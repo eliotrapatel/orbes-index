@@ -875,48 +875,6 @@ body.trade-loading #trade-close{display:none!important}
 #trade-summary-close:hover { background:rgba(255,255,255,0.85); color:rgba(0,0,0,0.65); }
 
 /* Night mode */
-body.trade.night-mode, body.trade.night-mode #trade-overlay { background:#0d0e11!important; }
-body.trade.night-mode #trade-top-btns button { color:rgba(255,255,255,0.32)!important; border-color:rgba(255,255,255,0.12)!important; }
-body.trade.night-mode 
-body.trade.night-mode 
-body.trade.night-mode 
-body.trade.night-mode 
-body.trade.night-mode #trade-card { background:rgba(255,255,255,0.035); border-color:rgba(255,255,255,0.07); box-shadow:0 1px 0 rgba(255,255,255,0.04) inset,0 8px 40px rgba(0,0,0,0.5); }
-body.trade.night-mode #trade-price { color:rgba(255,255,255,0.90)!important; }
-body.trade.night-mode #trade-pair, body.trade.night-mode .t-meta-lbl, body.trade.night-mode #trade-mult-label, body.trade.night-mode #trade-diff-label { color:rgba(255,255,255,0.22); }
-body.trade.night-mode #trade-momentum { color:rgba(255,255,255,0.35); }
-body.trade.night-mode #trade-momentum.mom-up { color:rgba(80,200,150,0.80); }
-body.trade.night-mode #trade-momentum.mom-down { color:rgba(210,90,70,0.75); }
-body.trade.night-mode #trade-timer-track { background:rgba(255,255,255,0.08); }
-body.trade.night-mode .t-mult-btn, body.trade.night-mode .t-diff-btn { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.09); color:rgba(255,255,255,0.38); }
-body.trade.night-mode .t-mult-btn.active, body.trade.night-mode .t-diff-btn.active { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.22); color:rgba(255,255,255,0.75); }
-body.trade.night-mode .t-bet { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10); color:rgba(255,255,255,0.45); }
-body.trade.night-mode .t-bet.bet-winning { border-color:rgba(80,200,150,0.55)!important; background:rgba(80,200,150,0.10)!important; color:rgba(80,200,150,0.90)!important; }
-body.trade.night-mode .t-bet.bet-losing { border-color:rgba(220,90,70,0.50)!important; background:rgba(220,90,70,0.09)!important; color:rgba(220,90,70,0.85)!important; }
-body.trade.night-mode .t-bet.bet-active { opacity:0.15!important; }
-body.trade.night-mode #trade-stats { background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.07); }
-body.trade.night-mode .t-stat-val { color:rgba(255,255,255,0.85); }
-body.trade.night-mode .t-stat-lbl, body.trade.night-mode .t-divider { color:rgba(255,255,255,0.22); background:rgba(255,255,255,0.07); }
-body.trade.night-mode .t-hist-row { background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.06); color:rgba(255,255,255,0.38); }
-body.trade.night-mode .t-hist-row.win .t-hist-result { color:rgba(80,200,150,0.85); }
-body.trade.night-mode .t-hist-row.loss .t-hist-result { color:rgba(210,85,65,0.80); }
-body.trade.night-mode #trade-history-label { color:rgba(255,255,255,0.18); }
-body.trade.night-mode #trade-crowd-wrap, body.trade.night-mode #trade-vol-wrap { background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.07); }
-body.trade.night-mode #crowd-up { color:rgba(80,200,150,0.80); }
-body.trade.night-mode #crowd-dn { color:rgba(210,100,80,0.75); }
-body.trade.night-mode #trade-loading { background:#0d0e11; }
-body.trade.night-mode #trade-loading-label { color:rgba(255,255,255,0.30); }
-body.trade.night-mode #tlr-track { stroke:rgba(255,255,255,0.08); }
-body.trade.night-mode #tlr-arc { stroke:rgba(255,255,255,0.55); }
-body.trade.night-mode #trade-cb-overlay { background:rgba(13,14,17,0.88); }
-body.trade.night-mode #trade-cb-inner { background:rgba(22,24,30,0.96); border-color:rgba(255,255,255,0.08); }
-body.trade.night-mode #trade-cb-title, body.trade.night-mode #trade-cb-sub { color:rgba(255,255,255,0.32); }
-body.trade.night-mode #trade-cb-num { color:rgba(255,255,255,0.62); }
-body.trade.night-mode #trade-signal-label { color:rgba(255,255,255,0.28); }
-body.trade.night-mode #trade-signal-bar-track { background:rgba(255,255,255,0.07); }
-body.trade.night-mode #trade-close { color:rgba(255,255,255,0.28); }
-body.trade.night-mode #trade-form-msg.hot { color:rgba(220,170,80,0.80); }
-body.trade.night-mode #trade-form-msg.cold { color:rgba(200,80,65,0.70); }
 
 /* Rank pts label */
 #trade-rank-pts {
@@ -933,9 +891,143 @@ body.trade.night-mode #trade-form-msg.cold { color:rgba(200,80,65,0.70); }
   letter-spacing:0.26em; text-transform:uppercase; color:rgba(0,0,0,0.40);
 }
 /* Night mode */
-body.trade.night-mode #trade-rank-pts { color:rgba(255,255,255,0.35); }
-body.trade.night-mode #trade-rank-next span { color:rgba(255,255,255,0.25) !important; }
-body.trade.night-mode #trade-rank { -webkit-text-fill-color:transparent; }
+
+/* ══ NIGHT MODE — COMPLETE ════════════════════════════════════════════════ */
+body.trade.night-mode { background:#0e1015 !important; }
+body.trade.night-mode #trade-overlay { background:#0e1015 !important; }
+
+/* Logo — invert to white on dark */
+body.trade.night-mode #trade-logo { filter:invert(1) brightness(1.8) !important; opacity:0.90 !important; }
+body.trade.night-mode #trade-loading-logo { filter:invert(1) brightness(1.8) !important; }
+body.trade.night-mode #trade-loading { background:#0e1015; }
+body.trade.night-mode #trade-loading-label { color:rgba(255,255,255,0.32); }
+body.trade.night-mode #tlr-track { stroke:rgba(255,255,255,0.09); }
+body.trade.night-mode #tlr-arc { stroke:rgba(255,255,255,0.60); }
+
+/* Top UI */
+body.trade.night-mode #trade-top-btns button { color:rgba(255,255,255,0.38) !important; border-color:rgba(255,255,255,0.14) !important; }
+body.trade.night-mode #trade-top-btns button:hover { color:rgba(255,255,255,0.72) !important; }
+body.trade.night-mode #trade-close { color:rgba(255,255,255,0.32); }
+body.trade.night-mode #trade-signal-label { color:rgba(255,255,255,0.30); }
+body.trade.night-mode #trade-signal-bar-track { background:rgba(255,255,255,0.08); }
+
+/* Rank block */
+body.trade.night-mode #trade-rank-wrap { background:rgba(255,255,255,0.06) !important; border-color:rgba(255,255,255,0.10) !important; box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 4px 20px rgba(0,0,0,0.4) !important; }
+body.trade.night-mode #trade-rank-pts { color:rgba(255,255,255,0.42) !important; }
+body.trade.night-mode #trade-rank-next span { color:rgba(255,255,255,0.30) !important; }
+body.trade.night-mode #trade-rank-bar-track { background:rgba(255,255,255,0.09); }
+
+/* Main card */
+body.trade.night-mode #trade-card { background:rgba(255,255,255,0.06) !important; border-color:rgba(255,255,255,0.10) !important; box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 50px rgba(0,0,0,0.6) !important; }
+body.trade.night-mode #trade-card::before { background:linear-gradient(135deg,rgba(255,255,255,0.06) 0%,rgba(255,255,255,0.00) 55%,rgba(255,255,255,0.03) 100%) !important; }
+/* Hot glow overrides for night */
+body.trade.night-mode #trade-card.hot-2  { box-shadow:0 1px 0 rgba(255,255,255,0.05) inset,0 8px 40px rgba(200,169,126,0.22),0 2px 8px rgba(0,0,0,0.4) !important; }
+body.trade.night-mode #trade-card.hot-5  { box-shadow:0 1px 0 rgba(255,255,255,0.05) inset,0 8px 60px rgba(160,196,216,0.40),0 2px 8px rgba(0,0,0,0.4) !important; }
+body.trade.night-mode #trade-card.hot-10 { box-shadow:0 1px 0 rgba(255,255,255,0.05) inset,0 0 90px rgba(160,196,216,0.55) !important; }
+
+/* Header — price & pair */
+body.trade.night-mode #trade-pair { color:rgba(255,255,255,0.30); }
+body.trade.night-mode #trade-price { color:rgba(255,255,255,0.92) !important; -webkit-text-fill-color:rgba(255,255,255,0.92) !important; }
+body.trade.night-mode #trade-price span { opacity:0.45 !important; }
+body.trade.night-mode #trade-delta { background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.40); }
+body.trade.night-mode #trade-momentum { color:rgba(255,255,255,0.38); }
+body.trade.night-mode #trade-momentum.mom-up { color:rgba(80,200,150,0.82); }
+body.trade.night-mode #trade-momentum.mom-down { color:rgba(210,90,70,0.78); }
+
+/* Multiplier & Diff labels + buttons */
+body.trade.night-mode #trade-mult-label,
+body.trade.night-mode #trade-diff-label,
+body.trade.night-mode #trade-timer-label,
+body.trade.night-mode #trade-timer-secs { color:rgba(255,255,255,0.28); }
+body.trade.night-mode #trade-timer-track { background:rgba(255,255,255,0.09); }
+body.trade.night-mode .t-mult-btn,
+body.trade.night-mode .t-diff-btn { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.11); color:rgba(255,255,255,0.42); }
+body.trade.night-mode .t-mult-btn.active,
+body.trade.night-mode .t-diff-btn.active { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.28); color:rgba(255,255,255,0.80); }
+body.trade.night-mode .t-mult-btn:hover:not(:disabled),
+body.trade.night-mode .t-diff-btn:hover:not(:disabled) { background:rgba(255,255,255,0.10); color:rgba(255,255,255,0.65); }
+
+/* Bet buttons */
+body.trade.night-mode .t-bet { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.12); color:rgba(255,255,255,0.50); }
+body.trade.night-mode .t-bet:hover:not(:disabled) { background:rgba(255,255,255,0.12); color:rgba(255,255,255,0.80); }
+body.trade.night-mode .t-bet.bet-winning { border-color:rgba(80,200,150,0.58) !important; background:rgba(80,200,150,0.12) !important; color:rgba(80,200,150,0.92) !important; }
+body.trade.night-mode .t-bet.bet-losing { border-color:rgba(220,90,70,0.52) !important; background:rgba(220,90,70,0.10) !important; color:rgba(220,90,70,0.88) !important; }
+body.trade.night-mode .t-bet.bet-active { opacity:0.15 !important; }
+body.trade.night-mode #t-higher .t-arrow { color:rgba(80,200,150,0.80); }
+body.trade.night-mode #t-lower .t-arrow { color:rgba(210,150,90,0.80); }
+
+/* Result + form messages */
+body.trade.night-mode #trade-res { /* chromatic text — fine as-is */ }
+body.trade.night-mode #trade-form-msg.hot { color:rgba(220,170,80,0.85); }
+body.trade.night-mode #trade-form-msg.cold { color:rgba(200,80,65,0.75); }
+
+/* Achievement */
+body.trade.night-mode .t-ach-inner { background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.12); }
+body.trade.night-mode .t-ach-title { color:rgba(255,255,255,0.32); }
+
+/* Stats */
+body.trade.night-mode #trade-stats { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.09); }
+body.trade.night-mode .t-stat-val { color:rgba(255,255,255,0.88); }
+body.trade.night-mode .t-stat-lbl { color:rgba(255,255,255,0.28); }
+body.trade.night-mode .t-divider { background:rgba(255,255,255,0.09); }
+
+/* Market row */
+body.trade.night-mode #trade-crowd-wrap,
+body.trade.night-mode #trade-vol-wrap { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.09); }
+body.trade.night-mode .t-meta-lbl { color:rgba(255,255,255,0.24); }
+body.trade.night-mode #trade-crowd { color:rgba(255,255,255,0.60); }
+body.trade.night-mode #crowd-up { color:rgba(80,200,150,0.82); }
+body.trade.night-mode #crowd-dn { color:rgba(210,100,80,0.78); }
+body.trade.night-mode #trade-vol-label { color:rgba(255,255,255,0.30); }
+
+/* History */
+body.trade.night-mode #trade-history-label { color:rgba(255,255,255,0.20); }
+body.trade.night-mode .t-hist-row { background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.08); color:rgba(255,255,255,0.42); }
+body.trade.night-mode .t-hist-row.win .t-hist-result { color:rgba(80,200,150,0.88); }
+body.trade.night-mode .t-hist-row.loss .t-hist-result { color:rgba(210,85,65,0.82); }
+body.trade.night-mode .t-hist-separator { color:rgba(255,255,255,0.18); border-top-color:rgba(255,255,255,0.07); }
+body.trade.night-mode .t-hist-pts.pts-win { color:rgba(80,200,150,0.75); }
+body.trade.night-mode .t-hist-pts.pts-loss { color:rgba(200,80,60,0.65); }
+
+/* Circuit Breaker */
+body.trade.night-mode #trade-cb-overlay { background:rgba(14,16,21,0.90); }
+body.trade.night-mode #trade-cb-inner { background:rgba(20,22,28,0.97); border-color:rgba(255,255,255,0.09); }
+body.trade.night-mode #trade-cb-title,
+body.trade.night-mode #trade-cb-sub { color:rgba(255,255,255,0.35); }
+body.trade.night-mode #trade-cb-num { color:rgba(255,255,255,0.65); }
+body.trade.night-mode #tcb-track { stroke:rgba(255,255,255,0.08); }
+
+/* Rules popup */
+body.trade.night-mode #trade-rules-popup { background:rgba(14,16,21,0.85); }
+body.trade.night-mode #trade-rules-inner { background:rgba(20,22,28,0.95); border-color:rgba(255,255,255,0.10); }
+body.trade.night-mode #trade-rules-title { color:rgba(255,255,255,0.30); }
+body.trade.night-mode .rule-num { color:rgba(255,255,255,0.20); }
+body.trade.night-mode .rule-head { color:rgba(255,255,255,0.60); }
+body.trade.night-mode .rule-body { color:rgba(255,255,255,0.38); }
+body.trade.night-mode #trade-rules-close { color:rgba(255,255,255,0.30); border-color:rgba(255,255,255,0.12); }
+body.trade.night-mode #trade-rules-close:hover { background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.55); }
+
+/* Rank popup */
+body.trade.night-mode #rank-popup { background:rgba(14,16,21,0.85); }
+body.trade.night-mode #rank-popup-inner { background:rgba(20,22,28,0.95); border-color:rgba(255,255,255,0.10); }
+body.trade.night-mode #rank-popup-title,
+body.trade.night-mode #rank-popup-note { color:rgba(255,255,255,0.25); }
+body.trade.night-mode .rank-row { border-bottom-color:rgba(255,255,255,0.07); }
+body.trade.night-mode .rank-name { color:rgba(255,255,255,0.55); }
+body.trade.night-mode .rank-req { color:rgba(255,255,255,0.25); }
+
+/* Session summary */
+body.trade.night-mode #trade-summary-bg { background:rgba(14,16,21,0.75); }
+body.trade.night-mode #trade-summary-inner { background:rgba(20,22,28,0.92); border-color:rgba(255,255,255,0.10); }
+body.trade.night-mode #tsm-session-lbl { color:rgba(255,255,255,0.25); }
+body.trade.night-mode #tsm-rank-badge { background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.10); }
+body.trade.night-mode #tsm-score-val { color:rgba(255,255,255,0.92); }
+body.trade.night-mode #tsm-score-lbl { color:rgba(255,255,255,0.24); }
+body.trade.night-mode #tsm-divider { background:rgba(255,255,255,0.08); }
+body.trade.night-mode .tsm-stat-val { color:rgba(255,255,255,0.85); }
+body.trade.night-mode .tsm-stat-lbl { color:rgba(255,255,255,0.25); }
+body.trade.night-mode #trade-summary-share { background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.14); color:rgba(255,255,255,0.50); }
+body.trade.night-mode #trade-summary-close { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.10); color:rgba(255,255,255,0.40); }
 </style>
 </head>
 <body>
