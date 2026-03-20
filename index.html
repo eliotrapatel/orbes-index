@@ -598,8 +598,8 @@ body.trade #trade-signal-wrap { display:flex; }
   display:flex; align-items:center; justify-content:space-between;
 }
 #trade-rank {
-  font-family:"Helvetica Neue",sans-serif; font-size:11px; font-weight:200;
-  letter-spacing:0.24em; text-transform:uppercase;
+  font-family:"Helvetica Neue",sans-serif; font-size:12px; font-weight:700;
+  letter-spacing:0.22em; text-transform:uppercase;
   background:linear-gradient(90deg,#c8a97e,#a0c4d8,#c4aad0,#7ec8b4,#c8a97e);
   background-size:300% 100%; -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   background-clip:text; animation:chromatic-shift 8s linear infinite;
@@ -658,7 +658,7 @@ body.trade #trade-signal-wrap { display:flex; }
 #trade-header { padding:18px 22px 14px; display:flex; justify-content:space-between; align-items:flex-start; border-bottom:0.5px solid rgba(0,0,0,0.055); position:relative; }
 #trade-header-left { display:flex; flex-direction:column; gap:4px; }
 #trade-pair { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:400; letter-spacing:0.38em; text-transform:uppercase; color:rgba(0,0,0,0.50); }
-#trade-price { font-family:"Helvetica Neue",sans-serif; font-size:clamp(26px,4vw,42px); font-weight:200; letter-spacing:0.03em; color:#1a1a1a; line-height:1; border-radius:4px; }
+#trade-price { font-family:"Helvetica Neue",sans-serif; font-size:clamp(36px,5.5vw,56px); font-weight:200; letter-spacing:0.02em; color:#1a1a1a; line-height:1; border-radius:4px; }
 #trade-price-arrow { display:inline-block; font-size:11px; margin-left:5px; vertical-align:middle; opacity:0; transition:opacity 0.2s; }
 #trade-price-arrow.up { color:rgba(70,165,120,0.9); opacity:1; }
 #trade-price-arrow.down { color:rgba(200,70,55,0.85); opacity:1; }
@@ -680,11 +680,11 @@ body.trade #trade-signal-wrap { display:flex; }
 
 /* Mult buttons */
 #trade-mult-wrap { padding:10px 22px 0; display:flex; align-items:center; gap:8px; }
-#trade-mult-label { font-family:"Helvetica Neue",sans-serif; font-size:6px; font-weight:400; letter-spacing:0.36em; text-transform:uppercase; color:rgba(0,0,0,0.48); }
+#trade-mult-label { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:700; letter-spacing:0.28em; text-transform:uppercase; color:rgba(0,0,0,0.55); }
 .t-mult-btn {
-  font-family:"Helvetica Neue",sans-serif; font-size:7px; font-weight:400; letter-spacing:0.18em;
-  padding:3px 8px; border-radius:2px; border:0.5px solid rgba(0,0,0,0.12);
-  background:rgba(255,255,255,0.5); color:rgba(0,0,0,0.4); cursor:pointer; transition:all 0.15s ease;
+  font-family:"Helvetica Neue",sans-serif; font-size:8px; font-weight:500; letter-spacing:0.14em;
+  padding:5px 12px; border-radius:4px; border:0.5px solid rgba(0,0,0,0.12);
+  background:rgba(255,255,255,0.5); color:rgba(0,0,0,0.52); cursor:pointer; transition:all 0.15s ease;
 }
 .t-mult-btn.active { background:rgba(0,0,0,0.08); color:rgba(0,0,0,0.75); border-color:rgba(0,0,0,0.42); }
 .t-mult-allin { background:linear-gradient(135deg,rgba(200,169,126,0.18),rgba(196,170,208,0.12))!important; border-color:rgba(200,169,126,0.45)!important; color:rgba(0,0,0,0.65)!important; position:relative; overflow:hidden; }
@@ -694,18 +694,19 @@ body.trade #trade-signal-wrap { display:flex; }
 
 /* Diff buttons */
 #trade-diff-wrap { padding:8px 22px 0; display:flex; align-items:center; gap:8px; }
-#trade-diff-label { font-family:"Helvetica Neue",sans-serif; font-size:6px; font-weight:400; letter-spacing:0.36em; text-transform:uppercase; color:rgba(0,0,0,0.48); }
+#trade-diff-label { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:700; letter-spacing:0.28em; text-transform:uppercase; color:rgba(0,0,0,0.55); }
 .t-diff-btn {
-  font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:400; letter-spacing:0.16em;
-  padding:3px 9px; border-radius:2px; border:0.5px solid rgba(0,0,0,0.10);
-  background:rgba(255,255,255,0.45); color:rgba(0,0,0,0.38); cursor:pointer; transition:all 0.15s ease;
+  font-family:"Helvetica Neue",sans-serif; font-size:8px; font-weight:500; letter-spacing:0.14em;
+  padding:5px 12px; border-radius:4px; border:0.5px solid rgba(0,0,0,0.10);
+  background:rgba(255,255,255,0.45); color:rgba(0,0,0,0.50); cursor:pointer; transition:all 0.15s ease;
 }
 .t-diff-btn.active { background:rgba(0,0,0,0.07); color:rgba(0,0,0,0.7); border-color:rgba(0,0,0,0.40); }
 
 /* Timer */
 #trade-timer-wrap { padding:10px 22px 0; }
 #trade-timer-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
-#trade-timer-label, #trade-timer-secs { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:400; letter-spacing:0.28em; text-transform:uppercase; color:rgba(0,0,0,0.46); }
+#trade-timer-label { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:700; letter-spacing:0.24em; text-transform:uppercase; color:rgba(0,0,0,0.55); }
+#trade-timer-secs { font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:600; letter-spacing:0.24em; text-transform:uppercase; color:rgba(0,0,0,0.52); }
 #trade-timer-track { height:1px; background:rgba(0,0,0,0.07); overflow:hidden; }
 #trade-timer-bar { height:100%; width:100%; background:linear-gradient(90deg,#c8a97e,#a0c4d8,#c4aad0,#7ec8b4); background-size:200% 100%; animation:tshift 4s linear infinite; transition:width 1s linear; }
 @keyframes timer-critical { 0%,100%{opacity:1} 50%{opacity:0.55} }
@@ -721,11 +722,11 @@ body.trade #trade-signal-wrap { display:flex; }
 #trade-bet-wrap { padding:12px 22px 18px; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .t-bet {
   display:flex; align-items:center; justify-content:center; gap:7px;
-  padding:13px 0; border-radius:4px;
+  padding:16px 0; border-radius:6px;
   border:0.5px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.42);
   backdrop-filter:blur(12px); cursor:pointer;
-  font-family:"Helvetica Neue",sans-serif; font-size:7px; font-weight:400;
-  letter-spacing:0.30em; text-transform:uppercase; color:rgba(0,0,0,0.48);
+  font-family:"Helvetica Neue",sans-serif; font-size:8.5px; font-weight:700;
+  letter-spacing:0.20em; text-transform:uppercase; color:rgba(0,0,0,0.62);
   box-shadow:0 1px 0 rgba(255,255,255,0.85) inset,0 2px 8px rgba(0,0,0,0.03);
   transition:all 0.15s ease;
 }
@@ -769,7 +770,7 @@ body.trade #trade-signal-wrap { display:flex; }
   margin-top:-10px;
   transition:max-height 0.5s ease, opacity 0.4s ease, margin-top 0.4s ease;
 }
-#trade-achievement.show { max-height:70px; opacity:1; margin-top:0; }
+#trade-achievement.show { max-height:90px; opacity:1; margin-top:0; }
 .t-ach-inner {
   padding:10px 16px 8px;
   background:rgba(255,255,255,0.58);
@@ -1101,6 +1102,160 @@ body.trade-loading #trade-card,
 body.trade-loading #trade-stats,
 body.trade-loading #trade-meta-row,
 body.trade-loading #trade-history-wrap { animation:none !important; opacity:0 !important; }
+
+/* ── SESSION SUMMARY REDESIGN ─────────────────────────────────────────────── */
+#trade-summary-inner {
+  position:relative; z-index:1; overflow:hidden;
+  width:min(400px,92vw);
+  background:rgba(255,255,255,0.68);
+  backdrop-filter:blur(48px) saturate(2.0) brightness(1.04);
+  -webkit-backdrop-filter:blur(48px) saturate(2.0) brightness(1.04);
+  border:0.5px solid rgba(255,255,255,0.72);
+  outline:0.5px solid rgba(255,255,255,0.35);
+  outline-offset:-1px;
+  border-radius:28px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.98) inset,
+    0 -1px 0 rgba(0,0,0,0.04) inset,
+    0 30px 90px rgba(0,0,0,0.14);
+  animation:tsm-in 0.6s cubic-bezier(0.34,1.56,0.64,1);
+  padding:0; /* remove, handled per section */
+}
+
+/* Logo strip */
+#tsm-logo-strip {
+  display:flex; align-items:center; justify-content:center;
+  padding:22px 32px 0;
+  position:relative; z-index:1;
+}
+#tsm-logo {
+  width:clamp(120px,50%,180px); height:auto; display:block;
+  opacity:0.85;
+  filter:none; /* light mode */
+}
+
+/* Rank row */
+#tsm-rank-row {
+  display:flex; justify-content:center;
+  padding:10px 0 4px;
+  position:relative; z-index:1;
+}
+#tsm-rank-badge {
+  padding:5px 16px;
+  background:rgba(0,0,0,0.04);
+  border:0.5px solid rgba(0,0,0,0.08);
+  border-radius:20px;
+}
+#tsm-rank {
+  font-family:"Helvetica Neue",sans-serif; font-size:7px; font-weight:400;
+  letter-spacing:0.42em; text-transform:uppercase;
+  background:linear-gradient(90deg,#c8a97e,#a0c4d8,#c4aad0,#7ec8b4,#c8a97e);
+  background-size:300% 100%; -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent; background-clip:text;
+  animation:chromatic-shift 8s linear infinite;
+}
+
+/* Score block */
+#tsm-score-block {
+  text-align:center; padding:14px 0 16px; position:relative; z-index:1;
+}
+#tsm-score-val {
+  font-family:"Helvetica Neue",sans-serif;
+  font-size:clamp(64px,14vw,96px); font-weight:100;
+  letter-spacing:-0.03em; color:#1a1a1a; line-height:1;
+}
+#tsm-score-lbl {
+  font-family:"Helvetica Neue",sans-serif;
+  font-size:6px; font-weight:400; letter-spacing:0.50em;
+  text-transform:uppercase; color:rgba(0,0,0,0.35); margin-top:4px;
+}
+
+/* Divider */
+#tsm-divider {
+  height:0.5px;
+  background:linear-gradient(90deg,rgba(255,255,255,0.0) 0%,rgba(0,0,0,0.10) 30%,rgba(0,0,0,0.10) 70%,rgba(255,255,255,0.0) 100%);
+  margin:0 24px;
+}
+
+/* Stats grid */
+#tsm-stats-grid {
+  display:grid; grid-template-columns:1fr 1fr 1fr 1fr;
+  padding:18px 24px 16px; gap:0; position:relative; z-index:1;
+}
+.tsm-stat { text-align:center; }
+.tsm-stat-val {
+  font-family:"Helvetica Neue",sans-serif;
+  font-size:22px; font-weight:200; color:#1a1a1a; line-height:1; letter-spacing:-0.01em;
+}
+.tsm-stat-lbl {
+  font-family:"Helvetica Neue",sans-serif;
+  font-size:5.5px; font-weight:400; letter-spacing:0.30em;
+  text-transform:uppercase; color:rgba(0,0,0,0.40); margin-top:5px;
+}
+
+/* Personal record */
+#tsm-record {
+  text-align:center; padding:0 0 10px;
+  font-family:"Helvetica Neue",sans-serif; font-size:6.5px; font-weight:400;
+  letter-spacing:0.40em; text-transform:uppercase;
+  background:linear-gradient(90deg,#c8a97e,#a0c4d8,#c4aad0,#7ec8b4,#c8a97e);
+  background-size:300% 100%; -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent; background-clip:text;
+  animation:chromatic-shift 8s linear infinite;
+  position:relative; z-index:1;
+}
+
+/* Actions */
+#tsm-actions {
+  display:flex; gap:8px; padding:0 20px 20px; position:relative; z-index:1;
+}
+#trade-summary-share,#trade-summary-close {
+  flex:1; font-family:"Helvetica Neue",sans-serif;
+  font-size:6.5px; font-weight:400; letter-spacing:0.38em;
+  text-transform:uppercase; padding:11px 0; border-radius:10px;
+  cursor:pointer; transition:all 0.2s ease;
+}
+#trade-summary-share {
+  background:rgba(0,0,0,0.06); border:0.5px solid rgba(0,0,0,0.12);
+  color:rgba(0,0,0,0.55);
+}
+#trade-summary-share:hover {
+  background:rgba(0,0,0,0.10); color:rgba(0,0,0,0.75);
+}
+#trade-summary-close {
+  background:rgba(255,255,255,0.65);
+  backdrop-filter:blur(12px);
+  border:0.5px solid rgba(255,255,255,0.90);
+  color:rgba(0,0,0,0.50);
+}
+#trade-summary-close:hover {
+  background:rgba(255,255,255,0.90); color:rgba(0,0,0,0.70);
+}
+
+/* Night mode summary */
+body.trade.night-mode #trade-summary-inner {
+  background:rgba(20,22,28,0.92) !important;
+  border-color:rgba(255,255,255,0.10) !important;
+}
+body.trade.night-mode #tsm-logo { filter:invert(1) brightness(1.8); }
+body.trade.night-mode #tsm-rank-badge {
+  background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.10);
+}
+body.trade.night-mode #tsm-score-val { color:rgba(255,255,255,0.92); }
+body.trade.night-mode #tsm-score-lbl { color:rgba(255,255,255,0.35); }
+body.trade.night-mode #tsm-divider {
+  background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.10) 30%,rgba(255,255,255,0.10) 70%,rgba(255,255,255,0) 100%);
+}
+body.trade.night-mode .tsm-stat-val { color:rgba(255,255,255,0.88); }
+body.trade.night-mode .tsm-stat-lbl { color:rgba(255,255,255,0.38); }
+body.trade.night-mode #trade-summary-share {
+  background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.14);
+  color:rgba(255,255,255,0.55);
+}
+body.trade.night-mode #trade-summary-close {
+  background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.10);
+  color:rgba(255,255,255,0.42);
+}
 </style>
 </head>
 <body>
@@ -1214,22 +1369,35 @@ body.trade-loading #trade-history-wrap { animation:none !important; opacity:0 !i
   <div id="trade-summary-bg"></div>
   <div id="trade-summary-inner">
     <canvas id="trade-summary-particles"></canvas>
-    <div id="tsm-header">
-      <div id="tsm-session-lbl">SESSION REPORT</div>
+
+    <!-- Logo strip at top -->
+    <div id="tsm-logo-strip">
+      <img id="tsm-logo" src="src="" alt="ORBES" />
+    </div>
+
+    <!-- Rank badge -->
+    <div id="tsm-rank-row">
       <div id="tsm-rank-badge"><span id="tsm-rank">RECRUIT</span></div>
     </div>
+
+    <!-- Giant score -->
     <div id="tsm-score-block">
       <div id="tsm-score-val">0</div>
       <div id="tsm-score-lbl">POINTS</div>
     </div>
+
     <div id="tsm-divider"></div>
+
+    <!-- 4 stats -->
     <div id="tsm-stats-grid">
       <div class="tsm-stat"><div class="tsm-stat-val" id="tsm-wins">0</div><div class="tsm-stat-lbl">WINS</div></div>
       <div class="tsm-stat"><div class="tsm-stat-val" id="tsm-losses">0</div><div class="tsm-stat-lbl">LOSSES</div></div>
       <div class="tsm-stat"><div class="tsm-stat-val" id="tsm-streak">—</div><div class="tsm-stat-lbl">BEST STREAK</div></div>
       <div class="tsm-stat"><div class="tsm-stat-val" id="tsm-winrate">—</div><div class="tsm-stat-lbl">WIN RATE</div></div>
     </div>
+
     <div id="tsm-record" style="display:none">NEW PERSONAL RECORD</div>
+
     <div id="tsm-actions">
       <button id="trade-summary-share">SHARE</button>
       <button id="trade-summary-close">CLOSE</button>
@@ -3540,7 +3708,7 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
     // ── API ───────────────────────────────────────────────────────────────────
     let _mock=95000+Math.random()*3000;
     function getMock(){_mock+=(Math.random()-0.495)*18;return parseFloat(_mock.toFixed(2));}
-    async function fetchWT(url,t=4000){
+    async function fetchWT(url,t=1500){
       const c=new AbortController();const id=setTimeout(()=>c.abort(),t);
       try{const r=await fetch(url,{signal:c.signal});clearTimeout(id);return r;}
       catch(e){clearTimeout(id);throw e;}
@@ -3553,8 +3721,12 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
       try{const r=await fetchWT('https://api.coindesk.com/v1/bpi/currentprice.json');if(r.ok){const d=await r.json();return parseFloat(d.bpi.USD.rate.replace(/,/g,''));}}catch(e){}
       return getMock();
     }
+    let _polling=false;
     async function poll(){
+      if(_polling)return;
+      _polling=true;
       const p=await fetchPrice();
+      _polling=false;
       if(p!==null){
         if(prices.length===0&&window._tradeFinishLoading)window._tradeFinishLoading();
         if(window._signalTick)window._signalTick();
@@ -3665,15 +3837,15 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
         cCtx.beginPath();cCtx.moveTo(padL,ey);cCtx.lineTo(padL+cw,ey);cCtx.stroke();
         cCtx.setLineDash([]);
         // Left tag
-        const tagH=16,tagW=padL-2,tagY=ey-tagH/2;
+        const tagH=20,tagW=padL-1,tagY=ey-tagH/2;
         cCtx.fillStyle=isWin?'rgba(126,200,180,0.22)':'rgba(200,120,100,0.18)';
         cCtx.fillRect(2,tagY,tagW,tagH);
         cCtx.strokeStyle=isWin?'rgba(126,200,180,0.75)':'rgba(200,120,100,0.65)';
         cCtx.lineWidth=1.2;cCtx.beginPath();cCtx.moveTo(0,ey);cCtx.lineTo(3,ey);cCtx.stroke();
-        cCtx.font='bold 5.5px "Helvetica Neue",sans-serif';
+        cCtx.font='bold 7px "Helvetica Neue",sans-serif';
         cCtx.fillStyle=isWin?'rgba(70,150,120,0.95)':'rgba(170,70,60,0.9)';
         cCtx.textAlign='center';
-        cCtx.fillText('$'+Math.round(betP).toLocaleString('en-US'),2+tagW/2,ey+2);
+        cCtx.fillText('$'+Math.round(betP).toLocaleString('en-US'),2+tagW/2,ey+2.5);
         cCtx.textAlign='left';
 
         // ── Live P&L overlay ────────────────────────────────────────────────
@@ -3683,7 +3855,7 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
         const pnlStr=pnlSign+pnl.toFixed(3)+'%';
         const pnlColor=pnl>=0?'rgba(60,155,110,0.95)':'rgba(190,70,60,0.95)';
         // Background pill
-        const pill_x=padL+cw-88,pill_y=padT+6,pill_w=82,pill_h=22;
+        const pill_x=padL+cw-92,pill_y=padT+5,pill_w=88,pill_h=28;
         cCtx.fillStyle='rgba(255,255,255,0.75)';
         cCtx.beginPath();
         if(cCtx.roundRect){cCtx.roundRect(pill_x,pill_y,pill_w,pill_h,3);}else{cCtx.rect(pill_x,pill_y,pill_w,pill_h);}
@@ -3692,10 +3864,10 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
         cCtx.beginPath();
         if(cCtx.roundRect){cCtx.roundRect(pill_x,pill_y,pill_w,pill_h,3);}else{cCtx.rect(pill_x,pill_y,pill_w,pill_h);}
         cCtx.stroke();
-        cCtx.font='5px "Helvetica Neue",sans-serif';cCtx.fillStyle='rgba(0,0,0,0.28)';
-        cCtx.textAlign='center';cCtx.fillText('LIVE P&L',pill_x+pill_w/2,pill_y+8);
-        cCtx.font='bold 8px "Helvetica Neue",sans-serif';cCtx.fillStyle=pnlColor;
-        cCtx.fillText(pnlStr,pill_x+pill_w/2,pill_y+19);
+        cCtx.font='5.5px "Helvetica Neue",sans-serif';cCtx.fillStyle='rgba(0,0,0,0.32)';
+        cCtx.textAlign='center';cCtx.fillText('LIVE P&L',pill_x+pill_w/2,pill_y+9);
+        cCtx.font='bold 11px "Helvetica Neue",sans-serif';cCtx.fillStyle=pnlColor;
+        cCtx.fillText(pnlStr,pill_x+pill_w/2,pill_y+22);
         cCtx.textAlign='left';
         cCtx.restore();
       }
@@ -4013,6 +4185,9 @@ drawBird = function(ctx,x,y,r,vy,alpha) { drawEagle(ctx,x,y,vy,alpha); };
   }
 
   window._showTradeSummary = function(data) {
+    // Logo from existing loading logo (avoids duplicate base64)
+    const tsmLogo=document.getElementById('tsm-logo');
+    if(tsmLogo){const src=document.getElementById('trade-loading-logo');if(src&&src.src)tsmLogo.src=src.src;}
     const el = document.getElementById('trade-summary');
     if (!el) return;
     const set = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
