@@ -5252,7 +5252,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const LS_SLOTS  = 'orbes_promo_slots';   // codes remaining (local cache)
   const LS_EMAIL  = 'orbes_promo_email';
   // ⚠️ Remplacer par l'URL de ton Apps Script déployé
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxDMh1hu8Lc5Tl4RJGLEI0orqxxh51UNk1cp4CUhq-_rWCv5E03T2rmlmMSCbYdOvQ9cA/exec';
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzrAXNXze6k16hwrr7Vn_TPWUQEGRA6pkAMes5B7lZ6nkShnuurprj30Z0-s584TZj8QQ/exec';
 
   // Restore persisted state
   var savedState = localStorage.getItem(LS_STATE) || 'fresh';
@@ -5285,8 +5285,10 @@ document.addEventListener("DOMContentLoaded", function() {
     // B: country suffix only, keep code short
     var lang = (navigator.language || 'en').toUpperCase().split('-');
     var country = lang.length > 1 ? lang[1].slice(0,2) : lang[0].slice(0,2);
-    var digits = Array.from({length:3}, () => Math.floor(Math.random()*10)).join('');
-    return 'OB·' + digits + '·' + country;
+    var digits = String(Math.floor(Math.random() * 900) + 100);
+    var l1 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random()*26)];
+    var l2 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random()*26)];
+    return 'OB-' + digits + l1 + l2;
   }
 
   function randChar() {
@@ -5667,7 +5669,7 @@ document.addEventListener("DOMContentLoaded", function() {
     // Update copy btn based on state
     var freshCopyBtn = document.getElementById('promo-copy-btn');
     if (freshCopyBtn) {
-      freshCopyBtn.textContent = codeCopied ? 'COPIED • ' + generatedCode : 'COPY ' + generatedCode;
+      freshCopyBtn.textContent = codeCopied ? 'COPIED — ' + generatedCode : 'COPY ' + generatedCode;
     }
     // Show hint message
     var hint = document.getElementById('promo-reopen-hint');
