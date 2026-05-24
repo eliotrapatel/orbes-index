@@ -5345,70 +5345,98 @@ document.addEventListener("DOMContentLoaded", function() {
     var url = APPS_SCRIPT_URL + '?' + Object.keys(params).map(function(k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k] !== undefined ? params[k] : '');
     }).join('&');
+
     if (callback) {
       url += '&callback=' + cbName;
+      var called = false;
+
       window[cbName] = function(data) {
+        if (called) return;
+        called = true;
         delete window[cbName];
         var s = document.getElementById(cbName);
-        if (s) s.parentNode.removeChild(s);
+        if (s && s.parentNode) s.parentNode.removeChild(s);
         callback(data);
       };
+
+      // Timeout fallback: Apps Script writes to Sheet but JSONP response
+      // sometimes fails due to redirect stripping. After 6s assume success.
+      var timeout = setTimeout(function() {
+        if (!called && window[cbName]) {
+          called = true;
+          delete window[cbName];
+          var s = document.getElementById(cbName);
+          if (s && s.parentNode) s.parentNode.removeChild(s);
+          // For claim: fetch code by email from Sheet
+          if (params.action === 'claim' && params.email) {
+            gsCall({ action: 'getcode', email: params.email }, callback);
+          } else if (params.action === 'slots') {
+            callback({ slots_remaining: savedSlots });
+          } else {
+            callback({ ok: true });
+          }
+        }
+      }, 6000);
+
+      var script = document.createElement('script');
+      script.id = cbName;
+      script.src = url;
+      script.onerror = function() {
+        clearTimeout(timeout);
+        if (!called) {
+          called = true;
+          if (script.parentNode) script.parentNode.removeChild(script);
+          if (params.action === 'claim' && params.email) {
+            gsCall({ action: 'getcode', email: params.email }, callback);
+          } else {
+            callback({ ok: true });
+          }
+        }
+      };
+      document.head.appendChild(script);
+    } else {
+      // Fire and forget — no callback needed
+      var script2 = document.createElement('script');
+      script2.src = url;
+      script2.onload = function() { if (script2.parentNode) script2.parentNode.removeChild(script2); };
+      script2.onerror = function() { if (script2.parentNode) script2.parentNode.removeChild(script2); };
+      document.head.appendChild(script2);
     }
-    var script = document.createElement('script');
-    script.id = cbName;
-    script.src = url;
-    script.onerror = function() {
-      var s = document.getElementById(cbName);
-      if (s) s.parentNode.removeChild(s);
-      if (callback) callback({ error: 'network' });
-    };
-    document.head.appendChild(script);
   }
 
+
+  // ── Core constants & element refs ─────────────────────────────
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwsoQeXSNNPgQhKbf-yeOKEhbsUL9U67nBpvUOhPBMtUh6u6kJ4b1YqwKUfNVrt1CXN/exec';
+  const DURATION = 30;
+  const CHARS    = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const LS_STATE  = 'orbes_promo_state';
+  const LS_CODE   = 'orbes_promo_code';
+  const LS_SLOTS  = 'orbes_promo_slots';
+  const LS_EMAIL  = 'orbes_promo_email';
+  const LS_UUID   = 'orbes_session_uuid';
+  const LS_VISITS = 'orbes_visit_count';
+  const LS_REF    = 'orbes_referral';
 
   const trigger  = document.getElementById('promo-trigger');
   const overlay  = document.getElementById('promo-overlay');
   const inner    = document.getElementById('promo-inner');
-  const codeEl   = document.getElementById('promo-code');
-  const secEl    = null; // removed
   const step1    = document.getElementById('promo-step-1');
   const step2    = document.getElementById('promo-step-2');
+  const codeEl   = document.getElementById('promo-code');
+  const secEl    = null; // removed
   const emailEl  = document.getElementById('promo-email');
   const emailBtn = document.getElementById('promo-email-btn');
   const copyBtn  = document.getElementById('promo-copy-btn');
   if (!trigger || !overlay) return;
 
-  const DURATION = 30;
-  const CHARS    = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const LS_STATE  = 'orbes_promo_state';
-  const LS_UUID   = 'orbes_session_uuid';
-  const LS_VISITS  = 'orbes_visit_count';
-  const LS_REF     = 'orbes_referral';
-  // J: detect referral code from URL ?ref=OB-XXX
-  (function() {
-    var urlRef = new URLSearchParams(window.location.search).get('ref');
-    if (urlRef) localStorage.setItem(LS_REF, urlRef);
-  })();
-  // Increment visit counter
-  var visitCount = parseInt(localStorage.getItem(LS_VISITS) || '0', 10) + 1;
-  localStorage.setItem(LS_VISITS, visitCount);
-
-  // E: show claimed code on return visits
-  (function() {
-    var cookieCode = getCookie('orbes_code');
-    var lsState    = localStorage.getItem(LS_STATE);
-    if (cookieCode && lsState === 'copied') {
-      // Show discreet code badge at bottom of page after 2s
-      setTimeout(function() {
-        var badge = document.getElementById('orbes-code-badge');
-        if (badge) {
-          badge.textContent = cookieCode;
-          badge.style.opacity = '1';
-        }
-      }, 2000);
-    }
-  })();
-  // D: generate/restore session UUID
+  // Session state
+  var savedState = localStorage.getItem(LS_STATE) || 'fresh';
+  var savedCode  = localStorage.getItem(LS_CODE)  || '';
+  var savedSlots = parseInt(localStorage.getItem(LS_SLOTS) || '0', 10);
+  if (!savedSlots || savedSlots < 1) {
+    savedSlots = Math.floor(Math.random() * 8) + 4;
+    localStorage.setItem(LS_SLOTS, savedSlots);
+  }
   var sessionUUID = localStorage.getItem(LS_UUID);
   if (!sessionUUID) {
     sessionUUID = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -5416,22 +5444,33 @@ document.addEventListener("DOMContentLoaded", function() {
       return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
     });
     localStorage.setItem(LS_UUID, sessionUUID);
-  }   // fresh|revealed|copied|expired
-  const LS_CODE   = 'orbes_promo_code';
-  const LS_SLOTS  = 'orbes_promo_slots';   // codes remaining (local cache)
-  const LS_EMAIL  = 'orbes_promo_email';
-  // ⚠️ Remplacer par l'URL de ton Apps Script déployé
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwsoQeXSNNPgQhKbf-yeOKEhbsUL9U67nBpvUOhPBMtUh6u6kJ4b1YqwKUfNVrt1CXN/exec';
-
-  // Restore persisted state
-  var savedState = localStorage.getItem(LS_STATE) || 'fresh';
-  var savedCode  = localStorage.getItem(LS_CODE)  || '';
-  var savedSlots = parseInt(localStorage.getItem(LS_SLOTS) || '0', 10);
-  if (!savedSlots || savedSlots < 1) {
-    savedSlots = Math.floor(Math.random() * 8) + 4; // fallback local
-    localStorage.setItem(LS_SLOTS, savedSlots);
   }
-  // Fetch real slot count from Sheets on page load
+  var visitCount = parseInt(localStorage.getItem(LS_VISITS) || '0', 10) + 1;
+  localStorage.setItem(LS_VISITS, visitCount);
+  (function() {
+    var urlRef = new URLSearchParams(window.location.search).get('ref');
+    if (urlRef) localStorage.setItem(LS_REF, urlRef);
+  })();
+  // Execute pending unassign from previous session
+  (function() {
+    var pending = localStorage.getItem('orbes_pending_unassign');
+    if (pending && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+      localStorage.removeItem('orbes_pending_unassign');
+      gsCall({ action: 'reassign', code: pending }, null);
+    }
+  })();
+  // Show claimed code badge on return
+  (function() {
+    var cookieCode = getCookie('orbes_code');
+    var lsState    = localStorage.getItem(LS_STATE);
+    if (cookieCode && lsState === 'copied') {
+      setTimeout(function() {
+        var badge = document.getElementById('orbes-code-badge');
+        if (badge) { badge.textContent = cookieCode; badge.style.opacity = '1'; }
+      }, 2000);
+    }
+  })();
+  // Fetch real slot count
   if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
     gsCall({ action: 'slots' }, function(sd) {
       if (sd && sd.slots_remaining !== undefined) {
@@ -5448,145 +5487,7 @@ document.addEventListener("DOMContentLoaded", function() {
   let revealed = false;
   let codeCopied = (savedState === 'copied');
   let codeRevealed = (savedState === 'revealed' || savedState === 'copied');
-
-  function generateCode() {
-    // B: country suffix only, keep code short
-    var lang = (navigator.language || 'en').toUpperCase().split('-');
-    var country = lang.length > 1 ? lang[1].slice(0,2) : lang[0].slice(0,2);
-    var digits = String(Math.floor(Math.random() * 900) + 100);
-    var l1 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random()*26)];
-    var l2 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random()*26)];
-    return 'OB-' + digits + l1 + l2;
-  }
-
-  function randChar() {
-    return CHARS[Math.floor(Math.random() * CHARS.length)];
-  }
-
-  function scrambleReveal(target, finalText, duration, onDone) {
-    const len = finalText.length;
-    const resolved = new Array(len).fill(false);
-    let lastResolvedCount = 0;
-    let start = null;
-    // E: pitched ticks per character
-    function playTick(charIndex) {
-      try {
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        var o = ctx.createOscillator(), g = ctx.createGain();
-        o.connect(g); g.connect(ctx.destination);
-        // Pitch rises slightly left to right (600–1100Hz)
-        o.frequency.value = 600 + (charIndex / (len - 1 || 1)) * 500;
-        o.type = 'sine';
-        g.gain.setValueAtTime(0.04, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
-        o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.08);
-      } catch(e) {}
-    }
-    function step(ts) {
-      if (!start) start = ts;
-      const progress = Math.min((ts - start) / duration, 1);
-      const resolvedCount = Math.floor(progress * len);
-      // Fire tick for each newly resolved char
-      for (let i = lastResolvedCount; i < resolvedCount; i++) {
-        if (!resolved[i] && finalText[i] !== '·' && finalText[i] !== ' ') {
-          playTick(i);
-        }
-        resolved[i] = true;
-      }
-      lastResolvedCount = resolvedCount;
-      // Build display
-      let display = '';
-      for (let i = 0; i < len; i++) {
-        if (resolved[i]) display += finalText[i];
-        else display += (finalText[i] === '·' || finalText[i] === ' ') ? finalText[i] : randChar();
-      }
-      target.textContent = display;
-      if (progress < 1) requestAnimationFrame(step);
-      else { target.textContent = finalText; if (onDone) onDone(); }
-    }
-    requestAnimationFrame(step);
-  }
-
-  function updateSocialProof() {
-    var el = document.getElementById('promo-social-text');
-    if (!el) return;
-    var n = Math.floor(Math.random() * 4) + 2;
-    el.textContent = n + ' people viewing this right now';
-    // I: speed up dot when crowded
-    var dot = document.getElementById('promo-dot');
-    if (dot) dot.style.animationDuration = n >= 4 ? '0.8s' : '1.4s';
-    setTimeout(updateSocialProof, Math.random() * 8000 + 6000);
-  }
-
-  function startTimer() {
-    remaining = DURATION;
-    if(secEl) secEl.textContent = remaining;
-    const fill = document.getElementById('promo-timer-fill');
-    const bar  = document.getElementById('promo-timer-bar');
-    if (fill) {
-      fill.style.transition = 'none';
-      fill.style.transform = 'scaleX(1)';
-      setTimeout(function() {
-        fill.style.transition = 'transform ' + DURATION + 's linear';
-        fill.style.transform = 'scaleX(0)';
-      }, 500);
-    }
-    timer = setInterval(function() {
-      remaining--;
-      if(secEl) secEl.textContent = remaining;
-      if (remaining === 10 && bar) bar.classList.add('urgent');
-      if (remaining <= 0) {
-        clearInterval(timer);
-        // H: disintegrate code char by char
-        if (codeEl) {
-          var chars = codeEl.textContent.split('');
-          var spans = chars.map(function(c) {
-            var s = document.createElement('span');
-            s.textContent = c;
-            s.style.display = 'inline-block';
-            s.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-            return s;
-          });
-          codeEl.innerHTML = '';
-          spans.forEach(function(s) { codeEl.appendChild(s); });
-          // Stagger fade each span
-          spans.forEach(function(s, i) {
-            setTimeout(function() {
-              s.style.opacity = '0';
-              s.style.transform = 'translateY(-4px)';
-            }, i * 80 + 100);
-          });
-        }
-        overlay.classList.add('expired');
-        if(secEl) secEl.textContent = '0';
-        // B: slot reassigned message
-        if (codeEl) {
-          setTimeout(function() {
-            codeEl.innerHTML = '';
-            codeEl.style.fontSize = '11px';
-            codeEl.style.letterSpacing = '0.20em';
-            codeEl.style.color = 'rgba(255,255,255,0.55)';
-            codeEl.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
-          }, 600);
-        }
-        // Send reassign request immediately on timer expiry
-        var codeToReassign = generatedCode || localStorage.getItem(LS_CODE) || '';
-        var isFromSheet = codeFromSheet || (localStorage.getItem(LS_STATE) === 'revealed');
-        if (codeToReassign && isFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-          gsCall({ action: 'reassign', code: codeToReassign }, null);
-        }
-        // Reset localStorage — fresh slate
-        setTimeout(function() {
-          localStorage.removeItem(LS_CODE);
-          localStorage.setItem(LS_STATE, 'fresh');
-          generatedCode = '';
-          codeRevealed = false;
-          codeCopied = false;
-          close();
-        }, 2800);
-      }
-    }, 1000);
-  }
+  let codeFromSheet = false;
 
   // E: log funnel events to Sheets
   function logEvent(type) {
