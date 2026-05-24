@@ -5765,7 +5765,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
       // Call Sheets API
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        var claimEmail = claimedEmail || localStorage.getItem(LS_EMAIL) || 'unknown';
+        var claimEmail = val || localStorage.getItem(LS_EMAIL) || 'unknown';
         var xhr = new XMLHttpRequest();
         xhr.open('GET', APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail), true);
         xhr.onload = function() {
