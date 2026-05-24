@@ -5264,14 +5264,18 @@ document.addEventListener("DOMContentLoaded", function() {
   }
   // Fetch real slot count from Sheets on page load
   if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-    fetch(APPS_SCRIPT_URL + '?action=slots')
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (d.slots_remaining !== undefined) {
-          savedSlots = d.slots_remaining;
+    var sxhr = new XMLHttpRequest();
+    sxhr.open('GET', APPS_SCRIPT_URL + '?action=slots', true);
+    sxhr.onload = function() {
+      try {
+        var sd = JSON.parse(sxhr.responseText);
+        if (sd.slots_remaining !== undefined) {
+          savedSlots = sd.slots_remaining;
           localStorage.setItem(LS_SLOTS, savedSlots);
         }
-      }).catch(function() {}); // silent fail — use local cache
+      } catch(e) {}
+    };
+    sxhr.send();
   }
 
   let generatedCode = savedCode || '';
@@ -5414,6 +5418,14 @@ document.addEventListener("DOMContentLoaded", function() {
     }, 1000);
   }
 
+  function fallbackLocal() {
+    var vf = document.getElementById('promo-verify-fill');
+    var vs = document.getElementById('promo-verify-step');
+    if (vf) vf.style.width = '100%';
+    if (vs) { vs.textContent = 'Access confirmed.'; vs.style.color = 'rgba(255,255,255,0.90)'; }
+    setTimeout(showStep2, 400);
+  }
+
   // Called when API returns a real code
   function showStep2WithCode(code) {
     generatedCode = code;
@@ -5463,16 +5475,20 @@ document.addEventListener("DOMContentLoaded", function() {
       // Refresh from Sheets once after popup opens
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
         setTimeout(function() {
-          fetch(APPS_SCRIPT_URL + '?action=slots')
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-              if (d.slots_remaining !== undefined) {
-                startCodes = d.slots_remaining;
+          var pxhr = new XMLHttpRequest();
+          pxhr.open('GET', APPS_SCRIPT_URL + '?action=slots', true);
+          pxhr.onload = function() {
+            try {
+              var pd = JSON.parse(pxhr.responseText);
+              if (pd.slots_remaining !== undefined) {
+                startCodes = pd.slots_remaining;
                 savedSlots = startCodes;
                 localStorage.setItem(LS_SLOTS, startCodes);
                 if (codesLeftEl) codesLeftEl.textContent = startCodes + ' codes remaining';
               }
-            }).catch(function() {});
+            } catch(e) {}
+          };
+          pxhr.send();
         }, 800);
       }
     }
@@ -5750,39 +5766,32 @@ document.addEventListener("DOMContentLoaded", function() {
       // Call Sheets API
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
         var claimEmail = claimedEmail || localStorage.getItem(LS_EMAIL) || 'unknown';
-        fetch(APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail), {
-          method: 'GET'
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (d.success) {
-            // Use real code from Sheets
-            generatedCode = d.code;
-            localStorage.setItem(LS_CODE, generatedCode);
-            localStorage.setItem(LS_STATE, 'revealed');
-            if (d.slots_remaining !== undefined) {
-              savedSlots = d.slots_remaining;
-              localStorage.setItem(LS_SLOTS, savedSlots);
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail), true);
+        xhr.onload = function() {
+          try {
+            var d = JSON.parse(xhr.responseText);
+            if (d.success) {
+              generatedCode = d.code;
+              localStorage.setItem(LS_CODE, generatedCode);
+              localStorage.setItem(LS_STATE, 'revealed');
+              if (d.slots_remaining !== undefined) {
+                savedSlots = d.slots_remaining;
+                localStorage.setItem(LS_SLOTS, savedSlots);
+              }
+              if (verifyFill) verifyFill.style.width = '100%';
+              if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
+              setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
+            } else if (d.error === 'no codes remaining') {
+              if (verifyStep) verifyStep.textContent = 'All codes have been claimed.';
+              emailBtn.textContent = 'SOLD OUT';
+            } else {
+              fallbackLocal();
             }
-            if (verifyFill) verifyFill.style.width = '100%';
-            if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-            setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
-          } else if (d.error === 'No codes remaining') {
-            if (verifyStep) verifyStep.textContent = 'All codes have been claimed.';
-            emailBtn.textContent = 'SOLD OUT';
-          } else {
-            // Fallback: generate local code
-            if (verifyFill) verifyFill.style.width = '100%';
-            if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-            setTimeout(showStep2, 400);
-          }
-        })
-        .catch(function() {
-          // Offline fallback
-          if (verifyFill) verifyFill.style.width = '100%';
-          if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-          setTimeout(showStep2, 400);
-        });
+          } catch(e) { fallbackLocal(); }
+        };
+        xhr.onerror = function() { fallbackLocal(); };
+        xhr.send();
       } else {
         // No API configured — local fallback
         var fbSteps = [{ pct: 1.0, label: 'Access confirmed.' }];
