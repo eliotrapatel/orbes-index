@@ -5252,7 +5252,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const LS_SLOTS  = 'orbes_promo_slots';   // codes remaining (local cache)
   const LS_EMAIL  = 'orbes_promo_email';
   // ⚠️ Remplacer par l'URL de ton Apps Script déployé
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyWmYPY619--DrRyfkZHkMDeKttaGHKC03Sp4O2mIGO3WFUtqC3gyyoYv49KcLPneAr/exec';
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxnlwCteYQ_prhB648fXgThem9dsSsy_haNRXuQd2ZEaRXjxDk3VTHErO6E4XwzjTXb/exec';
 
   // Restore persisted state
   var savedState = localStorage.getItem(LS_STATE) || 'fresh';
@@ -5749,10 +5749,9 @@ document.addEventListener("DOMContentLoaded", function() {
 
       // Call Sheets API
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'claim', email: claimedEmail || localStorage.getItem(LS_EMAIL) || 'unknown' })
+        var claimEmail = claimedEmail || localStorage.getItem(LS_EMAIL) || 'unknown';
+        fetch(APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail), {
+          method: 'GET'
         })
         .then(function(r) { return r.json(); })
         .then(function(d) {
