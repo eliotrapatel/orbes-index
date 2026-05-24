@@ -2038,6 +2038,70 @@ body.inverted #promo-trigger:hover {
   opacity: 0;
   animation: splash-btn-in 0.9s cubic-bezier(0.34,1.56,0.64,1) 0.3s forwards;
 }
+
+@media (max-width: 812px) {
+  #cryptic-msg { color: rgba(255,255,255,0.80) !important; }
+}
+
+/* Step 3 confirmation */
+#promo-step-3 {
+  text-align: center;
+}
+#promo-eyebrow-3 {
+  font-size: 7px; font-weight: 400;
+  letter-spacing: 0.50em; color: rgba(255,255,255,0.50);
+  text-transform: uppercase; margin-bottom: 20px;
+}
+#promo-confirm-code {
+  font-size: 28px; font-weight: 100;
+  letter-spacing: 0.20em; color: rgba(255,255,255,0.96);
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: center; padding: 24px 0 8px;
+  text-shadow: 0 0 24px rgba(255,255,255,0.15);
+}
+#promo-confirm-sub {
+  font-size: 10px; font-weight: 300;
+  letter-spacing: 0.32em; color: rgba(255,255,255,0.75);
+  text-transform: uppercase; margin: 16px 0 12px;
+}
+#promo-confirm-hint {
+  font-size: 8px; font-weight: 300;
+  letter-spacing: 0.16em; line-height: 2.0;
+  color: rgba(255,255,255,0.38); margin-bottom: 8px;
+}
+#promo-confirm-footer {
+  font-size: 7px; letter-spacing: 0.30em;
+  color: rgba(255,255,255,0.20); text-transform: uppercase;
+  margin-top: 16px;
+}
+
+/* J: referral link */
+#promo-referral-wrap {
+  margin: 20px 0 0;
+  padding: 16px;
+  background: rgba(255,255,255,0.05);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10),
+              0 0 0 0.5px rgba(255,255,255,0.08);
+}
+#promo-referral-label {
+  font-size: 6.5px; letter-spacing: 0.38em;
+  color: rgba(255,255,255,0.28); text-transform: uppercase;
+  margin-bottom: 8px;
+}
+#promo-referral-url {
+  font-size: 7.5px; letter-spacing: 0.10em;
+  color: rgba(255,255,255,0.50);
+  word-break: break-all; margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+#promo-referral-copy {
+  font-size: 7px; letter-spacing: 0.38em;
+  color: rgba(255,255,255,0.65); text-transform: uppercase;
+  cursor: pointer; transition: color 0.3s ease;
+  display: inline-block;
+}
+#promo-referral-copy:hover { color: rgba(255,255,255,0.95); }
 </style>
 </head>
 <body>
@@ -2099,7 +2163,6 @@ body.inverted #promo-trigger:hover {
 <canvas id="pac-canvas"></canvas>
 <canvas id="flp-canvas"></canvas>
 <div id="snake-score">0</div>
-<div id="cryptic-msg">WE SLEEP WHEN WE DIE</div>
 <div id="cryptic-msg">WE SLEEP WHEN WE DIE</div>
 <button id="snake-btn">&#10022; SNAKE</button>
 <div id="game-hud"></div>
@@ -5247,12 +5310,32 @@ document.addEventListener("DOMContentLoaded", function() {
 
   const DURATION = 30;
   const CHARS    = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const LS_STATE  = 'orbes_promo_state';   // fresh|revealed|copied|expired
+  const LS_STATE  = 'orbes_promo_state';
+  const LS_UUID   = 'orbes_session_uuid';
+  const LS_VISITS  = 'orbes_visit_count';
+  const LS_REF     = 'orbes_referral';
+  // J: detect referral code from URL ?ref=OB-XXX
+  (function() {
+    var urlRef = new URLSearchParams(window.location.search).get('ref');
+    if (urlRef) localStorage.setItem(LS_REF, urlRef);
+  })();
+  // Increment visit counter
+  var visitCount = parseInt(localStorage.getItem(LS_VISITS) || '0', 10) + 1;
+  localStorage.setItem(LS_VISITS, visitCount);
+  // D: generate/restore session UUID
+  var sessionUUID = localStorage.getItem(LS_UUID);
+  if (!sessionUUID) {
+    sessionUUID = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+    localStorage.setItem(LS_UUID, sessionUUID);
+  }   // fresh|revealed|copied|expired
   const LS_CODE   = 'orbes_promo_code';
   const LS_SLOTS  = 'orbes_promo_slots';   // codes remaining (local cache)
   const LS_EMAIL  = 'orbes_promo_email';
   // ⚠️ Remplacer par l'URL de ton Apps Script déployé
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxnlwCteYQ_prhB648fXgThem9dsSsy_haNRXuQd2ZEaRXjxDk3VTHErO6E4XwzjTXb/exec';
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzPmh8xLinFYP3FNr1fo_7Gwyy18zKwGZM3gfknmDfM365B1YsVspliFD0Fx0o732mb/exec';
 
   // Restore persisted state
   var savedState = localStorage.getItem(LS_STATE) || 'fresh';
@@ -5264,18 +5347,19 @@ document.addEventListener("DOMContentLoaded", function() {
   }
   // Fetch real slot count from Sheets on page load
   if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-    var sxhr = new XMLHttpRequest();
-    sxhr.open('GET', APPS_SCRIPT_URL + '?action=slots', true);
-    sxhr.onload = function() {
-      try {
-        var sd = JSON.parse(sxhr.responseText);
-        if (sd.slots_remaining !== undefined) {
-          savedSlots = sd.slots_remaining;
-          localStorage.setItem(LS_SLOTS, savedSlots);
-        }
-      } catch(e) {}
-    };
-    sxhr.send();
+    fetch(APPS_SCRIPT_URL + '?action=slots', { redirect: 'follow' })
+      .then(function(r) { return r.text(); })
+      .then(function(t) {
+        try {
+          var sd = JSON.parse(t);
+          if (sd.slots_remaining !== undefined) {
+            savedSlots = sd.slots_remaining;
+            localStorage.setItem(LS_SLOTS, savedSlots);
+            // F: store real claimed count
+            if (sd.claimed !== undefined) localStorage.setItem('orbes_promo_claimed', sd.claimed);
+          }
+        } catch(e) {}
+      }).catch(function() {});
   }
 
   let generatedCode = savedCode || '';
@@ -5405,6 +5489,12 @@ document.addEventListener("DOMContentLoaded", function() {
             codeEl.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
           }, 600);
         }
+        // Call API to unassign code if not copied
+        if (!codeCopied && generatedCode && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+          fetch(APPS_SCRIPT_URL + '?action=unassign&code=' + encodeURIComponent(generatedCode), {
+            method: 'GET', redirect: 'follow'
+          }).catch(function() {});
+        }
         // Reset localStorage — fresh slate
         setTimeout(function() {
           localStorage.removeItem(LS_CODE);
@@ -5416,6 +5506,14 @@ document.addEventListener("DOMContentLoaded", function() {
         }, 2800);
       }
     }, 1000);
+  }
+
+  // E: log funnel events to Sheets
+  function logEvent(type) {
+    if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return;
+    fetch(APPS_SCRIPT_URL + '?action=event&type=' + type + '&uuid=' + encodeURIComponent(sessionUUID), {
+      method: 'GET', redirect: 'follow'
+    }).catch(function() {});
   }
 
   function fallbackLocal() {
@@ -5471,24 +5569,25 @@ document.addEventListener("DOMContentLoaded", function() {
     var codesLeftEl = document.getElementById('promo-codes-left');
     var startCodes = savedSlots;
     if (codesLeftEl) {
-      codesLeftEl.textContent = startCodes + ' codes remaining';
+      var claimedCount = 500 - startCodes;
+      codesLeftEl.textContent = startCodes + ' codes remaining' + (claimedCount > 0 ? ' · ' + claimedCount + ' claimed' : '');
       // Refresh from Sheets once after popup opens
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
         setTimeout(function() {
-          var pxhr = new XMLHttpRequest();
-          pxhr.open('GET', APPS_SCRIPT_URL + '?action=slots', true);
-          pxhr.onload = function() {
-            try {
-              var pd = JSON.parse(pxhr.responseText);
-              if (pd.slots_remaining !== undefined) {
-                startCodes = pd.slots_remaining;
-                savedSlots = startCodes;
-                localStorage.setItem(LS_SLOTS, startCodes);
-                if (codesLeftEl) codesLeftEl.textContent = startCodes + ' codes remaining';
-              }
-            } catch(e) {}
-          };
-          pxhr.send();
+          fetch(APPS_SCRIPT_URL + '?action=slots', { redirect: 'follow' })
+            .then(function(r) { return r.text(); })
+            .then(function(t) {
+              try {
+                var pd = JSON.parse(t);
+                if (pd.slots_remaining !== undefined) {
+                  startCodes = pd.slots_remaining;
+                  savedSlots = startCodes;
+                  localStorage.setItem(LS_SLOTS, startCodes);
+                  var claimed = pd.claimed || (500 - startCodes);
+                  if (codesLeftEl) codesLeftEl.textContent = startCodes + ' codes remaining · ' + claimed + ' claimed';
+                }
+              } catch(e) {}
+            }).catch(function() {});
         }, 800);
       }
     }
@@ -5541,8 +5640,20 @@ document.addEventListener("DOMContentLoaded", function() {
     step1.style.display = 'block';
     step2.style.display = 'none';
     overlay.classList.add('active');
+    logEvent('popup_open');
     var fbar = document.getElementById('founding-bar');
-    if (fbar) fbar.classList.add('active');
+    if (fbar) {
+      // A: calculate days remaining to July 1 2026
+      var deadline = new Date('2026-07-01T00:00:00');
+      var now = new Date();
+      var daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+      var barText = 'FOUNDING ACCESS · VALID UNTIL JULY 2026';
+      if (daysLeft <= 30 && daysLeft > 1) barText = 'FOUNDING ACCESS · CLOSES IN ' + daysLeft + ' DAYS';
+      else if (daysLeft === 1) barText = 'FOUNDING ACCESS · CLOSES TOMORROW';
+      else if (daysLeft <= 0) barText = 'FOUNDING ACCESS · NOW CLOSED';
+      fbar.textContent = barText;
+      fbar.classList.add('active');
+    }
     updateSocialProof();
     // A: visitor detected message (only for truly fresh visitors)
     var gt = document.getElementById('promo-gate-text');
@@ -5612,6 +5723,8 @@ document.addEventListener("DOMContentLoaded", function() {
       var ew = document.getElementById('promo-email-wrap'); if (ew) { ew.style.display = ''; ew.style.opacity = '1'; }
       var sp = document.getElementById('promo-social-proof'); if (sp) { sp.style.opacity = '1'; }
       var gt2 = document.getElementById('promo-gate-text'); if (gt2) { gt2.style.opacity = '1'; }
+      var s3r = document.getElementById('promo-step-3'); if (s3r) { s3r.style.display = 'none'; s3r.style.opacity = '0'; }
+      var s2r = document.getElementById('promo-step-2'); if (s2r) { s2r.style.display = 'none'; s2r.style.opacity = '1'; }
       var ey = document.getElementById('promo-eyebrow'); if (ey) ey.style.opacity = '1';
       var dv = document.getElementById('promo-divider-top'); if (dv) dv.style.opacity = '1';
       var sp2 = document.getElementById('promo-social-proof'); if (sp2) sp2.style.opacity = '1';
@@ -5725,6 +5838,7 @@ document.addEventListener("DOMContentLoaded", function() {
           o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.07);
         } catch(e) {}
       })();
+      logEvent('claim_attempt');
       emailBtn.textContent = 'VERIFYING';
       emailBtn.classList.add('loading');
       // D: progress bar with steps
@@ -5766,11 +5880,25 @@ document.addEventListener("DOMContentLoaded", function() {
       // Call Sheets API
       if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
         var claimEmail = val || localStorage.getItem(LS_EMAIL) || 'unknown';
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail), true);
-        xhr.onload = function() {
+        // Apps Script requires fetch with redirect:follow
+        var tz  = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        // F: engagement score
+        var score = 0;
+        if (codeCopied) score += 1;
+        if ((localStorage.getItem('orbes_visit_count')||0) >= 2) score += 1;
+        if (tz.indexOf('Paris') !== -1 || tz.indexOf('Europe') !== -1) score += 1;
+        var visitRef = document.referrer || '';
+        if (visitRef.indexOf('instagram') !== -1 || visitRef.indexOf('tiktok') !== -1) score += 2;
+        var ref = document.referrer || 'direct';
+        var referralCode = localStorage.getItem(LS_REF) || '';
+        fetch(APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail) + '&tz=' + encodeURIComponent(tz) + '&ref=' + encodeURIComponent(ref) + '&uuid=' + encodeURIComponent(sessionUUID) + '&score=' + score + '&referral=' + encodeURIComponent(referralCode), {
+          method: 'GET',
+          redirect: 'follow'
+        })
+        .then(function(r) { return r.text(); })
+        .then(function(txt) {
           try {
-            var d = JSON.parse(xhr.responseText);
+            var d = JSON.parse(txt);
             if (d.success) {
               generatedCode = d.code;
               localStorage.setItem(LS_CODE, generatedCode);
@@ -5789,9 +5917,8 @@ document.addEventListener("DOMContentLoaded", function() {
               fallbackLocal();
             }
           } catch(e) { fallbackLocal(); }
-        };
-        xhr.onerror = function() { fallbackLocal(); };
-        xhr.send();
+        })
+        .catch(function() { fallbackLocal(); });
       } else {
         // No API configured — local fallback
         var fbSteps = [{ pct: 1.0, label: 'Access confirmed.' }];
@@ -5804,6 +5931,7 @@ document.addEventListener("DOMContentLoaded", function() {
     });
   }
   if (emailEl) {
+    emailEl.addEventListener('focus', function() { logEvent('email_focus'); }, { once: true });
     emailEl.addEventListener('blur', function() {
       var v = emailEl.value.trim();
       var valid = !v || /^[^@]+@[^@]+\.[^@]+$/.test(v);
@@ -5828,15 +5956,54 @@ document.addEventListener("DOMContentLoaded", function() {
       if (navigator.clipboard) navigator.clipboard.writeText(generatedCode);
       codeCopied = true;
       localStorage.setItem(LS_STATE, 'copied');
+      logEvent('code_copied');
+      // Mark as copied in Emails sheet
+      if (generatedCode && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+        fetch(APPS_SCRIPT_URL + '?action=copied&code=' + encodeURIComponent(generatedCode), {
+          method: 'GET', redirect: 'follow'
+        }).catch(function() {});
+      }
       copyBtn.textContent = 'SECURED ✦';
       copyBtn.classList.add('copied');
-      // D+G: auto-close — slide up asymmetric
+      // G: transition to step 3 confirmation screen
       setTimeout(function() {
-        inner.style.transition = 'transform 0.45s cubic-bezier(0.4,0,1,1), opacity 0.45s ease';
-        inner.style.transform = 'translateY(-14px) scale(0.98)';
-        inner.style.opacity = '0';
-        setTimeout(close, 450);
-      }, 1800);
+        var s2 = document.getElementById('promo-step-2');
+        var s3 = document.getElementById('promo-step-3');
+        var confirmCode = document.getElementById('promo-confirm-code');
+        if (confirmCode) confirmCode.textContent = generatedCode;
+        // J: generate referral link
+        var refWrap = document.getElementById('promo-referral-wrap');
+        var refUrl  = document.getElementById('promo-referral-url');
+        var refCopy = document.getElementById('promo-referral-copy');
+        var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
+        if (refUrl) refUrl.textContent = refLink;
+        if (refCopy) {
+          refCopy.onclick = function() {
+            if (navigator.clipboard) navigator.clipboard.writeText(refLink);
+            refCopy.textContent = 'COPIED ✦';
+            setTimeout(function() { refCopy.textContent = 'COPY LINK'; }, 2000);
+          };
+        }
+        if (s2) { s2.style.transition = 'opacity 0.3s ease'; s2.style.opacity = '0'; }
+        setTimeout(function() {
+          if (s2) s2.style.display = 'none';
+          if (s3) {
+            s3.style.opacity = '0';
+            s3.style.display = 'block';
+            requestAnimationFrame(function() {
+              s3.style.transition = 'opacity 0.5s ease';
+              s3.style.opacity = '1';
+            });
+          }
+          // Auto-close after 3s
+          setTimeout(function() {
+            inner.style.transition = 'transform 0.45s cubic-bezier(0.4,0,1,1), opacity 0.45s ease';
+            inner.style.transform = 'translateY(-12px) scale(0.98)';
+            inner.style.opacity = '0';
+            setTimeout(close, 450);
+          }, 3000);
+        }, 300);
+      }, 1200);
     });
   }
 
@@ -5900,6 +6067,22 @@ document.addEventListener("DOMContentLoaded", function() {
       <div id="promo-reopen-hint"></div>
       <div id="promo-footer-sep"></div>
       <div id="promo-footer">One use only · Not shown again.</div>
+    </div>
+
+    <!-- STEP 3: confirmation -->
+    <div id="promo-step-3" style="display:none">
+      <div id="promo-eyebrow-3">CODE SECURED</div>
+      <div id="promo-divider-top"></div>
+      <div id="promo-confirm-code"></div>
+      <div id="promo-confirm-sub">Check your inbox.</div>
+      <div id="promo-confirm-hint">Your founding access code has been sent<br>to your email address.</div>
+      <div id="promo-divider-top" style="margin-top:28px;"></div>
+      <div id="promo-referral-wrap">
+        <div id="promo-referral-label">YOUR REFERRAL LINK</div>
+        <div id="promo-referral-url"></div>
+        <div id="promo-referral-copy">COPY LINK</div>
+      </div>
+      <div id="promo-confirm-footer">theorbes.com</div>
     </div>
 
   </div>
