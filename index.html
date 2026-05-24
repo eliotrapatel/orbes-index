@@ -5547,9 +5547,11 @@ document.addEventListener("DOMContentLoaded", function() {
             codeEl.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
           }, 600);
         }
-        // Send reassign request to Sheet immediately on timer expiry
-        if (generatedCode && codeFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-          fetch(APPS_SCRIPT_URL + '?action=reassign&code=' + encodeURIComponent(generatedCode), {
+        // Send reassign request immediately on timer expiry
+        var codeToReassign = generatedCode || localStorage.getItem(LS_CODE) || '';
+        var isFromSheet = codeFromSheet || (localStorage.getItem(LS_STATE) === 'revealed');
+        if (codeToReassign && isFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+          fetch(APPS_SCRIPT_URL + '?action=reassign&code=' + encodeURIComponent(codeToReassign), {
             method: 'GET', redirect: 'follow'
           }).catch(function() {});
         }
@@ -5863,7 +5865,10 @@ document.addEventListener("DOMContentLoaded", function() {
   function reopenCode() {
     // Always sync from localStorage in case this is a new session
     var persisted = localStorage.getItem(LS_CODE) || '';
-    if (persisted) generatedCode = persisted;
+    if (persisted) {
+      generatedCode = persisted;
+      codeFromSheet = true; // code came from Sheet originally
+    }
 
     // If no code at all, fall back to full open flow
     if (!generatedCode) { open(); return; }
