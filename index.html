@@ -406,7 +406,7 @@ body.chromatic
   font-family: "Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif;
   font-size: clamp(11px, 1.4vw, 16px); font-weight: 400; letter-spacing: 0.34em;
   text-transform: uppercase;
-  color: #000; opacity: 0; pointer-events: none;
+  color: #000 !important; opacity: 0; pointer-events: none;
   transition: opacity 0.6s ease; white-space: nowrap;
 }
 body.inverted #cryptic-msg { color: #fff; }
@@ -1502,13 +1502,13 @@ body.trade.night-mode #trade-summary-close {
 }
 #promo-trigger {
   background: none;
-  border: 0.5px solid rgba(0,0,0,0.20);
+  border: 0.5px solid rgba(0,0,0,0.35);
   border-radius: 2px;
   cursor: pointer;
-  color: rgba(0,0,0,0.40);
+  color: rgba(0,0,0,0.65);
   font-size: 9px;
   font-family: "Helvetica Neue", Arial, sans-serif;
-  font-weight: 300;
+  font-weight: 400;
   letter-spacing: 0.35em;
   text-transform: uppercase;
   padding: 7px 18px;
@@ -1517,8 +1517,8 @@ body.trade.night-mode #trade-summary-close {
   animation: promo-pulse 4s ease-in-out infinite;
 }
 #promo-trigger:hover {
-  color: rgba(0,0,0,0.75);
-  border-color: rgba(0,0,0,0.45);
+  color: rgba(0,0,0,0.90);
+  border-color: rgba(0,0,0,0.60);
   transform: scale(1.04);
 }
 body.inverted #promo-trigger {
@@ -2102,6 +2102,48 @@ body.inverted #promo-trigger:hover {
   display: inline-block;
 }
 #promo-referral-copy:hover { color: rgba(255,255,255,0.95); }
+
+/* E: claimed code badge */
+#orbes-code-badge {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 7px;
+  font-weight: 300;
+  letter-spacing: 0.32em;
+  color: rgba(0,0,0,0.20);
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.2s ease;
+  white-space: nowrap;
+}
+/* Dark bg (mobile/splash) */
+@media (max-width: 812px) {
+  #orbes-code-badge { color: rgba(255,255,255,0.22); }
+}
+
+/* Mobile: text shadows for legibility over image background */
+@media (max-width: 812px) {
+  .bottom-text p,
+  .reveal span,
+  #reveal-text,
+  #text-rewrite {
+    text-shadow: 0 1px 6px rgba(0,0,0,0.55), 0 2px 12px rgba(0,0,0,0.30) !important;
+  }
+  #promo-trigger {
+    color: rgba(255,255,255,0.90) !important;
+    border-color: rgba(255,255,255,0.55) !important;
+    font-weight: 400 !important;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.55), 0 2px 12px rgba(0,0,0,0.30) !important;
+  }
+}
+
+/* Chromatic mode hidden */
+#chromatic-btn { display: none !important; }
 </style>
 </head>
 <body>
@@ -5322,6 +5364,22 @@ document.addEventListener("DOMContentLoaded", function() {
   // Increment visit counter
   var visitCount = parseInt(localStorage.getItem(LS_VISITS) || '0', 10) + 1;
   localStorage.setItem(LS_VISITS, visitCount);
+
+  // E: show claimed code on return visits
+  (function() {
+    var cookieCode = getCookie('orbes_code');
+    var lsState    = localStorage.getItem(LS_STATE);
+    if (cookieCode && lsState === 'copied') {
+      // Show discreet code badge at bottom of page after 2s
+      setTimeout(function() {
+        var badge = document.getElementById('orbes-code-badge');
+        if (badge) {
+          badge.textContent = cookieCode;
+          badge.style.opacity = '1';
+        }
+      }, 2000);
+    }
+  })();
   // D: generate/restore session UUID
   var sessionUUID = localStorage.getItem(LS_UUID);
   if (!sessionUUID) {
@@ -5490,11 +5548,7 @@ document.addEventListener("DOMContentLoaded", function() {
           }, 600);
         }
         // Call API to unassign code if not copied
-        if (!codeCopied && generatedCode && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-          fetch(APPS_SCRIPT_URL + '?action=unassign&code=' + encodeURIComponent(generatedCode), {
-            method: 'GET', redirect: 'follow'
-          }).catch(function() {});
-        }
+        // Code expired — Sheet status stays 'generated', cleanup handled server-side
         // Reset localStorage — fresh slate
         setTimeout(function() {
           localStorage.removeItem(LS_CODE);
@@ -5514,6 +5568,16 @@ document.addEventListener("DOMContentLoaded", function() {
     fetch(APPS_SCRIPT_URL + '?action=event&type=' + type + '&uuid=' + encodeURIComponent(sessionUUID), {
       method: 'GET', redirect: 'follow'
     }).catch(function() {});
+  }
+
+  // E: cookie helpers
+  function setCookie(name, value, days) {
+    var expires = new Date(Date.now() + days * 864e5).toUTCString();
+    document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/; SameSite=Lax';
+  }
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
   }
 
   function fallbackLocal() {
@@ -5542,8 +5606,11 @@ document.addEventListener("DOMContentLoaded", function() {
         step2.style.opacity = '1';
       });
     }, 350);
-    generatedCode = generateCode();
-    localStorage.setItem(LS_CODE, generatedCode);
+    // Only generate local code if API hasn't already set one
+    if (!generatedCode) {
+      generatedCode = generateCode();
+      localStorage.setItem(LS_CODE, generatedCode);
+    }
     localStorage.setItem(LS_STATE, 'revealed');
     // F: decrement slots counter
     savedSlots = Math.max(1, savedSlots - 1);
@@ -5641,6 +5708,18 @@ document.addEventListener("DOMContentLoaded", function() {
     step2.style.display = 'none';
     overlay.classList.add('active');
     logEvent('popup_open');
+    // D: update engagement score on every open
+    if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+      var openTz  = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      var openScore = 0;
+      if (visitCount >= 2) openScore += 1;
+      if (visitCount >= 5) openScore += 1;
+      if (openTz.indexOf('Europe') !== -1) openScore += 1;
+      if ((document.referrer||'').indexOf('instagram') !== -1 || (document.referrer||'').indexOf('tiktok') !== -1) openScore += 2;
+      fetch(APPS_SCRIPT_URL + '?action=update_score&uuid=' + encodeURIComponent(sessionUUID) + '&score=' + openScore + '&visits=' + visitCount, {
+        method: 'GET', redirect: 'follow'
+      }).catch(function() {});
+    }
     var fbar = document.getElementById('founding-bar');
     if (fbar) {
       // A: calculate days remaining to July 1 2026
@@ -5715,6 +5794,7 @@ document.addEventListener("DOMContentLoaded", function() {
     }
     setTimeout(function() {
       revealed = false;
+      codeFromSheet = false;
       trigger.style.pointerEvents = 'all';
       step1.style.display = 'block';
       step2.style.display = 'none';
@@ -5732,6 +5812,8 @@ document.addEventListener("DOMContentLoaded", function() {
       var err2 = document.getElementById('promo-email-error'); if (err2) err2.style.opacity = '0';
     }, 500);
   }
+
+  // Statuses: available → generated (seen) → claimed (copied)
 
   trigger.addEventListener('click', function(e) {
     e.stopPropagation();
@@ -5882,6 +5964,10 @@ document.addEventListener("DOMContentLoaded", function() {
         var claimEmail = val || localStorage.getItem(LS_EMAIL) || 'unknown';
         // Apps Script requires fetch with redirect:follow
         var tz  = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        // F: local time at claim
+        var localNow = new Date();
+        var localTime = String(localNow.getHours()).padStart(2,'0') + ':' + String(localNow.getMinutes()).padStart(2,'0');
+        var localDate = localNow.toLocaleDateString('fr-FR', { timeZone: tz || undefined });
         // F: engagement score
         var score = 0;
         if (codeCopied) score += 1;
@@ -5891,7 +5977,7 @@ document.addEventListener("DOMContentLoaded", function() {
         if (visitRef.indexOf('instagram') !== -1 || visitRef.indexOf('tiktok') !== -1) score += 2;
         var ref = document.referrer || 'direct';
         var referralCode = localStorage.getItem(LS_REF) || '';
-        fetch(APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail) + '&tz=' + encodeURIComponent(tz) + '&ref=' + encodeURIComponent(ref) + '&uuid=' + encodeURIComponent(sessionUUID) + '&score=' + score + '&referral=' + encodeURIComponent(referralCode), {
+        fetch(APPS_SCRIPT_URL + '?action=claim&email=' + encodeURIComponent(claimEmail) + '&tz=' + encodeURIComponent(tz) + '&ref=' + encodeURIComponent(ref) + '&uuid=' + encodeURIComponent(sessionUUID) + '&score=' + score + '&referral=' + encodeURIComponent(referralCode) + '&localtime=' + encodeURIComponent(localTime) + '&localdate=' + encodeURIComponent(localDate), {
           method: 'GET',
           redirect: 'follow'
         })
@@ -5901,8 +5987,10 @@ document.addEventListener("DOMContentLoaded", function() {
             var d = JSON.parse(txt);
             if (d.success) {
               generatedCode = d.code;
+              codeFromSheet = true;
               localStorage.setItem(LS_CODE, generatedCode);
               localStorage.setItem(LS_STATE, 'revealed');
+              // Already marked 'generated' by claim action in Sheet
               if (d.slots_remaining !== undefined) {
                 savedSlots = d.slots_remaining;
                 localStorage.setItem(LS_SLOTS, savedSlots);
@@ -5956,10 +6044,12 @@ document.addEventListener("DOMContentLoaded", function() {
       if (navigator.clipboard) navigator.clipboard.writeText(generatedCode);
       codeCopied = true;
       localStorage.setItem(LS_STATE, 'copied');
+      // E: set permanent cookie (valid 365 days)
+      setCookie('orbes_code', generatedCode, 365);
       logEvent('code_copied');
-      // Mark as copied in Emails sheet
-      if (generatedCode && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        fetch(APPS_SCRIPT_URL + '?action=copied&code=' + encodeURIComponent(generatedCode), {
+      if (generatedCode && codeFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+        // Mark code as 'claimed' in Codes sheet + 'copied' in Emails
+        fetch(APPS_SCRIPT_URL + '?action=claim_confirm&code=' + encodeURIComponent(generatedCode), {
           method: 'GET', redirect: 'follow'
         }).catch(function() {});
       }
@@ -6088,6 +6178,7 @@ document.addEventListener("DOMContentLoaded", function() {
   </div>
 </div>
 
+<div id="orbes-code-badge"></div>
 <div id="promo-toast"></div>
 <div id="founding-bar">FOUNDING ACCESS · VALID UNTIL JULY 2026</div>
 </body>
