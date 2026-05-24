@@ -5547,8 +5547,12 @@ document.addEventListener("DOMContentLoaded", function() {
             codeEl.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
           }, 600);
         }
-        // Call API to unassign code if not copied
-        // Code expired — Sheet status stays 'generated', cleanup handled server-side
+        // Send reassign request to Sheet immediately on timer expiry
+        if (generatedCode && codeFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+          fetch(APPS_SCRIPT_URL + '?action=reassign&code=' + encodeURIComponent(generatedCode), {
+            method: 'GET', redirect: 'follow'
+          }).catch(function() {});
+        }
         // Reset localStorage — fresh slate
         setTimeout(function() {
           localStorage.removeItem(LS_CODE);
@@ -5581,11 +5585,31 @@ document.addEventListener("DOMContentLoaded", function() {
   }
 
   function fallbackLocal() {
-    var vf = document.getElementById('promo-verify-fill');
+    // API failed — show error, don't show random code
     var vs = document.getElementById('promo-verify-step');
-    if (vf) vf.style.width = '100%';
-    if (vs) { vs.textContent = 'Access confirmed.'; vs.style.color = 'rgba(255,255,255,0.90)'; }
-    setTimeout(showStep2, 400);
+    var vf = document.getElementById('promo-verify-fill');
+    if (vf) vf.style.width = '0%';
+    if (vs) { vs.textContent = 'Connection error. Please retry.'; vs.style.color = 'rgba(255,100,100,0.80)'; }
+    var emailBtn2 = document.getElementById('promo-email-btn');
+    if (emailBtn2) {
+      emailBtn2.textContent = 'RETRY';
+      emailBtn2.classList.remove('loading');
+    }
+    // Re-show email form
+    setTimeout(function() {
+      var verifyWrap2 = document.getElementById('promo-verify-wrap');
+      var emailWrap2  = document.getElementById('promo-email-wrap');
+      var socialEl3   = document.getElementById('promo-social-proof');
+      var eyebrow2    = document.getElementById('promo-eyebrow');
+      var divider2    = document.getElementById('promo-divider-top');
+      var fg2         = document.getElementById('promo-footer-gate');
+      var gt3         = document.getElementById('promo-gate-text');
+      if (verifyWrap2) verifyWrap2.style.display = 'none';
+      [emailWrap2, socialEl3, eyebrow2, divider2, fg2].forEach(function(el) {
+        if (el) { el.style.opacity = '1'; el.style.display = ''; }
+      });
+      if (gt3) { gt3.style.opacity = '1'; }
+    }, 2000);
   }
 
   // Called when API returns a real code
@@ -5606,10 +5630,15 @@ document.addEventListener("DOMContentLoaded", function() {
         step2.style.opacity = '1';
       });
     }, 350);
-    // Only generate local code if API hasn't already set one
+    // Only generate local code if NO API configured AND no code yet
     if (!generatedCode) {
-      generatedCode = generateCode();
-      localStorage.setItem(LS_CODE, generatedCode);
+      if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
+        generatedCode = generateCode();
+        localStorage.setItem(LS_CODE, generatedCode);
+      } else {
+        // API is configured but no code yet — don't show anything, wait for API
+        return;
+      }
     }
     localStorage.setItem(LS_STATE, 'revealed');
     // F: decrement slots counter
@@ -5847,20 +5876,26 @@ document.addEventListener("DOMContentLoaded", function() {
     overlay.classList.add('active');
     var fbarR = document.getElementById('founding-bar');
     if (fbarR) fbarR.classList.add('active');
+    // Set content AFTER step2 is visible in DOM
     requestAnimationFrame(function() {
+      // Reset and fill code element
+      var freshCode = document.getElementById('promo-code');
+      if (freshCode) {
+        freshCode.style.transition = 'none';
+        freshCode.style.fontSize = '';
+        freshCode.style.letterSpacing = '';
+        freshCode.style.color = '';
+        freshCode.innerHTML = '';
+        freshCode.textContent = generatedCode;
+      }
+      // Update copy btn
+      var freshCopyBtn2 = document.getElementById('promo-copy-btn');
+      if (freshCopyBtn2) {
+        freshCopyBtn2.textContent = codeCopied ? 'COPIED • ' + generatedCode : 'COPY ' + generatedCode;
+      }
       step2.style.transition = 'opacity 0.45s ease';
       step2.style.opacity = '1';
     });
-    // Reset code styles and render — always query fresh
-    var freshCode = document.getElementById('promo-code');
-    if (freshCode) {
-      freshCode.style.transition = 'none';
-      freshCode.style.fontSize = '';
-      freshCode.style.letterSpacing = '';
-      freshCode.style.color = '';
-      freshCode.innerHTML = '';
-      freshCode.textContent = generatedCode;
-    }
     // Reset serial/timestamp
     var serialEl2 = document.getElementById('promo-serial');
     if (serialEl2) {
