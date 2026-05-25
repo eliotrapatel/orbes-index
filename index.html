@@ -5515,7 +5515,10 @@ document.addEventListener("DOMContentLoaded", function() {
     if (emailBtn2) {
       emailBtn2.textContent = 'RETRY';
       emailBtn2.classList.remove('loading');
+      emailBtn2.disabled = false;
     }
+    var emailEl2 = document.getElementById('promo-email');
+    if (emailEl2) emailEl2.disabled = false;
     // Re-show email form
     setTimeout(function() {
       var verifyWrap2 = document.getElementById('promo-verify-wrap');
@@ -5643,6 +5646,70 @@ document.addEventListener("DOMContentLoaded", function() {
         startTimer();
       });
     }, 80);
+  }
+
+  function startTimer() {
+    remaining = DURATION;
+    const fill = document.getElementById('promo-timer-fill');
+    const bar  = document.getElementById('promo-timer-bar');
+    if (fill) {
+      fill.style.transition = 'none';
+      fill.style.transform = 'scaleX(1)';
+      setTimeout(function() {
+        fill.style.transition = 'transform ' + DURATION + 's linear';
+        fill.style.transform = 'scaleX(0)';
+      }, 500);
+    }
+    timer = setInterval(function() {
+      remaining--;
+      if (remaining === 10 && bar) bar.classList.add('urgent');
+      if (remaining <= 0) {
+        clearInterval(timer);
+        // Disintegrate code
+        var freshCE = document.getElementById('promo-code');
+        if (freshCE) {
+          var chars = freshCE.textContent.split('');
+          var spans = chars.map(function(c) {
+            var s = document.createElement('span');
+            s.textContent = c;
+            s.style.display = 'inline-block';
+            s.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+            return s;
+          });
+          freshCE.innerHTML = '';
+          spans.forEach(function(s) { freshCE.appendChild(s); });
+          spans.forEach(function(sp, idx) {
+            setTimeout(function() {
+              sp.style.opacity = '0';
+              sp.style.transform = 'translateY(-4px)';
+            }, idx * 80 + 100);
+          });
+          setTimeout(function() {
+            freshCE.innerHTML = '';
+            freshCE.style.fontSize = '11px';
+            freshCE.style.letterSpacing = '0.20em';
+            freshCE.style.color = 'rgba(255,255,255,0.55)';
+            freshCE.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
+          }, 600);
+        }
+        // Reassign in Sheet
+        var codeToReassign = generatedCode || localStorage.getItem(LS_CODE) || '';
+        var isFromSheet = codeFromSheet || (localStorage.getItem(LS_STATE) === 'revealed');
+        if (codeToReassign && isFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+          gsCall({ action: 'reassign', code: codeToReassign }, null);
+        }
+        // Reset state
+        setTimeout(function() {
+          localStorage.removeItem(LS_CODE);
+          localStorage.setItem(LS_STATE, 'fresh');
+          generatedCode = '';
+          codeRevealed = false;
+          codeCopied = false;
+          codeFromSheet = false;
+          close();
+        }, 2800);
+      }
+    }, 1000);
   }
 
   function open() {
@@ -5929,32 +5996,55 @@ document.addEventListener("DOMContentLoaded", function() {
         if (visitRef.indexOf('instagram') !== -1 || visitRef.indexOf('tiktok') !== -1) score += 2;
         var ref = document.referrer || 'direct';
         var referralCode = localStorage.getItem(LS_REF) || '';
+        // Lock form completely during claim process
+        emailBtn.disabled = true;
+        if (emailEl) emailEl.disabled = true;
+        // Step 1: fire claim (no callback — Sheet writes fine without JSONP)
         gsCall({
           action: 'claim', email: claimEmail,
           tz: tz, ref: ref, uuid: sessionUUID,
           score: score, referral: referralCode,
           localtime: localTime, localdate: localDate
-        }, function(d) {
-          if (!d || d.error === 'network') { fallbackLocal(); return; }
-          if (d.success) {
-            generatedCode = d.code;
-            codeFromSheet = true;
-            localStorage.setItem(LS_CODE, generatedCode);
-            localStorage.setItem(LS_STATE, 'revealed');
-            if (d.slots_remaining !== undefined) {
-              savedSlots = d.slots_remaining;
-              localStorage.setItem(LS_SLOTS, savedSlots);
+        }, null);
+
+        // Step 2: after 2.5s poll getcode by email to retrieve assigned code
+        setTimeout(function() {
+          gsCall({ action: 'getcode', email: claimEmail }, function(d) {
+            if (d && d.success && d.code) {
+              generatedCode = d.code;
+              codeFromSheet = true;
+              localStorage.setItem(LS_CODE, generatedCode);
+              localStorage.setItem(LS_STATE, 'revealed');
+              if (d.slots_remaining !== undefined) {
+                savedSlots = d.slots_remaining;
+                localStorage.setItem(LS_SLOTS, savedSlots);
+              }
+              if (verifyFill) verifyFill.style.width = '100%';
+              if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
+              setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
+            } else if (d && d.error === 'no codes remaining') {
+              if (verifyStep) verifyStep.textContent = 'All codes have been claimed.';
+              emailBtn.textContent = 'SOLD OUT';
+            } else {
+              // Retry once after 3 more seconds
+              setTimeout(function() {
+                gsCall({ action: 'getcode', email: claimEmail }, function(d2) {
+                  if (d2 && d2.success && d2.code) {
+                    generatedCode = d2.code;
+                    codeFromSheet = true;
+                    localStorage.setItem(LS_CODE, generatedCode);
+                    localStorage.setItem(LS_STATE, 'revealed');
+                    if (verifyFill) verifyFill.style.width = '100%';
+                    if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
+                    setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
+                  } else {
+                    fallbackLocal();
+                  }
+                });
+              }, 3000);
             }
-            if (verifyFill) verifyFill.style.width = '100%';
-            if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-            setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
-          } else if (d.error === 'no codes remaining') {
-            if (verifyStep) verifyStep.textContent = 'All codes have been claimed.';
-            emailBtn.textContent = 'SOLD OUT';
-          } else {
-            fallbackLocal();
-          }
-        });
+          });
+        }, 2500);
       } else {
         // No API configured — local fallback
         var fbSteps = [{ pct: 1.0, label: 'Access confirmed.' }];
