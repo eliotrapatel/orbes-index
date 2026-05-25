@@ -1538,41 +1538,7 @@ body.inverted #promo-trigger:hover {
 
 
 
-@media (max-width: 480px) {
-  #promo-inner {
-    max-width: 92vw;
-    padding: 36px 28px 30px;
-  }
-  #promo-code {
-    font-size: 22px;
-    letter-spacing: 0.32em;
-    padding-left: 0.32em;
-  }
-  #promo-eyebrow, #promo-eyebrow-2 {
-    font-size: 8px;
-    letter-spacing: 0.40em;
-  }
-  #promo-gate-text {
-    font-size: 10px;
-  }
-  
-  
-  #promo-footer {
-    font-size: 7.5px;
-  }
-  
-  #promo-serial {
-    font-size: 8px;
-  }
-  #promo-email {
-    font-size: 11px;
-    padding: 13px 14px;
-  }
-  #promo-email-btn {
-    font-size: 9px;
-    padding: 13px 18px;
-  }
-}
+
 
 /* ── PROMO OVERLAY ──────────────────────────────────────────────── */
 #promo-overlay {
@@ -1589,7 +1555,7 @@ body.inverted #promo-trigger:hover {
 }
 #promo-inner {
   position: relative;
-  width: 88vw; max-width: 300px;
+  width: 92vw; max-width: 360px;
   padding: 40px 36px 32px;
   background: linear-gradient(160deg,
     rgba(255,255,255,0.32) 0%,
@@ -1793,13 +1759,7 @@ body.inverted #promo-trigger:hover {
 #promo-overlay.expired #promo-copy-btn { opacity: 0.25; pointer-events: none; }
 
 /* Mobile */
-@media (max-width: 480px) {
-  #promo-inner { max-width: 92vw; padding: 34px 26px 28px; }
-  #promo-code { font-size: 32px; }
-  #promo-copy-btn { font-size: 9px; padding: 13px 28px; }
-  #promo-email { font-size: 11px; padding: 13px 12px; }
-  #promo-email-btn { font-size: 9px; padding: 13px 16px; }
-}
+
 
 /* shake on copy */
 @keyframes promo-shake {
@@ -2149,84 +2109,180 @@ body.inverted #promo-trigger:hover {
 #promo-divider-tier {
   height: 0.5px;
   background: linear-gradient(90deg,
-    transparent 0%, rgba(255,255,255,0.15) 20%,
-    rgba(255,255,255,0.15) 80%, transparent 100%);
-  margin: 18px -40px 18px;
+    transparent 0%, rgba(255,255,255,0.18) 20%,
+    rgba(255,255,255,0.18) 80%, transparent 100%);
+  margin: 20px -40px 20px;
+}
+#promo-tier-wrap {
+  text-align: left;
+  margin-top: 4px;
 }
 .promo-tier-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  opacity: 0.35;
-  transition: opacity 0.4s ease;
+  gap: 0;
+  padding: 9px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  opacity: 0.28;
+  transition: opacity 0.5s ease, background 0.5s ease;
+  position: relative;
+  padding-left: 4px;
 }
+.promo-tier-row:last-of-type { border-bottom: none; }
 .promo-tier-row.active {
   opacity: 1;
 }
+/* Active tier: left accent bar */
+.promo-tier-row.active::before {
+  content: '';
+  position: absolute;
+  left: -22px;
+  top: 50%; transform: translateY(-50%);
+  width: 2px; height: 60%;
+  background: rgba(255,255,255,0.70);
+  border-radius: 2px;
+}
 .tier-glyph {
-  font-size: 8px;
-  color: rgba(255,255,255,0.60);
+  font-size: 7px;
+  color: rgba(255,255,255,0.40);
   flex-shrink: 0;
+  margin-right: 10px;
   transition: color 0.4s ease;
 }
-.promo-tier-row.active .tier-glyph {
-  color: rgba(255,255,255,0.95);
-}
+.promo-tier-row.active .tier-glyph { color: rgba(255,255,255,0.90); }
 .tier-name {
   font-size: 8px;
-  font-weight: 400;
-  letter-spacing: 0.38em;
-  color: rgba(255,255,255,0.55);
+  font-weight: 500;
+  letter-spacing: 0.40em;
+  color: rgba(255,255,255,0.45);
   text-transform: uppercase;
   flex-shrink: 0;
   transition: color 0.4s ease;
+  min-width: 80px;
 }
-.promo-tier-row.active .tier-name {
-  color: rgba(255,255,255,0.95);
-  font-weight: 500;
+.promo-tier-row.active .tier-name { color: rgba(255,255,255,0.96); }
+/* Discount badge */
+.tier-discount {
+  font-size: 8px;
+  font-weight: 300;
+  letter-spacing: 0.12em;
+  color: rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.07);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  border-radius: 2px;
+  padding: 2px 7px;
+  margin-left: 8px;
+  flex-shrink: 0;
+  transition: all 0.4s ease;
+}
+.promo-tier-row.active .tier-discount {
+  color: rgba(255,255,255,0.90);
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.25);
 }
 .tier-status {
   font-size: 7px;
   font-weight: 300;
-  letter-spacing: 0.22em;
-  color: rgba(255,255,255,0.30);
+  letter-spacing: 0.16em;
+  color: rgba(255,255,255,0.22);
   text-transform: uppercase;
   margin-left: auto;
   text-align: right;
   transition: color 0.4s ease;
 }
-.promo-tier-row.active .tier-status {
-  color: rgba(255,255,255,0.65);
-}
-/* Active checkmark */
+.promo-tier-row.active .tier-status { color: rgba(255,255,255,0.55); }
+/* Active: ✓ after name */
 .promo-tier-row.active .tier-name::after {
   content: ' ✓';
   font-size: 7px;
-  color: rgba(255,255,255,0.50);
+  color: rgba(255,255,255,0.45);
   font-weight: 300;
 }
+/* Referral copy btn — same as CLAIM */
 #promo-referral-tier-copy {
-  display: inline-block;
-  margin-top: 16px;
-  font-size: 7.5px;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  margin-top: 18px;
+  font-size: 8px;
   font-weight: 400;
-  letter-spacing: 0.38em;
-  color: rgba(255,255,255,0.60);
+  letter-spacing: 0.45em;
+  color: rgba(255,255,255,0.88);
   text-transform: uppercase;
   cursor: pointer;
-  padding: 9px 24px;
-  border: 0.5px solid rgba(255,255,255,0.20);
-  backdrop-filter: blur(8px);
-  transition: all 0.3s ease;
+  padding: 12px 0;
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(16px) saturate(1.8);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,0.45),
+    inset 0 -1px 0 rgba(0,0,0,0.12),
+    0 0 0 0.5px rgba(255,255,255,0.16),
+    0 4px 16px rgba(0,0,0,0.15);
+  border-radius: 1px;
+  transition: all 0.35s cubic-bezier(0.22,1,0.36,1);
 }
 #promo-referral-tier-copy:hover {
-  color: rgba(255,255,255,0.95);
-  border-color: rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.16);
+  color: rgba(255,255,255,1);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,0.60),
+    inset 0 -1px 0 rgba(0,0,0,0.12),
+    0 0 0 0.5px rgba(255,255,255,0.25),
+    0 8px 24px rgba(0,0,0,0.18);
 }
-#promo-tier-wrap {
-  text-align: left;
-  margin-top: 4px;
+
+#promo-scarcity-line { display: none !important; }
+
+#promo-inbox-msg {
+  font-size: 9px;
+  font-weight: 300;
+  letter-spacing: 0.28em;
+  color: rgba(255,255,255,0.70);
+  text-transform: uppercase;
+  text-align: center;
+  padding: 12px 0 4px;
+}
+
+@media (max-width: 480px) {
+  #promo-inner {
+    width: 96vw !important;
+    max-width: 96vw !important;
+    padding: 32px 22px 28px !important;
+    background: linear-gradient(160deg,
+      rgba(255,255,255,0.44) 0%,
+      rgba(255,255,255,0.22) 45%,
+      rgba(255,255,255,0.36) 100%) !important;
+    backdrop-filter: blur(40px) saturate(1.6) brightness(1.55) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(1.6) brightness(1.55) !important;
+  }
+  #promo-code { font-size: 26px !important; letter-spacing: 0.14em !important; }
+  #promo-eyebrow, #promo-eyebrow-2, #promo-eyebrow-3 {
+    font-size: 9px !important; color: rgba(255,255,255,0.82) !important;
+  }
+  #promo-gate-text { font-size: 11px !important; color: rgba(255,255,255,0.92) !important; }
+  #promo-copy-btn, #promo-referral-tier-copy {
+    font-size: 10px !important; padding: 13px 24px !important;
+    color: rgba(255,255,255,0.96) !important;
+  }
+  #promo-email { font-size: 16px !important; padding: 14px 12px !important; }
+  #promo-email-btn {
+    font-size: 10px !important; padding: 14px 14px !important;
+    color: rgba(255,255,255,0.96) !important;
+  }
+  #promo-footer, #promo-footer-gate {
+    font-size: 8px !important; color: rgba(255,255,255,0.60) !important;
+  }
+  #promo-serial, #promo-timestamp { font-size: 9px !important; color: rgba(255,255,255,0.65) !important; }
+  #promo-inbox-msg { font-size: 11px !important; color: rgba(255,255,255,0.85) !important; }
+  #promo-social-text { font-size: 9px !important; color: rgba(255,255,255,0.70) !important; }
+  #promo-verify-step { font-size: 10px !important; color: rgba(255,255,255,0.88) !important; }
+  .promo-tier-row { padding: 9px 0 !important; }
+  .tier-name { font-size: 10px !important; letter-spacing: 0.26em !important; }
+  .tier-status { font-size: 9px !important; }
+  .promo-tier-row.active .tier-name { color: rgba(255,255,255,0.98) !important; }
+  .promo-tier-row.active .tier-status { color: rgba(255,255,255,0.82) !important; }
 }
 </style>
 </head>
@@ -5549,7 +5605,7 @@ document.addEventListener("DOMContentLoaded", function() {
     wrap.style.display = 'block';
     var tiers      = ['bronze', 'silver', 'gold', 'platinum'];
     var thresholds = { bronze: 0, silver: 2, gold: 5, platinum: 10 };
-    var discounts  = { bronze: '10% OFF', silver: '20% OFF', gold: '40% OFF', platinum: '50% OFF' };
+    var discounts  = { bronze: '10%', silver: '20%', gold: '40%', platinum: '50%' };
     tiers.forEach(function(t) {
       var row    = document.getElementById('tier-' + t);
       var status = document.getElementById('tier-' + t + '-status');
@@ -5560,14 +5616,15 @@ document.addEventListener("DOMContentLoaded", function() {
         var nextTier = tiers[idx + 1];
         if (nextTier) {
           var left = thresholds[nextTier] - referralCount;
-          status.textContent = discounts[t] + (left > 0 ? ' · ' + left + ' more to upgrade' : '');
+          status.textContent = left > 0 ? left + ' referral' + (left > 1 ? 's' : '') + ' to upgrade' : 'Active';
         } else {
-          status.textContent = discounts[t] + ' · MAX TIER';
+          status.textContent = 'Max tier';
         }
       } else if (thresholds[t] > referralCount) {
-        status.textContent = thresholds[t] + ' referrals · ' + discounts[t];
+        var needed = thresholds[t];
+        status.textContent = needed + ' referral' + (needed > 1 ? 's' : '');
       } else {
-        status.textContent = discounts[t];
+        status.textContent = 'Unlocked';
       }
     });
     var refTierCopy = document.getElementById('promo-referral-tier-copy');
@@ -5725,7 +5782,7 @@ document.addEventListener("DOMContentLoaded", function() {
       tsEl.textContent = 'Generated · ' + hh + ':' + mm + ':' + ss;
     }
     // F: show code in button
-    if (copyBtn) copyBtn.textContent = 'COPY ' + generatedCode;
+    if (copyBtn) copyBtn.textContent = 'CLAIM';
     // Scarcity counter — decrements slowly while open
     var codesLeftEl = document.getElementById('promo-codes-left');
     var startCodes = savedSlots;
@@ -5784,6 +5841,16 @@ document.addEventListener("DOMContentLoaded", function() {
         codeEl.style.transform = 'scale(1.04)';
         setTimeout(function() { codeEl.style.transform = 'scale(1)'; }, 300);
         codeRevealed = true;
+        // Show tiers immediately after code reveals
+        var emailForTier0 = localStorage.getItem(LS_EMAIL) || '';
+        if (emailForTier0 && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+          gsCall({ action: 'getstatus', email: emailForTier0 }, function(d) {
+            var refs = (d && d.referrals !== undefined) ? d.referrals : 0;
+            renderTierDisplay(refs, getTierFromReferrals(refs));
+          });
+        } else {
+          renderTierDisplay(0, 'bronze');
+        }
         startTimer();
       });
     }, 80);
@@ -6056,7 +6123,7 @@ document.addEventListener("DOMContentLoaded", function() {
     var hint = document.getElementById('promo-reopen-hint');
     if (hint) {
       hint.textContent = codeCopied
-        ? 'Your code is saved in your clipboard.'
+        ? ''
         : 'Your code is still active. Copy it before it expires.';
       hint.style.opacity = '1';
     }
@@ -6240,47 +6307,22 @@ document.addEventListener("DOMContentLoaded", function() {
         // Mark code as 'claimed' in Codes sheet + 'copied' in Emails
         gsCall({ action: 'claim_confirm', code: generatedCode }, null);
       }
-      copyBtn.textContent = 'SECURED ✦';
-      copyBtn.classList.add('copied');
-      // G: transition to step 3 confirmation screen
+      // Replace CLAIM btn with "Check your inbox" — keep tiers visible
+      copyBtn.style.transition = 'opacity 0.3s ease';
+      copyBtn.style.opacity = '0';
       setTimeout(function() {
-        var s2 = document.getElementById('promo-step-2');
-        var s3 = document.getElementById('promo-step-3');
-        var confirmCode = document.getElementById('promo-confirm-code');
-        if (confirmCode) confirmCode.textContent = generatedCode;
-        // J: generate referral link
-        var refWrap = document.getElementById('promo-referral-wrap');
-        var refUrl  = document.getElementById('promo-referral-url');
-        var refCopy = document.getElementById('promo-referral-copy');
-        var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
-        if (refUrl) refUrl.textContent = refLink;
-        if (refCopy) {
-          refCopy.onclick = function() {
-            if (navigator.clipboard) navigator.clipboard.writeText(refLink);
-            refCopy.textContent = 'COPIED ✦';
-            setTimeout(function() { refCopy.textContent = 'COPY LINK'; }, 2000);
-          };
+        copyBtn.style.display = 'none';
+        var inboxMsg = document.getElementById('promo-inbox-msg');
+        if (!inboxMsg) {
+          inboxMsg = document.createElement('div');
+          inboxMsg.id = 'promo-inbox-msg';
+          copyBtn.parentNode.insertBefore(inboxMsg, copyBtn.nextSibling);
         }
-        if (s2) { s2.style.transition = 'opacity 0.3s ease'; s2.style.opacity = '0'; }
-        setTimeout(function() {
-          if (s2) s2.style.display = 'none';
-          if (s3) {
-            s3.style.opacity = '0';
-            s3.style.display = 'block';
-            requestAnimationFrame(function() {
-              s3.style.transition = 'opacity 0.5s ease';
-              s3.style.opacity = '1';
-            });
-          }
-          // Auto-close after 3s
-          setTimeout(function() {
-            inner.style.transition = 'transform 0.45s cubic-bezier(0.4,0,1,1), opacity 0.45s ease';
-            inner.style.transform = 'translateY(-12px) scale(0.98)';
-            inner.style.opacity = '0';
-            setTimeout(close, 450);
-          }, 3000);
-        }, 300);
-      }, 1200);
+        inboxMsg.innerHTML = 'Check your inbox.';
+        inboxMsg.style.opacity = '0';
+        inboxMsg.style.transition = 'opacity 0.5s ease';
+        requestAnimationFrame(function() { inboxMsg.style.opacity = '1'; });
+      }, 300);
     });
   }
 
@@ -6379,22 +6421,26 @@ document.addEventListener("DOMContentLoaded", function() {
         <div class="promo-tier-row" id="tier-bronze">
           <span class="tier-glyph">◈</span>
           <span class="tier-name">BRONZE</span>
-          <span class="tier-status" id="tier-bronze-status">10% off</span>
+          <span class="tier-discount">10%</span>
+          <span class="tier-status" id="tier-bronze-status"></span>
         </div>
         <div class="promo-tier-row" id="tier-silver">
           <span class="tier-glyph">◈</span>
           <span class="tier-name">SILVER</span>
-          <span class="tier-status" id="tier-silver-status">2 referrals · 20% off</span>
+          <span class="tier-discount">20%</span>
+          <span class="tier-status" id="tier-silver-status"></span>
         </div>
         <div class="promo-tier-row" id="tier-gold">
           <span class="tier-glyph">◈</span>
           <span class="tier-name">GOLD</span>
-          <span class="tier-status" id="tier-gold-status">5 referrals · 40% off</span>
+          <span class="tier-discount">40%</span>
+          <span class="tier-status" id="tier-gold-status"></span>
         </div>
         <div class="promo-tier-row" id="tier-platinum">
           <span class="tier-glyph">◈</span>
           <span class="tier-name">PLATINUM</span>
-          <span class="tier-status" id="tier-platinum-status">10 referrals · 50% off</span>
+          <span class="tier-discount">50%</span>
+          <span class="tier-status" id="tier-platinum-status"></span>
         </div>
         <div id="promo-referral-tier-copy">COPY REFERRAL LINK</div>
       </div>
