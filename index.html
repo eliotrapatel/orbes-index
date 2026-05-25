@@ -2144,6 +2144,90 @@ body.inverted #promo-trigger:hover {
 
 /* Chromatic mode hidden */
 #chromatic-btn { display: none !important; }
+
+/* Tier display */
+#promo-divider-tier {
+  height: 0.5px;
+  background: linear-gradient(90deg,
+    transparent 0%, rgba(255,255,255,0.15) 20%,
+    rgba(255,255,255,0.15) 80%, transparent 100%);
+  margin: 18px -40px 18px;
+}
+.promo-tier-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  opacity: 0.35;
+  transition: opacity 0.4s ease;
+}
+.promo-tier-row.active {
+  opacity: 1;
+}
+.tier-glyph {
+  font-size: 8px;
+  color: rgba(255,255,255,0.60);
+  flex-shrink: 0;
+  transition: color 0.4s ease;
+}
+.promo-tier-row.active .tier-glyph {
+  color: rgba(255,255,255,0.95);
+}
+.tier-name {
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.38em;
+  color: rgba(255,255,255,0.55);
+  text-transform: uppercase;
+  flex-shrink: 0;
+  transition: color 0.4s ease;
+}
+.promo-tier-row.active .tier-name {
+  color: rgba(255,255,255,0.95);
+  font-weight: 500;
+}
+.tier-status {
+  font-size: 7px;
+  font-weight: 300;
+  letter-spacing: 0.22em;
+  color: rgba(255,255,255,0.30);
+  text-transform: uppercase;
+  margin-left: auto;
+  text-align: right;
+  transition: color 0.4s ease;
+}
+.promo-tier-row.active .tier-status {
+  color: rgba(255,255,255,0.65);
+}
+/* Active checkmark */
+.promo-tier-row.active .tier-name::after {
+  content: ' ✓';
+  font-size: 7px;
+  color: rgba(255,255,255,0.50);
+  font-weight: 300;
+}
+#promo-referral-tier-copy {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 7.5px;
+  font-weight: 400;
+  letter-spacing: 0.38em;
+  color: rgba(255,255,255,0.60);
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 9px 24px;
+  border: 0.5px solid rgba(255,255,255,0.20);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+#promo-referral-tier-copy:hover {
+  color: rgba(255,255,255,0.95);
+  border-color: rgba(255,255,255,0.45);
+}
+#promo-tier-wrap {
+  text-align: left;
+  margin-top: 4px;
+}
 </style>
 </head>
 <body>
@@ -2186,7 +2270,7 @@ body.inverted #promo-trigger:hover {
   </div>
   <div class="reveal" id="reveal-wrap">
     <div class="reveal-text-wrap">
-      <span id="reveal-text">First Reveal Soon</span>
+      <span id="reveal-text"><span id="reveal-countdown">FIRST REVEAL SOON</span></span>
       <span id="text-rewrite">CRAFTING THE ORBES</span>
     </div>
   </div>
@@ -5362,7 +5446,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
 
   // ── Core constants & element refs ─────────────────────────────
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyh3_KussWeg-jd_B_irXuogp_uCVTP_NqKRy2yFB5JMXy739wLmo4kFcfa9Egsc6Vd/exec';
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6q-RfE8c0MPeSYfErvxJqsbmJnLGz83PKLyw4wVLKjwMKWdM2V2Tx4Is966zMvd-I/exec';
   const DURATION = 30;
   const CHARS    = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   const LS_STATE  = 'orbes_promo_state';
@@ -5405,7 +5489,13 @@ document.addEventListener("DOMContentLoaded", function() {
   localStorage.setItem(LS_VISITS, visitCount);
   (function() {
     var urlRef = new URLSearchParams(window.location.search).get('ref');
-    if (urlRef) localStorage.setItem(LS_REF, urlRef);
+    if (urlRef) {
+      localStorage.setItem(LS_REF, urlRef);
+      // Log referral_used event
+      setTimeout(function() {
+        gsCall({ action: 'event', type: 'referral_used', uuid: sessionUUID, ref: urlRef }, null);
+      }, 1000);
+    }
   })();
   // Execute pending unassign from previous session
   (function() {
@@ -5444,6 +5534,52 @@ document.addEventListener("DOMContentLoaded", function() {
   let codeCopied = (savedState === 'copied');
   let codeRevealed = (savedState === 'revealed' || savedState === 'copied');
   let codeFromSheet = false;
+
+  // Tier system helpers
+  function getTierFromReferrals(count) {
+    if (count >= 10) return 'platinum';
+    if (count >= 5)  return 'gold';
+    if (count >= 2)  return 'silver';
+    return 'bronze';
+  }
+
+  function renderTierDisplay(referralCount, currentTier) {
+    var wrap = document.getElementById('promo-tier-wrap');
+    if (!wrap) return;
+    wrap.style.display = 'block';
+    var tiers      = ['bronze', 'silver', 'gold', 'platinum'];
+    var thresholds = { bronze: 0, silver: 2, gold: 5, platinum: 10 };
+    var discounts  = { bronze: '10% OFF', silver: '20% OFF', gold: '40% OFF', platinum: '50% OFF' };
+    tiers.forEach(function(t) {
+      var row    = document.getElementById('tier-' + t);
+      var status = document.getElementById('tier-' + t + '-status');
+      if (!row || !status) return;
+      row.classList.toggle('active', t === currentTier);
+      if (t === currentTier) {
+        var idx = tiers.indexOf(t);
+        var nextTier = tiers[idx + 1];
+        if (nextTier) {
+          var left = thresholds[nextTier] - referralCount;
+          status.textContent = discounts[t] + (left > 0 ? ' · ' + left + ' more to upgrade' : '');
+        } else {
+          status.textContent = discounts[t] + ' · MAX TIER';
+        }
+      } else if (thresholds[t] > referralCount) {
+        status.textContent = thresholds[t] + ' referrals · ' + discounts[t];
+      } else {
+        status.textContent = discounts[t];
+      }
+    });
+    var refTierCopy = document.getElementById('promo-referral-tier-copy');
+    if (refTierCopy && generatedCode) {
+      var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
+      refTierCopy.onclick = function() {
+        if (navigator.clipboard) navigator.clipboard.writeText(refLink);
+        refTierCopy.textContent = 'COPIED ❆';
+        setTimeout(function() { refTierCopy.textContent = 'COPY REFERRAL LINK'; }, 2000);
+      };
+    }
+  }
 
   function generateCode() {
     var lang = (navigator.language || 'en').toUpperCase().split('-');
@@ -5901,6 +6037,16 @@ document.addEventListener("DOMContentLoaded", function() {
       var ss2 = String(now2.getSeconds()).padStart(2,'0');
       tsEl2.textContent = 'Generated · ' + hh2 + ':' + mm2 + ':' + ss2;
     }
+    // Fetch and render tier status on reopen
+    var emailForReopen = localStorage.getItem(LS_EMAIL) || '';
+    if (emailForReopen && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
+      gsCall({ action: 'getstatus', email: emailForReopen }, function(d) {
+        var refs = (d && d.referrals !== undefined) ? d.referrals : 0;
+        renderTierDisplay(refs, getTierFromReferrals(refs));
+      });
+    } else if (codeCopied) {
+      renderTierDisplay(0, 'bronze');
+    }
     // Update copy btn based on state
     var freshCopyBtn = document.getElementById('promo-copy-btn');
     if (freshCopyBtn) {
@@ -6153,6 +6299,40 @@ document.addEventListener("DOMContentLoaded", function() {
 })();
 });
 
+
+/* ── REVEAL COUNTDOWN ─────────────────────────────────────────── */
+(function() {
+  var REVEAL_DATE = new Date('2026-07-01T00:00:00');
+  var el = document.getElementById('reveal-countdown');
+  if (!el) return;
+
+  function update() {
+    var now  = new Date();
+    var diff = REVEAL_DATE - now;
+
+    if (diff <= 0) {
+      el.textContent = 'THE REVEAL HAS BEGUN';
+      return;
+    }
+
+    var days  = Math.floor(diff / (1000 * 60 * 60 * 24));
+    var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    var mins  = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (days > 30) {
+      el.textContent = 'FIRST REVEAL SOON';
+    } else if (days > 1) {
+      el.textContent = 'REVEAL IN ' + days + 'D ' + String(hours).padStart(2,'0') + 'H ' + String(mins).padStart(2,'0') + 'M';
+    } else if (days === 1) {
+      el.textContent = 'REVEAL TOMORROW · ' + String(hours).padStart(2,'0') + 'H ' + String(mins).padStart(2,'0') + 'M';
+    } else {
+      el.textContent = 'REVEAL IN ' + String(hours).padStart(2,'0') + 'H ' + String(mins).padStart(2,'0') + 'M';
+    }
+  }
+
+  update();
+  setInterval(update, 60000);
+})();
 </script>
 
 
@@ -6193,7 +6373,31 @@ document.addEventListener("DOMContentLoaded", function() {
         <div id="promo-timestamp"></div>
       </div>
       <div id="promo-timer-bar"><div id="promo-timer-fill"></div></div>
-      <div id="promo-copy-btn">COPY CODE</div>
+      <div id="promo-copy-btn">CLAIM</div>
+      <div id="promo-tier-wrap" style="display:none">
+        <div id="promo-divider-tier"></div>
+        <div class="promo-tier-row" id="tier-bronze">
+          <span class="tier-glyph">◈</span>
+          <span class="tier-name">BRONZE</span>
+          <span class="tier-status" id="tier-bronze-status">10% off</span>
+        </div>
+        <div class="promo-tier-row" id="tier-silver">
+          <span class="tier-glyph">◈</span>
+          <span class="tier-name">SILVER</span>
+          <span class="tier-status" id="tier-silver-status">2 referrals · 20% off</span>
+        </div>
+        <div class="promo-tier-row" id="tier-gold">
+          <span class="tier-glyph">◈</span>
+          <span class="tier-name">GOLD</span>
+          <span class="tier-status" id="tier-gold-status">5 referrals · 40% off</span>
+        </div>
+        <div class="promo-tier-row" id="tier-platinum">
+          <span class="tier-glyph">◈</span>
+          <span class="tier-name">PLATINUM</span>
+          <span class="tier-status" id="tier-platinum-status">10 referrals · 50% off</span>
+        </div>
+        <div id="promo-referral-tier-copy">COPY REFERRAL LINK</div>
+      </div>
       <div id="promo-scarcity-line"><span id="promo-dot-live"></span><span id="promo-codes-left"></span></div>
       <div id="promo-reopen-hint"></div>
       <div id="promo-footer-sep"></div>
