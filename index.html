@@ -5338,70 +5338,26 @@ audio.play().catch(()=>{const unlock=()=>{audio.play();document.removeEventListe
 /* ── PROMO EASTER EGG ──────────────────────────────────────────── */
 document.addEventListener("DOMContentLoaded", function() {
 (function() {
-  // JSONP helper — bypasses CORS for Apps Script
+  // Simple fetch wrapper — works with Apps Script redirect
   function gsCall(params, callback) {
     if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return;
-    var cbName = '_gs_' + Math.random().toString(36).slice(2);
     var url = APPS_SCRIPT_URL + '?' + Object.keys(params).map(function(k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k] !== undefined ? params[k] : '');
     }).join('&');
 
-    if (callback) {
-      url += '&callback=' + cbName;
-      var called = false;
-
-      window[cbName] = function(data) {
-        if (called) return;
-        called = true;
-        delete window[cbName];
-        var s = document.getElementById(cbName);
-        if (s && s.parentNode) s.parentNode.removeChild(s);
-        callback(data);
-      };
-
-      // Timeout fallback: Apps Script writes to Sheet but JSONP response
-      // sometimes fails due to redirect stripping. After 6s assume success.
-      var timeout = setTimeout(function() {
-        if (!called && window[cbName]) {
-          called = true;
-          delete window[cbName];
-          var s = document.getElementById(cbName);
-          if (s && s.parentNode) s.parentNode.removeChild(s);
-          // For claim: fetch code by email from Sheet
-          if (params.action === 'claim' && params.email) {
-            gsCall({ action: 'getcode', email: params.email }, callback);
-          } else if (params.action === 'slots') {
-            callback({ slots_remaining: savedSlots });
-          } else {
-            callback({ ok: true });
-          }
-        }
-      }, 6000);
-
-      var script = document.createElement('script');
-      script.id = cbName;
-      script.src = url;
-      script.onerror = function() {
-        clearTimeout(timeout);
-        if (!called) {
-          called = true;
-          if (script.parentNode) script.parentNode.removeChild(script);
-          if (params.action === 'claim' && params.email) {
-            gsCall({ action: 'getcode', email: params.email }, callback);
-          } else {
-            callback({ ok: true });
-          }
-        }
-      };
-      document.head.appendChild(script);
-    } else {
-      // Fire and forget — no callback needed
-      var script2 = document.createElement('script');
-      script2.src = url;
-      script2.onload = function() { if (script2.parentNode) script2.parentNode.removeChild(script2); };
-      script2.onerror = function() { if (script2.parentNode) script2.parentNode.removeChild(script2); };
-      document.head.appendChild(script2);
+    if (!callback) {
+      // Fire and forget
+      fetch(url, { method: 'GET', redirect: 'follow' }).catch(function() {});
+      return;
     }
+
+    fetch(url, { method: 'GET', redirect: 'follow' })
+      .then(function(r) { return r.text(); })
+      .then(function(t) {
+        try { callback(JSON.parse(t)); }
+        catch(e) { callback({ error: 'parse' }); }
+      })
+      .catch(function() { callback({ error: 'network' }); });
   }
 
 
@@ -5488,6 +5444,55 @@ document.addEventListener("DOMContentLoaded", function() {
   let codeCopied = (savedState === 'copied');
   let codeRevealed = (savedState === 'revealed' || savedState === 'copied');
   let codeFromSheet = false;
+
+  function generateCode() {
+    var lang = (navigator.language || 'en').toUpperCase().split('-');
+    var country = lang.length > 1 ? lang[1].slice(0,2) : lang[0].slice(0,2);
+    var digits = Array.from({length:3}, function() { return Math.floor(Math.random()*10); }).join('');
+    return 'OB-' + digits + '-' + country;
+  }
+
+  function randChar() {
+    return CHARS[Math.floor(Math.random() * CHARS.length)];
+  }
+
+  function scrambleReveal(target, finalText, duration, onDone) {
+    const len = finalText.length;
+    const resolved = new Array(len).fill(false);
+    let lastResolvedCount = 0;
+    let start = null;
+    function playTick(charIndex) {
+      try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = 600 + (charIndex / (len - 1 || 1)) * 500;
+        o.type = 'sine';
+        g.gain.setValueAtTime(0.04, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+        o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.08);
+      } catch(e) {}
+    }
+    function step(ts) {
+      if (!start) start = ts;
+      const progress = Math.min((ts - start) / duration, 1);
+      const resolvedCount = Math.floor(progress * len);
+      for (let i = lastResolvedCount; i < resolvedCount; i++) {
+        if (!resolved[i] && finalText[i] !== '\u00B7' && finalText[i] !== ' ' && finalText[i] !== '-') playTick(i);
+        resolved[i] = true;
+      }
+      lastResolvedCount = resolvedCount;
+      let display = '';
+      for (let i = 0; i < len; i++) {
+        if (resolved[i]) display += finalText[i];
+        else display += (finalText[i] === '\u00B7' || finalText[i] === ' ' || finalText[i] === '-') ? finalText[i] : randChar();
+      }
+      target.textContent = display;
+      if (progress < 1) requestAnimationFrame(step);
+      else { target.textContent = finalText; if (onDone) onDone(); }
+    }
+    requestAnimationFrame(step);
+  }
 
   // E: log funnel events to Sheets
   function logEvent(type) {
