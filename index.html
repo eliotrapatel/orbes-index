@@ -1558,11 +1558,11 @@ body.inverted #promo-trigger:hover {
   width: 92vw; max-width: 360px;
   padding: 40px 36px 32px;
   background: linear-gradient(160deg,
-    rgba(255,255,255,0.32) 0%,
-    rgba(255,255,255,0.12) 45%,
-    rgba(255,255,255,0.24) 100%);
-  backdrop-filter: blur(48px) saturate(1.8) brightness(1.35);
-  -webkit-backdrop-filter: blur(48px) saturate(1.8) brightness(1.35);
+    rgba(255,255,255,0.16) 0%,
+    rgba(255,255,255,0.06) 45%,
+    rgba(255,255,255,0.12) 100%);
+  backdrop-filter: blur(48px) saturate(2.0) brightness(0.88);
+  -webkit-backdrop-filter: blur(48px) saturate(2.0) brightness(0.88);
   box-shadow:
     inset 0 2px 0 rgba(255,255,255,0.55),
     inset 0 -1px 0 rgba(0,0,0,0.20),
@@ -2154,7 +2154,7 @@ body.inverted #promo-trigger:hover {
   font-size: 8px;
   font-weight: 500;
   letter-spacing: 0.40em;
-  color: rgba(255,255,255,0.45);
+  color: rgba(255,255,255,0.60);
   text-transform: uppercase;
   flex-shrink: 0;
   transition: color 0.4s ease;
@@ -2163,34 +2163,35 @@ body.inverted #promo-trigger:hover {
 .promo-tier-row.active .tier-name { color: rgba(255,255,255,0.96); }
 /* Discount badge */
 .tier-discount {
-  font-size: 8px;
-  font-weight: 300;
-  letter-spacing: 0.12em;
-  color: rgba(255,255,255,0.25);
-  background: rgba(255,255,255,0.07);
-  border: 0.5px solid rgba(255,255,255,0.10);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.10em;
+  color: rgba(255,255,255,0.40);
+  background: rgba(255,255,255,0.09);
+  border: 0.5px solid rgba(255,255,255,0.18);
   border-radius: 2px;
-  padding: 2px 7px;
+  padding: 3px 9px;
   margin-left: 8px;
   flex-shrink: 0;
   transition: all 0.4s ease;
 }
 .promo-tier-row.active .tier-discount {
-  color: rgba(255,255,255,0.90);
-  background: rgba(255,255,255,0.12);
-  border-color: rgba(255,255,255,0.25);
+  color: rgba(255,255,255,1);
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.45);
+  box-shadow: 0 0 12px rgba(255,255,255,0.10);
 }
 .tier-status {
   font-size: 7px;
   font-weight: 300;
   letter-spacing: 0.16em;
-  color: rgba(255,255,255,0.22);
+  color: rgba(255,255,255,0.40);
   text-transform: uppercase;
   margin-left: auto;
   text-align: right;
   transition: color 0.4s ease;
 }
-.promo-tier-row.active .tier-status { color: rgba(255,255,255,0.55); }
+.promo-tier-row.active .tier-status { color: rgba(255,255,255,0.75); }
 /* Active: ✓ after name */
 .promo-tier-row.active .tier-name::after {
   content: ' ✓';
@@ -2206,9 +2207,9 @@ body.inverted #promo-trigger:hover {
   text-align: center;
   margin-top: 18px;
   font-size: 8px;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: 0.45em;
-  color: rgba(255,255,255,0.88);
+  color: rgba(255,255,255,0.96);
   text-transform: uppercase;
   cursor: pointer;
   padding: 12px 0;
@@ -2251,11 +2252,11 @@ body.inverted #promo-trigger:hover {
     max-width: 96vw !important;
     padding: 32px 22px 28px !important;
     background: linear-gradient(160deg,
-      rgba(255,255,255,0.44) 0%,
-      rgba(255,255,255,0.22) 45%,
-      rgba(255,255,255,0.36) 100%) !important;
-    backdrop-filter: blur(40px) saturate(1.6) brightness(1.55) !important;
-    -webkit-backdrop-filter: blur(40px) saturate(1.6) brightness(1.55) !important;
+      rgba(255,255,255,0.14) 0%,
+      rgba(255,255,255,0.06) 45%,
+      rgba(255,255,255,0.11) 100%) !important;
+    backdrop-filter: blur(40px) saturate(2.0) brightness(0.82) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(2.0) brightness(0.82) !important;
   }
   #promo-code { font-size: 26px !important; letter-spacing: 0.14em !important; }
   #promo-eyebrow, #promo-eyebrow-2, #promo-eyebrow-3 {
@@ -5478,7 +5479,7 @@ audio.play().catch(()=>{const unlock=()=>{audio.play();document.removeEventListe
 /* ── PROMO EASTER EGG ──────────────────────────────────────────── */
 document.addEventListener("DOMContentLoaded", function() {
 (function() {
-  // Simple fetch wrapper — works with Apps Script redirect
+  // Simple fetch — worked before
   function gsCall(params, callback) {
     if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return;
     var url = APPS_SCRIPT_URL + '?' + Object.keys(params).map(function(k) {
@@ -5486,7 +5487,6 @@ document.addEventListener("DOMContentLoaded", function() {
     }).join('&');
 
     if (!callback) {
-      // Fire and forget
       fetch(url, { method: 'GET', redirect: 'follow' }).catch(function() {});
       return;
     }
@@ -5551,14 +5551,6 @@ document.addEventListener("DOMContentLoaded", function() {
       setTimeout(function() {
         gsCall({ action: 'event', type: 'referral_used', uuid: sessionUUID, ref: urlRef }, null);
       }, 1000);
-    }
-  })();
-  // Execute pending unassign from previous session
-  (function() {
-    var pending = localStorage.getItem('orbes_pending_unassign');
-    if (pending && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-      localStorage.removeItem('orbes_pending_unassign');
-      gsCall({ action: 'reassign', code: pending }, null);
     }
   })();
   // Show claimed code badge on return
@@ -5841,19 +5833,29 @@ document.addEventListener("DOMContentLoaded", function() {
         codeEl.style.transform = 'scale(1.04)';
         setTimeout(function() { codeEl.style.transform = 'scale(1)'; }, 300);
         codeRevealed = true;
-        // Show tiers immediately after code reveals
+        // Show tiers immediately — always start with bronze, update if we get real data
+        renderTierDisplay(0, 'bronze');
         var emailForTier0 = localStorage.getItem(LS_EMAIL) || '';
         if (emailForTier0 && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
           gsCall({ action: 'getstatus', email: emailForTier0 }, function(d) {
-            var refs = (d && d.referrals !== undefined) ? d.referrals : 0;
-            renderTierDisplay(refs, getTierFromReferrals(refs));
+            if (d && d.referrals !== undefined) {
+              renderTierDisplay(d.referrals, getTierFromReferrals(d.referrals));
+            }
           });
-        } else {
-          renderTierDisplay(0, 'bronze');
         }
         startTimer();
       });
     }, 80);
+  }
+
+  function updateSocialProof() {
+    var el = document.getElementById('promo-social-text');
+    if (!el) return;
+    var n = Math.floor(Math.random() * 4) + 2;
+    el.textContent = n + ' people viewing this right now';
+    var dot = document.getElementById('promo-dot');
+    if (dot) dot.style.animationDuration = n >= 4 ? '0.8s' : '1.4s';
+    setTimeout(updateSocialProof, Math.random() * 8000 + 6000);
   }
 
   function startTimer() {
@@ -5899,12 +5901,6 @@ document.addEventListener("DOMContentLoaded", function() {
             freshCE.style.color = 'rgba(255,255,255,0.55)';
             freshCE.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
           }, 600);
-        }
-        // Reassign in Sheet
-        var codeToReassign = generatedCode || localStorage.getItem(LS_CODE) || '';
-        var isFromSheet = codeFromSheet || (localStorage.getItem(LS_STATE) === 'revealed');
-        if (codeToReassign && isFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-          gsCall({ action: 'reassign', code: codeToReassign }, null);
         }
         // Reset state
         setTimeout(function() {
@@ -6104,15 +6100,15 @@ document.addEventListener("DOMContentLoaded", function() {
       var ss2 = String(now2.getSeconds()).padStart(2,'0');
       tsEl2.textContent = 'Generated · ' + hh2 + ':' + mm2 + ':' + ss2;
     }
-    // Fetch and render tier status on reopen
+    // Show tiers on reopen — bronze immediately, update from API
+    renderTierDisplay(0, 'bronze');
     var emailForReopen = localStorage.getItem(LS_EMAIL) || '';
     if (emailForReopen && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
       gsCall({ action: 'getstatus', email: emailForReopen }, function(d) {
-        var refs = (d && d.referrals !== undefined) ? d.referrals : 0;
-        renderTierDisplay(refs, getTierFromReferrals(refs));
+        if (d && d.referrals !== undefined) {
+          renderTierDisplay(d.referrals, getTierFromReferrals(d.referrals));
+        }
       });
-    } else if (codeCopied) {
-      renderTierDisplay(0, 'bronze');
     }
     // Update copy btn based on state
     var freshCopyBtn = document.getElementById('promo-copy-btn');
@@ -6217,6 +6213,8 @@ document.addEventListener("DOMContentLoaded", function() {
         // Lock form completely during claim process
         emailBtn.disabled = true;
         if (emailEl) emailEl.disabled = true;
+        // Sauvegarder l'email pour getstatus (tier) et les sessions suivantes
+        localStorage.setItem(LS_EMAIL, claimEmail);
         // Step 1: fire claim (no callback — Sheet writes fine without JSONP)
         gsCall({
           action: 'claim', email: claimEmail,
@@ -6298,31 +6296,45 @@ document.addEventListener("DOMContentLoaded", function() {
     copyBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       if (navigator.clipboard) navigator.clipboard.writeText(generatedCode);
+      // Stop timer — code is claimed
+      if (timer) { clearInterval(timer); timer = null; }
       codeCopied = true;
       localStorage.setItem(LS_STATE, 'copied');
-      // E: set permanent cookie (valid 365 days)
+      // Set permanent cookie (valid 365 days)
       setCookie('orbes_code', generatedCode, 365);
       logEvent('code_copied');
       if (generatedCode && codeFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        // Mark code as 'claimed' in Codes sheet + 'copied' in Emails
         gsCall({ action: 'claim_confirm', code: generatedCode }, null);
       }
-      // Replace CLAIM btn with "Check your inbox" — keep tiers visible
-      copyBtn.style.transition = 'opacity 0.3s ease';
-      copyBtn.style.opacity = '0';
-      setTimeout(function() {
-        copyBtn.style.display = 'none';
-        var inboxMsg = document.getElementById('promo-inbox-msg');
-        if (!inboxMsg) {
-          inboxMsg = document.createElement('div');
-          inboxMsg.id = 'promo-inbox-msg';
-          copyBtn.parentNode.insertBefore(inboxMsg, copyBtn.nextSibling);
-        }
-        inboxMsg.innerHTML = 'Check your inbox.';
-        inboxMsg.style.opacity = '0';
-        inboxMsg.style.transition = 'opacity 0.5s ease';
-        requestAnimationFrame(function() { inboxMsg.style.opacity = '1'; });
-      }, 300);
+      // Transition vers step 3
+      var step3 = document.getElementById('promo-step-3');
+      var step2El = document.getElementById('promo-step-2');
+      var confirmCodeEl = document.getElementById('promo-confirm-code');
+      var referralUrlEl = document.getElementById('promo-referral-url');
+      var referralCopyEl = document.getElementById('promo-referral-copy');
+      var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
+      if (confirmCodeEl) confirmCodeEl.textContent = generatedCode;
+      if (referralUrlEl) referralUrlEl.textContent = refLink;
+      if (referralCopyEl) {
+        referralCopyEl.addEventListener('click', function() {
+          if (navigator.clipboard) navigator.clipboard.writeText(refLink);
+          referralCopyEl.textContent = 'COPIED ❆';
+          setTimeout(function() { referralCopyEl.textContent = 'COPY LINK'; }, 2000);
+        });
+      }
+      if (step2El && step3) {
+        step2El.style.transition = 'opacity 0.35s ease';
+        step2El.style.opacity = '0';
+        setTimeout(function() {
+          step2El.style.display = 'none';
+          step3.style.opacity = '0';
+          step3.style.display = 'block';
+          requestAnimationFrame(function() {
+            step3.style.transition = 'opacity 0.45s ease';
+            step3.style.opacity = '1';
+          });
+        }, 350);
+      }
     });
   }
 
