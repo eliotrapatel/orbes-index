@@ -18,6 +18,7 @@ import { OwnershipService } from '../../src/server/services/ownership.js';
 import { VerificationService, type ScanMeta, type VerifyInput } from '../../src/server/services/verification.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
+import type { Db } from '../../src/server/db/connection.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
 export const admin: Actor = { type: 'admin', id: 'admin-1' };
@@ -42,8 +43,9 @@ export interface World {
   close(): Promise<void>;
 }
 
-export async function createWorld(opts: { anomaly?: Partial<AnomalyConfig>; start?: string } = {}): Promise<World> {
-  const t = await createTestDb();
+export async function createWorld(opts: { anomaly?: Partial<AnomalyConfig>; start?: string; db?: Db } = {}): Promise<World> {
+  // A caller-supplied database (e.g. real PostgreSQL) is owned by the caller: close() leaves it open.
+  const t: TestDb = opts.db ? ({ db: opts.db, pglite: undefined as never, close: async () => {} } as TestDb) : await createTestDb();
   const clock = createManualClock(opts.start ?? '2026-06-01T10:00:00.000Z');
   const config = { anomaly: { ...DEFAULT_ANOMALY_CONFIG, ...opts.anomaly } };
   const audit = new AuditService({ db: t.db, clock: clock.now });

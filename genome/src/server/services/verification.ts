@@ -16,6 +16,7 @@
  * console and never leave this module in the response.
  */
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { equalBytes, fromBase64Url } from '../../core/bytes.js';
 import { computeGenome, SUPPORTED_GENOME_VERSIONS, type Genome } from '../../core/genome/genome.js';
 import { packIdentity } from '../../core/identity.js';
@@ -145,6 +146,31 @@ const GENOME_STATES: readonly VerificationState[] = [...AUTHENTIC_STATES, 'SUSPI
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_META_TEXT = 200;
+
+/**
+ * Request body schema for POST /api/v1/verify (strict: unknown keys are
+ * rejected). `code` is deliberately loose (any string up to 1 KiB): a code
+ * that cannot be decoded must reach the service and be recorded as
+ * MALFORMED_CODE rather than bounce as a 400.
+ */
+export const verifyInputSchema = z.strictObject({
+  code: z.string().max(1024),
+  genome: z
+    .strictObject({
+      glyphs: z.array(z.int().min(0).max(15).nullable()).length(GENOME_LENGTH),
+      confidence: z.array(z.number().min(0).max(1)).length(GENOME_LENGTH).optional(),
+    })
+    .optional(),
+  client: z
+    .strictObject({
+      rsErrors: z.int().min(0).max(255).optional(),
+      rsErasures: z.int().min(0).max(255).optional(),
+      moduleSizePx: z.number().min(0).max(10_000).optional(),
+      decodeMs: z.number().min(0).max(600_000).optional(),
+      source: z.enum(['camera', 'upload']).optional(),
+    })
+    .optional(),
+});
 
 // ── Internal working state ─────────────────────────────────────────────────
 

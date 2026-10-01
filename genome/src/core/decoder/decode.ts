@@ -176,53 +176,93 @@ class Failure {
 
 // ── Stage: seal candidates ─────────────────────────────────────────────────
 
-interface Detection {
-  /** Detection image (possibly downscaled) and its summed-area table. */
-  image: GrayImage;
-  integral: IntegralImage;
+/**
+ * Per-frame detection state. Seal search runs on a detection image (the
+ * frame, or an area-downscaled copy of large frames); alignment and sampling
+ * run on the full-resolution frame of the matching polarity. Light-ink
+ * polarity is binarised directly from the normal summed-area table; the
+ * negative images themselves are only built once a light-ink seal is found.
+ */
+class Detection {
+  readonly image: GrayImage;
+  readonly integral: IntegralImage;
   /** Full-resolution pixels per detection pixel. */
-  factor: number;
+  readonly factor: number;
+  private negative: { image: GrayImage; integral: IntegralImage; frame: GrayImage } | null = null;
+
+  constructor(readonly frame: GrayImage) {
+    const pixels = frame.width * frame.height;
+    this.factor = pixels > MAX_DETECTION_PIXELS ? Math.ceil(Math.sqrt(pixels / MAX_DETECTION_PIXELS)) : 1;
+    this.image = this.factor > 1 ? downscaleImage(frame, this.factor) : frame;
+    this.integral = integralImage(this.image);
+  }
+
+  /** Detection image, its table and the full frame, as dark-ink images of the given polarity. */
+  view(inverted: boolean): { image: GrayImage; integral: IntegralImage; frame: GrayImage } {
+    if (!inverted) return { image: this.image, integral: this.integral, frame: this.frame };
+    if (!this.negative) {
+      const image = invertImage(this.image);
+      this.negative = { image, integral: integralImage(image), frame: this.factor > 1 ? invertImage(this.frame) : image };
+    }
+    return this.negative;
+  }
 }
 
-function detectionImage(img: GrayImage): Detection {
-  const pixels = img.width * img.height;
-  const factor = pixels > MAX_DETECTION_PIXELS ? Math.ceil(Math.sqrt(pixels / MAX_DETECTION_PIXELS)) : 1;
-  const image = factor > 1 ? downscaleImage(img, factor) : img;
-  return { image, integral: integralImage(image), factor };
+interface SealHit {
+  seal: SealCandidate;
+  inverted: boolean;
 }
 
 /**
- * Seal candidates in passes of increasing cost: rows of the coarse-window
- * binarisation, rows of the fine-window one, then columns of both (which
- * catch seals whose left or right side is damaged). Each pass yields only
- * seals not seen before, best first, so a frame whose code is found early
- * never pays for the later passes.
+ * Seal candidates in passes of increasing cost, both polarities interleaved:
+ * rows of the coarse-window binarisation (dark ink, then light ink), rows of
+ * the fine-window one, then columns of all of them (which catch seals with a
+ * damaged left or right side). Each pass yields only seals not seen before,
+ * best first, so a frame whose code is found early never pays for the
+ * later passes.
  */
-function* sealCandidates(det: Detection, max: number): Generator<SealCandidate> {
+function* sealCandidates(det: Detection, max: number, tryInverted: boolean): Generator<SealHit> {
   const { image } = det;
   const side = Math.min(image.width, image.height);
-  const windows = [...new Set([Math.max(8, Math.round(side / 8)), Math.max(6, Math.round(side / 16))])];
-  const binaries: Uint8Array[] = [];
-  const seen: SealCandidate[] = [];
-  const passes: (() => SealCluster[][])[] = [
-    ...windows.map((w) => () => {
-      const bin = binarize(image, det.integral, w);
-      binaries.push(bin);
-      return [findSealHits(bin, image.width, image.height, 'rows')];
-    }),
-    () => binaries.map((bin) => findSealHits(bin, image.width, image.height, 'columns')),
-  ];
+  const windows = [Math.max(8, Math.round(side / 8))];
+  const polarities = tryInverted ? [false, true] : [false];
+  const binaries: { bin: Uint8Array; inverted: boolean }[] = [];
+  const passes: { inverted: boolean; scan: () => SealCluster[][] }[] = [];
+  for (const w of windows) {
+    for (const inverted of polarities) {
+      passes.push({
+        inverted,
+        scan: () => {
+          const bin = binarize(image, det.integral, w, inverted);
+          binaries.push({ bin, inverted });
+          return [findSealHits(bin, image.width, image.height, 'rows')];
+        },
+      });
+    }
+  }
+  for (const inverted of polarities) {
+    passes.push({
+      inverted,
+      scan: () => binaries.filter((b) => b.inverted === inverted).map(({ bin }) => findSealHits(bin, image.width, image.height, 'columns')),
+    });
+  }
+  const seen: SealHit[] = [];
+  const near = (x: number, y: number, inverted: boolean) =>
+    seen.some((h) => h.inverted === inverted && Math.hypot(h.seal.center.x - x, h.seal.center.y - y) < 2 * h.seal.unit);
   for (const pass of passes) {
+    const clusters = mergeClusters(pass.scan()).filter((c) => !near(c.x, c.y, pass.inverted));
+    if (clusters.length === 0) continue;
+    const view = det.view(pass.inverted);
     const fresh: SealCandidate[] = [];
-    for (const cluster of mergeClusters(pass()).slice(0, MAX_CLUSTERS)) {
-      if (seen.some((s) => Math.hypot(s.center.x - cluster.x, s.center.y - cluster.y) < 2 * s.unit)) continue;
-      const seal = measureSeal(image, cluster);
-      if (seal && !seen.some((s) => Math.hypot(s.center.x - seal.center.x, s.center.y - seal.center.y) < 2 * s.unit)) fresh.push(seal);
+    for (const cluster of clusters.slice(0, MAX_CLUSTERS)) {
+      const seal = measureSeal(view.image, cluster);
+      if (seal && !near(seal.center.x, seal.center.y, pass.inverted)) fresh.push(seal);
     }
     fresh.sort((a, b) => b.score - a.score);
     for (const seal of fresh.slice(0, max)) {
-      seen.push(seal);
-      yield seal;
+      const hit = { seal, inverted: pass.inverted };
+      seen.push(hit);
+      yield hit;
     }
   }
 }
@@ -464,8 +504,8 @@ function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean,
 
 // ── Orchestration ──────────────────────────────────────────────────────────
 
-function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, det: Detection, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
-  const initial = initialAlignment(img, seal, moons, det.factor);
+function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, factor: number, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
+  const initial = initialAlignment(img, seal, moons, factor);
   if (!initial) {
     failure.note('NO_MOONS', 'degenerate moon configuration');
     return null;
@@ -474,7 +514,7 @@ function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, de
     failure.note('NO_MOONS', 'no code structure around the seal');
     return null;
   }
-  const unitPx = seal.unit * det.factor;
+  const unitPx = seal.unit * factor;
   let T = now(); const lap = (l: string) => { const n = now(); (globalThis as any).DBG?.(l + ' ' + (n - T).toFixed(1)); T = n; };
   // Cheapest first: a sharp frontal capture decodes straight from the moon fit.
   let alignment: Alignment = { ...initial, values: sampleCells(img, initial.homography, true) };
@@ -534,17 +574,18 @@ function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, de
   };
 }
 
-function decodePolarity(img: GrayImage, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
+function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: Failure, started: number): DecodeResult | null {
   let T = now();
-  const det = detectionImage(img);
-  for (const seal of sealCandidates(det, opts.maxSealCandidates)) {
-    (globalThis as any).DBG?.('seal ' + seal.unit.toFixed(2) + '@' + seal.score.toFixed(2) + ' t=' + (now() - T).toFixed(1));
-    const moons = findMoons(det.image, det.integral, seal);
+  const det = new Detection(frame);
+  for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, opts.tryInverted)) {
+    (globalThis as any).DBG?.('seal ' + seal.unit.toFixed(2) + '@' + seal.score.toFixed(2) + (inverted ? ' inv' : '') + ' t=' + (now() - T).toFixed(1));
+    const view = det.view(inverted);
+    const moons = findMoons(view.image, view.integral, seal);
     if (!moons) {
-      failure.note('NO_MOONS', `seal at (${seal.center.x.toFixed(1)}, ${seal.center.y.toFixed(1)}) without moons`);
+      failure.note('NO_MOONS', `seal at (${(seal.center.x * det.factor).toFixed(1)}, ${(seal.center.y * det.factor).toFixed(1)}) without moons`);
       continue;
     }
-    const result = decodeCandidate(img, seal, moons, det, opts, inverted, failure, started);
+    const result = decodeCandidate(view.frame, seal, moons, det.factor, opts, inverted, failure, started);
     if (result) return result;
   }
   return null;
@@ -565,12 +606,8 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
       maxSealCandidates: Number.isFinite(opts.maxSealCandidates) ? Math.max(1, Math.min(16, Math.floor(opts.maxSealCandidates as number))) : 4,
     };
     const frame: GrayImage = img.data.length === img.width * img.height ? img : { ...img, data: img.data.subarray(0, img.width * img.height) };
-    const normal = decodePolarity(frame, options, false, failure, started);
-    if (normal) return normal;
-    if (options.tryInverted) {
-      const inverted = decodePolarity(invertImage(frame), options, true, failure, started);
-      if (inverted) return inverted;
-    }
+    const result = decodeFrame(frame, options, failure, started);
+    if (result) return result;
   } catch (e) {
     return { ok: false, reason: failure.reason, detail: `internal error: ${e instanceof Error ? e.message : String(e)}`, elapsedMs: now() - started };
   }

@@ -44,6 +44,8 @@ const MIN_UNIT = 1.2;
 const RING_RANGE: [number, number] = [0.35, 1.9];
 const GAP_RANGE: [number, number] = [0.3, 1.8];
 const CORE_RANGE: [number, number] = [2.8, 4.8];
+/** Shortest possible core run (px). */
+const MIN_CORE_PX = Math.ceil(CORE_RANGE[0] * MIN_UNIT);
 /** Minimum quiet run beyond the seal ring, in u (the printed quiet ring is 1.75 u). */
 const MIN_QUIET = 0.4;
 
@@ -161,9 +163,56 @@ export interface SealCluster {
   count: number;
 }
 
+/** Grid cell (px) of the cluster index: larger than any merge radius at decodable sizes. */
+const CLUSTER_CELL = 64;
+/**
+ * Upper bound on clusters per scan. A real frame has a handful; texture or
+ * pure noise can produce thousands of chance pattern hits, and capping them
+ * bounds the cost of such frames (the strongest clusters arrive early).
+ */
+const MAX_SCAN_CLUSTERS = 512;
+
+/** Hits merged into clusters through a coarse spatial grid (O(1) per hit). */
+class ClusterIndex {
+  readonly all: SealCluster[] = [];
+  private readonly grid = new Map<number, SealCluster[]>();
+
+  add(hit: Hit): void {
+    const gx = Math.floor(hit.x / CLUSTER_CELL);
+    const gy = Math.floor(hit.y / CLUSTER_CELL);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const c of this.grid.get(this.key(gx + dx, gy + dy)) ?? []) {
+          if (Math.hypot(c.x - hit.x, c.y - hit.y) < 2 * Math.max(c.unit, hit.unit) && Math.abs(c.unit - hit.unit) < 0.5 * c.unit) {
+            // Running mean; the cluster stays filed under its first cell, which is
+            // fine since it never drifts by more than a fraction of a cell.
+            const k = c.count;
+            c.x = (c.x * k + hit.x) / (k + 1);
+            c.y = (c.y * k + hit.y) / (k + 1);
+            c.unit = (c.unit * k + hit.unit) / (k + 1);
+            c.count = k + 1;
+            return;
+          }
+        }
+      }
+    }
+    if (this.all.length >= MAX_SCAN_CLUSTERS) return;
+    const cluster = { x: hit.x, y: hit.y, unit: hit.unit, count: 1 };
+    this.all.push(cluster);
+    const key = this.key(gx, gy);
+    const bucket = this.grid.get(key);
+    if (bucket) bucket.push(cluster);
+    else this.grid.set(key, [cluster]);
+  }
+
+  private key(gx: number, gy: number): number {
+    return gy * 65536 + gx;
+  }
+}
+
 /** Scan along rows or columns + confirmation + clustering on one binarised frame. */
 export function findSealHits(bin: Uint8Array, w: number, h: number, axis: ScanAxis = 'rows'): SealCluster[] {
-  const clusters: SealCluster[] = [];
+  const clusters = new ClusterIndex();
   const [lines, length, lineStride, step] = axis === 'rows' ? [h, w, w, 1] : [w, h, 1, w];
   const runs = new Int32Array(length + 2);
   for (let line = 0; line < lines; line++) {
@@ -184,38 +233,29 @@ export function findSealHits(bin: Uint8Array, w: number, h: number, axis: ScanAx
     // Dark runs sit at odd indices; a seal section needs light runs on both sides.
     let start = runs[0];
     for (let i = 1; i + 5 < n; i += 2) {
-      const unit = sealPattern(runs[i], runs[i + 1], runs[i + 2], runs[i + 3], runs[i + 4]);
+      // Cheap pre-test: the core run spans ≥ 2.8 units of ≥ 1.2 px. Texture
+      // and noise produce hundreds of thousands of short runs per frame.
+      const unit = runs[i + 2] >= MIN_CORE_PX ? sealPattern(runs[i], runs[i + 1], runs[i + 2], runs[i + 3], runs[i + 4]) : 0;
       if (unit > 0 && runs[i - 1] >= MIN_QUIET * unit && runs[i + 5] >= MIN_QUIET * unit) {
         const core = start + runs[i] + runs[i + 1] + runs[i + 2] / 2;
         const seed = axis === 'rows' ? { x: core, y: line + 0.5, unit } : { x: line + 0.5, y: core, unit };
         const hit = confirm(bin, w, h, seed, axis);
-        if (hit) addToClusters(clusters, hit);
+        if (hit) clusters.add(hit);
       }
       start += runs[i] + runs[i + 1];
     }
   }
-  return clusters;
+  return clusters.all;
 }
 
-function addToClusters(clusters: SealCluster[], hit: Hit): void {
-  for (const c of clusters) {
-    if (Math.hypot(c.x - hit.x, c.y - hit.y) < 2 * Math.max(c.unit, hit.unit) && Math.abs(c.unit - hit.unit) < 0.5 * c.unit) {
-      const k = c.count;
-      c.x = (c.x * k + hit.x) / (k + 1);
-      c.y = (c.y * k + hit.y) / (k + 1);
-      c.unit = (c.unit * k + hit.unit) / (k + 1);
-      c.count = k + 1;
-      return;
-    }
-  }
-  clusters.push({ x: hit.x, y: hit.y, unit: hit.unit, count: 1 });
-}
+/** Clusters taken from each list when merging (lists come sorted by support). */
+const MERGE_TOP = 64;
 
-/** Merge cluster lists found on several binarisations of the same frame. */
+/** Merge cluster lists found on several scans of the same frame, strongest first. */
 export function mergeClusters(lists: readonly SealCluster[][]): SealCluster[] {
   const merged: SealCluster[] = [];
   for (const list of lists) {
-    for (const c of list) {
+    for (const c of [...list].sort((a, b) => b.count - a.count).slice(0, MERGE_TOP)) {
       const same = merged.find((m) => Math.hypot(m.x - c.x, m.y - c.y) < 2 * Math.max(m.unit, c.unit));
       if (!same) {
         merged.push({ ...c });

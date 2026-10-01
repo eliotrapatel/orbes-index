@@ -131,3 +131,15 @@ describe('GeoResolver', () => {
     expect(normalizeLatLon('-33.86', '151.21')).toEqual({ lat: -33.9, lon: 151.2 });
   });
 });
+
+describe('country radii', () => {
+  it('large countries have a larger centroid-to-edge radius than the default', async () => {
+    const { countryRadiusKm, DEFAULT_COUNTRY_RADIUS_KM } = await import('../../src/server/geo/centroids.js');
+    expect(countryRadiusKm('US')).toBeGreaterThan(2000);
+    expect(countryRadiusKm('RU')).toBeGreaterThan(countryRadiusKm('FR'));
+    expect(countryRadiusKm('MC')).toBe(DEFAULT_COUNTRY_RADIUS_KM);
+    expect(countryRadiusKm(undefined)).toBe(DEFAULT_COUNTRY_RADIUS_KM);
+    expect(countryRadiusKm('__proto__')).toBe(DEFAULT_COUNTRY_RADIUS_KM);
+    for (const c of Object.keys(COUNTRY_CENTROIDS)) expect(countryRadiusKm(c)).toBeGreaterThan(0);
+  });
+});
