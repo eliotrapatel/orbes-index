@@ -227,12 +227,49 @@ export class SessionService {
     return Number(r.numDeletedRows);
   }
 
-  /** Mark a session as having passed the second factor (admin step-up). */
-  async markMfaPassed(token: unknown, trx?: Db): Promise<boolean> {
-    const idHash = hashSessionToken(token);
-    if (!idHash) return false;
-    const r = await (trx ?? this.db).updateTable('sessions').set({ mfa_passed: true }).where('id_hash', '=', idHash).executeTakeFirst();
-    return Number(r.numUpdatedRows) > 0;
+  /**
+   * Replace a live session by a new token (privilege change, e.g. the admin
+   * step-up to MFA after TOTP enrolment): same subject, client metadata and
+   * absolute expiry, new token and CSRF token, `mfaPassed` as given. The old
+   * token stops working in the same transaction, so a token captured before
+   * the step-up never carries MFA. Null when `token` is not a live session of
+   * `subjectType`.
+   */
+  async rotate(token: unknown, subjectType: SessionSubjectType, opts: { mfaPassed: boolean }, trx?: Db): Promise<IssuedSession | null> {
+    const oldHash = hashSessionToken(token);
+    if (!oldHash) return null;
+    return inTransaction(trx ?? this.db, async (tx) => {
+      const old = await tx.selectFrom('sessions').selectAll().where('id_hash', '=', oldHash).forUpdate().executeTakeFirst();
+      const now = this.clock();
+      if (!old || old.subject_type !== subjectType || old.expires_at.getTime() <= now.getTime()) return null;
+      const next = toBase64Url(randomBytes(SESSION_TOKEN_BYTES));
+      const csrfToken = toBase64Url(randomBytes(CSRF_TOKEN_BYTES));
+      await tx.deleteFrom('sessions').where('id_hash', '=', oldHash).execute();
+      await tx
+        .insertInto('sessions')
+        .values({
+          id_hash: hashSessionToken(next)!,
+          subject_type: old.subject_type,
+          subject_id: old.subject_id,
+          csrf_token: csrfToken,
+          mfa_passed: opts.mfaPassed,
+          created_at: now,
+          expires_at: old.expires_at,
+          last_seen_at: now,
+          ip_hash: old.ip_hash,
+          user_agent: old.user_agent,
+        })
+        .execute();
+      return {
+        token: next,
+        csrfToken,
+        subjectType: old.subject_type,
+        subjectId: old.subject_id,
+        mfaPassed: opts.mfaPassed,
+        createdAt: now,
+        expiresAt: old.expires_at,
+      };
+    });
   }
 
   /** Housekeeping: delete expired sessions. */

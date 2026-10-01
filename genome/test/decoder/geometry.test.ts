@@ -3,6 +3,10 @@ import { inkBlobs } from '../../src/core/decoder/components.js';
 import { ellipseDistance, fitEllipse, fitEllipseRobust } from '../../src/core/decoder/ellipse.js';
 import { applyH, homographyFromPoints, invertH, jacobianH, multiplyH, solveLinear } from '../../src/core/decoder/homography.js';
 import { Prng } from '../support/prng.js';
+import { CODE01, CODE01_GENOME_CENTERS } from '../../src/core/code/profile.js';
+import { genomeGlyphPrimitives } from '../../src/core/genome/render.js';
+import { primitivesToSvg } from '../../src/core/render/svg.js';
+import { svgToGray } from '../support/raster.js';
 
 /** Points on the ellipse centred at (cx, cy), semi-axes a, b, rotated by phi. */
 function ellipsePoints(cx: number, cy: number, a: number, b: number, phi: number, n: number, rng?: Prng, noise = 0) {
@@ -154,5 +158,28 @@ describe('inkBlobs', () => {
     for (let y = 0; y < w; y += 2) for (let x = 0; x < w; x += 2) bin[y * w + x] = 1;
     expect(inkBlobs(bin, w, w, 1, 10, 100)).toEqual([]);
     expect(inkBlobs(bin, w, w, 1, 10)).toHaveLength(625);
+  });
+});
+
+describe('CODE-01 seal quiet ring and genome orbit (ORBES-CODE-SPEC §4.2)', () => {
+  it('genome ink touches r = 5.75 exactly, by design, and never enters the seal quiet ring', () => {
+    expect(CODE01.genome.orbitRadius - CODE01.genome.glyphRadius).toBe(CODE01.seal.quietOuter);
+    // Every glyph at every slot, rasterised at 40 px per u around the seal (r ≤ 10 u).
+    const pxPerU = 40;
+    const half = 10;
+    let minR = Infinity;
+    for (let glyph = 0; glyph < 16; glyph++) {
+      const prims = CODE01_GENOME_CENTERS.flatMap((c) => genomeGlyphPrimitives(glyph, c.x, c.y, CODE01.genome.glyphRadius));
+      const img = svgToGray(primitivesToSvg(prims, { x: -half, y: -half, w: 2 * half, h: 2 * half }, { paper: '#ffffff', ink: '#000000' }), { widthPx: 2 * half * pxPerU });
+      for (let y = 0; y < img.height; y++) {
+        for (let x = 0; x < img.width; x++) {
+          if (img.data[y * img.width + x] >= 128) continue;
+          minR = Math.min(minR, Math.hypot((x + 0.5) / pxPerU - half, (y + 0.5) / pxPerU - half));
+        }
+      }
+    }
+    // Ink (≥ half coverage) starts within a pixel of 5.75 and never inside it.
+    expect(minR).toBeGreaterThanOrEqual(CODE01.seal.quietOuter - 1 / pxPerU);
+    expect(minR).toBeLessThan(CODE01.seal.quietOuter + 2 / pxPerU);
   });
 });

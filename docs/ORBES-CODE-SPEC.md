@@ -44,14 +44,14 @@ The ORBES CODE is a proprietary two-dimensional, machine-readable visual code. I
 | Seal core | disc r = 2.0 | `seal` | finder (rotation-invariant run pattern), centre | **Yes** |
 | Seal gap | annulus 2.0–3.0, no ink | `seal` | finder pattern | **Yes** |
 | Seal orbit | annulus 3.0–4.0, ink | `seal` | finder, ellipse fit (affine) | **Yes** |
-| Seal quiet ring | annulus 4.0–5.75, no ink | — | isolates the finder | **Yes** |
+| Seal quiet ring | annulus 4.0 ≤ r < 5.75, no ink | — | isolates the finder | **Yes** |
 | Genome glyphs | 8 glyphs, radius 1.75, centres on r = 7.5 at θ = i·45° | `genome` | human identity; optional machine cross-check | No (secondary) |
 | Format cells | 2 × 15 cells on ring 0 | `format` | version + mask (BCH) | **Yes** |
 | Data cells | 1314 cells on 13 rings | `data` | RS codeword (payload, signature, CRC, parity) | **Yes** |
 | Moons | 4 discs r = 1.75 at radius 27.5, θ = 315°, 45°, 135°, 225° | `moon` | homography anchors | **Yes** |
 | Polaris halo | annulus centred on the NW moon, r = 2.6, width 0.4 | `polaris` | orientation hint only | No |
 | Horizon and guides | hairline rings r = 24.0 (0.08 u), 9.5 and 23.5 (0.06 u), reduced tone | `decor` | none, never sampled | No |
-| Quiet zones | around the seal (4.0–5.75), between data and moons, 2 u outer margin | — | isolation | **Yes** |
+| Quiet zones | seal quiet ring (4.0–5.75), outer quiet band (from the data edge at r 22.86 to the moons and polaris halo), 2 u outer margin | — | isolation | **Yes** (ink-free, except the decorative hairlines permitted in the outer quiet band by §4.7) |
 
 Elements marked **Yes** MUST be reproduced exactly within the tolerances of §9. The others MAY be omitted, for example `decor` on engraved metal, without affecting decodability.
 
@@ -64,6 +64,8 @@ Elements marked **Yes** MUST be reproduced exactly within the tolerances of §9.
 
 ### 4.2 Genome orbit
 Glyph *i* (i = 0…7) is centred at radius 7.5, angle i·45°. Glyph 0 is at north and the order is clockwise. Each glyph is drawn from the GENOME vocabulary (see [ORBES-GENOME-SPEC](ORBES-GENOME-SPEC.md)) with all ink inside radius 1.75 of its centre.
+
+The genome orbit therefore spans r 5.75–9.25, and a glyph whose ink reaches its 1.75 limit towards the seal touches **exactly** r = 5.75, the outer edge of the seal quiet ring. This is by design: the quiet ring is the half-open annulus 4.0 ≤ r < 5.75, so the seal keeps its full 1.75 u of clearance (§4.6) and no glyph ink ever enters it. Renditions MUST NOT let print gain push genome ink inside r = 5.75 by more than the §9 ink-spread tolerance.
 
 ### 4.3 Data orbits
 Ring *k* (k = 0…12) has centre radius `r_k = 10.5 + k` and `n_k = 4 · round(2π·r_k / 4)` cells, a multiple of 4. Cell *c* of ring *k* spans the angles `[c·2π/n_k, (c+1)·2π/n_k)`. Its sampling point is at radius `r_k` and angle `(c + ½)·2π/n_k`.
@@ -112,11 +114,23 @@ These are the minimum light (no-ink) clearances that every rendition MUST preser
 
 | Clearance | Region |
 |---|---|
-| ≥ 1.75 u | Seal orbit to the innermost genome ink (4.0 → 5.75) |
+| ≥ 1.75 u | Seal orbit to the innermost genome ink (4.0 → 5.75; genome ink may touch 5.75, §4.2) |
 | ≥ 0.6 u | Decorative hairlines to any machine-critical ink |
 | ≥ 1.0 u | Moons to any other ink, the polaris halo excepted |
 | 2.0 u | Outer quiet zone beyond the 46 u content square |
 
+### 4.7 Quiet regions and decorative hairlines
+- The **seal quiet ring** (4.0 ≤ r < 5.75) and the **2 u outer margin** MUST be entirely free of ink.
+- The **outer quiet band**, between the outer edge of data ring 12 (r = 22.86) and the moons and polaris halo (from r = 24.70 on the NW diagonal, 25.75 on the others), MUST be free of ink **except** for the two decorative hairlines of the `decor` layer, which are permitted there only at exactly these radii and tones:
+
+  | Hairline | Centre radius | Width | Tone (share of ink) | Clearance to machine-critical ink |
+  |---|---|---|---|---|
+  | Outer guide | 23.5 | 0.06 u | 0.25 | 0.61 u to data ring 12 |
+  | Horizon | 24.0 | 0.08 u | 0.35 | 0.66 u to the polaris halo |
+
+  Every decorative hairline MUST keep **≥ 0.6 u** clearance from any machine-critical ink (§4.6); no other mark of any kind (text, rules, texture, ornament) is permitted in the band.
+- The third hairline, the inner guide at r = 9.5 (0.06 u, tone 0.25), lies in the light gap between the genome orbit and data ring 0, 0.61 u from data ring 0. It is closer to the genome glyphs (0.22 u), which are not machine-critical.
+- Decorative hairlines are optional (§3) and painted first (§8.2). The reference decoder never samples them: its quiet-zone probes sit at r = 4.85 and r = 24.6, clear of every hairline.
 ---
 
 ## 5. Data content
@@ -144,7 +158,7 @@ The payload layout, the canonical encoding, the signing message (`"ORBES-CODE/v1
 - **Damage profile:** damage to a printed artifact is spatially clustered (scratches, glare, fingers, wear). Placing each byte on 8 consecutive cells of one orbit turns such damage into a few byte errors, which RS corrects optimally (it is an MDS code).
 - **Erasures:** RS natively supports *erasures*, so a decoder that knows a region is unreadable (glare saturation, occlusion, low confidence) recovers twice as many bytes there.
 - **Track record:** it is the error-correction code of QR Code, Data Matrix, Aztec and MaxiCode, with decades of deployment and well-understood miscorrection behaviour. It is cheap to decode in JavaScript (≈ 1 ms for 42 errors).
-- **Miscorrection:** with 85 parity bytes, the probability that an uncorrectable word decodes to a *wrong* codeword is below 10⁻⁶⁰. The CRC-16 and the signature catch it anyway.
+- **Miscorrection:** with 85 parity bytes and errors-only decoding, the probability that an uncorrectable word decodes to a *wrong* codeword is below 10⁻⁶⁰. Erasures spend parity, so this margin shrinks as more bytes are erased: a decoder SHOULD bound its erasures (the reference decoder stops at 70, §11). The CRC-16 and the signature catch a miscorrection anyway; the signature turns one into INVALID SIGNATURE, which is why it must stay rare.
 - **What we did not do:** no new error-correction algorithm was invented.
 
 ### 6.3 Format word
@@ -224,7 +238,7 @@ The recommended minimum size depends on the reading device (§10).
 | Arc thickness | 0.72 u ± 0.12 u |
 | Seal and moon radii | ± 0.10 u |
 | Ink spread / gain | ≤ 0.12 u (beyond this, adjacent rings start to merge) |
-| Quiet zones | MUST be free of ink, texture contrast ≤ 15 % |
+| Quiet zones | Seal quiet ring and 2 u outer margin: MUST be free of ink. Outer quiet band: MUST be free of ink except the decorative hairlines of §4.7, at their specified radii and tones. Texture contrast ≤ 15 % in all of them |
 
 ## 10. Measurable targets
 
@@ -252,11 +266,18 @@ A conforming decoder can work in any way it likes. The reference decoder (`genom
 4. **Homography:** a normalised DLT maps code-plane coordinates to the image, using the seal centre and the moon centroids. Orientation is ambiguous to within 90° rotations, so each hypothesis is tried, ranked by the polaris hint.
 5. **Refine:** sub-pixel adjustment of the anchor points to maximise cell bimodality. This absorbs centroid bias, lens distortion and mild curvature.
 6. **Sample:** read all 1344 cells with a small footprint and region-adaptive thresholds. A confidence is kept per cell, and low-confidence or glare-saturated bytes become erasure candidates.
-7. **Format and ECC:** decode the format word (BCH), unmask, then run Reed-Solomon. Errors-only comes first, then progressively more erasures. If the format word is unreadable, all four masks are tried.
+7. **Format and ECC:** decode the format word (BCH), unmask, then run Reed-Solomon. Errors-only comes first, then progressively more erasures on the least confident bytes (10, 20, … **at most 70**). If the format word is unreadable, all four masks are tried (0, 30 and 60 erasures).
 8. **Validate:** check the CRC-16, then the strict payload structure.
 9. **Genome cross-check (optional):** classify the 8 glyphs against vocabulary templates and report them with confidences.
 
 The decoder never verifies signatures. Verification is the server's responsibility (see [CRYPTOGRAPHY](CRYPTOGRAPHY.md) §5).
+
+**Miscorrection safety (normative for the reference scanner).** A miscorrected word that passes CRC-16 reaches the server as a well-formed code with a wrong signature, so a genuine artifact would be shown INVALID SIGNATURE. Two measures keep this vanishingly rare:
+
+- *Erasure cap.* With *f* erasures only 85 − *f* parity bytes still check the word. Measured on 100 000 random words: at 80 erasures (5 checking bytes) Reed-Solomon returned a wrong codeword 18 times, leaving CRC-16 as the only backstop (≈ 3·10⁻⁹ per attempt, and a camera makes several attempts per second); at 70 (15 checking bytes), 0 times. The reference decoder never erases more than **70** bytes (`MAX_RS_ERASURES`, `genome/src/core/decoder/decode.ts`). The scan matrix shows no robustness loss ([scan-matrix](reports/scan-matrix.md)).
+- *Second-frame confirmation.* When a read used heavy correction, **2·errors + erasures > 50**, the verify web app does not submit it until a second, independent camera frame decodes to identical data (`ReadConfirmer`, `genome/src/web/verify/capture.ts`); a photo upload is confirmed by a second resampling of the photo. A clean read pays nothing.
+
+**Failure detail (informative).** A failed decode also reports what it saw, for scan guidance only: for NO_MOONS, the most code-like seal found (`seal.confidence`, the share of probed data orbits showing arc texture around it, and `seal.unitPx`); for FORMAT, ECC, CRC and PAYLOAD, the scale of the located code (`moduleSizePx`). The verify app turns these into distance-aware hints (place the whole code inside the orbit · hold steady · hold about 20 cm away · zoom in).
 
 ## 12. Versioning
 

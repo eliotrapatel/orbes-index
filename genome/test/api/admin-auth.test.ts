@@ -65,9 +65,15 @@ describe('admin authentication', () => {
     const badCode = await c.post('/api/admin/auth/totp/enable', { secret, code: '000000' });
     expect(badCode.statusCode).toBe(400);
     const code = totp(base32Decode(secret), h.clock.now().getTime());
+    const before = c.cookies.get('orbes_admin')!;
     const enable = await c.post('/api/admin/auth/totp/enable', { secret, code });
     expect(enable.statusCode).toBe(200);
-    expect(safeJson(enable)).toEqual({ ok: true, mfaPassed: true });
+    expect(safeJson(enable)).toEqual({ ok: true, mfaPassed: true, csrfToken: expect.any(String) });
+    // The step-up issues a NEW session token: the pre-MFA cookie is dead.
+    expect(c.cookies.get('orbes_admin')).not.toBe(before);
+    const stale = h.client();
+    stale.cookies.set('orbes_admin', before);
+    expect((await stale.get('/api/admin/auth/me')).statusCode).toBe(401);
     expect((safeJson(await c.get('/api/admin/auth/me')) as any).mfaPassed).toBe(true);
 
     await c.post('/api/admin/auth/logout');

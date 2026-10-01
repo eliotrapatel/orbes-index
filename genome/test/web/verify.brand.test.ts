@@ -53,8 +53,6 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
 
   it('draws the favicon in the SEAL proportions: core r 2, gap to 3, ring 3–4', () => {
     const circles = [...favicon.matchAll(/<circle([^>]*)\/>/g)].map((m) => {
-      const attr = (n: string) => /(?:^|\s)([\w-]+)="([^"]*)"/g;
-      void attr;
       const get = (n: string) => new RegExp(`\\s${n}="([^"]*)"`).exec(m[1])?.[1];
       return { r: Number(get('r')), fill: get('fill'), stroke: get('stroke'), width: Number(get('stroke-width') ?? 0) };
     });
@@ -104,5 +102,15 @@ describe('verify app: OWNERSHIP heading follows the registration window', () => 
     const block = src.slice(src.indexOf('private registerBlock'), src.indexOf('private yoursBlock'));
     expect(block).toContain('registrationStatus(');
     expect(block).not.toMatch(/this\.status\('REGISTRATION OPEN'\)/);
+  });
+});
+
+describe('GENOME-01 vocabulary specimen (docs/assets/genome-01-vocabulary.svg)', () => {
+  const svg = readFileSync(join(WEB, '../../../docs/assets/genome-01-vocabulary.svg'), 'utf8');
+  const colours = new Set([...svg.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase()));
+
+  it('is printed on brand ivory with brand greys only (ivory colourway ink #111111, --ink-soft)', () => {
+    expect(svg).toContain('fill="#f6f2ea"');
+    expect([...colours].sort()).toEqual(['#111111', '#5c5c5c', '#f6f2ea']);
   });
 });

@@ -20,14 +20,18 @@
  *   accepted.
  *
  * Transfer codes are 12 Crockford base32 characters (60 bits), shown once
- * as XXXX-XXXX-XXXX; only a domain-separated SHA-256 of the canonical form
- * is stored (a deterministic hash is needed to look the transfer up; with
- * 60 bits of entropy and a 7-day life, a fast hash is adequate).
+ * as XXXX-XXXX-XXXX; only HMAC-SHA256 of the canonical form under a server
+ * key (HKDF from COOKIE_SECRET, info `orbes/transfer-code/v1`) is stored: a
+ * deterministic value is needed to look the transfer up, and the key keeps a
+ * leaked table from being brute-forced offline.
  *
  * Error messages are public (account routes) and never reveal internal
  * product statuses.
  */
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import { utf8 } from '../../core/bytes.js';
+import type { AppConfig } from '../config.js';
+import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { AcquiredVia, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
 import { DomainError, forbidden, notFound, tooManyRequests, validationError } from '../errors.js';
@@ -56,7 +60,8 @@ export const INCIDENT_TYPES = ['LOST', 'STOLEN'] as const;
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const TRANSFER_HASH_DOMAIN = 'ORBES-TRANSFER/v1\u0000';
+/** HKDF `info` of the transfer-code HMAC key (derived from COOKIE_SECRET). */
+export const TRANSFER_CODE_KEY_INFO = 'orbes/transfer-code/v1';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -135,11 +140,25 @@ export interface TransferRecord {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Lookup hash of a transfer code (any accepted spelling), or undefined when malformed. */
-export function hashTransferCode(code: unknown): Uint8Array | undefined {
+/**
+ * Server key for transfer-code lookups: HKDF-SHA256 from COOKIE_SECRET with
+ * info `orbes/transfer-code/v1`. Rotating COOKIE_SECRET invalidates pending
+ * transfer codes (owners start a new transfer).
+ */
+export function deriveTransferCodeKey(config: Pick<AppConfig, 'cookieSecret'>): Uint8Array {
+  return deriveSubkey(utf8(config.cookieSecret), TRANSFER_CODE_KEY_INFO, { salt: 'ORBES' });
+}
+
+/**
+ * Lookup value of a transfer code (any accepted spelling): HMAC-SHA256 of the
+ * canonical code under the server key, or undefined when malformed.
+ * Deterministic, so `token_hash` stays a unique index lookup; keyed, so a
+ * leaked `ownership_transfers` table cannot be brute-forced offline (60 bits).
+ */
+export function hashTransferCode(code: unknown, key: Uint8Array): Uint8Array | undefined {
   const canonical = normalizeCrockford(code, TRANSFER_CODE_LENGTH);
   if (canonical === undefined) return undefined;
-  return new Uint8Array(createHash('sha256').update(TRANSFER_HASH_DOMAIN + canonical, 'utf8').digest());
+  return new Uint8Array(createHmac('sha256', key).update(canonical, 'utf8').digest());
 }
 
 export function ownershipStateFor(current: { verified: boolean } | undefined | null, transferPending: boolean): OwnershipState {
@@ -188,8 +207,16 @@ export class OwnershipService {
   private readonly audit: AuditService;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
+  private readonly transferKey: Uint8Array;
 
-  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock }) {
+  /**
+   * `transferKey`: 32-byte HMAC key for transfer codes (deriveTransferCodeKey; the context always passes it).
+   * Without it a random per-instance key is used, which only suits single-instance tests.
+   */
+  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock; transferKey?: Uint8Array }) {
+    const key = deps.transferKey ?? new Uint8Array(randomBytes(32));
+    if (!(key instanceof Uint8Array) || key.length !== 32) throw new RangeError('transferKey must be 32 bytes');
+    this.transferKey = key;
     this.db = deps.db;
     this.audit = deps.audit;
     this.lifecycle = deps.lifecycle;
@@ -286,7 +313,7 @@ export class OwnershipService {
         .values({
           product_id: p.id,
           from_account_id: accountId,
-          token_hash: hashTransferCode(canonical)!,
+          token_hash: hashTransferCode(canonical, this.transferKey)!,
           status: 'PENDING',
           created_at: now,
           expires_at: expiresAt,
@@ -311,7 +338,7 @@ export class OwnershipService {
   /** The recipient redeems a transfer code: ownership moves, `verified` carries over, status → TRANSFERRED. */
   async acceptTransfer(accountId: string, transferCode: string, actor: Actor): Promise<OwnershipResult> {
     assertAccountId(accountId);
-    const tokenHash = hashTransferCode(transferCode);
+    const tokenHash = hashTransferCode(transferCode, this.transferKey);
     if (!tokenHash) throw validationError('The transfer code is not valid.');
     await this.requireActiveAccount(this.db, accountId);
 

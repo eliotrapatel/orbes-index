@@ -271,6 +271,11 @@ export function registrationOpen(expiresAt: string, now: number): boolean {
   return Number.isFinite(t) && t > now;
 }
 
+/** Heading of the OWNERSHIP panel's registration block: never "open" once the scan's window has closed. */
+export function registrationStatus(expiresAt: string, now: number): 'REGISTRATION OPEN' | 'REGISTRATION CLOSED' {
+  return registrationOpen(expiresAt, now) ? 'REGISTRATION OPEN' : 'REGISTRATION CLOSED';
+}
+
 /** Normalise a claim / transfer code as typed: uppercase, Crockford look-alikes kept, grouped XXXX-XXXX-XXXX. */
 export function normalizeCodeInput(raw: string): string {
   const chars = raw.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 12);

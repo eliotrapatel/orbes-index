@@ -122,11 +122,20 @@ describe('SessionService', () => {
     expect(await sessions.revokeAllForSubject('account', 'not-a-uuid')).toBe(0);
   });
 
-  it('marks MFA on an existing session', async () => {
-    const s = await sessions.create({ subjectType: 'admin', subjectId: randomUUID() });
-    expect(await sessions.markMfaPassed(s.token)).toBe(true);
-    expect((await sessions.validate(s.token, 'admin'))!.mfaPassed).toBe(true);
-    expect(await sessions.markMfaPassed('nope')).toBe(false);
+  it('step-up to MFA rotates the token: a new MFA-passed session replaces the old one', async () => {
+    const subjectId = randomUUID();
+    const s = await sessions.create({ subjectType: 'admin', subjectId, ipHash: 'ip', userAgent: 'UA' });
+    clock.advance(60_000);
+    const up = await sessions.rotate(s.token, 'admin', { mfaPassed: true });
+    expect(up).toMatchObject({ subjectType: 'admin', subjectId, mfaPassed: true });
+    expect(up!.token).not.toBe(s.token);
+    expect(up!.csrfToken).not.toBe(s.csrfToken);
+    expect(await sessions.validate(s.token, 'admin')).toBeNull();
+    expect((await sessions.validate(up!.token, 'admin'))!.mfaPassed).toBe(true);
+    // The absolute expiry is not extended by a step-up.
+    expect(up!.expiresAt).toEqual(s.expiresAt);
+    expect(await sessions.rotate('nope', 'admin', { mfaPassed: true })).toBeNull();
+    expect(await sessions.rotate(up!.token, 'account', { mfaPassed: true })).toBeNull();
   });
 
   it('purges expired sessions', async () => {

@@ -11,11 +11,16 @@
  *   r 0.0 ─ 2.0   SEAL core (solid orb)                       machine-critical
  *   r 2.0 ─ 3.0   SEAL gap (light)                            machine-critical
  *   r 3.0 ─ 4.0   SEAL orbit (solid ring)                     machine-critical
- *   r 4.0 ─ 5.75  quiet ring (light)                          machine-critical
+ *   r 4.0 ─ 5.75  quiet ring (light), half-open [4.0, 5.75)    machine-critical
  *   r 5.75─ 9.25  GENOME orbit: 8 glyphs, centre radius 7.5   identity / cross-check
+ *                 (a glyph's innermost ink may touch r = 5.75 exactly, by
+ *                 design: orbit 7.5 − glyph radius 1.75 = quietOuter; the
+ *                 seal keeps its full 1.75 u clearance, ORBES-CODE-SPEC §4.2)
  *   r 10.0─ 23.0  DATA orbits: 13 rings, centre radii 10.5…22.5, pitch 1
  *                 ring 0 carries 2 copies of the BCH format word
  *   r 23.0─ 25.75 quiet band (light)                          machine-critical
+ *                 (ink-free except the decor hairlines at r 23.5 and 24.0,
+ *                 ≥ 0.6 u from machine-critical ink, ORBES-CODE-SPEC §4.7)
  *   moons         4 solid discs, radius 1.75, centre radius 27.5 at the
  *                 diagonals (NW, NE, SE, SW); the NW moon ("polaris") carries a
  *                 thin concentric halo used only as an orientation hint.
@@ -50,6 +55,7 @@ export const CODE01 = {
     coreRadius: 2.0,
     gapOuter: 3.0,
     ringOuter: 4.0,
+    /** Outer edge of the seal quiet ring; equals genome.orbitRadius − genome.glyphRadius on purpose (genome ink may touch it). */
     quietOuter: 5.75,
   },
 

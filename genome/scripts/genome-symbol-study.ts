@@ -503,8 +503,9 @@ function writeReport(
 
 const FONT = "'Helvetica Neue', HelveticaNeue, Helvetica, Arial, sans-serif";
 const SPECIMEN_INK = '#111111';
-const SPECIMEN_PAPER = '#f7f5f0';
-const SPECIMEN_MUTED = '#8a8780';
+// Brand ivory (--ivory) and secondary grey (--ink-soft): docs/BRAND-DESIGN-SYSTEM.md §3.2.
+const SPECIMEN_PAPER = '#f6f2ea';
+const SPECIMEN_MUTED = '#5c5c5c';
 /** O26, category 1, serial 184: the identity shown on the specimen sheet. */
 const EXAMPLE_IDENTITY = (26 << 25) | (1 << 20) | 184;
 

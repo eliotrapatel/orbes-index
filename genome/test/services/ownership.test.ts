@@ -1,10 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
+import { utf8 } from '../../src/core/bytes.js';
+import { testConfig } from '../../src/server/config.js';
+import { deriveSubkey } from '../../src/server/crypto/secretbox.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import {
   CLAIM_ATTEMPT_LIMIT,
+  deriveTransferCodeKey,
   hashTransferCode,
   OwnershipService,
   ownershipStateFor,
@@ -20,6 +24,7 @@ import { createManualClock, type Actor } from '../../src/server/types.js';
 const admin: Actor = { type: 'admin', id: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' };
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+const TRANSFER_KEY = new Uint8Array(32).fill(7);
 
 async function expectDomainError(p: Promise<unknown>, code: string, status: number): Promise<DomainError> {
   const e = await p.then(
@@ -46,7 +51,7 @@ describe('OwnershipService', () => {
     t = await createTestDb();
     audit = new AuditService({ db: t.db, clock: clock.now });
     lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
-    ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now });
+    ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: TRANSFER_KEY });
     warranty = new WarrantyService({ db: t.db, audit, lifecycle, clock: clock.now });
     await t.db.insertInto('categories').values({ id: 1, code: 'J', name: 'Jewelry', warranty_months: 24 }).execute();
     const col = await t.db.insertInto('collections').values({ name: 'ORBIT' }).returning('id').executeTakeFirstOrThrow();
@@ -282,7 +287,12 @@ describe('OwnershipService', () => {
 
       // Only the hash is stored.
       const tr = await t.db.selectFrom('ownership_transfers').selectAll().where('product_id', '=', p.id).executeTakeFirstOrThrow();
-      expect(Buffer.from(tr.token_hash).equals(Buffer.from(hashTransferCode(offer.transferCode)!))).toBe(true);
+      // HMAC-SHA256 under the server key (HKDF from COOKIE_SECRET), not a bare hash: a leaked table cannot be brute-forced offline.
+      expect(Buffer.from(tr.token_hash).equals(Buffer.from(hashTransferCode(offer.transferCode, TRANSFER_KEY)!))).toBe(true);
+      const canonical = offer.transferCode.replace(/-/g, '');
+      expect(Buffer.from(tr.token_hash).equals(createHmac('sha256', TRANSFER_KEY).update(canonical, 'utf8').digest())).toBe(true);
+      expect(hashTransferCode(offer.transferCode, new Uint8Array(32).fill(1))).not.toEqual(hashTransferCode(offer.transferCode, TRANSFER_KEY));
+      expect(deriveTransferCodeKey(testConfig())).toEqual(deriveSubkey(utf8(testConfig().cookieSecret), 'orbes/transfer-code/v1', { salt: 'ORBES' }));
       expect(JSON.stringify(tr)).not.toContain(offer.transferCode.replace(/-/g, ''));
       expect(JSON.stringify((await audit.list({ targetId: p.productId })).items)).not.toContain(offer.transferCode.replace(/-/g, ''));
       expect((await ownership.currentOwner(p.productId))?.transferPending).toBe(true);

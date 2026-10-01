@@ -13,7 +13,7 @@ import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
-import { formatDate, normalizeCodeInput, registrationOpen, type OwnershipMode } from '../view-model.js';
+import { formatDate, normalizeCodeInput, registrationOpen, registrationStatus, type OwnershipMode } from '../view-model.js';
 import { sectionLabel } from './common.js';
 
 export interface OwnershipDeps {
@@ -137,8 +137,9 @@ export class OwnershipPanel {
   }
 
   private registerBlock(m: Extract<OwnershipMode, { kind: 'register' }>, s: SessionState): (HTMLElement | null)[] {
-    const out: (HTMLElement | null)[] = [this.status('REGISTRATION OPEN')];
-    if (!registrationOpen(m.expiresAt, this.now())) {
+    const now = this.now();
+    const out: (HTMLElement | null)[] = [this.status(registrationStatus(m.expiresAt, now))];
+    if (!registrationOpen(m.expiresAt, now)) {
       out.push(
         this.text('The registration window of this scan has closed. Scan the code again to register this piece.'),
         h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
