@@ -34,6 +34,7 @@ const PROBES: Probe[] = [
   { group: 'codes', method: 'POST', url: `/api/admin/products/${PID}/codes/reissue`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/activate`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/void`, body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/extend`, body: INVALID, min: 'OPERATOR' },
   { group: 'services', method: 'POST', url: `/api/admin/products/${PID}/services`, body: INVALID, min: 'OPERATOR' },
   { group: 'services', method: 'POST', url: `/api/admin/services/${UUID}/complete`, body: INVALID, min: 'OPERATOR' },
   { group: 'ownership', method: 'POST', url: `/api/admin/products/${PID}/ownership/confirm`, body: INVALID, min: 'OPERATOR' },
@@ -53,6 +54,8 @@ const PROBES: Probe[] = [
   { group: 'keys', method: 'POST', url: '/api/admin/keys/rotate', body: INVALID, min: 'ADMIN' },
   { group: 'keys', method: 'POST', url: '/api/admin/keys/1/retire', body: INVALID, min: 'ADMIN' },
   { group: 'keys', method: 'POST', url: '/api/admin/keys/1/revoke', body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'GET', url: '/api/admin/admins', min: 'ADMIN' },
+  { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/totp/reset`, body: INVALID, min: 'ADMIN' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -69,7 +72,7 @@ describe('admin role enforcement', () => {
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit']) {
+    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins']) {
       expect(groups.has(g)).toBe(true);
     }
   });

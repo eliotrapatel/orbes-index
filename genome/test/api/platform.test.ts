@@ -9,7 +9,8 @@ import { loggerOptions } from '../../src/server/http/logging.js';
 import { groupLimits } from '../../src/server/http/rate-limit.js';
 import { testConfig } from '../../src/server/config.js';
 import type { VerificationService } from '../../src/server/services/verification.js';
-import { accountClient, adminClient, createHarness, errorOf, PASSWORD, safeJson, type Harness } from './support.js';
+import { base32Decode, totp } from '../../src/server/crypto/totp.js';
+import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, seedCatalog, type Harness } from './support.js';
 
 describe('configuration wiring', () => {
   it('the api route group has its own budget (RATE_LIMIT_API_PER_MINUTE), separate from the admin one', async () => {
@@ -132,5 +133,59 @@ describe('account session probe and registration', () => {
     expect(errorOf(bad).message).toMatch(/^country: /);
     const none = await h.client().post('/api/v1/account/register', { email: 'country3@example.com', password: PASSWORD, country: '' });
     expect(none.statusCode).toBe(201);
+  });
+});
+
+describe('admin management routes', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await createHarness();
+  });
+  afterAll(() => h?.close());
+
+  it('ADMIN lists console users and resets another admin\'s TOTP (audited, their sessions end)', async () => {
+    const admin = await adminClient(h, 'ADMIN');
+    const target = await createAdmin(h.ctx, 'OPERATOR');
+    const op = h.client();
+    expect((await op.post('/api/admin/auth/login', { email: target.email, password: target.password })).statusCode).toBe(200);
+    const { secret } = safeJson(await op.post('/api/admin/auth/totp/setup')) as { secret: string };
+    expect((await op.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), h.clock.now().getTime()) })).statusCode).toBe(200);
+
+    const list = safeJson(await admin.get('/api/admin/admins')) as { items: { id: string; email: string; role: string; totpEnabled: boolean; locked: boolean; disabled: boolean }[] };
+    expect(list.items.find((a) => a.id === target.id)).toEqual({ id: target.id, email: target.email, role: 'OPERATOR', totpEnabled: true, locked: false, disabled: false, createdAt: expect.any(String) });
+
+    const reset = await admin.post(`/api/admin/admins/${target.id}/totp/reset`, {});
+    expect(reset.statusCode).toBe(200);
+    expect(safeJson(reset)).toMatchObject({ admin: { id: target.id, totpEnabled: false } });
+    expect((await h.ctx.services.auth.getAdmin(target.id)).totpEnabled).toBe(false);
+    expect((await op.get('/api/admin/auth/me')).statusCode).toBe(401); // the lost device's sessions are gone
+    const entry = (await h.ctx.audit.list({ action: 'admin.totp.disable' })).items[0];
+    expect(entry).toMatchObject({ actorType: 'admin', targetType: 'admin', targetId: target.id, details: { sessionsRevoked: 1 } });
+
+    const again = await admin.post(`/api/admin/admins/${target.id}/totp/reset`, {});
+    expect(again.statusCode).toBe(409);
+    expect(errorOf(again).code).toBe('TOTP_NOT_ENABLED');
+    const unknown = await admin.post('/api/admin/admins/00000000-0000-4000-8000-000000000000/totp/reset', {});
+    expect(unknown.statusCode).toBe(404);
+    expect(errorOf(unknown).code).toBe('ADMIN_NOT_FOUND');
+  });
+
+  it('OPERATOR extends an activated warranty by whole months', async () => {
+    const op = await adminClient(h, 'OPERATOR');
+    const catalog = await seedCatalog(h.ctx);
+    const p = await issue(h.ctx, catalog);
+    const pid = p.product.productId;
+    const early = await op.post(`/api/admin/products/${pid}/warranty/extend`, { months: 12 });
+    expect(early.statusCode).toBe(409);
+    expect(errorOf(early).code).toBe('WARRANTY_NOT_STARTED');
+    expect((await op.post(`/api/admin/products/${pid}/warranty/activate`, { purchaseDate: '2026-01-15' })).statusCode).toBe(200);
+    const res = await op.post(`/api/admin/products/${pid}/warranty/extend`, { months: 12 });
+    expect(res.statusCode).toBe(200);
+    expect(safeJson(res)).toMatchObject({ warranty: { durationMonths: 36, endDate: '2029-01-15' } });
+    for (const months of [0, 1.5, 121, '12']) {
+      const bad = await op.post(`/api/admin/products/${pid}/warranty/extend`, { months });
+      expect(bad.statusCode, String(months)).toBe(400);
+    }
+    expect((await h.ctx.audit.list({ action: 'warranty.extend' })).items[0]).toMatchObject({ targetId: pid });
   });
 });

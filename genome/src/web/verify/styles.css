@@ -17,7 +17,7 @@ body {
 }
 
 body[data-screen="scan"] {
-  background: #000;
+  background: var(--ink);
   overscroll-behavior: none;
 }
 
@@ -199,7 +199,7 @@ h1[tabindex="-1"]:focus {
   justify-content: space-between;
   padding: 0 calc(56px + var(--safe-left)) 0 calc(56px + var(--safe-right));
   font-size: 7px;
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-display);
   opacity: 0.4;
   animation: brand-fade 1s ease 1.2s both;
 }
@@ -222,7 +222,7 @@ h1[tabindex="-1"]:focus {
   inset: 0;
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--ink);
   color: var(--white);
   animation: brand-fade 0.6s ease both;
 }
@@ -316,7 +316,7 @@ h1[tabindex="-1"]:focus {
 }
 
 .scan__wordmark {
-  font-size: 11px;
+  font-size: var(--fs-label);
 }
 
 .scan__close {
@@ -342,14 +342,14 @@ h1[tabindex="-1"]:focus {
 }
 
 .scan__status {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.34em;
   text-indent: 0.34em;
 }
 
 .scan__hint {
   min-height: 1.6em;
-  font-size: 11px;
+  font-size: var(--fs-label);
   letter-spacing: 0.06em;
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.74);
@@ -464,7 +464,7 @@ h1[tabindex="-1"]:focus {
 
 .message__title {
   margin-top: 28px;
-  font-size: 15px;
+  font-size: var(--fs-lead);
   font-weight: 400;
   line-height: 1.7;
   letter-spacing: 0.3em;
@@ -593,7 +593,7 @@ h1[tabindex="-1"]:focus {
   padding: 14px 18px;
   border-top: 1px solid var(--hairline-strong);
   border-bottom: 1px solid var(--hairline-strong);
-  font-size: 12px;
+  font-size: var(--fs-line);
   line-height: 1.7;
   letter-spacing: 0.02em;
 }
@@ -617,7 +617,7 @@ h1[tabindex="-1"]:focus {
 .result__genome .bracket--br { bottom: 10px; right: 10px; }
 
 .genome__label {
-  font-size: 8px;
+  font-size: var(--fs-nano);
   letter-spacing: 0.36em;
   text-indent: 0.36em;
   color: var(--ink-soft);
@@ -627,8 +627,8 @@ h1[tabindex="-1"]:focus {
 .genome__id {
   margin-top: 16px;
   font-size: 17px;
-  letter-spacing: 0.22em;
-  text-indent: 0.22em;
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -649,7 +649,7 @@ h1[tabindex="-1"]:focus {
   justify-content: center;
   gap: 10px;
   margin-top: 20px;
-  font-size: 8px;
+  font-size: var(--fs-nano);
 }
 
 .result__lines {
@@ -662,7 +662,7 @@ h1[tabindex="-1"]:focus {
 }
 
 .lines__line {
-  font-size: 11px;
+  font-size: var(--fs-label);
   letter-spacing: 0.3em;
   text-indent: 0.3em;
   line-height: 2.55;
@@ -701,7 +701,7 @@ h1[tabindex="-1"]:focus {
   background: none;
   color: var(--ink-soft);
   font-size: 9px;
-  letter-spacing: 0.22em;
+  letter-spacing: var(--track-micro);
   text-transform: uppercase;
   cursor: pointer;
   transition: color var(--t-med) var(--ease);
@@ -771,14 +771,14 @@ h1[tabindex="-1"]:focus {
 .rows__label {
   flex: none;
   font-size: 9px;
-  letter-spacing: 0.28em;
+  letter-spacing: var(--track-label);
   color: var(--ink-soft);
   text-transform: uppercase;
 }
 
 .rows__value {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
   letter-spacing: 0.14em;
   text-align: right;
   text-transform: uppercase;
@@ -805,8 +805,8 @@ h1[tabindex="-1"]:focus {
 }
 
 .ownership__status {
-  font-size: 11px;
-  letter-spacing: 0.28em;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 
@@ -867,7 +867,7 @@ h1[tabindex="-1"]:focus {
 }
 
 .form__error {
-  font-size: 12px;
+  font-size: var(--fs-line);
   line-height: 1.6;
   letter-spacing: 0.02em;
 }
@@ -882,7 +882,7 @@ h1[tabindex="-1"]:focus {
 
 .form__notice {
   margin-top: 18px;
-  font-size: 12px;
+  font-size: var(--fs-line);
   line-height: 1.6;
   color: var(--ink-soft);
 }
@@ -932,18 +932,24 @@ h1[tabindex="-1"]:focus {
 
 .result__footnote {
   max-width: 38ch;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1.75;
   letter-spacing: 0.02em;
   color: var(--ink-soft);
 }
 
+/* The reference customers are asked to quote: legible (10 px, --ink-soft), tabular. */
 .result__meta {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px 18px;
-  font-size: 7px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  line-height: 2;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
 }
 
 /* ── Small screens & reduced motion ────────────────────────────────────── */

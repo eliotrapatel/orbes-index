@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
+import { UNUSUAL_ACTIVITY_OWNER_COPY, VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { ApiError } from '../../src/web/verify/api.js';
 import {
   ACTION_LABELS,
@@ -193,10 +193,19 @@ describe('verify view-model: ownership modes', () => {
     expect(vm.notice).toBeUndefined();
   });
 
-  it('carries the owner notice for unusual activity', () => {
-    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY', ownership: { registered: true, you: true } }));
-    expect(vm.notice).toMatch(/Unusual activity has been recorded/);
+  it('tells the owner about unusual activity once: the server message already says it, so no second notice', () => {
+    const vm = resultViewModel(
+      outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY', message: UNUSUAL_ACTIVITY_OWNER_COPY.message, ownership: { registered: true, you: true } }),
+    );
+    expect(vm.message).toMatch(/Unusual activity has been recorded/);
+    expect(vm.notice).toBeUndefined();
     expect(vm.tone).toBe('authentic');
+  });
+
+  it('keeps the owner notice when the server message does not mention the unusual activity', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY', ownership: { registered: true, you: true } }));
+    expect(vm.message).not.toMatch(/unusual activity/i);
+    expect(vm.notice).toMatch(/Unusual activity has been recorded/);
   });
 
   it('REGISTERED belongs to someone else', () => {

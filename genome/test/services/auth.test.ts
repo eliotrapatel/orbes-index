@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import {
+  ACCOUNT_LOGIN_THROTTLE,
   ADMIN_LOCKOUT_MS,
   ADMIN_LOCKOUT_THRESHOLD,
   AuthService,
@@ -124,6 +125,33 @@ describe('AuthService', () => {
       await expectDomainError(auth.login({ email: 'garbage', password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
       await expectDomainError(auth.login({ email: addr, password: undefined as unknown as string }, {}), 'INVALID_CREDENTIALS', 401);
       expect((await audit.list({ action: 'account.login_failed', targetId: ok.account.id })).total).toBe(1);
+    });
+
+    it(`throttles an account after ${ACCOUNT_LOGIN_THROTTLE.maxFailures} wrong passwords in 15 minutes, answering with the same generic error`, async () => {
+      expect(ACCOUNT_LOGIN_THROTTLE).toEqual({ maxFailures: 10, windowMs: 15 * 60_000 });
+      const addr = email();
+      const { account } = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
+      const generic = (await expectDomainError(auth.login({ email: email('ghost'), password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401)).publicMessage;
+      for (let i = 0; i < 10; i++) {
+        clock.advance(10_000);
+        await expectDomainError(auth.login({ email: addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+      }
+      // The right password no longer helps while the window lasts, and the answer does not say why.
+      const throttled = await expectDomainError(auth.login({ email: addr, password: PASSWORD }, { ipHash: 'ip-9' }), 'INVALID_CREDENTIALS', 401);
+      expect(throttled.publicMessage).toBe(generic);
+      expect((await audit.list({ action: 'account.login_failed', targetId: account.id })).total).toBe(10);
+      expect((await audit.list({ action: 'account.login_throttled', targetId: account.id })).total).toBe(1);
+
+      clock.advance(15 * 60_000);
+      expect((await auth.login({ email: addr, password: PASSWORD }, {})).account.id).toBe(account.id);
+      const row = await t.db.selectFrom('accounts').select(['failed_logins', 'failed_logins_since']).where('id', '=', account.id).executeTakeFirstOrThrow();
+      expect(row).toEqual({ failed_logins: 0, failed_logins_since: null });
+
+      // Failures spread beyond the window start a new window instead of adding up.
+      for (let i = 0; i < 9; i++) await expectDomainError(auth.login({ email: addr, password: 'wrong password!!' }, {}), 'INVALID_CREDENTIALS', 401);
+      clock.advance(16 * 60_000);
+      for (let i = 0; i < 9; i++) await expectDomainError(auth.login({ email: addr, password: 'wrong password!!' }, {}), 'INVALID_CREDENTIALS', 401);
+      expect((await auth.login({ email: addr, password: PASSWORD }, {})).account.id).toBe(account.id);
     });
 
     it('verifies NFKC-equivalent passwords', async () => {

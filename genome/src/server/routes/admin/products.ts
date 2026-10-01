@@ -32,6 +32,7 @@ import {
   serviceParams,
   transitionBody,
   warrantyActivateBody,
+  warrantyExtendBody,
 } from '../../http/schemas.js';
 import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import { toCodeRecord, toGenomeRecord, toProductRecord, type IssueProductInput } from '../../services/issuance.js';
@@ -229,6 +230,12 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { productId } = parse(productParams, request.params);
     const b = parse(optionalReasonBody, request.body);
     return { warranty: await warranty.void(productId, b.reason ?? null, adminActor(request)) };
+  });
+
+  app.post('/api/admin/products/:productId/warranty/extend', async (request) => {
+    const { productId } = parse(productParams, request.params);
+    const b = parse(warrantyExtendBody, request.body);
+    return { warranty: await warranty.extend(productId, b.months, adminActor(request)) };
   });
 
   app.post('/api/admin/products/:productId/services', async (request, reply) => {

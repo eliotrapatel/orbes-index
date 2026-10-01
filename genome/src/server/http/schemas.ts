@@ -157,6 +157,8 @@ export const adminLoginBody = body({
   totp: z.preprocess((v) => (v === '' ? null : v), z.string().max(16).regex(/^[0-9 ]+$/, 'Must be digits').nullable().optional()),
 });
 
+export const adminParams = z.object({ id: uuid });
+
 export const totpEnableBody = body({
   secret: z.string().trim().min(16).max(128).regex(/^[A-Za-z2-7=\s]+$/, 'Must be base32'),
   code: z.string().trim().min(6).max(16).regex(/^[0-9 ]+$/, 'Must be digits'),
@@ -242,6 +244,10 @@ export const openServiceBody = body({
   location: z.preprocess((v) => (v === '' ? null : v), z.string().max(200, 'At most 200 characters').nullable().optional()),
   notes: z.preprocess((v) => (v === '' ? null : v), z.string().max(4000, 'At most 4000 characters').nullable().optional()),
   performedBy: z.preprocess((v) => (v === '' ? null : v), z.string().max(200, 'At most 200 characters').nullable().optional()),
+});
+
+export const warrantyExtendBody = body({
+  months: z.number().int('Must be a whole number of months').min(1, 'At least 1 month').max(120, 'At most 120 months'),
 });
 
 export const completeServiceBody = optionalBody({

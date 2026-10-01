@@ -103,7 +103,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     vm.footnote ? h('p', { class: 'result__footnote', text: vm.footnote }) : null,
     h(
       'p',
-      { class: 'result__meta nano soft' },
+      { class: 'result__meta' },
       vm.verifiedAt ? h('span', { text: `VERIFIED ${vm.verifiedAt}` }) : null,
       vm.reference ? h('span', { text: `REF ${vm.reference}` }) : null,
     ),

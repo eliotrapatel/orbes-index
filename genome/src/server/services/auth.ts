@@ -39,6 +39,16 @@ import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
 export const PASSWORD_MIN_LENGTH = 12;
 export const ADMIN_LOCKOUT_THRESHOLD = 10;
 export const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
+/**
+ * Per-account login throttle for customers: after `maxFailures` wrong
+ * passwords inside `windowMs` (counted from the first failure of the window),
+ * further attempts on that account are refused WITHOUT checking the password,
+ * with the same INVALID_CREDENTIALS answer as any wrong password (no lockout
+ * oracle, no account enumeration). The window then expires on its own; a
+ * successful login resets the counter. The per-IP `auth` rate limit still
+ * applies on top.
+ */
+export const ACCOUNT_LOGIN_THROTTLE = Object.freeze({ maxFailures: 10, windowMs: 15 * 60 * 1000 });
 const TOTP_KEY_INFO = 'orbes/admin-totp/v1';
 const MAX_EMAIL = 254;
 const MAX_DISPLAY_NAME = 80;
@@ -80,6 +90,12 @@ export interface AdminProfile {
   role: AdminRole;
   totpEnabled: boolean;
   createdAt: Date;
+}
+
+export interface AdminSummary extends AdminProfile {
+  /** Temporarily locked after repeated failed sign-ins. */
+  locked: boolean;
+  disabled: boolean;
 }
 
 export interface RegisterAccountInput {
@@ -226,8 +242,14 @@ export class AuthService {
       await this.burnTime(password);
       throw invalidCredentials();
     }
+    if (this.accountThrottled(account)) {
+      // Same cost and answer as a wrong password; the password is not even looked at.
+      await this.burnTime(password);
+      await this.audit.record({ actor: accountActor(account.id, meta), action: 'account.login_throttled', targetType: 'account', targetId: account.id });
+      throw invalidCredentials();
+    }
     if (!(await verifySecret(password, account.password_hash))) {
-      await this.audit.record({ actor: accountActor(account.id, meta), action: 'account.login_failed', targetType: 'account', targetId: account.id });
+      await this.recordAccountFailure(account.id, meta);
       throw invalidCredentials();
     }
     if (account.status === 'LOCKED') throw new DomainError('ACCOUNT_LOCKED', 403, 'This account is locked. Please contact client services.');
@@ -236,6 +258,9 @@ export class AuthService {
     const rehash = needsRehash(account.password_hash) ? await hashSecret(password) : undefined;
     return inTransaction(this.db, async (tx) => {
       if (rehash) await tx.updateTable('accounts').set({ password_hash: rehash, updated_at: this.clock() }).where('id', '=', account.id).execute();
+      if (account.failed_logins !== 0 || account.failed_logins_since !== null) {
+        await tx.updateTable('accounts').set({ failed_logins: 0, failed_logins_since: null }).where('id', '=', account.id).execute();
+      }
       const session = await this.sessions.create(
         { subjectType: 'account', subjectId: account.id, ipHash: meta.ipHash, userAgent: meta.userAgent, replaceToken: meta.previousToken },
         tx,
@@ -415,14 +440,37 @@ export class AuthService {
     });
   }
 
-  /** Remove an admin's TOTP enrolment (lost device, after identity checks). */
-  async disableTotp(adminId: string, actor: Actor): Promise<void> {
-    await inTransaction(this.db, async (tx) => {
+  /**
+   * Remove an admin's TOTP enrolment (lost device, after identity checks; the
+   * console's reset action, ADMIN only). Every session of that admin ends in
+   * the same transaction: they were opened with the lost device. The admin
+   * then signs in with the password and enrols a new authenticator.
+   */
+  async disableTotp(adminId: string, actor: Actor): Promise<AdminProfile> {
+    return inTransaction(this.db, async (tx) => {
       const admin = await this.requireAdmin(tx, adminId);
       if (admin.totp_secret_enc === null) throw conflict('TOTP_NOT_ENABLED', 'Two-factor authentication is not enabled.');
-      await tx.updateTable('admin_users').set({ totp_secret_enc: null, updated_at: this.clock() }).where('id', '=', admin.id).execute();
-      await this.audit.record({ actor, action: 'admin.totp.disable', targetType: 'admin', targetId: admin.id }, tx);
+      const row = await tx
+        .updateTable('admin_users')
+        .set({ totp_secret_enc: null, updated_at: this.clock() })
+        .where('id', '=', admin.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      const sessionsRevoked = await this.sessions.revokeAllForSubject('admin', admin.id, {}, tx);
+      await this.audit.record({ actor, action: 'admin.totp.disable', targetType: 'admin', targetId: admin.id, details: { sessionsRevoked } }, tx);
+      return adminProfile(row);
     });
+  }
+
+  /** Console users, by email (ADMIN view: role, second factor, lock and disable state; never secrets). */
+  async listAdmins(): Promise<AdminSummary[]> {
+    const rows = await this.db.selectFrom('admin_users').selectAll().orderBy('email_normalized').execute();
+    const now = this.clock().getTime();
+    return rows.map((r) => ({
+      ...adminProfile(r),
+      locked: r.locked_until !== null && r.locked_until.getTime() > now,
+      disabled: r.disabled_at !== null,
+    }));
   }
 
   /** First start: create the configured ADMIN when no admin exists yet. Idempotent and race-safe. */
@@ -482,6 +530,38 @@ export class AuthService {
     this.dummyHash ??= hashSecret(`orbes-dummy-${Math.random()}`);
     const candidate = password && Buffer.byteLength(password, 'utf8') <= MAX_SECRET_BYTES ? password : 'x';
     await verifySecret(candidate, await this.dummyHash);
+  }
+
+  private accountThrottled(a: Pick<AccountRow, 'failed_logins' | 'failed_logins_since'>): boolean {
+    if (a.failed_logins < ACCOUNT_LOGIN_THROTTLE.maxFailures || a.failed_logins_since === null) return false;
+    return this.clock().getTime() - a.failed_logins_since.getTime() < ACCOUNT_LOGIN_THROTTLE.windowMs;
+  }
+
+  /** Count a wrong customer password in the current throttle window (a new window once the old one expired). */
+  private async recordAccountFailure(accountId: string, meta: ClientMeta): Promise<void> {
+    const now = this.clock();
+    const windowStart = new Date(now.getTime() - ACCOUNT_LOGIN_THROTTLE.windowMs);
+    await inTransaction(this.db, async (tx) => {
+      const r = await tx
+        .updateTable('accounts')
+        .set({
+          failed_logins: sql<number>`CASE WHEN failed_logins_since IS NULL OR failed_logins_since <= ${windowStart} THEN 1 ELSE failed_logins + 1 END`,
+          failed_logins_since: sql<Date>`CASE WHEN failed_logins_since IS NULL OR failed_logins_since <= ${windowStart} THEN ${now}::timestamptz ELSE failed_logins_since END`,
+        })
+        .where('id', '=', accountId)
+        .returning('failed_logins')
+        .executeTakeFirstOrThrow();
+      await this.audit.record(
+        {
+          actor: accountActor(accountId, meta),
+          action: 'account.login_failed',
+          targetType: 'account',
+          targetId: accountId,
+          details: { failedLogins: r.failed_logins, throttled: r.failed_logins >= ACCOUNT_LOGIN_THROTTLE.maxFailures },
+        },
+        tx,
+      );
+    });
   }
 
   /** Count a failed admin login (committed on its own) and lock at the threshold. */

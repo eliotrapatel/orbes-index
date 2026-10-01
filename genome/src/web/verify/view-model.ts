@@ -187,7 +187,10 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     reference: shortReference(outcome.scanId),
   };
   if (title.sub) vm.titleSub = title.sub;
-  if (outcome.notice === 'UNUSUAL_ACTIVITY') vm.notice = 'Unusual activity has been recorded for this identity. ORBES Client Services can assist you.';
+  // Said once: the server's owner message already carries the sentence; the notice only covers a message that does not.
+  if (outcome.notice === 'UNUSUAL_ACTIVITY' && !/unusual activity/i.test(vm.message)) {
+    vm.notice = 'Unusual activity has been recorded for this identity. ORBES Client Services can assist you.';
+  }
 
   // GENOME: shown whenever the server sends it (authentic, suspicious, revoked).
   const g = outcome.genome;
