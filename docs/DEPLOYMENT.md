@@ -90,7 +90,7 @@ https://theorbes.com/verify/*    301 → https://verify.theorbes.com/verify/$1
 - **HSTS caveat.** The service's responses would carry `includeSubDomains` for `theorbes.com`, which forces HTTPS on **every** subdomain of `theorbes.com` for two years. Only choose Option B when every subdomain already serves HTTPS, or override the header at the edge.
 - Serve the admin console on a separate, access-restricted hostname, or block `/admin*` and `/api/admin/*` at the edge for everyone outside the staff network.
 
-Example nginx server block for Option B. Option A is the same block with `location / { proxy_pass … }` on `verify.theorbes.com`.
+Example nginx configuration for Option B: a shared proxy include, then the server block. For Option A, use the same include in a `verify.theorbes.com` server block with a single `location / { proxy_pass http://127.0.0.1:8080; include conf.d/orbes-genome-proxy.inc; }`.
 
 ```nginx
 # /etc/nginx/conf.d/orbes-genome-proxy.inc
@@ -99,7 +99,10 @@ proxy_set_header X-Forwarded-For   $remote_addr;   # overwrite: never forward a 
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_http_version 1.1;
 proxy_read_timeout 35s;                            # the app's request timeout is 30 s
+```
 
+```nginx
+# /etc/nginx/conf.d/theorbes.com.conf
 server {
     listen 443 ssl;
     http2 on;
