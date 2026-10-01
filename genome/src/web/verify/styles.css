@@ -506,6 +506,13 @@ body[data-screen="scan"] .corners {
   animation: none;
 }
 
+.view--result.is-compact {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: calc(96px + var(--safe-bottom));
+}
+
 .view--result > * {
   opacity: 0;
   animation: brand-rise 1.4s var(--ease) both;
@@ -560,6 +567,13 @@ body[data-screen="scan"] .corners {
   letter-spacing: 0.3em;
   text-indent: 0.3em;
   line-height: 1.6;
+}
+
+.result__message,
+.message__text,
+.result__footnote,
+.result__help .prose {
+  text-wrap: balance;
 }
 
 .result__message {

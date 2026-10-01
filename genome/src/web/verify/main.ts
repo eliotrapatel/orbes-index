@@ -278,6 +278,7 @@ class App {
       const vm = resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset() });
       const view = resultView(vm, {
         onScanAgain: () => void this.startScan(),
+        onRefresh: () => void this.retryVerify(input),
         ownership: { api: this.api, session: this.session },
       });
       if (await this.swap(view.root, 'result')) this.result = view;

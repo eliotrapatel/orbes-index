@@ -26,6 +26,8 @@ import { tabsView } from './tabs.js';
 
 export interface ResultHandlers {
   onScanAgain(): void;
+  /** Verify the same code again (after an ownership change). */
+  onRefresh?(): void;
   ownership: Omit<OwnershipDeps, 'onRescan'>;
 }
 
@@ -38,6 +40,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   const root = viewRoot('result', 'result-title');
   root.dataset.state = vm.state;
   root.dataset.tone = vm.tone;
+  // Short results (no genome, no tabs) sit in the optical centre instead of hanging from the top.
+  if (!vm.genome && vm.tabs.length === 0) root.classList.add('is-compact');
   let ownership: OwnershipPanel | null = null;
 
   const head = h(
@@ -86,7 +90,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         case 'care':
           return h('div', { class: 'panel' }, h('p', { class: 'prose panel__care', text: vm.care }));
         case 'ownership':
-          ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain });
+          ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh });
           return h('div', { class: 'panel' }, ownership.root);
       }
     };
