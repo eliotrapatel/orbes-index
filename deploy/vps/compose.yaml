@@ -1,0 +1,243 @@
+# ORBES GENOME CODE: production stack for ONE OVH VPS (Ubuntu 26.04 LTS).
+#
+#   internet ──80/443──▶ caddy ──edge (internal)──▶ app:8080 ──backend (internal)──▶ postgres:5432
+#
+# * Only Caddy publishes ports (80/tcp, 443/tcp, 443/udp). The app and
+#   PostgreSQL sit on internal networks: unreachable from the internet and
+#   without outbound internet access themselves.
+# * Caddy has a FIXED address on the `edge` network (CADDY_EDGE_IP) and the
+#   app trusts exactly that address (TRUST_PROXY): the client IP the app sees
+#   is the one Caddy determined, never a client-supplied X-Forwarded-For.
+# * Configuration: deploy/vps/.env (from .env.example, created by
+#   scripts/setup.sh, mode 0600, never committed). Compose reads it both for
+#   ${…} interpolation below and as the app's env_file.
+#
+# Day-to-day commands (run from deploy/vps/, as the `orbes` user):
+#   scripts/deploy.sh                       build the current commit, roll out, smoke test, roll back on failure
+#   docker compose ps                       state and health of the three services
+#   docker compose logs -f app caddy        logs (JSON lines)
+#   scripts/backup.sh / scripts/restore.sh  encrypted backups (docs/DEPLOYMENT.md §15)
+#
+# The app image is built by scripts/deploy.sh (docker build, tagged with the
+# git commit, optional extra_ca build secret) and selected with
+# ORBES_IMAGE_TAG; `docker compose build app` works as well without the secret.
+
+name: orbes
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "${HTTP_PORT:-80}:80/tcp"
+      - "${HTTPS_PORT:-443}:443/tcp"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in deploy/vps/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/vps/.env}
+      TLS_MODE: ${TLS_MODE:-acme}
+      EDGE_MODE: ${EDGE_MODE:-direct}
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-0.0.0.0/0 ::/0}
+    labels:
+      # scripts/deploy.sh sets this to the hash of Caddyfile + caddy.d/: a changed
+      # configuration recreates the container (bind-mounted files can go stale).
+      orbes.caddy-config-hash: ${CADDY_CONFIG_HASH:-unset}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy.d:/etc/caddy/caddy.d:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    working_dir: /etc/caddy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${CADDY_MEM_LIMIT:-256m}
+    cpus: ${CADDY_CPUS:-1.0}
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *logging
+    networks:
+      public: {}
+      edge:
+        ipv4_address: ${CADDY_EDGE_IP:-172.30.80.2}
+
+  app:
+    image: orbes-genome:${ORBES_IMAGE_TAG:-latest}
+    build:
+      context: ../../genome
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      # Wired by this file; the secrets and tunables come from .env.
+      ORBES_ENV: production
+      PUBLIC_ORIGIN: https://${APP_DOMAIN:?set APP_DOMAIN in deploy/vps/.env}
+      DATABASE_URL: postgres://${POSTGRES_USER:-orbes}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/vps/.env}@postgres:5432/${POSTGRES_DB:-orbes}
+      HOST: 0.0.0.0
+      PORT: "8080"
+      TRUST_PROXY: ${CADDY_EDGE_IP:-172.30.80.2}
+      KEY_PROVIDER: local
+      KEY_DIR: /var/lib/orbes/keys
+      MIGRATE_ON_START: "true"
+      GEO_MODE: ${GEO_MODE:-mmdb}
+      GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-geoip.mmdb}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - keys:/var/lib/orbes/keys
+      - geoip:/var/lib/orbes/geoip:ro
+    # Immutable container: code is read-only, uid 1000 (image USER node); tsx and npm caches go to tmpfs.
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      - /home/node:size=16m,uid=1000,gid=1000
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${APP_MEM_LIMIT:-768m}
+    cpus: ${APP_CPUS:-1.5}
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging: *logging
+    networks:
+      edge: {}
+      backend: {}
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orbes}
+      POSTGRES_USER: ${POSTGRES_USER:-orbes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/vps/.env}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    # Sized for a VPS with 2–4 GB of RAM where PostgreSQL gets ~1 GB (PG_MEM_LIMIT).
+    # Raise shared_buffers / effective_cache_size together with the limit.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-768MB}
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+      - -c
+      - wal_buffers=8MB
+      - -c
+      - min_wal_size=128MB
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_checkpoints=on
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 256mb
+    # The entrypoint needs to chown the data directory and drop to the postgres user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${PG_MEM_LIMIT:-1g}
+    cpus: ${PG_CPUS:-1.5}
+    pids_limit: 256
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *logging
+    networks:
+      backend: {}
+
+  # One-off tool (scripts/geoip-update.sh): downloads and validates the GeoIP
+  # database into the geoip volume. Never started by `up` (profile), and the only
+  # service besides Caddy with outbound internet access.
+  geoip-update:
+    profiles: ["tools"]
+    image: orbes-genome:${ORBES_IMAGE_TAG:-latest}
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+      - /home/node:size=16m,uid=1000,gid=1000
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - geoip:/var/lib/orbes/geoip
+      - ./scripts/geoip-fetch.mjs:/opt/orbes/geoip-fetch.mjs:ro
+    environment:
+      GEOIP_PROVIDER: ${GEOIP_PROVIDER:-dbip}
+      GEOIP_FILE: ${GEOIP_FILE:-geoip.mmdb}
+      GEOIP_DIR: /var/lib/orbes/geoip
+      MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID:-}
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
+      HTTPS_PROXY: ${GEOIP_HTTPS_PROXY:-}
+      NODE_USE_ENV_PROXY: "1"
+    entrypoint: ["node", "/opt/orbes/geoip-fetch.mjs"]
+    networks:
+      tools: {}
+
+volumes:
+  pgdata:
+  keys:
+  geoip:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # Caddy's network with the outside world (published ports, ACME).
+  public: {}
+  # Caddy ↔ app. Internal (no route out); fixed subnet so TRUST_PROXY can name Caddy's address.
+  edge:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.80.0/28}
+  # app ↔ PostgreSQL. Internal.
+  backend:
+    internal: true
+  # Outbound access for one-off tools (geoip-update).
+  tools: {}

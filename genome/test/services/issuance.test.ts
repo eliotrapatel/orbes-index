@@ -448,7 +448,7 @@ describe('IssuanceService.renderCode', () => {
   it('renders SVG with the core renderer', async () => {
     const svg = await w.issuance.renderCode(codeId, 'svg');
     expect(svg.contentType).toMatch(/^image\/svg\+xml/);
-    expect(svg.filename).toBe('ORBES-O26-J-00184-I1-black-30mm.svg');
+    expect(svg.filename).toBe('ORBES-O26-J-00184-I1-classic-30mm.svg');
     const body = svg.body as string;
     expect(body.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-25 -25 50 50" width="30mm" height="30mm">')).toBe(true);
     expect(body).toContain('<title>ORBES CODE O26-J-00184</title>');
@@ -494,7 +494,7 @@ describe('IssuanceService.renderCode', () => {
   it('renders a vector PDF sized to the artifact plus label', async () => {
     const pdf = await w.issuance.renderCode(codeId, 'pdf', { label: true, widthMm: 25.4 });
     expect(pdf.contentType).toBe('application/pdf');
-    expect(pdf.filename).toBe('ORBES-O26-J-00184-I1-black-25.4mm-label.pdf');
+    expect(pdf.filename).toBe('ORBES-O26-J-00184-I1-classic-25.4mm-label.pdf');
     const text = Buffer.from(pdf.body as Uint8Array).toString('latin1');
     expect(text.startsWith('%PDF-1.4')).toBe(true);
     expect(text.trimEnd().endsWith('%%EOF')).toBe(true);

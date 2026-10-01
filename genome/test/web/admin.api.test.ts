@@ -124,13 +124,13 @@ describe('AdminApi', () => {
 
   it('downloads artifacts as blobs with a safe file name, dpi only for PNG', async () => {
     const { fetch, calls } = fakeFetch(
-      new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-black-30mm.svg"' } }),
+      new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"' } }),
       new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { 'content-type': 'image/png' } }),
     );
     const api = new AdminApi({ fetch });
     const svg = await api.artifact('c0de', 'svg', { widthMm: 30, theme: 'classic', label: true, dpi: 600 });
     expect(calls[0].url).toBe('/api/admin/codes/c0de/artifact.svg?widthMm=30&theme=classic&label=true');
-    expect(svg.filename).toBe('ORBES-O26-J-00001-I1-black-30mm.svg');
+    expect(svg.filename).toBe('ORBES-O26-J-00001-I1-classic-30mm.svg');
     expect(await svg.blob.text()).toBe('<svg/>');
     const png = await api.artifact('c0de', 'png', { dpi: 1200 });
     expect(calls[1].url).toBe('/api/admin/codes/c0de/artifact.png?dpi=1200');

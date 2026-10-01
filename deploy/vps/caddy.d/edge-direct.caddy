@@ -1,0 +1,7 @@
+# EDGE_MODE=direct (default): clients connect straight to this VPS.
+# Imported into the global `servers` options of ../Caddyfile.
+#
+# No trusted_proxies: Caddy ignores every client-supplied X-Forwarded-* header
+# and {client_ip} is always the TCP peer. HTTP/3 needs UDP 443 (published by
+# compose.yaml, allowed by bootstrap-ubuntu.sh).
+protocols h1 h2 h3

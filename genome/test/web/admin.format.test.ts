@@ -77,7 +77,7 @@ describe('admin api helpers', () => {
   });
 
   it('extracts a safe file name from Content-Disposition', () => {
-    expect(filenameFromDisposition('attachment; filename="ORBES-O26-J-00001-I1-black-30mm.svg"', 'x')).toBe('ORBES-O26-J-00001-I1-black-30mm.svg');
+    expect(filenameFromDisposition('attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"', 'x')).toBe('ORBES-O26-J-00001-I1-classic-30mm.svg');
     expect(filenameFromDisposition("attachment; filename*=UTF-8''ORBES%20code.pdf", 'x')).toBe('ORBES_code.pdf');
     expect(filenameFromDisposition('attachment; filename="../../etc/passwd"', 'x')).toBe('_.._etc_passwd');
     expect(filenameFromDisposition('attachment; filename=".hidden"', 'fallback.svg')).toBe('hidden');
