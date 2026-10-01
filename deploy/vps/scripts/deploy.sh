@@ -12,10 +12,15 @@
 #   1. Export the ref (default HEAD) with `git archive` into a temporary build
 #      context: the working tree is never checked out or modified, and
 #      uncommitted changes are never deployed by accident (--worktree builds
-#      the working tree as it is, tagged <commit>-dirty-<time>).
+#      the working tree as it is, tagged <commit>-dirty-<time>). Its files are
+#      made readable by everyone whatever the caller's umask (setup.sh runs
+#      under 077): the image's `node` user must read its root-owned sources.
 #   2. docker build -> orbes-genome:<commit12>. BUILD_EXTRA_CA_FILE (.env) is
 #      passed as the extra_ca BuildKit secret when set (TLS-inspecting proxy).
-#   3. The Caddy configuration is validated with the values of .env (a typo
+#      An existing image of that commit is reused, unless its user cannot read
+#      its sources (built under umask 077 before step 1 normalised them).
+#   3. The Caddy configuration is made readable by the Caddy container (it has
+#      no capabilities) and validated with the values of .env (a typo
 #      must not take the only public entry point down), then an encrypted
 #      backup (scripts/backup.sh) when the stack is already running and holds
 #      data (--no-backup skips it).
@@ -112,6 +117,7 @@ else
     git -C "$REPO_DIR" archive --format=tar "$COMMIT" genome | tar -C "$BUILD_CTX" -xf - --strip-components=1
   fi
   [[ -f "$BUILD_CTX/Dockerfile" ]] || die "no genome/Dockerfile in the build context"
+  normalize_build_context "$BUILD_CTX"
 
   # ── 2. Build ───────────────────────────────────────────────────────────────
   step "build orbes-genome:$TAG"
@@ -126,7 +132,15 @@ else
   for v in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
     if [[ -n "${!v:-}" ]]; then build_args+=(--build-arg "$v=${!v}"); fi
   done
+  reuse=false
   if docker image inspect "$IMAGE" >/dev/null 2>&1 && [[ "$WORKTREE" != true ]]; then
+    if image_sources_readable "$IMAGE"; then
+      reuse=true
+    else
+      warn "$IMAGE exists, but its user cannot read its sources (built under a restrictive umask): rebuilding it"
+    fi
+  fi
+  if [[ "$reuse" == true ]]; then
     log "$IMAGE already exists: reusing it"
   else
     run env DOCKER_BUILDKIT=1 docker build "${build_args[@]}" "$BUILD_CTX"
@@ -135,6 +149,7 @@ fi
 
 # ── 3. Caddy configuration, pre-deploy backup ─────────────────────────────
 step "Caddy configuration"
+ensure_caddy_config_readable
 caddy_validate || die "fix $ENV_FILE (or the Caddyfile) first: nothing was changed"
 
 PREV_TAG="$(env_get ORBES_IMAGE_TAG latest)"
@@ -170,6 +185,7 @@ rollout() {
   fi
   db_prepare || return 1
   compose up -d --remove-orphans || return 1
+  recreate_caddy_if_fixed || return 1
   wait_healthy app "$TIMEOUT" && wait_healthy caddy 60
 }
 

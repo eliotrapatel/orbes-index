@@ -78,6 +78,10 @@ COPY src/core ./src/core
 COPY src/server ./src/server
 COPY scripts/db.ts scripts/keys.ts scripts/admin.ts scripts/geoip-update.ts ./scripts/
 COPY --from=web /app/dist/web ./dist/web
+# COPY keeps the build context's modes: a context extracted under a restrictive
+# umask (0600 files, 0700 directories) would leave the sources unreadable for
+# `node`. Still root-owned and read-only for it.
+RUN chmod -R a+rX package.json package-lock.json tsconfig.json src scripts dist
 
 USER node
 EXPOSE 8080

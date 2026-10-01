@@ -106,6 +106,13 @@ describe('Dockerfile, docker-compose.yml, .dockerignore', () => {
     for (const s of [...SECRETS, 'DATABASE_URL']) expect(dockerfile, s).not.toMatch(new RegExp(`^(ENV|ARG)\\b.*\\b${s}\\b`, 'm'));
   });
 
+  it('keeps the root-owned sources readable by the node user whatever the modes of the build context', () => {
+    // A context extracted under umask 077 (setup.sh → deploy.sh) once shipped 0600 sources: EACCES at start.
+    const fix = dockerfile.indexOf('\nRUN chmod -R a+rX package.json package-lock.json tsconfig.json src scripts dist\n');
+    expect(fix).toBeGreaterThan(dockerfile.lastIndexOf('\nCOPY '));
+    expect(fix).toBeLessThan(dockerfile.indexOf('\nUSER node\n'));
+  });
+
   it('runs the app hardened next to postgres:17 with persistent volumes, never publishing the database', () => {
     expect(compose).toMatch(/image: postgres:17\b/);
     expect(compose).toMatch(/POSTGRES_PASSWORD: \$\{POSTGRES_PASSWORD:\?/);

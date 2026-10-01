@@ -175,10 +175,12 @@ fi
 step "start the stack"
 CADDY_CONFIG_HASH="$(cat "$STACK_DIR/Caddyfile" "$STACK_DIR"/caddy.d/*.caddy | sha256sum | cut -c1-16)"
 export CADDY_CONFIG_HASH
+ensure_caddy_config_readable
 compose up -d postgres
 wait_healthy postgres 180 || die "postgres did not become healthy"
 db_prepare || die "database preparation (role, migrations of orbes-genome:$TAG, privileges) failed"
 compose up -d
+recreate_caddy_if_fixed
 wait_healthy app 240 || die "the app is not healthy after the restore: docker compose logs app"
 wait_healthy caddy 60 || die "caddy is not healthy"
 body="$(https_get /api/v1/health)" || die "health check through Caddy failed: $body"

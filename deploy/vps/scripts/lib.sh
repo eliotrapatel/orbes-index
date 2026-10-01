@@ -242,6 +242,50 @@ caddy_validate() {
   fi
 }
 
+# Caddy runs as root WITHOUT capabilities (compose.yaml: cap_drop ALL), so it reads its
+# bind-mounted configuration through the "other" permission bits only. A checkout made under
+# a restrictive umask (0600 files, 0700 directories) would crash-loop Caddy, while
+# caddy_validate (default capabilities) still passes. These files hold no secret; nothing
+# else in the checkout (.env, .state/) is touched. Sets CADDY_CONFIG_FIXED=true when it
+# changed something: see recreate_caddy_if_fixed.
+CADDY_CONFIG_FIXED=false
+ensure_caddy_config_readable() {
+  local unreadable
+  unreadable="$(find "$STACK_DIR/Caddyfile" "$STACK_DIR/caddy.d" \( -type f ! -perm -004 \) -o \( -type d ! -perm -005 \))"
+  [[ -n "$unreadable" ]] || return 0
+  log "making the Caddy configuration readable by the Caddy container (no capabilities): ${unreadable//$'\n'/ }"
+  run chmod -R a+rX "$STACK_DIR/Caddyfile" "$STACK_DIR/caddy.d"
+  if [[ "$DRY_RUN" != true ]]; then CADDY_CONFIG_FIXED=true; fi
+}
+
+# After `compose up -d`: a Caddy container started while its configuration was unreadable is
+# crash-looping, and the label hash (file contents) has not changed, so compose keeps it. A
+# fresh container also resets the restart count that wait_healthy treats as a crash loop.
+recreate_caddy_if_fixed() {
+  [[ "$CADDY_CONFIG_FIXED" == true ]] || return 0
+  log "recreating Caddy: its configuration was unreadable until now"
+  compose up -d --force-recreate --no-deps caddy
+}
+
+# normalize_build_context DIR: everything below DIR readable (directories traversable) by
+# everyone; DIR itself, made 0700 by mktemp, is left alone, so nothing in it is ever
+# reachable by other local users, and symbolic links are skipped (chmod would follow them
+# out of DIR). GNU tar, run by a non-root user, applies the umask, and setup.sh runs (and
+# calls deploy.sh) under umask 077: COPY keeps those 0600/0700 modes, root-owned, and the
+# image's `node` user could not read its own sources (EACCES on /app/package.json).
+normalize_build_context() {
+  local dir=$1
+  [[ -d "$dir" ]] || die "normalize_build_context: $dir is not a directory"
+  find "$dir" -mindepth 1 ! -type l -exec chmod a+rX {} +
+}
+
+# image_sources_readable IMAGE: the image's own user can read /app/package.json (an image
+# built before normalize_build_context, under umask 077, cannot: EACCES at start).
+image_sources_readable() {
+  docker run --rm --network none --entrypoint node "$1" \
+    -e 'require("fs").accessSync("package.json", require("fs").constants.R_OK)' >/dev/null 2>&1
+}
+
 # Root CA of Caddy's internal issuer (TLS_MODE=internal), for curl --cacert.
 caddy_internal_ca() {
   local out=$1

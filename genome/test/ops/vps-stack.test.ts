@@ -16,14 +16,18 @@
  *    trusts no proxy in direct mode, strips query strings and headers from the
  *    access log and leaves HSTS to the app;
  *  - the scripts are strict bash with --help, and the destructive ones have
- *    --dry-run; the systemd units point at scripts that exist.
+ *    --dry-run; the systemd units point at scripts that exist;
+ *  - whatever the operator's umask, the image's sources and Caddy's
+ *    bind-mounted configuration stay readable (lib.sh helpers run in bash).
  *
- * Static checks only (no Docker): the stack itself is exercised by bringing it
- * up (docs/DEPLOYMENT.md §15.12).
+ * No Docker here: the stack itself is exercised by bringing it up
+ * (docs/DEPLOYMENT.md §15.12).
  */
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { BlockList } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -369,6 +373,82 @@ describe('deploy/vps scripts and systemd units', () => {
     // Many deploys in a day (pre-deploy backups) never prune the nightly history.
     const backup = read(STACK, 'scripts', 'backup.sh');
     expect(backup).toMatch(/prune "\$DAILY" "\$KEEP_DAILY" scheduled\nprune "\$DAILY" "\$KEEP_DAILY" event\n/);
+  });
+
+  it("keep the image's sources and Caddy's configuration readable whatever the operator's umask", () => {
+    // setup.sh runs (and calls deploy.sh) under umask 077: the image once shipped 0600 sources (EACCES).
+    const deploy = read(STACK, 'scripts', 'deploy.sh');
+    const normalize = deploy.indexOf('normalize_build_context "$BUILD_CTX"');
+    expect(normalize).toBeGreaterThan(deploy.indexOf('git -C "$REPO_DIR" archive'));
+    expect(normalize).toBeGreaterThan(deploy.indexOf('| tar -C "$BUILD_CTX" -xf -'));
+    expect(normalize).toBeLessThan(deploy.indexOf('run env DOCKER_BUILDKIT=1 docker build'));
+    // An image built before that fix (same commit, same tag) is never reused as is.
+    expect(deploy).toMatch(/\n {4}if image_sources_readable "\$IMAGE"; then\n {6}reuse=true\n/);
+    // Caddy has no capabilities: its bind-mounted configuration must be readable before it
+    // starts, and a container that crash-looped on it is recreated (restart count reset).
+    expect(deploy.indexOf('ensure_caddy_config_readable')).toBeGreaterThan(0);
+    expect(deploy.indexOf('ensure_caddy_config_readable')).toBeLessThan(deploy.indexOf('caddy_validate || die'));
+    expect(deploy).toMatch(/\n {2}compose up -d --remove-orphans \|\| return 1\n {2}recreate_caddy_if_fixed \|\| return 1\n/);
+    const restore = read(STACK, 'scripts', 'restore.sh');
+    expect(restore.indexOf('ensure_caddy_config_readable')).toBeGreaterThan(0);
+    expect(restore.indexOf('ensure_caddy_config_readable')).toBeLessThan(restore.indexOf('\ncompose up -d\n'));
+    expect(restore).toMatch(/\ncompose up -d\nrecreate_caddy_if_fixed\n/);
+  });
+
+  it('normalise a build context made under umask 077, and open up the Caddy configuration only', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orbes-umask-'));
+    try {
+      const script = [
+        'set -Eeuo pipefail',
+        'umask 077',
+        'source "$1"',
+        // mktemp -d, as deploy.sh: the context root is 0700 from the start.
+        'ctx="$(mktemp -d "$2/ctx.XXXXXX")"; mkdir -p "$ctx/src/core"; echo "{}" >"$ctx/package.json"; echo x >"$ctx/src/core/a.ts"',
+        'echo secret >"$2/outside"; ln -s "$2/outside" "$ctx/link"',
+        'normalize_build_context "$ctx"',
+        'echo "ctx=$ctx"',
+        'STACK_DIR="$2/stack"; mkdir -p "$STACK_DIR/caddy.d"',
+        'echo ":80" >"$STACK_DIR/Caddyfile"; echo "# edge" >"$STACK_DIR/caddy.d/edge-direct.caddy"; echo "SECRET=1" >"$STACK_DIR/.env"',
+        'echo "fixed-before=$CADDY_CONFIG_FIXED"',
+        'ensure_caddy_config_readable',
+        'ensure_caddy_config_readable',
+        'echo "fixed-after=$CADDY_CONFIG_FIXED"',
+      ].join('\n');
+      // Pinned: lib.sh reads DRY_RUN and QUIET from the environment.
+      const env = { ...process.env, DRY_RUN: 'false', QUIET: 'false' };
+      const r = spawnSync('bash', ['-c', script, 'bash', join(STACK, 'scripts', 'lib.sh'), dir], { encoding: 'utf8', env });
+      expect(r.status, r.stderr).toBe(0);
+      const ctx = /^ctx=.*\/(ctx\.\w+)$/m.exec(r.stdout)![1];
+      const mode = (...p: string[]) => statSync(join(dir, ...p)).mode & 0o777;
+      // Readable and traversable by `node`, writable by no one else; the context root stays
+      // private and a symbolic link's target outside it is left alone.
+      expect(mode(ctx)).toBe(0o700);
+      expect(mode(ctx, 'package.json')).toBe(0o644);
+      expect(mode(ctx, 'src')).toBe(0o755);
+      expect(mode(ctx, 'src', 'core', 'a.ts')).toBe(0o644);
+      expect(mode('outside')).toBe(0o600);
+      // Caddy's files opened up once (the second call has nothing to do), which flags the
+      // container for recreation; .env untouched.
+      expect(mode('stack', 'Caddyfile')).toBe(0o644);
+      expect(mode('stack', 'caddy.d')).toBe(0o755);
+      expect(mode('stack', 'caddy.d', 'edge-direct.caddy')).toBe(0o644);
+      expect(mode('stack', '.env')).toBe(0o600);
+      expect(r.stderr.match(/making the Caddy configuration readable/g)).toHaveLength(1);
+      expect(r.stdout).toMatch(/^fixed-before=false$/m);
+      expect(r.stdout).toMatch(/^fixed-after=true$/m);
+      // --dry-run only shows the change.
+      const dry = spawnSync('bash', ['-c', [
+        'set -Eeuo pipefail', 'umask 077', 'source "$1"',
+        'STACK_DIR="$2/dry"; mkdir -p "$STACK_DIR/caddy.d"; echo ":80" >"$STACK_DIR/Caddyfile"',
+        'ensure_caddy_config_readable', 'echo "fixed=$CADDY_CONFIG_FIXED"',
+      ].join('\n'), 'bash', join(STACK, 'scripts', 'lib.sh'), dir], { encoding: 'utf8', env: { ...env, DRY_RUN: 'true' } });
+      expect(dry.status, dry.stderr).toBe(0);
+      expect(dry.stderr).toMatch(/\[dry-run\] chmod -R a\+rX/);
+      expect(mode('dry', 'Caddyfile')).toBe(0o600);
+      expect(dry.stdout).toMatch(/^fixed=false$/m);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('keep the filled-in .env and local state out of git', () => {
