@@ -129,6 +129,8 @@ export const ADVISORY_LOCK = Object.freeze({
   CATEGORY_ALLOCATION: 0x4f52_0002,
   SERIAL_ALLOCATION: 0x4f52_0003,
   KEY_ROTATION: 0x4f52_0004,
+  /** AnomalyService.recordFinding for product-less findings (VALID_SIGNATURE_UNREGISTERED), which no unique index can deduplicate. */
+  ANOMALY_UNREGISTERED: 0x4f52_0101,
 });
 
 /**

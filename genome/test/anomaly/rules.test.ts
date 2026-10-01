@@ -5,7 +5,6 @@ import {
   combineRisk,
   decayFactor,
   deviceDiversity,
-  deviceKey,
   evaluateRules,
   geoDispersion,
   impossibleTravel,
@@ -13,6 +12,7 @@ import {
   postRevocationScan,
   prepareHistory,
   scanVelocity,
+  sourceKey,
   type ScanRecord,
 } from '../../src/server/services/anomaly-rules.js';
 
@@ -160,8 +160,8 @@ describe('SCAN_VELOCITY', () => {
   it('fires above velocityMaxScans within the window from ≥ velocityMinDevices devices', () => {
     const h = burst(21, 5);
     const [f] = scanVelocity(h, at(20 * MIN), cfg);
-    expect(f).toMatchObject({ type: 'SCAN_VELOCITY', severity: 'MEDIUM', weight: 35 });
-    expect(f.details).toMatchObject({ scans: 21, devices: 5 });
+    expect(f).toMatchObject({ type: 'SCAN_VELOCITY', severity: 'MEDIUM', weight: 45 });
+    expect(f.details).toMatchObject({ scans: 21, sources: 5 });
     expect(f.scanIds).toHaveLength(21);
   });
 
@@ -177,12 +177,10 @@ describe('SCAN_VELOCITY', () => {
     expect(scanVelocity(h, at(25 * MIN), cfg)).toEqual([]);
   });
 
-  it('scans without any device identifier share one bucket', () => {
+  it('scans without any source identifier share one bucket', () => {
     const h = Array.from({ length: 30 }, (_, i) => scan(i * MIN, { deviceHash: null }));
     expect(scanVelocity(h, at(30 * MIN), cfg)).toEqual([]);
-    expect(deviceKey({ id: 'x', at: at(0) })).toBe('unknown');
-    expect(deviceKey({ id: 'x', at: at(0), sessionHash: 's' })).toBe('s:s');
-    expect(deviceKey({ id: 'x', at: at(0), ipHash: 'i' })).toBe('i:i');
+    expect(sourceKey({ id: 'x', at: at(0) })).toBe('unknown');
   });
 
   it('reports a past burst at its own time (so it decays)', () => {
@@ -198,7 +196,7 @@ describe('DEVICE_DIVERSITY', () => {
     const h = Array.from({ length: 13 }, (_, i) => scan(i * HOUR, { deviceHash: `d${i}` }));
     const [f] = deviceDiversity(h, at(13 * HOUR), cfg);
     expect(f).toMatchObject({ type: 'DEVICE_DIVERSITY', severity: 'MEDIUM', weight: 30 });
-    expect(f.details.devices).toBe(13);
+    expect(f.details.sources).toBe(13);
     expect(deviceDiversity(h.slice(0, 12), at(13 * HOUR), cfg)).toEqual([]);
   });
 
@@ -210,6 +208,49 @@ describe('DEVICE_DIVERSITY', () => {
   it('owner devices are excluded', () => {
     const h = Array.from({ length: 13 }, (_, i) => scan(i * HOUR, { deviceHash: `d${i}`, byOwner: i < 2 }));
     expect(deviceDiversity(h, at(13 * HOUR), cfg)).toEqual([]);
+  });
+});
+
+describe('distinct sources, not raw device cookies (SEC-7)', () => {
+  it('the source key is the IP pseudonym when present, else the device, else the session', () => {
+    expect(sourceKey({ id: 'x', at: at(0), ipHash: 'i', deviceHash: 'd', sessionHash: 's' })).toBe('i:i');
+    expect(sourceKey({ id: 'x', at: at(0), deviceHash: 'd', sessionHash: 's' })).toBe('d:d');
+    expect(sourceKey({ id: 'x', at: at(0), sessionHash: 's' })).toBe('s:s');
+    expect(sourceKey({ id: 'x', at: at(0), ipHash: '', deviceHash: 'd' })).toBe('d:d');
+    expect(sourceKey({ id: 'x', at: at(0) })).toBe('unknown');
+  });
+
+  it('40 cookie-less scans from one IP (a fresh device cookie each time) are one source: no DEVICE_DIVERSITY, no SCAN_VELOCITY', () => {
+    const h = Array.from({ length: 40 }, (_, i) => scan(i * 30_000, { deviceHash: `fresh-cookie-${i}`, ipHash: 'one-ip', country: 'FR' }));
+    const r = evaluateRules(h, at(40 * 30_000), cfg, { currentScanId: h[39].id });
+    expect(r.findings).toEqual([]);
+    expect(r.riskScore).toBe(0);
+  });
+
+  it('a boutique on one wifi with many phones is one source', () => {
+    const h = Array.from({ length: 30 }, (_, i) => scan(i * MIN, { deviceHash: `phone-${i % 15}`, ipHash: 'boutique-wifi', country: 'FR', lat: 48.9, lon: 2.3 }));
+    expect(evaluateRules(h, at(30 * MIN), cfg).findings).toEqual([]);
+  });
+
+  it('copies scanned in distinct places (distinct IPs) are still flagged', () => {
+    const h = Array.from({ length: 13 }, (_, i) => scan(i * HOUR, { deviceHash: `d${i}`, ipHash: `ip-${i}` }));
+    const [f] = deviceDiversity(h, at(13 * HOUR), cfg);
+    expect(f.details.sources).toBe(13);
+    const burst = Array.from({ length: 30 }, (_, i) => scan(i * 30_000, { deviceHash: `p${i % 15}`, ipHash: `ip-${i % 15}`, country: 'FR', lat: 48.9, lon: 2.3 }));
+    expect(scanVelocity(burst, at(15 * MIN), cfg)).toHaveLength(1);
+  });
+
+  it('a same-place burst from many sources (velocity + diversity) reaches the suspicious threshold', () => {
+    const burst = Array.from({ length: 30 }, (_, i) => scan(i * 30_000, { deviceHash: `p${i % 15}`, ipHash: `ip-${i % 15}`, country: 'FR', lat: 48.9, lon: 2.3 }));
+    const r = evaluateRules(burst, at(29 * 30_000), cfg, { currentScanId: burst[29].id });
+    expect(r.findings.map((f) => f.type).sort()).toEqual(['DEVICE_DIVERSITY', 'SCAN_VELOCITY']);
+    expect(r.riskScore).toBe(62); // 1 − 0.55 · 0.70
+    expect(r.riskScore).toBeGreaterThanOrEqual(cfg.suspiciousThreshold);
+  });
+
+  it('without an IP pseudonym, devices and then sessions stand in', () => {
+    const h = Array.from({ length: 13 }, (_, i) => scan(i * HOUR, { deviceHash: null, sessionHash: `sess-${i}` }));
+    expect(deviceDiversity(h, at(13 * HOUR), cfg)).toHaveLength(1);
   });
 });
 
@@ -288,7 +329,7 @@ describe('scoring', () => {
 
   it('weights table matches the contract', () => {
     expect(ANOMALY_WEIGHTS.IMPOSSIBLE_TRAVEL).toEqual({ severity: 'HIGH', weight: 60 });
-    expect(ANOMALY_WEIGHTS.SCAN_VELOCITY).toEqual({ severity: 'MEDIUM', weight: 35 });
+    expect(ANOMALY_WEIGHTS.SCAN_VELOCITY).toEqual({ severity: 'MEDIUM', weight: 45 });
     expect(ANOMALY_WEIGHTS.DEVICE_DIVERSITY).toEqual({ severity: 'MEDIUM', weight: 30 });
     expect(ANOMALY_WEIGHTS.GEO_DISPERSION).toEqual({ severity: 'HIGH', weight: 45 });
     expect(ANOMALY_WEIGHTS.LOST_STOLEN_SCAN).toEqual({ severity: 'HIGH', weight: 50 });

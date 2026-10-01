@@ -56,6 +56,7 @@
     "db:status": "tsx scripts/db.ts status",
     "db:seed": "tsx scripts/db.ts seed",
     "db:reset-demo": "tsx scripts/db.ts reset-demo",
-    "demo:export": "tsx scripts/export-demo-codes.ts"
+    "demo:export": "tsx scripts/export-demo-codes.ts",
+    "demo": "tsx src/server/index.ts --demo"
   }
 }

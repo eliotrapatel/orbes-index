@@ -138,6 +138,7 @@ rollout() {
 ACTIVE_KEY_CHECK='const keys=JSON.parse(require("fs").readFileSync(0,"utf8"));const list=Array.isArray(keys)?keys:(keys.keys||[]);process.exit(list.some(k=>k.status==="ACTIVE")?0:1)'
 
 ensure_signing_key() {
+  # shellcheck disable=SC2016 # expanded by the container's shell
   if compose exec -T -e ACTIVE_KEY_CHECK="$ACTIVE_KEY_CHECK" app \
     sh -c 'node --import tsx scripts/keys.ts list --json | node -e "$ACTIVE_KEY_CHECK"'; then
     log "an ACTIVE signing key exists"

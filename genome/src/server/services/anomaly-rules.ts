@@ -37,7 +37,8 @@ export type AnomalyType = RuleType | ServiceFindingType;
 /** Severity and weight (0..100) per finding type. Service findings carry the risk score they are stored with. */
 export const ANOMALY_WEIGHTS: Readonly<Record<AnomalyType, { severity: AnomalySeverity; weight: number }>> = Object.freeze({
   IMPOSSIBLE_TRAVEL: { severity: 'HIGH', weight: 60 },
-  SCAN_VELOCITY: { severity: 'MEDIUM', weight: 35 },
+  // 45 (was 35): a same-place burst (velocity ⊕ diversity = 62) crosses the default threshold 60.
+  SCAN_VELOCITY: { severity: 'MEDIUM', weight: 45 },
   DEVICE_DIVERSITY: { severity: 'MEDIUM', weight: 30 },
   GEO_DISPERSION: { severity: 'HIGH', weight: 45 },
   LOST_STOLEN_SCAN: { severity: 'HIGH', weight: 50 },
@@ -51,9 +52,11 @@ export const ANOMALY_WEIGHTS: Readonly<Record<AnomalyType, { severity: AnomalySe
 export interface ScanRecord {
   id: string;
   at: Date;
-  /** Pseudonymous device id (HMAC). Falls back to session, then IP hash, for device counting. */
+  /** Pseudonymous device id (HMAC of the device cookie). Source key when there is no IP pseudonym. */
   deviceHash?: string | null;
+  /** Session pseudonym. Source key when there is neither an IP nor a device pseudonym. */
   sessionHash?: string | null;
+  /** HMAC(pepper, IP). The primary source key (see sourceKey). */
   ipHash?: string | null;
   accountId?: string | null;
   /** The scan was made by the product's current, authenticated owner. */
@@ -129,14 +132,19 @@ export function horizonMs(config: AnomalyConfig): number {
 }
 
 /**
- * Key used to count distinct devices. Without a device cookie the session,
- * then the IP pseudonym stand in; scans with none of them share one bucket,
- * so missing data can never inflate the device count.
+ * Key used to count distinct SOURCES (contract §2.5, SEC-7): the IP
+ * pseudonym when present, else the device cookie pseudonym, else the
+ * session pseudonym. Device cookies are client-controlled (a client that
+ * drops its cookie gets a fresh one on every request), so counting them
+ * would let one machine inflate DEVICE_DIVERSITY / SCAN_VELOCITY at will;
+ * an IP is not free to multiply. A boutique wifi with many phones counts as
+ * one source. Scans with none of them share one bucket, so missing data can
+ * never inflate the count.
  */
-export function deviceKey(s: ScanRecord): string {
+export function sourceKey(s: ScanRecord): string {
+  if (s.ipHash) return `i:${s.ipHash}`;
   if (s.deviceHash) return `d:${s.deviceHash}`;
   if (s.sessionHash) return `s:${s.sessionHash}`;
-  if (s.ipHash) return `i:${s.ipHash}`;
   return 'unknown';
 }
 
@@ -271,35 +279,35 @@ export const impossibleTravel: AnomalyRule = (history, now, config) => {
 
 /**
  * SCAN_VELOCITY: more than velocityMaxScans scans within velocityWindowMin
- * minutes from at least velocityMinDevices distinct devices. The current
- * owner's scans are not counted (owner adjustment, §2.5).
+ * minutes from at least velocityMinDevices distinct sources (sourceKey). The
+ * current owner's scans are not counted (owner adjustment, §2.5).
  */
 export const scanVelocity: AnomalyRule = (history, now, config) => {
   const scans = prepareHistory(history, now, config).filter((s) => !s.byOwner);
   const v = latestWindowViolation(
     scans,
     config.velocityWindowMin * MINUTE_MS,
-    deviceKey,
-    (count, devices) => count > config.velocityMaxScans && devices >= config.velocityMinDevices,
+    sourceKey,
+    (count, sources) => count > config.velocityMaxScans && sources >= config.velocityMinDevices,
   );
   if (!v) return [];
   return [
     finding('SCAN_VELOCITY', scans[v.end].at, scans.slice(v.start, v.end + 1).map((s) => s.id), {
       scans: v.count,
-      devices: v.distinct,
+      sources: v.distinct,
       windowMin: config.velocityWindowMin,
     }),
   ];
 };
 
-/** DEVICE_DIVERSITY: more than deviceMax distinct devices within deviceWindowDays (owner scans excluded). */
+/** DEVICE_DIVERSITY: more than deviceMax distinct sources (sourceKey) within deviceWindowDays (owner scans excluded). */
 export const deviceDiversity: AnomalyRule = (history, now, config) => {
   const scans = prepareHistory(history, now, config).filter((s) => !s.byOwner);
-  const v = latestWindowViolation(scans, config.deviceWindowDays * DAY_MS, deviceKey, (_count, devices) => devices > config.deviceMax);
+  const v = latestWindowViolation(scans, config.deviceWindowDays * DAY_MS, sourceKey, (_count, sources) => sources > config.deviceMax);
   if (!v) return [];
   return [
     finding('DEVICE_DIVERSITY', scans[v.end].at, scans.slice(v.start, v.end + 1).map((s) => s.id), {
-      devices: v.distinct,
+      sources: v.distinct,
       scans: v.count,
       windowDays: config.deviceWindowDays,
     }),

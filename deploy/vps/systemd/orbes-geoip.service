@@ -1,0 +1,27 @@
+# ORBES GENOME CODE: monthly GeoIP database refresh (deploy/vps/scripts/geoip-update.sh).
+# Template: bootstrap-ubuntu.sh replaces @APP_DIR@ and @DEPLOY_USER@.
+# Logs: journalctl -u orbes-geoip.
+[Unit]
+Description=ORBES GENOME CODE GeoIP database refresh (DB-IP City Lite)
+Documentation=file://@APP_DIR@/docs/DEPLOYMENT.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+Group=@DEPLOY_USER@
+WorkingDirectory=@APP_DIR@/deploy/vps
+ExecStart=@APP_DIR@/deploy/vps/scripts/geoip-update.sh
+UMask=0077
+Nice=10
+TimeoutStartSec=1h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

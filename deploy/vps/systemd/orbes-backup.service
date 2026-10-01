@@ -1,0 +1,29 @@
+# ORBES GENOME CODE: nightly encrypted backup (deploy/vps/scripts/backup.sh).
+# Template: bootstrap-ubuntu.sh replaces @APP_DIR@ and @DEPLOY_USER@ and installs
+# it into /etc/systemd/system. Logs: journalctl -u orbes-backup.
+[Unit]
+Description=ORBES GENOME CODE encrypted backup (database + signing-key files)
+Documentation=file://@APP_DIR@/docs/DEPLOYMENT.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+Group=@DEPLOY_USER@
+WorkingDirectory=@APP_DIR@/deploy/vps
+ExecStart=@APP_DIR@/deploy/vps/scripts/backup.sh --reason nightly
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

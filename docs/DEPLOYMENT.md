@@ -222,7 +222,8 @@ All configuration comes from environment variables. It is parsed **once at start
 
 | Variable | Default | Rules |
 |---|---|---|
-| `GEO_MODE` | `none` | `none`, `cloudflare` (`cf-ipcountry`, `cf-iplatitude`, `cf-iplongitude`, `cf-region`) or `headers`. **Production: `cloudflare` and `headers` require `TRUST_PROXY`** (not `false`). |
+| `GEO_MODE` | `none` | `none`, `mmdb` (local GeoIP database, §3.4; the `.env.example` value), `cloudflare` (`cf-ipcountry`, `cf-iplatitude`, `cf-iplongitude`, `cf-region`) or `headers`. **Production: `mmdb`, `cloudflare` and `headers` require `TRUST_PROXY`** (not `false`). |
+| `GEO_MMDB_PATH` | unset | Absolute path of the `.mmdb` file. **Required when `GEO_MODE=mmdb`.** Its existence is not checked at start: a missing file only disables geolocation (§3.4). |
 | `GEO_COUNTRY_HEADER` | unset | A valid HTTP header name (case-insensitive). **Required when `GEO_MODE=headers`.** |
 | `GEO_LAT_HEADER`, `GEO_LON_HEADER` | unset | Valid header names. In `headers` mode, set both or neither. Only use `headers` behind a proxy that **overwrites** these headers on every request. |
 
@@ -289,7 +290,8 @@ With `ORBES_ENV=production` (or `NODE_ENV=production` and no `ORBES_ENV`), the s
 | `PUBLIC_ORIGIN` is not `https://` | `must be https:// in production` |
 | `TRUST_PROXY=true` (or `yes`) | `"true" trusts every X-Forwarded-For hop (client-forgeable)` |
 | `TRUST_PROXY` is a number (any environment) | `hop counts are not supported` |
-| `GEO_MODE=cloudflare` or `headers` without `TRUST_PROXY` | `… mode requires TRUST_PROXY in production` |
+| `GEO_MODE=mmdb`, `cloudflare` or `headers` without `TRUST_PROXY` | `… mode requires TRUST_PROXY in production` |
+| `GEO_MODE=mmdb` without an absolute `GEO_MMDB_PATH` (any environment) | `GEO_MMDB_PATH: required when GEO_MODE=mmdb` / `must be an absolute path` |
 | Pending migrations, without `--migrate` / `MIGRATE_ON_START` | `startup failed`, reason `database schema is not up to date (pending: …)`, exit code 1 |
 
 Production also changes behaviour at runtime:
@@ -313,6 +315,51 @@ Production also changes behaviour at runtime:
 | No proxy (development only) | The client | `false` |
 
 The client IP is the first untrusted address, counting from the right of `X-Forwarded-For`. A proxy that appends to the header is therefore safe. One that forwards the client's header unchanged and without its own entry is not.
+
+### 3.4 GeoIP database (`GEO_MODE=mmdb`)
+
+Anomaly scoring (impossible travel, geographic dispersion) needs a coarse location per scan. Without a CDN in front, the app locates the client itself: the client IP it already computes (`request.ip`, with `TRUST_PROXY` applied to `X-Forwarded-For`) is looked up in a local MaxMind-format file. Cloudflare remains optional (`GEO_MODE=cloudflare`, §1.2).
+
+**Data and licence.** [DB-IP](https://db-ip.com) "IP to City Lite", published monthly at `https://download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` (≈ 57 MiB compressed, ≈ 121 MiB installed), licence [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The attribution "IP Geolocation by DB-IP" with a link to db-ip.com is kept in `NOTICE.md` at the repository root; if a location derived from it is ever displayed (the admin console, a report), show the same attribution there. The file is never committed: locally it lives in `genome/.data/geoip/` (git-ignored). MaxMind GeoLite2-City uses the same format and also works (its own licence key and EULA; not automated here).
+
+**What the app does with it**
+
+| Situation | Behaviour |
+|---|---|
+| Public client IP | `{ country, lat, lon }`, coordinates rounded to 1 decimal (≈ 10 km), stored on the scan event like the other modes. Unknown countries and out-of-range values are dropped. |
+| Private, loopback, link-local, CGNAT, documentation, multicast or other special-purpose IP | Not looked up: no location. |
+| Raw IP | Used in memory for the lookup only. Never logged (lookup errors log only the error class), never stored: only the peppered HMAC is kept. |
+| File missing, unreadable or corrupt at start | One warning (`geoip database unavailable; scans get no location until it is installed`), scans get no location, **verification is unaffected**. |
+| File replaced | Checked at most every 10 minutes (mtime, size, inode; lazily, on lookups) and reloaded in the background: `geoip database reloaded`. No restart. |
+| Replacement corrupt, or file deleted | The copy already in memory keeps serving; one warning (`keeping the copy already in memory`). |
+| Cost | ≈ 125 MiB of RAM in the app (twice that for a moment during a reload), load ≈ 0.15 s, lookup ≈ 6–9 µs (measured on the 2026-10 edition, 100 000 random IPv4 addresses). |
+
+**Configuration.** `GEO_MODE=mmdb`, `GEO_MMDB_PATH=/var/lib/orbes/geoip/dbip-city-lite.mmdb` (absolute, inside the container) and a `TRUST_PROXY` that lists the proxy (§3.3). Mount the GeoIP directory into the app container **read-only**; only the updater writes to it.
+
+**Install and refresh: `scripts/geoip-update.ts`**
+
+```bash
+# Install or refresh $GEO_MMDB_PATH (or --path <file>); default without either: genome/.data/geoip/dbip-city-lite.mmdb
+node --import tsx scripts/geoip-update.ts
+#   geoip-update: downloading https://download.db-ip.com/free/dbip-city-lite-2026-10.mmdb.gz
+#   geoip-update: downloaded 57.4 MiB compressed, 121.1 MiB uncompressed; gzip integrity OK
+#   geoip-update: probe 8.8.8.8 → US (37.4, -122.1) OK
+#   geoip-update: validated DBIP-City-Lite built 2026-10-01T01:41:21.000Z (14297794 nodes)
+#   geoip-update: installed edition 2026-10 at /var/lib/orbes/geoip/dbip-city-lite.mmdb
+
+node --import tsx scripts/geoip-update.ts --dry-run          # what would be downloaded (HEAD only); writes nothing
+node --import tsx scripts/geoip-update.ts --check /var/lib/orbes/geoip/dbip-city-lite.mmdb --probe 81.2.69.160=GB
+node --import tsx scripts/geoip-update.ts --rollback         # the previous file becomes current again
+node --import tsx scripts/geoip-update.ts --help             # every option (--month, --force, --probe, --json, …)
+```
+
+- The current UTC month is tried first; while it is not published (HTTP 404) the previous month is used. Any other HTTP error fails without falling back.
+- The archive is size-capped and gunzipped as a stream (CRC and length checked), then opened with the server's own code and must resolve the probes (default `8.8.8.8=US`) before it is installed. A failed run leaves the installed file untouched and exits 1.
+- Install is atomic (temporary file in the same directory, fsync, rename); the replaced file is kept as `<file>.previous`, and `<file>.json` records the edition, URL, SHA-256 and build date. A lock file (`<file>.lock`, stale after one hour) prevents concurrent runs.
+- Idempotent: an edition that is installed and intact is not downloaded again (`--force` overrides), so the job can run **daily**: it downloads once, when the new edition appears, and is a local no-op otherwise.
+- Exit codes: 0 installed or already up to date, 1 failure, 2 usage error. Alert on a non-zero exit, and on a `buildEpoch` older than 45 days in the startup or reload log.
+
+**Checking it in production.** After a start or a reload the log carries `geoip database loaded` / `reloaded` with `databaseType`, `buildEpoch` and `nodeCount`. A scan made from a mobile network should then have `country`, `lat` and `lon` set on its `scan_events` row; scans from the VPS itself or a LAN have none (private addresses).
 
 ---
 
@@ -953,6 +1000,7 @@ Configuration
 - [ ] `PUBLIC_ORIGIN` is the exact `https://` origin users see. Other hostnames redirect to it.
 - [ ] `TRUST_PROXY` lists only your proxies (§3.3), never `true`. The app port is reachable only by the proxy (`APP_BIND=127.0.0.1` or a firewall).
 - [ ] `GEO_MODE=cloudflare` / `headers` only behind a proxy that overwrites those headers, with the origin locked to it.
+- [ ] `GEO_MODE=mmdb`: the startup log shows `geoip database loaded` with a recent `buildEpoch`, the update timer runs (§3.4), and `NOTICE.md` keeps the DB-IP attribution.
 - [ ] `BOOTSTRAP_ADMIN_*` removed after the first start.
 
 Edge and network

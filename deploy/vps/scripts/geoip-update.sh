@@ -82,6 +82,7 @@ case "$MODE" in
     log "validating $SRC"
     compose run --rm --no-deps "${extra[@]}" -v "$SRC:/import/in.mmdb:ro" geoip-update --check /import/in.mmdb
     log "installing it as $TARGET (the current file is kept as $FILE.previous)"
+    # shellcheck disable=SC2016 # expanded by the container's shell
     run compose run --rm --no-deps -v "$SRC:/import/in.mmdb:ro" --entrypoint sh geoip-update -c '
       set -eu
       t="$1"; d="$(dirname "$t")"

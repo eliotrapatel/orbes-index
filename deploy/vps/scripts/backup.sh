@@ -90,6 +90,7 @@ trap cleanup EXIT
 
 # ── Database (first: a rotation during the run then only adds a key FILE, which is harmless) ──
 step "database dump"
+# shellcheck disable=SC2016 # expanded by the container's shell
 compose exec -T postgres sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --compress=6' >"$WORK/db.dump"
 docker run --rm -i --network none --entrypoint pg_restore "$PG_IMAGE" --list <"$WORK/db.dump" >"$WORK/db.toc"
 grep -q 'TABLE DATA public cryptographic_keys' "$WORK/db.toc" || die "the dump has no cryptographic_keys data: wrong database?"

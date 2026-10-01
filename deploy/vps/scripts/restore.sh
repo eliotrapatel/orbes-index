@@ -134,6 +134,7 @@ if [[ "$DO_DB" == true ]]; then
   if docker volume inspect "$PGDATA_VOLUME" >/dev/null 2>&1; then docker volume rm "$PGDATA_VOLUME" >/dev/null; fi
   compose up -d postgres
   wait_healthy postgres 180 || die "postgres did not become healthy"
+  # shellcheck disable=SC2016 # expanded by the container's shell
   compose exec -T postgres sh -c 'exec pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' <"$WORK/db.dump"
   log "database restored"
 fi

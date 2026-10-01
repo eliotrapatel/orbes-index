@@ -1,0 +1,7 @@
+# Secrets and local state of the VPS stack: never committed.
+.env
+.env.*
+!.env.example
+.state/
+*.agekey
+*.age

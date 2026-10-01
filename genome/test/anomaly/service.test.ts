@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { AnomalyService, type AnomalyFinding } from '../../src/server/services/anomaly.js';
+import { ADVISORY_LOCK } from '../../src/server/db/connection.js';
+import { ANOMALY_UNREGISTERED_LOCK, AnomalyService, type AnomalyFinding } from '../../src/server/services/anomaly.js';
 import { pageRequest } from '../../src/server/types.js';
 import { admin, anomalies, createAccount, createWorld, issue, type World } from '../verification/world.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
@@ -214,5 +215,12 @@ describe('AnomalyService', () => {
     const cur = await scanAt(r, new Date(t0), { country: 'FR' });
     const e = await svc.evaluate({ productId: r.product.id, codeId: r.code.id, scanEventId: cur, accountIsOwner: false });
     expect(e.riskScore).toBe(0);
+  });
+
+  it('the product-less finding lock lives in the shared ADVISORY_LOCK namespace', () => {
+    expect(ADVISORY_LOCK.ANOMALY_UNREGISTERED).toBe(0x4f52_0101);
+    expect(ANOMALY_UNREGISTERED_LOCK).toBe(ADVISORY_LOCK.ANOMALY_UNREGISTERED);
+    const values = Object.values(ADVISORY_LOCK);
+    expect(new Set(values).size).toBe(values.length);
   });
 });

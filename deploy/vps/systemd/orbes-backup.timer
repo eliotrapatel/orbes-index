@@ -1,0 +1,11 @@
+# ORBES GENOME CODE: run orbes-backup.service every night (UTC-independent: local time).
+[Unit]
+Description=Nightly ORBES GENOME CODE backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

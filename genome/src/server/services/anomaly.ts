@@ -7,7 +7,7 @@
  * are for the admin console only and never part of a public response.
  */
 import { sql } from 'kysely';
-import { advisoryXactLock, inTransaction, type Db } from '../db/connection.js';
+import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import {
   ANOMALY_SEVERITIES,
@@ -35,10 +35,10 @@ const MAX_NOTE = 2000;
 const DEFAULT_HISTORY_LIMIT = 1000;
 /**
  * Serialises recording of product-less findings (VALID_SIGNATURE_UNREGISTERED):
- * the partial unique index cannot deduplicate NULL product ids. Same "OR"
- * namespace as ADVISORY_LOCK in db/connection.ts, outside its range.
+ * the partial unique index cannot deduplicate NULL product ids. Defined with
+ * every other lock key in ADVISORY_LOCK (db/connection.ts); kept here as an alias.
  */
-export const ANOMALY_UNREGISTERED_LOCK = 0x4f52_0101;
+export const ANOMALY_UNREGISTERED_LOCK = ADVISORY_LOCK.ANOMALY_UNREGISTERED;
 
 /** A finding to record (rule or service level). */
 export interface AnomalyFinding {
@@ -245,7 +245,7 @@ export class AnomalyService {
     // No product: deduplicate by type and the scanned identity, under a lock (NULLs never conflict in an index).
     const packed = typeof v.details.packedIdentity === 'number' ? v.details.packedIdentity : null;
     await inTransaction(db, async (tx) => {
-      await advisoryXactLock(tx, ANOMALY_UNREGISTERED_LOCK);
+      await advisoryXactLock(tx, ADVISORY_LOCK.ANOMALY_UNREGISTERED);
       let q = tx
         .selectFrom('anomalies')
         .select(['id'])

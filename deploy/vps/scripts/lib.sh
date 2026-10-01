@@ -2,7 +2,8 @@
 # ORBES GENOME CODE, VPS stack: helpers shared by the scripts in this directory.
 # Sourced, never executed. Callers set `set -Eeuo pipefail` themselves.
 
-# Paths: STACK_DIR = deploy/vps, REPO_DIR = repository root.
+# Paths: STACK_DIR = deploy/vps, REPO_DIR = repository root (used by the sourcing scripts).
+# shellcheck disable=SC2034
 SCRIPTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 STACK_DIR="$(cd -- "$SCRIPTS_DIR/.." && pwd -P)"
 REPO_DIR="$(cd -- "$STACK_DIR/../.." && pwd -P)"
