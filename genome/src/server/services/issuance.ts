@@ -166,6 +166,7 @@ export const GENOME_VERSION = 1;
 export const CODE_VERSION = 1;
 export const MAX_ISSUE = 255;
 const SERIAL_MAX = 999_999;
+const NOT_PRINTABLE: ReadonlySet<ProductStatus> = new Set(['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
 const MAX_ATTEMPTS = 5;
 const MAX_REASON = 500;
 
@@ -722,6 +723,7 @@ export class IssuanceService {
         'c.created_at',
         'p.product_id as canonical_id',
         'p.packed_identity',
+        'p.status as product_status',
         'g.genome_version',
         'g.glyphs',
         'g.product_id as genome_product',
@@ -732,6 +734,10 @@ export class IssuanceService {
     if (!row) throw notFound('Code', 'CODE_NOT_FOUND');
     if (row.status !== 'ACTIVE') {
       throw conflict('CODE_NOT_ACTIVE', 'Only the active code of a product can be rendered.', `status ${row.status}`);
+    }
+    // New prints of a code would only help copy it: none for products that are out of circulation or under incident.
+    if (NOT_PRINTABLE.has(row.product_status)) {
+      throw conflict('PRODUCT_NOT_PRINTABLE', 'Codes of this product cannot be printed in its current state.', `status ${row.product_status}`);
     }
 
     const fail = (detail: string): never => {

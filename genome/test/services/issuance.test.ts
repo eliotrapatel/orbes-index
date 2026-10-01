@@ -492,6 +492,18 @@ describe('IssuanceService.renderCode', () => {
     expect(e.code).toBe('CODE_NOT_ACTIVE');
   });
 
+  it('refuses codes of products out of circulation or under incident', async () => {
+    const r = await w.issuance.issueProduct(ring(w), admin);
+    for (const status of ['STOLEN', 'LOST', 'COUNTERFEIT_FLAGGED', 'REVOKED', 'RETIRED'] as const) {
+      await w.t.db.updateTable('products').set({ status }).where('id', '=', r.product.id).execute();
+      expect((await domainError(w.issuance.renderCode(r.code.id, 'png'))).code, status).toBe('PRODUCT_NOT_PRINTABLE');
+    }
+    for (const status of ['ACTIVATED', 'OWNED', 'SERVICED'] as const) {
+      await w.t.db.updateTable('products').set({ status }).where('id', '=', r.product.id).execute();
+      expect((await w.issuance.renderCode(r.code.id, 'svg')).contentType, status).toMatch(/svg/);
+    }
+  });
+
   it('refuses to render a stored code that fails its integrity check', async () => {
     const r = await w.issuance.issueProduct(ring(w), admin);
     // Simulate a compromised database: bypass the immutability guard and swap the signature.

@@ -117,6 +117,6 @@ describe('multi-up sheets', () => {
     await expect(renderPrintSheet([], {}, { createdAt })).rejects.toBeInstanceOf(ArtifactOptionsError);
     await expect(renderPrintSheet([item(1)], { page: 'B5' as never }, { createdAt })).rejects.toBeInstanceOf(ArtifactOptionsError);
     await expect(renderPrintSheet([item(1)], { widthMm: 400 }, { createdAt })).rejects.toThrow(/too large for this page/);
-    expect(MAX_SHEET_ITEMS).toBe(500);
+    expect(MAX_SHEET_ITEMS).toBe(200);
   });
 });

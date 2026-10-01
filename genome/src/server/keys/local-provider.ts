@@ -25,7 +25,7 @@
  */
 import { createCipheriv, createDecipheriv, createSecretKey, randomBytes, type KeyObject } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, link, lstat, mkdir, open, unlink } from 'node:fs/promises';
+import { chmod, link, mkdir, open, stat, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { fromBase64Url, toBase64Url } from '../../core/bytes.js';
@@ -152,7 +152,8 @@ export class LocalKeyProvider implements KeyProvider {
   private async prepareDir(): Promise<void> {
     try {
       await mkdir(this.dir, { recursive: true, mode: DIR_MODE });
-      const st = await lstat(this.dir);
+      // stat, not lstat: an operator may point KEY_DIR at a mounted volume through a symlink.
+      const st = await stat(this.dir);
       if (!st.isDirectory()) throw new KeyProviderError('CONFIG', 'key directory path is not a directory');
       if ((st.mode & 0o077) !== 0) {
         // mkdir's mode is filtered by the umask and ignored for existing directories.

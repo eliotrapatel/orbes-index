@@ -188,7 +188,8 @@ export interface PrintSheetOptions {
   cropMarks?: boolean;
 }
 
-export const MAX_SHEET_ITEMS = 500;
+// Bounds one request: ~55 KB of PDF and ~30 ms of rendering per code.
+export const MAX_SHEET_ITEMS = 200;
 
 /** Multi-up PDF of labeled artifacts with crop marks and a 10 mm scale bar. */
 export async function renderPrintSheet(

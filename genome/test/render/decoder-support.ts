@@ -19,20 +19,26 @@ export interface CoreDecoder {
   decodeOrbesCode(img: GrayImage, opts?: { tryInverted?: boolean; tryMirrored?: boolean; readGenome?: boolean }): DecodeResult;
 }
 
+// The contract fixes the exports, not the file layout: look in the likely modules.
+const CANDIDATES = ['index.js', 'decoder.js', 'decode.js', 'image.js'];
+
 let cached: Promise<CoreDecoder | undefined> | undefined;
 
 export function loadDecoder(): Promise<CoreDecoder | undefined> {
   cached ??= (async () => {
-    // A variable specifier keeps TypeScript from requiring the module at compile time.
-    for (const path of ['../../src/core/decoder/index.js', '../../src/core/decoder/decoder.js']) {
+    const found: Partial<CoreDecoder> = {};
+    for (const file of CANDIDATES) {
       try {
+        // A variable specifier keeps TypeScript from requiring the module at compile time.
+        const path = `../../src/core/decoder/${file}`;
         const m = (await import(/* @vite-ignore */ path)) as Partial<CoreDecoder>;
-        if (typeof m.decodeOrbesCode === 'function' && typeof m.rgbaToGray === 'function') return m as CoreDecoder;
+        if (!found.decodeOrbesCode && typeof m.decodeOrbesCode === 'function') found.decodeOrbesCode = m.decodeOrbesCode;
+        if (!found.rgbaToGray && typeof m.rgbaToGray === 'function') found.rgbaToGray = m.rgbaToGray;
       } catch {
-        // not built yet
+        // module not built (yet)
       }
     }
-    return undefined;
+    return found.decodeOrbesCode && found.rgbaToGray ? (found as CoreDecoder) : undefined;
   })();
   return cached;
 }
