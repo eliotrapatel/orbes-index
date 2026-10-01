@@ -155,13 +155,18 @@ describe('admin console (E2E, Chromium)', () => {
     await p.waitForSelector('dialog.dialog', { state: 'detached', timeout: 15_000 });
   }
 
-  async function shot(p: Page, name: string): Promise<void> {
+  async function shot(p: Page, name: string, opts: { full?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
-    await p.evaluate(() => document.fonts.ready);
+    // Top of the page, without transient notices.
+    await p.evaluate(async () => {
+      document.querySelectorAll('.toast').forEach((t) => t.remove());
+      window.scrollTo(0, 0);
+      await document.fonts.ready;
+    });
     await p.waitForTimeout(400); // let the entrance fade settle
     await p.screenshot({ path: join(OUT_DIR, `admin-${name}.png`) });
-    await p.screenshot({ path: join(OUT_DIR, `admin-${name}-full.png`), fullPage: true });
+    if (opts.full) await p.screenshot({ path: join(OUT_DIR, `admin-${name}-full.png`), fullPage: true });
   }
 
   beforeAll(async () => {
@@ -223,6 +228,9 @@ describe('admin console (E2E, Chromium)', () => {
   });
 
   it('refuses a wrong password, then signs the bootstrap admin in', async () => {
+    await page.goto(`${origin}/admin`);
+    await page.waitForSelector('[data-testid=login-form]');
+    await shot(page, 'login');
     await signIn(page, ADMIN.email, 'not the password at all');
     await expect.poll(async () => page.locator('.login__error').textContent()).toMatch(/invalid email or password/i);
     expect(await page.inputValue('input[name=password]')).toBe('');
@@ -234,7 +242,7 @@ describe('admin console (E2E, Chromium)', () => {
     expect(await page.locator('.kpi').first().locator('.kpi__value').textContent()).toBe('9');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Dashboard');
     expect(await page.locator('.bar').count()).toBeGreaterThanOrEqual(8);
-    await shot(page, 'dashboard');
+    await shot(page, 'dashboard', { full: true });
   }, STEP_TIMEOUT);
 
   it('creates a model in the catalogue', async () => {
@@ -248,6 +256,7 @@ describe('admin console (E2E, Chromium)', () => {
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Model created.")');
     await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
+    await shot(page, 'catalogue');
   }, STEP_TIMEOUT);
 
   it('issues a product with the generator and shows the one-time claim code', async () => {
@@ -258,6 +267,7 @@ describe('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=variant]', '52');
     await page.fill('input[name=productionBatch]', 'B-2026-10-A');
     expect(await page.isChecked('input[name=withClaimSecret]')).toBe(true);
+    await shot(page, 'generator-form');
 
     const [response] = await Promise.all([
       page.waitForResponse((r) => r.url().endsWith('/api/admin/products') && r.request().method() === 'POST'),
@@ -274,7 +284,7 @@ describe('admin console (E2E, Chromium)', () => {
     expect(body.claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect(await page.locator('[data-testid=genome-figure] svg path').count()).toBeGreaterThan(8);
     expect(await page.locator('[data-testid=code-figure] svg path').count()).toBeGreaterThan(100);
-    await shot(page, 'generator');
+    await shot(page, 'generator', { full: true });
 
     // Theme switch re-renders the same code on ivory.
     await page.selectOption('select[name=theme]', 'ivory');
@@ -319,7 +329,7 @@ describe('admin console (E2E, Chromium)', () => {
     await confirmDialog(page);
     await expect.poll(() => row('warranty').textContent()).toContain('ACTIVE');
     await expect.poll(() => row('status').textContent()).toContain('ACTIVATED');
-    await shot(page, 'product');
+    await shot(page, 'product', { full: true });
 
     // Re-issue: the new code is signed and previewed; the old one is superseded.
     await page.click('[data-testid=action-reissue]');
@@ -336,8 +346,11 @@ describe('admin console (E2E, Chromium)', () => {
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
     await go(page, '#/products?status=LOST', 'Products');
     await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+    await go(page, '#/products', 'Products');
+    await shot(page, 'products');
     await go(page, '#/anomalies?status=OPEN', 'Anomalies');
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
+    await shot(page, 'anomalies');
     expect(await page.locator('.status--critical').count()).toBeGreaterThanOrEqual(1);
   }, STEP_TIMEOUT);
 
@@ -361,6 +374,7 @@ describe('admin console (E2E, Chromium)', () => {
     const rows = await page.locator('table.table tbody tr').allTextContents();
     expect(rows[0]).toMatch(/#2.*ACTIVE/);
     expect(rows[1]).toMatch(/#1.*RETIRED/);
+    await shot(page, 'keys');
   }, STEP_TIMEOUT);
 
   it('verifies the audit chain', async () => {
@@ -370,6 +384,7 @@ describe('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=audit-verify]');
     await page.waitForSelector('[data-testid=chain-result][data-ok=true]');
     expect(await page.locator('[data-testid=chain-result]').textContent()).toMatch(/CHAIN INTACT.*entries re-hashed/);
+    await shot(page, 'audit');
   }, STEP_TIMEOUT);
 
   it('signs out', async () => {
