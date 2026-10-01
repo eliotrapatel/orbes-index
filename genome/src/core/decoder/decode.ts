@@ -38,23 +38,22 @@
  *     the four masks are brute-forced. CRC-16 and strict payload parsing
  *     (unframeCodeData) catch miscorrections; a failure moves on to the next
  *     hypothesis.
- *  7. Cheap repair, when step 6 fails: the fits leaving one moon out (a
- *     damaged moon), followed by steps 5–6 again.
- *  8. Seal-less fallback: when no seal candidate decodes so far (seal
- *     scratched, under a glare stripe, crossed by a strip), connected
- *     components of the binarised frame are searched for four disc-like
- *     blobs whose diagonals cross near their middles (components.ts,
- *     moons.ts); their crossing is the code centre, and steps 4–7 follow for
- *     every quadruple that is not a code already tried.
- *  9. Costly repair, for the located codes with the best quiet zones only
- *     (a frame too blurred or too small to read must not pay it for every
- *     look-alike), cheapest first: a smooth offset field started from a
- *     registration of the orbits on their ring lattice (refine.ts: curved
- *     surfaces, up to a code on a finger ring), coordinate-descent refinement
- *     of the control points on cell contrast (centroid bias, lens
- *     distortion), then the offset field from that refined fit; each is
- *     followed by steps 5–6 again.
- * 10. Genome (genome-reader.ts), optional and never fatal.
+ *  7. Alignment repair, when step 6 fails, cheapest first, each stage
+ *     followed by steps 5–6 again: the fits leaving one moon out (a damaged
+ *     moon); then, for at most two located codes per frame (a frame too
+ *     blurred or too small to read must not pay it for every look-alike), a
+ *     smooth offset field started from a registration of the orbits on their
+ *     ring lattice (refine.ts: curved surfaces, up to a code on a finger
+ *     ring), coordinate-descent refinement of the control points on cell
+ *     contrast (centroid bias, lens distortion), and the offset field from
+ *     that refined fit.
+ *  8. Seal-less fallback: when no seal candidate decodes (seal scratched,
+ *     under a glare stripe, crossed by a strip), connected components of the
+ *     binarised frame are searched for four disc-like blobs whose diagonals
+ *     cross near their middles (components.ts, moons.ts); their crossing is
+ *     the code centre. Steps 4–7 follow for every quadruple that is not a
+ *     code already tried, the costly repairs last and best quiet zone first.
+ *  9. Genome (genome-reader.ts), optional and never fatal.
  *
  * Isomorphic: no Node.js or DOM dependencies.
  */
@@ -125,6 +124,13 @@ const MAX_CLUSTERS = 12;
 const ERASURE_STEPS = [0, 10, 20, 30, 40, 50, 60, 70, 80];
 /** Combined distance (of 30 bits) up to which a format read is trusted (the 30-bit code corrects 6). */
 const FORMAT_TRUST = 6;
+/**
+ * Combined distance up to which a format read is taken as certain: a wrong
+ * word that close needs ≥ 12 of the 30 format cells flipped into a valid
+ * pattern, so a Reed-Solomon failure under it means unreadable data, not a
+ * misread mask, and brute-forcing the masks would only cost time.
+ */
+const FORMAT_CERTAIN = 2;
 
 const FORMAT_WORDS = Array.from({ length: 32 }, (_, v) => bchFormatEncode(v));
 
@@ -528,6 +534,7 @@ function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean,
     if (read) return read;
   }
   if (trusted.length === 0) failure.note('FORMAT', 'format word unreadable');
+  else if (trusted[0].formatDistance <= FORMAT_CERTAIN) return null;
   // Format unreadable, or damaged into a wrong but plausible word: brute-force
   // the masks not tried yet, the most plausible orientations first.
   for (const h of hyps) {
@@ -556,6 +563,8 @@ interface Attempt {
   alignment: Alignment;
   /** Quiet-zone score of the anchor fit: ranks attempts for the costly repairs. */
   quiet: number;
+  /** Whether the costly repairs were already spent on it. */
+  repaired: boolean;
 }
 
 /** Anchor fit and quiet-zone gate. Null (failure noted) when the anchors do not frame a code. */
@@ -571,7 +580,7 @@ function prepareAttempt(img: GrayImage, anchors: Anchors | null, unitPx: number,
     failure.note('NO_MOONS', 'no code structure around the seal');
     return null;
   }
-  return { img, anchors, moons, unitPx, inverted, fitted, alignment: fitted, quiet };
+  return { img, anchors, moons, unitPx, inverted, fitted, alignment: fitted, quiet, repaired: false };
 }
 
 /** The cheap stages, which decode most captures: the anchor fit, then the fits leaving one moon out. */
@@ -666,11 +675,11 @@ function isRepeat(attempts: readonly Attempt[], anchors: Anchors, unitPx: number
 /** Moon quadruples examined per polarity by the seal-less fallback. */
 const MAX_MOON_QUADS = 3;
 /**
- * Located codes that get the costly repairs, best quiet zone first. A
- * hopeless frame (code too small or too blurred to read) must not pay them
- * for every look-alike moon quadruple: they cost several times the cheap stages.
+ * Located codes that get the costly repairs per frame. A hopeless frame (code
+ * too small or too blurred to read) must not pay them for every look-alike
+ * moon quadruple: they cost several times the cheap stages.
  */
-const MAX_REPAIRS = 1;
+const MAX_REPAIRS = 2;
 
 /**
  * Seal-less fallback: the four moons alone locate the code (their diagonals
@@ -704,13 +713,16 @@ function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polariti
 }
 
 /**
- * Every located code first gets the cheap stages (seal candidates, then the
- * seal-less fallback); only then do the best few get the costly repairs.
+ * Seal-located codes get the costly repairs right after the cheap stages
+ * fail (the seal confirms a code is there); codes found by the seal-less
+ * fallback get them afterwards, best quiet zone first. MAX_REPAIRS bounds
+ * the total either way.
  */
 function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: Failure, started: number): DecodeResult | null {
   const det = new Detection(frame);
   const polarities = opts.tryInverted ? [false, true] : [false];
   const attempts: Attempt[] = [];
+  let repairs = 0;
   for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, polarities)) {
     const view = det.view(inverted);
     const moons = findMoons(view.image, view.integral, seal);
@@ -723,15 +735,20 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
     const anchors = anchorsOf(view.frame, center, sealAffine, moons, det.factor);
     const attempt = prepareAttempt(view.frame, anchors, seal.unit * det.factor, moons, inverted, failure);
     if (!attempt) continue;
-    const read = quickDecode(attempt, opts, failure);
-    if (read) return decodeResult(attempt, read, opts, started);
     attempts.push(attempt);
+    let read = quickDecode(attempt, opts, failure);
+    if (!read && repairs < MAX_REPAIRS) {
+      repairs++;
+      attempt.repaired = true;
+      read = repairDecode(attempt, opts, failure);
+    }
+    if (read) return decodeResult(attempt, read, opts, started);
   }
   const fallback = decodeFromMoons(det, opts, polarities, attempts, failure, started);
   if (fallback) return fallback;
-  // Stable sort: on equal scores, seal-located attempts (found first) go first.
-  const ranked = [...attempts].sort((a, b) => b.quiet - a.quiet).slice(0, MAX_REPAIRS);
-  for (const attempt of ranked) {
+  // Stable sort: on equal scores, earlier attempts go first.
+  const ranked = attempts.filter((a) => !a.repaired).sort((a, b) => b.quiet - a.quiet);
+  for (const attempt of ranked.slice(0, MAX_REPAIRS - repairs)) {
     const read = repairDecode(attempt, opts, failure);
     if (read) return decodeResult(attempt, read, opts, started);
   }

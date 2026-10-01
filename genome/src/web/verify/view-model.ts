@@ -204,7 +204,8 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
 
   const p = outcome.product;
   if (authentic && p) {
-    vm.productLines = [upper(p.model), upper(p.type), upper(p.variant), upper(p.category?.name), upper(p.material), p.createdYear ? `CREATED ${p.createdYear}` : '']
+    // Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED; the variant belongs to the PRODUCT tab.
+    vm.productLines = [upper(p.model), upper(p.type), upper(p.category?.name), upper(p.material), p.createdYear ? `CREATED ${p.createdYear}` : '']
       .filter((x) => x.length > 0);
     const rows: Row[] = [['PRODUCT ID', p.productId]];
     if (p.collection) rows.push(['COLLECTION', upper(p.collection)]);

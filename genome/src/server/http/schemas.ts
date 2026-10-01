@@ -112,9 +112,13 @@ export function pageOf(query: unknown): PageRequest {
 
 // ── Public ─────────────────────────────────────────────────────────────────
 
-/** Contract §2.4 VerifyInput. The code is base64url of the 79-byte framed data (≤ 200 chars). */
+/**
+ * Contract §2.4 VerifyInput. The code is base64url of the 79-byte framed data (≤ 200 chars), but only
+ * the type and a hard size bound are checked here: step 1 makes any decode failure (alphabet, length,
+ * framing) the MALFORMED_CODE state, recorded as a scan, so the service must see it.
+ */
 export const verifyBody = body({
-  code: z.string().min(1, 'Required').max(200, 'At most 200 characters').regex(BASE64URL_RE, 'Must be base64url'),
+  code: z.string().max(1024, 'At most 1024 characters'),
   genome: z
     .strictObject({
       glyphs: z.array(z.union([z.number().int().min(0).max(15), z.null()])).length(8),

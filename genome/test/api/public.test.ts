@@ -145,16 +145,33 @@ describe('public API', () => {
       expect((safeJson(res) as any).state).toBe('MALFORMED_CODE');
     });
 
-    it('rejects characters outside base64url with 400', async () => {
+    // Contract §2.4 step 1: any failure to decode the code (alphabet, length ≤ 200, framing) is the
+    // MALFORMED_CODE state, recorded as a scan, not a request error.
+    it('answers MALFORMED_CODE (200) for characters outside base64url, and records the scan', async () => {
       const res = await h.client().post('/api/v1/verify', { code: 'abc+/=def' });
-      expect(res.statusCode).toBe(400);
-      expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+      expect(res.statusCode).toBe(200);
+      const body = safeJson(res) as any;
+      expect(body.state).toBe('MALFORMED_CODE');
+      const scan = await h.ctx.db.selectFrom('scan_events').select('result_state').where('id', '=', body.scanId).executeTakeFirstOrThrow();
+      expect(scan.result_state).toBe('MALFORMED_CODE');
     });
 
-    it('rejects a code longer than 200 characters with 400', async () => {
-      const res = await h.client().post('/api/v1/verify', { code: 'A'.repeat(201) });
-      expect(res.statusCode).toBe(400);
-      expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+    it('answers MALFORMED_CODE (200) for an empty code or one longer than 200 characters', async () => {
+      for (const code of ['', 'A'.repeat(201)]) {
+        const res = await h.client().post('/api/v1/verify', { code });
+        expect(res.statusCode).toBe(200);
+        expect((safeJson(res) as any).state).toBe('MALFORMED_CODE');
+      }
+    });
+
+    it('still rejects a non-string or absurdly long code field with 400', async () => {
+      for (const code of [42, null, 'A'.repeat(1025)]) {
+        const res = await h.client().post('/api/v1/verify', { code });
+        expect(res.statusCode).toBe(400);
+        expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+      }
+      const missing = await h.client().post('/api/v1/verify', {});
+      expect(missing.statusCode).toBe(400);
     });
 
     it('rejects unknown fields (top level and nested) with 400', async () => {

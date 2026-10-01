@@ -310,27 +310,35 @@ interface TextOptions {
   color: string;
   /** Stroke weight multiplier (small type is drawn slightly heavier). */
   weight?: number;
+  /**
+   * Widest the line may be; a longer line is set at a proportionally smaller
+   * cap height. Default for start-aligned text: up to the right page margin.
+   */
+  maxWidth?: number;
 }
 
 /** A line of stroked uppercase lettering, as a display-list item. */
 function text(content: string, o: TextOptions): Item {
   const upper = content.toUpperCase();
   const tracking = o.tracking ?? 0;
-  const width = textWidth(upper, o.cap, tracking);
   const align = o.align ?? 'start';
+  const maxWidth = o.maxWidth ?? (align === 'start' ? PAGE_WIDTH_MM - MARGIN - o.x : Infinity);
+  const natural = textWidth(upper, o.cap, tracking);
+  const cap = natural > maxWidth ? (o.cap * maxWidth) / natural : o.cap;
+  const width = textWidth(upper, cap, tracking);
   let pen = align === 'start' ? o.x : align === 'end' ? o.x - width : o.x - width / 2;
-  const top = o.baseline - o.cap;
+  const top = o.baseline - cap;
   let d = '';
   for (const ch of upper) {
     if (ch !== ' ') {
       d += LABEL_CHARSET.has(ch)
-        ? textRun(ch, { capHeight: o.cap, x: pen, baseline: o.baseline, align: 'start' }).d
-        : placeGlyphPath(EXTRA_GLYPHS[ch].d, pen, top, o.cap);
+        ? textRun(ch, { capHeight: cap, x: pen, baseline: o.baseline, align: 'start' }).d
+        : placeGlyphPath(EXTRA_GLYPHS[ch].d, pen, top, cap);
     }
-    pen += (glyphAdvance(ch) + SIDE_BEARING + tracking) * o.cap;
+    pen += (glyphAdvance(ch) + SIDE_BEARING + tracking) * cap;
   }
-  const weight = o.weight ?? (o.cap < 1.5 ? 1.3 : 1);
-  return { kind: 'stroke', d, width: o.cap * STROKE_RATIO * weight, color: o.color, text: upper };
+  const weight = o.weight ?? (cap < 1.5 ? 1.3 : 1);
+  return { kind: 'stroke', d, width: cap * STROKE_RATIO * weight, color: o.color, text: upper };
 }
 
 /** Greedy word wrap to `maxWidth` mm. */
@@ -669,6 +677,8 @@ const SIZE_CAP = 1.7;
 const SAMPLE_CAP = 1.05;
 const ID_CAP = 0.95;
 
+const TABLE_ROW_H = 7.8;
+
 const CROP_GAP = 1;
 const CROP_LEN = 3;
 const CROP_WIDTH = 0.1;
@@ -851,7 +861,7 @@ function recordTable(x0: number, y0: number, ink: string): Item[] {
   const labelW = 21.6;
   const cellW = 13.7;
   const headH = 6;
-  const rowH = 6.6;
+  const rowH = TABLE_ROW_H;
   const cols = SCAN_DISTANCES_CM.length * 2;
   const width = labelW + cols * cellW;
   const height = 2 * headH + SHEET_SIZES_MM.length * rowH;
@@ -899,7 +909,8 @@ function renditionPage(r: Rendition): SheetPage {
   items.push(
     text('ORBES CODE-01 · PRINT TEST SHEET', { cap: 2.2, tracking: 0.5, x: MARGIN, baseline: 15, color: INK }),
     text(SAMPLE_LABEL, { cap: 2.2, tracking: 0.5, x: right, baseline: 15, align: 'end', color: INK }),
-    text(`${String(r.index).padStart(2, '0')} · ${r.name}`, { cap: 4.4, tracking: 0.32, x: MARGIN, baseline: 25.5, color: INK }),
+    text(`RENDITION ${r.index} / ${RENDITIONS.length}`, { cap: 1.6, tracking: 0.4, x: right, baseline: 25.5, align: 'end', color: MUTED }),
+    text(r.name, { cap: 4.4, tracking: 0.32, x: MARGIN, baseline: 25.5, color: INK }),
     text(r.description, { cap: 1.6, tracking: 0.28, x: MARGIN, baseline: 31, color: MUTED }),
     text(`SAMPLE CODE ${code.productId} · KEY ID ${SAMPLE_KEY_ID} · PUBLIC SAMPLE KEY · A VERIFIER MUST ANSWER INVALID SIGNATURE OR UNKNOWN`, {
       cap: 1.6,
@@ -945,7 +956,7 @@ function renditionPage(r: Rendition): SheetPage {
   const tableTop = t0 + 11;
   const tableItems = recordTable(MARGIN, tableTop, INK);
   items.push(...tableItems);
-  const tableBottom = tableTop + 12 + SHEET_SIZES_MM.length * 6.6;
+  const tableBottom = tableTop + 12 + SHEET_SIZES_MM.length * TABLE_ROW_H;
   const notes = [
     'WRITE 3/3, 2/3, 1/3 OR 0/3 · LEAVE BLANK IF NOT TESTED · WRITE > WHEN THE CODE DOES NOT FIT INSIDE THE ON-SCREEN ORBIT AT THAT DISTANCE',
     'DISTANCE = PHONE LENS TO TAG, PHONE PARALLEL TO THE TAG · A READ = ANY RESULT SCREEN WITHIN 10 S · CUT THE TAG OUT OR MASK THE OTHER CODES FIRST',
@@ -996,7 +1007,13 @@ const INSTRUCTIONS: readonly (readonly [string, readonly string[]])[] = [
     '4 · RECORD',
     [
       'WRITE THE NUMBER OF SUCCESSFUL ATTEMPTS IN THE TABLE OF EACH PAGE: ONE TABLE PER PHONE AND PRINT, COPY THE PAGE FOR MORE PHONES. NOTE PHONE MODEL, OS, BROWSER, LIGHT AND PRINTER.',
-      'COMPARE WITH DOCS/REPORTS/PRINT-SIZE-MATRIX.MD, A CAMERA SIMULATION. A MINIMUM PRINT SIZE IS VALIDATED ONLY WHEN THE PHYSICAL RESULTS ON REAL PHONES (ANDROID, IPHONE, IPHONE PRO) AGREE WITH IT.',
+    ],
+  ],
+  [
+    '5 · DECIDE',
+    [
+      'A SIZE PASSES ON A PHONE WHEN IT READS 3/3 AT TWO NEIGHBOURING DISTANCES WITHOUT ZOOM: REAL USERS DO NOT HOLD AN EXACT DISTANCE. THIS IS THE ROBUST CRITERION OF THE SIMULATION.',
+      'COMPARE WITH DOCS/REPORTS/PRINT-SIZE-MATRIX.MD, A CAMERA SIMULATION. A MINIMUM PRINT SIZE IS VALIDATED ONLY WHEN THE PHYSICAL RESULTS ON REAL PHONES (ANDROID, IPHONE, IPHONE PRO) AGREE WITH IT. WHEN THEY DISAGREE, THE PHYSICAL RESULT WINS.',
     ],
   ],
 ];
@@ -1008,7 +1025,7 @@ function coverPage(): SheetPage {
   items.push(
     text('ORBES CODE-01', { cap: 3, tracking: 0.7, x: MARGIN, baseline: 20, color: INK }),
     text('PHYSICAL PRINT TEST SHEETS', { cap: 5.6, tracking: 0.36, x: MARGIN, baseline: 31, color: INK }),
-    text(`${SAMPLE_LABEL} · EVERY CODE IN THIS KIT IS SIGNED WITH THE PUBLIC SAMPLE KEY AND MUST NEVER VERIFY AS AUTHENTIC`, {
+    text(`${SAMPLE_LABEL} · EVERY CODE HERE IS SIGNED WITH THE PUBLIC SAMPLE KEY · NEVER AUTHENTIC`, {
       cap: 1.7,
       tracking: 0.3,
       x: MARGIN,

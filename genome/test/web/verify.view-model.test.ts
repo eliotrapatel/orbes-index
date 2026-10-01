@@ -163,9 +163,10 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(vm.ownership).toEqual({ kind: 'unregistered' });
   });
 
-  it('includes a variant line and falls back to the default care text', () => {
+  it('keeps the variant out of the brand lines (contract §4) but lists it, and falls back to the default care text', () => {
+    // The demo's O26-J-00184 is a SIZE 52 MONOLITHE RING: its lines read MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026.
     const v = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: 'Size 52', care: '  ' } }));
-    expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'SIZE 52', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     expect(v.productRows).toContainEqual(['VARIANT', 'SIZE 52']);
     expect(v.care).toBe(DEFAULT_CARE);
   });

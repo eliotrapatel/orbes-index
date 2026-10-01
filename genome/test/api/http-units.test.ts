@@ -85,8 +85,11 @@ describe('schemas', () => {
 
   it('bounds the verify input', () => {
     expect(parse(verifyBody, { code: 'AbC-_9' })).toEqual({ code: 'AbC-_9' });
-    expect(() => parse(verifyBody, { code: '' })).toThrow();
-    expect(() => parse(verifyBody, { code: 'A'.repeat(201) })).toThrow();
+    // Undecodable strings reach the service, which answers MALFORMED_CODE (contract §2.4 step 1).
+    expect(parse(verifyBody, { code: '' })).toEqual({ code: '' });
+    expect(parse(verifyBody, { code: 'A'.repeat(201) })).toEqual({ code: 'A'.repeat(201) });
+    expect(() => parse(verifyBody, { code: 'A'.repeat(1025) })).toThrow();
+    expect(() => parse(verifyBody, { code: 42 })).toThrow();
     expect(() => parse(verifyBody, { code: 'AAAA', genome: { glyphs: Array(8).fill(null), confidence: [2, 0, 0, 0, 0, 0, 0, 0] } })).toThrow();
   });
 

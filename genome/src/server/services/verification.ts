@@ -420,7 +420,8 @@ export class VerificationService {
       .selectFrom('products as p')
       .innerJoin('categories as cat', 'cat.id', 'p.category_id')
       .innerJoin('models as m', 'm.id', 'p.model_id')
-      .leftJoin('collections as col', 'col.id', 'p.collection_id')
+      // Same rule as product_overview and the owner's product list: the product's own collection, else its model's.
+      .leftJoin('collections as col', (j) => j.on((eb) => eb('col.id', '=', eb.fn.coalesce('p.collection_id', 'm.collection_id'))))
       .leftJoin('codes as c', (j) => j.onRef('c.product_id', '=', 'p.id').on('c.issue', '=', issue))
       .leftJoin('warranties as w', 'w.product_id', 'p.id')
       .leftJoin('ownership as o', (j) => j.onRef('o.product_id', '=', 'p.id').on('o.ended_at', 'is', null))
