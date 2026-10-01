@@ -38,12 +38,13 @@ const NON_INCIDENT = S('ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRE
 
 /** Contract §2.6, row for row. REVOKED leaves only through `reinstate()`; RETIRED is terminal. */
 export const TRANSITIONS: Readonly<Record<ProductStatus, readonly ProductStatus[]>> = Object.freeze({
-  ISSUED: S('ACTIVATED', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
+  // ISSUED → SERVICED: pre-sale inspection / quality control; the return move goes back to ISSUED.
+  ISSUED: S('ACTIVATED', 'SERVICED', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   ACTIVATED: S('REGISTERED', 'OWNED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   REGISTERED: S('OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   OWNED: S('TRANSFERRED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   TRANSFERRED: S('OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
-  SERVICED: S('ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
+  SERVICED: S('ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   RESOLD: S('REGISTERED', 'OWNED', 'SERVICED', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   LOST: S(...NON_INCIDENT, 'RETIRED', 'REVOKED'),
   STOLEN: S(...NON_INCIDENT, 'RETIRED', 'REVOKED'),
@@ -57,7 +58,7 @@ export const TRANSITIONS: Readonly<Record<ProductStatus, readonly ProductStatus[
  * towards the status held before entering the current one.
  */
 export const RETURN_TO_PREVIOUS: Readonly<Partial<Record<ProductStatus, readonly ProductStatus[]>>> = Object.freeze({
-  SERVICED: S('ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD'),
+  SERVICED: S('ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD'),
   LOST: NON_INCIDENT,
   STOLEN: NON_INCIDENT,
   COUNTERFEIT_FLAGGED: NON_INCIDENT,
@@ -358,6 +359,17 @@ export class LifecycleService {
   }
 
   /**
+   * A SERVICED product whose service started before sale (ISSUED → SERVICED:
+   * inspection, quality control). Such a piece was never sold, so it is not
+   * open for first registration until it has been activated.
+   */
+  async isPreSaleService(productId: string, trx?: Db): Promise<boolean> {
+    const db = trx ?? this.db;
+    const product = await requireProduct(db, productId);
+    return product.status === 'SERVICED' && (await this.returnTargetOf(db, product)) === 'ISSUED';
+  }
+
+  /**
    * Status change on behalf of OwnershipService / WarrantyService, inside
    * THEIR transaction, on a product row they already locked FOR UPDATE.
    * Same table and return rules as `transition()`. @internal
@@ -366,8 +378,9 @@ export class LifecycleService {
     if (!tx.isTransaction) throw new Error('applyForService must run inside a transaction');
     if (product.status === 'REVOKED') throw notAllowed(product.status, to);
     const target = await this.returnTargetOf(tx, product);
+    // First registration during an after-sale service; never during a pre-sale (ISSUED → SERVICED) one.
     const registrationOverride =
-      opts.registrationFromService === true && product.status === 'SERVICED' && (to === 'REGISTERED' || to === 'OWNED');
+      opts.registrationFromService === true && product.status === 'SERVICED' && target !== 'ISSUED' && (to === 'REGISTERED' || to === 'OWNED');
     if (!registrationOverride && !isTransitionAllowed(product.status, to, target)) {
       throw notAllowed(product.status, to);
     }

@@ -104,14 +104,14 @@ describe('state machine data (contract §2.6)', () => {
 
   it('matches the contract table exactly', () => {
     const incident = ['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'];
-    expect(TRANSITIONS.ISSUED).toEqual(['ACTIVATED', ...incident]);
+    expect(TRANSITIONS.ISSUED).toEqual(['ACTIVATED', 'SERVICED', ...incident]);
     expect(TRANSITIONS.ACTIVATED).toEqual(['REGISTERED', 'OWNED', 'SERVICED', 'RESOLD', ...incident]);
     expect(TRANSITIONS.REGISTERED).toEqual(['OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD', ...incident]);
     expect(TRANSITIONS.OWNED).toEqual(['TRANSFERRED', 'SERVICED', 'RESOLD', ...incident]);
     expect(TRANSITIONS.TRANSFERRED).toEqual(['OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD', ...incident]);
-    expect(TRANSITIONS.SERVICED).toEqual(['ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD', ...incident]);
+    expect(TRANSITIONS.SERVICED).toEqual(['ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD', ...incident]);
     expect(TRANSITIONS.RESOLD).toEqual(['REGISTERED', 'OWNED', 'SERVICED', ...incident]);
-    expect(RETURN_TO_PREVIOUS.SERVICED).toEqual(['ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD']);
+    expect(RETURN_TO_PREVIOUS.SERVICED).toEqual(['ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'RESOLD']);
     for (const s of ['LOST', 'STOLEN'] as const) {
       expect([...TRANSITIONS[s]].sort()).toEqual([...RETURN_TO_PREVIOUS[s]!, 'RETIRED', 'REVOKED'].sort());
       expect(RETURN_TO_PREVIOUS[s]).not.toContain('LOST');
@@ -252,6 +252,20 @@ describe('LifecycleService', () => {
       await expectDomainError(lifecycle.transition(p.productId, wrong, {}, admin), 'TRANSITION_NOT_ALLOWED', 409);
     }
     expect((await lifecycle.transition(p.productId, 'REGISTERED', {}, admin)).to).toBe('REGISTERED');
+  });
+
+  it('ISSUED → SERVICED (pre-sale inspection / QA) returns to ISSUED only, and is reported as pre-sale', async () => {
+    const p = await productIn('ISSUED');
+    expect(await lifecycle.isPreSaleService(p.id)).toBe(false);
+    await lifecycle.transition(p.productId, 'SERVICED', { reason: 'QA inspection' }, admin);
+    expect(await lifecycle.isPreSaleService(p.id)).toBe(true);
+    expect(await lifecycle.allowedTransitions(p.productId)).toEqual(['ISSUED', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
+    await expectDomainError(lifecycle.transition(p.productId, 'ACTIVATED', {}, admin), 'TRANSITION_NOT_ALLOWED', 409);
+    expect((await lifecycle.transition(p.productId, 'ISSUED', { reason: 'QA passed' }, admin)).to).toBe('ISSUED');
+    expect(await lifecycle.isPreSaleService(p.id)).toBe(false);
+    // An after-sale service is not pre-sale.
+    const sold = await productIn('SERVICED');
+    expect(await lifecycle.isPreSaleService(sold.id)).toBe(false);
   });
 
   it('LOST/STOLEN recover to the previous non-incident status, even across a revocation', async () => {

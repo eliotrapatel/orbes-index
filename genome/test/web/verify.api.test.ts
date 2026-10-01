@@ -70,7 +70,15 @@ describe('ApiClient', () => {
     expect(f.calls[1].body).toEqual({ registrationToken: 'tok' });
   });
 
-  it('treats a 401 from /me as signed out', async () => {
+  it('probes the session without a 401 when signed out (200 { account: null })', async () => {
+    const f = fakeFetch([() => json(200, { account: null })]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.me()).toBeNull();
+    expect(api.hasSession).toBe(false);
+    expect(f.calls.map((c) => `${c.method} ${c.url}`)).toEqual(['GET /api/v1/account/session']);
+  });
+
+  it('treats a 401 from the session probe as signed out', async () => {
     const f = fakeFetch([() => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in required.' } })]);
     const api = new ApiClient({ fetch: f.impl });
     expect(await api.me()).toBeNull();
@@ -89,9 +97,9 @@ describe('ApiClient', () => {
     const offer = await api.initiateTransfer('O26-J-00184');
     expect(offer.transferCode).toBe('AAAA-BBBB-CCCC');
     expect(f.calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      'GET /api/v1/account/me',
+      'GET /api/v1/account/session',
       'POST /api/v1/ownership/transfers',
-      'GET /api/v1/account/me',
+      'GET /api/v1/account/session',
       'POST /api/v1/ownership/transfers',
     ]);
     expect(f.calls[1].headers['x-csrf-token']).toBe('old');

@@ -45,7 +45,10 @@ export const CLAIM_ATTEMPT_WINDOW_MS = 60 * 60 * 1000;
 /** Audit action whose entries count towards the claim-code attempt limit. */
 export const CLAIM_FAILED_ACTION = 'ownership.claim_failed';
 
-/** Statuses in which an unowned product can be registered (same set as verification step 10). */
+/**
+ * Statuses in which an unowned product can be registered (same set as verification step 10), except a
+ * SERVICED piece whose service started before sale (ISSUED → SERVICED, see LifecycleService.isPreSaleService).
+ */
 export const REGISTRABLE_STATUSES: readonly ProductStatus[] = Object.freeze(['ACTIVATED', 'RESOLD', 'SERVICED']);
 /** Statuses in which an owner can hand a product over. */
 export const TRANSFERABLE_STATUSES: readonly ProductStatus[] = Object.freeze(['REGISTERED', 'OWNED', 'TRANSFERRED']);
@@ -211,7 +214,7 @@ export class OwnershipService {
     await this.requireActiveAccount(this.db, accountId);
     const product = await requireProduct(this.db, peek.productId);
     if (await this.currentOwnership(this.db, product.id)) throw alreadyRegistered();
-    if (!REGISTRABLE_STATUSES.includes(product.status)) throw registrationNotAllowed(product.status);
+    if (!(await this.registrable(this.db, product))) throw registrationNotAllowed(product.status);
 
     let verified = false;
     if (product.claim_secret_hash !== null) {
@@ -232,7 +235,7 @@ export class OwnershipService {
       const consumed = await consumeScanToken(tx, token, { now, productId: p.id });
       if (!consumed.ok) throw tokenError(consumed.reason);
       if (await this.currentOwnership(tx, p.id)) throw alreadyRegistered();
-      if (!REGISTRABLE_STATUSES.includes(p.status)) throw registrationNotAllowed(p.status);
+      if (!(await this.registrable(tx, p))) throw registrationNotAllowed(p.status);
 
       await tx
         .insertInto('ownership')
@@ -636,6 +639,12 @@ export class OwnershipService {
       return true;
     });
     if (failed) throw new DomainError('CLAIM_CODE_INVALID', 403, 'The claim code does not match this product.');
+  }
+
+  /** Open for first registration: a registrable status, and not a pre-sale service (ISSUED → SERVICED). */
+  private async registrable(db: Db, product: ProductRow): Promise<boolean> {
+    if (!REGISTRABLE_STATUSES.includes(product.status)) return false;
+    return !(product.status === 'SERVICED' && (await this.lifecycle.isPreSaleService(product.id, db)));
   }
 
   private async currentOwnership(db: Db, productUuid: string): Promise<OwnershipRow | undefined> {

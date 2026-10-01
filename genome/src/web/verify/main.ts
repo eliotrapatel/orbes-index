@@ -71,8 +71,8 @@ class App {
     document.body.prepend(viewportCorners());
     history.replaceState({ screen: 'landing' }, '');
     this.showLanding(false);
-    // Boot the decoder worker while the visitor reads the landing screen.
-    const warm = () => this.decoderClient()?.warm();
+    // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen.
+    const warm = () => void this.decoderClient()?.warm();
     const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     if (idle) idle.call(window, warm);
     else setTimeout(warm, 400);

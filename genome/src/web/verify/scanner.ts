@@ -33,6 +33,7 @@ import {
 } from './capture.js';
 import { classifyCameraError, type ProblemKind } from './copy.js';
 import type { DecodeReply, DecodeRequest, WorkerMessage } from './protocol.js';
+import { warmupFrame } from './warmup.js';
 
 // ── Camera ─────────────────────────────────────────────────────────────────
 
@@ -253,6 +254,7 @@ export class DecoderClient {
   private pending: Pending | null = null;
   private nextId = 1;
   private failures = 0;
+  private warmed = false;
 
   constructor(
     private readonly url: string,
@@ -270,13 +272,31 @@ export class DecoderClient {
     if (this.pending) this.restart();
   }
 
-  /** Start the worker early (landing page) so the first frame is not slowed by its boot. */
-  warm(): void {
+  /**
+   * Start the worker early (landing page) and decode one tiny synthetic code
+   * (warmup.ts), so the first camera frame is neither slowed by the worker's
+   * boot nor by the engine compiling the decoder. Once per client; the result
+   * is discarded. Resolves with the warm-up decode time (ms), or null.
+   */
+  warm(): Promise<number | null> {
     try {
       this.ensure();
     } catch {
-      // Reported on first use.
+      return Promise.resolve(null); // reported on first use
     }
+    if (this.warmed || this.pending || typeof ImageData === 'undefined') return Promise.resolve(null);
+    this.warmed = true;
+    let image: ImageData;
+    try {
+      const f = warmupFrame();
+      image = new ImageData(f.data, f.width, f.height);
+    } catch {
+      return Promise.resolve(null);
+    }
+    return this.decode(image, { tryInverted: false, tryMirrored: false, readGenome: true }).then(
+      (reply) => reply.timing.decodeMs,
+      () => null,
+    );
   }
 
   decode(image: ImageData, options: DecodeRequest['options']): Promise<DecodeReply> {

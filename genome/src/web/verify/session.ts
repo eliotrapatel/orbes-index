@@ -1,6 +1,6 @@
 /**
  * The customer's account session as the page knows it. The session cookie is
- * httpOnly; the page only learns "signed in as …" from /account/me, login or
+ * httpOnly; the page only learns "signed in as …" from /account/session, login or
  * register, and keeps the CSRF token inside ApiClient.
  */
 import { ApiError, type ApiClient } from './api.js';
@@ -24,7 +24,7 @@ export class SessionStore {
     return this.current;
   }
 
-  /** Learn the session once (GET /account/me). A network failure leaves it unknown and rethrows. */
+  /** Learn the session once (GET /account/session). A network failure leaves it unknown and rethrows. */
   ensure(): Promise<SessionState> {
     if (this.current.status !== 'unknown') return Promise.resolve(this.current);
     this.loading ??= this.api

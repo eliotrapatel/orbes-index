@@ -3,10 +3,12 @@
  *
  * - Same-origin JSON only; cookies travel with `credentials: 'same-origin'`
  *   (the session cookie is httpOnly, the page never sees it).
- * - CSRF: login, register and /account/me return the session's CSRF token;
- *   it is kept in memory only and sent as `x-csrf-token` on every unsafe
- *   request. A 403 CSRF_FAILED (token rotated by a login elsewhere, or a
- *   reloaded page) refreshes the token once through /account/me and retries.
+ * - CSRF: login, register and the session probe (/account/session) return
+ *   the session's CSRF token; it is kept in memory only and sent as
+ *   `x-csrf-token` on every unsafe request. A 403 CSRF_FAILED (token rotated
+ *   by a login elsewhere, or a reloaded page) refreshes the token once through
+ *   the probe and retries. The probe answers 200 `{ account: null }` when
+ *   signed out, so a signed-out visit logs no 401 in the browser console.
  * - Every failure becomes an ApiError with the server's public `{ code,
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
@@ -83,12 +85,16 @@ export class ApiClient {
 
   // ── Account ──────────────────────────────────────────────────────────────
 
-  /** The current session, or null when signed out. */
+  /** The current session, or null when signed out (GET /account/session; a 401 also reads as signed out). */
   async me(): Promise<SessionInfo | null> {
     try {
-      const s = await this.request<SessionInfo>('GET', '/api/v1/account/me');
-      this.remember(s);
-      return s;
+      const s = await this.request<SessionInfo | { account: null }>('GET', '/api/v1/account/session');
+      if (!s || s.account === null || typeof s.account !== 'object') {
+        this.forgetSession();
+        return null;
+      }
+      this.remember(s as SessionInfo);
+      return s as SessionInfo;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         this.forgetSession();

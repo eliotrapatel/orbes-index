@@ -241,7 +241,8 @@ describe('OwnershipService', () => {
     });
 
     it('refuses statuses that are not open for registration, without revealing them', async () => {
-      for (const path of [[], ['LOST'], ['REVOKED'], ['COUNTERFEIT_FLAGGED'], ['ACTIVATED', 'RETIRED']] as ProductStatus[][]) {
+      // ['SERVICED'] from ISSUED is a pre-sale inspection: the piece was never sold.
+      for (const path of [[], ['LOST'], ['REVOKED'], ['COUNTERFEIT_FLAGGED'], ['ACTIVATED', 'RETIRED'], ['SERVICED']] as ProductStatus[][]) {
         const p = await product({ path });
         const a = await account();
         const e = await expectDomainError(ownership.registerFirst(a.id, { registrationToken: await scanToken(p.id) }, a.actor), 'REGISTRATION_NOT_ALLOWED', 409);

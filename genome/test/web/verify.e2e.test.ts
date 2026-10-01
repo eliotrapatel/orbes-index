@@ -46,7 +46,7 @@ const visible = (loc: Locator) => loc.waitFor({ state: 'visible', timeout: POLL.
 
 /**
  * Console noise that is expected: Chromium logs every 4xx API answer as a failed resource
- * (the 401 of /account/me for signed-out visitors, a 403 for a wrong claim code).
+ * (a 403 for a wrong claim code; signed-out visitors no longer cause a 401: /account/session answers 200).
  */
 function isExpectedConsole(m: ConsoleMessage): boolean {
   return m.type() !== 'error' || /Failed to load resource: the server responded with a status of 4\d\d/.test(m.text());

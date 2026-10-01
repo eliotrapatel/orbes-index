@@ -64,7 +64,7 @@ export class OwnershipPanel {
   private readonly state: PanelState;
   private readonly now: () => number;
   private unsubscribe: (() => void) | null = null;
-  /** /account/me could not be reached: offer the sign-in forms rather than wait forever. */
+  /** The session probe could not be reached: offer the sign-in forms rather than wait forever. */
   private sessionUnavailable = false;
 
   constructor(

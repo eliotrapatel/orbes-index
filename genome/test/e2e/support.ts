@@ -39,6 +39,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { simulateCapture, type CaptureParams } from '../support/camera-sim.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { svgToGray, type GrayImage } from '../support/raster.js';
+import { WARMUP_FRAME_SIDE } from '../../src/web/verify/warmup.js';
 
 const execFileP = promisify(execFile);
 
@@ -351,11 +352,21 @@ export async function blockCamera(browser: Browser, page: Page, origin: string):
 
 // ── Instrumentation ────────────────────────────────────────────────────────
 
+export interface TimelineReply {
+  t: number;
+  id: number;
+  ok: boolean;
+  reason?: string;
+  timing?: { grayMs: number; decodeMs: number; totalMs: number };
+}
+
 export interface Timeline {
   clicks: { t: number; text: string }[];
   gum: { start: number; end?: number; ok?: boolean; error?: string; settings?: { width?: number; height?: number; frameRate?: number } }[];
   frames: { t: number; id: number; w: number; h: number }[];
-  replies: { t: number; id: number; ok: boolean; reason?: string; timing?: { grayMs: number; decodeMs: number; totalMs: number } }[];
+  replies: TimelineReply[];
+  /** The landing page's decoder warm-up decode (not a camera or photo frame), once posted. */
+  warmup: { t: number; id: number; reply: TimelineReply | null } | null;
   screens: { t: number; screen: string }[];
   locked: number | null;
   video: { t: number; type: string }[];
@@ -371,7 +382,7 @@ export interface Timeline {
  */
 export const INSTRUMENTATION = `(() => {
   const now = () => performance.now();
-  const T = (window.__orbesE2E = { clicks: [], gum: [], frames: [], replies: [], screens: [], locked: null, video: [], inputs: [], stoppedTracks: 0 });
+  const T = (window.__orbesE2E = { clicks: [], gum: [], frames: [], replies: [], warmup: null, screens: [], locked: null, video: [], inputs: [], stoppedTracks: 0 });
   document.addEventListener('change', (e) => {
     if (e.target && e.target.type === 'file') T.inputs.push({ t: now(), id: e.target.id || '' });
   }, true);
@@ -412,11 +423,16 @@ export const INSTRUMENTATION = `(() => {
         super(url, opts);
         this.addEventListener('message', (ev) => {
           const m = ev.data;
-          if (m && m.type === 'result') T.replies.push({ t: now(), id: m.id, ok: m.ok === true, reason: m.reason, timing: m.timing });
+          if (!m || m.type !== 'result') return;
+          const reply = { t: now(), id: m.id, ok: m.ok === true, reason: m.reason, timing: m.timing };
+          if (T.warmup && T.warmup.id === m.id && !T.warmup.reply) T.warmup.reply = reply;
+          else T.replies.push(reply);
         });
       }
       postMessage(msg, transfer) {
-        if (msg && msg.type === 'decode') T.frames.push({ t: now(), id: msg.id, w: msg.width, h: msg.height });
+        // The landing page's decoder warm-up (src/web/verify/warmup.ts, 200 × 200, first decode of the page) is kept apart.
+        if (msg && msg.type === 'decode' && T.warmup === null && T.frames.length === 0 && msg.width === ${WARMUP_FRAME_SIDE} && msg.height === ${WARMUP_FRAME_SIDE}) T.warmup = { t: now(), id: msg.id, reply: null };
+        else if (msg && msg.type === 'decode') T.frames.push({ t: now(), id: msg.id, w: msg.width, h: msg.height });
         return super.postMessage(msg, transfer);
       }
     };
