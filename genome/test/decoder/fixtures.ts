@@ -11,6 +11,7 @@ import { packIdentity } from '../../src/core/identity.js';
 import { encodePayload, frameCodeData } from '../../src/core/payload.js';
 import type { CaptureParams } from '../support/camera-sim.js';
 import { captureGeometry, simulateCapture } from '../support/camera-sim.js';
+import { decodeOrbesCode } from '../../src/core/decoder/index.js';
 import { Prng } from '../support/prng.js';
 import { svgToGray, type GrayImage } from '../support/raster.js';
 
@@ -92,4 +93,30 @@ export function captureTruth(pxPerU: number, params: CaptureParams): (x: number,
     if (!p) throw new Error(`code point (${x}, ${y}) is not visible`);
     return p;
   };
+}
+
+export interface TrialSetup {
+  /** Frame pixels per code unit, face-on. */
+  pxPerU: number;
+  params: CaptureParams;
+  style?: CodeStyle;
+}
+
+/**
+ * Seeded robustness trials: `n` captures of distinct codes built by `setup`
+ * from a per-trial PRNG, each decoded with default options. Returns the
+ * number of exact decodes and a description of every failure.
+ */
+export function runTrials(label: string, n: number, setup: (rng: Prng) => TrialSetup): { ok: number; failures: string[] } {
+  const failures: string[] = [];
+  let ok = 0;
+  for (let t = 0; t < n; t++) {
+    const rng = new Prng(`${label}#${t}`);
+    const code = makeCode(1000 + (t % 16));
+    const { pxPerU, params, style } = setup(rng);
+    const res = decodeOrbesCode(capture(code, pxPerU, params, rng.u32(), style));
+    if (res.ok && res.data.every((b, i) => b === code.data[i])) ok++;
+    else failures.push(`${label} #${t}: ${res.ok ? 'wrong data' : `${res.reason} ${res.detail ?? ''}`}`);
+  }
+  return { ok, failures };
 }
