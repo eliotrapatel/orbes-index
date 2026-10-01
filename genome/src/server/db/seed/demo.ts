@@ -33,6 +33,7 @@ import { randomBytes } from 'node:crypto';
 import type { AppContext } from '../../context.js';
 import { pseudonymize } from '../../http/client.js';
 import { revokeCode } from '../../routes/admin/code-revocation.js';
+import { REGISTRABLE_STATUSES } from '../../services/ownership.js';
 import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
 import { noopLogger, type Actor, type Logger } from '../../types.js';
@@ -1278,7 +1279,7 @@ async function summarise(w: World, keyId: number, steps: number, now: Date, gene
     claimCodes.push({
       productId: p.productId,
       claimCode: s.claimCode,
-      registrable: row !== undefined && row.ownership_state === 'UNREGISTERED' && ['ACTIVATED', 'RESOLD', 'SERVICED'].includes(row.status),
+      registrable: row !== undefined && row.ownership_state === 'UNREGISTERED' && REGISTRABLE_STATUSES.includes(row.status),
     });
   }
 

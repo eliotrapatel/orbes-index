@@ -75,7 +75,6 @@ export const AUTHENTIC_STATES: readonly VerificationState[] = [
 ];
 
 export const MINUTE = 60_000;
-export const HOUR = 60 * MINUTE;
 
 // ── Places ─────────────────────────────────────────────────────────────────
 
@@ -367,6 +366,8 @@ export class Lab {
   static async open(opts: LabOptions, shared?: Lab): Promise<Lab> {
     const dbFactory = opts.dbFactory ?? pgliteFactory;
     const store = await dbFactory();
+    let ctx: AppContext | undefined;
+    let app: FastifyInstance | undefined;
     try {
       const clock = createManualClock(opts.start ?? WORLD_START);
       const provider = new MemoryKeyProvider({ env: 'test' });
@@ -378,8 +379,8 @@ export class Lab {
         // Scenarios span up to two simulated days; the admin console stays logged in throughout.
         sessionTtlHours: { admin: 168 },
       });
-      const ctx = await createContext(config, { db: store.db, clock: clock.now, keyProvider: provider, ensureActiveKey: true });
-      const app = await buildApp(ctx, { serveStatic: false });
+      ctx = await createContext(config, { db: store.db, clock: clock.now, keyProvider: provider, ensureActiveKey: true });
+      app = await buildApp(ctx, { serveStatic: false });
       const catalog = await seedCatalog(ctx);
       const creds = await createAdmin(ctx, 'ADMIN');
       const admin = new Client(app, { ip: '192.0.2.10' });
@@ -387,6 +388,8 @@ export class Lab {
       if (login.statusCode !== 200) throw new Error(`admin login failed: ${login.statusCode} ${login.body}`);
       return new Lab(opts.scenario, opts.label ?? 'default thresholds', ctx, app, clock, provider, admin, catalog, store.close, dbFactory, shared);
     } catch (e) {
+      await app?.close();
+      await ctx?.close();
       await store.close();
       throw e;
     }

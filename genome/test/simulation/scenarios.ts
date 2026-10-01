@@ -25,7 +25,7 @@ import {
   unframeCodeData,
   type CodePayloadV1,
 } from '../../src/core/payload.js';
-import { publicKeyFromSeed, signEd25519 } from '../../src/server/crypto/ed25519-node.js';
+import { signEd25519 } from '../../src/server/crypto/ed25519-node.js';
 import { DEFAULT_ANOMALY_CONFIG } from '../../src/server/config.js';
 import { buildVerifyInput } from '../../src/web/verify/capture.js';
 import type { VerifyInput } from '../../src/web/verify/types.js';
@@ -33,7 +33,6 @@ import { hashSeed, Prng } from '../support/prng.js';
 import {
   AUTHENTIC_STATES,
   blankAnnulus,
-  HOUR,
   Lab,
   MINUTE,
   PLACES,
@@ -146,7 +145,7 @@ const authentic: Scenario = {
   key: 'authentic',
   title: 'Authentic code (control)',
   setup:
-    'A ring is issued through the admin generator (with a claim code), its 30 mm / 600 dpi PNG artifact downloaded from the admin API and photographed by phones in Paris: in the boutique before sale, by the buyer after the retail activation, by a friend after the buyer registered it with token + claim code, by the logged-in owner, then by eight more phones (every capture preset) over the day.',
+    'A ring is issued through the admin generator (with a claim code), its 30 mm / 600 dpi PNG artifact downloaded from the admin API and photographed by phones in Paris: in the boutique before sale, by the buyer after the retail activation, by a friend after the buyer registered it with token + claim code, by the logged-in owner, then by eight more phones (every capture preset) in Paris and Lyon over the day.',
   knownGaps: [],
   knownLimits: [],
   async run(lab) {
@@ -211,7 +210,7 @@ const cloned: Scenario = {
   setup:
     'An activated ring is registered by its owner in Paris. An hour later the same printed artifact (copied onto counterfeits) is photographed by 24 different phones in 8 countries within 20 minutes (one scan every 50 s, edge geo headers with city coordinates). Then the genuine owner, logged in, scans their ring in Paris.',
   knownGaps: [],
-  knownLimits: ['2b'],
+  knownLimits: ['2c'],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
     const p = await lab.issue({ activate: true });
@@ -229,13 +228,13 @@ const cloned: Scenario = {
       lab.advance(50_000);
     }
     const decoded = scans.filter((s) => s.photo.ok);
-    lab.expectTrue('2-photos', 'every phone decoded the copied artifact', '24 of 24', `${decoded.length} of 24`, decoded.length === 24);
+    lab.expectTrue('2b', 'every phone decoded the copied artifact', '24 of 24', `${decoded.length} of 24`, decoded.length === 24);
     const [head, ...rest] = decoded;
-    await lab.expectState('2b', 'first copy scanned (Paris): nothing unusual yet', head, 'AUTHENTIC_REGISTERED', { limit: true, note: 'One scan of a copy in the owner’s own city is indistinguishable from the genuine product.' });
-    lab.expectAll('2c', 'next 23 scans (7 more countries, minutes apart), strangers', rest, 'SUSPICIOUS_ACTIVITY');
+    await lab.expectState('2c', 'first copy scanned (Paris): nothing unusual yet', head, 'AUTHENTIC_REGISTERED', { limit: true, note: 'One scan of a copy in the owner’s own city is indistinguishable from the genuine product.' });
+    lab.expectAll('2d', 'next 23 scans (7 more countries, minutes apart), strangers', rest, 'SUSPICIOUS_ACTIVITY');
     const susp = rest.find((s) => s.state === 'SUSPICIOUS_ACTIVITY');
     lab.expectTrue(
-      '2d',
+      '2e',
       'SUSPICIOUS shows signature + genome (to compare with the object), no product data',
       'verification + genome, no product/warranty/ownership',
       susp ? Object.keys(susp.body).filter((k) => !['state', 'scanId', 'verifiedAt', 'title', 'message'].includes(k)).join(', ') : 'n/a',
@@ -244,11 +243,11 @@ const cloned: Scenario = {
 
     lab.advance(5 * MINUTE);
     const own = await lab.scan(owner, art);
-    await lab.expectState('2e', 'genuine owner (logged in) scans in Paris during the attack', own, 'AUTHENTIC_OWNERSHIP_VERIFIED');
-    lab.expectTrue('2f', 'owner sees the unusual-activity notice', "notice: 'UNUSUAL_ACTIVITY'", `notice: ${own.body.notice ?? 'none'} · ${own.body.title}`, own.body.notice === 'UNUSUAL_ACTIVITY');
+    await lab.expectState('2f', 'genuine owner (logged in) scans in Paris during the attack', own, 'AUTHENTIC_OWNERSHIP_VERIFIED');
+    lab.expectTrue('2g', 'owner sees the unusual-activity notice', "notice: 'UNUSUAL_ACTIVITY'", `notice: ${own.body.notice ?? 'none'} · ${own.body.title}`, own.body.notice === 'UNUSUAL_ACTIVITY');
     const ev = await lab.authEvent(own.scanId);
-    lab.expectTrue('2g', 'owner exception recorded internally', 'RISK_THRESHOLD_OWNER', (ev?.reasons ?? []).join(', '), (ev?.reasons ?? []).includes('RISK_THRESHOLD_OWNER'));
-    await lab.expectAnomalies('2h', 'anomalies recorded for the product', p, ['IMPOSSIBLE_TRAVEL', 'GEO_DISPERSION', 'SCAN_VELOCITY', 'DEVICE_DIVERSITY']);
+    lab.expectTrue('2h', 'owner exception recorded internally', 'RISK_THRESHOLD_OWNER', (ev?.reasons ?? []).join(', '), (ev?.reasons ?? []).includes('RISK_THRESHOLD_OWNER'));
+    await lab.expectAnomalies('2i', 'anomalies recorded for the product', p, ['IMPOSSIBLE_TRAVEL', 'GEO_DISPERSION', 'SCAN_VELOCITY', 'DEVICE_DIVERSITY']);
     lab.redactionCheck('2z');
   },
 };
@@ -260,7 +259,7 @@ const alteredId: Scenario = {
   key: 'altered-id',
   title: 'Altered product ID',
   setup:
-    'A forger photographs a genuine low-priced ring, edits the identity in the 79 bytes the scanner read to that of a pricier registered product (recomputing the public CRC-16), and submits it; then flips each of the 32 identity bits one at a time; then prints the relabelled bytes as a brand-new, visually valid artifact (render module, with the target product’s genome glyphs) and has a victim photograph it.',
+    'A forger photographs a genuine low-priced ring, edits the identity in the 79 bytes the scanner read to that of a pricier registered product (recomputing the public CRC-16), and submits it; then flips each of the 32 identity bits, and each of the 104 bits of the whole signed payload, one at a time; then prints the relabelled bytes as a brand-new, visually valid artifact (render module, with the target product’s genome glyphs) and has a victim photograph it.',
   knownGaps: [],
   knownLimits: [],
   async run(lab) {
@@ -297,17 +296,38 @@ const alteredId: Scenario = {
       wrong === 0,
     );
 
+    // Every single-bit flip of the whole signed payload: versions, key id, identity, issue, issued day, nonce.
+    const sweep: Submission[] = [];
+    const expected: string[] = [];
+    let off = 0;
+    for (let bit = 0; bit < PAYLOAD_V1_LENGTH * 8; bit++) {
+      const data = reframe(read, { payload: (b) => void (b[bit >> 3] ^= 0x80 >> (bit & 7)) });
+      const parsed = tryDecodePayload(data.subarray(0, PAYLOAD_V1_LENGTH));
+      const want = parsed && parsed.genomeVersion === 1 ? 'INVALID_SIGNATURE' : 'MALFORMED_CODE';
+      expected.push(want);
+      const sub = await lab.submitBytes(forger, data);
+      sweep.push(sub);
+      if (sub.state !== want || sub.violations.length) off++;
+    }
+    lab.expectTrue(
+      '3d',
+      'every single-bit flip of the 13-byte signed payload (104 bits: versions, key id, identity, issue, day, nonce)',
+      `${tally(expected)} (MALFORMED_CODE where strict parsing or the version check refuses the edit)`,
+      tally(sweep.map((s) => s.state ?? `HTTP ${s.status}`)),
+      off === 0,
+    );
+
     const forged = await lab.forgeArtifact('relabelled', relabelled, target.genome.glyphs);
     const victim = lab.device('victim-phone', PLACES.paris);
     const s1 = await lab.scan(victim, forged);
     const same = !!s1.photo.decoded && fromBase64Url(s1.photo.decoded.code).every((b, i) => b === relabelled[i]);
-    lab.expectTrue('3d', 'new artifact printed from the edited bytes: the decoder reads it', 'decoded, bytes = edited bytes', s1.photo.ok ? `decoded in ${s1.photo.frames} frame(s), bytes ${same ? 'identical' : 'DIFFERENT'}` : `not decoded (${s1.photo.reason})`, s1.photo.ok && same);
-    await lab.expectState('3e', 'the server rejects the reprinted relabelled code', s1, 'INVALID_SIGNATURE', { reason: 'BAD_SIGNATURE' });
+    lab.expectTrue('3e', 'new artifact printed from the edited bytes: the decoder reads it', 'decoded, bytes = edited bytes', s1.photo.ok ? `decoded in ${s1.photo.frames} frame(s), bytes ${same ? 'identical' : 'DIFFERENT'}` : `not decoded (${s1.photo.reason})`, s1.photo.ok && same);
+    await lab.expectState('3f', 'the server rejects the reprinted relabelled code', s1, 'INVALID_SIGNATURE', { reason: 'BAD_SIGNATURE' });
 
     const t = await lab.scan(lab.device('target-owner-phone', PLACES.paris), await lab.artifact(target));
-    await lab.expectState('3f', 'the impersonated product is unaffected', t, 'AUTHENTIC_FIRST_REGISTRATION');
+    await lab.expectState('3g', 'the impersonated product is unaffected', t, 'AUTHENTIC_FIRST_REGISTRATION');
     const rows = await lab.anomalies();
-    lab.expectTrue('3g', 'invalid signatures create scan events, not anomalies', 'no anomaly', rows.length ? rows.map((a) => a.type).join(', ') : 'none', rows.length === 0, 'Rejected forgeries are visible in VERIFICATION EVENTS (state INVALID_SIGNATURE), not in ANOMALIES.');
+    lab.expectTrue('3h', 'invalid signatures create scan events, not anomalies', 'no anomaly', rows.length ? rows.map((a) => a.type).join(', ') : 'none', rows.length === 0, 'Rejected forgeries are visible in VERIFICATION EVENTS (state INVALID_SIGNATURE), not in ANOMALIES.');
     lab.redactionCheck('3z');
   },
 };
@@ -319,7 +339,7 @@ const alteredGenome: Scenario = {
   key: 'altered-genome',
   title: 'Altered genome',
   setup:
-    'Starting from a genuine scan, the forger (a) changes the signed genome-version nibble (all 15 other values); (b) reprints the genuine 79 bytes with the 8 glyphs of another product; (c) reprints them with a single glyph replaced; (d) sands off the whole genome orbit of a genuine label.',
+    'Starting from a genuine scan, the forger changes the signed genome-version nibble (all 15 other values); reprints the genuine 79 bytes with the 8 glyphs of another registered product; reprints them with a single glyph replaced; and sands the whole genome orbit off a genuine label.',
   knownGaps: ['4a'],
   knownLimits: ['4d', '4e'],
   async run(lab) {
@@ -525,7 +545,7 @@ const duplicated: Scenario = {
   setup:
     'A counterfeiter photographs a genuine label in the boutique, decodes it and prints a perfect copy (render module, ivory theme; the genome is public, derived from the identity). The genuine piece is scanned in Paris and the copy in Tokyo 20 s apart (city coordinates); then both holders keep scanning; then the copies are scanned ≥ 12 h apart.',
   knownGaps: [],
-  knownLimits: ['8a', '8g', '8h'],
+  knownLimits: ['8a', '8f', '8h'],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
     const p = await lab.issue({ activate: true, claim: true });
@@ -559,11 +579,11 @@ const duplicated: Scenario = {
     lab.at('2026-06-01T22:30:00Z');
     const s3 = await lab.scan(tokyo, copy);
     const tokyoReg = s3.body.registration ? await lab.register(tokyo, s3) : 0;
-    await lab.expectState('8g', 'copy rescanned in Tokyo 12.5 h later (plausible flight)', s3, 'AUTHENTIC_FIRST_REGISTRATION', { limit: true, note: 'Paris → Tokyo in 12.5 h is a possible journey and the 10:00 finding has decayed below the threshold (60 × (1 − 12.5 h / 30 d) < 60).' });
-    lab.expectTrue('8f', 'copy holder tries to register without the claim code', 'rejected (claim code required)', `HTTP ${tokyoReg || 'n/a'}`, tokyoReg !== 201 && tokyoReg !== 0);
+    await lab.expectState('8f', 'copy rescanned in Tokyo 12.5 h later (plausible flight)', s3, 'AUTHENTIC_FIRST_REGISTRATION', { limit: true, note: 'Paris → Tokyo in 12.5 h is a possible journey (776 km/h), and the 10:01 finding has decayed to 60 × (1 − 12.5 h / 30 d) ≈ 59 < 60.' });
+    lab.expectTrue('8g', 'copy holder tries to register without the claim code', 'rejected (claim code required)', `HTTP ${tokyoReg || 'n/a'}`, tokyoReg !== 201 && tokyoReg !== 0);
     lab.at('2026-06-02T11:00:00Z');
     const s4 = await lab.scan(paris, genuine);
-    await lab.expectState('8h', 'genuine piece rescanned in Paris 12.5 h after that', s4, 'AUTHENTIC_FIRST_REGISTRATION', { limit: true, note: 'Copies scanned in alternation ≥ 11 h apart never look like impossible travel.' });
+    await lab.expectState('8h', 'genuine piece rescanned in Paris 12.5 h after that', s4, 'AUTHENTIC_FIRST_REGISTRATION', { limit: true, note: 'Copies scanned in alternation more than 10.8 h apart (9 705 km at 900 km/h) never look like impossible travel.' });
     const reg = await lab.register(paris, s4, p.claimCode);
     lab.expectTrue('8i', 'genuine buyer registers with the claim code', 'HTTP 201', `HTTP ${reg}`, reg === 201);
     lab.at('2026-06-02T23:30:00Z');
@@ -589,55 +609,56 @@ const highRisk: Scenario = {
   key: 'high-risk',
   title: 'High-risk scan patterns',
   setup:
-    'Velocity burst: 30 scans in 15 minutes by 15 phones in one city (Paris), with the default thresholds and again in a world whose operator lowered ANOMALY_SUSPICIOUS_THRESHOLD to 50. Canonical journey: France 10:00 → Japan 10:02 → USA 10:03 (edge reports the country only).',
-  knownGaps: ['9b'],
+    'Canonical journey: France 10:00 → Japan 10:02 → USA 10:03 (the edge reports the country only). Velocity burst on another ring: 30 scans in 15 minutes by 15 phones in one city (Paris, from 10:30), with the default thresholds and again in a second world whose operator lowered ANOMALY_SUSPICIOUS_THRESHOLD to 50.',
+  knownGaps: ['9f'],
   knownLimits: [],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
+    const r = await lab.issue({ activate: true });
     const p = await lab.issue({ activate: true });
+    const artR = await lab.artifact(r);
     const art = await lab.artifact(p);
+
+    const fr = lab.device('phone-FR', PLACES.paris, { geo: 'country' });
+    const jp = lab.device('phone-JP', PLACES.tokyo, { geo: 'country' });
+    const us = lab.device('phone-US', PLACES.newYork, { geo: 'country' });
     lab.at('2026-06-01T10:00:00Z');
+    await lab.expectState('9a', 'France 10:00', await lab.scan(fr, artR), 'AUTHENTIC_FIRST_REGISTRATION');
+    lab.at('2026-06-01T10:02:00Z');
+    await lab.expectState('9b', 'Japan 10:02', await lab.scan(jp, artR), 'SUSPICIOUS_ACTIVITY', { reason: 'ANOMALY:IMPOSSIBLE_TRAVEL' });
+    lab.at('2026-06-01T10:03:00Z');
+    await lab.expectState('9c', 'USA 10:03', await lab.scan(us, artR), 'SUSPICIOUS_ACTIVITY', { reason: 'ANOMALY:IMPOSSIBLE_TRAVEL' });
+    const travel = (await lab.anomaliesOf(r)).find((a) => a.type === 'IMPOSSIBLE_TRAVEL');
+    lab.expectTrue(
+      '9d',
+      'IMPOSSIBLE_TRAVEL from country centroids (lower-bound distance)',
+      'HIGH, basis country, 2 occurrences',
+      travel ? `${travel.severity}, basis ${travel.details.basis}, last ${travel.details.fromCountry}→${travel.details.toCountry} ≥ ${travel.details.distanceKm} km in ${travel.details.minutes} min, ×${travel.occurrences}` : 'none',
+      !!travel && travel.severity === 'HIGH' && travel.details.basis === 'country' && travel.occurrences === 2,
+    );
+
+    lab.at('2026-06-01T10:30:00Z');
     const scans = await burst(lab, art, 30, 15);
-    lab.expectAll('9a', 'velocity burst, scans 1–20 (thresholds not yet crossed)', scans.slice(0, 20), 'AUTHENTIC_FIRST_REGISTRATION');
+    lab.expectAll('9e', 'velocity burst, scans 1–20 (thresholds not yet crossed)', scans.slice(0, 20), 'AUTHENTIC_FIRST_REGISTRATION');
     const w = DEFAULT_ANOMALY_CONFIG;
     const combined = Math.round(100 * (1 - (1 - 0.35) * (1 - 0.3)));
-    lab.expectAll('9b', `velocity burst, scans 21–30 (> ${w.velocityMaxScans} scans / ${w.velocityWindowMin} min, > ${w.deviceMax} devices), default thresholds`, scans.slice(20), 'SUSPICIOUS_ACTIVITY', {
+    lab.expectAll('9f', `velocity burst, scans 21–30 (> ${w.velocityMaxScans} scans / ${w.velocityWindowMin} min, > ${w.deviceMax} devices), default thresholds`, scans.slice(20), 'SUSPICIOUS_ACTIVITY', {
       gap: {
         contract: 'AUTHENTIC_FIRST_REGISTRATION',
         note: `SCAN_VELOCITY (35) and DEVICE_DIVERSITY (30) combine to ${combined} < suspiciousThreshold ${w.suspiciousThreshold}: with the contract defaults a burst confined to one place is recorded (MEDIUM anomalies) but never shown as SUSPICIOUS; it needs a geographic signal or a lower threshold.`,
       },
     });
     const last = await lab.authEvent(scans[29].scanId);
-    lab.expectTrue('9c', 'internal risk score of the last burst scan', `${combined} (0.35 ⊕ 0.30)`, String(last?.risk_score), last?.risk_score === combined);
-    await lab.expectAnomalies('9d', 'burst anomalies recorded for review', p, ['SCAN_VELOCITY', 'DEVICE_DIVERSITY']);
+    lab.expectTrue('9g', 'internal risk score of the last burst scan', `${combined} (0.35 ⊕ 0.30)`, String(last?.risk_score), last?.risk_score === combined);
+    await lab.expectAnomalies('9h', 'burst anomalies recorded for review', p, ['SCAN_VELOCITY', 'DEVICE_DIVERSITY']);
 
     const strict = await lab.spawn({ scenario: `${lab.scenario}/strict`, label: 'threshold 50', anomaly: { suspiciousThreshold: 50 } });
     strict.at('2026-06-01T09:00:00Z');
     const q = await strict.issue({ activate: true });
     const artQ = await strict.artifact(q);
-    strict.at('2026-06-01T10:00:00Z');
+    strict.at('2026-06-01T10:30:00Z');
     const strictScans = await burst(strict, artQ, 30, 15);
-    strict.expectAll('9e', 'same burst, operator threshold 50: scans 21–30', strictScans.slice(20), 'SUSPICIOUS_ACTIVITY');
-
-    const r = await lab.issue({ activate: true });
-    const artR = await lab.artifact(r);
-    const fr = lab.device('phone-FR', PLACES.paris, { geo: 'country' });
-    const jp = lab.device('phone-JP', PLACES.tokyo, { geo: 'country' });
-    const us = lab.device('phone-US', PLACES.newYork, { geo: 'country' });
-    lab.at('2026-06-01T11:00:00Z');
-    await lab.expectState('9f', 'France 11:00', await lab.scan(fr, artR), 'AUTHENTIC_FIRST_REGISTRATION');
-    lab.at('2026-06-01T11:02:00Z');
-    await lab.expectState('9g', 'Japan 11:02', await lab.scan(jp, artR), 'SUSPICIOUS_ACTIVITY', { reason: 'ANOMALY:IMPOSSIBLE_TRAVEL' });
-    lab.at('2026-06-01T11:03:00Z');
-    await lab.expectState('9h', 'USA 11:03', await lab.scan(us, artR), 'SUSPICIOUS_ACTIVITY', { reason: 'ANOMALY:IMPOSSIBLE_TRAVEL' });
-    const travel = (await lab.anomaliesOf(r)).find((a) => a.type === 'IMPOSSIBLE_TRAVEL');
-    lab.expectTrue(
-      '9i',
-      'IMPOSSIBLE_TRAVEL from country centroids (lower-bound distance)',
-      'HIGH, basis country, 2 occurrences',
-      travel ? `${travel.severity}, basis ${travel.details.basis}, last ${travel.details.fromCountry}→${travel.details.toCountry} ≥ ${travel.details.distanceKm} km in ${travel.details.minutes} min, ×${travel.occurrences}` : 'none',
-      !!travel && travel.severity === 'HIGH' && travel.details.basis === 'country' && travel.occurrences === 2,
-    );
+    strict.expectAll('9i', 'same burst, operator threshold 50: scans 21–30', strictScans.slice(20), 'SUSPICIOUS_ACTIVITY');
     lab.redactionCheck('9z');
   },
 };
@@ -682,8 +703,8 @@ const keys: Scenario = {
 
     await lab.expectState('10a', 'unknown key id 200 (CRC recomputed)', await lab.submitBytes(forger, reframe(fromBase64Url(old.code.data), { payload: (b) => void (b[1] = 200) })), 'INVALID_SIGNATURE', { reason: 'UNKNOWN_KEY' });
 
+    // The forger's own Ed25519 key (never registered with ORBES), seeded.
     const forgerSeed = Uint8Array.from({ length: 32 }, () => rng.int(0, 255));
-    publicKeyFromSeed(forgerSeed);
     const ownKeyPayload = encodePayload({ ...base, nonce: Uint8Array.of(1, 2, 3, 4) });
     const ownKeyCode = frameCodeData(ownKeyPayload, signEd25519(forgerSeed, signingMessage(ownKeyPayload)));
     const sOwn = await lab.scan(victim, await lab.forgeArtifact('forger-key', ownKeyCode, old.genome.glyphs));

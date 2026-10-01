@@ -314,7 +314,12 @@ export async function exportCodes(db: Db, keys: KeyService, products: readonly D
     for (const row of rows) {
       const packed = Number(row.packed_identity);
       // Same end-to-end check as IssuanceService.renderCode: never draw a code that would not verify.
-      const payload = decodePayload(row.payload);
+      let payload: ReturnType<typeof decodePayload>;
+      try {
+        payload = decodePayload(row.payload);
+      } catch {
+        throw new Error(`${info.productId} issue ${row.issue} failed its integrity check (payload does not decode)`);
+      }
       const key = await keys.publicKey(row.key_id);
       const problems = [
         payload.issue !== row.issue && 'issue',

@@ -39,12 +39,12 @@
  *     (unframeCodeData) catch miscorrections; a failure moves on to the next
  *     hypothesis.
  *  7. Alignment repair, only when step 6 fails, cheapest first: the fits
- *     leaving one moon out (a damaged moon), coordinate-descent refinement of
- *     the control points on cell contrast (refine.ts: centroid bias, lens
- *     distortion), then a smooth offset field (curved surfaces), then that
- *     field started from a registration of the orbits on their ring lattice
- *     (strong bends, e.g. a code on a finger ring); each is followed by
- *     steps 5–6 again.
+ *     leaving one moon out (a damaged moon), a smooth offset field started
+ *     from a registration of the orbits on their ring lattice (refine.ts:
+ *     curved surfaces, up to a code on a finger ring), coordinate-descent
+ *     refinement of the control points on cell contrast (centroid bias, lens
+ *     distortion), then the offset field from that refined fit; each is
+ *     followed by steps 5–6 again.
  *  8. Seal-less fallback: when no seal candidate decodes (seal scratched,
  *     under a glare stripe, crossed by a strip), connected components of the
  *     binarised frame are searched for four disc-like blobs whose diagonals
@@ -556,10 +556,9 @@ function decodeAnchors(img: GrayImage, anchors: Anchors | null, unitPx: number, 
   }
   // Cheapest first: most captures decode straight from the anchor fit; each
   // further stage costs more and only runs when the previous one failed.
-  // The lattice registration tolerates misalignment the other repairs cannot,
-  // so it starts from the plain anchor fit: the leave-one-out fits lean on
-  // the seal's affine frame, which a strong bend makes wrong away from the
-  // centre, and the contrast descents may have locked onto a neighbouring ring.
+  // The lattice registration starts from the plain anchor fit: the
+  // leave-one-out fits lean on the seal's affine frame, which a strong bend
+  // makes wrong away from the centre.
   const fitted = alignment;
   let read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
   if (!read) {
@@ -570,19 +569,19 @@ function decodeAnchors(img: GrayImage, anchors: Anchors | null, unitPx: number, 
     }
   }
   if (!read) {
+    // Kept only when it decodes: on flat surfaces, where the lattice has
+    // nothing to fix, the contrast descents below start from the best fit so far.
+    const lattice = withRingLattice(img, fitted, unitPx);
+    read = lattice && decodeCells(lattice.cls, moons, opts.tryMirrored, failure);
+    if (lattice && read) alignment = lattice;
+  }
+  if (!read) {
     alignment = refineAlignment(img, alignment, unitPx);
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
   }
   if (!read) {
     alignment = withOffsetField(img, alignment, unitPx);
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-  }
-  if (!read) {
-    const lattice = withRingLattice(img, fitted, unitPx);
-    if (lattice) {
-      alignment = lattice;
-      read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-    }
   }
   if (!read) return null;
 

@@ -3,7 +3,8 @@
 # ORBES GENOME CODE: verification API, admin console and web apps in one image.
 #
 #   docker build -t orbes-genome .
-#   docker run --env-file .env -p 8080:8080 -v orbes-keys:/var/lib/orbes/keys orbes-genome
+#   docker run --env-file .env -e KEY_DIR=/var/lib/orbes/keys -p 8080:8080 \
+#     -v orbes-keys:/var/lib/orbes/keys orbes-genome
 #
 # The image runs the TypeScript sources with tsx (a runtime dependency) and
 # serves the web apps built in the `web` stage. It holds no secrets and no
@@ -28,8 +29,13 @@ COPY package.json package-lock.json ./
 # --ignore-scripts: no third-party install script runs at build time; esbuild
 # (used by the web build and by tsx) finds its @esbuild/<platform> binary
 # without its optional postinstall step.
+# Behind a TLS-inspecting proxy, pass its CA as a build secret (added to, not
+# replacing, the default trust store; never stored in a layer):
+#   docker build --secret id=extra_ca,src=/path/to/proxy-ca.pem .
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --omit=dev --ignore-scripts
+    --mount=type=secret,id=extra_ca,required=false \
+    if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi \
+ && npm ci --omit=dev --ignore-scripts
 
 # ── 2. Web apps (esbuild → dist/web, content-hashed) ───────────────────────
 FROM deps AS web
@@ -43,12 +49,12 @@ FROM ${NODE_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="ORBES GENOME CODE" \
       org.opencontainers.image.description="ORBES product identity and authentication service" \
       org.opencontainers.image.vendor="ORBES"
+# Production defaults to KEY_PROVIDER=local; KEY_DIR (/var/lib/orbes/keys, the
+# volume below) and every secret come from the environment (.env.example).
 ENV NODE_ENV=production \
     ORBES_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \
-    KEY_PROVIDER=local \
-    KEY_DIR=/var/lib/orbes/keys \
     npm_config_update_notifier=false \
     npm_config_fund=false
 WORKDIR /app

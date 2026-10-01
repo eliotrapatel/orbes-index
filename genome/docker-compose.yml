@@ -1,0 +1,85 @@
+# ORBES GENOME CODE on one host: the app and PostgreSQL 17.
+#
+#   cp .env.example .env            # then fill in every secret (the app refuses to start without them)
+#   docker compose up -d --build
+#   docker compose exec app node --import tsx scripts/keys.ts generate     # first signing key, once
+#   docker compose ps                                                      # app should become "healthy"
+#
+# The app listens on 127.0.0.1:${APP_PORT:-8080}; put a TLS-terminating
+# reverse proxy (Caddy, nginx, a load balancer) in front of it and set
+# PUBLIC_ORIGIN / TRUST_PROXY accordingly. PostgreSQL is not published at all.
+#
+# Persistent data lives in two named volumes:
+#   pgdata  the database            (back it up: pg_dump / volume snapshots)
+#   keys    encrypted signing keys  (back it up WITH KEY_ENCRYPTION_KEY stored elsewhere;
+#                                    losing either means no new codes can be signed)
+#
+# Keep secrets outside the checkout with ORBES_ENV_FILE=/etc/orbes/genome.env
+# (and `docker compose --env-file /etc/orbes/genome.env …` for the variables
+# interpolated below).
+
+name: orbes-genome
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orbes}
+      POSTGRES_USER: ${POSTGRES_USER:-orbes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (see .env.example)}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    shm_size: 128mb
+    security_opt:
+      - no-new-privileges:true
+    networks: [backend]
+
+  app:
+    build:
+      context: .
+    image: orbes-genome:${ORBES_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ${ORBES_ENV_FILE:-.env}
+        required: true
+    environment:
+      # Wired by this file; everything else comes from the env file.
+      DATABASE_URL: postgres://${POSTGRES_USER:-orbes}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (see .env.example)}@db:5432/${POSTGRES_DB:-orbes}
+      HOST: 0.0.0.0
+      PORT: "8080"
+      KEY_PROVIDER: local
+      KEY_DIR: /var/lib/orbes/keys
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    volumes:
+      - keys:/var/lib/orbes/keys
+    # Immutable container: code is read-only; tsx and npm caches go to tmpfs.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      - /home/node:size=16m,uid=1000,gid=1000
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    networks: [backend]
+
+volumes:
+  pgdata:
+  keys:
+
+networks:
+  backend:
