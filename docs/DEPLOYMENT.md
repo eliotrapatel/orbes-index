@@ -1047,7 +1047,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
  │  postgres:17 (volume pgdata, never published)                                                      │
  │                                                                                                    │
  │  systemd timers: orbes-backup (nightly, age-encrypted → /var/backups/orbes [→ OVH Object Storage]) │
- │                  orbes-geoip  (monthly, DB-IP City Lite → volume geoip)                            │
+ │                  orbes-geoip  (weekly, DB-IP City Lite → volume geoip)                             │
  └────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1114,7 +1114,7 @@ What the bootstrap does (idempotent, rerun it any time; `--help` lists the optio
 | Clock | Keeps an active NTP client (chrony is Ubuntu's default since 25.10), else installs and enables systemd-timesyncd. TOTP, session expiry and audit timestamps assume an accurate clock: `timedatectl` must show `System clock synchronized: yes`. |
 | Swap | 2 GB `/swapfile` when RAM < 2 GB and no swap exists. |
 | Deploy user | `orbes` (no password, no sudo, member of `docker`, which is root-equivalent: protect this account); `/opt/orbes` (0750) and `/var/backups/orbes` (0700) owned by it; the checkout is chowned to it. |
-| Timers | `orbes-backup.timer` (nightly ≈ 03:17 + up to 20 min) and `orbes-geoip.timer` (5th of each month), running the scripts as `orbes` from `--app-dir` (default `/opt/orbes/orbes-index`). |
+| Timers | `orbes-backup.timer` (nightly ≈ 03:17 + up to 20 min) and `orbes-geoip.timer` (weekly, Monday ≈ 04:41 + up to 1 h; DB-IP publishes a new edition monthly and a run before it is out keeps the previous one), running the scripts as `orbes` from `--app-dir` (default `/opt/orbes/orbes-index`). |
 
 **Optional SSH hardening:** `sudo …/bootstrap-ubuntu.sh --harden-ssh` writes `/etc/ssh/sshd_config.d/10-orbes-hardening.conf` (`PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `MaxAuthTries 4`; it sorts before cloud-init's `50-cloud-init.conf`, and sshd keeps the first value it reads). It refuses unless a non-root member of `sudo` has a valid non-empty `~/.ssh/authorized_keys` **and** working sudo (a `NOPASSWD` rule, as on OVH's `ubuntu` user, or a password), validates with `sshd -t` (and removes the file again if that fails), then reloads sshd. **Keep your session open and test a new login (`ssh ubuntu@<ip> sudo -v`) before closing it.**
 
@@ -1158,7 +1158,7 @@ Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` a
 `GEO_MODE=mmdb` (the stack's default) locates scans from the client IP that Caddy forwards, with the DB-IP "IP to City Lite" file in the `geoip` volume (§3.4: data, licence and attribution, privacy, reload behaviour). The volume is mounted **read-only** in the app; only the updater writes to it.
 
 ```bash
-scripts/geoip-update.sh                 # download, validate, install atomically (monthly timer does this)
+scripts/geoip-update.sh                 # download, validate, install atomically (the weekly timer does this)
 scripts/geoip-update.sh --check         # validate the installed file (no network)
 scripts/geoip-update.sh --rollback      # back to the previous edition
 scripts/geoip-update.sh --from-file dbip-city-lite-2026-10.mmdb   # air-gapped install, validated first

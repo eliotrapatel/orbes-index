@@ -15,7 +15,7 @@
 # within 10 minutes without a restart. Idempotent: an edition already
 # installed is not downloaded again (unless --force).
 #
-# Runs monthly from the orbes-geoip.timer systemd unit. A failed refresh keeps
+# Runs weekly from the orbes-geoip.timer systemd unit. A failed refresh keeps
 # the current file; a missing file only disables geolocation (never
 # verification). Exit codes: 0 ok, 1 failure, 2 usage error.
 set -Eeuo pipefail

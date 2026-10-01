@@ -38,7 +38,7 @@ The script does the following:
 - enables automatic security updates, fail2ban and time sync;
 - adds swap if needed;
 - creates the `orbes` user;
-- installs the nightly backup timer and the monthly GeoIP timer.
+- installs the nightly backup timer and the weekly GeoIP timer.
 
 **Optional hardening.** Once you have confirmed you can log in with your SSH key, run the script again with `--harden-ssh`. That disables password and root SSH logins. The script refuses to do this if it would lock you out.
 
@@ -106,7 +106,7 @@ docker compose ps                                                # caddy, app, p
    - In OVH → *Object Storage*, create a bucket and S3 credentials.
    - Run `rclone config` as `orbes` to add the remote.
    - Set `BACKUP_RCLONE_DEST=<remote>:<bucket>/orbes` in `.env`.
-3. **Check the timer.** `systemctl list-timers 'orbes-*'` should list the nightly backup and the monthly GeoIP refresh.
+3. **Check the timer.** `systemctl list-timers 'orbes-*'` should list the nightly backup and the weekly GeoIP refresh.
 
 ## 7. Catalogue and first products (admin console)
 

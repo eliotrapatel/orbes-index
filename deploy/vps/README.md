@@ -18,8 +18,8 @@ internet ──80/443──▶ caddy ──edge (internal)──▶ app:8080 ─
 | `scripts/setup.sh` | Once, as `orbes`: `.env` with generated secrets, backup key, first deployment, GeoIP database. |
 | `scripts/deploy.sh` | Build a git ref, roll out, first signing key, smoke tests, automatic rollback. |
 | `scripts/backup.sh` / `restore.sh` | Encrypted (age) database + key-volume archives, retention, optional copy to OVH Object Storage; restore with checks and confirmation. |
-| `scripts/geoip-update.sh` | Monthly DB-IP City Lite refresh into the `geoip` volume. |
-| `systemd/` | `orbes-backup.timer` (nightly), `orbes-geoip.timer` (monthly). |
+| `scripts/geoip-update.sh` | DB-IP City Lite refresh into the `geoip` volume (weekly timer; a new edition appears monthly). |
+| `systemd/` | `orbes-backup.timer` (nightly), `orbes-geoip.timer` (weekly). |
 
 ## Quick start
 

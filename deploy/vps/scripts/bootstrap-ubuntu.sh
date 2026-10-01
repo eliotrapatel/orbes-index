@@ -22,7 +22,7 @@
 #   * a 2 GB swap file when RAM < 2 GB and no swap is active
 #   * deploy user `orbes` (docker group; no sudo, no password), /opt/orbes owned by
 #     it, /var/backups/orbes (0700, orbes)
-#   * systemd units orbes-backup (nightly) and orbes-geoip (monthly), from
+#   * systemd units orbes-backup (nightly) and orbes-geoip (weekly), from
 #     ../systemd, pointing at --app-dir (default /opt/orbes/orbes-index)
 #   * OPTIONAL --harden-ssh: key-only authentication, no root login. Applied only
 #     after checking that a non-root sudo user has a valid, non-empty
@@ -143,7 +143,7 @@ svc() { # svc ARGS…: systemctl, only shown when systemd is not running
 
 # ── systemd units ──────────────────────────────────────────────────────────
 install_units() {
-  step "systemd units (backup nightly, GeoIP monthly)"
+  step "systemd units (backup nightly, GeoIP weekly)"
   local src="$STACK_DIR/systemd" u changed=false
   [[ -d "$src" ]] || die "unit templates not found in $src"
   [[ -d "$APP_DIR/deploy/vps" ]] || warn "$APP_DIR/deploy/vps does not exist yet: clone the repository there (or pass --app-dir)"

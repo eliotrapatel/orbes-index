@@ -1,11 +1,12 @@
-# ORBES GENOME CODE: refresh the GeoIP database monthly. DB-IP publishes each
-# month's edition at the start of the month; the updater falls back to the
-# previous edition while the current one is not out yet.
+# ORBES GENOME CODE: refresh the GeoIP database weekly. DB-IP publishes each
+# month's edition at the start of the month; a run before it is out falls back
+# to the previous edition, so a weekly run picks the new one up within days.
+# Runs that find the current edition already installed download nothing.
 [Unit]
-Description=Monthly ORBES GENOME CODE GeoIP refresh
+Description=Weekly ORBES GENOME CODE GeoIP refresh
 
 [Timer]
-OnCalendar=*-*-05 04:41:00
+OnCalendar=Mon *-*-* 04:41:00
 RandomizedDelaySec=1h
 Persistent=true
 

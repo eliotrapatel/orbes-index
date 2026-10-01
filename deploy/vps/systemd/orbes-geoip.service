@@ -1,4 +1,4 @@
-# ORBES GENOME CODE: monthly GeoIP database refresh (deploy/vps/scripts/geoip-update.sh).
+# ORBES GENOME CODE: weekly GeoIP database refresh (deploy/vps/scripts/geoip-update.sh).
 # Template: bootstrap-ubuntu.sh replaces @APP_DIR@ and @DEPLOY_USER@.
 # Logs: journalctl -u orbes-geoip.
 [Unit]

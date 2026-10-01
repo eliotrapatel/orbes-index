@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ORBES GENOME CODE: deploy a git ref of this repository to the VPS stack.
 #
-#   scripts/deploy.sh [--ref <git-ref>] [--worktree] [--no-backup] [--skip-smoke] [--timeout <s>] [--dry-run]
+#   scripts/deploy.sh [<git-ref> | --ref <git-ref>] [--worktree] [--no-backup] [--skip-smoke]
+#                     [--timeout <s>] [--dry-run]
 #   scripts/deploy.sh --image <tag>      roll out an image that already exists (e.g. a previous
 #                                        tag from .state/deploys.log), without building
 #   scripts/deploy.sh --rebuild          rebuild the same commit with fresh base images
@@ -54,7 +55,8 @@ while (($#)); do
     --timeout) TIMEOUT=${2:?--timeout needs seconds}; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h | --help) usage; exit 0 ;;
-    *) usage >&2; exit 2 ;;
+    -*) usage >&2; exit 2 ;;
+    *) REF=$1; shift ;; # positional ref: scripts/deploy.sh <commit|tag|branch>
   esac
 done
 [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || { echo "--timeout must be a number of seconds" >&2; exit 2; }
@@ -216,5 +218,9 @@ if [[ "$SMOKE" == true ]]; then
 fi
 
 printf '%s deploy %s OK (previous %s)\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_DIR/deploys.log"
-printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
-log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
+if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
+  printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
+  log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
+else
+  log "deployed $IMAGE (no previous image on this host to roll back to)"
+fi
