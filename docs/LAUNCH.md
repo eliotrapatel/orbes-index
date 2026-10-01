@@ -16,7 +16,7 @@ Details for every step are in [DEPLOYMENT.md §15](DEPLOYMENT.md) and [deploy/vp
 
 ## 1. DNS (do it first; propagation takes minutes to hours)
 
-1. In the DNS for `theorbes.com`, add an **A record**: name `verify`, value = the VPS IPv4, TTL 300. Add an **AAAA** record only if the VPS has IPv6.
+1. In the DNS for `theorbes.com`, add an **A record**: name `verify`, value = the VPS IPv4, TTL 300. Do **not** add an AAAA (IPv6) record: the stack is published on IPv4 only, so every visitor keeps their own identity for rate limiting and anomaly detection.
 2. Wait until `dig +short verify.theorbes.com` (or <https://dnschecker.org>) shows the VPS IP.
 
 ## 2. Prepare the server (once, ~10 min)
@@ -84,9 +84,9 @@ The admin console requires 2-factor authentication in production.
 
 3. Remove the bootstrap credentials:
    - edit `.env` and delete the `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` lines;
-   - then run `docker compose up -d`.
+   - then run `scripts/deploy.sh` to apply the change.
 
-**Optional:** to restrict `/admin` to your office or home IPs, set `ADMIN_ALLOWED_IPS` in `.env`.
+**Optional:** to restrict `/admin` to your office or home IPs, set `ADMIN_ALLOWED_IPS` in `.env` (space-separated IPs or CIDRs, no commas), then run `scripts/deploy.sh`, which validates the Caddy configuration before applying it.
 
 ## 5. Smoke test
 
