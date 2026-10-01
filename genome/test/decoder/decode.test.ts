@@ -121,6 +121,24 @@ describe('decodeOrbesCode — clean renders', () => {
     expect(res.quality.moduleSizePx).toBeCloseTo(28, 0);
   });
 
+  it('brute-forces the mask when both format copies are destroyed', () => {
+    const code = makeCode(47, { mask: 2 });
+    const ppu = 6;
+    const img = renderCode(code, ppu);
+    for (const fill of [255, 0]) {
+      // Paint over the whole format ring (ring 0, r 10.14–10.86 u) in paper or ink.
+      const damaged = { ...img, data: img.data.slice() };
+      for (let y = 0; y < img.height; y++) {
+        for (let x = 0; x < img.width; x++) {
+          const r = Math.hypot(x + 0.5 - 25 * ppu, y + 0.5 - 25 * ppu) / ppu;
+          if (r > 10 && r < 11) damaged.data[y * img.width + x] = fill;
+        }
+      }
+      const res = expectDecoded(decodeOrbesCode(damaged), code);
+      expect(res.quality.rsErrors + res.quality.rsErasures).toBeGreaterThan(0);
+    }
+  });
+
   it('skips the genome when asked and accepts out-of-range candidate limits', () => {
     const code = makeCode(46);
     const img = renderCode(code, 5);

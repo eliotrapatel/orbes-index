@@ -22,16 +22,16 @@ const RELATIVE_MARGIN = 0.1;
 const MIN_MARGIN = 4;
 
 /**
- * 1 = ink, 0 = substrate. `window` is the box side in pixels; `lightInk`
+ * 1 = ink, 0 = substrate. `windowPx` is the box side in pixels; `lightInk`
  * selects light-on-dark polarity. The comparison is done on window sums
  * (v · area against a threshold sum), and interior pixels, whose window is
  * never clipped, take a branch-free fast path: this loop runs over every
  * pixel of every frame, several times.
  */
-export function binarize(img: GrayImage, ii: IntegralImage, window: number, lightInk = false): Uint8Array {
+export function binarize(img: GrayImage, ii: IntegralImage, windowPx: number, lightInk = false): Uint8Array {
   const { width: w, height: h, data } = img;
   const out = new Uint8Array(w * h);
-  const half = Math.max(1, Math.floor(window / 2));
+  const half = Math.max(1, Math.floor(windowPx / 2));
   const s = w + 1;
   const { sums } = ii;
   const keep = 1 - RELATIVE_MARGIN;

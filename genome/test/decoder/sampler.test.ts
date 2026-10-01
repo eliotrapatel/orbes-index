@@ -3,7 +3,7 @@ import { CODE01_MOONS, CODE01_SIZE } from '../../src/core/code/profile.js';
 import { primitiveCovers, readGenome } from '../../src/core/decoder/genome-reader.js';
 import { applyH, homographyFromPoints, multiplyH, type Homography } from '../../src/core/decoder/homography.js';
 import type { GrayImage } from '../../src/core/decoder/image.js';
-import { alignmentScore, coordinateDescent, fieldShift, FIELD_PARAMS, refineControlPoints, refineOffsetField } from '../../src/core/decoder/refine.js';
+import { alignmentScore, coordinateDescent, fieldShift, FIELD_PARAMS, fullObjective, refineControlPoints, refineOffsetField } from '../../src/core/decoder/refine.js';
 import { CELL_COUNT, CELL_GEOMETRY, classifyCells, quietZoneScore, sampleCells } from '../../src/core/decoder/sampler.js';
 import { genomeGlyphPrimitives } from '../../src/core/genome/render.js';
 import type { Primitive } from '../../src/core/geometry.js';
@@ -79,7 +79,8 @@ describe('cell sampling and classification', () => {
 describe('alignment refinement', () => {
   it('coordinate descent climbs to the optimum of a smooth score', () => {
     const p = new Float64Array([0, 0]);
-    const best = coordinateDescent(p, (q) => -((q[0] - 1.3) ** 2) - (q[1] + 0.7) ** 2, 1, 0.01, 1000);
+    const score = (q: Float64Array) => -((q[0] - 1.3) ** 2) - (q[1] + 0.7) ** 2;
+    const best = coordinateDescent(p, score(p), fullObjective(p, score), 1, 0.01, 1000);
     expect(p[0]).toBeCloseTo(1.3, 1);
     expect(p[1]).toBeCloseTo(-0.7, 1);
     expect(best).toBeGreaterThan(-0.001);
@@ -127,6 +128,8 @@ describe('alignment refinement', () => {
     const field = refineOffsetField(img, h, 6, cls);
     const withField = classifyCells(sampleCells(img, h, true, field.shift));
     expect(field.score).toBeGreaterThan(alignmentScore(sampleCells(img, h, false), cls));
+    // The incremental objective agrees with a full evaluation of the final field.
+    expect(field.score).toBeCloseTo(alignmentScore(sampleCells(img, h, false, field.shift), cls), 6);
     expect(bitErrors(withField.bits)).toBeLessThan(bitErrors(cls.bits));
   });
 });

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#ffffff">
+<meta name="referrer" content="no-referrer">
+<meta name="format-detection" content="telephone=no">
+<meta name="description" content="Verify an ORBES GENOME CODE.">
+<meta name="orbes-worker" content="./worker.ts">
+<title>ORBES — Authentication</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./styles.css">
+<script type="module" src="./main.ts"></script>
+</head>
+<body data-screen="landing">
+<div class="grain" aria-hidden="true"></div>
+<div id="app" class="app">
+  <noscript>
+    <main class="view view--message">
+      <div class="message__body">
+        <h1 class="message__title">JAVASCRIPT REQUIRED</h1>
+        <p class="message__text prose">ORBES authentication reads the code in your browser. Please enable JavaScript and reload this page.</p>
+      </div>
+    </main>
+  </noscript>
+</div>
+<input id="photo-input" class="visually-hidden" type="file" accept="image/*" tabindex="-1" aria-hidden="true">
+</body>
+</html>

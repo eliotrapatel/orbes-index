@@ -20,7 +20,7 @@
 import { CODE01_RINGS } from '../code/profile.js';
 import { TAU, type Point } from '../geometry.js';
 import { homographyFromPoints, type Homography } from './homography.js';
-import type { GrayImage } from './image.js';
+import { sampleBilinear, type GrayImage } from './image.js';
 import { CELL_COUNT, CELL_GEOMETRY, projectCells, sampleProjected, type CellClassification } from './sampler.js';
 
 /** Contrast-normalised separation of the cell samples from their thresholds (higher = better aligned). */
@@ -34,12 +34,37 @@ export function alignmentScore(values: Float64Array, cls: CellClassification): n
 }
 
 /**
- * Coordinate descent: each coordinate is nudged by ±step while that improves
- * `score`; the step halves once no coordinate improves, down to `minStep`.
- * Returns the best score; `params` holds the best point.
+ * An objective over a parameter vector that can score a one-coordinate change
+ * without committing it (so scorers can update incrementally).
  */
-export function coordinateDescent(params: Float64Array, score: (p: Float64Array) => number, step: number, minStep: number, maxEvals: number): number {
-  let best = score(params);
+export interface Objective {
+  /** Score with coordinate k set to `value`, all others as last accepted. */
+  trial(k: number, value: number): number;
+  /** Commit the last trial. */
+  accept(): void;
+}
+
+/** Objective from a plain scoring function (every trial is a full evaluation). */
+export function fullObjective(params: Float64Array, score: (p: Float64Array) => number): Objective {
+  const scratch = Float64Array.from(params);
+  return {
+    trial(k, value) {
+      scratch.set(params);
+      scratch[k] = value;
+      return score(scratch);
+    },
+    accept() {},
+  };
+}
+
+/**
+ * Coordinate descent: each coordinate is nudged by ±step while that improves
+ * the objective; the step halves once no coordinate improves, down to
+ * `minStep`. `params` holds the best point on return (the objective sees it
+ * through accept); returns the best score.
+ */
+export function coordinateDescent(params: Float64Array, initial: number, objective: Objective, step: number, minStep: number, maxEvals: number): number {
+  let best = initial;
   let evals = 1;
   for (let s = step; s >= minStep && evals < maxEvals; s /= 2) {
     let improved = true;
@@ -47,16 +72,16 @@ export function coordinateDescent(params: Float64Array, score: (p: Float64Array)
       improved = false;
       for (let k = 0; k < params.length && evals < maxEvals; k++) {
         for (const dir of [1, -1]) {
-          const old = params[k];
-          params[k] = old + dir * s;
-          const v = score(params);
+          const value = params[k] + dir * s;
+          const v = objective.trial(k, value);
           evals++;
           if (v > best) {
             best = v;
+            params[k] = value;
+            objective.accept();
             improved = true;
             break;
           }
-          params[k] = old;
         }
       }
     }
@@ -91,7 +116,7 @@ export function refineControlPoints(
     if (!h) return -Infinity;
     return alignmentScore(sampleProjected(img, projectCells(h, false), null, values), cls);
   };
-  const best = coordinateDescent(params, score, 0.3 * unitPx, 0.04 * unitPx, 400);
+  const best = coordinateDescent(params, score(params), fullObjective(params, score), 0.3 * unitPx, 0.04 * unitPx, 400);
   const points = pointsOf(params);
   const h = homographyFromPoints(codePoints, points);
   return h ? { homography: h, points, score: best } : null;
@@ -107,16 +132,19 @@ export const FIELD_PARAMS = SECTORS * BANDS * 2;
 /**
  * Bilinear weights of each cell on the field nodes: four (node, weight)
  * pairs per cell, nodes at sector centres and at the innermost / outermost
- * data radius. Static: the cells never move in the code plane.
+ * data radius; and the reverse lists (cells influenced by each node), which
+ * make a one-parameter change cost a quarter of a full evaluation. Static:
+ * the cells never move in the code plane.
  */
 const FIELD_WEIGHTS = (() => {
   const inner = CODE01_RINGS[0].radius;
   const outer = CODE01_RINGS[CODE01_RINGS.length - 1].radius;
   const node = new Uint8Array(CELL_COUNT * 4);
   const weight = new Float64Array(CELL_COUNT * 4);
+  const byNode: { cells: number[]; weights: number[] }[] = Array.from({ length: SECTORS * BANDS }, () => ({ cells: [], weights: [] }));
   for (let i = 0; i < CELL_COUNT; i++) {
     const f = (CELL_GEOMETRY.theta[i] / TAU) * SECTORS - 0.5;
-    const s0 = (((Math.floor(f) % SECTORS) + SECTORS) % SECTORS) as number;
+    const s0 = ((Math.floor(f) % SECTORS) + SECTORS) % SECTORS;
     const s1 = (s0 + 1) % SECTORS;
     const ta = f - Math.floor(f);
     const radius = CODE01_RINGS[CELL_GEOMETRY.ring[i]].radius;
@@ -130,9 +158,18 @@ const FIELD_WEIGHTS = (() => {
     entries.forEach(([n, w], k) => {
       node[4 * i + k] = n;
       weight[4 * i + k] = w;
+      if (w > 0) {
+        byNode[n].cells.push(i);
+        byNode[n].weights.push(w);
+      }
     });
   }
-  return { node, weight };
+  return {
+    node,
+    weight,
+    nodeCells: byNode.map((b) => Int32Array.from(b.cells)),
+    nodeWeights: byNode.map((b) => Float64Array.from(b.weights)),
+  };
 })();
 
 /** Per-cell image shift (interleaved dx, dy) implied by the field parameters. */
@@ -154,13 +191,55 @@ export function fieldShift(params: Float64Array, out = new Float64Array(CELL_COU
 /**
  * Offset-field refinement on top of a homography: follows surface curvature
  * and lens distortion. Returns the per-cell shift to apply when sampling.
+ * Field parameter 2n + a is the offset of node n along axis a (0 = x).
  */
 export function refineOffsetField(img: GrayImage, h: Homography, unitPx: number, cls: CellClassification): { shift: Float64Array; score: number } {
   const pos = projectCells(h, false);
-  const shift = new Float64Array(CELL_COUNT * 2);
-  const values = new Float64Array(CELL_COUNT);
-  const score = (p: Float64Array): number => alignmentScore(sampleProjected(img, pos, fieldShift(p, shift), values), cls);
   const params = new Float64Array(FIELD_PARAMS);
-  const best = coordinateDescent(params, score, 0.25 * unitPx, 0.04 * unitPx, 800);
+  const shift = new Float64Array(CELL_COUNT * 2);
+  const contribution = new Float64Array(CELL_COUNT);
+  const cellScore = (i: number, dx: number, dy: number): number => {
+    const v = sampleBilinear(img, pos[2 * i] + dx, pos[2 * i + 1] + dy);
+    return Math.abs(v - cls.threshold[i]) / (cls.contrast[i] > 1 ? cls.contrast[i] : 1);
+  };
+  let total = 0;
+  for (let i = 0; i < CELL_COUNT; i++) {
+    contribution[i] = cellScore(i, 0, 0);
+    total += contribution[i];
+  }
+  // Pending trial: coordinate k's node cells with their new shift and score.
+  let pendingK = -1;
+  let pendingTotal = 0;
+  const trialShift = new Float64Array(CELL_COUNT);
+  const trialScore = new Float64Array(CELL_COUNT);
+  const objective: Objective = {
+    trial(k, value) {
+      const axis = k & 1;
+      const cells = FIELD_WEIGHTS.nodeCells[k >> 1];
+      const weights = FIELD_WEIGHTS.nodeWeights[k >> 1];
+      const delta = value - params[k];
+      let t = total;
+      for (let j = 0; j < cells.length; j++) {
+        const i = cells[j];
+        const moved = shift[2 * i + axis] + weights[j] * delta;
+        trialShift[j] = moved;
+        trialScore[j] = axis === 0 ? cellScore(i, moved, shift[2 * i + 1]) : cellScore(i, shift[2 * i], moved);
+        t += trialScore[j] - contribution[i];
+      }
+      pendingK = k;
+      pendingTotal = t;
+      return t;
+    },
+    accept() {
+      const axis = pendingK & 1;
+      const cells = FIELD_WEIGHTS.nodeCells[pendingK >> 1];
+      for (let j = 0; j < cells.length; j++) {
+        shift[2 * cells[j] + axis] = trialShift[j];
+        contribution[cells[j]] = trialScore[j];
+      }
+      total = pendingTotal;
+    },
+  };
+  const best = coordinateDescent(params, total, objective, 0.25 * unitPx, 0.04 * unitPx, 800);
   return { shift: fieldShift(params), score: best };
 }

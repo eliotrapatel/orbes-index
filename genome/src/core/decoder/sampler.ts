@@ -77,7 +77,7 @@ const IMMEDIATE = neighbourhoods(1, 1.6);
 
 const FOOTPRINT = 0.2;
 /** Sub-samples per cell with the footprint (3 × 3) and without (centre only). */
-export const FOOTPRINT_SAMPLES = 9;
+const FOOTPRINT_SAMPLES = 9;
 
 /**
  * Image positions of the cell samples through `h`: interleaved x, y; one

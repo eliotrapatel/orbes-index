@@ -15,7 +15,7 @@
 import { CODE01, CODE01_GENOME_CENTERS } from '../code/profile.js';
 import { genomeGlyphPrimitives } from '../genome/render.js';
 import { GENOME01_GLYPHS } from '../genome/vocabulary.js';
-import type { Primitive } from '../geometry.js';
+import { angleOf, type Primitive } from '../geometry.js';
 import type { Homography } from './homography.js';
 import { sampleBilinear, type GrayImage } from './image.js';
 
@@ -25,16 +25,12 @@ const HALF_EXTENT = CODE01.genome.glyphRadius * 1.1;
 /** Supersampling per grid cell when rasterising templates. */
 const SUPER = 4;
 
+/** A glyph is reported only when its template correlates at least this well… */
 const MIN_CORRELATION = 0.45;
+/** …and clearly better than the runner-up. */
 const MIN_MARGIN = 0.06;
 
-/** Angle clockwise from north, in [0, 2π). */
-function angleOf(dx: number, dy: number): number {
-  const a = Math.atan2(dx, -dy);
-  return a < 0 ? a + 2 * Math.PI : a;
-}
-
-/** Angular distance of `a` from the clockwise interval [start, end] (0 inside). */
+/** True when angle `a` lies in the clockwise interval [start, end] (radians, any turn). */
 function inSpan(a: number, start: number, end: number): boolean {
   const t = 2 * Math.PI;
   const rel = (((a - start) % t) + t) % t;

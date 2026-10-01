@@ -1,0 +1,67 @@
+/**
+ * Visual tone of every status the console shows. The palette is
+ * monochrome on purpose; the one colour, oxblood red (#8A1C1C), is kept for
+ * the few facts that demand immediate action (CRITICAL anomalies, a stored
+ * code that no longer verifies, a broken audit chain).
+ *
+ *   solid    filled black mark: in force (ACTIVE, OWNED, AUTHENTIC)
+ *   outline  hollow mark: pending / in progress (ISSUED, OPEN, NOT STARTED)
+ *   muted    grey: historical (RETIRED, SUPERSEDED, RESOLVED, EXPIRED)
+ *   alert    inverted label: needs attention (REVOKED, LOST, SUSPICIOUS)
+ *   critical red: act now
+ */
+export type Tone = 'solid' | 'outline' | 'muted' | 'alert' | 'critical';
+
+const PRODUCT: Record<string, Tone> = {
+  ISSUED: 'outline',
+  ACTIVATED: 'solid',
+  REGISTERED: 'solid',
+  OWNED: 'solid',
+  TRANSFERRED: 'solid',
+  SERVICED: 'outline',
+  RESOLD: 'solid',
+  RETIRED: 'muted',
+  REVOKED: 'alert',
+  COUNTERFEIT_FLAGGED: 'alert',
+  LOST: 'alert',
+  STOLEN: 'alert',
+};
+
+const CODE: Record<string, Tone> = { ACTIVE: 'solid', SUPERSEDED: 'muted', REVOKED: 'alert' };
+const KEY: Record<string, Tone> = { ACTIVE: 'solid', RETIRED: 'muted', REVOKED: 'alert' };
+const SEVERITY: Record<string, Tone> = { LOW: 'muted', MEDIUM: 'outline', HIGH: 'alert', CRITICAL: 'critical' };
+const ANOMALY_STATUS: Record<string, Tone> = { OPEN: 'alert', ACKNOWLEDGED: 'outline', RESOLVED: 'muted', DISMISSED: 'muted' };
+const WARRANTY: Record<string, Tone> = { NOT_STARTED: 'outline', ACTIVE: 'solid', EXPIRED: 'muted', VOID: 'alert' };
+const OWNERSHIP: Record<string, Tone> = { UNREGISTERED: 'outline', REGISTERED: 'solid', OWNED: 'solid', TRANSFER_PENDING: 'outline' };
+const SERVICE: Record<string, Tone> = { OPEN: 'outline', COMPLETED: 'muted', CANCELLED: 'muted' };
+const VERIFICATION: Record<string, Tone> = {
+  AUTHENTIC: 'solid',
+  AUTHENTIC_FIRST_REGISTRATION: 'solid',
+  AUTHENTIC_REGISTERED: 'solid',
+  AUTHENTIC_OWNERSHIP_VERIFIED: 'solid',
+  SUSPICIOUS_ACTIVITY: 'alert',
+  REVOKED: 'alert',
+  UNKNOWN: 'alert',
+  INVALID_SIGNATURE: 'critical',
+  MALFORMED_CODE: 'muted',
+  PENDING: 'outline',
+};
+
+export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification';
+
+const TABLES: Record<ToneDomain, Record<string, Tone>> = {
+  product: PRODUCT,
+  code: CODE,
+  key: KEY,
+  severity: SEVERITY,
+  anomaly: ANOMALY_STATUS,
+  warranty: WARRANTY,
+  ownership: OWNERSHIP,
+  service: SERVICE,
+  verification: VERIFICATION,
+};
+
+export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {
+  if (!value) return 'muted';
+  return TABLES[domain][value] ?? 'outline';
+}

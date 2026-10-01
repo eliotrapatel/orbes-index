@@ -5,9 +5,11 @@
  * so EVERY line through its centre crosses the run sequence
  *   light · dark 1 · light 1 · dark 4 · light 1 · dark 1 · light
  * whatever the rotation, and an affine view preserves those ratios. Stage 1
- * looks for that pattern along image rows of the binarised frame, stage 2
- * confirms it along the column and both diagonals through the core (rejecting
- * stripes, text and clutter), stage 3 clusters the hits of one seal.
+ * looks for that pattern along image rows (or columns) of the binarised
+ * frame, stage 2 confirms it along a second line through the core (the
+ * perpendicular or a diagonal: rejects stripes, text and clutter while
+ * tolerating a seal damaged on one side), stage 3 clusters the hits of one
+ * seal through a coarse spatial grid.
  * Stage 4 measures the seal precisely on the gray image: rays from the centre
  * locate the ring (both edges) and the core edge with sub-pixel threshold
  * crossings, and direct least-squares ellipse fits give the centre and the
@@ -293,16 +295,14 @@ function measureAt(img: GrayImage, cx: number, cy: number, unit: number, hits: n
   const step = Math.min(0.5, unit / 6);
   const samples = Math.ceil(reach / step);
 
-  // Ink level: the inner part of the core; paper level: the quiet ring, per ray.
-  let ink = 0;
-  let inkCount = 0;
-  for (let k = 0; k < 9; k++) {
-    const a = (k * Math.PI * 2) / 9;
-    const r = k === 0 ? 0 : 0.9 * unit;
-    ink += sampleBilinear(img, cx + r * Math.cos(a), cy + r * Math.sin(a));
-    inkCount++;
+  // Ink level: the centre and eight points inside the core; paper level: the
+  // median over rays of the brightest point beyond the ring (the quiet ring).
+  let ink = sampleBilinear(img, cx, cy);
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4;
+    ink += sampleBilinear(img, cx + 0.9 * unit * Math.cos(a), cy + 0.9 * unit * Math.sin(a));
   }
-  ink /= inkCount;
+  ink /= 9;
 
   const profiles: Float64Array[] = [];
   const peaks: number[] = [];
@@ -346,14 +346,15 @@ function measureAt(img: GrayImage, cx: number, cy: number, unit: number, hits: n
   if (!ringFit || ringFit.inliers < RAY_COUNT * 0.5) return null;
   const coreFit = fitEllipseRobust(core[0], core[1], Math.max(0.5, 0.15 * unit));
 
-  // Combine: the ring (radius 3.5 u) defines the shape; the core fit (2 u)
-  // only adds to the centre estimate, with weight by support and radius.
-  const fits: [Ellipse, number, number][] = [[ringFit.ellipse, 3.5, ringFit.inliers * 3.5 * 3.5]];
-  if (coreFit && coreFit.inliers >= RAY_COUNT * 0.5) fits.push([coreFit.ellipse, 2.0, coreFit.inliers * 2 * 2 * 0.5]);
+  // Combine: the ring (radius 3.5 u) defines the shape; the core fit (2 u,
+  // its edge slightly biased by blur) only adds to the centre estimate,
+  // weighted by support and radius.
+  const fits: [Ellipse, number][] = [[ringFit.ellipse, ringFit.inliers * 3.5 * 3.5]];
+  if (coreFit && coreFit.inliers >= RAY_COUNT * 0.5) fits.push([coreFit.ellipse, coreFit.inliers * 2 * 2 * 0.5]);
   let wsum = 0;
   let ex = 0;
   let ey = 0;
-  for (const [el, , wgt] of fits) {
+  for (const [el, wgt] of fits) {
     ex += el.cx * wgt;
     ey += el.cy * wgt;
     wsum += wgt;

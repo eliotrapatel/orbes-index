@@ -1,48 +1,54 @@
 /**
- * ORBES CODE-01 decoder: luma frame → verified-by-ECC code data.
+ * ORBES CODE-01 decoder: luma frame → code data validated by Reed-Solomon,
+ * CRC-16 and strict payload parsing. It never verifies signatures (that is
+ * the server's job) and never throws.
  *
  * Pipeline (each stage is its own module):
  *
- *  1. Detection image. Frames above ~2.5 MP are area-downscaled by an integer
- *     factor for detection only; alignment and sampling always use full
- *     resolution. A summed-area table feeds every box statistic.
- *  2. Seal (finder.ts). Adaptive mean thresholding at two window sizes
- *     (1/8 and 1/16 of the short side); rows are scanned for the seal's
- *     rotation-invariant 1:1:4:1:1 run pattern, hits are confirmed along the
- *     column and diagonals and clustered; rays cast on the gray image give
+ *  1. Detection image. Frames above 2.5 MP are area-downscaled by an integer
+ *     factor for detection only; alignment and sampling always use the full
+ *     frame. One summed-area table feeds every box statistic.
+ *  2. Seal (finder.ts). Adaptive mean thresholding at two window sizes (1/8
+ *     and 1/16 of the short side), for dark ink and — from the same table —
+ *     light ink. Rows (then columns) are scanned for the seal's
+ *     rotation-invariant 1:1:4:1:1 run pattern; hits are confirmed along a
+ *     second direction and clustered; rays cast on the gray image give
  *     sub-pixel ring and core edges, fitted with direct least-squares
- *     ellipses → centre + affine frame (up to rotation). Light-on-dark codes
- *     are handled by running the whole pipeline on the negative.
+ *     ellipses → centre and affine frame (up to rotation). Passes run from
+ *     cheapest to most thorough and stop as soon as a code decodes.
  *  3. Moons (moons.ts). Centre-surround box filter in the annulus where the
- *     moons must be, sub-pixel darkness-weighted centroids, best set of four
- *     (or three) peaks 90° apart. The polaris halo darkness is kept as an
- *     orientation hint only.
- *  4. Homography (homography.ts). Normalised DLT from seal centre + moons.
- *     When all four moons are present the five-point fit and the four
- *     leave-one-moon-out fits compete on cell contrast, so one damaged moon
- *     cannot spoil the frame.
- *  5. Refinement (refine.ts). Coordinate descent on the control points'
- *     image positions maximising the contrast of cell samples (corrects
- *     centroid bias, ellipse-centre perspective offset, mild distortion);
- *     if decoding then fails, a per-sector offset field is added on top for
- *     curved or lens-distorted surfaces and decoding is retried.
- *  6. Sampling (sampler.ts). Every cell is read with a 3 × 3 footprint and
- *     classified against a local 2-means threshold; confidence reflects both
- *     the margin to the threshold and the health of the neighbourhood.
- *  7. Orientation, format and ECC. A single sampling serves all eight
- *     dihedral hypotheses (rotation by 90° = index shift per ring, mirror =
- *     index reversal, since every ring has a multiple of four cells and the
- *     moon square is symmetric). Hypotheses are ranked by the distance of the
- *     two format copies to the nearest BCH(15,5) word (polaris hint breaks
- *     ties), then decoded with Reed-Solomon RS(164,79), errors only first,
- *     then with progressively more erasures on the least confident bytes.
- *     When no hypothesis yields a clean format read, all four masks are
- *     tried. CRC-16 and strict payload parsing (unframeCodeData) reject
- *     miscorrections; a failure moves on to the next hypothesis.
- *  8. Genome (genome-reader.ts), optional and never fatal.
- *
- * The decoder never throws: malformed input, numerical failures and
- * unexpected internal errors all become an ok:false result.
+ *     moons must lie, disc-shape check, size-adapted sub-pixel centroids,
+ *     then the best four (or three) whose diagonals pass through the seal
+ *     centre — a projective invariant, so strong perspective is no problem.
+ *     The polaris halo is measured as an orientation hint only.
+ *  4. Homography (homography.ts). Moon centroids are re-measured with their
+ *     local scale, then a normalised DLT maps seal centre + moons (plus seal
+ *     ring points when a moon is missing). A quiet-zone check rejects look-
+ *     alikes (a genome glyph mistaken for a seal) before any costly work.
+ *  5. Sampling (sampler.ts). Every cell is read with a 3 × 3 footprint and
+ *     classified against a local 2-means threshold; confidence combines the
+ *     margin to the threshold with the contrast of the cell's surroundings.
+ *  6. Orientation, format and ECC. A single sampling serves all dihedral
+ *     hypotheses (a 90° rotation is an index shift on every ring, a mirror an
+ *     index reversal: every ring has a multiple of four cells and the moon
+ *     square is symmetric). Hypotheses are ranked by the distance of the two
+ *     format copies to the nearest BCH(15,5) word (polaris hint breaks ties)
+ *     and decoded with RS(164,79): errors only first, then with more and more
+ *     erasures on the least confident bytes. With no trustworthy format read
+ *     the four masks are brute-forced. CRC-16 and strict payload parsing
+ *     (unframeCodeData) catch miscorrections; a failure moves on to the next
+ *     hypothesis.
+ *  7. Alignment repair, only when step 6 fails, cheapest first: the fits
+ *     leaving one moon out (a damaged moon), coordinate-descent refinement of
+ *     the control points on cell contrast (refine.ts: centroid bias, lens
+ *     distortion), then a smooth offset field (curved surfaces); each is
+ *     followed by steps 5–6 again.
+ *  8. Seal-less fallback: when no seal candidate decodes (seal scratched,
+ *     under a glare stripe, crossed by a strip), connected components of the
+ *     binarised frame are searched for four disc-like blobs whose diagonals
+ *     cross near their middles (components.ts, moons.ts); their crossing is
+ *     the code centre, and steps 4–7 follow.
+ *  9. Genome (genome-reader.ts), optional and never fatal.
  *
  * Isomorphic: no Node.js or DOM dependencies.
  */
@@ -214,11 +220,11 @@ class Detection {
   }
 
   /** Binarisation of the detection image (cached: the passes share them). */
-  binary(window: number, inverted: boolean): Uint8Array {
-    const key = `${window}/${inverted}`;
+  binary(windowPx: number, inverted: boolean): Uint8Array {
+    const key = `${windowPx}/${inverted}`;
     let bin = this.binaries.get(key);
     if (!bin) {
-      bin = binarize(this.image, this.integral, window, inverted);
+      bin = binarize(this.image, this.integral, windowPx, inverted);
       this.binaries.set(key, bin);
     }
     return bin;
@@ -464,7 +470,12 @@ function readCodeword(cls: CellClassification, g: number, mask: number): { codew
   return { codeword, byteConfidence };
 }
 
-function tryHypothesis(cls: CellClassification, g: number, mask: number, schedule: readonly number[], failure: Failure): CodeRead | null {
+/**
+ * Reed-Solomon over the erasure schedule for one (orientation, mask) guess.
+ * `guessed` marks brute-forced masks, whose Reed-Solomon failures say nothing
+ * beyond the unreadable format already noted.
+ */
+function tryHypothesis(cls: CellClassification, g: number, mask: number, schedule: readonly number[], guessed: boolean, failure: Failure): CodeRead | null {
   const { codeword, byteConfidence } = readCodeword(cls, g, mask);
   const order = Array.from(byteConfidence.keys()).sort((a, b) => byteConfidence[a] - byteConfidence[b] || a - b);
   let lastErasures = -1;
@@ -476,7 +487,7 @@ function tryHypothesis(cls: CellClassification, g: number, mask: number, schedul
     lastErasures = count;
     const rs = rsDecode(codeword, NSYM, order.slice(0, count));
     if (!rs.ok) {
-      failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
+      if (!guessed) failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
       continue;
     }
     try {
@@ -497,16 +508,16 @@ function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean,
   const hyps = formatHypotheses(cls, moons, mirrored, failure);
   const trusted = hyps.filter((h) => h.formatDistance <= FORMAT_TRUST);
   for (const h of trusted) {
-    const read = tryHypothesis(cls, h.g, h.mask, ERASURE_STEPS, failure);
+    const read = tryHypothesis(cls, h.g, h.mask, ERASURE_STEPS, false, failure);
     if (read) return read;
   }
-  if (trusted.length > 0) return null;
-  // Format unreadable (both copies damaged): brute-force the masks, the
-  // most plausible orientations first.
-  failure.note('FORMAT', 'format word unreadable');
+  if (trusted.length === 0) failure.note('FORMAT', 'format word unreadable');
+  // Format unreadable, or damaged into a wrong but plausible word: brute-force
+  // the masks not tried yet, the most plausible orientations first.
   for (const h of hyps) {
     for (let mask = 0; mask < CODE01_MASK_COUNT; mask++) {
-      const read = tryHypothesis(cls, h.g, mask, BRUTE_FORCE_ERASURES, failure);
+      if (h.formatDistance <= FORMAT_TRUST && mask === h.mask) continue;
+      const read = tryHypothesis(cls, h.g, mask, BRUTE_FORCE_ERASURES, true, failure);
       if (read) return read;
     }
   }
@@ -531,28 +542,23 @@ function decodeAnchors(img: GrayImage, anchors: Anchors | null, unitPx: number, 
     failure.note('NO_MOONS', 'no code structure around the seal');
     return null;
   }
-  let T = now(); const lap = (l: string) => { const n = now(); (globalThis as any).DBG?.(l + ' ' + (n - T).toFixed(1)); T = n; };
   // Cheapest first: most captures decode straight from the anchor fit; each
   // further stage costs more and only runs when the previous one failed.
   let read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-  lap('initial ' + !!read);
   if (!read) {
     const robust = leaveOneOut(img, anchors, alignment);
     if (robust) {
       alignment = robust;
       read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-      lap('leave-one-out ' + !!read);
     }
   }
   if (!read) {
     alignment = refineAlignment(img, alignment, unitPx);
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-    lap('refine ' + !!read);
   }
   if (!read) {
     alignment = withOffsetField(img, alignment, unitPx);
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-    lap('field ' + !!read);
   }
   if (!read) return null;
 
@@ -614,10 +620,7 @@ function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polariti
     const view = det.view(inverted);
     for (const quad of findMoonQuads(view.image, blobs, MAX_MOON_QUADS)) {
       const center = scale(quad.center, det.factor);
-      const moonFit = homographyFromPoints(
-        [{ x: 0, y: 0 }, ...CODE01_MOONS],
-        [center, ...quad.moons.slots.map((m) => scale(m as Point, det.factor))],
-      );
+      const moonFit = homographyFromPoints([{ x: 0, y: 0 }, ...CODE01_MOONS], [center, ...quad.points.map((m) => scale(m, det.factor))]);
       if (!moonFit) continue;
       const local = jacobianH(moonFit, 0, 0);
       const anchors = anchorsOf(view.frame, center, local, quad.moons, det.factor);
@@ -629,11 +632,9 @@ function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polariti
 }
 
 function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: Failure, started: number): DecodeResult | null {
-  let T = now();
   const det = new Detection(frame);
   const polarities = opts.tryInverted ? [false, true] : [false];
   for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, polarities)) {
-    (globalThis as any).DBG?.('seal ' + seal.unit.toFixed(2) + '@' + seal.score.toFixed(2) + (inverted ? ' inv' : '') + ' t=' + (now() - T).toFixed(1));
     const view = det.view(inverted);
     const moons = findMoons(view.image, view.integral, seal);
     if (!moons) {
@@ -646,7 +647,6 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
     const result = decodeAnchors(view.frame, anchors, seal.unit * det.factor, moons, opts, inverted, failure, started);
     if (result) return result;
   }
-  (globalThis as any).DBG?.('fallback t=' + (now() - T).toFixed(1));
   return decodeFromMoons(det, opts, polarities, failure, started);
 }
 
@@ -659,11 +659,12 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
     if (!frame || frame.width < MIN_SIDE || frame.height < MIN_SIDE) {
       return { ok: false, reason: 'NO_SEAL', detail: 'image too small or malformed', elapsedMs: now() - started };
     }
+    const o: DecodeOptions = opts !== null && typeof opts === 'object' ? opts : {};
     const options: Required<DecodeOptions> = {
-      tryInverted: opts.tryInverted ?? true,
-      tryMirrored: opts.tryMirrored ?? false,
-      readGenome: opts.readGenome ?? true,
-      maxSealCandidates: Number.isFinite(opts.maxSealCandidates) ? Math.max(1, Math.min(16, Math.floor(opts.maxSealCandidates as number))) : 4,
+      tryInverted: o.tryInverted ?? true,
+      tryMirrored: o.tryMirrored ?? false,
+      readGenome: o.readGenome ?? true,
+      maxSealCandidates: Number.isFinite(o.maxSealCandidates) ? Math.max(1, Math.min(16, Math.floor(o.maxSealCandidates as number))) : 4,
     };
     const result = decodeFrame(frame, options, failure, started);
     if (result) return result;

@@ -1,23 +1,28 @@
 /**
  * Moon (perspective anchor) detection.
  *
- * The seal fixes the code's affine frame up to an in-plane rotation, so the
- * four moons (solid discs r = 1.75 u at radius 27.5 u on the diagonals) must
- * lie in an annulus around the seal; perspective only stretches that annulus,
- * so it is searched generously. Inside it a centre-surround box filter (dark
- * inner box, light surround; two summed-area lookups per position) responds
- * to compact dark blobs of the moon's size and stays near zero on data arcs
- * (striped: the surround is as dark as the centre), on large dark areas
- * (occluders, shadows: same) and on thin lines. Peaks are refined to a
- * sub-pixel darkness-weighted centroid restricted to the moon disc, which
- * also keeps the polaris halo (from 2.4 u) out of the estimate.
+ * Seal-guided search: the seal fixes the code's affine frame up to an
+ * in-plane rotation, so the four moons (solid discs r = 1.75 u at radius
+ * 27.5 u on the diagonals) must lie in an annulus around the seal;
+ * perspective only stretches that annulus, so it is searched generously.
+ * Inside it a centre-surround box filter (dark inner box, light surround; two
+ * summed-area lookups per position) responds to compact dark blobs of the
+ * moon's size and stays near zero on data arcs (striped: the surround is as
+ * dark as the centre), on large dark areas (occluders, shadows) and on thin
+ * lines. Each peak must then look like an isolated disc along 16 rays, and is
+ * re-centred with a window fitted to its measured size: a darkness-weighted
+ * centroid of the whole disc and none of the polaris halo (from 2.4 u).
  *
  * Selection uses a projective invariant: opposite moons and the code centre
  * are collinear in ANY view (a homography maps lines to lines), so the two
  * moon diagonals must both pass through the seal centre. Candidate pairs are
  * scored on that, then combined into the best four (or three, when a moon is
- * occluded) — robust to strong perspective, where the moons' rectified radii
+ * hidden) — robust to strong perspective, where the moons' rectified radii
  * and angles drift far from the frontal 27.5 u / 90°.
+ *
+ * Moon-first search (seal unreadable): among disc-like connected components,
+ * four of similar size whose two "diagonals" cross near their middles; the
+ * crossing is the code centre.
  *
  * Isomorphic: no Node.js or DOM dependencies.
  */
@@ -79,7 +84,7 @@ function singularValues([a, b, c, d]: Mat2): [number, number] {
 }
 
 /** Mean gray value on a circle of radius r (u) around image point p, mapped by `affine`. */
-export function ringMean(img: GrayImage, affine: Mat2, p: Point, r: number, count: number): number {
+function ringMean(img: GrayImage, affine: Mat2, p: Point, r: number, count: number): number {
   let sum = 0;
   for (let k = 0; k < count; k++) {
     const a = (k * 2 * Math.PI) / count;
@@ -141,7 +146,7 @@ export function moonLevels(img: GrayImage, affine: Mat2, p: Point): { ink: numbe
 }
 
 /** Halo darkness around a moon centre (polaris hint), relative to the moon's contrast. */
-export function haloDarkness(img: GrayImage, affine: Mat2, p: Point): number {
+function haloDarkness(img: GrayImage, affine: Mat2, p: Point): number {
   const { ink, paper } = moonLevels(img, affine, p);
   if (!(paper - ink > 1)) return 0;
   return (paper - ringMean(img, affine, p, CODE01.moons.haloRadius, 24)) / (paper - ink);
@@ -376,6 +381,8 @@ export function findMoons(img: GrayImage, ii: IntegralImage, seal: SealCandidate
 export interface MoonQuad {
   /** Intersection of the moon diagonals: the code centre in any view. */
   center: Point;
+  /** The four moons, clockwise around the centre (same order as `moons.slots`). */
+  points: Point[];
   moons: MoonSet;
 }
 
@@ -444,18 +451,21 @@ export function findMoonQuads(img: GrayImage, blobs: readonly Blob[], max: numbe
   return quads
     .sort((p, q) => q.score - p.score)
     .slice(0, max)
-    .map(({ center, four }) => ({ center, moons: moonSetAround(img, center, four) }));
+    .map(({ center, four, score }) => {
+      const slots = moonsAround(img, center, four);
+      return { center, points: slots.map(({ x, y }) => ({ x, y })), moons: { slots, score } };
+    });
 }
 
-/** The four moon blobs as a MoonSet: clockwise around the centre, halo hint from each blob's own ellipse. */
-function moonSetAround(img: GrayImage, center: Point, blobs: Blob[]): MoonSet {
+/** The four moon blobs clockwise around the centre, with the halo hint measured in each blob's own ellipse. */
+function moonsAround(img: GrayImage, center: Point, blobs: Blob[]): MoonDetection[] {
   const angle = (b: Blob) => {
     const a = Math.atan2(b.x - center.x, -(b.y - center.y));
     return a < 0 ? a + 2 * Math.PI : a;
   };
-  const slots = [...blobs]
+  return [...blobs]
     .sort((p, q) => angle(p) - angle(q))
-    .map((b): MoonDetection => {
+    .map((b) => {
       // Moon-local affine (u → px) from the blob ellipse: axes a, b along theta.
       const c = Math.cos(b.theta);
       const s = Math.sin(b.theta);
@@ -464,5 +474,4 @@ function moonSetAround(img: GrayImage, center: Point, blobs: Blob[]): MoonSet {
       const affine: Mat2 = [ka * c * c + kb * s * s, (ka - kb) * c * s, (ka - kb) * c * s, ka * s * s + kb * c * c];
       return { x: b.x, y: b.y, response: 1, halo: haloDarkness(img, affine, b) };
     });
-  return { slots, score: 4 };
 }

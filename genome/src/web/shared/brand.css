@@ -1,0 +1,589 @@
+/*
+ * ORBES brand foundation for the web apps (verify, admin).
+ *
+ * Tokens and primitives only: colour, type, motion, hairlines, corner
+ * brackets, grain, buttons, focus. App stylesheets @import this file and add
+ * their own layout. Mirrors the house style of theorbes.com (index.html):
+ * white and black, "Helvetica Neue", uppercase micro-type with wide tracking,
+ * 1 px rules, hairline corner brackets, film grain and slow
+ * cubic-bezier(0.22, 1, 0.36, 1) motion. No gradients, no shadows.
+ *
+ * CSP: style-src 'self' — everything lives in external files; scripts only
+ * toggle classes or set custom properties through the CSSOM.
+ */
+
+:root {
+  /* Colour */
+  --white: #ffffff;
+  --ivory: #f6f2ea;
+  --ink: #0a0a0a;
+  /* Secondary text: the darkest grey that still reads as "quiet" (6.4:1 on white, AA). */
+  --ink-soft: #5c5c5c;
+  /* Decorative only (rules, glyph separators): 2.8:1, never used for text that must be read. */
+  --metal: #9a9a9a;
+  --hairline: rgba(10, 10, 10, 0.12);
+  --hairline-strong: rgba(10, 10, 10, 0.32);
+  --paper: var(--white);
+
+  /* Type */
+  --font: "Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif;
+  --fs-nano: 8px;
+  --fs-micro: 10px;
+  --fs-label: 11px;
+  --fs-line: 12px;
+  --fs-body: 13px;
+  --fs-lead: 15px;
+  --fs-title: 24px;
+  --fs-wordmark: 30px;
+  --track-micro: 0.22em;
+  --track-label: 0.28em;
+  --track-display: 0.32em;
+  --track-wordmark: 0.62em;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 0.35s;
+  --t-med: 0.7s;
+  --t-slow: 1.4s;
+
+  /* Frame */
+  --corner-size: 14px;
+  --corner-x: 30px;
+  --corner-y: 26px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--white);
+}
+
+/* ── Typography ────────────────────────────────────────────────────────── */
+
+/* Tracked uppercase type carries trailing letter-spacing after its last glyph;
+   centred text compensates with a matching indent (as theorbes.com does). */
+.micro,
+.label,
+.caps {
+  text-transform: uppercase;
+  font-weight: 400;
+}
+
+.micro {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  line-height: 2;
+}
+
+.label {
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  line-height: 1.8;
+}
+
+.nano {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  line-height: 2;
+}
+
+.soft {
+  color: var(--ink-soft);
+}
+
+.centered {
+  text-align: center;
+}
+
+.indent-micro {
+  text-indent: var(--track-micro);
+}
+
+.indent-label {
+  text-indent: var(--track-label);
+}
+
+.wordmark {
+  display: block;
+  font-size: var(--fs-wordmark);
+  font-weight: 400;
+  letter-spacing: var(--track-wordmark);
+  text-indent: var(--track-wordmark);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wordmark--small {
+  font-size: 12px;
+  letter-spacing: 0.55em;
+  text-indent: 0.55em;
+}
+
+.prose {
+  font-size: var(--fs-body);
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+/* ── Rules & brackets ──────────────────────────────────────────────────── */
+
+.rule {
+  display: block;
+  width: 100%;
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.rule--short {
+  width: 28px;
+  margin-inline: auto;
+  border-top-color: var(--hairline-strong);
+}
+
+/* Viewport corner brackets (fixed), exactly as theorbes.com: 14 px, 1 px lines. */
+.corners {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.corner {
+  position: absolute;
+  width: var(--corner-size);
+  height: var(--corner-size);
+  opacity: 0;
+  animation: brand-fade var(--t-med) ease 0.6s forwards;
+}
+
+.corner::before,
+.corner::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+  transition: background-color var(--t-slow) var(--ease);
+}
+
+.corner::before {
+  width: 100%;
+  height: 1px;
+}
+
+.corner::after {
+  width: 1px;
+  height: 100%;
+}
+
+.corner--tl {
+  top: calc(var(--corner-y) + var(--safe-top));
+  left: calc(var(--corner-x) + var(--safe-left));
+}
+.corner--tr {
+  top: calc(var(--corner-y) + var(--safe-top));
+  right: calc(var(--corner-x) + var(--safe-right));
+}
+.corner--bl {
+  bottom: calc(var(--corner-y) + var(--safe-bottom));
+  left: calc(var(--corner-x) + var(--safe-left));
+}
+.corner--br {
+  bottom: calc(var(--corner-y) + var(--safe-bottom));
+  right: calc(var(--corner-x) + var(--safe-right));
+}
+.corner--tl::before,
+.corner--tl::after {
+  top: 0;
+  left: 0;
+}
+.corner--tr::before,
+.corner--tr::after {
+  top: 0;
+  right: 0;
+}
+.corner--bl::before,
+.corner--bl::after {
+  bottom: 0;
+  left: 0;
+}
+.corner--br::before,
+.corner--br::after {
+  bottom: 0;
+  right: 0;
+}
+
+/* Local brackets framing a block (the block must be position: relative). */
+.bracketed {
+  position: relative;
+}
+
+.bracket {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+}
+
+.bracket::before,
+.bracket::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+}
+
+.bracket::before {
+  width: 100%;
+  height: 1px;
+}
+
+.bracket::after {
+  width: 1px;
+  height: 100%;
+}
+
+.bracket--tl {
+  top: 0;
+  left: 0;
+}
+.bracket--tr {
+  top: 0;
+  right: 0;
+}
+.bracket--bl {
+  bottom: 0;
+  left: 0;
+}
+.bracket--br {
+  bottom: 0;
+  right: 0;
+}
+.bracket--tl::before,
+.bracket--tl::after {
+  top: 0;
+  left: 0;
+}
+.bracket--tr::before,
+.bracket--tr::after {
+  top: 0;
+  right: 0;
+}
+.bracket--bl::before,
+.bracket--bl::after {
+  bottom: 0;
+  left: 0;
+}
+.bracket--br::before,
+.bracket--br::after {
+  bottom: 0;
+  right: 0;
+}
+
+/* ── Grain ─────────────────────────────────────────────────────────────── */
+
+/* Film grain as on theorbes.com (img-src allows data:). Purely decorative. */
+.grain {
+  position: fixed;
+  inset: -200%;
+  width: 400%;
+  height: 400%;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: brand-grain 9s steps(1) infinite;
+}
+
+@keyframes brand-grain {
+  0% { transform: translate(0, 0); }
+  10% { transform: translate(-4%, -9%); }
+  20% { transform: translate(-14%, 4%); }
+  30% { transform: translate(6%, -14%); }
+  40% { transform: translate(-4%, 18%); }
+  50% { transform: translate(-18%, 9%); }
+  60% { transform: translate(13%, 4%); }
+  70% { transform: translate(0, 13%); }
+  80% { transform: translate(2%, 32%); }
+  90% { transform: translate(-18%, 9%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+
+/* The single hairline button. */
+.btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  min-width: 248px;
+  padding: 0 28px;
+  border: 1px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    background-color var(--t-med) var(--ease),
+    color var(--t-med) var(--ease),
+    border-color var(--t-med) var(--ease),
+    opacity var(--t-med) var(--ease);
+}
+
+.btn:active,
+.btn[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--white);
+}
+
+@media (hover: hover) {
+  .btn:hover {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--white);
+  }
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.btn--block {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Text link styled as tracked micro-type with a hairline that draws on focus/hover. */
+.textlink {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  padding: 10px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  text-decoration: none;
+  line-height: 1.6;
+  cursor: pointer;
+  opacity: 0.62;
+  transition: opacity var(--t-med) var(--ease);
+}
+
+.textlink::after {
+  content: "";
+  position: absolute;
+  left: 0.3em;
+  right: 0;
+  bottom: 6px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--t-med) var(--ease);
+}
+
+.textlink:active,
+.textlink:focus-visible {
+  opacity: 1;
+}
+
+.textlink:active::after,
+.textlink:focus-visible::after {
+  transform: scaleX(1);
+}
+
+@media (hover: hover) {
+  .textlink:hover {
+    opacity: 1;
+  }
+  .textlink:hover::after {
+    transform: scaleX(1);
+  }
+}
+
+/* Form fields: a single hairline beneath, no boxes. */
+.field {
+  display: block;
+  text-align: left;
+}
+
+.field__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.field__input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px; /* 16 px: iOS does not zoom into the field */
+  letter-spacing: 0.04em;
+  outline: none;
+  transition: border-color var(--t-med) var(--ease);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.field__input:focus {
+  border-bottom-color: var(--ink);
+}
+
+.field__input[aria-invalid="true"] {
+  border-bottom-color: var(--ink);
+}
+
+.field__hint {
+  display: block;
+  margin-top: 8px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.field__input--code {
+  font-size: 18px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+/* ── Focus & accessibility ─────────────────────────────────────────────── */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 4px;
+}
+
+.field__input:focus-visible {
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ── Motion ────────────────────────────────────────────────────────────── */
+
+@keyframes brand-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes brand-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rise {
+  opacity: 0;
+  animation: brand-rise var(--t-slow) var(--ease) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  .grain {
+    animation: none;
+  }
+}
