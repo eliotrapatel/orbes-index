@@ -632,14 +632,60 @@ function writeReport(results: RowResult[], opts: RunInfo): void {
   L.push('');
   const allMins = RENDITIONS.map((r) => universal(r.id));
   const overall = allMins.every((m) => m !== null) ? Math.max(...(allMins as number[])) : null;
-  const iphonePro = RENDITIONS.map((r) => robustMinimum(rows, r.id, 'iphone-pro-1x')?.sizeMm ?? Infinity);
-  const android = RENDITIONS.map((r) => robustMinimum(rows, r.id, 'android-1x')?.sizeMm ?? Infinity);
+  const span = (values: number[]): string => {
+    const finite = values.filter(Number.isFinite);
+    if (finite.length === 0) return '> 50 mm';
+    const lo = Math.min(...finite);
+    const hi = Math.max(...values);
+    return lo === hi ? `${lo} mm` : `${lo}–${Number.isFinite(hi) ? hi : '> 50'} mm`;
+  };
+  const robustAcross = (profile: string): number[] => RENDITIONS.map((r) => robustMinimum(rows, r.id, profile)?.sizeMm ?? Infinity);
+  /** 1× and 2× profiles reading `size` robustly on every substrate. */
+  const readersAt = (size: number, ids: readonly string[]): string[] =>
+    ids.filter((id) => robustAcross(id).every((m) => m <= size)).map((id) => PROFILES.find((p) => p.id === id)!.label);
+  const proPx10 = (pxPerMm(PROFILES.find((p) => p.id === 'iphone-pro-1x')!, 200) * 10) / CODE01_SIZE;
   L.push(
-    `Reading the tables: the binding constraint is focus, not resolution. Android main cameras focus at 8 cm and reach small sizes (robust minimum ${Math.min(...android)}–${Math.max(...android)} mm across substrates); the iPhone Pro main camera cannot focus closer than ≈ 20 cm, where a 10 mm code is about ${((pxPerMm(PROFILES.find((p) => p.id === 'iphone-pro-1x')!, 200) * 10) / 50).toFixed(1)} px per u, below what the decoder needs (robust minimum ${Math.min(...iphonePro)}–${Number.isFinite(Math.max(...iphonePro)) ? Math.max(...iphonePro) : '> 50'} mm). Moving closer than the minimum focus blurs faster than it magnifies. 2× zoom restores the small sizes at 20–25 cm where the browser exposes it. ${overall === null ? '' : `A single rule for every substrate and phone at 1× would be **${overall} mm simulated, ${nextSize(overall)} mm recommended**.`}`,
+    `Reading the tables: the binding constraint is focus, not resolution. Android main cameras focus at 8 cm and reach small sizes (robust minimum ${span(robustAcross('android-1x'))} across substrates); the iPhone Pro main camera cannot focus closer than ≈ 20 cm, where a 10 mm code is about ${proPx10.toFixed(1)} px per u, below what the decoder needs (robust minimum ${span(robustAcross('iphone-pro-1x'))}). Moving closer than the minimum focus blurs faster than it magnifies. 2× zoom restores the small sizes at 20–25 cm where the browser exposes it. ${overall === null ? '' : `A single rule for every substrate and phone at 1× would be **${overall} mm simulated, ${nextSize(overall)} mm recommended**.`}`,
   );
   L.push('');
+  const known = allMins.filter((m): m is number => m !== null);
+  if (known.length > 0) {
+    L.push(
+      `Substrates: in this simulation the substrate moves the 1× minimum by ${Math.min(...known) === Math.max(...known) ? 'nothing' : `at most one size step (${span(known)})`}. The decoder's local thresholds absorb the modelled contrasts and textures. Real leather grain, foil and engraved metal are harsher than these models (see limitations), so the physical sheets matter most on those materials.`,
+    );
+    L.push('');
+  }
+  const zoomMins = RENDITIONS.map((r) => withZoom(r.id));
+  const zoomFloor = zoomMins.every((m) => m !== null) ? Math.max(...(zoomMins as number[])) : null;
+  const all = PROFILES.map((p) => p.id);
+  const smallest = SHEET_SIZES_MM[0];
+  L.push('**Guidance**, all of it pending physical confirmation:');
+  L.push('');
+  if (overall !== null) {
+    L.push(
+      `- **Universal rule — ${nextSize(overall)} mm.** Every simulated phone reads it at two or more neighbouring distances without zoom (simulated minimum ${overall} mm, plus one size step). Certificates and cards, which have room, and leather goods should use it or larger.`,
+    );
+  }
+  if (zoomFloor !== null) {
+    const floor = nextSize(zoomFloor);
+    const at1x = readersAt(floor, BASE_PROFILES);
+    const missing = BASE_PROFILES.filter((id) => !at1x.includes(PROFILES.find((p) => p.id === id)!.label));
+    const fragile = missing
+      .map((id) => {
+        const p = PROFILES.find((x) => x.id === id)!;
+        const where = SCAN_DISTANCES_CM.filter((d) => RENDITIONS.every((r) => rows.get(keyOf(r.id, id, d))?.cells.find((c) => c.sizeMm === floor)?.reliable));
+        return `${p.label} ${where.length ? `only at ${where.join(', ')} cm` : 'not at all'}`;
+      })
+      .join('; ');
+    L.push(
+      `- **Zoom-assisted floor — ${floor} mm** (simulated ${zoomFloor} mm when 2× zoom may be used, plus one step). Without zoom it is read robustly by ${at1x.length ? at1x.join('; ') : 'no 1× profile'}${fragile ? `; ${fragile} on every substrate` : ''}. Acceptable for jewelry tags that cannot fit the universal size, provided the scanner offers zoom and tells users of phones that cannot focus close to hold the phone further away and zoom in.`,
+    );
+  }
   L.push(
-    'Product guidance that follows, all pending physical confirmation: keep **jewelry tags** at the recommended size above (a smaller code on a small tag is readable by Android phones and by iPhones with zoom, not by every phone at 1×); give **leather goods** and **certificates** room for 25–30 mm where the design allows, which keeps every profile in its comfortable range; and make the scanner\'s zoom control prominent, since it is what lets an iPhone Pro read small codes from its focus distance.',
+    `- **${smallest} mm** is read robustly on every substrate only by ${readersAt(smallest, all).join('; ') || 'no profile'}: not a production size for an audience with mixed phones.`,
+  );
+  L.push(
+    `- **Scanner.** Its "Move a little closer" hint (after NO_MOONS failures, src/web/verify/capture.ts \`scanHint\`) pushes phones that cannot focus that close into defocus; most failures here are ECC / FORMAT (blur, too few pixels), not NO_MOONS. For small codes, a "hold about 20 cm away and zoom" hint and a prominent zoom control are what make the iPhone Pro rows above reachable.`,
   );
   L.push('');
 
@@ -690,9 +736,9 @@ function writeReport(results: RowResult[], opts: RunInfo): void {
     '**Simulation only.** No real phone was used. The physical test sheets exist precisely to confirm or overturn these numbers; until they have been run on real Android phones, iPhones and an iPhone Pro, every minimum here is a hypothesis.',
     '**Optimistic camera.** The simulator models a pinhole camera with Gaussian blur, sensor noise and a fixed tone mapping. It does not model demosaicing artefacts, ISP sharpening halos, temporal denoising, rolling shutter, auto-exposure or autofocus hunting, or video-pipeline downscaling some browsers apply. Real phones lose resolution to these, so real minima are likely somewhat larger.',
     '**Defocus model.** Thin lens with a Gaussian of matched variance instead of the true disc-shaped PSF (whose MTF has zeros and contrast reversal); lens parameters are typical values, not measurements of a given model. Phones that switch to an ultra-wide macro camera at close range (some iPhone Pro models in the native camera app) are not modelled: in the browser the main camera is the conservative assumption.',
-    '**Field of view and crop.** One HFOV per family (±2.5° shifts px/mm by ≈ ±4 %), one 1080p stream, one reference viewport (390×844 CSS px). A browser that delivers 720p halves the pixels per u at the same distance. Larger or smaller screens change the crop, not the sampling.',
+    '**Field of view and crop.** One HFOV per family (±2.5° shifts px/mm by ≈ ±4 %), one 1080p stream, one reference viewport (390×844 CSS px). A browser that delivers 720p instead has a third fewer pixels per u at the same distance. Larger or smaller screens change the crop, not the sampling.',
     '**Zoom.** Modelled as a true sensor crop (full resolution). A browser that upscales a 1080p stream digitally gains nothing; whether a given browser exposes `zoom` at all varies.',
-    '**Substrates.** Simulated by reflectance levels and the simulator\'s procedural textures, whose scale follows the code, not physical millimetres. Real leather grain, foil sparkle, engraving burr and metal specularity are not reproduced; the metallic model has one soft specular stripe only.',
+    '**Substrates.** Simulated by reflectance levels and the simulator\'s procedural textures, whose feature size is tied to the image (about one texel per frame pixel), not to physical millimetres. Real leather grain, foil sparkle, engraving burr and metal specularity are not reproduced; the metallic model has one soft specular stripe only.',
     '**Printing.** Sources are perfect vector renderings: no print gain, toner scatter or engraving tolerance. ORBES-CODE-SPEC §9 allows ±0.12 u of ink spread; at 10 mm that is ±24 µm, at the edge of office printers.',
     `**Statistics.** N = ${opts.confirm} trials for confirmed cells, ${opts.screen} for screened ones; "reliable by monotonicity" cells rely on the physical argument that a larger code at the same distance sees the same blur in pixels with more pixels per u. Rates near the threshold carry wide intervals.`,
     '**Decoder version.** Results are for the decoder at the time of the run; re-run after decoder changes (deterministic, so differences are real).',

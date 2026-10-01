@@ -16,36 +16,45 @@
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@resvg/resvg-js": "^2.6.2",
+    "esbuild": "^0.28.2",
+    "fastify": "^5.12.5",
+    "kysely": "^0.29.6",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
     "@types/node": "^26.6.3",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.23.1",
     "@types/pngjs": "^6.0.5",
-    "esbuild": "^0.28.2",
-    "fastify": "^5.12.5",
     "jpeg-js": "^0.4.4",
-    "kysely": "^0.29.6",
-    "pdfkit": "^0.20.2",
-    "pg": "^8.23.1",
+    "playwright-core": "1.56",
     "pngjs": "^7.0.0",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.3",
-    "zod": "^4.6.5"
-  },
-  "devDependencies": {
-    "playwright-core": "1.56"
+    "vitest": "^5.0.3"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:pg": "node -e \"process.env.ORBES_TEST_POSTGRES_URL || (console.error('test:pg needs ORBES_TEST_POSTGRES_URL, e.g. postgres://user:pass@127.0.0.1:5432/postgres (a role with CREATEDB)'), process.exit(2))\" && vitest run postgres test/services/issuance.test.ts -t PostgreSQL",
     "build:web": "tsx scripts/build-web.ts",
     "build": "npm run build:web",
     "dev": "tsx watch src/server/index.ts",
     "start": "node --import tsx src/server/index.ts",
     "poc": "tsx scripts/poc.ts",
+    "bench": "tsx scripts/bench.ts",
+    "scan-matrix": "tsx scripts/scan-matrix.ts",
+    "sheets": "tsx scripts/test-sheets.ts",
     "keys:generate": "tsx scripts/keys.ts generate",
+    "keys:rotate": "tsx scripts/keys.ts rotate",
+    "keys:list": "tsx scripts/keys.ts list",
     "db:migrate": "tsx scripts/db.ts migrate",
-    "db:seed": "tsx scripts/db.ts seed"
+    "db:status": "tsx scripts/db.ts status",
+    "db:seed": "tsx scripts/db.ts seed",
+    "db:reset-demo": "tsx scripts/db.ts reset-demo",
+    "demo:export": "tsx scripts/export-demo-codes.ts"
   }
 }
