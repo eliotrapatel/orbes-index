@@ -3,7 +3,7 @@ import * as serverSchema from '../../src/server/db/schema.js';
 import { ROLE_RANK as SERVER_ROLE_RANK } from '../../src/server/http/sessions.js';
 import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS } from '../../src/server/render/artifact.js';
 import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
-import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/services/issuance.js';
+import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
 import { dashboardKpis, severityBars, statusBars } from '../../src/web/admin/model/dashboard.js';
 import {
   ARTIFACT_DEFAULTS,

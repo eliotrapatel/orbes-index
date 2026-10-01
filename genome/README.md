@@ -121,7 +121,7 @@ npm run poc                       # fresh random keys and nonce each run
 npm run poc -- --seed 7           # reproducible run
 ```
 
-This runs the core end to end without a server or database: key pair → identity → GENOME-01 → signed payload → CODE-01 → SVG/PNG → simulated phone capture → decode → verify → `AUTHENTIC`. It then runs a series of attacks, each of which must come out invalid: product id rewritten, genome version changed, printed glyphs replaced, signature byte modified, forged code re-printed, random fake code, image corrupted beyond ECC. Artifacts go to `out/poc/`. The exit code is 0 only if every outcome matches its expectation.
+This runs the core end to end without a server or database: key pair → identity → GENOME-01 → signed payload → CODE-01 → SVG/PNG → simulated phone capture → decode → verify → `AUTHENTIC`. It then runs a series of attacks, each of which must be refused with the public state the production server answers: product id rewritten, genome version changed, signature byte modified, forged code re-printed and random fake code give `INVALID_SIGNATURE`; printed glyphs replaced gives `SUSPICIOUS_ACTIVITY` (reason `GENOME_MISMATCH`); an image corrupted beyond ECC gives `MALFORMED_CODE`. Artifacts go to `out/poc/`. The exit code is 0 only if every outcome matches its expectation.
 
 ### Tests
 

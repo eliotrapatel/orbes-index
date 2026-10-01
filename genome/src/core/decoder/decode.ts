@@ -34,7 +34,8 @@
  *     square is symmetric). Hypotheses are ranked by the distance of the two
  *     format copies to the nearest BCH(15,5) word (polaris hint breaks ties)
  *     and decoded with RS(164,79): errors only first, then with more and more
- *     erasures on the least confident bytes. Unless the format read is
+ *     erasures on the least confident bytes, never more than 70 (miscorrection
+ *     safety, see MAX_RS_ERASURES). Unless the format read is
  *     certain, the other masks are then brute-forced. CRC-16 and strict
  *     payload parsing (unframeCodeData) catch miscorrections; a failure moves
  *     on to the next hypothesis.
@@ -120,8 +121,18 @@ const MAX_DETECTION_PIXELS = 2_500_000;
 const MIN_SIDE = 12;
 /** Seal clusters measured per polarity before ranking. */
 const MAX_CLUSTERS = 12;
-/** Erasure schedule on the least confident bytes (2·errors + erasures ≤ 85). */
-const ERASURE_STEPS = [0, 10, 20, 30, 40, 50, 60, 70, 80];
+/**
+ * Most codeword bytes ever erased. Erasures spend parity: with f erased bytes
+ * only 85 − f parity bytes still check the rest of the word. At 80 erasures (5
+ * checking bytes) Reed-Solomon accepted a wrong codeword for 18 in 100 000
+ * random words, leaving CRC-16 as the only backstop (≈ 3·10⁻⁹ per attempt, and
+ * a scanner makes many attempts). At 70 (15 checking bytes) no miscorrection
+ * was measured in 100 000 words, and the scan matrix is unchanged: captures
+ * that need more than 70 erasures are rescanned rather than risked.
+ */
+export const MAX_RS_ERASURES = 70;
+/** Erasure schedule on the least confident bytes (2·errors + erasures ≤ 85, erasures ≤ MAX_RS_ERASURES). */
+export const ERASURE_STEPS: readonly number[] = [0, 10, 20, 30, 40, 50, 60, 70];
 /** Combined distance (of 30 bits) up to which a format read is trusted (the 30-bit code corrects 6). */
 const FORMAT_TRUST = 6;
 /**
@@ -493,6 +504,53 @@ function readCodeword(cls: CellClassification, g: number, mask: number): { codew
   return { codeword, byteConfidence };
 }
 
+/** A codeword read through Reed-Solomon, CRC-16 and strict payload parsing. */
+export interface ProgressiveRead {
+  data: Uint8Array;
+  payloadBytes: Uint8Array;
+  signature: Uint8Array;
+  errors: number;
+  erasures: number;
+}
+
+/**
+ * Reed-Solomon over an erasure schedule: errors only first, then the `step`
+ * least confident bytes erased, for each step of `schedule` (steps above
+ * MAX_RS_ERASURES are clamped to it). Each candidate must pass CRC-16 and
+ * strict payload parsing. `onFailure` hears every rejected attempt. Null
+ * when no step yields a valid frame.
+ */
+export function decodeCodewordProgressive(
+  codeword: Uint8Array,
+  byteConfidence: Float64Array,
+  schedule: readonly number[] = ERASURE_STEPS,
+  onFailure?: (reason: 'ECC' | 'CRC' | 'PAYLOAD', detail: string, erasures: number) => void,
+): ProgressiveRead | null {
+  const order = Array.from(byteConfidence.keys()).sort((a, b) => byteConfidence[a] - byteConfidence[b] || a - b);
+  let lastErasures = -1;
+  for (const step of schedule) {
+    // Never erase bytes that read cleanly: past that point more erasures only cost capacity.
+    const limit = Math.min(step, MAX_RS_ERASURES, order.length);
+    let count = 0;
+    while (count < limit && byteConfidence[order[count]] < 0.999) count++;
+    if (count === lastErasures) continue;
+    lastErasures = count;
+    const rs = rsDecode(codeword, NSYM, order.slice(0, count));
+    if (!rs.ok) {
+      onFailure?.('ECC', `Reed-Solomon failed (${count} erasures)`, count);
+      continue;
+    }
+    try {
+      const framed = unframeCodeData(rs.data);
+      return { data: rs.data, payloadBytes: framed.payloadBytes, signature: framed.signature, errors: rs.errors, erasures: rs.erasures };
+    } catch (e) {
+      if (e instanceof PayloadError && e.code === 'CRC') onFailure?.('CRC', 'CRC-16 mismatch after Reed-Solomon', count);
+      else onFailure?.('PAYLOAD', e instanceof Error ? e.message : 'invalid payload', count);
+    }
+  }
+  return null;
+}
+
 /**
  * Reed-Solomon over the erasure schedule for one (orientation, mask) guess.
  * `guessed` marks brute-forced masks, whose Reed-Solomon failures say nothing
@@ -500,28 +558,11 @@ function readCodeword(cls: CellClassification, g: number, mask: number): { codew
  */
 function tryHypothesis(cls: CellClassification, g: number, mask: number, schedule: readonly number[], guessed: boolean, failure: Failure): CodeRead | null {
   const { codeword, byteConfidence } = readCodeword(cls, g, mask);
-  const order = Array.from(byteConfidence.keys()).sort((a, b) => byteConfidence[a] - byteConfidence[b] || a - b);
-  let lastErasures = -1;
-  for (const step of schedule) {
-    // Never erase bytes that read cleanly: past that point more erasures only cost capacity.
-    let count = 0;
-    while (count < step && byteConfidence[order[count]] < 0.999) count++;
-    if (count === lastErasures) continue;
-    lastErasures = count;
-    const rs = rsDecode(codeword, NSYM, order.slice(0, count));
-    if (!rs.ok) {
-      if (!guessed) failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
-      continue;
-    }
-    try {
-      const framed = unframeCodeData(rs.data);
-      return { g, mask, data: rs.data, payloadBytes: framed.payloadBytes, signature: framed.signature, errors: rs.errors, erasures: rs.erasures };
-    } catch (e) {
-      if (e instanceof PayloadError && e.code === 'CRC') failure.note('CRC', 'CRC-16 mismatch after Reed-Solomon');
-      else failure.note('PAYLOAD', e instanceof Error ? e.message : 'invalid payload');
-    }
-  }
-  return null;
+  const read = decodeCodewordProgressive(codeword, byteConfidence, schedule, (reason, detail, count) => {
+    if (reason !== 'ECC') failure.note(reason, detail);
+    else if (!guessed) failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
+  });
+  return read && { g, mask, ...read };
 }
 
 /** Erasure schedule when brute-forcing masks (format unreadable): fewer, coarser steps. */

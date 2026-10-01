@@ -23,10 +23,12 @@
  * visible within the TTL.
  */
 import { randomBytes } from 'node:crypto';
-import { ed25519 } from '@noble/curves/ed25519.js';
 import { concatBytes, toBase64Url, utf8 } from '../../core/bytes.js';
 import { SIGNATURE_LENGTH } from '../../core/payload.js';
-import { verifyEd25519Node } from '../crypto/ed25519-node.js';
+import { isStrictEd25519PublicKey, verifyEd25519Node } from '../crypto/ed25519-node.js';
+
+/** Re-exported: the strict weak-key rule lives in ../crypto/ed25519-node.ts. */
+export { isStrictEd25519PublicKey };
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import type { KeyRow, KeyStatus } from '../db/schema.js';
@@ -114,16 +116,6 @@ export function isKeyTrustedAt(key: Pick<KeyRecord, 'status' | 'revokedAt' | 'co
   const cutoff = key.compromisedAt ?? key.revokedAt;
   if (cutoff === null) return false; // inconsistent row: fail closed
   return codeCreatedAt.getTime() < cutoff.getTime();
-}
-
-/** Strict RFC 8032 public key: canonical encoding of a point of order > 8 (same rule as verifyEd25519Node). */
-export function isStrictEd25519PublicKey(publicKey: unknown): publicKey is Uint8Array {
-  if (!(publicKey instanceof Uint8Array) || publicKey.length !== PUBLIC_KEY_LENGTH) return false;
-  try {
-    return !ed25519.Point.fromBytes(publicKey, false).isSmallOrder();
-  } catch {
-    return false;
-  }
 }
 
 export class KeyService {

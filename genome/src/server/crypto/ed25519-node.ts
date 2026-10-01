@@ -56,8 +56,14 @@ function privateKeyFromSeed(seed: Uint8Array): KeyObject {
   }
 }
 
-/** Canonical encoding of a point of order > 8, i.e. what strict RFC 8032 verification accepts as a key. */
-function isStrictPublicKey(publicKey: Uint8Array): boolean {
+/**
+ * Strict RFC 8032 public key: 32 bytes, the canonical encoding of a point of
+ * order > 8, i.e. what strict verification accepts as a key. The one weak-key
+ * rule of the server: verifyEd25519Node applies it before OpenSSL, and
+ * KeyService refuses to register any key that fails it.
+ */
+export function isStrictEd25519PublicKey(publicKey: unknown): publicKey is Uint8Array {
+  if (!isBytes(publicKey, PUBLIC_KEY_LENGTH)) return false;
   try {
     return !ed25519.Point.fromBytes(publicKey, false).isSmallOrder();
   } catch {
@@ -93,7 +99,7 @@ export function signEd25519(seed32: Uint8Array, message: Uint8Array): Uint8Array
 /** True iff `signature` is a valid strict RFC 8032 signature of `message` under `publicKey`. Never throws. */
 export function verifyEd25519Node(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean {
   if (!isBytes(publicKey, PUBLIC_KEY_LENGTH) || !isBytes(message) || !isBytes(signature, SIGNATURE_LENGTH)) return false;
-  if (!isStrictPublicKey(publicKey)) return false;
+  if (!isStrictEd25519PublicKey(publicKey)) return false;
   try {
     const key = createPublicKey({ key: withPrefix(SPKI_PREFIX, publicKey), format: 'der', type: 'spki' });
     return verify(null, message, key, signature);

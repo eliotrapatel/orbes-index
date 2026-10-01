@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTH_POLICY_KINDS,
   AuthenticatorRegistry,
   parseAuthPolicy,
   PrintedCodeAuthenticator,
@@ -8,7 +7,6 @@ import {
   type AuthenticatorContext,
   type PhysicalAuthenticator,
 } from '../../src/server/authenticators/index.js';
-import { AUTH_POLICY_KINDS as ISSUANCE_KINDS } from '../../src/server/services/issuance.js';
 
 const ok: AuthenticatorContext = {
   product: { id: 'p', productId: 'O26-J-00001' },
@@ -98,10 +96,6 @@ describe('AuthenticatorRegistry', () => {
     const p = new UnimplementedAuthenticator('SECURE_NFC');
     expect(p.implemented).toBe(false);
     expect((await p.evaluate()).status).toBe('UNSUPPORTED');
-  });
-
-  it('owns the policy kind list used by issuance', () => {
-    expect([...AUTH_POLICY_KINDS]).toEqual([...ISSUANCE_KINDS]);
   });
 });
 

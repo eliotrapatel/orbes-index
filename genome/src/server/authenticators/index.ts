@@ -13,7 +13,7 @@
 
 export const AUTHENTICATOR_KINDS = ['PRINTED_CODE', 'SECURE_NFC', 'SECURE_ELEMENT', 'TAMPER_EVIDENT'] as const;
 export type AuthenticatorKind = (typeof AUTHENTICATOR_KINDS)[number];
-/** Same list, under the name issuance uses for policy validation. */
+/** Kinds a product's authentication policy may combine ('+'-joined); issuance validates policies against this list. */
 export const AUTH_POLICY_KINDS = AUTHENTICATOR_KINDS;
 export const DEFAULT_AUTH_POLICY = 'PRINTED_CODE';
 

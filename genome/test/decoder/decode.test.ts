@@ -3,7 +3,9 @@ import { encodeOrbesCode } from '../../src/core/code/encoder.js';
 import { CODE01_MOONS, CODE01_SIZE } from '../../src/core/code/profile.js';
 import { decodeOrbesCode, rgbaToGray, type DecodeResult, type GrayImage } from '../../src/core/decoder/index.js';
 import { applyH } from '../../src/core/decoder/homography.js';
+import { decodeCodewordProgressive, ERASURE_STEPS, MAX_RS_ERASURES } from '../../src/core/decoder/decode.js';
 import { frameCodeData } from '../../src/core/payload.js';
+import { rsDecode } from '../../src/core/ecc/index.js';
 import { PRESETS, simulateCapture } from '../support/camera-sim.js';
 import { Prng } from '../support/prng.js';
 import { grayToRgba, svgToGray } from '../support/raster.js';
@@ -272,5 +274,54 @@ describe('decodeOrbesCode — never throws, no false positives', () => {
     const res = expectDecoded(decodeOrbesCode(img), code);
     expect(res.quality.elapsedMs).toBeLessThan(500);
     expect(CODE01_SIZE * res.quality.moduleSizePx).toBeGreaterThan(300);
+  });
+});
+
+describe('progressive erasures (miscorrection safety)', () => {
+  // RS(164,79): 85 parity bytes. With 80 erasures only 5 parity bytes check the
+  // rest of the word, and Reed-Solomon miscorrects 18 in 100 000 random words
+  // (CRC-16 is then the only backstop, ≈ 3e-9 per attempt). Capped at 70
+  // erasures (15 checking bytes) miscorrection was measured at 0 in 100 000.
+  const code = makeCode(58);
+  const codeword = code.model.codeword;
+  const rng = new Prng('erasure-cap');
+  /** `wrong` bytes corrupted, the first `lowConfidence` positions of a shuffled order marked unreliable. */
+  function damaged(wrong: number, lowConfidence: number, unknownErrors = 0) {
+    const order = Array.from({ length: codeword.length }, (_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = rng.int(0, i);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const word = codeword.slice();
+    const confidence = new Float64Array(codeword.length).fill(1);
+    order.slice(0, lowConfidence).forEach((b, i) => (confidence[b] = 0.1 + i / 1000));
+    for (const b of order.slice(0, wrong)) word[b] ^= 1 + rng.int(0, 254);
+    for (const b of order.slice(lowConfidence, lowConfidence + unknownErrors)) word[b] ^= 1 + rng.int(0, 254);
+    return { word, confidence };
+  }
+
+  it('never erases more than MAX_RS_ERASURES = 70 bytes', () => {
+    expect(MAX_RS_ERASURES).toBe(70);
+    expect(Math.max(...ERASURE_STEPS)).toBe(MAX_RS_ERASURES);
+  });
+
+  it('still uses all 70 erasures: 70 located + 7 unknown bad bytes decode (2·7 + 70 = 84 ≤ 85)', () => {
+    const { word, confidence } = damaged(70, 70, 7);
+    const read = decodeCodewordProgressive(word, confidence);
+    expect(read).not.toBeNull();
+    expect(read?.data).toEqual(code.data);
+    expect(read?.erasures).toBeLessThanOrEqual(MAX_RS_ERASURES);
+    expect(read?.errors).toBe(7);
+  });
+
+  it('refuses a word that only 80 erasures could repair (78 located bad bytes)', () => {
+    const { word, confidence } = damaged(78, 80);
+    expect(decodeCodewordProgressive(word, confidence)).toBeNull();
+    // The former schedule (…, 70, 80) accepted it: 80 erasures do repair it…
+    const order = Array.from(confidence.keys()).sort((x, y) => confidence[x] - confidence[y]);
+    const rs = rsDecode(word, 85, order.slice(0, 80));
+    expect(rs.ok && rs.data).toEqual(code.data);
+    // …but a schedule asking for them is clamped to the cap.
+    expect(decodeCodewordProgressive(word, confidence, [0, 10, 20, 30, 40, 50, 60, 70, 80, 85])).toBeNull();
   });
 });

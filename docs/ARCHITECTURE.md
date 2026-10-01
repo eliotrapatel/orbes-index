@@ -171,7 +171,7 @@ The phases follow the master specification. Phases 1–5 must prove the core bef
 | 3 | Encoder: payload framing, RS, mask selection, format word | Round-trip at the cell level |
 | 4 | Decoder: finder, moons, homography, sampler, RS errors+erasures | Synthetic camera test matrix meets the targets |
 | 5 | Ed25519 signing/verification, key IDs, rotation | Tamper tests return INVALID |
-| **POC** | `npm run poc`: issue → render → simulated capture → decode → verify → AUTHENTIC, then tamper product ID / genome / signature → INVALID | Passing |
+| **POC** | `npm run poc`: issue → render → simulated capture → decode → verify → AUTHENTIC, then tamper product ID / signature → INVALID SIGNATURE, reprinted genome → SUSPICIOUS ACTIVITY (`GENOME_MISMATCH`) | Passing |
 | 6 | Verification API | < 300 ms p95 (excluding network) |
 | 7 | Mobile scanner (`/verify`) | Fake-camera E2E passes in Chromium |
 | 8 | Product database + migrations + demo dataset | Migrations apply to empty DB |

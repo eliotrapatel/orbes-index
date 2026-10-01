@@ -34,6 +34,7 @@ import {
   signingMessage,
   type CodePayloadV1,
 } from '../../core/payload.js';
+import { AUTH_POLICY_KINDS, DEFAULT_AUTH_POLICY } from '../authenticators/index.js';
 import { verifyEd25519Node } from '../crypto/ed25519-node.js';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isCheckViolation, isForeignKeyViolation, isRetryableTxError, isUniqueViolation } from '../db/pg-errors.js';
@@ -159,9 +160,6 @@ export interface IssuanceServiceDeps {
   log?: Logger;
 }
 
-/** Authenticator kinds a policy may name (contract §2.11). */
-export const AUTH_POLICY_KINDS = ['PRINTED_CODE', 'SECURE_NFC', 'SECURE_ELEMENT', 'TAMPER_EVIDENT'] as const;
-export const DEFAULT_AUTH_POLICY = 'PRINTED_CODE';
 export const GENOME_VERSION = 1;
 export const CODE_VERSION = 1;
 export const MAX_ISSUE = 255;

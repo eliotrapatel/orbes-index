@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { fromBase64Url, toBase64Url, utf8 } from '../../src/core/bytes.js';
-import { verifyEd25519Node } from '../../src/server/crypto/ed25519-node.js';
+import { isStrictEd25519PublicKey as strictKeyCheck, verifyEd25519Node } from '../../src/server/crypto/ed25519-node.js';
 import { isUniqueViolation } from '../../src/server/db/pg-errors.js';
 import { DomainError } from '../../src/server/errors.js';
 import {
@@ -373,6 +373,14 @@ describe('KeyService', () => {
       expect((await domainError(keys.rotate(admin))).code).toBe('KEY_REJECTED');
       expect(await keys.list()).toEqual([]);
       expect(isStrictEd25519PublicKey(identity)).toBe(false);
+    });
+
+    it('uses the one strict public-key check of the Node Ed25519 module (no duplicate rule)', () => {
+      expect(isStrictEd25519PublicKey).toBe(strictKeyCheck);
+      expect(strictKeyCheck(Uint8Array.from([1, ...new Array(31).fill(0)]))).toBe(false);
+      expect(strictKeyCheck(new Uint8Array(31))).toBe(false);
+      expect(strictKeyCheck('not bytes')).toBe(false);
+      expect(strictKeyCheck(ed25519.getPublicKey(ed25519.utils.randomSecretKey()))).toBe(true);
     });
 
     it('requires proof of possession: a public key the provider cannot sign for is not registered', async () => {
