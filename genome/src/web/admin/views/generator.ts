@@ -10,7 +10,7 @@
  * stored client-side and disappears when the operator leaves or hides it.
  */
 import { bracket } from '../../shared/corners.js';
-import { h, mount } from '../../shared/dom.js';
+import { focusFirst, h, mount } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
 import { formatDate, humanize, isoDay, shortHash, versionLabel } from '../format.js';
 import { buildIssueInput, formatClaimCode, modelsFor, POLICY_OPTIONS, type IssueForm } from '../model/generator.js';
@@ -29,7 +29,15 @@ export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
   }
   const [cats, models, cols] = await Promise.all([ctx.api.categories(), ctx.api.models(), ctx.api.collections()]);
   const root = h('div', { class: 'view view--generator' });
-  mount(root, ...formScreen(ctx, cats.items.filter((c) => c.active), models.items, cols.items, (r) => mount(root, ...resultScreen(ctx, r))));
+  mount(
+    root,
+    ...formScreen(ctx, cats.items.filter((c) => c.active), models.items, cols.items, (r) => {
+      mount(root, ...resultScreen(ctx, r));
+      // The form was long: start the result (claim code first) at the top.
+      window.scrollTo(0, 0);
+      focusFirst(root);
+    }),
+  );
   return root;
 }
 
@@ -223,7 +231,7 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
           defList([
             { label: 'Fingerprint', value: mono(g.fingerprint) },
             { label: 'Version', value: g.versionLabel },
-            { label: 'Glyphs', value: g.ids.join(' · ') },
+            { label: 'Glyphs', value: mono(g.ids.join(' · ')) },
           ]),
         ),
       ),

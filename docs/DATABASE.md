@@ -126,7 +126,7 @@ PGlite has a **single connection**. Kysely serialises access to it, which is why
   - `categories.id` and `categories.code` are immutable and categories are never deleted;
   - the cryptographic identity columns of `products`, `codes` and `cryptographic_keys` are immutable, and `genomes` rows cannot be updated at all.
 - **`updated_at`:** maintained by the trigger function `orbes_touch_updated_at()` on `products`, `accounts`, `admin_users` and `warranties`. Services pass their injectable clock explicitly; when a statement leaves `updated_at` unchanged (including setting it to its current value), the trigger stamps `now()` (the transaction start time).
-- **No business seed data.** The migration creates no categories, models, keys or users. Categories are created through the admin API; the first admin and the first signing key are created at startup (§9.4).
+- **No business seed data.** The migration creates no categories, models, keys or users. Categories, collections and models are created through the admin API. The first admin is created at startup from `BOOTSTRAP_ADMIN_*`; the first signing key is created at startup in development and test, and through `POST /api/admin/keys/rotate` in production (§9.4).
 
 ### 3.1 Trigger functions
 
@@ -610,7 +610,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `lon` | `real` | NULL | — | `CHECK (BETWEEN -180 AND 180)`. Rounded to 1 decimal place; present only together with `lat`. |
 | `user_agent_family` | `text` | NULL | — | Coarse `Browser/OS`, e.g. `Safari/iOS`, `Chrome/Android`, `Bot/Other`. No versions. |
 | `client_metrics` | `jsonb` | NULL | — | Decoder metrics sent by the client (`rsErrors`, `rsErasures`, `moduleSizePx`, `decodeMs`, `source`). Informational; invalid values are dropped. |
-| `result_state` | `text` | NOT NULL | — | The verification state (§API). No `CHECK`: the row is inserted with a provisional value and updated to the final state in the same transaction. |
+| `result_state` | `text` | NOT NULL | — | The verification state (see [API §9.3](API.md#93-states-and-public-wording)). No `CHECK`: the row is inserted with a provisional value and updated to the final state in the same transaction. |
 | `latency_ms` | `int` | NULL | — | `CHECK (latency_ms >= 0)`. Server-side processing time. |
 
 - **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_occurred_at_idx (occurred_at)`.
@@ -911,7 +911,7 @@ After the schema is current, `createContext()` also:
 
 - loads the category cache;
 - creates the bootstrap ADMIN from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` when no admin exists (idempotent and race-safe);
-- in development and test, creates a signing key when none is ACTIVE; in production, runs a signing self-test instead and logs an error (issuance unavailable, verification unaffected) when there is no usable ACTIVE key.
+- in development and test, creates a signing key when none is ACTIVE; in production, runs a signing self-test instead and logs an error (issuance unavailable, verification unaffected) when there is no usable ACTIVE key. An ADMIN then creates one with `POST /api/admin/keys/rotate`.
 
 ---
 
@@ -950,7 +950,7 @@ Recommendations:
 3. **Back up key custody separately.** Losing the private keys does not affect verification (public keys are in the database) but prevents issuing codes under those keys; rotate to a new key in that case. Never place key files in the same backup set as the database without separate encryption.
 4. **Anchor the audit chain.** Export the head returned by `GET /api/admin/audit/verify` (`head.id`, `head.hash`) regularly to write-once storage. After any restore, run `GET /api/admin/audit/verify` and compare the restored head with the last exported anchor: a point-in-time restore legitimately drops the newest entries, and the anchor shows how many.
 5. **Restore into an empty database.** `audit_logs` rejects `TRUNCATE`, `DELETE` and `UPDATE`, and categories cannot be deleted, so a restore over existing data fails by design.
-6. **Use separate roles.** Let a migration role own the schema and give the application role only `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the tables and `USAGE` on the sequences. The guard triggers stop the application role, but a table owner or superuser can disable them.
+6. **Use separate roles.** Let a migration role own the schema and give the application role only `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the tables, `USAGE` on the sequences and `SELECT` on `kysely_migration` (the production start-up check reads it). The guard triggers stop the application role, but a table owner or superuser can disable them.
 7. **Test restores** on a schedule: restore, start a server against the copy (it refuses to start if migrations are missing), verify the audit chain and verify a known code end to end.
 
 ---

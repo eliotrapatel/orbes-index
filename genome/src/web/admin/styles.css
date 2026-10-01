@@ -466,9 +466,18 @@ body {
   white-space: nowrap;
 }
 
-.kpi--critical .kpi__value,
 .kpi--critical .kpi__note {
   color: var(--critical);
+}
+
+.kpi--critical .kpi__note::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 10px 1px 1px;
+  background: var(--critical);
+  transform: rotate(45deg);
 }
 
 /* ── Hairline bars ─────────────────────────────────────────────────────── */
@@ -1140,18 +1149,14 @@ a.bar__label:hover {
 .figure--code {
   width: 100%;
   max-width: 360px;
-  padding: 18px;
-  background: var(--white);
-  border: 1px solid var(--hairline);
+  padding: 30px;
+  background: var(--ivory);
 }
 
-.figure--theme-inverted {
-  background: #0a0a0a;
-  color: var(--white);
-}
-
+/* An ivory code on the ivory plate would lose its edge: show it on white. */
 .figure--theme-ivory {
-  background: #f6f2ea;
+  background: var(--white);
+  outline: 1px solid var(--hairline);
 }
 
 .figure .bracket {
@@ -1184,14 +1189,20 @@ a.bar__label:hover {
 }
 
 .hero__caption-sub {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.1em;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
   color: var(--ink-soft);
-  overflow-wrap: anywhere;
+}
+
+.hero__caption-ids {
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
 }
 
 .sheet {
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--hairline-strong);
 }
 
 .sheet__row {
@@ -1239,6 +1250,7 @@ a.bar__label:hover {
 }
 
 .sheet__note {
+  overflow-wrap: anywhere;
   font-size: var(--fs-micro);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1480,8 +1492,8 @@ a.bar__label:hover {
 
 .claim {
   margin-bottom: 8px;
-  padding: 30px 34px;
-  border: 1px solid var(--ink);
+  padding: 32px 36px;
+  background: var(--ivory);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 40px;

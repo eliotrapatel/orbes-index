@@ -90,6 +90,20 @@ function setTitle(t: string): void {
   document.title = `${t} — ORBES Genome Console`;
 }
 
+/** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
+function goTo(hash: string): void {
+  if (location.hash === hash) void route();
+  else location.hash = hash;
+}
+
+/** After enrolment the profile changed (2FA): rebuild the shell so the sidebar reflects it. */
+function enrolled(next: string): () => void {
+  return () => {
+    shell = null;
+    goTo(next);
+  };
+}
+
 // ── Shell ──────────────────────────────────────────────────────────────────
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
@@ -170,8 +184,7 @@ function showLogin(notice?: string): void {
       (s) => {
         session = s;
         const r = parseHash(location.hash);
-        if (r.name === 'login') location.hash = href('dashboard');
-        else void route();
+        goTo(r.name === 'login' ? href('dashboard') : location.hash || href('dashboard'));
       },
       notice ? { notice } : {},
     ),
@@ -185,6 +198,8 @@ async function logout(): Promise<void> {
     notifyError(e);
   }
   session = null;
+  // An explicit sign-out starts the next session on the dashboard (an expired session resumes where it was).
+  history.replaceState(null, '', location.pathname + location.search);
   showLogin();
 }
 
@@ -232,12 +247,12 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     markNav(null);
     sh.crumb.textContent = 'Account · Security';
     setTitle('Security');
-    mount(sh.view, securityView(api, s, () => (location.hash = href('dashboard')), { forced: true }));
+    mount(sh.view, securityView(api, s, enrolled(href('dashboard')), { forced: true }));
     return;
   }
 
   if (r.name === 'login') {
-    location.hash = href('dashboard');
+    goTo(href('dashboard'));
     return;
   }
 
@@ -249,7 +264,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     markNav(null);
     sh.crumb.textContent = 'Account · Security';
     setTitle('Security');
-    mount(sh.view, securityView(api, s, () => void route()));
+    mount(sh.view, securityView(api, s, enrolled(href('security'))));
     return;
   }
 

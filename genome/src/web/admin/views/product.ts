@@ -49,7 +49,8 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
             { class: 'hero__caption' },
             h('span', { class: 'hero__caption-label' }, 'Genome'),
             mono(d.genome.fingerprint),
-            h('span', { class: 'hero__caption-sub' }, `${d.genome.versionLabel} · ${d.genome.ids.join(' · ')}`),
+            h('span', { class: 'hero__caption-sub' }, d.genome.versionLabel),
+            h('span', { class: 'hero__caption-ids mono' }, d.genome.ids.join(' · ')),
           )
         : null,
     ),

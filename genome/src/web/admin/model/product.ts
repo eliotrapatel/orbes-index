@@ -59,7 +59,7 @@ export function productSheet(d: ProductDetail): SheetRow[] {
       ...(d.lifecycle.returnTo ? { note: `Returns to ${humanize(d.lifecycle.returnTo)}` } : {}),
     },
     d.genome
-      ? { key: 'genome', label: 'Genome', value: d.genome.fingerprint, tone: 'solid', mono: true, note: `${d.genome.versionLabel} · ${d.genome.pattern}` }
+      ? { key: 'genome', label: 'Genome', value: d.genome.fingerprint, tone: 'solid', mono: true, note: `${d.genome.versionLabel} · 8 glyphs` }
       : { key: 'genome', label: 'Genome', value: 'NONE', tone: 'alert' },
   ];
 

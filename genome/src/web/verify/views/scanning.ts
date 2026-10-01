@@ -85,7 +85,10 @@ export function scanView(handlers: ScanHandlers): ScanView {
     },
     setLocked: (locked) => {
       root.classList.toggle('is-locked', locked);
-      if (locked) video.pause();
+      if (locked) {
+        video.pause();
+        hint.textContent = '';
+      }
     },
     setReady: (ready) => root.classList.toggle('is-ready', ready),
     setTorch: (available, on) => {
