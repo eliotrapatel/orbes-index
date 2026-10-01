@@ -202,7 +202,12 @@ function shortReason(e: unknown): string {
   const code = (e as { code?: unknown })?.code;
   if (typeof code === 'string' && /^E[A-Z]+$/.test(code)) return code;
   const msg = e instanceof Error ? e.message : String(e);
-  return msg.replace(/\s+/g, ' ').slice(0, 120);
+  // Library messages may quote their input: scrub anything address-like.
+  return msg
+    .replace(/\s+/g, ' ')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '[ip]')
+    .replace(/[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}/gi, '[ip]')
+    .slice(0, 120);
 }
 
 function signatureOf(st: Stats): string {
@@ -275,7 +280,9 @@ export class MmdbGeoDatabase {
     } catch (e) {
       if (!this.lookupFailureReported) {
         this.lookupFailureReported = true;
-        this.log.warn({ geoip: { path: this.path, reason: shortReason(e) } }, 'geoip lookup failed; the database may be damaged (no location for affected requests)');
+        // Only the error class: a lookup error message could quote the address.
+        const kind = e instanceof Error ? e.name : typeof e;
+        this.log.warn({ geoip: { path: this.path, error: kind } }, 'geoip lookup failed; the database may be damaged (no location for affected requests)');
       }
       return {};
     }
