@@ -120,7 +120,7 @@ export function fromBase64Url(s: string): Uint8Array {
 // Created lazily so that importing this module never touches a host global.
 let encoder: TextEncoder | undefined;
 
-/** UTF-8 encoding (lone surrogates become U+FFFD, as with TextEncoder). */
+/** UTF-8 encoding with WHATWG TextEncoder semantics (lone surrogates become U+FFFD). */
 export function utf8(s: string): Uint8Array {
   encoder ??= new TextEncoder();
   return encoder.encode(s);

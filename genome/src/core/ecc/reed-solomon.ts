@@ -72,7 +72,9 @@ function generatorPoly(nsym: number): Uint8Array {
 export function rsEncode(data: Uint8Array, nsym: number): Uint8Array {
   const n = data.length + nsym;
   if (!isValidShape(n, nsym)) {
-    throw new RangeError(`invalid Reed-Solomon shape: ${data.length} data + ${nsym} parity bytes (need ≥ 1 each, total ≤ 255)`);
+    throw new RangeError(
+      `invalid Reed-Solomon shape: ${data.length} data + ${nsym} parity bytes (need ≥ 1 each, total ≤ 255)`,
+    );
   }
   const gen = generatorPoly(nsym);
   const out = new Uint8Array(n);
@@ -98,7 +100,7 @@ export function rsEncode(data: Uint8Array, nsym: number): Uint8Array {
 // at index i (lowest degree first), which keeps BM and Forney index-aligned
 // with the syndrome sequence.
 
-/** S_j = r(α^j), j = 0..nsym−1 (Horner over the received bytes). */
+/** S_j = r(α^j), j = 0..nsym−1, by Horner's rule over the received bytes. */
 function syndromes(word: Uint8Array, nsym: number): Uint8Array {
   const s = new Uint8Array(nsym);
   for (let j = 0; j < nsym; j++) {
@@ -137,29 +139,47 @@ function polyEval(p: Uint8Array, x: number): number {
 function berlekampMassey(synd: Uint8Array, gamma: Uint8Array): { lambda: Uint8Array; length: number } {
   const nsym = synd.length;
   const f = gamma.length - 1;
-  let lambda = new Uint8Array(nsym + 1);
-  lambda.set(gamma);
-  // Massey's invariants (deg Λ ≤ L, deg B ≤ r − L + f ≤ nsym) keep every
-  // polynomial within nsym + 1 coefficients.
+  const lambda = new Uint8Array(nsym + 1);
   const b = new Uint8Array(nsym + 1);
+  lambda.set(gamma);
   b.set(gamma);
   let length = f;
+  // Massey's invariants: before step r, deg Λ ≤ L ≤ r − 1 and deg B ≤ r − 1 − L + f,
+  // so x·B and the updated Λ have degree ≤ r ≤ nsym. The shift never drops a
+  // coefficient and indices above r never need to be touched.
   for (let r = f + 1; r <= nsym; r++) {
     let delta = 0;
     for (let i = 0; i < r; i++) delta ^= gfMul(lambda[i], synd[r - 1 - i]);
     b.copyWithin(1, 0, nsym); // B ← x·B
     b[0] = 0;
     if (delta === 0) continue;
-    const next = lambda.slice(); // Λ − Δ·x·B
-    for (let i = 0; i <= nsym; i++) next[i] ^= gfMul(delta, b[i]);
     if (2 * length <= r + f - 1) {
+      // Λ ← Λ − Δ·x·B and B ← Δ⁻¹·Λ_old, both from the old values.
       const inv = gfInv(delta);
-      for (let i = 0; i <= nsym; i++) b[i] = gfMul(inv, lambda[i]); // B ← Δ⁻¹·Λ_old
+      for (let i = 0; i <= r; i++) {
+        const old = lambda[i];
+        lambda[i] = old ^ gfMul(delta, b[i]);
+        b[i] = gfMul(inv, old);
+      }
       length = r + f - length;
+    } else {
+      for (let i = 0; i <= r; i++) lambda[i] ^= gfMul(delta, b[i]);
     }
-    lambda = next;
   }
   return { lambda, length };
+}
+
+/**
+ * Chien search: ascending byte positions p in [0, n) with Λ(X_p⁻¹) = 0.
+ * Locators beyond the (shortened) codeword are never visited, so roots there
+ * simply go missing from the result.
+ */
+function chienSearch(locator: Uint8Array, n: number): number[] {
+  const positions: number[] = [];
+  for (let p = 0; p < n; p++) {
+    if (polyEval(locator, gfExp(p - (n - 1))) === 0) positions.push(p);
+  }
+  return positions;
 }
 
 /**
@@ -200,22 +220,19 @@ export function rsDecode(codeword: Uint8Array, nsym: number, erasures: readonly 
   // which no codeword position can produce.
   if (2 * length - f > nsym || degree(lambda) !== length) return TOO_MANY_ERRORS;
 
-  // Chien search over the n positions of the (possibly shortened) codeword.
-  // Roots that correspond to positions beyond n leave the count short.
+  // Λ must split into distinct roots that all lie inside the codeword.
   const locator = lambda.subarray(0, length + 1);
-  const positions: number[] = [];
-  for (let p = 0; p < n; p++) {
-    if (polyEval(locator, gfExp(p - (n - 1))) === 0) positions.push(p);
-  }
+  const positions = chienSearch(locator, n);
   if (positions.length !== length) return TOO_MANY_ERRORS;
 
   // Forney (first consecutive root 0): Y = X·Ω(X⁻¹) / Λ'(X⁻¹), where
-  // Ω(x) = S(x)·Λ(x) mod x^nsym and Λ' is the formal derivative, which in
-  // characteristic 2 keeps only the odd-degree terms.
-  const omega = new Uint8Array(nsym);
-  for (let i = 0; i < nsym; i++) {
+  // Ω(x) = S(x)·Λ(x) mod x^nsym. Because Λ generates the whole syndrome
+  // sequence, the coefficients of degree ≥ L vanish and Ω has L terms. Λ' is
+  // the formal derivative, which in characteristic 2 keeps only odd terms.
+  const omega = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
     let acc = 0;
-    for (let j = 0; j <= Math.min(i, length); j++) acc ^= gfMul(locator[j], synd[i - j]);
+    for (let j = 0; j <= i; j++) acc ^= gfMul(locator[j], synd[i - j]);
     omega[i] = acc;
   }
   const derivative = new Uint8Array(length);

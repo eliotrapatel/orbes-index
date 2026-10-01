@@ -391,10 +391,14 @@ describe('rsDecode beyond capacity', () => {
     expect(miscorrections).toBe(0);
   });
 
-  it('rejects one symbol beyond capacity in mixed errors/erasures (2e + f = nsym + 1)', () => {
+  it('rejects mixed errors/erasures one step beyond capacity (2e + f = nsym + 1)', () => {
+    // Erasures puncture the code: f erasures leave nsym − f parity symbols for
+    // the e unknown errors. With f ≤ 60 at least 25 remain, which keeps the
+    // miscorrection probability below ≈ 2^−49, so failure is the only outcome
+    // a correct decoder can produce here.
     const rng = prng(23);
     for (let trial = 0; trial < 200; trial++) {
-      const f = 1 + 2 * rng.int(43); // odd, so (nsym + 1 − f) is even
+      const f = 2 + 2 * rng.int(30); // even, so e = (nsym + 1 − f) / 2 is an integer
       const e = (CODE01_NSYM + 1 - f) / 2;
       const codeword = rsEncode(rng.bytes(CODE01_K), CODE01_NSYM);
       const touched = pickPositions(rng, codeword.length, e + f);
@@ -446,19 +450,27 @@ describe('rsDecode input validation', () => {
 // ── Performance ────────────────────────────────────────────────────────────
 
 describe('rsDecode performance', () => {
-  it(`decodes RS(164,79) with ${CODE01_T} errors in well under 5 ms on average`, () => {
+  it(`decodes RS(164,79) with ${CODE01_T} errors in under 5 ms on average`, () => {
     const rng = prng(30);
-    const inputs = Array.from({ length: 200 }, () => {
+    const inputs = Array.from({ length: 50 }, () => {
       const codeword = rsEncode(rng.bytes(CODE01_K), CODE01_NSYM);
       return corrupt(rng, codeword, pickPositions(rng, codeword.length, CODE01_T));
     });
-    for (const received of inputs.slice(0, 20)) rsDecode(received, CODE01_NSYM); // JIT warm-up
-    const start = performance.now();
-    for (const received of inputs) {
-      if (!rsDecode(received, CODE01_NSYM).ok) expect.fail('decode failed');
-    }
-    const averageMs = (performance.now() - start) / inputs.length;
-    console.info(`RS(164,79) decode with ${CODE01_T} errors: ${averageMs.toFixed(3)} ms average`);
-    expect(averageMs).toBeLessThan(5);
+    for (const received of inputs) rsDecode(received, CODE01_NSYM); // JIT warm-up
+    // The median of several rounds keeps a busy CI machine from failing the
+    // bound on a single preempted round, while still asserting a mean time.
+    const roundAveragesMs = Array.from({ length: 5 }, () => {
+      const start = performance.now();
+      for (const received of inputs) {
+        if (!rsDecode(received, CODE01_NSYM).ok) expect.fail('decode failed');
+      }
+      return (performance.now() - start) / inputs.length;
+    });
+    const medianMs = [...roundAveragesMs].sort((a, b) => a - b)[2];
+    console.info(
+      `RS(164,79) decode with ${CODE01_T} errors: median ${medianMs.toFixed(3)} ms/decode ` +
+        `(rounds: ${roundAveragesMs.map((ms) => ms.toFixed(3)).join(', ')})`,
+    );
+    expect(medianMs).toBeLessThan(5);
   });
 });
