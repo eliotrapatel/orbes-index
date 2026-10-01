@@ -2,7 +2,7 @@
  * Revocations (ADMIN): the register of revoked codes, products and keys,
  * and one entry point that dispatches to the owning service:
  *
- *   CODE    → code revocation (code-revocation.ts)          targetId: code uuid
+ *   CODE    → IssuanceService.revokeCode                     targetId: code uuid
  *   PRODUCT → LifecycleService.transition(…, 'REVOKED')      targetId: canonical id or uuid
  *   KEY     → KeyService.revoke (no compromise time)         targetId: key id 1..255
  *
@@ -14,7 +14,6 @@ import { createRevocationBody, pageOf, parse, productRef, uuid } from '../../htt
 import { adminActor } from '../../http/sessions.js';
 import type { RevocationRow, RevocationTargetType } from '../../db/schema.js';
 import { makePage, pageOffset } from '../../types.js';
-import { revokeCode } from './code-revocation.js';
 import type { AdminRouteDeps } from './index.js';
 
 function revocationJson(r: RevocationRow) {
@@ -55,7 +54,7 @@ export const adminRevocationRoutes: FastifyPluginAsync<AdminRouteDeps> = async (
     switch (b.targetType) {
       case 'CODE': {
         const codeId = parse(uuid, b.targetId);
-        await revokeCode(ctx, codeId, b.reason, actor);
+        await ctx.services.issuance.revokeCode(codeId, b.reason, actor);
         target = { type: 'CODE', id: codeId };
         break;
       }

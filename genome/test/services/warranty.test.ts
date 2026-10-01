@@ -324,9 +324,15 @@ describe('WarrantyService', () => {
       expect(await lifecycle.allowedTransitions(p.productId)).toEqual(['SERVICED', 'RETIRED', 'REVOKED']);
     });
 
-    it('refuses to open a service from ISSUED or while already SERVICED', async () => {
+    it('opens a pre-sale inspection from ISSUED and returns the piece to ISSUED when it completes', async () => {
       const a = await product();
-      await expectDomainError(warranty.openService(a.productId, { type: 'CLEANING' }, admin), 'TRANSITION_NOT_ALLOWED', 409);
+      const svc = await warranty.openService(a.productId, { type: 'INSPECTION', notes: 'QA before shipping' }, admin);
+      expect((await t.db.selectFrom('products').select('status').where('product_id', '=', a.productId).executeTakeFirstOrThrow()).status).toBe('SERVICED');
+      const closed = await warranty.completeService(svc.id, {}, admin);
+      expect(closed.statusChange?.to).toBe('ISSUED');
+    });
+
+    it('refuses to open a service while already SERVICED', async () => {
       const b = await product({ path: ['ACTIVATED'] });
       await warranty.openService(b.productId, { type: 'CLEANING' }, admin);
       await expectDomainError(warranty.openService(b.productId, { type: 'CLEANING' }, admin), 'TRANSITION_NOT_ALLOWED', 409);

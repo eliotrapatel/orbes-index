@@ -12,7 +12,6 @@ import { artifactParams, artifactQuery, codeParams, pageOf, parse, printSheetBod
 import { adminActor } from '../../http/sessions.js';
 import { toCodeRecord, toGenomeRecord } from '../../services/issuance.js';
 import { makePage, pageOffset } from '../../types.js';
-import { revokeCode } from './code-revocation.js';
 import type { AdminRouteDeps } from './index.js';
 import { codeJson, genomeJson } from './serialize.js';
 
@@ -65,8 +64,7 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.post('/api/admin/codes/:codeId/revoke', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { codeId } = parse(codeParams, request.params);
     const b = parse(requiredReasonBody, request.body);
-    const r = await revokeCode(ctx, codeId, b.reason, adminActor(request));
-    return { code: codeJson(toCodeRecord(r.code, r.productId)) };
+    return { code: codeJson(await issuance.revokeCode(codeId, b.reason, adminActor(request))) };
   });
 
   app.get('/api/admin/codes', async (request) => {

@@ -229,14 +229,19 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       await page.getByRole('button', { name: 'SCAN ORBES CODE' }).tap();
       await page.locator('.view--scan.is-ready').waitFor();
       await textOf(page.getByRole('status'), 'SCANNING…');
-      // HINT_AFTER_MS (6 s) without a read: the guide line turns into advice.
-      await textOf(page.locator('.scan__hint'), /Place the whole code inside the orbit|Move a little closer/);
+      // HINT_AFTER_MS (6 s) without a read: the guide line turns into advice. Nothing code-like is in
+      // view (look-alike seals in the clutter carry no data orbits), so it asks for the code, never
+      // for a distance or the zoom.
+      await textOf(page.locator('.scan__hint'), 'Place the whole code inside the orbit');
       await page.screenshot({ path: join(E2E_OUT_DIR, 'camera-searching.png') });
 
       const timeline = await readTimeline(page);
       // ≥ 6 s of frames, at most one every 120 ms and only while the worker is idle (≈ 3–8 per second here).
       expect(timeline.replies.length).toBeGreaterThanOrEqual(3);
       expect(timeline.replies.every((r) => !r.ok)).toBe(true);
+      // The hint stays the same while scanning goes on (it follows the prevailing failure, not one odd frame).
+      await page.waitForTimeout(1_500);
+      expect(norm(await page.locator('.scan__hint').innerText())).toBe('Place the whole code inside the orbit');
       expect(timeline.locked).toBeNull();
       const reasons: Record<string, number> = {};
       for (const r of timeline.replies) reasons[r.reason ?? '?'] = (reasons[r.reason ?? '?'] ?? 0) + 1;

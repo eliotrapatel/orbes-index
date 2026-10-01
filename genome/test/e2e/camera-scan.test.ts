@@ -105,8 +105,9 @@ async function openVerify(browser: Browser, srv: E2EServer, reducedMotion: 'redu
   const res = await page.goto(`${srv.origin}/verify`);
   expect(res?.status()).toBe(200);
   await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
-  // The landing warms the decoder worker at idle time; a visitor reads the page for a moment first.
+  // The landing warms the decoder at idle time (one synthetic decode); a visitor reads the page for a moment first.
   await page.waitForTimeout(300);
+  await expect.poll(async () => (await readTimeline(page)).warmup?.reply?.ok ?? null, { timeout: 10_000, interval: 50 }).toBe(true);
   return { page, problems, close: () => ctx.close() };
 }
 
@@ -232,7 +233,16 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         await page.waitForTimeout(1_500); // entrance animations settle before the review screenshot
         await page.screenshot({ path: join(E2E_OUT_DIR, 'camera-result.png'), fullPage: true });
 
-        metrics.designedMotion = { ...timing, serverLatencyMs: event.latency_ms, cropPx: timeline.frames[0].w, trackSettings: timeline.gum[0].settings };
+        // The warm-up decode ran on the landing page, before the tap, and is not counted as a camera frame.
+        expect(timeline.warmup?.reply?.ok).toBe(true);
+        expect(timeline.warmup!.t).toBeLessThan(timeline.gum[0].start);
+        metrics.designedMotion = {
+          ...timing,
+          serverLatencyMs: event.latency_ms,
+          cropPx: timeline.frames[0].w,
+          trackSettings: timeline.gum[0].settings,
+          warmupDecodeMs: timeline.warmup?.reply?.timing?.decodeMs ?? null,
+        };
         expect(timing.recognition).not.toBeNull();
         expect(timing.recognition!).toBeLessThan(CEILING_MS);
         expect(timing.tapToResult!).toBeLessThan(CEILING_MS + 3_000);
@@ -244,10 +254,13 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
 
     it(`time-to-recognition and time-to-result over ${RUNS} fresh scans (reduced motion: no designed pauses)`, async () => {
       const timings: (ScanTiming & { serverLatencyMs: number | null })[] = [];
+      const warmups: (number | null)[] = [];
       for (let i = 0; i < RUNS; i++) {
         const { page, problems, close } = await openVerify(browser, srv, 'reduce');
         try {
+          const warmupDecodeMs = (await readTimeline(page)).warmup?.reply?.timing?.decodeMs ?? null;
           const { title, timing } = await scan(page);
+          warmups.push(warmupDecodeMs);
           expect(title).toBe('AUTHENTIC');
           await textOf(page.locator('.genome__id'), 'O26-J-00184');
           const event = await latestScanEvent(srv);
@@ -268,6 +281,9 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         tapToResult: summarize(timings.map((t) => t.tapToResult!)),
         framesToRecognition: summarize(timings.map((t) => t.framesToRecognition!)),
         workerDecodeMs: summarize(timings.flatMap((t) => t.workerDecodeMs)),
+        // Warm-up decode on the landing page (cold engine), then the first camera frame (warm).
+        warmupDecodeMs: warmups,
+        firstFrameDecodeMs: summarize(timings.map((t) => t.workerDecodeMs[0])),
         targetMs: RECOGNITION_TARGET_MS,
       };
       metrics.reducedMotion = summary;

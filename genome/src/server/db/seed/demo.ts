@@ -32,7 +32,6 @@
 import { randomBytes } from 'node:crypto';
 import type { AppContext } from '../../context.js';
 import { pseudonymize } from '../../http/client.js';
-import { revokeCode } from '../../routes/admin/code-revocation.js';
 import { REGISTRABLE_STATUSES } from '../../services/ownership.js';
 import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
@@ -1002,7 +1001,7 @@ function storyFor(productId: string, add: AddStep): Story {
       }),
     revokeCode: (when, reason) =>
       add(when, 'code revoked', async (w) => {
-        await revokeCode(w.ctx, state(w, productId).codeId, reason, DEMO_SEED_ACTOR);
+        await w.ctx.services.issuance.revokeCode(state(w, productId).codeId, reason, DEMO_SEED_ACTOR);
       }),
     reissue: (when, reason) => add(when, 'code re-issued', (w) => reissue(w, productId, reason)),
     voidWarranty: (when, reason) =>

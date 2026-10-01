@@ -402,6 +402,37 @@ describe('IssuanceService.reissueCode', () => {
   });
 });
 
+describe('IssuanceService.revokeCode', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w.t.close());
+
+  it('revokes one code with a revocations row and an audit entry; the product keeps its identity', async () => {
+    const { product, code } = await w.issuance.issueProduct(ring(w), admin);
+    w.clock.advance(60_000);
+    const r = await w.issuance.revokeCode(code.id, '  Label printed twice  ', admin);
+    expect(r).toMatchObject({ id: code.id, productId: product.productId, status: 'REVOKED', revocationReason: 'Label printed twice' });
+    expect(r.revokedAt?.toISOString()).toBe('2026-05-14T09:31:00.000Z');
+    const rev = await w.t.db.selectFrom('revocations').selectAll().where('target_type', '=', 'CODE').where('target_id', '=', code.id).executeTakeFirstOrThrow();
+    expect(rev).toMatchObject({ reason_code: 'CODE_REVOKED', reason: 'Label printed twice', created_by: 'admin:admin-7' });
+    const entry = (await w.audit.list({ action: 'code.revoke' })).items[0];
+    expect(entry).toMatchObject({ targetType: 'code', targetId: code.id, details: { productId: product.productId, issue: 1, previousStatus: 'ACTIVE' } });
+    // A new code can be issued for the same identity.
+    expect((await w.issuance.reissueCode(product.productId, 'replacement label', admin)).issue).toBe(2);
+  });
+
+  it('validates the code id, the reason and refuses a second revocation', async () => {
+    const { code } = await w.issuance.issueProduct(ring(w), admin);
+    expect((await domainError(w.issuance.revokeCode('not-a-uuid', 'x', admin))).code).toBe('CODE_NOT_FOUND');
+    expect((await domainError(w.issuance.revokeCode('00000000-0000-4000-8000-000000000000', 'x', admin))).code).toBe('CODE_NOT_FOUND');
+    expect((await domainError(w.issuance.revokeCode(code.id, '   ', admin))).code).toBe('VALIDATION_FAILED');
+    await w.issuance.revokeCode(code.id, 'lost roll of labels', admin);
+    expect((await domainError(w.issuance.revokeCode(code.id, 'again', admin))).code).toBe('CODE_ALREADY_REVOKED');
+  });
+});
+
 describe('IssuanceService.renderCode', () => {
   let w: World;
   let codeId: string;

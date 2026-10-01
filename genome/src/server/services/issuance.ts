@@ -40,7 +40,7 @@ import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/c
 import { isCheckViolation, isForeignKeyViolation, isRetryableTxError, isUniqueViolation } from '../db/pg-errors.js';
 import type { CodeRow, CodeStatus, GenomeRow, OwnershipState, ProductRow, ProductStatus } from '../db/schema.js';
 import { conflict, DomainError, notFound, validationError } from '../errors.js';
-import { isKeyTrustedAt, type ActiveSigner, type KeyService } from '../keys/key-service.js';
+import { actorLabel, isKeyTrustedAt, type ActiveSigner, type KeyService } from '../keys/key-service.js';
 import {
   ArtifactOptionsError,
   MAX_SHEET_ITEMS,
@@ -160,6 +160,8 @@ export interface IssuanceServiceDeps {
   log?: Logger;
 }
 
+/** `revocations.reason_code` of a single-code revocation. */
+export const CODE_REVOKED_REASON_CODE = 'CODE_REVOKED';
 export const GENOME_VERSION = 1;
 export const CODE_VERSION = 1;
 export const MAX_ISSUE = 255;
@@ -353,6 +355,50 @@ export class IssuanceService {
     if (!product) throw notFound('Product', 'PRODUCT_NOT_FOUND');
 
     return this.withRetries((signer) => inTransaction(this.db, (trx) => this.reissueIn(trx, signer, product.id, why, actor)), 'reissue');
+  }
+
+  /**
+   * Revoke ONE code (a misprinted, lost or leaked label). In one transaction:
+   * lock the product row then the code row (the same order as re-issue, so the
+   * two cannot deadlock), mark the code REVOKED, open a `revocations` row
+   * (reason code CODE_REVOKED) and append the audit entry. The code verifies
+   * as REVOKED from then on; the product keeps its identity and GENOME and can
+   * receive a new code with `reissueCode`.
+   */
+  async revokeCode(codeId: string, reason: string, actor: Actor): Promise<CodeRecord> {
+    const why = typeof reason === 'string' ? reason.trim() : '';
+    if (why.length < 1 || why.length > MAX_REASON) throw validationError(`A reason of 1–${MAX_REASON} characters is required.`);
+    if (typeof codeId !== 'string' || !UUID_RE.test(codeId)) throw notFound('Code', 'CODE_NOT_FOUND');
+    return inTransaction(this.db, async (tx) => {
+      const peek = await tx.selectFrom('codes').select('product_id').where('id', '=', codeId).executeTakeFirst();
+      if (!peek) throw notFound('Code', 'CODE_NOT_FOUND');
+      const product = await tx.selectFrom('products').select(['id', 'product_id']).where('id', '=', peek.product_id).forUpdate().executeTakeFirstOrThrow();
+      const code = await tx.selectFrom('codes').selectAll().where('id', '=', codeId).forUpdate().executeTakeFirstOrThrow();
+      if (code.status === 'REVOKED') throw conflict('CODE_ALREADY_REVOKED', 'This code is already revoked.');
+
+      const now = this.clock();
+      const updated = await tx
+        .updateTable('codes')
+        .set({ status: 'REVOKED', revoked_at: now, revocation_reason: why })
+        .where('id', '=', codeId)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await tx
+        .insertInto('revocations')
+        .values({ target_type: 'CODE', target_id: codeId, reason_code: CODE_REVOKED_REASON_CODE, reason: why, created_by: actorLabel(actor), created_at: now })
+        .execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'code.revoke',
+          targetType: 'code',
+          targetId: codeId,
+          details: { productId: product.product_id, issue: code.issue, keyId: code.key_id, previousStatus: code.status, reason: why },
+        },
+        tx,
+      );
+      return toCodeRecord(updated, product.product_id);
+    });
   }
 
   /**

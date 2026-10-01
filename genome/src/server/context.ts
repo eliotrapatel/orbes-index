@@ -24,6 +24,7 @@ import { AuthenticatorRegistry } from './authenticators/index.js';
 import { AnomalyService } from './services/anomaly.js';
 import { AuditService } from './services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
+import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
@@ -43,6 +44,8 @@ export interface AppServices {
   warranty: WarrantyService;
   auth: AuthService;
   authenticators: AuthenticatorRegistry;
+  /** Collections and models (categories: `AppContext.categories`). */
+  catalog: CatalogService;
 }
 
 export interface AppContext {
@@ -114,6 +117,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const ownership = new OwnershipService({ db, audit, lifecycle, clock });
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
     const issuance = new IssuanceService({ db, keys, audit, categories, clock, log });
+    const catalog = new CatalogService({ db, audit, categories, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
@@ -127,6 +131,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       warranty,
       auth,
       authenticators,
+      catalog,
       ...overrides.services,
     };
 
