@@ -11,6 +11,7 @@
  * the known ones, so a fix or a regression both show up.
  */
 import { fromBase64Url, writeU32BE } from '../../src/core/bytes.js';
+import { CODE_PROFILES, unframeAnyCodeData } from '../../src/core/code-profiles.js';
 import { computeGenome } from '../../src/core/genome/genome.js';
 import { packIdentity, unpackIdentity } from '../../src/core/identity.js';
 import {
@@ -114,6 +115,16 @@ function isValidIdentity(packed: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** An intact frame naming a code version without a profile (verification answers UNKNOWN). */
+function unsupportedCodeVersion(data: Uint8Array): boolean {
+  try {
+    unframeAnyCodeData(data, CODE_PROFILES);
+    return false;
+  } catch (e) {
+    return e instanceof PayloadError && e.code === 'UNSUPPORTED_VERSION';
   }
 }
 
@@ -304,8 +315,10 @@ const alteredId: Scenario = {
     for (let bit = 0; bit < PAYLOAD_V1_LENGTH * 8; bit++) {
       const data = reframe(read, { payload: (b) => void (b[bit >> 3] ^= 0x80 >> (bit & 7)) });
       const parsed = tryDecodePayload(data.subarray(0, PAYLOAD_V1_LENGTH));
-      // Strict parsing refuses some edits (MALFORMED_CODE); every other edit, the genome version included, fails Ed25519.
-      const want = parsed ? 'INVALID_SIGNATURE' : 'MALFORMED_CODE';
+      // Strict parsing refuses some edits (MALFORMED_CODE); a code-version edit to 2..8 leaves an intact frame of a
+      // version without a profile (UNKNOWN, ORBES-CODE-SPEC §12); every other edit, the genome version included,
+      // fails Ed25519.
+      const want = parsed ? 'INVALID_SIGNATURE' : unsupportedCodeVersion(data) ? 'UNKNOWN' : 'MALFORMED_CODE';
       expected.push(want);
       const sub = await lab.submitBytes(forger, data);
       sweep.push(sub);
@@ -314,7 +327,7 @@ const alteredId: Scenario = {
     lab.expectTrue(
       '3d',
       'every single-bit flip of the 13-byte signed payload (104 bits: versions, key id, identity, issue, day, nonce)',
-      `${tally(expected)} (MALFORMED_CODE where strict parsing refuses the edit)`,
+      `${tally(expected)} (MALFORMED_CODE where strict parsing refuses the edit, UNKNOWN for a code version edited to 2–8)`,
       tally(sweep.map((s) => s.state ?? `HTTP ${s.status}`)),
       off === 0,
     );
