@@ -273,6 +273,16 @@ async function seedCommand(config: AppConfig, deps: CliDeps, io: CliIO, log: Log
     const ctx = await createContext(config, { db, clock: clock.now, log: ctxLog, keyProvider: provider, migrate: false });
     const started = performance.now();
     try {
+      // An ACTIVE key this process cannot sign with (left by an earlier KEY_PROVIDER=memory run, or a wrong
+      // KEY_DIR / KEY_ENCRYPTION_KEY) would fail the first issuance with a vague error; say what to do instead.
+      if (!(await ctx.keys.selfTest())) {
+        io.err(
+          provider.name === 'memory'
+            ? 'db seed: the ACTIVE signing key belongs to an earlier process (KEY_PROVIDER=memory keeps keys in memory only). Run `tsx scripts/db.ts reset-demo --yes`, or use KEY_PROVIDER=local.'
+            : 'db seed: the ACTIVE signing key cannot sign with the configured provider (check KEY_DIR and KEY_ENCRYPTION_KEY, or rotate: `tsx scripts/keys.ts rotate`).',
+        );
+        return EXIT.FAILURE;
+      }
       const result = await seedDemo(ctx, { clock, now: deps.now?.() ?? new Date(), ...(password ? { accountPassword: password } : {}), log: ctxLog });
       const ephemeral = isEphemeralDatabase(config.databaseUrl);
       let keyNote: string | undefined;

@@ -7,6 +7,9 @@ import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runDbCli, type CliIO } from '../../scripts/db.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID } from '../../src/server/db/seed/demo.js';
+import { KeyService } from '../../src/server/keys/key-service.js';
+import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { AuditService } from '../../src/server/services/audit.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
 const NOW = new Date('2026-10-01T09:00:00.000Z');
@@ -60,6 +63,24 @@ describe('db CLI: usage and refusals', () => {
     expect(r.code).toBe(78);
     expect(r.io.text()).toMatch(/COOKIE_SECRET: must be at least 32 characters/);
     expect(r.io.text()).not.toContain('short-secret-value');
+  });
+});
+
+describe('db CLI: unusable signing key', () => {
+  it('stops before seeding when the ACTIVE key cannot sign in this process, and says how to recover', async () => {
+    const t = await createTestDb();
+    try {
+      // An earlier process with KEY_PROVIDER=memory left an ACTIVE key nobody holds any more.
+      const earlier = new KeyService({ db: t.db, provider: new MemoryKeyProvider({ env: 'test' }), audit: new AuditService({ db: t.db }) });
+      await earlier.ensureActiveKey({ type: 'system' });
+      const io = capture();
+      const code = await runDbCli(['seed'], { env: DEV_ENV, io, db: t.db, keyProvider: new MemoryKeyProvider({ env: 'test' }), now: () => NOW });
+      expect(code).toBe(1);
+      expect(io.text()).toMatch(/belongs to an earlier process .* reset-demo --yes/);
+      expect(await t.db.selectFrom('products').select('id').execute()).toHaveLength(0);
+    } finally {
+      await t.close();
+    }
   });
 });
 
