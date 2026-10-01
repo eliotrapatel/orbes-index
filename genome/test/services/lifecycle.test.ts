@@ -288,7 +288,7 @@ describe('LifecycleService', () => {
     }
     expect(await lifecycle.snapshot(p.productId)).toEqual({ status: 'REVOKED', allowed: [], returnTo: 'SERVICED', canReinstate: true });
 
-    await expectDomainError(lifecycle.reinstate(p.productId, '  ', admin), 'VALIDATION_FAILED', 400);
+    await expectDomainError(lifecycle.reinstate(p.productId, 'bad\u0000', admin), 'VALIDATION_FAILED', 400);
     clock.advance(60_000);
     const change = await lifecycle.reinstate(p.productId, 'revocation was an error', admin);
     expect(change).toMatchObject({ from: 'REVOKED', to: 'SERVICED' });
@@ -310,9 +310,11 @@ describe('LifecycleService', () => {
     expect(Object.fromEntries(codes.map((c) => [c.target_id, c.reason_code]))).toEqual({ [a.productId]: 'COUNTERFEIT', [b.productId]: 'ADMIN_DECISION' });
   });
 
-  it('reinstate refuses products that are not revoked', async () => {
+  it('reinstate refuses products that are not revoked; the reason is optional', async () => {
     const p = await productIn('OWNED');
     await expectDomainError(lifecycle.reinstate(p.productId, 'why not', admin), 'NOT_REVOKED', 409);
+    const r = await productIn('REVOKED');
+    expect(await lifecycle.reinstate(r.productId, undefined, admin)).toMatchObject({ from: 'REVOKED', to: 'OWNED', reason: null });
   });
 
   it('refuses return moves when the history cannot tell the previous status', async () => {

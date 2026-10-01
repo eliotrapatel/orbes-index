@@ -174,23 +174,34 @@ export function textRun(text: string, opts: TextRunOptions): TextRun {
   const P = (gx: number, gy: number, ox: number) => `${fmt(ox + gx * s)} ${fmt(top + gy * s)}`;
   for (const ch of upper) {
     const g = glyphOf(ch);
+    // Pen position in glyph space, to check that every arc starts where the previous stroke ended.
+    let pen0: [number, number] = [0, 0];
+    let cur: [number, number] = [0, 0];
     for (const op of g.ops) {
       switch (op[0]) {
         case 'M':
         case 'L':
           parts.push(`${op[0]}${P(op[1], op[2], pen)}`);
+          cur = [op[1], op[2]];
+          if (op[0] === 'M') pen0 = cur;
           break;
         case 'Z':
           parts.push('Z');
+          cur = pen0;
           break;
         case 'arc': {
           const [, cx, cy, rx, ry, from, to] = op;
+          const [sx, sy] = pointOn(cx, cy, rx, ry, from);
+          if (Math.abs(sx - cur[0]) > 1e-3 || Math.abs(sy - cur[1]) > 1e-3) {
+            throw new Error(`label glyph ${JSON.stringify(ch)}: arc does not start at the pen position`);
+          }
           const span = to - from;
           const pieces = Math.max(1, Math.ceil(Math.abs(span) / MAX_ARC_DEG - 1e-9));
           const sweep = span > 0 ? 1 : 0;
           for (let k = 1; k <= pieces; k++) {
             const [px, py] = pointOn(cx, cy, rx, ry, from + (span * k) / pieces);
             parts.push(`A${fmt(rx * s)} ${fmt(ry * s)} 0 0 ${sweep} ${P(px, py, pen)}`);
+            cur = [px, py];
           }
           break;
         }

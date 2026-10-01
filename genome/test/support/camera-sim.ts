@@ -131,12 +131,17 @@ export interface CaptureParams {
    */
   curvature?: number;
   /**
-   * How far the printed sheet extends beyond the source on each side, as a
-   * fraction of the source width (one number, or per axis). Infinity
-   * (default) = the substrate fills the view.
+   * How far the printed surface (with its substrate texture) extends beyond
+   * the source on each side, as a fraction of the source width; one number or
+   * per axis, Infinity = it fills the view. Default 0: pixels that map outside
+   * the source show the background.
    */
   sheetMargin?: number | { x: number; y: number };
-  /** Seen beyond the sheet or past the surface's silhouette: flat reflectance or clutter (default 0.25). */
+  /**
+   * Beyond the sheet or past the surface's silhouette: a flat reflectance or
+   * seeded clutter. Default: flat at `paperLevel`, so a clean capture looks
+   * like the source printed on a larger blank card.
+   */
   background?: number | ClutterBackground;
   /** Surface texture, attached to the surface (default 'none'). */
   substrate?: Substrate;
@@ -161,9 +166,9 @@ export interface CaptureParams {
   /** JPEG round trip at this quality (1..100); omitted = no compression. */
   jpegQuality?: number;
   /**
-   * 'fast' (default): luma-only DCT quantisation, equivalent to a baseline
-   * JPEG of a gray image to within ±1 level on ~10 % of pixels and ~8× faster;
-   * 'jpeg-js': the real codec round trip (image-io `encodeJpeg`).
+   * 'fast' (default): image-io `encodeJpegFast`, the luma-only lossy stage of
+   * baseline JPEG (mean absolute difference < 0.3 levels from the real codec,
+   * several times faster); 'jpeg-js': the real codec round trip (`encodeJpeg`).
    */
   jpegCodec?: 'fast' | 'jpeg-js';
   /** Final area-average downscale (≥ 1, default 1); the output is round(frame / downscale). */
@@ -219,7 +224,9 @@ function buildRig(source: { width: number; height: number }, p: CaptureParams): 
   check(downscale >= 1 && finite(downscale), 'downscale must be ≥ 1');
   check(Math.abs(tiltX) < 85 && Math.abs(tiltY) < 85, 'tilts must be within ±85°');
   check(curvature >= 0 && curvature < 2 * Math.PI, 'curvature must be in [0, 2π)');
-  check(finite(p.rotationDeg ?? 0) && finite(p.barrelK1 ?? 0), 'rotation and barrelK1 must be finite');
+  check(finite(p.rotationDeg ?? 0), 'rotationDeg must be finite');
+  // Beyond this the radial model folds over inside a phone-like field of view.
+  check(Math.abs(p.barrelK1 ?? 0) <= 0.5, 'barrelK1 must be within ±0.5');
   check(finite(p.offset?.x ?? 0) && finite(p.offset?.y ?? 0), 'offset must be finite');
 
   const scale = codeWidthPx / source.width;
@@ -628,6 +635,12 @@ function sourceLevel(src: GrayImage, framePxPerSrcPx: number): Level {
 
 // ── Capture ────────────────────────────────────────────────────────────────
 
+/**
+ * Photograph `source` (e.g. a rasterised ORBES CODE) with a simulated phone
+ * camera. Every random choice (clutter, texture patch, occluders, noise)
+ * derives from `seed`: same source, params and seed → byte-identical frame.
+ * Use `captureGeometry` with the same params to know where the source landed.
+ */
 export function simulateCapture(source: GrayImage, params: CaptureParams = {}, seed = 0): GrayImage {
   check(source.data.length === source.width * source.height, 'source data length does not match its size');
   const rig = buildRig(source, params);
@@ -654,13 +667,13 @@ function renderScene(source: GrayImage, rig: Rig, p: CaptureParams, rng: Prng): 
   const { w: lw, h: lh, data: lt, factor } = sourceLevel(source, pxPerSrc);
   const invFactor = 1 / factor;
 
-  const margin = p.sheetMargin ?? Infinity;
+  const margin = p.sheetMargin ?? 0;
   const marginX = (typeof margin === 'number' ? margin : margin.x) * srcW;
   const marginY = (typeof margin === 'number' ? margin : margin.y) * srcW;
   check(marginX >= 0 && marginY >= 0, 'sheetMargin must be ≥ 0');
   const bounded = Number.isFinite(marginX) || Number.isFinite(marginY);
 
-  const background = p.background ?? 0.25;
+  const background = p.background ?? paper;
   check(typeof background === 'object' || (background >= 0 && background <= 1), 'background level must be in [0, 1]');
   const clutterW = Math.ceil(W / CLUTTER_SUBSAMPLE);
   const clutterH = Math.ceil(H / CLUTTER_SUBSAMPLE);
@@ -1079,8 +1092,17 @@ const HANDHELD: CaptureParams = {
   jpegQuality: 82,
 };
 
+/** Presets are shared by every test in a process: freeze them all the way down. */
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) freezeDeep(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /** Capture conditions for the scan test matrix (default 1280×720 frame). */
-export const PRESETS: Readonly<Record<PresetName, Readonly<CaptureParams>>> = Object.freeze({
+export const PRESETS: Readonly<Record<PresetName, Readonly<CaptureParams>>> = freezeDeep({
   /** Face-on, centred, noiseless, uncompressed: the decoder's best case. */
   clean: {},
   typicalPhone: HANDHELD,
@@ -1097,7 +1119,7 @@ export const PRESETS: Readonly<Record<PresetName, Readonly<CaptureParams>>> = Ob
     vignette: 0.45,
     blurSigma: 1.3,
     motionBlur: { lengthPx: 3, angleDeg: 20 },
-    noise: { sigma: 5, shot: 0.8 },
+    noise: { sigma: 4, shot: 0.5 },
     jpegQuality: 70,
   },
   /** Glossy label under a lamp: a saturated highlight across the data orbits. */
@@ -1128,7 +1150,7 @@ export const PRESETS: Readonly<Record<PresetName, Readonly<CaptureParams>>> = Ob
     inkLevel: 0.2,
     illumination: { angleDeg: 45, strength: 0.3 },
     blurSigma: 1,
-    noise: { sigma: 3, shot: 0.3 },
+    noise: { sigma: 2.5, shot: 0.1 },
     jpegQuality: 80,
   },
   /** Laser engraving on a brushed ring: strong curvature, specular stripe along the ring axis. */
@@ -1153,7 +1175,7 @@ export const PRESETS: Readonly<Record<PresetName, Readonly<CaptureParams>>> = Ob
     substrate: 'textured-paper',
     occlusion: { count: 5, area: 0.012 },
     blurSigma: 1.1,
-    noise: { sigma: 4, shot: 0.4 },
+    noise: { sigma: 3, shot: 0.15 },
     jpegQuality: 75,
   },
   /** Far away / tiny print: 3 px per CODE-01 module (50 u across). */

@@ -310,8 +310,9 @@ export class LifecycleService {
    * Lift a revocation: REVOKED → the status held before the revocation.
    * Authorisation (ADMIN only) is enforced by the route; the actor is recorded.
    */
-  async reinstate(productId: string, reason: string, actor: Actor, trx?: Db): Promise<StatusChange> {
-    const why = cleanReason(reason, 'Reason', true);
+  async reinstate(productId: string, reason: string | null | undefined, actor: Actor, trx?: Db): Promise<StatusChange> {
+    // Optional: the contract's reinstate route carries no body. Routes should still pass one when they have it.
+    const why = cleanReason(reason);
     return inTransaction(trx ?? this.db, async (tx) => {
       const product = await requireProduct(tx, productId, { forUpdate: true });
       if (product.status !== 'REVOKED') {

@@ -4,7 +4,7 @@
  *   writePng / writeJpeg   GrayImage → file (parent directories are created)
  *   readImage              PNG or JPEG file → GrayImage (sniffed by magic bytes)
  *   encodeJpeg             exact JPEG round trip through jpeg-js
- *   encodeJpegFast         the same lossy stage for luma only, ~10× faster
+ *   encodeJpegFast         the same lossy stage for luma only, ~8× faster
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -145,72 +145,70 @@ export function encodeJpegFast(img: GrayImage, quality: number): GrayImage {
   return out;
 }
 
-/** In-place 8×8 AAN forward DCT (libjpeg jfdctflt.c); output scaled by 8·aan[u]·aan[v]. */
+/** In-place 8×8 AAN forward DCT (libjpeg jfdctflt.c): rows, then columns; output scaled by 8·aan[u]·aan[v]. */
 function forwardDct(d: Float64Array): void {
-  for (let pass = 0; pass < 2; pass++) {
-    // Pass 0 runs along rows (stride 1), pass 1 along columns (stride 8).
-    const step = pass === 0 ? 1 : 8;
-    const next = pass === 0 ? 8 : 1;
-    for (let line = 0, o = 0; line < 8; line++, o += next) {
-      const d0 = d[o], d1 = d[o + step], d2 = d[o + 2 * step], d3 = d[o + 3 * step];
-      const d4 = d[o + 4 * step], d5 = d[o + 5 * step], d6 = d[o + 6 * step], d7 = d[o + 7 * step];
-      const tmp0 = d0 + d7, tmp7 = d0 - d7, tmp1 = d1 + d6, tmp6 = d1 - d6;
-      const tmp2 = d2 + d5, tmp5 = d2 - d5, tmp3 = d3 + d4, tmp4 = d3 - d4;
-      // Even part.
-      const tmp10 = tmp0 + tmp3, tmp13 = tmp0 - tmp3, tmp11 = tmp1 + tmp2, tmp12 = tmp1 - tmp2;
-      d[o] = tmp10 + tmp11;
-      d[o + 4 * step] = tmp10 - tmp11;
-      const z1 = (tmp12 + tmp13) * 0.707106781;
-      d[o + 2 * step] = tmp13 + z1;
-      d[o + 6 * step] = tmp13 - z1;
-      // Odd part.
-      const o10 = tmp4 + tmp5, o11 = tmp5 + tmp6, o12 = tmp6 + tmp7;
-      const z5 = (o10 - o12) * 0.382683433;
-      const z2 = 0.5411961 * o10 + z5;
-      const z4 = 1.306562965 * o12 + z5;
-      const z3 = o11 * 0.707106781;
-      const z11 = tmp7 + z3, z13 = tmp7 - z3;
-      d[o + 5 * step] = z13 + z2;
-      d[o + 3 * step] = z13 - z2;
-      d[o + step] = z11 + z4;
-      d[o + 7 * step] = z11 - z4;
-    }
-  }
+  for (let o = 0; o < 64; o += 8) fdct8(d, o, 1);
+  for (let o = 0; o < 8; o++) fdct8(d, o, 8);
 }
 
-/** In-place 8×8 AAN inverse DCT (libjpeg jidctflt.c); input pre-scaled by aan[u]·aan[v], output ×8. */
+/** One 8-point AAN forward DCT over d[o], d[o + s], …, d[o + 7s]. */
+function fdct8(d: Float64Array, o: number, s: number): void {
+  const d0 = d[o], d1 = d[o + s], d2 = d[o + 2 * s], d3 = d[o + 3 * s];
+  const d4 = d[o + 4 * s], d5 = d[o + 5 * s], d6 = d[o + 6 * s], d7 = d[o + 7 * s];
+  const tmp0 = d0 + d7, tmp7 = d0 - d7, tmp1 = d1 + d6, tmp6 = d1 - d6;
+  const tmp2 = d2 + d5, tmp5 = d2 - d5, tmp3 = d3 + d4, tmp4 = d3 - d4;
+  // Even part.
+  const tmp10 = tmp0 + tmp3, tmp13 = tmp0 - tmp3, tmp11 = tmp1 + tmp2, tmp12 = tmp1 - tmp2;
+  d[o] = tmp10 + tmp11;
+  d[o + 4 * s] = tmp10 - tmp11;
+  const z1 = (tmp12 + tmp13) * 0.707106781;
+  d[o + 2 * s] = tmp13 + z1;
+  d[o + 6 * s] = tmp13 - z1;
+  // Odd part.
+  const o10 = tmp4 + tmp5, o11 = tmp5 + tmp6, o12 = tmp6 + tmp7;
+  const z5 = (o10 - o12) * 0.382683433;
+  const z2 = 0.5411961 * o10 + z5;
+  const z4 = 1.306562965 * o12 + z5;
+  const z3 = o11 * 0.707106781;
+  const z11 = tmp7 + z3, z13 = tmp7 - z3;
+  d[o + 5 * s] = z13 + z2;
+  d[o + 3 * s] = z13 - z2;
+  d[o + s] = z11 + z4;
+  d[o + 7 * s] = z11 - z4;
+}
+
+/** In-place 8×8 AAN inverse DCT (libjpeg jidctflt.c): columns, then rows; input pre-scaled by aan[u]·aan[v], output ×8. */
 function inverseDct(d: Float64Array): void {
-  for (let pass = 0; pass < 2; pass++) {
-    // Pass 0 runs along columns (stride 8), pass 1 along rows (stride 1).
-    const step = pass === 0 ? 8 : 1;
-    const next = pass === 0 ? 1 : 8;
-    for (let line = 0, o = 0; line < 8; line++, o += next) {
-      // Even part.
-      const e0 = d[o], e1 = d[o + 2 * step], e2 = d[o + 4 * step], e3 = d[o + 6 * step];
-      const tmp10 = e0 + e2, tmp11 = e0 - e2, tmp13 = e1 + e3;
-      const tmp12 = (e1 - e3) * 1.414213562 - tmp13;
-      const tmp0 = tmp10 + tmp13, tmp3 = tmp10 - tmp13, tmp1 = tmp11 + tmp12, tmp2 = tmp11 - tmp12;
-      // Odd part.
-      const i4 = d[o + step], i5 = d[o + 3 * step], i6 = d[o + 5 * step], i7 = d[o + 7 * step];
-      const z13 = i6 + i5, z10 = i6 - i5, z11 = i4 + i7, z12 = i4 - i7;
-      const tmp7 = z11 + z13;
-      const r11 = (z11 - z13) * 1.414213562;
-      const z5 = (z10 + z12) * 1.847759065;
-      const r10 = 1.0823922 * z12 - z5;
-      const r12 = -2.61312593 * z10 + z5;
-      const tmp6 = r12 - tmp7;
-      const tmp5 = r11 - tmp6;
-      const tmp4 = r10 + tmp5;
-      d[o] = tmp0 + tmp7;
-      d[o + 7 * step] = tmp0 - tmp7;
-      d[o + step] = tmp1 + tmp6;
-      d[o + 6 * step] = tmp1 - tmp6;
-      d[o + 2 * step] = tmp2 + tmp5;
-      d[o + 5 * step] = tmp2 - tmp5;
-      d[o + 4 * step] = tmp3 + tmp4;
-      d[o + 3 * step] = tmp3 - tmp4;
-    }
-  }
+  for (let o = 0; o < 8; o++) idct8(d, o, 8);
+  for (let o = 0; o < 64; o += 8) idct8(d, o, 1);
+}
+
+/** One 8-point AAN inverse DCT over d[o], d[o + s], …, d[o + 7s]. */
+function idct8(d: Float64Array, o: number, s: number): void {
+  // Even part.
+  const e0 = d[o], e1 = d[o + 2 * s], e2 = d[o + 4 * s], e3 = d[o + 6 * s];
+  const tmp10 = e0 + e2, tmp11 = e0 - e2, tmp13 = e1 + e3;
+  const tmp12 = (e1 - e3) * 1.414213562 - tmp13;
+  const tmp0 = tmp10 + tmp13, tmp3 = tmp10 - tmp13, tmp1 = tmp11 + tmp12, tmp2 = tmp11 - tmp12;
+  // Odd part.
+  const i4 = d[o + s], i5 = d[o + 3 * s], i6 = d[o + 5 * s], i7 = d[o + 7 * s];
+  const z13 = i6 + i5, z10 = i6 - i5, z11 = i4 + i7, z12 = i4 - i7;
+  const tmp7 = z11 + z13;
+  const r11 = (z11 - z13) * 1.414213562;
+  const z5 = (z10 + z12) * 1.847759065;
+  const r10 = 1.0823922 * z12 - z5;
+  const r12 = -2.61312593 * z10 + z5;
+  const tmp6 = r12 - tmp7;
+  const tmp5 = r11 - tmp6;
+  const tmp4 = r10 + tmp5;
+  d[o] = tmp0 + tmp7;
+  d[o + 7 * s] = tmp0 - tmp7;
+  d[o + s] = tmp1 + tmp6;
+  d[o + 6 * s] = tmp1 - tmp6;
+  d[o + 2 * s] = tmp2 + tmp5;
+  d[o + 5 * s] = tmp2 - tmp5;
+  d[o + 4 * s] = tmp3 + tmp4;
+  d[o + 3 * s] = tmp3 - tmp4;
 }
 
 function assertImage(img: GrayImage): void {

@@ -15,7 +15,7 @@ import { svgToGray } from './raster.js';
  * CODE-01-like stand-in (viewBox −25..25): seal, 13 orbits of random arcs,
  * four moons. Only the look matters here; real artifacts come from the encoder.
  */
-export function orbitalTestPattern(seed: number): string {
+function orbitalTestPattern(seed: number): string {
   const rng = new Prng(seed);
   const parts: string[] = [
     '<circle cx="0" cy="0" r="2" fill="#000"/>',
@@ -53,6 +53,7 @@ function main(): void {
   const source = svgToGray(orbitalTestPattern(seed), { widthPx: 1200 });
   writePng(join(outDir, 'source.png'), source);
   for (const name of Object.keys(PRESETS) as PresetName[]) {
+    simulateCapture(source, PRESETS[name], seed); // warm-up: report steady-state time, not JIT time
     const started = performance.now();
     const frame = simulateCapture(source, PRESETS[name], seed);
     const ms = performance.now() - started;
@@ -62,4 +63,4 @@ function main(): void {
   }
 }
 
-if (process.argv[1]?.endsWith("preview.ts")) main();
+main();

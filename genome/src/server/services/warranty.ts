@@ -253,8 +253,8 @@ export class WarrantyService {
   }
 
   /** Void the warranty (e.g. unauthorised modification). Works before activation too. */
-  async void(productId: string, reason: string, actor: Actor): Promise<WarrantyRecord> {
-    const why = cleanReason(reason, 'Reason', true)!;
+  async void(productId: string, reason: string | null | undefined, actor: Actor): Promise<WarrantyRecord> {
+    const why = cleanReason(reason);
     const now = this.clock();
     return inTransaction(this.db, async (tx) => {
       const product = await requireProduct(tx, productId, { forUpdate: true });
@@ -280,7 +280,7 @@ export class WarrantyService {
             .returningAll()
             .executeTakeFirstOrThrow();
       await this.audit.record(
-        { actor, action: 'warranty.void', targetType: 'product', targetId: product.product_id, details: { reason: why } },
+        { actor, action: 'warranty.void', targetType: 'product', targetId: product.product_id, details: why === null ? {} : { reason: why } },
         tx,
       );
       return toRecord(row, product.product_id, utcDate(now));
@@ -288,7 +288,7 @@ export class WarrantyService {
   }
 
   /** Alias of `void` for callers that avoid the reserved word. */
-  voidWarranty(productId: string, reason: string, actor: Actor): Promise<WarrantyRecord> {
+  voidWarranty(productId: string, reason: string | null | undefined, actor: Actor): Promise<WarrantyRecord> {
     return this.void(productId, reason, actor);
   }
 
