@@ -151,7 +151,7 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
   const w = d.warranty;
   const owner = d.ownership.current;
   return {
-    transitions: can(role, 'transition') ? d.lifecycle.allowed.filter((s) => s !== 'REVOKED' || can(role, 'revokeProduct')) : [],
+    transitions: can(role, 'transition') ? d.lifecycle.allowed.filter((s) => (s !== 'REVOKED' && s !== 'RETIRED') || can(role, 'revokeProduct')) : [],
     canReinstate: d.lifecycle.canReinstate && can(role, 'reinstate'),
     canReissue: can(role, 'reissueCode') && !NOT_PRINTABLE.has(status) && maxIssue < MAX_ISSUE,
     revocableCodeId: active && can(role, 'revokeCode') ? active.id : null,

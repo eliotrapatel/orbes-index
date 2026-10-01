@@ -17,8 +17,9 @@
  * are collinear in ANY view (a homography maps lines to lines), so the two
  * moon diagonals must both pass through the seal centre. Candidate pairs are
  * scored on that, then combined into the best four (or three, when a moon is
- * hidden) — robust to strong perspective, where the moons' rectified radii
- * and angles drift far from the frontal 27.5 u / 90°.
+ * hidden, or even two, when the frame cuts the others off) — robust to
+ * strong perspective, where the moons' rectified radii and angles drift far
+ * from the frontal 27.5 u / 90°.
  *
  * Moon-first search (seal unreadable): among disc-like connected components,
  * four of similar size whose two "diagonals" cross near their middles; the
@@ -47,7 +48,7 @@ export interface MoonDetection {
 export interface MoonSet {
   /**
    * Four slots in clockwise image order around the seal; opposite slots
-   * (k, k + 2) are opposite moons. Null = not found (at most one).
+   * (k, k + 2) are opposite moons. Null = not found (at most two).
    */
   slots: (MoonDetection | null)[];
   score: number;
@@ -326,16 +327,17 @@ function diagonals(peaks: Peak[]): Diagonal[] {
 }
 
 /** Order detections clockwise by rectified angle into four slots (null = missing). */
-function toSlots(members: Peak[], missingAngle: number | null): (MoonDetection | null)[] {
+function toSlots(members: Peak[], missingAngles: readonly number[]): (MoonDetection | null)[] {
   const entries: { a: number; m: MoonDetection | null }[] = members.map((p) => ({ a: p.a, m: p }));
-  if (missingAngle !== null) entries.push({ a: missingAngle, m: null });
+  for (const a of missingAngles) entries.push({ a, m: null });
   entries.sort((x, y) => x.a - y.a);
   return entries.map((e) => (e.m ? { x: e.m.x, y: e.m.y, response: e.m.response, halo: e.m.halo } : null));
 }
 
 /**
- * Detect the moons around a seal candidate and pick the most consistent set.
- * Null when fewer than three consistent moons are visible.
+ * Detect the moons around a seal candidate and pick the most consistent set:
+ * four, else three, else two (one diagonal, else two neighbours). Null when
+ * not even two consistent moons are visible.
  */
 export function findMoons(img: GrayImage, ii: IntegralImage, seal: SealCandidate): MoonSet | null {
   const peaks = moonPeaks(img, ii, seal);
@@ -351,7 +353,7 @@ export function findMoons(img: GrayImage, ii: IntegralImage, seal: SealCandidate
       if (Math.abs(Math.min(cross, Math.PI - cross) - Math.PI / 2) > ANGLE_TOLERANCE) continue;
       const score = d1.score + d2.score;
       if (!best || score > best.score) {
-        best = { slots: toSlots([peaks[d1.i], peaks[d1.j], peaks[d2.i], peaks[d2.j]], null), score };
+        best = { slots: toSlots([peaks[d1.i], peaks[d1.j], peaks[d2.i], peaks[d2.j]], []), score };
       }
     }
   }
@@ -369,8 +371,27 @@ export function findMoons(img: GrayImage, ii: IntegralImage, seal: SealCandidate
       const score = 0.75 * (d.score + m.response);
       if (!best || score > best.score) {
         const missing = (m.a + Math.PI) % (2 * Math.PI);
-        best = { slots: toSlots([p, q, m], missing), score };
+        best = { slots: toSlots([p, q, m], [missing]), score };
       }
+    }
+  }
+  if (best) return best;
+  // Two moons only: the frame cuts off the rest, a close-up (the other
+  // diagonal) or a code partly outside the frame (one side). The seal's
+  // affine frame stands in for the missing moons (decode.ts fitFrame); the
+  // quiet-zone check and Reed-Solomon reject a chance pair.
+  if (diags.length > 0) {
+    const p = peaks[diags[0].i];
+    const q = peaks[diags[0].j];
+    return { slots: toSlots([p, q], [(p.a + Math.PI / 2) % (2 * Math.PI), (p.a + (3 * Math.PI) / 2) % (2 * Math.PI)]), score: 0.5 * diags[0].score };
+  }
+  for (let i = 0; i < peaks.length; i++) {
+    for (let j = i + 1; j < peaks.length; j++) {
+      const p = peaks[i];
+      const q = peaks[j];
+      if (Math.abs(angleDiff(p.a, q.a) - Math.PI / 2) > ANGLE_TOLERANCE || p.r < 0.6 * q.r || q.r < 0.6 * p.r) continue;
+      const score = 0.4 * (p.response + q.response);
+      if (!best || score > best.score) best = { slots: toSlots([p, q], [(p.a + Math.PI) % (2 * Math.PI), (q.a + Math.PI) % (2 * Math.PI)]), score };
     }
   }
   return best;

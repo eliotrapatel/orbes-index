@@ -196,7 +196,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const ipHashPepper = secret('IP_HASH_PEPPER', e.IP_HASH_PEPPER, DEV_IP_HASH_PEPPER);
 
   // Proxy trust.
-  const trustProxy = parseTrustProxy(e.TRUST_PROXY);
+  const trustProxy = parseTrustProxy(e.TRUST_PROXY, issues);
 
   // Geo.
   const geoMode = field('GEO_MODE', z.enum(['none', 'cloudflare', 'headers']), e.GEO_MODE) ?? 'none';
@@ -339,6 +339,16 @@ export function productionIssues(c: AppConfig): string[] {
   if (c.geo.mode === 'headers' && c.trustProxy === false) {
     issues.push('GEO_MODE: headers mode requires TRUST_PROXY in production');
   }
+  // Behind Cloudflare without proxy trust, every client shares the edge's IP (one rate-limit
+  // bucket for everybody), and a cf-* header reaching the app directly is client-forged.
+  if (c.geo.mode === 'cloudflare' && c.trustProxy === false) {
+    issues.push('GEO_MODE: cloudflare mode requires TRUST_PROXY in production');
+  }
+  // `true` makes the LEFT-most X-Forwarded-For entry the client IP. Proxies append, so that entry is
+  // whatever the client sent: rate limits (login, claim and transfer codes) and IP pseudonyms become forgeable.
+  if (c.trustProxy === true) {
+    issues.push('TRUST_PROXY: "true" trusts every X-Forwarded-For hop (client-forgeable); list the proxy addresses or ranges instead');
+  }
   return issues;
 }
 
@@ -417,12 +427,21 @@ function parseOrigin(s: string): string | { error: string } {
   return u.origin;
 }
 
-/** 'true'/'false' (and 1/0, yes/no) become booleans; anything else is handed to Fastify verbatim (IPs/CIDRs/'loopback'). */
-function parseTrustProxy(v: string | undefined): boolean | string {
+/**
+ * 'true'/'yes' and 'false'/'no'/'0' become booleans; anything else is handed to Fastify verbatim
+ * (IPs/CIDRs/'loopback'/'uniquelocal'). A positive number is refused: operators write it meaning
+ * "one proxy hop", but it used to mean "trust everything" here, and this Fastify version treats a
+ * number as "trust nothing" — neither is what was asked for.
+ */
+function parseTrustProxy(v: string | undefined, issues: string[]): boolean | string {
   if (v === undefined) return false;
   const l = v.toLowerCase();
-  if (l === 'true' || l === '1' || l === 'yes') return true;
-  if (l === 'false' || l === '0' || l === 'no') return false;
+  if (l === 'true' || l === 'yes') return true;
+  if (l === 'false' || l === 'no' || l === '0') return false;
+  if (/^\d+$/.test(l)) {
+    issues.push('TRUST_PROXY: hop counts are not supported; list the proxy addresses or ranges (e.g. loopback, uniquelocal, 10.0.0.0/8)');
+    return false;
+  }
   return v;
 }
 

@@ -3,11 +3,11 @@ import { CODE01_MOONS, CODE01_SIZE } from '../../src/core/code/profile.js';
 import { primitiveCovers, readGenome } from '../../src/core/decoder/genome-reader.js';
 import { applyH, homographyFromPoints, multiplyH, type Homography } from '../../src/core/decoder/homography.js';
 import type { GrayImage } from '../../src/core/decoder/image.js';
-import { alignmentScore, coordinateDescent, fieldShift, FIELD_PARAMS, fullObjective, refineControlPoints, refineOffsetField } from '../../src/core/decoder/refine.js';
+import { alignmentScore, coordinateDescent, fieldShift, FIELD_PARAMS, fullObjective, refineControlPoints, refineOffsetField, ringLatticeField } from '../../src/core/decoder/refine.js';
 import { CELL_COUNT, CELL_GEOMETRY, classifyCells, quietZoneScore, sampleCells } from '../../src/core/decoder/sampler.js';
 import { genomeGlyphPrimitives } from '../../src/core/genome/render.js';
 import type { Primitive } from '../../src/core/geometry.js';
-import type { CaptureParams } from '../support/camera-sim.js';
+import { PRESETS, type CaptureParams } from '../support/camera-sim.js';
 import { Prng } from '../support/prng.js';
 import { capture, captureTruth, makeCode, renderCode } from './fixtures.js';
 
@@ -131,6 +131,36 @@ describe('alignment refinement', () => {
     // The incremental objective agrees with a full evaluation of the final field.
     expect(field.score).toBeCloseTo(alignmentScore(sampleCells(img, h, false, field.shift), cls), 6);
     expect(bitErrors(withField.bits)).toBeLessThan(bitErrors(cls.bits));
+  });
+});
+
+describe('ring lattice registration', () => {
+  it('registers the orbits of a code on a finger ring, where the anchor fit is a ring pitch off', () => {
+    const params: CaptureParams = { ...PRESETS.metal, rotationDeg: 70 };
+    const img = capture(code, 7.2, params, 5);
+    const h = truthFrame(captureTruth(7.2, params));
+    const anchorFit = classifyCells(sampleCells(img, h, true));
+    const initial = ringLatticeField(img, h)!;
+    const registered = classifyCells(sampleCells(img, h, true, fieldShift(initial)));
+    const refined = refineOffsetField(img, h, 7.2, registered, initial);
+    const final = classifyCells(sampleCells(img, h, true, refined.shift));
+    // Through the seal and moons alone a sixth of the cells read wrong; the
+    // registration alone halves that, and descent from it reaches a readable frame
+    // (Reed-Solomon corrects 42 bytes, ≈ 60 scattered cells).
+    expect(bitErrors(anchorFit.bits)).toBeGreaterThan(150);
+    expect(bitErrors(registered.bits)).toBeLessThan(bitErrors(anchorFit.bits) / 2);
+    expect(bitErrors(final.bits)).toBeLessThan(60);
+  });
+
+  it('leaves a well-aligned flat capture alone and finds nothing without orbits', () => {
+    const params: CaptureParams = { rotationDeg: 25, tiltXDeg: 20 };
+    const img = capture(code, 5, params, 7);
+    const h = truthFrame(captureTruth(5, params));
+    const shift = fieldShift(ringLatticeField(img, h)!);
+    // Every node offset stays well inside the 0.28 u gap between rings.
+    for (let i = 0; i < shift.length; i += 2) expect(Math.hypot(shift[i], shift[i + 1])).toBeLessThan(0.15 * 5);
+    const blank: GrayImage = { width: 300, height: 300, data: new Uint8Array(300 * 300).fill(200) };
+    expect(ringLatticeField(blank, renderFrame(6))).toBeNull();
   });
 });
 

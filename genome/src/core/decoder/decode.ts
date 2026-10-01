@@ -34,10 +34,10 @@
  *     square is symmetric). Hypotheses are ranked by the distance of the two
  *     format copies to the nearest BCH(15,5) word (polaris hint breaks ties)
  *     and decoded with RS(164,79): errors only first, then with more and more
- *     erasures on the least confident bytes. With no trustworthy format read
- *     the four masks are brute-forced. CRC-16 and strict payload parsing
- *     (unframeCodeData) catch miscorrections; a failure moves on to the next
- *     hypothesis.
+ *     erasures on the least confident bytes. Unless the format read is
+ *     certain, the other masks are then brute-forced. CRC-16 and strict
+ *     payload parsing (unframeCodeData) catch miscorrections; a failure moves
+ *     on to the next hypothesis.
  *  7. Alignment repair, when step 6 fails, cheapest first, each stage
  *     followed by steps 5–6 again: the fits leaving one moon out (a damaged
  *     moon); then, for at most two located codes per frame (a frame too
@@ -311,9 +311,10 @@ const MIN_QUIET_SCORE = 0.7;
 /**
  * Homography from the seal centre and the moons (frame-0 code points ↔ image
  * points). With three moons the centre is collinear with the opposite pair,
- * which leaves one degree of freedom open, so the seal itself supplies four
- * more correspondences: points of its ring (r = 3.5 u) placed through the
- * seal's affine frame, rotated to agree with the moons (2-D Procrustes).
+ * which leaves one degree of freedom open (with two moons, more), so the
+ * seal itself supplies four more correspondences: points of its ring
+ * (r = 3.5 u) placed through the seal's affine frame, rotated to agree with
+ * the moons (2-D Procrustes).
  */
 function fitFrame(center: Point, sealAffine: Mat2, pairs: readonly [Point, Point][]): Homography | null {
   const code = [{ x: 0, y: 0 }, ...pairs.map(([c]) => c)];

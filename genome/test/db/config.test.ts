@@ -88,8 +88,10 @@ describe('loadConfig — development defaults', () => {
     expect(c.bootstrapAdmin).toEqual({ email: 'admin@theorbes.com', password: 'a-long-bootstrap-password' });
   });
 
-  it('parses TRUST_PROXY booleans', () => {
-    for (const v of ['true', 'TRUE', '1', 'yes']) expect(loadConfig({ TRUST_PROXY: v }).trustProxy).toBe(true);
+  it('parses TRUST_PROXY booleans and refuses hop counts', () => {
+    for (const v of ['true', 'TRUE', 'yes']) expect(loadConfig({ TRUST_PROXY: v }).trustProxy).toBe(true);
+    // '1' used to mean "trust every hop"; a number is ambiguous, so it is refused (security review SEC-1).
+    expect(() => loadConfig({ TRUST_PROXY: '1' })).toThrow(/TRUST_PROXY: hop counts are not supported/);
     for (const v of ['false', '0', 'no']) expect(loadConfig({ TRUST_PROXY: v }).trustProxy).toBe(false);
     expect(loadConfig({ TRUST_PROXY: 'loopback' }).trustProxy).toBe('loopback');
   });
@@ -207,7 +209,7 @@ describe('loadConfig — production hardening', () => {
     expect(issues({ ...PROD, GEO_MODE: 'headers', GEO_COUNTRY_HEADER: 'x-country' })).toEqual([
       'GEO_MODE: headers mode requires TRUST_PROXY in production',
     ]);
-    expect(loadConfig({ ...PROD, GEO_MODE: 'headers', GEO_COUNTRY_HEADER: 'x-country', TRUST_PROXY: 'true' }).geo.mode).toBe('headers');
+    expect(loadConfig({ ...PROD, GEO_MODE: 'headers', GEO_COUNTRY_HEADER: 'x-country', TRUST_PROXY: '10.0.0.0/8' }).geo.mode).toBe('headers');
   });
 });
 

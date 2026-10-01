@@ -15,12 +15,12 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyServerOptions } from 'fastify';
 import type { AppContext } from './context.js';
 import { ipHashOf } from './http/client.js';
-import { installErrorHandlers } from './http/errors.js';
+import { errorBody, installErrorHandlers } from './http/errors.js';
 import { registerRateLimits } from './http/rate-limit.js';
-import { registerSecurity } from './http/security.js';
+import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin/index.js';
@@ -59,6 +59,18 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     requestTimeout: 30_000,
     forceCloseConnections: 'idle',
     return503OnClosing: true,
+    // URLs the router rejects (over-long parameter, broken percent-escape) never reach a hook or the
+    // error handler: Fastify's default answer echoes the URL and its FST_ code, without our headers.
+    frameworkErrors: (_error, _request, rawReply) => {
+      const reply = rawReply as unknown as FastifyReply;
+      reply
+        .code(400)
+        .header('content-security-policy', CONTENT_SECURITY_POLICY)
+        .header('x-content-type-options', 'nosniff')
+        .header('cache-control', 'no-store')
+        .type('application/json; charset=utf-8')
+        .send(errorBody('BAD_REQUEST', 'The request URL is invalid.'));
+    },
   });
 
   // JSON is the only body format the API speaks. Dropping text/plain also means a

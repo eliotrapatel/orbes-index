@@ -38,15 +38,19 @@
  *
  *   npx tsx scripts/print-size-matrix.ts [--workers N] [--screen N] [--confirm N]
  *        [--only substrate,…] [--profiles id,…] [--no-write] [--out report.md]
+ *   npx tsx scripts/print-size-matrix.ts --from-json out/print-size-matrix.json   (report only)
  *
- * Writes docs/reports/print-size-matrix.md (full runs only, or --out).
+ * Writes docs/reports/print-size-matrix.md (full runs only, or --out) and the
+ * raw results to genome/out/print-size-matrix.json (git-ignored).
  */
 
 import { fork, type ChildProcess } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { availableParallelism, loadavg } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { toHex, utf8 } from '../src/core/bytes.js';
 import { CODE01, CODE01_SIZE } from '../src/core/code/profile.js';
 import { decodeOrbesCode } from '../src/core/decoder/index.js';
 import { cameraCrop } from '../src/web/verify/capture.js';
@@ -384,7 +388,19 @@ function workerLoop(): void {
 
 // ── Report ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_REPORT = resolve(dirname(fileURLToPath(import.meta.url)), '../../docs/reports/print-size-matrix.md');
+const GENOME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_REPORT = resolve(GENOME_ROOT, '../docs/reports/print-size-matrix.md');
+const DEFAULT_JSON = resolve(GENOME_ROOT, 'out/print-size-matrix.json');
+
+/** Short fingerprint of the decoder sources the run used (results change when they do). */
+function decoderFingerprint(): string {
+  const dir = resolve(GENOME_ROOT, 'src/core/decoder');
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts'))
+    .sort();
+  const text = files.map((f) => `${f}\n${readFileSync(join(dir, f), 'utf8')}`).join('\n');
+  return toHex(sha256(utf8(text))).slice(0, 12);
+}
 
 type Key = `${string}|${string}|${number}`;
 const keyOf = (rendition: string, profile: string, distanceCm: number): Key => `${rendition}|${profile}|${distanceCm}`;
@@ -457,6 +473,8 @@ interface RunInfo {
   workers: number;
   wallMs: number;
   loadAvg: number;
+  decoder: string;
+  date: string;
   path: string;
 }
 
@@ -480,7 +498,7 @@ function writeReport(results: RowResult[], opts: RunInfo): void {
   );
   L.push('');
   L.push(
-    `Run: ${results.length} rows (substrate × profile × distance) × ${SHEET_SIZES_MM.length} sizes = ${cells.length} cells; ${count((c) => c.status === 'overflow')} cells where the code does not fit the scanner crop (▲, physical, not simulated), ${count((c) => c.status === 'skipped')} cells not run below two 0 % sizes (·), ${count((c) => c.status === 'measured')} cells simulated with **${totalTrials} decoded frames**: ${cpuMinutes.toFixed(1)} CPU-minutes (${((1000 * cpuMinutes * 60) / Math.max(1, totalTrials)).toFixed(0)} ms per simulated and decoded frame), ${minutes} min wall time on ${opts.workers} worker processes (machine load average ${opts.loadAvg.toFixed(1)} at the end of the run; on ${opts.workers} otherwise idle cores the wall time is about ${(cpuMinutes / opts.workers).toFixed(1)} min).`,
+    `Run: ${results.length} rows (substrate × profile × distance) × ${SHEET_SIZES_MM.length} sizes = ${cells.length} cells; ${count((c) => c.status === 'overflow')} cells where the code does not fit the scanner crop (▲, physical, not simulated), ${count((c) => c.status === 'skipped')} cells not run below two 0 % sizes (·), ${count((c) => c.status === 'measured')} cells simulated with **${totalTrials} decoded frames**: ${cpuMinutes.toFixed(1)} CPU-minutes (${((1000 * cpuMinutes * 60) / Math.max(1, totalTrials)).toFixed(0)} ms per simulated and decoded frame), ${minutes} min wall time on ${opts.workers} worker processes (machine load average ${opts.loadAvg.toFixed(1)} at the end of the run; on ${opts.workers} otherwise idle cores the wall time is about ${(cpuMinutes / opts.workers).toFixed(1)} min). Decoder sources fingerprint \`${opts.decoder}\` (SHA-256 of \`src/core/decoder/*.ts\`), run of ${opts.date}.`,
   );
   L.push('');
 
@@ -721,6 +739,12 @@ async function main(): Promise<void> {
   const only = arg('--only')?.split(',');
   const profiles = arg('--profiles')?.split(',');
   const out = arg('--out');
+  const fromJson = arg('--from-json');
+  if (fromJson) {
+    const saved = JSON.parse(readFileSync(resolve(fromJson), 'utf8')) as { info: Omit<RunInfo, 'path'>; results: RowResult[] };
+    writeReport(saved.results, { ...saved.info, path: out ? resolve(out) : DEFAULT_REPORT });
+    return;
+  }
   const write = out !== undefined || (!args.includes('--no-write') && !only && !profiles);
   if (!(screen >= 2 && confirm >= screen && workers >= 1)) throw new Error('need --screen ≥ 2, --confirm ≥ --screen, --workers ≥ 1');
 
@@ -744,7 +768,13 @@ async function main(): Promise<void> {
   console.log(`\n${results.reduce((s, r) => s + r.trialsRun, 0)} trials in ${(wallMs / 60000).toFixed(1)} min`);
   const cpuMin = results.reduce((s, r) => s + r.cpuMs, 0) / 60000;
   console.log(`CPU time ${cpuMin.toFixed(1)} min; load average ${loadavg()[0].toFixed(1)}`);
-  if (write) writeReport(results, { screen, confirm, workers, wallMs, loadAvg: loadavg()[0], path: out ? resolve(out) : DEFAULT_REPORT });
+  const info = { screen, confirm, workers, wallMs, loadAvg: loadavg()[0], decoder: decoderFingerprint(), date: new Date().toISOString().slice(0, 10) };
+  if (!write) return;
+  const json = out ? resolve(out).replace(/\.md$/, '') + '.json' : DEFAULT_JSON;
+  mkdirSync(dirname(json), { recursive: true });
+  writeFileSync(json, JSON.stringify({ info, results }));
+  console.log(`Raw results: ${json}`);
+  writeReport(results, { ...info, path: out ? resolve(out) : DEFAULT_REPORT });
 }
 
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

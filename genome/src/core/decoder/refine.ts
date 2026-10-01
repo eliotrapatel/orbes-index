@@ -464,6 +464,8 @@ export function ringLatticeField(img: GrayImage, h: Homography): Float64Array | 
     }
   }
 
+  // No chain at all only with non-finite scores (a degenerate homography).
+  if (picks.length !== SECTORS) return null;
   const params = new Float64Array(FIELD_PARAMS);
   const radii = [CODE01_RINGS[0].radius, CODE01_RINGS[CODE01_RINGS.length - 1].radius];
   for (let s = 0; s < SECTORS; s++) {

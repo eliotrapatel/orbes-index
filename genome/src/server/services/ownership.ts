@@ -34,7 +34,7 @@ import { DomainError, forbidden, notFound, tooManyRequests, validationError } fr
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
-import { requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { findProduct, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { consumeScanToken, inspectScanToken, type ScanTokenFailure } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -167,6 +167,17 @@ const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
 const notOwner = () => new DomainError('NOT_OWNER', 403, 'Only the current owner can do this.');
 
+/**
+ * Lock a product for an owner-only customer action. An unknown id answers exactly like a product
+ * the caller does not own: product ids are sequential, so "not found" vs "not yours" would let any
+ * account enumerate the issued serials (production volumes per category and year).
+ */
+async function lockForOwnerAction(tx: Db, productId: string): Promise<ProductRow> {
+  const p = await findProduct(tx, productId, { forUpdate: true });
+  if (!p) throw notOwner();
+  return p;
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export class OwnershipService {
@@ -254,7 +265,7 @@ export class OwnershipService {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const p = await requireProduct(tx, productId, { forUpdate: true });
+      const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
       if (!current || current.account_id !== accountId) throw notOwner();
       await this.expireStale(tx, p, now);
@@ -370,9 +381,14 @@ export class OwnershipService {
     assertAccountId(accountId);
     await inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const p = await requireProduct(tx, productId, { forUpdate: true });
+      const p = await lockForOwnerAction(tx, productId);
       const pending = await this.pendingTransfer(tx, p.id);
-      if (!pending) throw notFound('Pending transfer', 'NO_PENDING_TRANSFER');
+      // Strangers learn nothing (not even whether a transfer is pending): ownership is checked first.
+      if (!pending) {
+        const current = await this.currentOwnership(tx, p.id);
+        if (!current || current.account_id !== accountId) throw notOwner();
+        throw notFound('Pending transfer', 'NO_PENDING_TRANSFER');
+      }
       if (pending.from_account_id !== accountId) throw notOwner();
       await tx.updateTable('ownership_transfers').set({ status: 'CANCELLED', completed_at: now }).where('id', '=', pending.id).execute();
       const current = await this.currentOwnership(tx, p.id);
@@ -428,7 +444,7 @@ export class OwnershipService {
     if (!INCIDENT_TYPES.includes(type)) throw validationError('Incident type must be LOST or STOLEN.');
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const p = await requireProduct(tx, productId, { forUpdate: true });
+      const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
       if (!current || current.account_id !== accountId) throw notOwner();
       const pending = await this.pendingTransfer(tx, p.id);

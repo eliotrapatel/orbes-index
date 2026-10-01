@@ -121,7 +121,8 @@ describe('ownership API', () => {
     expect(history.body).not.toContain('internal note'); // staff notes stay internal
 
     expect((await stranger.get(`/api/v1/products/${p.product.productId}/service-history`)).statusCode).toBe(403);
-    expect((await owner.get('/api/v1/products/O26-J-99999/service-history')).statusCode).toBe(404);
+    // Unknown ids answer like products of someone else (no enumeration of issued serials).
+    expect((await owner.get('/api/v1/products/O26-J-99999/service-history')).statusCode).toBe(403);
     expect((await owner.get('/api/v1/products/not-a-product/service-history')).statusCode).toBe(400);
 
     expect((await stranger.post('/api/v1/ownership/incidents', { productId: p.product.productId, type: 'STOLEN' })).statusCode).toBe(403);

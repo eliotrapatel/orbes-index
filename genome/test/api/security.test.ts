@@ -88,9 +88,10 @@ describe('CSRF protection', () => {
     const foreign = await client.post('/api/v1/ownership/transfers', transfer, { noCsrf: true, headers: { 'x-csrf-token': other.csrf! } });
     expect(foreign.statusCode).toBe(403);
 
-    // With the right token the request reaches the service (404: no such product).
+    // With the right token the request reaches the service (NOT_OWNER: unknown ids answer like others' products).
     const ok = await client.post('/api/v1/ownership/transfers', transfer);
-    expect(ok.statusCode).toBe(404);
+    expect(ok.statusCode).toBe(403);
+    expect(errorOf(ok).code).toBe('NOT_OWNER');
   });
 
   it('requires Origin == PUBLIC_ORIGIN, or no Origin with Sec-Fetch-Site: same-origin', async () => {
@@ -107,7 +108,7 @@ describe('CSRF protection', () => {
     const crossSite = await client.post('/api/v1/ownership/transfers', transfer, { origin: null, headers: { 'sec-fetch-site': 'cross-site' } });
     expect(crossSite.statusCode).toBe(403);
     const sameOrigin = await client.post('/api/v1/ownership/transfers', transfer, { origin: null, headers: { 'sec-fetch-site': 'same-origin' } });
-    expect(sameOrigin.statusCode).toBe(404); // passed the CSRF check
+    expect(errorOf(sameOrigin).code).toBe('NOT_OWNER'); // passed the CSRF check, refused by the service
   });
 
   it('protects admin mutations the same way, and reads need no token', async () => {

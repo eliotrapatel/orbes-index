@@ -22,6 +22,7 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   confirmOwnership: 'OPERATOR',
   triageAnomaly: 'OPERATOR',
   createCatalog: 'OPERATOR',
+  /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',
   revokeCode: 'ADMIN',

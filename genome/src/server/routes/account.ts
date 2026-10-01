@@ -16,7 +16,7 @@ import { rateLimitHook } from '../http/rate-limit.js';
 import { loginBody, parse, productParams, registerAccountBody } from '../http/schemas.js';
 import { clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
-import { requireProduct } from '../services/lifecycle.js';
+import { findProduct } from '../services/lifecycle.js';
 import type { RouteDeps } from './public.js';
 
 /** The public view of an account (contract: `{ email, displayName }`). */
@@ -67,9 +67,12 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/products/:productId/service-history', async (request) => {
     const { account } = requireAccount(request);
     const { productId } = parse(productParams, request.params);
-    const product = await requireProduct(ctx.db, productId);
+    // Unknown and not-owned products answer alike, so product ids cannot be enumerated here.
+    const notYours = () => forbidden('Only the current owner can see the service history of this product.');
+    const product = await findProduct(ctx.db, productId);
+    if (!product) throw notYours();
     const owner = await ownership.currentOwner(product.id);
-    if (!owner || owner.accountId !== account.id) throw forbidden('Only the current owner can see the service history of this product.');
+    if (!owner || owner.accountId !== account.id) throw notYours();
     const services = await warranty.services(product.id);
     // Owner view: what was done and when. Staff notes and technician names stay internal.
     return {

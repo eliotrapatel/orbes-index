@@ -285,6 +285,8 @@ describe('product view model (spec §22)', () => {
 
     const op = productActions(d, 'OPERATOR');
     expect(op.transitions).not.toContain('REVOKED');
+    expect(op.transitions).not.toContain('RETIRED'); // terminal, verifies as REVOKED: ADMIN only
+    expect(admin.transitions).toContain('RETIRED');
     expect(op.transitions).toContain('LOST');
     expect(op.revocableCodeId).toBeNull();
     expect(op.canDownload).toBe(true);

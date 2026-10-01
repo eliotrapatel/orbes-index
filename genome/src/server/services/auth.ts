@@ -143,6 +143,19 @@ export function deriveTotpEncryptionKey(config: Pick<AppConfig, 'keys' | 'cookie
 
 const invalidCredentials = () => new DomainError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
 
+/**
+ * The normalised password of a login attempt, or undefined when it cannot match any stored hash
+ * (not a string, empty, or over the scrypt input limit). Such attempts are refused BEFORE the
+ * account lookup and still pay one scrypt (burnTime): verifySecret refuses them instantly, so a
+ * lookup-then-verify would answer known emails ~50x faster than unknown ones (enumeration oracle).
+ */
+function loginPassword(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const pw = normalizePassword(raw);
+  const bytes = Buffer.byteLength(pw, 'utf8');
+  return bytes > 0 && bytes <= MAX_SECRET_BYTES ? pw : undefined;
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export class AuthService {
@@ -207,7 +220,7 @@ export class AuthService {
   /** Customer login. Issues a new session (rotating `meta.previousToken` out). */
   async login(input: { email: string; password: string }, meta: ClientMeta = {}): Promise<{ account: AccountProfile; session: IssuedSession }> {
     const email = normalizeEmail(input?.email);
-    const password = typeof input?.password === 'string' ? normalizePassword(input.password) : undefined;
+    const password = loginPassword(input?.password);
     const account = email && password ? await this.db.selectFrom('accounts').selectAll().where('email_normalized', '=', email.normalized).executeTakeFirst() : undefined;
     if (!account || password === undefined) {
       await this.burnTime(password);
@@ -283,7 +296,7 @@ export class AuthService {
     meta: ClientMeta = {},
   ): Promise<{ admin: AdminProfile; session: IssuedSession }> {
     const email = normalizeEmail(input?.email);
-    const password = typeof input?.password === 'string' ? normalizePassword(input.password) : undefined;
+    const password = loginPassword(input?.password);
     const admin = email && password ? await this.db.selectFrom('admin_users').selectAll().where('email_normalized', '=', email.normalized).executeTakeFirst() : undefined;
     if (!admin || password === undefined || admin.disabled_at !== null) {
       await this.burnTime(password);
@@ -291,9 +304,7 @@ export class AuthService {
     }
     const now = this.clock();
     // Locked: refuse before looking at the password, so guessing makes no progress.
-    if (admin.locked_until !== null && admin.locked_until.getTime() > now.getTime()) {
-      throw new DomainError('ACCOUNT_LOCKED', 429, 'Too many failed attempts. Please try again later.');
-    }
+    if (admin.locked_until !== null && admin.locked_until.getTime() > now.getTime()) throw accountLocked();
     if (!(await verifySecret(password, admin.password_hash))) {
       await this.recordAdminFailure(admin.id, 'password', meta);
       throw invalidCredentials();
@@ -314,6 +325,17 @@ export class AuthService {
 
     const rehash = needsRehash(admin.password_hash) ? await hashSecret(password) : undefined;
     return inTransaction(this.db, async (tx) => {
+      // Re-check under the row lock: parallel wrong guesses may have locked (or an admin disabled)
+      // the account while this attempt was hashing. Without this, a burst of guesses gets every
+      // in-flight attempt evaluated and a correct one still logs in past the lockout.
+      const fresh = await tx
+        .selectFrom('admin_users')
+        .select(['locked_until', 'disabled_at'])
+        .where('id', '=', admin.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!fresh || fresh.disabled_at !== null) throw invalidCredentials();
+      if (fresh.locked_until !== null && fresh.locked_until.getTime() > this.clock().getTime()) throw accountLocked();
       let q = tx
         .updateTable('admin_users')
         .set({
@@ -518,6 +540,7 @@ export class AuthService {
 // ── Mapping & validation ───────────────────────────────────────────────────
 
 const invalidTotp = () => new DomainError('INVALID_TOTP', 401, 'The authentication code is not valid.');
+const accountLocked = () => new DomainError('ACCOUNT_LOCKED', 429, 'Too many failed attempts. Please try again later.');
 
 function totpAad(adminId: string): string {
   return `${TOTP_KEY_INFO}|${adminId}`;

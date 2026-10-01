@@ -41,6 +41,9 @@ import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
 import { codeJson, genomeJson, issuedCodeJson, productJson } from './serialize.js';
 
+/** Transitions that end a product's public validity: ADMIN only (contract §3: revocation is ADMIN's). */
+export const ADMIN_ONLY_TARGETS: ReadonlySet<string> = new Set(['REVOKED', 'RETIRED']);
+
 /** Escape LIKE metacharacters so a search for "50%" matches literally. */
 export function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -189,7 +192,8 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { productId } = parse(productParams, request.params);
     const b = parse(transitionBody, request.body);
     const { admin } = requireAdmin(request);
-    if (b.to === 'REVOKED' && !hasRole(admin.role, 'ADMIN')) throw forbidden('Only an ADMIN can revoke a product.');
+    // RETIRED is revocation-class: terminal (no reinstatement) and verifies as REVOKED, so it needs ADMIN too.
+    if (ADMIN_ONLY_TARGETS.has(b.to) && !hasRole(admin.role, 'ADMIN')) throw forbidden('Only an ADMIN can revoke or retire a product.');
     const statusChange = await lifecycle.transition(productId, b.to, { reason: b.reason ?? null }, adminActor(request));
     return { statusChange, lifecycle: await lifecycle.snapshot(statusChange.id) };
   });
