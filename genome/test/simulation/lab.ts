@@ -506,7 +506,12 @@ export class Lab {
   /** Every anomaly of this world, through GET /api/admin/anomalies. */
   async anomalies(): Promise<AnomalyView[]> {
     const res = await this.adminCall('GET', '/api/admin/anomalies?page=1&pageSize=200');
-    return ((safeJson(res) as any).items as any[]).map((a) => ({
+    // The world clock is fixed, so several findings share a timestamp and the API order among them
+    // follows random row ids: sort by product and type so the report reads the same on every run.
+    const items = ((safeJson(res) as any).items as any[])
+      .slice()
+      .sort((x, y) => String(x.productId ?? '').localeCompare(String(y.productId ?? '')) || String(x.type).localeCompare(String(y.type)));
+    return items.map((a) => ({
       productId: a.productId,
       type: a.type,
       severity: a.severity,

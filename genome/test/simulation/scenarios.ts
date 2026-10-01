@@ -436,7 +436,7 @@ const corrupted: Scenario = {
   key: 'corrupted',
   title: 'Corrupted code',
   setup:
-    'A label is scuffed far beyond Reed-Solomon capacity (900 ink/abrasion spots over a 240° sector of data orbits 1–12) and photographed; a control label is scuffed lightly (150 spots over 40°). Then hand-made malformed submissions: bad CRC, wrong lengths, a partial byte, reserved / unknown version fields with a valid CRC (all answered MALFORMED_CODE), and requests outside the API schema (empty, oversized, non-base64url: refused with 400 and not recorded).',
+    'A label is scuffed far beyond Reed-Solomon capacity (900 ink/abrasion spots over a 240° sector of data orbits 1–12) and photographed; a control label is scuffed lightly (150 spots over 40°). Then hand-made malformed submissions: bad CRC, wrong lengths, a partial byte, reserved / unknown version fields with a valid CRC, an empty code, non-base64url characters and a 600-character code (all processed, recorded and answered MALFORMED_CODE, contract §2.4 step 1); and requests outside the API schema (a code over 1024 characters, a non-string code: refused with 400 and not recorded).',
   knownGaps: [],
   knownLimits: [],
   async run(lab) {
@@ -470,24 +470,36 @@ const corrupted: Scenario = {
     for (const [id, title, code, reason] of cases) {
       await lab.expectState(id, title, await lab.submit(phone, { code }), 'MALFORMED_CODE', { reason });
     }
-    // Requests outside the API schema (API.md: empty, > 200 characters, not base64url) are refused unread.
-    const n0 = await lab.scanEventCount();
-    const refused = [
+    // Any string up to 1 KiB reaches the service (schemas.ts verifyBody): an empty code, characters outside
+    // base64url or more than 200 characters are contract §2.4 step 1 failures, recorded as MALFORMED_CODE scans.
+    const m0 = await lab.scanEventCount();
+    const undecodable = [
       await lab.submit(phone, { code: '' }),
       await lab.submit(phone, { code: `${p.code.data.slice(0, 100)}!!!!!!` }),
       await lab.submit(phone, { code: 'A'.repeat(600) }),
-      await lab.submit(phone, { code: 'A'.repeat(2000) }),
     ];
+    const m1 = await lab.scanEventCount();
+    lab.expectTrue(
+      '6j',
+      'undecodable strings inside the request schema (empty, “!” characters, 600 characters)',
+      'MALFORMED_CODE ×3, each recorded as a scan',
+      `${tally(undecodable.map((r) => r.state ?? `HTTP ${r.status}`))}; ${m1 - m0} scan events`,
+      undecodable.every((r) => r.state === 'MALFORMED_CODE' && r.violations.length === 0) && m1 - m0 === 3,
+      'Since the verify route accepts any string up to 1024 characters (schemas.ts verifyBody), these are recorded MALFORMED_CODE scans, not 400s. docs/API.md (verify request rules) still documents 400 VALIDATION_FAILED for them.',
+    );
+    // Requests outside the API schema (a code over 1024 characters, a non-string code) are refused unread.
+    const n0 = await lab.scanEventCount();
+    const refused = [await lab.submit(phone, { code: 'A'.repeat(2000) }), await lab.submit(phone, { code: 42 })];
     const n1 = await lab.scanEventCount();
     const shapeOk = refused.every((r) => r.status === 400 && r.body.error?.code === 'VALIDATION_FAILED' && Object.keys(r.body).join() === 'error');
     lab.expectTrue(
-      '6j',
-      'outside the request schema (empty, “!” characters, 600 and 2000 characters)',
-      'HTTP 400 VALIDATION_FAILED ×4, not recorded',
+      '6k',
+      'outside the request schema (2000 characters, a number instead of a string)',
+      'HTTP 400 VALIDATION_FAILED ×2, not recorded',
       `${tally(refused.map((r) => `HTTP ${r.status} ${r.body.error?.code ?? ''}`.trim()))}; ${n1 - n0} scan events`,
       shapeOk && n1 === n0,
     );
-    await lab.expectAnomalies('6k', 'corrupted codes create no anomaly', null, []);
+    await lab.expectAnomalies('6l', 'corrupted codes create no anomaly', null, []);
     lab.redactionCheck('6z');
   },
 };

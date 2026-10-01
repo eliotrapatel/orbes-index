@@ -1,10 +1,46 @@
+# ORBES GENOME CODE: files that never belong in git.
+# Patterns without a leading slash match at any depth under genome/.
+
+# ── Dependencies and generated output ──────────────────────────────────────
 node_modules/
 dist/
-coverage/
-.data/
-.secrets/
-*.local
-.env
 out/
+coverage/
 test-results/
 playwright-report/
+.vitest/
+*.tsbuildinfo
+
+# ── Local state and secrets ────────────────────────────────────────────────
+# PGlite data directories, local key stores, env files, private keys.
+.data/
+.secrets/
+/keys/
+/.keys/
+*.key.json
+*.pem
+.env
+.env.*
+!.env.example
+*.local
+
+# ── Scratch, debug and profiling files ─────────────────────────────────────
+# Throwaway dev scripts, profiling harnesses, decoder experiments, captured
+# camera clips and profiler dumps.
+scripts/.dev-*
+test/support/.prof*
+src/core/decoder/zz-*
+.dev-*
+zz-*
+/*.y4m
+*.cpuprofile
+*.heapprofile
+*.heapsnapshot
+isolate-*.log
+npm-debug.log*
+*.log
+
+# ── Editors and operating systems ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp

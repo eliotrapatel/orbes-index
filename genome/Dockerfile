@@ -11,9 +11,11 @@
 # keys: configuration comes from the environment (see .env.example), signing
 # keys live encrypted in the /var/lib/orbes/keys volume (KEY_PROVIDER=local).
 #
-# Operator commands run in the same image, e.g.
-#   docker compose exec app node --import tsx scripts/keys.ts generate
-#   docker compose exec app node --import tsx scripts/db.ts migrate
+# Operator commands run in the same image (the npm scripts of package.json,
+# or the same CLIs through node directly), e.g.
+#   docker compose exec app npm run keys:generate      # = node --import tsx scripts/keys.ts generate
+#   docker compose exec app npm run db:migrate         # = node --import tsx scripts/db.ts migrate
+# Full runbook: docs/DEPLOYMENT.md.
 
 ARG NODE_IMAGE=node:22-slim
 
@@ -25,7 +27,10 @@ ENV NODE_ENV=production \
     npm_config_fund=false \
     npm_config_update_notifier=false
 COPY package.json package-lock.json ./
-# --omit=dev: the only dev dependency is playwright-core (browser E2E tests).
+# --omit=dev: the toolchain (typescript, vitest, @types/*), the test-only image
+# codecs (pngjs, jpeg-js) and playwright-core stay out of the image. tsx and
+# esbuild are runtime dependencies: the server starts with `node --import tsx`
+# and the `web` stage below bundles the web apps with esbuild.
 # --ignore-scripts: no third-party install script runs at build time; esbuild
 # (used by the web build and by tsx) finds its @esbuild/<platform> binary
 # without its optional postinstall step.

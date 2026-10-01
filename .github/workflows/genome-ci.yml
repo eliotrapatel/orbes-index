@@ -1,0 +1,141 @@
+# ORBES GENOME CODE: continuous integration.
+#
+# Runs on every push and pull request that touches the authentication system
+# (genome/), its specifications (docs/) or this workflow. The ORBES website
+# (index.html at the repository root) is static and is not built here.
+#
+#   test    npm ci → typecheck → the whole vitest suite, including the opt-in
+#           PostgreSQL suites (postgres:16 service container) and the Chromium
+#           E2E suites (Chromium installed by playwright-core, same version as
+#           package-lock.json) → web build → production dependency audit
+#           (report only, never blocks)
+#   image   docker build of genome/Dockerfile (no push), so the production
+#           image is proven to build on every change
+
+name: genome-ci
+
+on:
+  push:
+    paths:
+      - 'genome/**'
+      - 'docs/**'
+      - '.github/workflows/genome-ci.yml'
+  pull_request:
+    paths:
+      - 'genome/**'
+      - 'docs/**'
+      - '.github/workflows/genome-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genome-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: genome
+
+jobs:
+  test:
+    name: typecheck, tests, web build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Superuser of the service container: the opt-in PostgreSQL suites
+      # (test/**/postgres.test.ts, test/services/issuance.test.ts) create and
+      # drop their own throwaway databases, which needs CREATEDB.
+      ORBES_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
+      npm_config_fund: 'false'
+      npm_config_update_notifier: 'false'
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: genome/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The E2E suites (test/e2e/*, test/web/*.e2e.test.ts) drive a real Chromium.
+      # Most of them skip when the binary is missing, but test/web/admin.e2e.test.ts
+      # does not, so CI installs the Chromium build that matches the locked
+      # playwright-core version and points the suites at it with ORBES_CHROMIUM.
+      - name: Resolve playwright-core version
+        id: playwright
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: chromium-${{ runner.os }}-playwright-core-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium and its system libraries
+        run: |
+          npx playwright-core install --with-deps --no-shell chromium
+          echo "ORBES_CHROMIUM=$(node -p "require('playwright-core').chromium.executablePath()")" >> "$GITHUB_ENV"
+
+      # Optional suite: the PDF artifacts are rasterised by an independent
+      # renderer (poppler's pdftoppm); without it that suite is skipped.
+      - name: Install poppler-utils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils
+
+      - name: Test (vitest, PostgreSQL and Chromium suites included)
+        run: npx vitest run
+
+      - name: Build web apps
+        run: npm run build:web
+
+      - name: Audit production dependencies (report only)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genome-test-output
+          path: genome/out/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  image:
+    name: docker image builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Build genome/Dockerfile
+        run: docker build --pull --tag orbes-genome:ci .

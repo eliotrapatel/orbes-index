@@ -225,6 +225,28 @@ The verify page boots the worker at idle time after the landing page renders. It
 
   A slow regression on a busy CI could therefore pass. Watch `genome/out/e2e/camera-scan.json`.
 
+## Re-verification (2026-10-01, 10:55–11:01 UTC)
+
+An independent re-run on the same shared VM (1-minute load 4–12 on 4 CPUs, i.e. 1.7–3.0 per CPU at the end of each camera test), against the code as of commit `d3a5484`:
+
+| What | Re-run | Agrees with the report? |
+|---|---|---|
+| `npx vitest run test/e2e`, 3 consecutive runs | 12/12 tests passed each time, 70 s / 69 s / 79 s | Yes, no flakiness seen in 3 runs |
+| Recognition, reduced motion (4 scans per run) | medians 419 / 445 / 432 ms, range 383–679 ms; every scan read on the first frame sent | Yes (report: medians 468–529 ms) |
+| Recognition, designed motion | 628 / 705 / 668 ms | Better than the report's 1 124 and 1 331 ms runs: below 1 s in 3 of 3 runs |
+| Settling clip | 952 / 1 878 / 1 062 ms; 1–2 blurred frames rejected (NO_MOONS, FORMAT) before the read | Yes |
+| Blank tag | 34–41 frames in ≈ 7 s, every reply NO_MOONS, nothing sent to the server | Yes |
+| `bench.ts --quick` (200 verify requests, 40 issues, 10 frames) | API sequential p95 32.9 ms, p99 51.0 ms; issuance 56.3 products/s; verify first load 30.4 KB gzip, admin 46.9 KB | Yes, within run-to-run noise |
+| Decoder, `--quick` (6 code frames, 4 code-free, load ≈ 3 per CPU) | Chromium worker p50 70 ms (code), 290 ms (code-free) | Slower than the report's 46–53 / 155–185 ms; consistent with the heavier load and the tiny sample |
+| Decoder worker bundle | 58.0 KB raw, 24.3 KB gzip | Grew from 56.6 / 23.8 KB since the report (decoder edited since); verify first load unchanged |
+
+Two caveats from the re-run:
+
+- **The 1 s target was not asserted in any of the 3 re-runs.** The load per CPU at the end of the timing test was 1.68, 2.2 and 3.04, all above the 1.5 gate, so the test only recorded the numbers. On a busy shared machine the timing assertion is effectively dormant; use `ORBES_E2E_STRICT=1` on a quiet machine to enforce it.
+- **The settling test does not assert that blurred frames are rejected.** The fake camera loops the clip, so whether a blurred frame is sampled depends on start-up timing. The rejections above come from the recorded metrics; the test title was changed to say only what it asserts.
+
+PostgreSQL 16 remains unmeasured: this re-run had no database role either.
+
 ## Reproduce
 
 ```sh

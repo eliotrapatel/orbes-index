@@ -295,7 +295,10 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
       await browser?.close();
     });
 
-    it('rejects the blurred frames, then reads the code once it is steady: AUTHENTIC', async () => {
+    // The clip loops (6 blurred + 8 steady frames, 0.93 s), so whether the pump samples a blurred frame
+    // before a steady one depends on when the camera starts: rejected frames are recorded in the
+    // metrics (settling.failedReasons), not asserted. What is asserted is that the scan still ends AUTHENTIC.
+    it('reads the code from a clip that starts with the hand arriving (blurred frames): AUTHENTIC', async () => {
       const { page, problems, close } = await openVerify(browser, srv, 'reduce');
       try {
         const { title, timing } = await scan(page);
