@@ -1,0 +1,448 @@
+/**
+ * Runtime configuration, parsed from the environment once at startup.
+ *
+ * Fail fast: every problem is collected and reported together in one
+ * ConfigError, and the process should refuse to start. Messages name the
+ * variable and the rule, never the value (values may be secrets).
+ *
+ * Development and test get working defaults (in-memory PGlite, memory keys,
+ * well-known dev secrets). Production gets none of those and is hardened:
+ * see `productionIssues()`.
+ */
+import { z } from 'zod';
+import { isAbsolute } from 'node:path';
+import { fromBase64Url } from '../core/bytes.js';
+import { parseDatabaseUrl, redactDatabaseUrl } from './db/url.js';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export type OrbesEnv = 'development' | 'test' | 'production';
+
+/** Internal anomaly thresholds — NEVER exposed via the API. */
+export interface AnomalyConfig {
+  suspiciousThreshold: number;
+  impossibleTravelKmh: number;
+  minTravelKm: number;
+  velocityWindowMin: number;
+  velocityMaxScans: number;
+  velocityMinDevices: number;
+  deviceWindowDays: number;
+  deviceMax: number;
+  geoWindowDays: number;
+  geoMaxCountries: number;
+  decayDays: number;
+}
+
+export interface AppConfig {
+  env: OrbesEnv;
+  host: string;
+  port: number;
+  publicOrigin: string;                 // scheme://host[:port], no trailing slash
+  databaseUrl: string;                  // postgres://… | pglite:memory | pglite:/abs/path
+  cookieSecret: string;                 // ≥ 32 chars
+  ipHashPepper: string;                 // ≥ 32 chars, HMAC key for IP / device pseudonymisation
+  trustProxy: boolean | string;         // passed to Fastify
+  geo: { mode: 'none' | 'cloudflare' | 'headers'; countryHeader?: string; latHeader?: string; lonHeader?: string };
+  keys: { provider: 'local' | 'memory'; dir?: string; encryptionKey?: string /* base64url 32 bytes, AES-256-GCM */ };
+  bootstrapAdmin?: { email: string; password: string };
+  anomaly: AnomalyConfig;
+  rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number };
+  sessionTtlHours: { account: number; admin: number };
+}
+
+export class ConfigError extends Error {
+  override readonly name = 'ConfigError';
+  constructor(readonly issues: string[]) {
+    super(`Invalid configuration:\n  - ${issues.join('\n  - ')}`);
+  }
+}
+
+// ── Defaults ───────────────────────────────────────────────────────────────
+
+export const DEFAULT_ANOMALY_CONFIG: Readonly<AnomalyConfig> = Object.freeze({
+  suspiciousThreshold: 60,
+  impossibleTravelKmh: 900,
+  minTravelKm: 500,
+  velocityWindowMin: 60,
+  velocityMaxScans: 20,
+  velocityMinDevices: 5,
+  deviceWindowDays: 7,
+  deviceMax: 12,
+  geoWindowDays: 7,
+  geoMaxCountries: 3,
+  decayDays: 30,
+});
+
+/** env var → AnomalyConfig key, with the accepted range. */
+const ANOMALY_ENV: Record<string, { key: keyof AnomalyConfig; int: boolean; min: number; max: number }> = {
+  ANOMALY_SUSPICIOUS_THRESHOLD: { key: 'suspiciousThreshold', int: true, min: 1, max: 100 },
+  ANOMALY_IMPOSSIBLE_TRAVEL_KMH: { key: 'impossibleTravelKmh', int: false, min: 1, max: 100_000 },
+  ANOMALY_MIN_TRAVEL_KM: { key: 'minTravelKm', int: false, min: 0, max: 40_075 },
+  ANOMALY_VELOCITY_WINDOW_MIN: { key: 'velocityWindowMin', int: true, min: 1, max: 10_080 },
+  ANOMALY_VELOCITY_MAX_SCANS: { key: 'velocityMaxScans', int: true, min: 1, max: 1_000_000 },
+  ANOMALY_VELOCITY_MIN_DEVICES: { key: 'velocityMinDevices', int: true, min: 1, max: 1_000_000 },
+  ANOMALY_DEVICE_WINDOW_DAYS: { key: 'deviceWindowDays', int: true, min: 1, max: 3_650 },
+  ANOMALY_DEVICE_MAX: { key: 'deviceMax', int: true, min: 1, max: 1_000_000 },
+  ANOMALY_GEO_WINDOW_DAYS: { key: 'geoWindowDays', int: true, min: 1, max: 3_650 },
+  ANOMALY_GEO_MAX_COUNTRIES: { key: 'geoMaxCountries', int: true, min: 1, max: 250 },
+  ANOMALY_DECAY_DAYS: { key: 'decayDays', int: false, min: 0.001, max: 3_650 },
+};
+
+const RATE_LIMIT_ENV = {
+  RATE_LIMIT_VERIFY_PER_MINUTE: 'verifyPerMinute',
+  RATE_LIMIT_AUTH_PER_MINUTE: 'authPerMinute',
+  RATE_LIMIT_ADMIN_PER_MINUTE: 'adminPerMinute',
+} as const;
+
+const DEFAULT_RATE_LIMITS = { verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300 };
+// Tests issue many requests in a burst; rate-limit tests override these explicitly.
+const TEST_RATE_LIMITS = { verifyPerMinute: 10_000, authPerMinute: 10_000, adminPerMinute: 10_000 };
+
+const DEFAULT_SESSION_TTL_HOURS = { account: 720, admin: 8 };
+
+// Well-known non-production secrets. Production refuses them by value.
+const DEV_COOKIE_SECRET = 'orbes-dev-cookie-secret-not-for-production-use-0001';
+const DEV_IP_HASH_PEPPER = 'orbes-dev-ip-hash-pepper-not-for-production-use-0001';
+const KNOWN_DEV_SECRETS = new Set([DEV_COOKIE_SECRET, DEV_IP_HASH_PEPPER]);
+
+const MIN_SECRET_LENGTH = 32;
+// Cheap guard against placeholders like 'xxxxxxxx…' or 'changeme' repeated.
+const MIN_SECRET_DISTINCT_CHARS = 10;
+
+// ── Field schemas ──────────────────────────────────────────────────────────
+
+const zPort = z.coerce.number().int().min(1).max(65_535);
+const zHost = z.string().min(1).max(255).regex(/^[A-Za-z0-9.:_\-[\]]+$/, 'must be a hostname or IP address');
+const zHeaderName = z
+  .string()
+  .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/, 'must be a valid HTTP header name')
+  .transform((s) => s.toLowerCase());
+const zEmail = z
+  .string()
+  .max(254)
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'must be an email address');
+
+// ── loadConfig ─────────────────────────────────────────────────────────────
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const issues: string[] = [];
+  const e = normaliseEnv(env);
+
+  const field = <T>(name: string, schema: z.ZodType<T>, value: string | undefined): T | undefined => {
+    if (value === undefined) return undefined;
+    const r = schema.safeParse(value);
+    if (r.success) return r.data;
+    issues.push(`${name}: ${r.error.issues.map((i) => i.message).join('; ')}`);
+    return undefined;
+  };
+
+  // Environment. NODE_ENV=production without ORBES_ENV fails safe into production rules.
+  let orbesEnv: OrbesEnv = 'development';
+  if (e.ORBES_ENV !== undefined) {
+    const r = z.enum(['development', 'test', 'production']).safeParse(e.ORBES_ENV);
+    if (r.success) orbesEnv = r.data;
+    else issues.push('ORBES_ENV: must be one of development, test, production');
+  } else if (e.NODE_ENV === 'production') {
+    orbesEnv = 'production';
+  }
+  const prod = orbesEnv === 'production';
+
+  const host = field('HOST', zHost, e.HOST) ?? (prod ? '0.0.0.0' : '127.0.0.1');
+  const port = field('PORT', zPort, e.PORT) ?? 8080;
+
+  // Public origin.
+  let publicOrigin: string | undefined;
+  if (e.PUBLIC_ORIGIN !== undefined) {
+    const r = parseOrigin(e.PUBLIC_ORIGIN);
+    if (typeof r === 'string') publicOrigin = r;
+    else issues.push(`PUBLIC_ORIGIN: ${r.error}`);
+  } else if (prod) {
+    issues.push('PUBLIC_ORIGIN: required in production');
+  } else {
+    publicOrigin = `http://localhost:${port}`;
+  }
+
+  // Database.
+  let databaseUrl: string | undefined;
+  if (e.DATABASE_URL !== undefined) {
+    try {
+      parseDatabaseUrl(e.DATABASE_URL);
+      databaseUrl = e.DATABASE_URL;
+    } catch (err) {
+      issues.push(`DATABASE_URL: ${(err as Error).message}`);
+    }
+  } else if (prod) {
+    issues.push('DATABASE_URL: required in production');
+  } else {
+    databaseUrl = 'pglite:memory';
+  }
+
+  // Secrets.
+  const secret = (name: string, value: string | undefined, devDefault: string): string | undefined => {
+    if (value === undefined) {
+      if (prod) {
+        issues.push(`${name}: required in production`);
+        return undefined;
+      }
+      return devDefault;
+    }
+    if (value.length < MIN_SECRET_LENGTH) {
+      issues.push(`${name}: must be at least ${MIN_SECRET_LENGTH} characters`);
+      return undefined;
+    }
+    return value;
+  };
+  const cookieSecret = secret('COOKIE_SECRET', e.COOKIE_SECRET, DEV_COOKIE_SECRET);
+  const ipHashPepper = secret('IP_HASH_PEPPER', e.IP_HASH_PEPPER, DEV_IP_HASH_PEPPER);
+
+  // Proxy trust.
+  const trustProxy = parseTrustProxy(e.TRUST_PROXY);
+
+  // Geo.
+  const geoMode = field('GEO_MODE', z.enum(['none', 'cloudflare', 'headers']), e.GEO_MODE) ?? 'none';
+  const geo: AppConfig['geo'] = { mode: geoMode };
+  const countryHeader = field('GEO_COUNTRY_HEADER', zHeaderName, e.GEO_COUNTRY_HEADER);
+  const latHeader = field('GEO_LAT_HEADER', zHeaderName, e.GEO_LAT_HEADER);
+  const lonHeader = field('GEO_LON_HEADER', zHeaderName, e.GEO_LON_HEADER);
+  if (geoMode === 'headers') {
+    if (countryHeader === undefined && e.GEO_COUNTRY_HEADER === undefined) {
+      issues.push('GEO_COUNTRY_HEADER: required when GEO_MODE=headers');
+    }
+    if ((latHeader === undefined) !== (lonHeader === undefined)) {
+      issues.push('GEO_LAT_HEADER / GEO_LON_HEADER: set both or neither');
+    }
+    if (countryHeader) geo.countryHeader = countryHeader;
+    if (latHeader) geo.latHeader = latHeader;
+    if (lonHeader) geo.lonHeader = lonHeader;
+  }
+
+  // Keys.
+  const keyProvider = field('KEY_PROVIDER', z.enum(['local', 'memory']), e.KEY_PROVIDER) ?? (prod ? 'local' : 'memory');
+  const keys: AppConfig['keys'] = { provider: keyProvider };
+  if (keyProvider === 'local') {
+    if (e.KEY_DIR === undefined) issues.push('KEY_DIR: required when KEY_PROVIDER=local');
+    else if (!isAbsolute(e.KEY_DIR)) issues.push('KEY_DIR: must be an absolute path');
+    else keys.dir = e.KEY_DIR;
+
+    if (e.KEY_ENCRYPTION_KEY === undefined) {
+      issues.push('KEY_ENCRYPTION_KEY: required when KEY_PROVIDER=local');
+    } else {
+      const k = decodeKey32(e.KEY_ENCRYPTION_KEY);
+      if (k === undefined) issues.push('KEY_ENCRYPTION_KEY: must be base64url (no padding) encoding exactly 32 bytes');
+      else if (prod && isDegenerateKey(k)) issues.push('KEY_ENCRYPTION_KEY: refused (all bytes identical)');
+      else keys.encryptionKey = e.KEY_ENCRYPTION_KEY;
+    }
+  }
+
+  // Bootstrap admin (first run only).
+  let bootstrapAdmin: AppConfig['bootstrapAdmin'];
+  const bEmail = e.BOOTSTRAP_ADMIN_EMAIL;
+  const bPassword = e.BOOTSTRAP_ADMIN_PASSWORD;
+  if ((bEmail === undefined) !== (bPassword === undefined)) {
+    issues.push('BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD: set both or neither');
+  } else if (bEmail !== undefined && bPassword !== undefined) {
+    const email = field('BOOTSTRAP_ADMIN_EMAIL', zEmail, bEmail);
+    // Same minimum as AuthService (contract §2.9); upper bound caps scrypt input size.
+    let passwordOk = true;
+    if (bPassword.length < 12 || bPassword.length > 1024) {
+      issues.push('BOOTSTRAP_ADMIN_PASSWORD: must be 12..1024 characters');
+      passwordOk = false;
+    }
+    if (email !== undefined && passwordOk) bootstrapAdmin = { email, password: bPassword };
+  }
+
+  // Anomaly overrides. Unknown ANOMALY_* names are errors: a typo would silently keep a default.
+  const anomaly: AnomalyConfig = { ...DEFAULT_ANOMALY_CONFIG };
+  for (const name of Object.keys(e)) {
+    if (!name.startsWith('ANOMALY_')) continue;
+    const spec = ANOMALY_ENV[name];
+    if (!spec) {
+      issues.push(`${name}: unknown anomaly setting`);
+      continue;
+    }
+    const base = spec.int ? z.coerce.number().int() : z.coerce.number();
+    const v = field(name, base.min(spec.min).max(spec.max), e[name]);
+    if (v !== undefined) anomaly[spec.key] = v;
+  }
+
+  // Rate limits.
+  const rateLimits = { ...(orbesEnv === 'test' ? TEST_RATE_LIMITS : DEFAULT_RATE_LIMITS) };
+  for (const name of Object.keys(e)) {
+    if (!name.startsWith('RATE_LIMIT_')) continue;
+    if (!(name in RATE_LIMIT_ENV)) {
+      issues.push(`${name}: unknown rate limit setting`);
+      continue;
+    }
+    const key = RATE_LIMIT_ENV[name as keyof typeof RATE_LIMIT_ENV];
+    const v = field(name, z.coerce.number().int().min(1).max(1_000_000), e[name]);
+    if (v !== undefined) rateLimits[key] = v;
+  }
+
+  const sessionTtlHours = {
+    account:
+      field('SESSION_TTL_ACCOUNT_HOURS', z.coerce.number().int().min(1).max(8_760), e.SESSION_TTL_ACCOUNT_HOURS) ??
+      DEFAULT_SESSION_TTL_HOURS.account,
+    admin:
+      field('SESSION_TTL_ADMIN_HOURS', z.coerce.number().int().min(1).max(168), e.SESSION_TTL_ADMIN_HOURS) ??
+      DEFAULT_SESSION_TTL_HOURS.admin,
+  };
+
+  if (issues.length > 0) throw new ConfigError(issues);
+
+  const config: AppConfig = {
+    env: orbesEnv,
+    host,
+    port,
+    publicOrigin: publicOrigin!,
+    databaseUrl: databaseUrl!,
+    cookieSecret: cookieSecret!,
+    ipHashPepper: ipHashPepper!,
+    trustProxy,
+    geo,
+    keys,
+    ...(bootstrapAdmin ? { bootstrapAdmin } : {}),
+    anomaly,
+    rateLimits,
+    sessionTtlHours,
+  };
+
+  if (prod) {
+    const prodIssues = productionIssues(config);
+    if (prodIssues.length > 0) throw new ConfigError(prodIssues);
+  }
+  return deepFreeze(config);
+}
+
+/**
+ * Production hardening (contract §0) plus two defence-in-depth rules:
+ * distinct cookie/pepper secrets, and header-based geo only behind a trusted proxy
+ * (otherwise any client could forge its location).
+ */
+export function productionIssues(c: AppConfig): string[] {
+  const issues: string[] = [];
+  try {
+    if (parseDatabaseUrl(c.databaseUrl).kind === 'pglite') issues.push('DATABASE_URL: pglite is refused in production');
+  } catch {
+    issues.push('DATABASE_URL: invalid');
+  }
+  if (c.keys.provider === 'memory') issues.push('KEY_PROVIDER: memory is refused in production');
+  for (const [name, value] of [
+    ['COOKIE_SECRET', c.cookieSecret],
+    ['IP_HASH_PEPPER', c.ipHashPepper],
+  ] as const) {
+    if (KNOWN_DEV_SECRETS.has(value)) issues.push(`${name}: the development default is refused in production`);
+    else if (value.length < MIN_SECRET_LENGTH) issues.push(`${name}: must be at least ${MIN_SECRET_LENGTH} characters`);
+    else if (new Set(value).size < MIN_SECRET_DISTINCT_CHARS) issues.push(`${name}: too little variety, use a random value`);
+  }
+  if (c.cookieSecret === c.ipHashPepper) issues.push('COOKIE_SECRET / IP_HASH_PEPPER: must be different secrets');
+  if (!c.publicOrigin.startsWith('https://')) issues.push('PUBLIC_ORIGIN: must be https:// in production');
+  if (c.geo.mode === 'headers' && c.trustProxy === false) {
+    issues.push('GEO_MODE: headers mode requires TRUST_PROXY in production');
+  }
+  return issues;
+}
+
+// ── Test helper ────────────────────────────────────────────────────────────
+
+export type ConfigOverrides = Partial<Omit<AppConfig, 'geo' | 'keys' | 'anomaly' | 'rateLimits' | 'sessionTtlHours'>> & {
+  geo?: Partial<AppConfig['geo']>;
+  keys?: Partial<AppConfig['keys']>;
+  anomaly?: Partial<AnomalyConfig>;
+  rateLimits?: Partial<AppConfig['rateLimits']>;
+  sessionTtlHours?: Partial<AppConfig['sessionTtlHours']>;
+};
+
+/**
+ * A valid `test` config (in-memory PGlite, memory keys) with overrides merged
+ * one level deep. Overrides are not re-validated, so tests can probe edge values.
+ */
+export function testConfig(overrides: ConfigOverrides = {}): AppConfig {
+  const base = loadConfig({ ORBES_ENV: 'test' });
+  const merged: AppConfig = {
+    ...base,
+    ...overrides,
+    geo: { ...base.geo, ...overrides.geo },
+    keys: { ...base.keys, ...overrides.keys },
+    anomaly: { ...base.anomaly, ...overrides.anomaly },
+    rateLimits: { ...base.rateLimits, ...overrides.rateLimits },
+    sessionTtlHours: { ...base.sessionTtlHours, ...overrides.sessionTtlHours },
+  };
+  return deepFreeze(merged);
+}
+
+// ── Logging ────────────────────────────────────────────────────────────────
+
+/** A summary safe to log at startup: no secrets, no anomaly thresholds. */
+export function redactConfig(c: AppConfig): Record<string, unknown> {
+  return {
+    env: c.env,
+    host: c.host,
+    port: c.port,
+    publicOrigin: c.publicOrigin,
+    database: redactDatabaseUrl(c.databaseUrl),
+    trustProxy: c.trustProxy,
+    geo: c.geo,
+    keys: { provider: c.keys.provider, dir: c.keys.dir, encryptionKey: c.keys.encryptionKey ? '[set]' : undefined },
+    bootstrapAdmin: c.bootstrapAdmin ? '[set]' : undefined,
+    rateLimits: c.rateLimits,
+    sessionTtlHours: c.sessionTtlHours,
+  };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Trim values and drop empty ones, so `FOO=` behaves like an unset variable. */
+function normaliseEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v !== 'string') continue;
+    const t = v.trim();
+    if (t !== '') out[k] = t;
+  }
+  return out;
+}
+
+function parseOrigin(s: string): string | { error: string } {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return { error: 'must be an absolute URL origin such as https://verify.theorbes.com' };
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return { error: 'must use http or https' };
+  if (u.username || u.password) return { error: 'must not contain credentials' };
+  if ((u.pathname !== '/' && u.pathname !== '') || u.search || u.hash || s.endsWith('/')) {
+    return { error: 'must be an origin only (no path, query, fragment or trailing slash)' };
+  }
+  return u.origin;
+}
+
+/** 'true'/'false' (and 1/0, yes/no) become booleans; anything else is handed to Fastify verbatim (IPs/CIDRs/'loopback'). */
+function parseTrustProxy(v: string | undefined): boolean | string {
+  if (v === undefined) return false;
+  const l = v.toLowerCase();
+  if (l === 'true' || l === '1' || l === 'yes') return true;
+  if (l === 'false' || l === '0' || l === 'no') return false;
+  return v;
+}
+
+function decodeKey32(s: string): Uint8Array | undefined {
+  try {
+    const b = fromBase64Url(s);
+    return b.length === 32 ? b : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDegenerateKey(k: Uint8Array): boolean {
+  return k.every((b) => b === k[0]);
+}
+
+function deepFreeze<T>(o: T): T {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
+  }
+  return o;
+}

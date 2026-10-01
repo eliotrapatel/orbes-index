@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 820" width="600" height="820" font-family="'Helvetica Neue', HelveticaNeue, Helvetica, Arial, sans-serif">
+<title>ORBES GENOME-01 vocabulary</title>
+<rect width="600" height="820" fill="#f7f5f0"/>
+<path d="M20 38V20H38" fill="none" stroke="#111111" stroke-width="0.75"/>
+<path d="M580 38V20H562" fill="none" stroke="#111111" stroke-width="0.75"/>
+<path d="M20 782V800H38" fill="none" stroke="#111111" stroke-width="0.75"/>
+<path d="M580 782V800H562" fill="none" stroke="#111111" stroke-width="0.75"/>
+<text x="48" y="76" font-size="22" letter-spacing="9.24" font-weight="300" fill="#111111">ORBES</text>
+<text x="552" y="70" font-size="9" letter-spacing="2.70" text-anchor="end" fill="#111111">GENOME-01</text>
+<text x="552" y="84" font-size="7" letter-spacing="2.10" text-anchor="end" fill="#8a8780">GLYPH VOCABULARY</text>
+<path d="M48 104H552" stroke="#111111" stroke-width="0.5"/>
+<text x="48" y="124" font-size="6.5" letter-spacing="1.95" fill="#8a8780">16 GLYPHS · 4 BITS EACH · 8 GLYPHS PER GENOME = 32 BITS</text>
+<g fill="#111111"><path fill-rule="evenodd" d="M111 168A26 26 0 0 1 137 194A26 26 0 0 1 111 220A26 26 0 0 1 85 194A26 26 0 0 1 111 168ZM111 174.76A19.24 19.24 0 0 0 91.76 194A19.24 19.24 0 0 0 111 213.24A19.24 19.24 0 0 0 130.24 194A19.24 19.24 0 0 0 111 174.76Z"/></g>
+<text x="111" y="246" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">FULL ORBIT</text>
+<text x="111" y="258" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">0 · 0000</text>
+<g fill="#111111"><path d="M237 168A26 26 0 0 1 263 194A26 26 0 0 1 237 220A26 26 0 0 1 211 194A26 26 0 0 1 237 168Z"/></g>
+<text x="237" y="246" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">ORB</text>
+<text x="237" y="258" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">1 · 0001</text>
+<g fill="#111111"><path fill-rule="evenodd" d="M363 168A26 26 0 0 1 389 194A26 26 0 0 1 363 220A26 26 0 0 1 337 194A26 26 0 0 1 363 168ZM363 174.76A19.24 19.24 0 0 0 343.76 194A19.24 19.24 0 0 0 363 213.24A19.24 19.24 0 0 0 382.24 194A19.24 19.24 0 0 0 363 174.76Z"/><path d="M363 184.64A9.36 9.36 0 0 1 372.36 194A9.36 9.36 0 0 1 363 203.36A9.36 9.36 0 0 1 353.64 194A9.36 9.36 0 0 1 363 184.64Z"/></g>
+<text x="363" y="246" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">RING POINT</text>
+<text x="363" y="258" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">2 · 0010</text>
+<g fill="#111111"><path d="M489 184.64A9.36 9.36 0 0 1 498.36 194A9.36 9.36 0 0 1 489 203.36A9.36 9.36 0 0 1 479.64 194A9.36 9.36 0 0 1 489 184.64Z"/></g>
+<text x="489" y="246" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">POINT</text>
+<text x="489" y="258" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">3 · 0011</text>
+<g fill="#111111"><path fill-rule="evenodd" d="M111 300A26 26 0 0 1 137 326A26 26 0 0 1 111 352A26 26 0 0 1 85 326A26 26 0 0 1 111 300ZM111 306.76A19.24 19.24 0 0 0 91.76 326A19.24 19.24 0 0 0 111 345.24A19.24 19.24 0 0 0 130.24 326A19.24 19.24 0 0 0 111 306.76Z"/><path d="M88.38 326A22.62 22.62 0 0 1 111 303.38A22.62 22.62 0 0 1 133.62 326Z"/></g>
+<text x="111" y="378" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">HALF ORBIT N</text>
+<text x="111" y="390" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">4 · 0100</text>
+<path d="M48 274H552" stroke="#111111" stroke-opacity="0.18" stroke-width="0.5"/>
+<g fill="#111111"><path fill-rule="evenodd" d="M237 300A26 26 0 0 1 263 326A26 26 0 0 1 237 352A26 26 0 0 1 211 326A26 26 0 0 1 237 300ZM237 306.76A19.24 19.24 0 0 0 217.76 326A19.24 19.24 0 0 0 237 345.24A19.24 19.24 0 0 0 256.24 326A19.24 19.24 0 0 0 237 306.76Z"/><path d="M237 303.38A22.62 22.62 0 0 1 259.62 326A22.62 22.62 0 0 1 237 348.62Z"/></g>
+<text x="237" y="378" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">HALF ORBIT E</text>
+<text x="237" y="390" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">5 · 0101</text>
+<g fill="#111111"><path fill-rule="evenodd" d="M363 300A26 26 0 0 1 389 326A26 26 0 0 1 363 352A26 26 0 0 1 337 326A26 26 0 0 1 363 300ZM363 306.76A19.24 19.24 0 0 0 343.76 326A19.24 19.24 0 0 0 363 345.24A19.24 19.24 0 0 0 382.24 326A19.24 19.24 0 0 0 363 306.76Z"/><path d="M385.62 326A22.62 22.62 0 0 1 363 348.62A22.62 22.62 0 0 1 340.38 326Z"/></g>
+<text x="363" y="378" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">HALF ORBIT S</text>
+<text x="363" y="390" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">6 · 0110</text>
+<g fill="#111111"><path fill-rule="evenodd" d="M489 300A26 26 0 0 1 515 326A26 26 0 0 1 489 352A26 26 0 0 1 463 326A26 26 0 0 1 489 300ZM489 306.76A19.24 19.24 0 0 0 469.76 326A19.24 19.24 0 0 0 489 345.24A19.24 19.24 0 0 0 508.24 326A19.24 19.24 0 0 0 489 306.76Z"/><path d="M489 348.62A22.62 22.62 0 0 1 466.38 326A22.62 22.62 0 0 1 489 303.38Z"/></g>
+<text x="489" y="378" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">HALF ORBIT W</text>
+<text x="489" y="390" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">7 · 0111</text>
+<g fill="#111111"><path d="M86.281 466.06A26 26 0 0 1 95.71 436.971A26 26 0 0 1 126.29 436.971A26 26 0 0 1 135.719 466.06A26 26 0 0 0 111 448.12A26 26 0 0 0 86.281 466.06Z"/></g>
+<text x="111" y="510" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">ECLIPSE N</text>
+<text x="111" y="522" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">8 · 1000</text>
+<path d="M48 406H552" stroke="#111111" stroke-opacity="0.18" stroke-width="0.5"/>
+<g fill="#111111"><path d="M228.94 433.281A26 26 0 0 1 258.029 442.71A26 26 0 0 1 258.029 473.29A26 26 0 0 1 228.94 482.719A26 26 0 0 0 246.88 458A26 26 0 0 0 228.94 433.281Z"/></g>
+<text x="237" y="510" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">ECLIPSE E</text>
+<text x="237" y="522" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">9 · 1001</text>
+<g fill="#111111"><path d="M387.719 449.94A26 26 0 0 1 378.29 479.029A26 26 0 0 1 347.71 479.029A26 26 0 0 1 338.281 449.94A26 26 0 0 0 363 467.88A26 26 0 0 0 387.719 449.94Z"/></g>
+<text x="363" y="510" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">ECLIPSE S</text>
+<text x="363" y="522" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">A · 1010</text>
+<g fill="#111111"><path d="M497.06 482.719A26 26 0 0 1 467.971 473.29A26 26 0 0 1 467.971 442.71A26 26 0 0 1 497.06 433.281A26 26 0 0 0 479.12 458A26 26 0 0 0 497.06 482.719Z"/></g>
+<text x="489" y="510" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">ECLIPSE W</text>
+<text x="489" y="522" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">B · 1011</text>
+<g fill="#111111"><path d="M131.926 574.569A26 26 0 0 1 128.443 609.281A26 26 0 0 1 93.557 609.281A26 26 0 0 1 90.074 574.569A3.38 3.38 0 0 1 94.801 573.855A3.38 3.38 0 0 1 95.515 578.581A19.24 19.24 0 0 0 98.092 604.268A19.24 19.24 0 0 0 123.908 604.268A19.24 19.24 0 0 0 126.485 578.581A3.38 3.38 0 0 1 127.199 573.855A3.38 3.38 0 0 1 131.926 574.569Z"/></g>
+<text x="111" y="642" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">OPEN ORBIT N</text>
+<text x="111" y="654" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">C · 1100</text>
+<path d="M48 538H552" stroke="#111111" stroke-opacity="0.18" stroke-width="0.5"/>
+<g fill="#111111"><path d="M252.431 610.926A26 26 0 0 1 217.719 607.443A26 26 0 0 1 217.719 572.557A26 26 0 0 1 252.431 569.074A3.38 3.38 0 0 1 253.145 573.801A3.38 3.38 0 0 1 248.419 574.515A19.24 19.24 0 0 0 222.732 577.092A19.24 19.24 0 0 0 222.732 602.908A19.24 19.24 0 0 0 248.419 605.485A3.38 3.38 0 0 1 253.145 606.199A3.38 3.38 0 0 1 252.431 610.926Z"/></g>
+<text x="237" y="642" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">OPEN ORBIT E</text>
+<text x="237" y="654" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">D · 1101</text>
+<g fill="#111111"><path d="M342.074 605.431A26 26 0 0 1 345.557 570.719A26 26 0 0 1 380.443 570.719A26 26 0 0 1 383.926 605.431A3.38 3.38 0 0 1 379.199 606.145A3.38 3.38 0 0 1 378.485 601.419A19.24 19.24 0 0 0 375.908 575.732A19.24 19.24 0 0 0 350.092 575.732A19.24 19.24 0 0 0 347.515 601.419A3.38 3.38 0 0 1 346.801 606.145A3.38 3.38 0 0 1 342.074 605.431Z"/></g>
+<text x="363" y="642" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">OPEN ORBIT S</text>
+<text x="363" y="654" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">E · 1110</text>
+<g fill="#111111"><path d="M473.569 569.074A26 26 0 0 1 508.281 572.557A26 26 0 0 1 508.281 607.443A26 26 0 0 1 473.569 610.926A3.38 3.38 0 0 1 472.855 606.199A3.38 3.38 0 0 1 477.581 605.485A19.24 19.24 0 0 0 503.268 602.908A19.24 19.24 0 0 0 503.268 577.092A19.24 19.24 0 0 0 477.581 574.515A3.38 3.38 0 0 1 472.855 573.801A3.38 3.38 0 0 1 473.569 569.074Z"/></g>
+<text x="489" y="642" font-size="6.5" letter-spacing="1.82" text-anchor="middle" fill="#111111">OPEN ORBIT W</text>
+<text x="489" y="654" font-size="6" letter-spacing="1.68" text-anchor="middle" fill="#8a8780">F · 1111</text>
+<path d="M48 684H552" stroke="#111111" stroke-width="0.5"/>
+<text x="48" y="702" font-size="6.5" letter-spacing="1.95" fill="#8a8780">EXAMPLE GENOME</text>
+<text x="552" y="702" font-size="6.5" letter-spacing="1.95" text-anchor="end" fill="#8a8780">PACKED IDENTITY 0x341000B8 · G1-E1DC-BE52</text>
+<g fill="#111111"><path d="M160.247 744.529A11 11 0 0 1 161.72 729.843A11 11 0 0 1 176.48 729.843A11 11 0 0 1 177.953 744.529A1.43 1.43 0 0 1 175.953 744.831A1.43 1.43 0 0 1 175.651 742.831A8.14 8.14 0 0 0 174.561 731.964A8.14 8.14 0 0 0 163.639 731.964A8.14 8.14 0 0 0 162.549 742.831A1.43 1.43 0 0 1 162.247 744.831A1.43 1.43 0 0 1 160.247 744.529Z"/><path d="M206.5 727A11 11 0 0 1 217.5 738A11 11 0 0 1 206.5 749A11 11 0 0 1 195.5 738A11 11 0 0 1 206.5 727Z"/><path d="M187.8 736.6A1.4 1.4 0 0 1 189.2 738A1.4 1.4 0 0 1 187.8 739.4A1.4 1.4 0 0 1 186.4 738A1.4 1.4 0 0 1 187.8 736.6Z"/><path d="M250.429 746.853A11 11 0 0 1 235.743 745.38A11 11 0 0 1 235.743 730.62A11 11 0 0 1 250.429 729.147A1.43 1.43 0 0 1 250.731 731.147A1.43 1.43 0 0 1 248.731 731.449A8.14 8.14 0 0 0 237.864 732.539A8.14 8.14 0 0 0 237.864 743.461A8.14 8.14 0 0 0 248.731 744.551A1.43 1.43 0 0 1 250.731 744.853A1.43 1.43 0 0 1 250.429 746.853Z"/><path d="M225.2 736.6A1.4 1.4 0 0 1 226.6 738A1.4 1.4 0 0 1 225.2 739.4A1.4 1.4 0 0 1 223.8 738A1.4 1.4 0 0 1 225.2 736.6Z"/><path d="M290.153 731.471A11 11 0 0 1 288.68 746.157A11 11 0 0 1 273.92 746.157A11 11 0 0 1 272.447 731.471A1.43 1.43 0 0 1 274.447 731.169A1.43 1.43 0 0 1 274.749 733.169A8.14 8.14 0 0 0 275.839 744.036A8.14 8.14 0 0 0 286.761 744.036A8.14 8.14 0 0 0 287.851 733.169A1.43 1.43 0 0 1 288.153 731.169A1.43 1.43 0 0 1 290.153 731.471Z"/><path d="M262.6 736.6A1.4 1.4 0 0 1 264 738A1.4 1.4 0 0 1 262.6 739.4A1.4 1.4 0 0 1 261.2 738A1.4 1.4 0 0 1 262.6 736.6Z"/><path d="M322.11 748.458A11 11 0 0 1 309.803 744.469A11 11 0 0 1 309.803 731.531A11 11 0 0 1 322.11 727.542A11 11 0 0 0 314.52 738A11 11 0 0 0 322.11 748.458Z"/><path d="M300 736.6A1.4 1.4 0 0 1 301.4 738A1.4 1.4 0 0 1 300 739.4A1.4 1.4 0 0 1 298.6 738A1.4 1.4 0 0 1 300 736.6Z"/><path d="M347.247 744.529A11 11 0 0 1 348.72 729.843A11 11 0 0 1 363.48 729.843A11 11 0 0 1 364.953 744.529A1.43 1.43 0 0 1 362.953 744.831A1.43 1.43 0 0 1 362.651 742.831A8.14 8.14 0 0 0 361.561 731.964A8.14 8.14 0 0 0 350.639 731.964A8.14 8.14 0 0 0 349.549 742.831A1.43 1.43 0 0 1 349.247 744.831A1.43 1.43 0 0 1 347.247 744.529Z"/><path d="M337.4 736.6A1.4 1.4 0 0 1 338.8 738A1.4 1.4 0 0 1 337.4 739.4A1.4 1.4 0 0 1 336 738A1.4 1.4 0 0 1 337.4 736.6Z"/><path fill-rule="evenodd" d="M393.5 727A11 11 0 0 1 404.5 738A11 11 0 0 1 393.5 749A11 11 0 0 1 382.5 738A11 11 0 0 1 393.5 727ZM393.5 729.86A8.14 8.14 0 0 0 385.36 738A8.14 8.14 0 0 0 393.5 746.14A8.14 8.14 0 0 0 401.64 738A8.14 8.14 0 0 0 393.5 729.86Z"/><path d="M393.5 728.43A9.57 9.57 0 0 1 403.07 738A9.57 9.57 0 0 1 393.5 747.57Z"/><path d="M374.8 736.6A1.4 1.4 0 0 1 376.2 738A1.4 1.4 0 0 1 374.8 739.4A1.4 1.4 0 0 1 373.4 738A1.4 1.4 0 0 1 374.8 736.6Z"/><path fill-rule="evenodd" d="M430.9 727A11 11 0 0 1 441.9 738A11 11 0 0 1 430.9 749A11 11 0 0 1 419.9 738A11 11 0 0 1 430.9 727ZM430.9 729.86A8.14 8.14 0 0 0 422.76 738A8.14 8.14 0 0 0 430.9 746.14A8.14 8.14 0 0 0 439.04 738A8.14 8.14 0 0 0 430.9 729.86Z"/><path d="M430.9 734.04A3.96 3.96 0 0 1 434.86 738A3.96 3.96 0 0 1 430.9 741.96A3.96 3.96 0 0 1 426.94 738A3.96 3.96 0 0 1 430.9 734.04Z"/><path d="M412.2 736.6A1.4 1.4 0 0 1 413.6 738A1.4 1.4 0 0 1 412.2 739.4A1.4 1.4 0 0 1 410.8 738A1.4 1.4 0 0 1 412.2 736.6Z"/></g>
+<text x="48" y="780" font-size="6" letter-spacing="1.80" fill="#8a8780">GENOME = PERMUTE(IDENTITY) · PUBLIC BIJECTION · AUTHENTICITY: ED25519</text>
+<text x="552" y="780" font-size="6" letter-spacing="1.80" text-anchor="end" fill="#8a8780">PARIS, 2026</text>
+</svg>
