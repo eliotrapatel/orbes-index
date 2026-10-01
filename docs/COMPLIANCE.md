@@ -159,3 +159,26 @@ Procedures for the out-of-scope physical items:
 - `409 EMAIL_TAKEN` on registration reveals that an account exists (SECURITY-MODEL §3.3) until an email channel exists.
 - The admin lockout can be abused to keep a known admin out, and first TOTP enrolment in the console is trust-on-first-use (SECURITY-MODEL §3.3).
 - Only `VERIFY` scan events are written. Registrations and transfers are recorded in `audit_logs` (DATABASE §5.16).
+
+---
+
+## 5. Remediation (2026-10-01)
+
+Every item of §4 was worked in a second pass the same day, test first where behaviour changed (the new or changed test was run red, then the fix made it green). `index.html` was not touched and no state-changing git command was run.
+
+| Check | Command | Result |
+|---|---|---|
+| Full test suite, PostgreSQL suites included | `cd genome && ORBES_TEST_POSTGRES_URL=postgres://…@127.0.0.1:5432/postgres npx vitest run` | **126 files, 1 935 tests passed, 0 failed** (387 s; Chromium E2E included) |
+| Typecheck | `npx tsc -p tsconfig.json` | clean (exit 0) |
+| Proof of concept | `npm run poc` | PASSED, 8 of 8 outcomes as expected |
+| Web build | `npx tsx scripts/build-web.ts --out <tmp>` | 10 files; verify 74.9 KB, worker 62.2 KB (+1.4 KB: the code-profile registry), admin 126.0 KB; no key material, no signing code |
+| Decoder latency budget (item 3) | `npx tsx scripts/bench.ts --only decoder` | Chromium worker: code p50 37.4 ms; code-free p50 127.0 ms, p95 189.6 ms → **PASS** (exit 0) |
+| Verify API on PostgreSQL 16.14 (D22) | `ORBES_TEST_POSTGRES_URL=… npx tsx scripts/bench.ts --only api,issuance` | sequential p50 10.8 / p95 15.9 / p99 22.9 ms; 8 in flight p95 56.9 ms at 210 req/s; 0 non-200 |
+| Counterfeit simulation | `npx tsx scripts/counterfeit-simulation.ts` | 114 checks: 108 PASS, 6 LIMIT (documented), 0 GAP, 0 FAIL; report regenerated |
+| Payload encodings (D4) | `npx tsx scripts/payload-encodings.ts` | table of CRYPTOGRAPHY §3.1 |
+
+New and changed tests: `test/core/code-profiles.test.ts` (new), `test/verification/verification.test.ts` (unsupported code version → UNKNOWN + warning), `test/simulation/scenarios.ts` (3d, 6i, 6j), `test/decoder/robustness-damage.test.ts` (low light), `test/decoder/latency-budget.test.ts` (new), `test/crypto/payload-encodings.test.ts` (new), `test/keys/provider-contract.ts` + `provider-contract.test.ts` (new), `test/api/context.test.ts` (scan-history purge), `test/db/config.test.ts` (`SCAN_RETENTION_DAYS`, production warning), `test/ops/vps-stack.test.ts` (`.vercelignore` `deploy/` + `node_modules/`, root `.gitignore`), `test/web/verify.brand.test.ts` and `test/web/admin.brand.test.ts` (ivory ink, font-size tokens).
+
+Code changed: `src/core/code-profiles.ts` (new), `src/core/payload.ts` (`UNSUPPORTED_VERSION`), `src/core/code/encoder.ts`, `src/core/code/styles.ts` (new), `src/core/decoder/decode.ts`, `src/core/code/profile.ts` (comment), `src/server/services/verification.ts`, `src/server/config.ts`, `src/server/context.ts`, `src/server/services/scan-retention.ts` (new), `src/web/verify/genome-view.ts`, `src/web/admin/ui/figures.ts`, `src/web/admin/format.ts` (comment), `src/web/shared/brand.css`, `src/web/verify/styles.css`, `src/web/admin/styles.css`, `scripts/bench.ts`, `scripts/decoder-budget.ts` (new), `scripts/payload-encodings.ts` (new), `.env.example`; repository root `.vercelignore`, `.gitignore` (new), `deploy/vps/.env.example` and `deploy/vps/compose.yaml` (one line each for `SCAN_RETENTION_DAYS`).
+
+Out of scope for a software prototype, stated rather than faked: physical print validation (item 1), real-device measurements (item 2, the remaining PARTIAL §28), a vendor KMS/HSM provider (item 4), the brand's master vector wordmark (item 9.1) and a licensed web font (item 9.18). The retention *period* (item 5) is a legal decision; the mechanism is in place.
