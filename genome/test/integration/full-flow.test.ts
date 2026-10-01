@@ -313,6 +313,10 @@ describe('full flow: issue → print → scan → verify → own → transfer �
   });
 
   it('the admin console shows the open impossible-travel anomaly and the suspicious scans', async () => {
+    // Two days have passed: the 8-hour admin session has expired and must be refused, then renewed.
+    expect((await s.admin.get('/api/admin/auth/me')).statusCode).toBe(401);
+    json(await s.admin.post('/api/admin/auth/login', { email: ADMIN.email, password: ADMIN.password }), 200);
+
     const anomalies = json(await s.admin.get('/api/admin/anomalies?status=OPEN'), 200);
     const travel = anomalies.items.find((a: { type: string }) => a.type === 'IMPOSSIBLE_TRAVEL');
     expect(travel).toMatchObject({ productId: 'O26-J-00184', severity: 'HIGH', status: 'OPEN' });
