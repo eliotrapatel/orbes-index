@@ -9,7 +9,7 @@
  *   verify  POST /api/v1/verify                            config.rateLimits.verifyPerMinute
  *   auth    logins, registration, claim & transfer codes   config.rateLimits.authPerMinute
  *   admin   every other /api/admin route                    config.rateLimits.adminPerMinute
- *   api     remaining public/account routes                 config.rateLimits.adminPerMinute
+ *   api     remaining public/account routes                 config.rateLimits.apiPerMinute
  *
  * Clients are keyed by the peppered hash of their IP (IPv6 grouped by /64);
  * raw addresses are never kept, not even in the in-memory store.
@@ -44,7 +44,7 @@ export function groupLimits(config: Pick<AppConfig, 'rateLimits'>): Record<RateG
     verify: config.rateLimits.verifyPerMinute,
     auth: config.rateLimits.authPerMinute,
     admin: config.rateLimits.adminPerMinute,
-    api: config.rateLimits.adminPerMinute,
+    api: config.rateLimits.apiPerMinute,
   };
 }
 

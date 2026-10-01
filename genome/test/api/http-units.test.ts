@@ -139,7 +139,7 @@ describe('logging', () => {
   });
 
   it('logs requests without IPs or query strings', () => {
-    const opts = loggerOptions({ env: 'production' }) as { serializers: { req: (r: unknown) => unknown }; redact: { paths: string[] } };
+    const opts = loggerOptions({ logLevel: 'info' }) as { serializers: { req: (r: unknown) => unknown }; redact: { paths: string[] } };
     expect(opts.serializers.req({ method: 'POST', url: '/api/v1/verify?token=abc', id: 'r1', ip: '1.2.3.4' })).toEqual({ method: 'POST', url: '/api/v1/verify', reqId: 'r1' });
     expect(opts.redact.paths).toContain('req.headers.cookie');
   });

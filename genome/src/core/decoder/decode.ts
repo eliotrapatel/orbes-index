@@ -121,6 +121,12 @@ export type DecodeResult =
        * for a look-alike in clutter — and `unitPx` its scale (px per u).
        */
       seal?: SealEvidence;
+      /**
+       * Scale (px per u) of the best code that was located and framed but not
+       * read (reasons FORMAT, ECC, CRC, PAYLOAD): tells a code too small to
+       * read from one that is blurred or moving.
+       */
+      moduleSizePx?: number;
       elapsedMs: number;
     };
 
@@ -216,6 +222,8 @@ class Failure {
   detail?: string;
   /** Best evidence among seals that could not be framed (NO_MOONS). */
   seal: SealEvidence | null = null;
+  /** Scale of the best located code (highest quiet-zone score). */
+  located: { unitPx: number; quiet: number } | null = null;
   note(reason: DecodeFailure, detail?: string): void {
     if (FAILURE_RANK[reason] >= FAILURE_RANK[this.reason]) {
       this.reason = reason;
@@ -706,6 +714,7 @@ function prepareAttempt(img: GrayImage, anchors: Anchors | null, unitPx: number,
     failure.note('NO_MOONS', 'no code structure around the seal');
     return null;
   }
+  if (!failure.located || quiet > failure.located.quiet) failure.located = { unitPx, quiet };
   return { img, anchors, moons, unitPx, inverted, fitted, alignment: fitted, quiet, repaired: false };
 }
 
@@ -913,6 +922,7 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
     reason: failure.reason,
     ...(failure.detail ? { detail: failure.detail } : {}),
     ...(failure.reason === 'NO_MOONS' && failure.seal ? { seal: { confidence: Math.round(failure.seal.confidence * 1000) / 1000, unitPx: Math.round(failure.seal.unitPx * 100) / 100 } } : {}),
+    ...(FAILURE_RANK[failure.reason] >= FAILURE_RANK.FORMAT && failure.located ? { moduleSizePx: Math.round(failure.located.unitPx * 100) / 100 } : {}),
     elapsedMs: now() - started,
   };
 }

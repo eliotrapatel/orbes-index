@@ -18,10 +18,10 @@ function pathOnly(url: unknown): string {
   return (q === -1 ? url : url.slice(0, q)).slice(0, 300);
 }
 
-/** pino options for Fastify: level by environment, IP-free serializers, secrets redacted. */
-export function loggerOptions(config: Pick<AppConfig, 'env'>, level?: string): LoggerOption {
+/** pino options for Fastify: level from LOG_LEVEL (config.logLevel), IP-free serializers, secrets redacted. */
+export function loggerOptions(config: Pick<AppConfig, 'logLevel'>): LoggerOption {
   return {
-    level: level ?? (config.env === 'production' ? 'info' : config.env === 'test' ? 'warn' : 'debug'),
+    level: config.logLevel,
     redact: {
       paths: [
         'req.headers.cookie',

@@ -6,16 +6,28 @@ import {
   buildVerifyInput,
   CAMERA_MAX_SIDE,
   cameraCrop,
+  correctionLoad,
+  DEFAULT_ZOOM,
+  defaultZoomLevel,
   FRAME_INTERVAL_MS,
   FrameThrottle,
+  HEAVY_CORRECTION_LOAD,
   HINT_AFTER_MS,
+  HINT_WINDOW,
+  HintTracker,
+  ReadConfirmer,
   RETICLE_MARGIN,
   scanHint,
+  SEAL_CONFIDENT,
+  SMALL_MODULE_PX,
   UPLOAD_MAX_SIDE,
   uploadCrops,
+  zoomLabel,
+  type ScanFailure,
 } from '../../src/web/verify/capture.js';
+import { HINTS } from '../../src/web/verify/copy.js';
 import { handleDecode } from '../../src/web/verify/frame-decoder.js';
-import { isDecodeRequest, MAX_FRAME_PIXELS, type DecodeRequest, type DecodedCode } from '../../src/web/verify/protocol.js';
+import { isDecodeRequest, MAX_FRAME_PIXELS, type DecodeFailureReason, type DecodeRequest, type DecodedCode } from '../../src/web/verify/protocol.js';
 import { makeCode } from '../decoder/fixtures.js';
 import { grayToRgba, svgToGray } from '../support/raster.js';
 
@@ -99,13 +111,136 @@ describe('FrameThrottle', () => {
 });
 
 describe('scanHint', () => {
+  const f = (reason: DecodeFailureReason, more: Partial<ScanFailure> = {}): ScanFailure => ({ reason, ...more });
+  const T = HINT_AFTER_MS;
+
   it('stays quiet at first, then guides by the last failure', () => {
-    expect(scanHint('NO_SEAL', HINT_AFTER_MS - 1)).toBeNull();
-    expect(scanHint(null, HINT_AFTER_MS * 3)).toBeNull();
-    expect(scanHint('NO_SEAL', HINT_AFTER_MS)).toBe('align');
-    expect(scanHint('NO_MOONS', HINT_AFTER_MS)).toBe('closer');
-    for (const r of ['FORMAT', 'ECC', 'CRC', 'PAYLOAD'] as const) expect(scanHint(r, HINT_AFTER_MS)).toBe('steady');
-    expect(scanHint('INTERNAL', HINT_AFTER_MS)).toBe('align');
+    expect(scanHint(f('NO_SEAL'), T - 1)).toBeNull();
+    expect(scanHint(null, T * 3)).toBeNull();
+    expect(scanHint(f('NO_SEAL'), T)).toBe('align');
+    for (const r of ['FORMAT', 'ECC', 'CRC', 'PAYLOAD'] as const) expect(scanHint(f(r, { moduleSizePx: 6 }), T)).toBe('steady');
+    expect(scanHint(f('FORMAT'), T)).toBe('steady');
+    expect(scanHint(f('INTERNAL'), T)).toBe('align');
+    expect(scanHint(f('INPUT'), T)).toBe('align');
+  });
+
+  it('asks to place the code in the orbit when no code-like seal was found (clutter, a look-alike, no consistent moons)', () => {
+    expect(scanHint(f('NO_MOONS'), T)).toBe('align');
+    expect(scanHint(f('NO_MOONS', { seal: { confidence: 0.1, unitPx: 4 } }), T)).toBe('align');
+    expect(scanHint(f('NO_MOONS', { seal: { confidence: SEAL_CONFIDENT - 0.01, unitPx: 1.5 } }), T, { zoom: 'available' })).toBe('align');
+    // A real code of a sensible size whose moons were missed: part of it is outside the orbit.
+    expect(scanHint(f('NO_MOONS', { seal: { confidence: 0.9, unitPx: 5 } }), T, { cropSidePx: 560 })).toBe('align');
+  });
+
+  it('never says "move closer": distance-aware guidance, zoom first when the camera offers it', () => {
+    expect(Object.values(HINTS).join(' ')).not.toMatch(/closer/i);
+    expect(HINTS.distance).toBe('Hold about 20 cm away');
+    expect(HINTS.zoom).toMatch(/^Zoom in/);
+    // A code read far too small to decode (format read, data not): zoom in if possible, else the distance.
+    const small = f('ECC', { moduleSizePx: SMALL_MODULE_PX - 0.3 });
+    expect(scanHint(small, T, { zoom: 'available' })).toBe('zoom');
+    expect(scanHint(small, T, { zoom: 'applied' })).toBe('distance');
+    expect(scanHint(small, T, { zoom: 'none' })).toBe('distance');
+    expect(scanHint(small, T)).toBe('distance');
+    // A real seal, too small for its moons to be found.
+    expect(scanHint(f('NO_MOONS', { seal: { confidence: 0.8, unitPx: 1.4 } }), T, { zoom: 'available' })).toBe('zoom');
+    // A real seal so large the moons fall outside the decoded square: too close.
+    expect(scanHint(f('NO_MOONS', { seal: { confidence: 0.8, unitPx: 14 } }), T, { cropSidePx: 560, zoom: 'available' })).toBe('distance');
+    // A FORMAT failure says nothing certain about a code (clutter is framed too): steady, never zoom.
+    expect(scanHint(f('FORMAT', { moduleSizePx: 1.5 }), T, { zoom: 'available' })).toBe('steady');
+  });
+});
+
+describe('HintTracker', () => {
+  it('follows the prevailing failure of the recent frames, not a single odd frame', () => {
+    const t = new HintTracker();
+    expect(t.hint(HINT_AFTER_MS)).toBeNull();
+    for (let i = 0; i < 5; i++) t.push({ reason: 'NO_MOONS' });
+    t.push({ reason: 'FORMAT', moduleSizePx: 2 });
+    expect(t.hint(HINT_AFTER_MS - 1)).toBeNull();
+    expect(t.hint(HINT_AFTER_MS)).toBe('align');
+    for (let i = 0; i < HINT_WINDOW; i++) t.push({ reason: 'ECC', moduleSizePx: 6 });
+    expect(t.hint(HINT_AFTER_MS)).toBe('steady');
+    t.reset();
+    expect(t.hint(HINT_AFTER_MS * 2)).toBeNull();
+  });
+
+  it('breaks ties towards the most recent frame', () => {
+    const t = new HintTracker(4);
+    t.push({ reason: 'ECC', moduleSizePx: 6 });
+    t.push({ reason: 'NO_SEAL' });
+    t.push({ reason: 'ECC', moduleSizePx: 6 });
+    t.push({ reason: 'NO_SEAL' });
+    expect(t.hint(HINT_AFTER_MS)).toBe('align');
+  });
+});
+
+describe('ReadConfirmer (miscorrection safety)', () => {
+  const read = (code: string, rsErrors: number, rsErasures: number): DecodedCode => ({
+    code,
+    codeVersion: 1,
+    genome: null,
+    quality: { rsErrors, rsErasures, moduleSizePx: 5, contrast: 0.6, inverted: false, mirrored: false },
+  });
+
+  it('measures the correction load as 2·errors + erasures', () => {
+    expect(correctionLoad(read('A', 10, 30).quality)).toBe(50);
+    expect(HEAVY_CORRECTION_LOAD).toBe(50);
+  });
+
+  it('submits a lightly corrected read at once', () => {
+    const c = new ReadConfirmer();
+    const r = read('A', 10, 30);
+    expect(c.offer(r, 1)).toBe(r);
+  });
+
+  it('holds a heavily corrected read until a second, independent frame decodes identical data', () => {
+    const c = new ReadConfirmer();
+    const first = read('A', 10, 31);
+    expect(c.offer(first, 1)).toBeNull();
+    // The same video frame again is not independent evidence.
+    expect(c.offer(read('A', 12, 31), 1)).toBeNull();
+    // A different frame with different data replaces the held read; nothing is submitted.
+    expect(c.offer(read('B', 0, 60), 2)).toBeNull();
+    // Another frame confirming B: submitted, the least corrected of the two.
+    const confirm = read('B', 20, 20);
+    expect(c.offer(confirm, 3)).toBe(confirm);
+  });
+
+  it('confirms a held heavy read with a light read of the same data, and lets a light read of other data through', () => {
+    const c = new ReadConfirmer();
+    expect(c.offer(read('A', 0, 70), 1)).toBeNull();
+    const light = read('A', 2, 0);
+    expect(c.offer(light, 2)).toBe(light);
+    c.reset();
+    expect(c.offer(read('A', 0, 70), 1)).toBeNull();
+    const other = read('C', 1, 0);
+    expect(c.offer(other, 2)).toBe(other);
+    // After a reset nothing is held.
+    c.reset();
+    expect(c.offer(read('A', 30, 10), 5)).toBeNull();
+  });
+});
+
+describe('camera zoom', () => {
+  it('applies about 2× by default, clamped to the track range and snapped to its step', () => {
+    expect(DEFAULT_ZOOM).toBe(2);
+    expect(defaultZoomLevel(null)).toBeNull();
+    expect(defaultZoomLevel({ min: 1, max: 8, step: 0.1 })).toBe(2);
+    expect(defaultZoomLevel({ min: 1, max: 1.6, step: 0.1 })).toBe(1.6);
+    expect(defaultZoomLevel({ min: 1, max: 10, step: 0.75 })).toBe(1.75);
+    expect(defaultZoomLevel({ min: 1, max: 5, step: 0 })).toBe(2);
+    // No gain over the minimum (or a range in other units, e.g. 100–400): leave the camera alone.
+    expect(defaultZoomLevel({ min: 100, max: 400, step: 1 })).toBeNull();
+    expect(defaultZoomLevel({ min: 2, max: 2, step: 0.1 })).toBeNull();
+    expect(defaultZoomLevel({ min: 1, max: Number.NaN, step: 0.1 })).toBeNull();
+  });
+
+  it('labels the zoom control with the level it switches to', () => {
+    expect(zoomLabel(2)).toBe('2×');
+    expect(zoomLabel(1)).toBe('1×');
+    expect(zoomLabel(1.6)).toBe('1.6×');
+    expect(zoomLabel(1.75)).toBe('1.8×');
   });
 });
 

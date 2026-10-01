@@ -21,7 +21,9 @@ export const STATUS = Object.freeze({
 export const HINTS: Readonly<Record<Exclude<ScanHint, null>, string>> = Object.freeze({
   align: 'Place the whole code inside the orbit',
   steady: 'Hold steady — in even light',
-  closer: 'Move a little closer',
+  // Never "move closer": phones that cannot focus close (iPhone Pro, ≈ 20 cm) only blur.
+  distance: 'Hold about 20 cm away',
+  zoom: 'Zoom in — tap 2×',
 });
 
 export const SCAN_GUIDE = 'Align the ORBES CODE within the orbit';

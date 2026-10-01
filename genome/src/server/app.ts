@@ -12,11 +12,13 @@
  * service call → `{ error: { code, message } }` on any failure.
  */
 import { randomUUID } from 'node:crypto';
+import type { Server } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { AppContext } from './context.js';
+import { DomainError } from './errors.js';
 import { ipHashOf } from './http/client.js';
 import { errorBody, installErrorHandlers } from './http/errors.js';
 import { registerRateLimits } from './http/rate-limit.js';
@@ -39,13 +41,33 @@ export interface BuildAppOptions {
   staticDir?: string;
   /** Fastify logger: pino options (see http/logging.ts loggerOptions) or false (default, silent). */
   logger?: FastifyServerOptions['logger'];
-  /** Refuse admin sessions that did not pass TOTP outside the auth routes. Default: production only. */
+  /** Refuse admin sessions that did not pass TOTP outside the auth routes. Default: config.adminRequireMfa (ADMIN_REQUIRE_MFA). */
   requireAdminMfa?: boolean;
 }
 
+/**
+ * URLs the router rejects (over-long parameter, broken percent-escape) never reach a hook or the
+ * error handler: Fastify's default answer echoes the URL and its FST_ code, without our headers.
+ * Typed against the plain HTTP/1.1 server this app runs on (the factory's generic option type
+ * would otherwise be inferred against the HTTP/2 overloads).
+ */
+export const frameworkErrors: NonNullable<FastifyServerOptions<Server>['frameworkErrors']> = (_error, _request, reply) => {
+  reply
+    .code(400)
+    .header('content-security-policy', CONTENT_SECURITY_POLICY)
+    .header('x-content-type-options', 'nosniff')
+    .header('cache-control', 'no-store')
+    .type('application/json; charset=utf-8')
+    .send(errorBody('BAD_REQUEST', 'The request URL is invalid.'));
+};
+
+/** What a request gets while the server drains (SIGTERM): the standard error shape, not Fastify's own body. */
+export const shuttingDown = () =>
+  new DomainError('SERVICE_UNAVAILABLE', 503, 'The service is restarting. Please try again in a moment.');
+
 export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const { config } = ctx;
-  const app = Fastify({
+  const app = Fastify<Server>({
     logger: opts.logger ?? false,
     trustProxy: config.trustProxy,
     bodyLimit: BODY_LIMIT_BYTES,
@@ -58,19 +80,9 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     connectionTimeout: 30_000,
     requestTimeout: 30_000,
     forceCloseConnections: 'idle',
-    return503OnClosing: true,
-    // URLs the router rejects (over-long parameter, broken percent-escape) never reach a hook or the
-    // error handler: Fastify's default answer echoes the URL and its FST_ code, without our headers.
-    frameworkErrors: (_error, _request, rawReply) => {
-      const reply = rawReply as unknown as FastifyReply;
-      reply
-        .code(400)
-        .header('content-security-policy', CONTENT_SECURITY_POLICY)
-        .header('x-content-type-options', 'nosniff')
-        .header('cache-control', 'no-store')
-        .type('application/json; charset=utf-8')
-        .send(errorBody('BAD_REQUEST', 'The request URL is invalid.'));
-    },
+    // Draining is answered by the gate below (standard error shape and security headers).
+    return503OnClosing: false,
+    frameworkErrors,
   });
 
   // JSON is the only body format the API speaks. Dropping text/plain also means a
@@ -93,13 +105,24 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     request.orbes = { ipHash: ipHashOf(config.ipHashPepper, request) };
   });
   await registerSecurity(app, config);
+  // Shutdown gate: once close() starts, requests still arriving on open keep-alive connections get
+  // a 503 SERVICE_UNAVAILABLE (and Connection: close) instead of running against a closing database.
+  let closing = false;
+  app.addHook('preClose', async () => {
+    closing = true;
+  });
+  app.addHook('onRequest', async (_request, reply) => {
+    if (!closing) return;
+    reply.header('connection', 'close');
+    throw shuttingDown();
+  });
   const limiters = await registerRateLimits(app, config);
 
   const deps = { ctx, limiters };
   await app.register(publicRoutes, deps);
   await app.register(accountRoutes, deps);
   await app.register(ownershipRoutes, deps);
-  await app.register(adminRoutes, { ...deps, requireMfa: opts.requireAdminMfa ?? config.env === 'production' });
+  await app.register(adminRoutes, { ...deps, requireMfa: opts.requireAdminMfa ?? config.adminRequireMfa });
 
   if (opts.serveStatic ?? true) await registerStatic(app, opts.staticDir ?? DEFAULT_STATIC_DIR);
 

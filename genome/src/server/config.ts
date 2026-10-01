@@ -46,9 +46,18 @@ export interface AppConfig {
   keys: { provider: 'local' | 'memory'; dir?: string; encryptionKey?: string /* base64url 32 bytes, AES-256-GCM */ };
   bootstrapAdmin?: { email: string; password: string };
   anomaly: AnomalyConfig;
-  rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number };
+  rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number; apiPerMinute: number };
   sessionTtlHours: { account: number; admin: number };
+  /** MIGRATE_ON_START: apply pending migrations at startup in production (always done in development/test). */
+  migrateOnStart: boolean;
+  /** LOG_LEVEL: pino level of the server log. */
+  logLevel: LogLevel;
+  /** ADMIN_REQUIRE_MFA: admin sessions must have passed TOTP outside the auth routes (default: production only). */
+  adminRequireMfa: boolean;
 }
+
+export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export class ConfigError extends Error {
   override readonly name = 'ConfigError';
@@ -92,11 +101,14 @@ const RATE_LIMIT_ENV = {
   RATE_LIMIT_VERIFY_PER_MINUTE: 'verifyPerMinute',
   RATE_LIMIT_AUTH_PER_MINUTE: 'authPerMinute',
   RATE_LIMIT_ADMIN_PER_MINUTE: 'adminPerMinute',
+  RATE_LIMIT_API_PER_MINUTE: 'apiPerMinute',
 } as const;
 
-const DEFAULT_RATE_LIMITS = { verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300 };
+const DEFAULT_RATE_LIMITS = { verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300, apiPerMinute: 120 };
 // Tests issue many requests in a burst; rate-limit tests override these explicitly.
-const TEST_RATE_LIMITS = { verifyPerMinute: 10_000, authPerMinute: 10_000, adminPerMinute: 10_000 };
+const TEST_RATE_LIMITS = { verifyPerMinute: 10_000, authPerMinute: 10_000, adminPerMinute: 10_000, apiPerMinute: 10_000 };
+
+const DEFAULT_LOG_LEVEL: Readonly<Record<OrbesEnv, LogLevel>> = { production: 'info', test: 'warn', development: 'debug' };
 
 const DEFAULT_SESSION_TTL_HOURS = { account: 720, admin: 8 };
 
@@ -117,6 +129,12 @@ const zHeaderName = z
   .string()
   .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/, 'must be a valid HTTP header name')
   .transform((s) => s.toLowerCase());
+/** Boolean switches: 1/true/yes and 0/false/no (any case). */
+const zSwitch = z
+  .string()
+  .transform((s) => s.toLowerCase())
+  .pipe(z.enum(['1', 'true', 'yes', '0', 'false', 'no'], { error: 'must be true or false' }))
+  .transform((s) => s === '1' || s === 'true' || s === 'yes');
 const zEmail = z
   .string()
   .max(254)
@@ -287,6 +305,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       DEFAULT_SESSION_TTL_HOURS.admin,
   };
 
+  // Operations.
+  const migrateOnStart = field('MIGRATE_ON_START', zSwitch, e.MIGRATE_ON_START) ?? false;
+  const logLevel =
+    field('LOG_LEVEL', z.string().transform((s) => s.toLowerCase()).pipe(z.enum(LOG_LEVELS, { error: `must be one of ${LOG_LEVELS.join(', ')}` })), e.LOG_LEVEL) ??
+    DEFAULT_LOG_LEVEL[orbesEnv];
+  const adminRequireMfa = field('ADMIN_REQUIRE_MFA', zSwitch, e.ADMIN_REQUIRE_MFA) ?? prod;
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -304,6 +329,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     anomaly,
     rateLimits,
     sessionTtlHours,
+    migrateOnStart,
+    logLevel,
+    adminRequireMfa,
   };
 
   if (prod) {
@@ -352,6 +380,20 @@ export function productionIssues(c: AppConfig): string[] {
   return issues;
 }
 
+/**
+ * Accepted but risky settings, logged as warnings at startup (never values).
+ * ADMIN_REQUIRE_MFA=false in production lets a stolen admin password alone
+ * reach every console action: it is allowed for a first-run enrolment window,
+ * not as a steady state.
+ */
+export function configWarnings(c: AppConfig): string[] {
+  const warnings: string[] = [];
+  if (c.env === 'production' && !c.adminRequireMfa) {
+    warnings.push('ADMIN_REQUIRE_MFA: disabled in production; admin sessions without TOTP can use the whole console (enrol every admin, then remove the override)');
+  }
+  return warnings;
+}
+
 // ── Test helper ────────────────────────────────────────────────────────────
 
 export type ConfigOverrides = Partial<Omit<AppConfig, 'geo' | 'keys' | 'anomaly' | 'rateLimits' | 'sessionTtlHours'>> & {
@@ -370,6 +412,8 @@ export function testConfig(overrides: ConfigOverrides = {}): AppConfig {
   const base = loadConfig({ ORBES_ENV: 'test' });
   const merged: AppConfig = {
     ...base,
+    // A test config for another environment gets that environment's MFA default, like loadConfig.
+    adminRequireMfa: overrides.env === 'production',
     ...overrides,
     geo: { ...base.geo, ...overrides.geo },
     keys: { ...base.keys, ...overrides.keys },
@@ -396,6 +440,9 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
     bootstrapAdmin: c.bootstrapAdmin ? '[set]' : undefined,
     rateLimits: c.rateLimits,
     sessionTtlHours: c.sessionTtlHours,
+    migrateOnStart: c.migrateOnStart,
+    logLevel: c.logLevel,
+    adminRequireMfa: c.adminRequireMfa,
   };
 }
 
