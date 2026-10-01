@@ -22,7 +22,6 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { GENOME01_GLYPHS, type GlyphDef } from './vocabulary.js';
 
 export interface Genome {
@@ -43,7 +42,9 @@ export const SUPPORTED_GENOME_VERSIONS: readonly number[] = Object.freeze([1]);
 const GLYPH_COUNT = 8;
 const GLYPH_BITS = 4;
 const FEISTEL_ROUNDS = 8;
-const ROUND_DOMAIN = utf8ToBytes('ORBES/GENOME-01/F');
+// ASCII by construction; spelled out byte by byte so that importing this
+// module touches no host global (TextEncoder) at load time.
+const ROUND_DOMAIN = Uint8Array.from('ORBES/GENOME-01/F', (c) => c.charCodeAt(0));
 
 /** Round-function input: domain ‖ round index ‖ be16(right half). Reused scratch buffer. */
 const roundInput = new Uint8Array(ROUND_DOMAIN.length + 3);

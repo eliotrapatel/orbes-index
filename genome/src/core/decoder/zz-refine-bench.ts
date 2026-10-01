@@ -337,54 +337,41 @@ function sectorProfile(img: GrayImage, h: Homography, sector: number): Float64Ar
 const OFFSETS = Array.from({ length: Math.round((2 * LATTICE_OFFSET) / LATTICE_OFFSET_STEP) + 1 }, (_, i) => -LATTICE_OFFSET + i * LATTICE_OFFSET_STEP);
 
 /**
- * Template edges (code radii) and the weight of the profile integral up to
- * each: the template is piecewise constant (1 − fill on ink zones, −fill on
- * the rest of the band), so a correlation is a weighted sum of profile
- * integrals at its edges.
- */
-const LATTICE_EDGES = (() => {
-  const radii: number[] = [LATTICE.inner, LATTICE.outer];
-  const weights: number[] = [LATTICE.fill, -LATTICE.fill];
-  for (const ring of CODE01_RINGS) {
-    radii.push(ring.radius - LATTICE.halfArc, ring.radius + LATTICE.halfArc);
-    weights.push(-1, 1);
-  }
-  return { radii: Float64Array.from(radii), weights: Float64Array.from(weights) };
-})();
-
-/**
  * Registration of a profile against the lattice: for every offset a, the best
  * correlation over the slopes b, where template radius t is observed at
- * t + a + b·(t − mid). Each correlation costs one prefix-sum lookup per
- * template edge instead of one product per profile sample.
+ * t + a + b·(t − mid). The template is piecewise constant, so a correlation
+ * is a sum of profile integrals (prefix sums) over the observed band and ink
+ * zones: ≈ 30 lookups instead of one per profile sample.
  */
 function registration(profile: Float64Array): { score: Float64Array; slope: Float64Array } {
   const prefix = new Float64Array(PROFILE_SAMPLES + 1);
   for (let j = 0; j < PROFILE_SAMPLES; j++) prefix[j + 1] = prefix[j] + profile[j];
-  const { radii, weights } = LATTICE_EDGES;
+  // Integral of the (piecewise-constant) profile from PROFILE_FROM to observed radius x, in samples.
+  const integral = (x: number): number => {
+    const u = (x - PROFILE_FROM) / PROFILE_STEP;
+    if (u <= 0) return 0;
+    if (u >= PROFILE_SAMPLES) return prefix[PROFILE_SAMPLES];
+    const j = Math.floor(u);
+    return prefix[j] + (u - j) * profile[j];
+  };
   const score = new Float64Array(OFFSETS.length).fill(-Infinity);
   const slope = new Float64Array(OFFSETS.length);
-  for (let i = 0; i < OFFSETS.length; i++) {
+  OFFSETS.forEach((a, i) => {
     for (const b of LATTICE_SLOPES) {
-      let c = 0;
-      for (let e = 0; e < radii.length; e++) {
-        // Integral of the piecewise-constant profile up to the observed edge, in samples.
-        const u = (radii[e] + OFFSETS[i] + b * (radii[e] - LATTICE.mid) - PROFILE_FROM) / PROFILE_STEP;
-        let integral: number;
-        if (u <= 0) integral = 0;
-        else if (u >= PROFILE_SAMPLES) integral = prefix[PROFILE_SAMPLES];
-        else {
-          const j = Math.floor(u);
-          integral = prefix[j] + (u - j) * profile[j];
-        }
-        c += weights[e] * integral;
+      const observed = (t: number): number => t + a + b * (t - LATTICE.mid);
+      let ink = 0;
+      for (let k = 0; k < CODE01_RINGS.length; k++) {
+        const r = CODE01_RINGS[k].radius;
+        ink += integral(observed(r + LATTICE.halfArc)) - integral(observed(r - LATTICE.halfArc));
       }
+      const band = integral(observed(LATTICE.outer)) - integral(observed(LATTICE.inner));
+      const c = ink - LATTICE.fill * band;
       if (c > score[i]) {
         score[i] = c;
         slope[i] = b;
       }
     }
-  }
+  });
   return { score, slope };
 }
 
@@ -421,7 +408,11 @@ function branchCandidates(score: Float64Array): number[] {
  * jumps between neighbouring sectors (a smooth surface bends smoothly).
  */
 export function ringLatticeField(img: GrayImage, h: Homography): Float64Array | null {
-  const regs = Array.from({ length: SECTORS }, (_, s) => registration(sectorProfile(img, h, s)));
+  let t0 = performance.now();
+  const profs = Array.from({ length: SECTORS }, (_, s) => sectorProfile(img, h, s));
+  (globalThis as any).tp = ((globalThis as any).tp ?? 0) + performance.now() - t0; t0 = performance.now();
+  const regs = profs.map((p) => registration(p));
+  (globalThis as any).tr = ((globalThis as any).tr ?? 0) + performance.now() - t0; t0 = performance.now();
   const peaks = regs.map((r) => Math.max(...r.score));
   const median = [...peaks].sort((a, b) => a - b)[SECTORS >> 1];
   if (!(median > 0)) return null;
@@ -464,6 +455,7 @@ export function ringLatticeField(img: GrayImage, h: Homography): Float64Array | 
     }
   }
 
+  (globalThis as any).tv = ((globalThis as any).tv ?? 0) + performance.now() - t0;
   const params = new Float64Array(FIELD_PARAMS);
   const radii = [CODE01_RINGS[0].radius, CODE01_RINGS[CODE01_RINGS.length - 1].radius];
   for (let s = 0; s < SECTORS; s++) {

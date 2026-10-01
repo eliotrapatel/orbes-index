@@ -7,6 +7,7 @@ import {
   staticCategoryResolver,
   unpackIdentity,
   type CategoryInfo,
+  type CategoryResolver,
   type ProductIdentity,
 } from '../../src/core/identity.js';
 
@@ -174,6 +175,20 @@ describe('parseProductId', () => {
   it('rejects non-string input', () => {
     expect(() => parseProductId(26184 as unknown as string, resolver)).toThrow(IdentityError);
     expect(() => parseProductId(null as unknown as string, resolver)).toThrow(IdentityError);
+  });
+
+  it('keeps one spelling per identity even when the resolver is inconsistent', () => {
+    // The resolver is external data (the category registry). A registry that
+    // maps two letters to one index (a retired alias, a bad migration) must
+    // not give one identity two accepted spellings: only the letter that
+    // formatProductId would print for the index parses.
+    const aliased: CategoryResolver = {
+      byCode: (code) => (code === 'J' || code === 'K' ? { code, index: 1, name: 'Jewelry' } : undefined),
+      byIndex: (index) => (index === 1 ? { code: 'J', index: 1, name: 'Jewelry' } : undefined),
+    };
+    expect(formatProductId(id(2026, 1, 184), aliased)).toBe('O26-J-00184');
+    expect(parseProductId('O26-J-00184', aliased)).toEqual(id(2026, 1, 184));
+    expect(() => parseProductId('O26-K-00184', aliased)).toThrow(IdentityError);
   });
 
   it('round-trips format → parse → format for random identities (seeded)', () => {

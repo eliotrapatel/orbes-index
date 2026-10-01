@@ -349,6 +349,49 @@ describe('rsDecode beyond capacity', () => {
     expect(failures).toBeGreaterThan(0);
   });
 
+  it('is an exact errors-and-erasures bounded-distance decoder (exhaustive codebook oracle, k = 2)', () => {
+    // With k = 2 the whole codebook (65 536 words) can be searched. For any
+    // received word and erasure set F, the decoder must succeed iff some
+    // codeword c has 2·e(c) + |F| ≤ nsym, where e(c) counts the mismatches
+    // OUTSIDE F, and must then return exactly that (necessarily unique) c.
+    // This pins down the erasure semantics: erasures at data or parity
+    // positions, duplicated or at bytes that happen to be correct.
+    const rng = prng(25);
+    const k = 2;
+    for (let nsym = 1; nsym <= 5; nsym++) {
+      const n = k + nsym;
+      const codebook = Array.from({ length: 1 << 16 }, (_, v) => rsEncode(Uint8Array.of(v >> 8, v & 0xff), nsym));
+      let successes = 0;
+      let failures = 0;
+      for (let trial = 0; trial < 150; trial++) {
+        const received = codebook[rng.int(codebook.length)].slice();
+        for (let i = rng.int(n + 1); i > 0; i--) received[rng.int(n)] = rng.int(256);
+        const erasures = Array.from({ length: rng.int(nsym + 2) }, () => rng.int(n));
+        const erased = new Set(erasures);
+        const oracle =
+          erased.size > nsym
+            ? undefined
+            : codebook.find((c) => {
+                let e = 0;
+                for (let p = 0; p < n; p++) if (!erased.has(p) && c[p] !== received[p]) e++;
+                return 2 * e + erased.size <= nsym;
+              });
+        const result = rsDecode(received, nsym, erasures);
+        if (oracle === undefined) {
+          expect(result).toEqual({ ok: false, reason: 'TOO_MANY_ERRORS' });
+          failures++;
+        } else {
+          if (!result.ok) expect.fail(`nsym ${nsym}, trial ${trial}: a codeword is within reach, decoder failed`);
+          expect(result.codeword).toEqual(oracle);
+          expect(result.erasures).toBe(erased.size);
+          successes++;
+        }
+      }
+      expect(successes).toBeGreaterThan(0);
+      expect(failures).toBeGreaterThan(0);
+    }
+  });
+
   it('never returns a non-codeword on small codes, where miscorrections are frequent', () => {
     const rng = prng(21);
     let miscorrections = 0;

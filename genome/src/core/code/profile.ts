@@ -227,8 +227,8 @@ function maskBitsShared(mask: number): Uint8Array {
 // the all-zero word never appears. See src/core/ecc/bch.ts.
 
 export function formatInfoValue(codeVersion: number, mask: number): number {
-  if (codeVersion < 1 || codeVersion > 8) throw new RangeError('codeVersion out of range');
-  if (mask < 0 || mask > 3) throw new RangeError('mask out of range');
+  if (!Number.isInteger(codeVersion) || codeVersion < 1 || codeVersion > 8) throw new RangeError('codeVersion out of range');
+  if (!Number.isInteger(mask) || mask < 0 || mask > 3) throw new RangeError('mask out of range');
   return ((codeVersion - 1) << 2) | mask;
 }
 

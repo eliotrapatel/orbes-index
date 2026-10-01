@@ -131,6 +131,11 @@ export function parseProductId(s: string, resolver: CategoryResolver): ProductId
   if (!info || info.code !== code) throw new IdentityError(`unknown category code ${code}`);
   const id: ProductIdentity = { year: YEAR_BASE + Number(yy), categoryIndex: info.index, serial: Number(digits) };
   assertValidIdentity(id);
+  // Round-trip through the index, as formatProductId does: a registry that
+  // maps a second letter to the same index must not create a second spelling.
+  if (resolveByIndex(id.categoryIndex, resolver).code !== code) {
+    throw new IdentityError(`category code ${code} is not the canonical code of index ${id.categoryIndex}`);
+  }
   return id;
 }
 

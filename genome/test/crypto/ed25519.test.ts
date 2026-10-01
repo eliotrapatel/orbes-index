@@ -1,4 +1,5 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
+import { sha512 } from '@noble/hashes/sha2.js';
 import { describe, expect, it } from 'vitest';
 import { concatBytes, fromHex, toHex } from '../../src/core/bytes.js';
 import { verifyEd25519 } from '../../src/core/verify/ed25519.js';
@@ -219,6 +220,36 @@ describe.each(VERIFIERS)('%s verification is strict and never throws', (_name, v
     const forged = concatBytes(identity, new Uint8Array(32));
     expect(verify(identity, message, forged)).toBe(false);
     expect(verify(identity, new Uint8Array(0), forged)).toBe(false);
+  });
+
+  describe('R encodings (signatures made with the secret key, so only R decides)', () => {
+    // With R = the identity point, S = k·a (mod L) satisfies S·B = R + k·A for
+    // k = SHA-512(R_bytes ‖ A ‖ M), i.e. a genuine signature by the key
+    // holder. The same point R has two non-canonical spellings (y = p + 1,
+    // and x = 0 with the sign bit set); strict RFC 8032 verifiers must reject
+    // both, otherwise a signer could mint several byte-distinct signatures of
+    // one code and the registry's byte comparisons would stop being unique.
+    const P = 2n ** 255n - 19n;
+    const { scalar } = ed25519.utils.getExtendedPublicKey(fromHex(v.secret));
+
+    function signWithR(rBytes: Uint8Array): Uint8Array {
+      const k = bytesToBigIntLE(sha512(concatBytes(rBytes, publicKey, message))) % L;
+      return concatBytes(rBytes, bigIntToBytesLE((k * scalar) % L, 32));
+    }
+
+    it('accepts the canonical encoding (y = 1)', () => {
+      expect(verify(publicKey, message, signWithR(bigIntToBytesLE(1n, 32)))).toBe(true);
+    });
+
+    it('rejects y = p + 1', () => {
+      expect(verify(publicKey, message, signWithR(bigIntToBytesLE(P + 1n, 32)))).toBe(false);
+    });
+
+    it('rejects x = 0 with the sign bit set', () => {
+      const negativeZero = bigIntToBytesLE(1n, 32);
+      negativeZero[31] |= 0x80;
+      expect(verify(publicKey, message, signWithR(negativeZero))).toBe(false);
+    });
   });
 
   it('rejects the same forgery with a non-canonical identity key (y = p + 1)', () => {

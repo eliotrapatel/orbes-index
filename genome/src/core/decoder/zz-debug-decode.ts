@@ -389,7 +389,8 @@ function anchorsOf(img: GrayImage, center: Point, sealAffine: Mat2, moons: MoonS
  * smudge, a partial occlusion) cannot spoil the frame. Null when the full
  * fit stays best.
  */
-function leaveOneOut(img: GrayImage, anchors: Anchors, full: Alignment): Alignment | null {
+function leaveOneOut(...args: Parameters<typeof leaveOneOutInner>): ReturnType<typeof leaveOneOutInner> { const t0 = now(); const r = leaveOneOutInner(...args); console.log(`   leaveOneOut ${(now() - t0).toFixed(1)} ms`); return r; }
+function leaveOneOutInner(img: GrayImage, anchors: Anchors, full: Alignment): Alignment | null {
   if (anchors.pairs.length !== 4) return null;
   let best: Homography | null = null;
   let bestScore = alignmentScore(sampleCells(img, full.homography, false), full.cls);
@@ -405,21 +406,24 @@ function leaveOneOut(img: GrayImage, anchors: Anchors, full: Alignment): Alignme
   return best ? alignmentFrom(img, anchors.center, best) : null;
 }
 
-function refineAlignment(img: GrayImage, a: Alignment, unitPx: number): Alignment {
+function refineAlignment(...args: Parameters<typeof refineAlignmentInner>): ReturnType<typeof refineAlignmentInner> { const t0 = now(); const r = refineAlignmentInner(...args); console.log(`   refineAlignment ${(now() - t0).toFixed(1)} ms`); return r; }
+function refineAlignmentInner(img: GrayImage, a: Alignment, unitPx: number): Alignment {
   const refined = refineControlPoints(img, a.codePoints, a.imagePoints, unitPx, a.cls);
   if (!refined) return a;
   const values = sampleCells(img, refined.homography, true);
   return { ...a, homography: refined.homography, imagePoints: refined.points, values, cls: classifyCells(values) };
 }
 
-function withOffsetField(img: GrayImage, a: Alignment, unitPx: number): Alignment {
+function withOffsetField(...args: Parameters<typeof withOffsetFieldInner>): ReturnType<typeof withOffsetFieldInner> { const t0 = now(); const r = withOffsetFieldInner(...args); console.log(`   withOffsetField ${(now() - t0).toFixed(1)} ms`); return r; }
+function withOffsetFieldInner(img: GrayImage, a: Alignment, unitPx: number): Alignment {
   const { shift } = refineOffsetField(img, a.homography, unitPx, a.cls);
   const values = sampleCells(img, a.homography, true, shift);
   return { ...a, values, cls: classifyCells(values), shift };
 }
 
 /** Offset field registered on the ring lattice first (strong curvature), then refined; null when no lattice shows. */
-function withRingLattice(img: GrayImage, a: Alignment, unitPx: number): Alignment | null {
+function withRingLattice(...args: Parameters<typeof withRingLatticeInner>): ReturnType<typeof withRingLatticeInner> { const t0 = now(); const r = withRingLatticeInner(...args); console.log(`   withRingLattice ${(now() - t0).toFixed(1)} ms`); return r; }
+function withRingLatticeInner(img: GrayImage, a: Alignment, unitPx: number): Alignment | null {
   const initial = ringLatticeField(img, a.homography);
   if (!initial) return null;
   const start = classifyCells(sampleCells(img, a.homography, true, fieldShift(initial)));
@@ -517,6 +521,15 @@ function tryHypothesis(cls: CellClassification, g: number, mask: number, schedul
 const BRUTE_FORCE_ERASURES = [0, 30, 60];
 
 function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean, failure: Failure): CodeRead | null {
+  const t0 = now();
+  const r = decodeCellsInner(cls, moons, mirrored, failure);
+  const truth = (globalThis as any).__truth as Uint8Array | undefined;
+  let best = -1;
+  if (truth) { best = 1e9; for (let g = 0; g < 4; g++) { let e = 0; const perm = DIHEDRAL_PERMS[g]; for (let j = 0; j < CELL_COUNT; j++) if (cls.bits[perm[j]] !== truth[j]) e++; best = Math.min(best, e); } }
+  console.log(`   decodeCells ${(now() - t0).toFixed(1)} ms ${r ? 'ok' : 'fail'} cellErr ${best} @${(now() - (globalThis as any).__t0).toFixed(0)}`);
+  return r;
+}
+function decodeCellsInner(cls: CellClassification, moons: MoonSet, mirrored: boolean, failure: Failure): CodeRead | null {
   const hyps = formatHypotheses(cls, moons, mirrored, failure);
   const trusted = hyps.filter((h) => h.formatDistance <= FORMAT_TRUST);
   for (const h of trusted) {
@@ -660,6 +673,7 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
   const polarities = opts.tryInverted ? [false, true] : [false];
   for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, polarities)) {
     const view = det.view(inverted);
+    console.log(`  seal cand inverted=${inverted} at ${seal.center.x.toFixed(0)},${seal.center.y.toFixed(0)} @${(now() - started).toFixed(0)}`);
     const moons = findMoons(view.image, view.integral, seal);
     if (!moons) {
       failure.note('NO_MOONS', `seal at (${(seal.center.x * det.factor).toFixed(1)}, ${(seal.center.y * det.factor).toFixed(1)}) without moons`);
@@ -676,7 +690,7 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
 
 /** Decode the most prominent ORBES CODE-01 in a luma frame. Never throws. */
 export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): DecodeResult {
-  const started = now();
+  const started = now(); (globalThis as any).__t0 = started;
   const failure = new Failure();
   try {
     const frame = asGrayImage(img);
