@@ -1170,7 +1170,7 @@ It runs `genome/scripts/geoip-update.ts` in the app image as the one-off service
 
 ```bash
 cd /opt/orbes/orbes-index && git pull            # or: git fetch --tags
-cd deploy/vps && scripts/deploy.sh                # HEAD; or --ref v1.2.0 / --ref <commit>
+cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v1.2.0 / <commit> (= --ref …)
 ```
 
 | Step | Detail |
@@ -1292,4 +1292,21 @@ The app's `TRUST_PROXY` stays Caddy's address in both modes: Caddy always hands 
 
 ### 15.13 How this stack was validated
 
-Run in a sandbox before release (Docker 29, Compose 5, `caddy:2` 2.11, `postgres:17`): shellcheck clean on all scripts; `bootstrap-ubuntu.sh --dry-run` in `ubuntu:26.04` containers (Docker repository detected for `resolute/amd64`, fallback to Ubuntu's archive without a download tool, swap below 2 GB, `--harden-ssh` refused without a fallback sudo user and accepted with one; the drop-in passes `sshd -t` and overrides `50-cloud-init.conf`); `systemd-analyze verify` on the units; the full stack with `TLS_MODE=internal` and `APP_DOMAIN=verify.orbes.test` (`deploy.sh` build, migrations, first key, smoke tests; automatic rollback from a crash-looping image); a demo code verified AUTHENTIC through Caddy; forged `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `CF-Connecting-IP` and `True-Client-IP` headers left the stored IP pseudonym and the rate-limit bucket unchanged, while a client with another address got another pseudonym; the access log held no query string, cookie or header; the admin allowlist and the 64 KB body limit; `backup.sh` (retention, rclone copy) then `restore.sh` into a stack whose volumes had all been deleted: same row counts, byte-identical key file, the signing key usable, and codes issued before the backup verifying AUTHENTIC / REVOKED as before. `genome/test/ops/vps-stack.test.ts` guards the static properties in CI.
+Last full run: 2026-10-01, in a sandbox (Docker 29.6, Compose 5.3, `caddy:2` = 2.11.4, `postgres:17`, `node:22-slim`; the VPS itself simulated by `ubuntu:26.04` = 26.04.1 "resolute" containers). Not exercised there: a real Let's Encrypt issuance (no public DNS), arm64 hardware, and `geoip-update.sh` downloading by itself (the sandbox containers have no direct internet; the same file was fetched on the host and installed with `--from-file`, which runs the same validation).
+
+| Area | What was run | Result |
+|---|---|---|
+| Scripts | `shellcheck -x -S style` (0.11) on every script; `--help` on each | clean; exit 0 |
+| Bootstrap | `bootstrap-ubuntu.sh --dry-run` in `ubuntu:26.04` | codename/arch detected (`resolute`/`amd64`); Docker's repository publishes `resolute` for amd64 and arm64 → `docker-ce` + plugins; an unknown codename (404) or no download tool → Ubuntu's `docker.io` 29.1 / `docker-compose-v2` 2.40 / `docker-buildx`; `--docker-source ubuntu` forces the fallback; extra sshd ports kept open in ufw and fail2ban; swap planned only with RAM < 2 GB |
+| SSH hardening | `--harden-ssh` with no `authorized_keys`, an empty or invalid one, a locked password without `NOPASSWD` | refused each time (exit 1); accepted with a valid key and working sudo; the drop-in passes `sshd -t` and wins over `50-cloud-init.conf` (`sshd -T`: `permitrootlogin no`, `passwordauthentication no`) |
+| systemd | `systemd-analyze verify` (systemd 259) on the rendered units; `systemd-analyze calendar` | clean; backup daily 03:17, GeoIP Mondays 04:41 |
+| setup.sh | fresh `.env`, rerun, as root | secrets generated (KEK 43 chars), `.env` 0600; rerun keeps every secret; the age identity is printed once, matches the stored recipient and is written nowhere; root refused |
+| Stack | `setup.sh --tls-internal` then `deploy.sh` (`APP_DOMAIN=verify.orbes.test`, `curl --resolve`) | build, migrations, first key (`keys:generate`), smoke tests (health, keys document, `/verify`) green in ~50 s; HTTP → HTTPS 308; HSTS/CSP from the app only, no `Server` header |
+| Update + rollback | `deploy.sh` on a new commit (pre-deploy backup, off-site copy); `deploy.sh --image <crash-looping image>` | deployed; the broken release was detected (crash loop) and rolled back automatically to the previous tag, stack healthy, exit 1 |
+| Verification | demo dataset (`db.ts seed`, one-off non-production run), codes from `export-demo-codes.ts`; a product issued through the admin API via Caddy (password + TOTP enrolled with `admin.ts`, CSRF) | `POST /api/v1/verify` through Caddy: AUTHENTIC, AUTHENTIC_REGISTERED, REVOKED as expected; the newly issued code AUTHENTIC |
+| Client IP | `X-Forwarded-For` (single, chain), `X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, `CF-IPCountry` sent by the client, in `EDGE_MODE=direct` and `cloudflare` | the stored IP pseudonym stayed the HMAC of the real peer address and the rate-limit bucket kept counting down; no country from the forged `8.8.8.8` although the loaded GeoIP file maps it to US; a second client got its own pseudonym |
+| Edge | access log; 70 KB body; `ADMIN_ALLOWED_IPS`; `caddy validate` in acme/internal × direct/cloudflare | no query string, cookie, header or full IP in Caddy's log; 413; `/admin*` and `/api/admin*` 403 outside the list (forged XFF does not help), `/verify` unaffected; all valid |
+| Backups | `backup.sh` (incl. `--verify-identity`, retention with `BACKUP_KEEP_DAILY=2`, rclone copy/check to a test remote, `--dry-run`) | archives written and re-read, full decryption check OK, pruning and weekly hard link as designed, remote copy checked |
+| Restore | `docker compose down -v` (every volume deleted), archive fetched back from the remote, `restore.sh --identity … --yes` (after `--dry-run`, a wrong identity and a non-interactive run without `--yes`, all refused) | stack healthy in 20 s; row counts, key registry and key file (SHA-256, mode 0600, owner 1000) identical; a code issued before the backup AUTHENTIC, one issued after it UNKNOWN; `keys:generate` → "already ACTIVE"; a new product issued with the restored key verified AUTHENTIC; admin TOTP still valid; audit chain verified |
+
+`genome/test/ops/vps-stack.test.ts` guards the static properties (vercel.json, compose isolation and hardening, TRUST_PROXY pinning, Caddyfile client-IP and log rules, scripts, timers) in CI.

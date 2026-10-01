@@ -303,6 +303,10 @@ describe('deploy/vps scripts and systemd units', () => {
       expect(timer).toMatch(/\nOnCalendar=/);
       expect(timer).toMatch(/\nWantedBy=timers\.target\n/);
     }
+    // Backups nightly; GeoIP weekly (DB-IP publishes monthly, and a run before the new
+    // edition is out keeps the previous one, so a monthly timer could lag by a month).
+    expect(read(STACK, 'systemd', 'orbes-backup.timer')).toMatch(/\nOnCalendar=\*-\*-\* \d\d:\d\d:\d\d\n/);
+    expect(read(STACK, 'systemd', 'orbes-geoip.timer')).toMatch(/\nOnCalendar=(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \*-\*-\* \d\d:\d\d:\d\d\n/);
   });
 
   it('keep the filled-in .env and local state out of git', () => {
