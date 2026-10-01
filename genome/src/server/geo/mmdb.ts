@@ -76,7 +76,9 @@ interface Loaded {
  * never carry a meaningful location. For IPv6 everything outside global
  * unicast 2000::/3 is excluded, plus the special blocks inside it.
  */
-const NON_GLOBAL = (() => {
+// One list per family: a BlockList matches IPv4 rules against IPv4-mapped IPv6 and vice versa, and the
+// IPv6 rule ::/3 (which contains ::ffff:0:0/96) would otherwise swallow every IPv4 address.
+const NON_GLOBAL_V4 = (() => {
   const b = new BlockList();
   for (const [net, bits] of [
     ['0.0.0.0', 8], // "this network"
@@ -97,6 +99,11 @@ const NON_GLOBAL = (() => {
   ] as const) {
     b.addSubnet(net, bits, 'ipv4');
   }
+  return b;
+})();
+
+const NON_GLOBAL_V6 = (() => {
+  const b = new BlockList();
   for (const [net, bits] of [
     ['::', 3], // unspecified, loopback, IPv4-mapped/compatible, NAT64, discard-only…
     ['4000::', 2], // not global unicast
@@ -123,11 +130,11 @@ export function publicAddress(ip: unknown): { address: string; family: 4 | 6 } |
   const lower = a.toLowerCase();
   if (lower.startsWith('::ffff:') && isIP(a.slice(7)) === 4) a = a.slice(7);
   const family = isIP(a);
-  if (family === 4) return NON_GLOBAL.check(a, 'ipv4') ? undefined : { address: a, family: 4 };
+  if (family === 4) return NON_GLOBAL_V4.check(a, 'ipv4') ? undefined : { address: a, family: 4 };
   if (family === 6) {
     // A zone index (fe80::1%eth0) only exists on link-local addresses, which are excluded anyway.
     if (a.includes('%')) return undefined;
-    return NON_GLOBAL.check(a, 'ipv6') ? undefined : { address: a, family: 6 };
+    return NON_GLOBAL_V6.check(a, 'ipv6') ? undefined : { address: a, family: 6 };
   }
   return undefined;
 }
@@ -164,7 +171,7 @@ export function openMmdb(bytes: Buffer): Reader<Response> {
   if (bytes.length < 64) throw new Error('file too small to be a MaxMind DB');
   let reader: Reader<Response>;
   try {
-    reader = new Reader<Response>(bytes);
+    reader = new Reader<Response>(bytes, { cache: boundedCache(RECORD_CACHE_SIZE) });
   } catch (e) {
     throw new Error(`not a readable MaxMind DB (${shortReason(e)})`);
   }
@@ -181,6 +188,21 @@ export function openMmdb(bytes: Buffer): Reader<Response> {
     throw new Error(`damaged MaxMind DB (${shortReason(e)})`);
   }
   return reader;
+}
+
+/** Decoded records kept per database (keyed by data offset: many networks share one city record). */
+const RECORD_CACHE_SIZE = 8192;
+
+/** Insertion-ordered Map, oldest entry evicted first: bounded memory, O(1) per operation. */
+function boundedCache(max: number): { get(key: number): unknown; set(key: number, value: unknown): void } {
+  const map = new Map<number, unknown>();
+  return {
+    get: (key) => map.get(key),
+    set: (key, value) => {
+      if (map.size >= max) map.delete(map.keys().next().value as number);
+      map.set(key, value);
+    },
+  };
 }
 
 function statusOf(path: string, reader: Reader<Response>, bytes: number): MmdbStatus {

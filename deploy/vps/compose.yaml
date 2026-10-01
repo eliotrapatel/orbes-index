@@ -99,7 +99,7 @@ services:
       KEY_DIR: /var/lib/orbes/keys
       MIGRATE_ON_START: "true"
       GEO_MODE: ${GEO_MODE:-mmdb}
-      GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-geoip.mmdb}
+      GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-dbip-city-lite.mmdb}
       # Secrets.
       COOKIE_SECRET: ${COOKIE_SECRET:?set COOKIE_SECRET in deploy/vps/.env}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER:?set IP_HASH_PEPPER in deploy/vps/.env}
@@ -216,32 +216,31 @@ services:
     networks:
       backend: {}
 
-  # One-off tool (scripts/geoip-update.sh): downloads and validates the GeoIP
-  # database into the geoip volume. Never started by `up` (profile), and the only
-  # service besides Caddy with outbound internet access.
+  # One-off tool (scripts/geoip-update.sh): runs genome/scripts/geoip-update.ts
+  # (DB-IP "IP to City Lite", CC BY 4.0) to download, validate and atomically
+  # install the GeoIP database into the geoip volume; the app reloads it within
+  # 10 minutes. Never started by `up` (profile), and the only service besides
+  # Caddy with outbound internet access.
   geoip-update:
     profiles: ["tools"]
     image: orbes-genome:${ORBES_IMAGE_TAG:-latest}
     user: "1000:1000"
     read_only: true
     tmpfs:
-      - /tmp:size=512m
+      - /tmp:size=64m
       - /home/node:size=16m,uid=1000,gid=1000
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    mem_limit: 768m
     volumes:
       - geoip:/var/lib/orbes/geoip
-      - ./scripts/geoip-fetch.mjs:/opt/orbes/geoip-fetch.mjs:ro
     environment:
-      GEOIP_PROVIDER: ${GEOIP_PROVIDER:-dbip}
-      GEOIP_FILE: ${GEOIP_FILE:-geoip.mmdb}
-      GEOIP_DIR: /var/lib/orbes/geoip
-      MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID:-}
-      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
-      HTTPS_PROXY: ${GEOIP_HTTPS_PROXY:-}
+      GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-dbip-city-lite.mmdb}
+      # Node's fetch only uses a proxy when told to (empty = direct connection).
       NODE_USE_ENV_PROXY: "1"
-    entrypoint: ["node", "/opt/orbes/geoip-fetch.mjs"]
+      HTTPS_PROXY: ${GEOIP_HTTPS_PROXY:-}
+    entrypoint: ["node", "--import", "tsx", "scripts/geoip-update.ts"]
     networks:
       tools: {}
 
