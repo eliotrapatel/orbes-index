@@ -205,8 +205,10 @@ interface Work {
   signatureValid: boolean;
   key?: KeyRecord;
   reg?: Registered;
-  /** Product and code found, payload hash equal, key trusted (steps 5–6 passed). */
+  /** Key trusted, product and code found, payload hash equal (steps 4 and 6 passed). */
   trusted: boolean;
+  /** Step 5 ended the decision: a validly signed genome version this server does not support. */
+  unsupportedGenomeVersion?: number;
   genome?: Genome;
   genomeCheck: GenomeCheck;
   serviceFinding?: { type: ServiceFindingType; details: JsonObject };
@@ -299,6 +301,8 @@ export class VerificationService {
         );
         w.riskScore = evaluation.riskScore;
         for (const f of evaluation.findings) w.reasons.push(`ANOMALY:${f.type}`);
+        /** SUSPICIOUS only because of the scan history (no status, genome or code finding). */
+        let riskOnly = false;
         if (w.state === undefined && w.riskScore >= this.threshold) {
           if (w.isOwner) {
             w.state = 'AUTHENTIC_OWNERSHIP_VERIFIED';
@@ -307,25 +311,31 @@ export class VerificationService {
           } else {
             w.state = 'SUSPICIOUS_ACTIVITY';
             w.reasons.push('RISK_THRESHOLD');
+            riskOnly = true;
           }
         }
 
         // Step 10: ownership.
         let registration: VerifyOutcome['registration'];
+        const issueToken = async (claimCodeRequired: boolean) => {
+          const token = await createScanToken(trx, { productId: reg.productUuid, scanEventId: scanId, now, ttlMs: this.registrationTtlMs });
+          return { token: token.token, expiresAt: token.expiresAt.toISOString(), claimCodeRequired };
+        };
+        // A pre-sale service (ISSUED → SERVICED) was never sold: not open for first registration.
+        const registrable = async () =>
+          REGISTRABLE.includes(reg.status) && !(await isPreSaleService(trx, { id: reg.productUuid, status: reg.status }));
         if (w.state === undefined) {
           if (w.isOwner) w.state = 'AUTHENTIC_OWNERSHIP_VERIFIED';
           else if (reg.ownerAccountId !== null) w.state = 'AUTHENTIC_REGISTERED';
-          // A pre-sale service (ISSUED → SERVICED) was never sold: not open for first registration.
-          else if (REGISTRABLE.includes(reg.status) && !(await isPreSaleService(trx, { id: reg.productUuid, status: reg.status }))) {
+          else if (await registrable()) {
             w.state = 'AUTHENTIC_FIRST_REGISTRATION';
-            const token = await createScanToken(trx, {
-              productId: reg.productUuid,
-              scanEventId: scanId,
-              now,
-              ttlMs: this.registrationTtlMs,
-            });
-            registration = { token: token.token, expiresAt: token.expiresAt.toISOString(), claimCodeRequired: reg.hasClaimSecret };
+            registration = await issueToken(reg.hasClaimSecret);
           } else w.state = 'AUTHENTIC';
+        } else if (riskOnly && reg.ownerAccountId === null && reg.hasClaimSecret && (await registrable())) {
+          // Anomaly poisoning (strangers scanning copies) must not lock out the buyer who holds the
+          // certificate claim code: the token is offered, and only the claim code can use it.
+          registration = await issueToken(true);
+          w.reasons.push('REGISTRATION_WITH_CLAIM_CODE');
         }
 
         // Step 11: authenticator policy (never changes the state).
@@ -343,10 +353,11 @@ export class VerificationService {
     return result;
   }
 
-  // ── Steps 1–8 (read-only) ────────────────────────────────────────────────
+  // ── Steps 1–8 (read-only) ──────────────────────────────────────────────
 
   private async decide(w: Work, code: unknown, genomeReading: CleanGenome | undefined): Promise<void> {
-    // Step 1: decode base64url, unframe (length + CRC), decode the payload.
+    // Step 1: strict structural parse: base64url, unframe (length + CRC), strict payload decoding
+    // (code version 1, reserved values such as genome version / key id / issue 0).
     if (typeof code !== 'string' || code.length === 0 || code.length > MAX_CODE_CHARS) {
       return end(w, 'MALFORMED_CODE', 'MALFORMED:INPUT');
     }
@@ -359,24 +370,39 @@ export class VerificationService {
     const { payload, payloadBytes, signature } = unframed;
     w.payload = payload;
     w.payloadBytes = payloadBytes;
-
-    // Step 2: supported versions only (decodePayload already pins the code version).
+    // decodePayload already pins the code version; kept as a guard should the core decoder ever widen.
     if (payload.codeVersion !== 1) return end(w, 'MALFORMED_CODE', 'UNSUPPORTED_CODE_VERSION');
-    if (!SUPPORTED_GENOME_VERSIONS.includes(payload.genomeVersion)) return end(w, 'MALFORMED_CODE', 'UNSUPPORTED_GENOME_VERSION');
 
-    // Step 3: the key named by the code.
+    // Step 2: the key named by the code.
     const key = await this.keys.publicKey(payload.keyId);
     if (!key) return end(w, 'INVALID_SIGNATURE', 'UNKNOWN_KEY');
     w.key = key;
 
-    // Step 4: strict Ed25519 (rejects small-order / non-canonical keys before OpenSSL).
+    // Step 3: strict Ed25519 (rejects small-order / non-canonical keys before OpenSSL). Every signed
+    // field, the genome version included, is authenticated here: an edited version fails as a forgery.
     if (!verifyEd25519Node(key.publicKey, signingMessage(payloadBytes), signature)) {
       return end(w, 'INVALID_SIGNATURE', 'BAD_SIGNATURE');
     }
     w.signatureValid = true;
 
-    // Step 5: registry.
+    // Step 4: revoked-key trust. A revoked key only vouches for codes whose registry record (product,
+    // issue) was created before its cut-off; anything else it signed, registered or not, is refused.
     const reg = await this.lookup(packedOf(payload), payload.issue);
+    const keyTrusted = reg?.code ? isKeyTrustedAt(key, reg.code.createdAt) : key.status !== 'REVOKED';
+    if (!keyTrusted) {
+      w.reg = reg;
+      return end(w, 'INVALID_SIGNATURE', 'KEY_REVOKED');
+    }
+
+    // Step 5: genome version support. Validly signed by a trusted ORBES key but newer than this
+    // server understands: the server is outdated, not the code. UNKNOWN, with a server warning.
+    if (!SUPPORTED_GENOME_VERSIONS.includes(payload.genomeVersion)) {
+      w.reg = reg;
+      w.unsupportedGenomeVersion = payload.genomeVersion;
+      return end(w, 'UNKNOWN', 'UNSUPPORTED_GENOME_VERSION');
+    }
+
+    // Step 6: registry.
     if (!reg) {
       w.serviceFinding = {
         type: 'VALID_SIGNATURE_UNREGISTERED',
@@ -396,9 +422,6 @@ export class VerificationService {
       w.serviceFinding = { type: 'CODE_MISMATCH', details: { keyId: payload.keyId, issue: payload.issue } };
       return end(w, 'SUSPICIOUS_ACTIVITY', 'CODE_MISMATCH');
     }
-
-    // Step 6: a revoked key only vouches for codes recorded before its compromise.
-    if (!isKeyTrustedAt(key, reg.code.createdAt)) return end(w, 'INVALID_SIGNATURE', 'KEY_REVOKED');
     w.trusted = true;
 
     // Step 7: genome cross-check against the signed identity.
@@ -525,6 +548,12 @@ export class VerificationService {
     if (state === 'SUSPICIOUS_ACTIVITY' || w.notice) {
       this.log.warn({ scanId, state, reasons: w.reasons }, 'verification flagged');
     }
+    if (w.unsupportedGenomeVersion !== undefined) {
+      this.log.warn(
+        { scanId, genomeVersion: w.unsupportedGenomeVersion, keyId: w.payload?.keyId },
+        'validly signed code with an unsupported genome version: this server is outdated',
+      );
+    }
     return this.outcome(state, w, scanId, now, registration);
   }
 
@@ -594,6 +623,8 @@ export class VerificationService {
       };
       if (state === 'AUTHENTIC_FIRST_REGISTRATION' && registration) out.registration = registration;
     }
+    // SUSPICIOUS from the risk score alone on an unregistered product with a claim secret (step 10).
+    if (state === 'SUSPICIOUS_ACTIVITY' && registration?.claimCodeRequired === true) out.registration = registration;
     return out;
   }
 

@@ -165,6 +165,8 @@ function allowedKeys(state: string): Set<string> {
     case 'AUTHENTIC_OWNERSHIP_VERIFIED':
       return new Set([...authentic, 'notice']);
     case 'SUSPICIOUS_ACTIVITY':
+      // A registration token (claim code required) when only the scan history made it suspicious (§2.4 step 10).
+      return new Set([...BASE_KEYS, ...VERIFICATION_KEYS, ...GENOME_KEYS, ...REGISTRATION_KEYS]);
     case 'REVOKED':
       return new Set([...BASE_KEYS, ...VERIFICATION_KEYS, ...GENOME_KEYS]);
     default:
@@ -223,6 +225,10 @@ export function redactionViolations(body: unknown, secrets: Iterable<string> = [
   for (const k of keyPaths(body)) if (!allowed.has(k)) out.push(`field ${k} not allowed in ${state}`);
   if ((AUTHENTIC_STATES as readonly string[]).includes(state)) {
     for (const k of REQUIRED_AUTHENTIC) if (!(k in body)) out.push(`${state} without ${k}`);
+  }
+  const registration = (body as { registration?: { claimCodeRequired?: unknown } }).registration;
+  if (state === 'SUSPICIOUS_ACTIVITY' && registration !== undefined && registration?.claimCodeRequired !== true) {
+    out.push('SUSPICIOUS_ACTIVITY registration without a required claim code');
   }
   const text = JSON.stringify(body);
   for (const w of FORBIDDEN_WORDS) if (text.includes(w)) out.push(`internal term "${w}"`);

@@ -5,7 +5,12 @@
  * valid ORBES signature, a registry entry, a lifecycle status, a consistent
  * scan history). None claims that the physical object is genuine, because a
  * printed code can be copied. None reveals internal statuses, scores or why
- * a result was reached.
+ * a result was reached. Customer vocabulary: the object is a "piece", never a
+ * "product" (BRAND-DESIGN-SYSTEM voice).
+ *
+ * Single source: the verify app shows `title` / `message` from the response
+ * and must not keep its own copy of these sentences (including the owner's
+ * unusual-activity variant below).
  */
 import type { VerificationState } from '../db/schema.js';
 
@@ -17,7 +22,7 @@ export interface VerificationCopy {
 export const VERIFICATION_COPY: Readonly<Record<VerificationState, Readonly<VerificationCopy>>> = Object.freeze({
   AUTHENTIC: Object.freeze({
     title: 'AUTHENTIC',
-    message: 'This ORBES identity was issued and signed by ORBES and is registered to an active product.',
+    message: 'This ORBES identity was issued and signed by ORBES and is registered to an active piece.',
   }),
   AUTHENTIC_FIRST_REGISTRATION: Object.freeze({
     title: 'AUTHENTIC — FIRST REGISTRATION',

@@ -255,11 +255,14 @@ networks:
   # Caddy's network with the outside world (published ports, ACME).
   public: {}
   # Caddy ↔ app. Internal (no route out); fixed subnet so TRUST_PROXY can name Caddy's address.
+  # Dynamic addresses (the app) come from ip_range only, so no container can ever take
+  # Caddy's fixed address, whatever the start order.
   edge:
     internal: true
     ipam:
       config:
         - subnet: ${EDGE_SUBNET:-172.30.80.0/28}
+          ip_range: ${EDGE_DYNAMIC_RANGE:-172.30.80.8/29}
   # app ↔ PostgreSQL. Internal.
   backend:
     internal: true

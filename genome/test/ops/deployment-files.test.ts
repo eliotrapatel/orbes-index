@@ -99,7 +99,7 @@ describe('Dockerfile, docker-compose.yml, .dockerignore', () => {
     expect(dockerfile).toMatch(/npm run build:web/);
     expect(dockerfile).toMatch(/^USER node$/m);
     // The operator CLIs ship in the runtime image (migrations, keys, console users).
-    expect(dockerfile).toMatch(/^COPY scripts\/db\.ts scripts\/keys\.ts scripts\/admin\.ts \.\/scripts\/$/m);
+    expect(dockerfile).toMatch(/^COPY scripts\/db\.ts scripts\/keys\.ts scripts\/admin\.ts scripts\/geoip-update\.ts \.\/scripts\/$/m);
     expect(dockerfile).toMatch(/^HEALTHCHECK [^\n]*\\\n\s+CMD [^\n]*\/api\/v1\/health/m);
     expect(dockerfile).toMatch(/^CMD \["node", "--import", "tsx", "src\/server\/index\.ts"\]$/m);
     // No secret ever baked into an image layer.

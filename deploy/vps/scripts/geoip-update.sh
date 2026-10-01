@@ -54,7 +54,8 @@ VOLUME="$(volume_name geoip)"
 if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then
   run docker volume create --label "com.docker.compose.project=$(project_name)" --label com.docker.compose.volume=geoip "$VOLUME" >/dev/null
 fi
-run docker run --rm --network none --user 0 -v "$VOLUME:/geo" --entrypoint chown "$IMAGE" 1000:1000 /geo
+# Ownership fix (idempotent, also in --dry-run): a fresh volume is root-owned, the updater runs as uid 1000.
+docker run --rm --network none --user 0 -v "$VOLUME:/geo" --entrypoint chown "$IMAGE" 1000:1000 /geo
 
 # The updater ships in the image when the Dockerfile copies it; otherwise mount it from this checkout.
 extra=()

@@ -29,10 +29,17 @@
 #
 # HSTS, CSP, frame and permission headers are set by the app itself: nothing
 # here adds or overrides security headers (no duplicates, no conflicts).
-
 {
 	# Admin API on the container's loopback only (used by `caddy reload` and the healthcheck).
 	admin localhost:2019
+	# Runtime log (stderr). Access lines never go here: the only access log is the
+	# filtered one of the site below (otherwise the automatic HTTP→HTTPS redirect and
+	# requests for unknown hosts would be logged unfiltered: full IPs, query strings).
+	log default {
+		output stderr
+		format json
+		exclude http.log.access
+	}
 	servers {
 		# caddy.d/edge-direct.caddy or caddy.d/edge-cloudflare.caddy
 		import caddy.d/edge-{$EDGE_MODE:direct}.caddy
@@ -110,7 +117,11 @@
 		close
 	}
 
-	header -Server
+	# No product fingerprinting (security headers come from the app, see above).
+	header {
+		-Server
+		-Via
+	}
 
 	reverse_proxy app:8080 {
 		# Exactly one entry: the client IP as Caddy determined it (see the contract above).

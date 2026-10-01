@@ -59,7 +59,7 @@ describe('the nine states', () => {
     const out = await verify(w, r.code.data);
     expect(out.state).toBe('AUTHENTIC');
     expect(out.title).toBe('AUTHENTIC');
-    expect(out.message).toBe('This ORBES identity was issued and signed by ORBES and is registered to an active product.');
+    expect(out.message).toBe('This ORBES identity was issued and signed by ORBES and is registered to an active piece.');
     expect(out.verification).toEqual({
       signature: 'VALID',
       keyId: r.code.keyId,
@@ -255,8 +255,16 @@ describe('step 1–2: decoding and versions', () => {
     expect(await reasonOf(reframe(data, { payload: (p) => void (p[1] = 0) }))).toEqual(['MALFORMED:RESERVED']);
   });
 
-  it('rejects an unsupported genome version (step 2)', async () => {
-    expect(await reasonOf(reframe(data, { payload: (p) => void (p[0] = (1 << 4) | 2) }))).toEqual(['UNSUPPORTED_GENOME_VERSION']);
+  it('a reserved genome version (0) is a structural failure', async () => {
+    expect(await reasonOf(reframe(data, { payload: (p) => void (p[0] = (1 << 4) | 0) }))).toEqual(['MALFORMED:RESERVED']);
+  });
+
+  it('a tampered genome version fails the signature: the signature is checked before version support', async () => {
+    for (const v of [2, 7, 15]) {
+      const out = await verify(w, reframe(data, { payload: (p) => void (p[0] = (1 << 4) | v) }));
+      expect(out.state).toBe('INVALID_SIGNATURE');
+      expect(await authEvent(w, out.scanId)).toMatchObject({ reasons: ['BAD_SIGNATURE'], signature_valid: false });
+    }
   });
 
   it('records the scan even when the code is unreadable', async () => {
@@ -375,13 +383,52 @@ describe('steps 3–6: keys and signatures', () => {
     await w.keys.rotate(admin, 'orbes-test-k5');
   });
 
-  it('a revoked key cannot make an unregistered identity look registered: UNKNOWN (step 5 before 6)', async () => {
+  it('a validly signed but unsupported genome version → UNKNOWN (UNSUPPORTED_GENOME_VERSION), logged as a server warning', async () => {
+    const warnings: unknown[] = [];
+    const log = { info: () => {}, error: () => {}, warn: (o: unknown) => void warnings.push(o) };
+    const svc = new VerificationService({ db: w.t.db, keys: w.keys, anomaly: w.anomaly, config: w.config, clock: w.clock.now, log });
+    const r = await issue(w);
+    const code = await signedCode(w, { serial: r.product.serial, genomeVersion: 2 });
+    const out = await svc.verify({ code }, {});
+    expect(out.state).toBe('UNKNOWN');
+    expect(Object.keys(out).sort()).toEqual(['message', 'scanId', 'state', 'title', 'verifiedAt']);
+    expect(await authEvent(w, out.scanId)).toMatchObject({ reasons: ['UNSUPPORTED_GENOME_VERSION'], signature_valid: true, code_id: null });
+    expect(warnings).toEqual([expect.objectContaining({ scanId: out.scanId, genomeVersion: 2 })]);
+    // Not a compromise alarm: the server is outdated, the code may be genuine.
+    expect((await anomalies(w)).filter((a) => a.product_id === r.product.id)).toEqual([]);
+  });
+
+  it('revoked key before the registry: a new identity signed by a revoked key → INVALID_SIGNATURE (KEY_REVOKED), no anomaly', async () => {
     const code = await signedCode(w, { serial: 66_001 });
+    const unsupported = await signedCode(w, { serial: 66_002, genomeVersion: 3 });
     const signer = await w.keys.activeSigner();
     w.clock.advance(MIN);
     await w.keys.revoke(signer.keyId, { reason: 'compromise', compromisedAt: new Date(w.clock.now().getTime() - 2 * DAY) }, admin);
-    expect((await verify(w, code)).state).toBe('UNKNOWN');
+    const out = await verify(w, code);
+    expect(out.state).toBe('INVALID_SIGNATURE');
+    expect(Object.keys(out).sort()).toEqual(['message', 'scanId', 'state', 'title', 'verifiedAt']);
+    expect(await authEvent(w, out.scanId)).toMatchObject({ reasons: ['KEY_REVOKED'], signature_valid: true, product_id: null, code_id: null });
+    // The revoked-key rule also precedes the genome-version support check.
+    const u = await verify(w, unsupported);
+    expect(u.state).toBe('INVALID_SIGNATURE');
+    expect((await authEvent(w, u.scanId)).reasons).toEqual(['KEY_REVOKED']);
+    const packed = packIdentity({ year: 2026, categoryIndex: 1, serial: 66_001 });
+    expect((await anomalies(w)).filter((a) => a.details.packedIdentity === packed)).toEqual([]);
     await w.keys.rotate(admin, 'orbes-test-k6');
+  });
+
+  it('revoked key, product whose code was recorded before the cut-off, forged nonce → SUSPICIOUS (CODE_MISMATCH)', async () => {
+    const r = await issue(w);
+    const nonce = unframeCodeData(fromBase64Url(r.code.data)).payloadBytes.slice(9, 13);
+    nonce[0] ^= 0xff;
+    const forged = await signedCode(w, { serial: r.product.serial, issue: 1, nonce });
+    w.clock.advance(HOUR);
+    await w.keys.revoke(r.code.keyId, { reason: 'compromise' }, admin);
+    expect((await verify(w, r.code.data)).state).toBe('AUTHENTIC');
+    const out = await verify(w, forged);
+    expect(out.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect((await authEvent(w, out.scanId)).reasons).toEqual(['CODE_MISMATCH']);
+    await w.keys.rotate(admin, 'orbes-test-k7');
   });
 });
 
@@ -599,23 +646,82 @@ describe('step 9: anomaly scoring and the owner notice', () => {
     expect((await anomalies(w)).filter((a) => a.product_id === r.product.id)).toEqual([]);
   });
 
-  it('a mass-copied code scanned by strangers becomes SUSPICIOUS', async () => {
+  it('a mass-copied code scanned by strangers in one place becomes SUSPICIOUS (velocity 45 ⊕ diversity 30 = 62)', async () => {
     const base = Date.parse('2026-09-01T10:00:00.000Z');
     const r = await issueActivated(w);
     const states: string[] = [];
     for (let i = 0; i < 25; i++) {
       w.clock.set(base + i * MIN);
-      states.push((await verify(w, r.code.data, { deviceHash: `stranger-${i}`, geo: { country: 'FR' } })).state);
+      states.push((await verify(w, r.code.data, { deviceHash: `stranger-${i}`, ipHash: `ip-${i}`, geo: { country: 'FR' } })).state);
     }
-    // Velocity (35) + device diversity (30) → 55 < 60 alone; no travel. Geography adds the rest.
-    expect(states.at(-1)).toBe('AUTHENTIC_FIRST_REGISTRATION');
-    for (const [i, c] of ['GB', 'DE', 'IT'].entries()) {
-      w.clock.set(base + (30 + i) * HOUR);
-      states.push((await verify(w, r.code.data, { deviceHash: `abroad-${i}`, geo: { country: c } })).state);
-    }
-    expect(states.at(-1)).toBe('SUSPICIOUS_ACTIVITY');
+    // Diversity alone (from the 13th source, 30) stays below 60; with velocity (from the 21st scan) the burst is shown.
+    expect(states.slice(0, 20).every((s) => s === 'AUTHENTIC_FIRST_REGISTRATION')).toBe(true);
+    expect(states.slice(20).every((s) => s === 'SUSPICIOUS_ACTIVITY')).toBe(true);
     const types = (await anomalies(w)).filter((a) => a.product_id === r.product.id).map((a) => a.type).sort();
-    expect(types).toEqual(['DEVICE_DIVERSITY', 'GEO_DISPERSION', 'SCAN_VELOCITY']);
+    expect(types).toEqual(['DEVICE_DIVERSITY', 'SCAN_VELOCITY']);
+  });
+
+  it('cookie-less inflation from one IP is one source: no velocity / diversity finding', async () => {
+    const base = Date.parse('2026-09-10T10:00:00.000Z');
+    const r = await issueActivated(w);
+    for (let i = 0; i < 40; i++) {
+      w.clock.set(base + i * 30_000);
+      const out = await verify(w, r.code.data, { deviceHash: `fresh-cookie-${i}`, ipHash: 'one-ip', geo: { country: 'FR' } });
+      expect(out.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    }
+    expect((await anomalies(w)).filter((a) => a.product_id === r.product.id)).toEqual([]);
+  });
+
+  describe('registration despite anomaly poisoning', () => {
+    async function poisoned(extra: Parameters<typeof issueActivated>[1], base: number) {
+      const r = await issueActivated(w, extra);
+      let last;
+      for (let i = 0; i < 22; i++) {
+        w.clock.set(base + i * MIN);
+        last = await verify(w, r.code.data, { deviceHash: `poison-${i}`, ipHash: `poison-ip-${i}`, geo: { country: 'FR' } });
+      }
+      return { r, last: last! };
+    }
+
+    it('SUSPICIOUS from the risk score alone, unregistered, with a claim secret → a registration token (claim code required)', async () => {
+      const { r, last } = await poisoned({ withClaimSecret: true }, Date.parse('2026-10-01T10:00:00.000Z'));
+      expect(last.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(last.registration).toEqual({ token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expiresAt: expect.any(String), claimCodeRequired: true });
+      expect(last.product).toBeUndefined();
+      expect(last.ownership).toBeUndefined();
+      expect((await authEvent(w, last.scanId)).reasons).toEqual(expect.arrayContaining(['RISK_THRESHOLD', 'REGISTRATION_WITH_CLAIM_CODE']));
+      // The legitimate buyer holding the certificate claim code registers.
+      const buyer = await createAccount(w);
+      const reg = await w.ownership.registerFirst(buyer, { registrationToken: last.registration!.token, claimCode: r.claimCode }, { type: 'account', id: buyer });
+      expect(reg.verified).toBe(true);
+      // Without the claim code the token is useless.
+      const again = await poisoned({ withClaimSecret: true }, Date.parse('2026-10-02T10:00:00.000Z'));
+      await expect(
+        w.ownership.registerFirst(buyer, { registrationToken: again.last.registration!.token }, { type: 'account', id: buyer }),
+      ).rejects.toMatchObject({ code: 'CLAIM_CODE_REQUIRED' });
+    });
+
+    it('no token without a claim secret', async () => {
+      const { last } = await poisoned({}, Date.parse('2026-10-03T10:00:00.000Z'));
+      expect(last.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(last.registration).toBeUndefined();
+    });
+
+    it('no token when the product is LOST, or the genome mismatches', async () => {
+      const r = await issueActivated(w, { withClaimSecret: true });
+      const owner = await createAccount(w);
+      await registerOwner(w, r, owner, r.claimCode);
+      await w.ownership.reportIncident(owner, r.product.productId, 'LOST', { type: 'account', id: owner });
+      const lost = await verify(w, r.code.data);
+      expect(lost.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(lost.registration).toBeUndefined();
+
+      const g = await issueActivated(w, { withClaimSecret: true });
+      const wrong = g.genome.glyphs.map((x) => (x + 1) % 16);
+      const out = await verify(w, { code: g.code.data, genome: { glyphs: wrong } });
+      expect(out.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(out.registration).toBeUndefined();
+    });
   });
 });
 

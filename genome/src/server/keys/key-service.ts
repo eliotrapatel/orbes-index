@@ -75,6 +75,12 @@ export interface PublicKeyInfo {
   activatedAt: string | null;
   retiredAt: string | null;
   revokedAt: string | null;
+  /**
+   * Trust cut-off of a REVOKED key, when a compromise time was given: codes recorded strictly
+   * before it stay valid (else the cut-off is `revokedAt`). Published so offline verifiers can
+   * apply the same rule as the server. The revocation reason stays internal.
+   */
+  compromisedAt: string | null;
 }
 
 export interface ActiveSigner {
@@ -560,6 +566,7 @@ function toPublicInfo(r: KeyRecord): PublicKeyInfo {
     activatedAt: r.activatedAt?.toISOString() ?? null,
     retiredAt: r.retiredAt?.toISOString() ?? null,
     revokedAt: r.revokedAt?.toISOString() ?? null,
+    compromisedAt: r.compromisedAt?.toISOString() ?? null,
   };
 }
 

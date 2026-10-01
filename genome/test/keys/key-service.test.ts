@@ -235,10 +235,12 @@ describe('KeyService', () => {
       const audit = await f.audit.list({ action: 'key.revoke' });
       expect(audit.items[0].details).toMatchObject({ keyId: 1, previousStatus: 'ACTIVE', compromisedAt: '2026-03-05T00:00:00.000Z' });
 
-      // The public list shows the revocation (status + time) but not the internal reason.
+      // The public list shows the revocation (status, time and trust cut-off) but not the internal reason:
+      // offline verifiers need compromisedAt to apply the same cut-off as the server.
       const pub = (await f.keys.listPublic())[0];
-      expect(pub).toMatchObject({ keyId: 1, status: 'REVOKED', revokedAt: '2026-03-11T10:00:00.000Z' });
-      expect(Object.keys(pub).sort()).toEqual(['activatedAt', 'alg', 'keyId', 'kid', 'publicKey', 'retiredAt', 'revokedAt', 'status']);
+      expect(pub).toMatchObject({ keyId: 1, status: 'REVOKED', revokedAt: '2026-03-11T10:00:00.000Z', compromisedAt: '2026-03-05T00:00:00.000Z' });
+      expect(Object.keys(pub).sort()).toEqual(['activatedAt', 'alg', 'compromisedAt', 'keyId', 'kid', 'publicKey', 'retiredAt', 'revokedAt', 'status']);
+      expect(JSON.stringify(pub)).not.toContain('reason');
       expect((await domainError(f.keys.activeSigner())).code).toBe('NO_ACTIVE_KEY');
     });
 

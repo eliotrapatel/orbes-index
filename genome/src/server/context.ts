@@ -109,7 +109,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
     const provider = overrides.keyProvider ?? (await createKeyProvider(config, log));
     const keys = new KeyService({ db, provider, audit, clock, log });
-    const geo = overrides.geo ?? new GeoResolver(config.geo);
+    const geo = overrides.geo ?? new GeoResolver(config.geo, { log, clock });
     const sessions = new SessionService({ db, clock, ttlHours: config.sessionTtlHours });
 
     const auth = new AuthService({ db, audit, sessions, totpKey: deriveTotpEncryptionKey(config), clock });

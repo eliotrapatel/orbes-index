@@ -38,6 +38,9 @@ describe('admin keys, revocations and audit', () => {
     const rev = await admin.post('/api/admin/keys/1/revoke', { reason: 'HSM audit finding', compromisedAt });
     expect(rev.statusCode, rev.body).toBe(200);
     expect(safeJson(rev)).toMatchObject({ keyId: 1, status: 'REVOKED', compromisedAt });
+    // Third-party verifiers get the same cut-off from the public key list.
+    const published = (safeJson(await h.client().get('/.well-known/orbes-keys.json')) as any).keys.find((k: any) => k.keyId === 1);
+    expect(published).toMatchObject({ status: 'REVOKED', compromisedAt, revokedAt: expect.any(String) });
     expect((safeJson(await h.client().post('/api/v1/verify', { code: before.code.data })) as any).state).toBe('INVALID_SIGNATURE');
     expect((await admin.post('/api/admin/keys/1/revoke', { reason: 'again' })).statusCode).toBe(409);
     expect((await admin.post('/api/admin/keys/1/revoke', { reason: 'x', compromisedAt: 'yesterday' })).statusCode).toBe(400);

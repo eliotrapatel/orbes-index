@@ -27,6 +27,7 @@ import {
 } from '../../src/core/payload.js';
 import { signEd25519 } from '../../src/server/crypto/ed25519-node.js';
 import { DEFAULT_ANOMALY_CONFIG } from '../../src/server/config.js';
+import { ANOMALY_WEIGHTS } from '../../src/server/services/anomaly-rules.js';
 import { buildVerifyInput } from '../../src/web/verify/capture.js';
 import type { VerifyInput } from '../../src/web/verify/types.js';
 import { hashSeed, Prng } from '../support/prng.js';
@@ -303,7 +304,8 @@ const alteredId: Scenario = {
     for (let bit = 0; bit < PAYLOAD_V1_LENGTH * 8; bit++) {
       const data = reframe(read, { payload: (b) => void (b[bit >> 3] ^= 0x80 >> (bit & 7)) });
       const parsed = tryDecodePayload(data.subarray(0, PAYLOAD_V1_LENGTH));
-      const want = parsed && parsed.genomeVersion === 1 ? 'INVALID_SIGNATURE' : 'MALFORMED_CODE';
+      // Strict parsing refuses some edits (MALFORMED_CODE); every other edit, the genome version included, fails Ed25519.
+      const want = parsed ? 'INVALID_SIGNATURE' : 'MALFORMED_CODE';
       expected.push(want);
       const sub = await lab.submitBytes(forger, data);
       sweep.push(sub);
@@ -312,7 +314,7 @@ const alteredId: Scenario = {
     lab.expectTrue(
       '3d',
       'every single-bit flip of the 13-byte signed payload (104 bits: versions, key id, identity, issue, day, nonce)',
-      `${tally(expected)} (MALFORMED_CODE where strict parsing or the version check refuses the edit)`,
+      `${tally(expected)} (MALFORMED_CODE where strict parsing refuses the edit)`,
       tally(sweep.map((s) => s.state ?? `HTTP ${s.status}`)),
       off === 0,
     );
@@ -339,8 +341,8 @@ const alteredGenome: Scenario = {
   key: 'altered-genome',
   title: 'Altered genome',
   setup:
-    'Starting from a genuine scan, the forger changes the signed genome-version nibble (all 15 other values); reprints the genuine 79 bytes with the 8 glyphs of another registered product; reprints them with a single glyph replaced; and sands the whole genome orbit off a genuine label.',
-  knownGaps: ['4a'],
+    'Starting from a genuine scan, the forger changes the signed genome-version nibble (all 15 other values: 0 is reserved, 2–15 are well-formed but not signed); reprints the genuine 79 bytes with the 8 glyphs of another registered product; reprints them with a single glyph replaced; and sands the whole genome orbit off a genuine label.',
+  knownGaps: [],
   knownLimits: ['4d', '4e'],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
@@ -352,16 +354,14 @@ const alteredGenome: Scenario = {
     const read = bytesOf(s0);
 
     const versions: Submission[] = [];
-    for (let v = 0; v < 16; v++) {
-      if (v === 1) continue;
+    for (let v = 2; v < 16; v++) {
       versions.push(await lab.submitBytes(forger, reframe(read, { payload: (b) => void (b[0] = (b[0] & 0xf0) | v) }), genomeOf(s0)));
     }
-    lab.expectAll('4a', 'signed genome-version nibble changed (0, 2…15), CRC recomputed', versions, 'INVALID_SIGNATURE', {
-      gap: {
-        contract: 'MALFORMED_CODE',
-        note: 'Contract §2.4 step 2 rejects unsupported versions (and payload parsing rejects 0) before the signature check, so the public result is MALFORMED_CODE (“UNREADABLE CODE — scan it again”) instead of INVALID_SIGNATURE. Never authentic; only the wording differs.',
-      },
+    lab.expectAll('4a', 'signed genome-version nibble changed (2…15), CRC recomputed', versions, 'INVALID_SIGNATURE', {
+      note: 'Contract §2.4 verifies the signature before the genome-version support check: an edited version is a forgery (INVALID SIGNATURE), not an unreadable code.',
     });
+    const v0 = await lab.submitBytes(forger, reframe(read, { payload: (b) => void (b[0] = b[0] & 0xf0) }), genomeOf(s0));
+    await lab.expectState('4h', 'genome-version nibble 0 (reserved), CRC recomputed', v0, 'MALFORMED_CODE', { reason: 'MALFORMED:RESERVED' });
 
     const swapped = await lab.forgeArtifact('glyphs-of-other', read, other.genome.glyphs);
     const diff = glyphDiff(p.genome.glyphs, other.genome.glyphs);
@@ -485,7 +485,7 @@ const corrupted: Scenario = {
       'MALFORMED_CODE ×3, each recorded as a scan',
       `${tally(undecodable.map((r) => r.state ?? `HTTP ${r.status}`))}; ${m1 - m0} scan events`,
       undecodable.every((r) => r.state === 'MALFORMED_CODE' && r.violations.length === 0) && m1 - m0 === 3,
-      'Since the verify route accepts any string up to 1024 characters (schemas.ts verifyBody), these are recorded MALFORMED_CODE scans, not 400s. docs/API.md (verify request rules) still documents 400 VALIDATION_FAILED for them.',
+      'The verify route accepts any string up to 1024 characters (schemas.ts verifyBody); contract §2.4 step 1 turns every decode failure into a recorded MALFORMED_CODE scan (docs/API.md, verify request rules).',
     );
     // Requests outside the API schema (a code over 1024 characters, a non-string code) are refused unread.
     const n0 = await lab.scanEventCount();
@@ -621,8 +621,8 @@ const highRisk: Scenario = {
   key: 'high-risk',
   title: 'High-risk scan patterns',
   setup:
-    'Canonical journey: France 10:00 → Japan 10:02 → USA 10:03 (the edge reports the country only). Velocity burst on another ring: 30 scans in 15 minutes by 15 phones in one city (Paris, from 10:30), with the default thresholds and again in a second world whose operator lowered ANOMALY_SUSPICIOUS_THRESHOLD to 50.',
-  knownGaps: ['9f'],
+    'Canonical journey: France 10:00 → Japan 10:02 → USA 10:03 (the edge reports the country only). Velocity burst on another ring: 30 scans in 15 minutes by 15 phones (15 addresses) in one city (Paris, from 10:30), with the default thresholds and again in a second world whose operator lowered ANOMALY_SUSPICIOUS_THRESHOLD to 50. Source counting: 40 scans in 20 minutes from one address by a client that drops its cookie every time (12:00). Anomaly poisoning: the same burst on a ring shipped with a claim code, then its buyer scans and registers with the certificate claim code (13:00).',
+  knownGaps: [],
   knownLimits: [],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
@@ -653,16 +653,50 @@ const highRisk: Scenario = {
     const scans = await burst(lab, art, 30, 15);
     lab.expectAll('9e', 'velocity burst, scans 1–20 (thresholds not yet crossed)', scans.slice(0, 20), 'AUTHENTIC_FIRST_REGISTRATION');
     const w = DEFAULT_ANOMALY_CONFIG;
-    const combined = Math.round(100 * (1 - (1 - 0.35) * (1 - 0.3)));
-    lab.expectAll('9f', `velocity burst, scans 21–30 (> ${w.velocityMaxScans} scans / ${w.velocityWindowMin} min, > ${w.deviceMax} devices), default thresholds`, scans.slice(20), 'SUSPICIOUS_ACTIVITY', {
-      gap: {
-        contract: 'AUTHENTIC_FIRST_REGISTRATION',
-        note: `SCAN_VELOCITY (35) and DEVICE_DIVERSITY (30) combine to ${combined} < suspiciousThreshold ${w.suspiciousThreshold}: with the contract defaults a burst confined to one place is recorded (MEDIUM anomalies) but never shown as SUSPICIOUS; it needs a geographic signal or a lower threshold.`,
-      },
+    const vw = ANOMALY_WEIGHTS.SCAN_VELOCITY.weight;
+    const dw = ANOMALY_WEIGHTS.DEVICE_DIVERSITY.weight;
+    const combined = Math.round(100 * (1 - (1 - vw / 100) * (1 - dw / 100)));
+    lab.expectAll('9f', `velocity burst, scans 21–30 (> ${w.velocityMaxScans} scans / ${w.velocityWindowMin} min, > ${w.deviceMax} sources), default thresholds`, scans.slice(20), 'SUSPICIOUS_ACTIVITY', {
+      note: `SCAN_VELOCITY (${vw}) ⊕ DEVICE_DIVERSITY (${dw}) = ${combined} ≥ suspiciousThreshold ${w.suspiciousThreshold}: a burst confined to one place is shown without a geographic signal.`,
     });
     const last = await lab.authEvent(scans[29].scanId);
-    lab.expectTrue('9g', 'internal risk score of the last burst scan', `${combined} (0.35 ⊕ 0.30)`, String(last?.risk_score), last?.risk_score === combined);
+    lab.expectTrue('9g', 'internal risk score of the last burst scan', `${combined} (${vw / 100} ⊕ ${dw / 100})`, String(last?.risk_score), last?.risk_score === combined);
     await lab.expectAnomalies('9h', 'burst anomalies recorded for review', p, ['SCAN_VELOCITY', 'DEVICE_DIVERSITY']);
+
+    // One address, a fresh device cookie on every request: one source (SEC-7), not 40 devices.
+    const inflated = await lab.issue({ activate: true });
+    const artI = await lab.artifact(inflated);
+    const cookieless = lab.device('cookie-dropper', PLACES.paris, { preset: 'clean' });
+    lab.at('2026-06-01T12:00:00Z');
+    const flood: Scan[] = [];
+    for (let i = 0; i < 40; i++) {
+      cookieless.client.cookies.clear();
+      flood.push(await lab.scan(cookieless, artI));
+      lab.advance(30_000);
+    }
+    lab.expectAll('9j', '40 scans in 20 min from one address, cookie dropped every time', flood, 'AUTHENTIC_FIRST_REGISTRATION', {
+      note: 'Anomaly rules count distinct sources (IP pseudonym, else device, else session): cookie-less inflation from one address is one source.',
+    });
+    await lab.expectAnomalies('9k', 'no velocity / diversity finding from one source', inflated, []);
+
+    // Anomaly poisoning: strangers burst-scan copies of a ring shipped with a claim code; its buyer is not locked out.
+    const claimed = await lab.issue({ activate: true, claim: true });
+    const artC = await lab.artifact(claimed);
+    const buyer = (await lab.customer('Burst buyer', PLACES.paris)).device;
+    lab.at('2026-06-01T13:00:00Z');
+    await burst(lab, artC, 25, 15);
+    const sb = await lab.scan(buyer, artC);
+    await lab.expectState('9l', 'the buyer scans during the burst (claim-code product, unregistered)', sb, 'SUSPICIOUS_ACTIVITY', { reason: 'REGISTRATION_WITH_CLAIM_CODE' });
+    const reg = sb.body.registration;
+    const regStatus = reg ? await lab.register(buyer, sb, claimed.claimCode) : 0;
+    lab.expectTrue(
+      '9m',
+      'registration still offered, claim code required; the buyer registers with the certificate claim code',
+      'token + claimCodeRequired, HTTP 201',
+      reg ? `token ${String(reg.token).length} chars, claimCodeRequired ${reg.claimCodeRequired}, HTTP ${regStatus}` : 'no token',
+      reg?.claimCodeRequired === true && regStatus === 201,
+      'When only the scan history makes a scan SUSPICIOUS, an unregistered product with a claim code still gets a registration token: copies cannot lock out the buyer holding the certificate claim code.',
+    );
 
     const strict = await lab.spawn({ scenario: `${lab.scenario}/strict`, label: 'threshold 50', anomaly: { suspiciousThreshold: 50 } });
     strict.at('2026-06-01T09:00:00Z');
@@ -699,7 +733,7 @@ const keys: Scenario = {
   title: 'Keys, key compromise and forged codes',
   setup:
     'Products are issued under key 1 at 09:00 and 10:00. Forgeries: an unknown key id; a code signed by the forger’s own (unregistered) key; codes signed with the REAL key outside issuance (simulated theft) for an unregistered identity and for an existing product with a new nonce; 100 + 100 seeded random codes. At 11:00 the compromise is discovered: the admin rotates to key 2 and revokes key 1 with compromise time 09:30.',
-  knownGaps: ['10l'],
+  knownGaps: [],
   knownLimits: [],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
@@ -765,10 +799,8 @@ const keys: Scenario = {
     const lgPayload = encodePayload({ ...base, identity: lateGhost, nonce: Uint8Array.of(7, 7, 7, 7) });
     const lgCode = frameCodeData(lgPayload, await lab.signWithKey(1, signingMessage(lgPayload)));
     await lab.expectState('10l', 'new forgery signed by the revoked key 1, unregistered identity', await lab.submitBytes(forger, lgCode), 'INVALID_SIGNATURE', {
-      gap: {
-        contract: 'UNKNOWN',
-        note: 'CRYPTOGRAPHY §5.1 and THREAT-MODEL G say anything else signed by a revoked key is INVALID SIGNATURE, but contract §2.4 runs the registry lookup (step 5, UNKNOWN + CRITICAL anomaly) before the revoked-key rule (step 6). Not authentic either way.',
-      },
+      reason: 'KEY_REVOKED',
+      note: 'Contract §2.4 applies the revoked-key rule (step 4) before the registry (step 6): without a registry record older than the cut-off, anything signed by a revoked key is refused.',
     });
     const twin2Payload = encodePayload({ ...base, nonce: Uint8Array.of(1, 1, 1, 1) });
     await lab.expectState('10m', 'new forgery signed by the revoked key 1, existing identity', await lab.submitBytes(forger, frameCodeData(twin2Payload, await lab.signWithKey(1, signingMessage(twin2Payload)))), 'NOT_AUTHENTIC', { reason: 'CODE_MISMATCH' });

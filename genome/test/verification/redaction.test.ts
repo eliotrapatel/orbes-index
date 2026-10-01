@@ -8,7 +8,7 @@ import { toBase64Url } from '../../src/core/bytes.js';
 import { encodePayload, frameCodeData, signingMessage } from '../../src/core/payload.js';
 import { DEFAULT_ANOMALY_CONFIG } from '../../src/server/config.js';
 import { PRODUCT_STATUSES, type VerificationState } from '../../src/server/db/schema.js';
-import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
+import { UNUSUAL_ACTIVITY_OWNER_COPY, VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import type { VerifyOutcome } from '../../src/server/services/verification.js';
 import { admin, createAccount, createWorld, issue, issueActivated, reframe, registerOwner, verify, type World } from './world.js';
 
@@ -155,8 +155,28 @@ describe('public response redaction', () => {
       expect(text).not.toMatch(/genuine|real product|guarantee|physical|counterfeit|stolen|lost|risk|score|anomal/i);
     }
     expect(VERIFICATION_COPY.AUTHENTIC.message).toBe(
-      'This ORBES identity was issued and signed by ORBES and is registered to an active product.',
+      'This ORBES identity was issued and signed by ORBES and is registered to an active piece.',
     );
+    // Customer vocabulary: the object is a "piece", never a "product".
+    for (const { message } of Object.values(VERIFICATION_COPY)) expect(message).not.toMatch(/\bproducts?\b/i);
+    expect(UNUSUAL_ACTIVITY_OWNER_COPY.message).not.toMatch(/\bproducts?\b/i);
+  });
+
+  it('SUSPICIOUS from the risk score alone with a claim secret adds only `registration` (claim code required)', async () => {
+    const r = await issueActivated(w, { withClaimSecret: true });
+    const t0 = w.clock.now().getTime();
+    let out: VerifyOutcome | undefined;
+    for (let i = 0; i < 22; i++) {
+      w.clock.set(t0 + i * 60_000);
+      out = await verify(w, r.code.data, { deviceHash: `burst-${i}`, ipHash: `burst-ip-${i}`, geo: { country: 'FR' } });
+    }
+    w.clock.set(t0);
+    expect(out!.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(keyPaths(out)).toEqual(
+      sorted(EXPECTED_KEYS.SUSPICIOUS_ACTIVITY, ['registration', 'registration.claimCodeRequired', 'registration.expiresAt', 'registration.token']),
+    );
+    expect(out!.registration?.claimCodeRequired).toBe(true);
+    assertNoLeak(out!, [r.product.id, r.claimCode!, 'burst-21', 'burst-ip-21']);
   });
 
   it('threshold values never appear as numbers in any body', () => {

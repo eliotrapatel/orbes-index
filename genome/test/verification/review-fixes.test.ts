@@ -29,3 +29,24 @@ describe('public product fields agree with the registry views', () => {
     expect(out.product?.collection).toBe('ZENITH');
   });
 });
+
+describe('authentication_events.authenticators default matches what the service writes', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await createWorld();
+  });
+  afterAll(() => w.close());
+
+  it("the column default is the object form '{}' (the service always writes an object)", async () => {
+    const out = await verify(w, 'not a code');
+    const written = await w.t.db.selectFrom('authentication_events').select('authenticators').where('scan_event_id', '=', out.scanId).executeTakeFirstOrThrow();
+    expect(written.authenticators).toEqual({ policy: null, results: [] });
+    const row = await w.t.db
+      .insertInto('authentication_events')
+      .values({ scan_event_id: out.scanId, signature_valid: false, genome_check: 'NOT_PROVIDED', state: 'MALFORMED_CODE', reasons: [], risk_score: 0 })
+      .returning('authenticators')
+      .executeTakeFirstOrThrow();
+    expect(row.authenticators).toEqual({});
+    expect(Array.isArray(row.authenticators)).toBe(false);
+  });
+});

@@ -42,6 +42,16 @@ describe('redactionViolations', () => {
     expect(redactionViolations(noOwnership)).toContain('AUTHENTIC without ownership');
   });
 
+  it('allows a registration block on SUSPICIOUS_ACTIVITY only when the claim code is required', () => {
+    const registration = { token: 't'.repeat(43), expiresAt: '2026-06-01T10:15:00.000Z', claimCodeRequired: true };
+    const susp = { ...base, state: 'SUSPICIOUS_ACTIVITY', genome: authentic.genome, verification: authentic.verification };
+    expect(redactionViolations({ ...susp, registration })).toEqual([]);
+    expect(redactionViolations({ ...susp, registration: { ...registration, claimCodeRequired: false } })).toContain(
+      'SUSPICIOUS_ACTIVITY registration without a required claim code',
+    );
+    expect(redactionViolations({ ...base, state: 'REVOKED', registration }).join()).toMatch(/field registration not allowed/);
+  });
+
   it('flags internal vocabulary, raw statuses and secrets inside values', () => {
     expect(redactionViolations({ ...base, message: 'risk 55 below threshold' }).join()).toMatch(/risk.*threshold/s);
     expect(redactionViolations({ ...base, message: 'IMPOSSIBLE_TRAVEL' }).join()).toMatch(/IMPOSSIBLE_TRAVEL/);

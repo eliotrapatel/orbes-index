@@ -76,7 +76,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json ./
 COPY src/core ./src/core
 COPY src/server ./src/server
-COPY scripts/db.ts scripts/keys.ts scripts/admin.ts ./scripts/
+COPY scripts/db.ts scripts/keys.ts scripts/admin.ts scripts/geoip-update.ts ./scripts/
 COPY --from=web /app/dist/web ./dist/web
 
 USER node
