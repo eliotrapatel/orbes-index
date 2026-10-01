@@ -73,6 +73,8 @@ export interface ChainVerification {
 const ACTION_RE = /^[A-Za-z][A-Za-z0-9_]*(?:[.:][A-Za-z0-9_-]+)*$/;
 const MAX_ACTION = 200;
 const MAX_FIELD = 500;
+// Audit details describe a change; they are not a document store. API bodies are capped at 16 KB.
+const MAX_DETAILS_BYTES = 64 * 1024;
 
 // ── Canonical JSON ─────────────────────────────────────────────────────────
 
@@ -219,6 +221,7 @@ export class AuditService {
       ipHash: optionalText(actor.ipHash, 'ip hash'),
     };
     const detailsText = jsonText(details);
+    if (Buffer.byteLength(detailsText, 'utf8') > MAX_DETAILS_BYTES) throw validationError('Audit details are too large.');
 
     return inTransaction(trx ?? this.db, async (tx) => {
       await advisoryXactLock(tx, ADVISORY_LOCK.AUDIT_CHAIN);

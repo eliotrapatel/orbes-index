@@ -25,9 +25,9 @@ const PRODUCT_STATUS = `'ISSUED','ACTIVATED','REGISTERED','OWNED','TRANSFERRED',
 const VERIFICATION_STATE = `'AUTHENTIC','AUTHENTIC_FIRST_REGISTRATION','AUTHENTIC_REGISTERED','AUTHENTIC_OWNERSHIP_VERIFIED','SUSPICIOUS_ACTIVITY','REVOKED','UNKNOWN','INVALID_SIGNATURE','MALFORMED_CODE'`;
 const ACTOR_TYPE = `'admin','account','system'`;
 
-// Restrict-violation SQLSTATE for every guard below, so callers can tell a
-// blocked mutation apart from ordinary constraint failures.
-const GUARD_ERRCODE = `'23001'`;
+// Custom SQLSTATE for every guard below, so callers can tell a blocked
+// mutation apart from constraint failures (23001 is taken by FK ON DELETE RESTRICT).
+const GUARD_ERRCODE = `'OR001'`;
 
 export const UP: readonly string[] = [
   // ── Trigger functions ────────────────────────────────────────────────────

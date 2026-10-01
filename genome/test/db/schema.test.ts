@@ -178,8 +178,9 @@ describe('schema', () => {
   it('foreign keys restrict deletes', async () => {
     const { model } = await seedProduct(t.db);
     const err = await t.db.deleteFrom('models').where('id', '=', model.id).execute().catch((e: unknown) => e);
-    expect(pgError(err)).toMatchObject({ code: '23503' });
+    expect(pgError(err)).toMatchObject({ code: '23001', table: 'products' });
     expect(isForeignKeyViolation(err)).toBe(true);
+    expect(isGuardViolation(err)).toBe(false);
   });
 
   it('keys: single ACTIVE key, 32-byte public keys, immutable key material', async () => {

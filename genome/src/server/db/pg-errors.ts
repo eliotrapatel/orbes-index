@@ -8,8 +8,10 @@ export const PG_ERROR = Object.freeze({
   FOREIGN_KEY_VIOLATION: '23503',
   CHECK_VIOLATION: '23514',
   NOT_NULL_VIOLATION: '23502',
-  /** Raised by the schema's guard triggers (append-only audit log, immutable columns). */
+  /** Raised for ON DELETE RESTRICT foreign keys. */
   RESTRICT_VIOLATION: '23001',
+  /** Custom: raised by the schema's guard triggers (append-only audit log, immutable columns). */
+  GUARD_VIOLATION: 'OR001',
   SERIALIZATION_FAILURE: '40001',
   DEADLOCK_DETECTED: '40P01',
   RAISE_EXCEPTION: 'P0001',
@@ -40,8 +42,10 @@ function is(code: string, e: unknown, constraint?: string): boolean {
 }
 
 export const isUniqueViolation = (e: unknown, constraint?: string): boolean => is(PG_ERROR.UNIQUE_VIOLATION, e, constraint);
-export const isForeignKeyViolation = (e: unknown, constraint?: string): boolean => is(PG_ERROR.FOREIGN_KEY_VIOLATION, e, constraint);
+/** Missing referenced row (23503) or delete of a still-referenced row under ON DELETE RESTRICT (23001). */
+export const isForeignKeyViolation = (e: unknown, constraint?: string): boolean =>
+  is(PG_ERROR.FOREIGN_KEY_VIOLATION, e, constraint) || is(PG_ERROR.RESTRICT_VIOLATION, e, constraint);
 export const isCheckViolation = (e: unknown, constraint?: string): boolean => is(PG_ERROR.CHECK_VIOLATION, e, constraint);
-export const isGuardViolation = (e: unknown): boolean => is(PG_ERROR.RESTRICT_VIOLATION, e);
+export const isGuardViolation = (e: unknown): boolean => is(PG_ERROR.GUARD_VIOLATION, e);
 export const isRetryableTxError = (e: unknown): boolean =>
   is(PG_ERROR.SERIALIZATION_FAILURE, e) || is(PG_ERROR.DEADLOCK_DETECTED, e);
