@@ -9,8 +9,8 @@
 #   app trusts exactly that address (TRUST_PROXY): the client IP the app sees
 #   is the one Caddy determined, never a client-supplied X-Forwarded-For.
 # * Configuration: deploy/vps/.env (from .env.example, created by
-#   scripts/setup.sh, mode 0600, never committed). Compose reads it both for
-#   ${…} interpolation below and as the app's env_file.
+#   scripts/setup.sh, mode 0600, never committed). Compose reads it for the
+#   ${…} interpolation below; each container gets only the variables listed.
 #
 # Day-to-day commands (run from deploy/vps/, as the `orbes` user):
 #   scripts/deploy.sh                       build the current commit, roll out, smoke test, roll back on failure
@@ -85,11 +85,10 @@ services:
       context: ../../genome
     restart: unless-stopped
     init: true
-    env_file:
-      - path: .env
-        required: true
+    # No env_file: the app receives exactly these variables (nothing else from .env,
+    # e.g. no backup or GeoIP-download settings). An empty value counts as unset.
     environment:
-      # Wired by this file; the secrets and tunables come from .env.
+      # Wired by this file.
       ORBES_ENV: production
       PUBLIC_ORIGIN: https://${APP_DOMAIN:?set APP_DOMAIN in deploy/vps/.env}
       DATABASE_URL: postgres://${POSTGRES_USER:-orbes}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/vps/.env}@postgres:5432/${POSTGRES_DB:-orbes}
@@ -101,6 +100,32 @@ services:
       MIGRATE_ON_START: "true"
       GEO_MODE: ${GEO_MODE:-mmdb}
       GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-geoip.mmdb}
+      # Secrets.
+      COOKIE_SECRET: ${COOKIE_SECRET:?set COOKIE_SECRET in deploy/vps/.env}
+      IP_HASH_PEPPER: ${IP_HASH_PEPPER:?set IP_HASH_PEPPER in deploy/vps/.env}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?set KEY_ENCRYPTION_KEY in deploy/vps/.env}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Optional tunables (genome/.env.example); unset = the app's defaults.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ADMIN_REQUIRE_MFA: ${ADMIN_REQUIRE_MFA:-}
+      RATE_LIMIT_VERIFY_PER_MINUTE: ${RATE_LIMIT_VERIFY_PER_MINUTE:-}
+      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-}
+      RATE_LIMIT_ADMIN_PER_MINUTE: ${RATE_LIMIT_ADMIN_PER_MINUTE:-}
+      RATE_LIMIT_API_PER_MINUTE: ${RATE_LIMIT_API_PER_MINUTE:-}
+      SESSION_TTL_ACCOUNT_HOURS: ${SESSION_TTL_ACCOUNT_HOURS:-}
+      SESSION_TTL_ADMIN_HOURS: ${SESSION_TTL_ADMIN_HOURS:-}
+      ANOMALY_SUSPICIOUS_THRESHOLD: ${ANOMALY_SUSPICIOUS_THRESHOLD:-}
+      ANOMALY_IMPOSSIBLE_TRAVEL_KMH: ${ANOMALY_IMPOSSIBLE_TRAVEL_KMH:-}
+      ANOMALY_MIN_TRAVEL_KM: ${ANOMALY_MIN_TRAVEL_KM:-}
+      ANOMALY_VELOCITY_WINDOW_MIN: ${ANOMALY_VELOCITY_WINDOW_MIN:-}
+      ANOMALY_VELOCITY_MAX_SCANS: ${ANOMALY_VELOCITY_MAX_SCANS:-}
+      ANOMALY_VELOCITY_MIN_DEVICES: ${ANOMALY_VELOCITY_MIN_DEVICES:-}
+      ANOMALY_DEVICE_WINDOW_DAYS: ${ANOMALY_DEVICE_WINDOW_DAYS:-}
+      ANOMALY_DEVICE_MAX: ${ANOMALY_DEVICE_MAX:-}
+      ANOMALY_GEO_WINDOW_DAYS: ${ANOMALY_GEO_WINDOW_DAYS:-}
+      ANOMALY_GEO_MAX_COUNTRIES: ${ANOMALY_GEO_MAX_COUNTRIES:-}
+      ANOMALY_DECAY_DAYS: ${ANOMALY_DECAY_DAYS:-}
     depends_on:
       postgres:
         condition: service_healthy
