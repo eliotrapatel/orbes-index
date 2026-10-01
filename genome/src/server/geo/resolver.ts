@@ -1,10 +1,13 @@
 /**
  * GeoResolver (contract §2.12): coarse location of a request, from headers set
- * by the edge (Cloudflare) or by a trusted reverse proxy.
+ * by the edge (Cloudflare) or by a trusted reverse proxy, or (GEO_MODE=mmdb)
+ * from a local GeoIP database applied to the client IP the HTTP layer already
+ * computed (`request.ip`, which honours TRUST_PROXY): see mmdb.ts.
  *
  * Privacy: coordinates are rounded to 1 decimal (≈ 10 km) before they leave
- * this module, and the raw IP address is never read here. Only the peppered
- * HMAC of the IP (computed by the HTTP layer) is ever stored.
+ * this module. The raw IP address is only read in mmdb mode, in memory, for
+ * the lookup: it is never logged or returned. Only the peppered HMAC of the IP
+ * (computed by the HTTP layer) is ever stored.
  *
  * Header values are attacker-controlled unless a proxy overwrites them, which
  * is why `headers` mode is only allowed with TRUST_PROXY (enforced by config)
@@ -12,7 +15,9 @@
  * guessed. Location only feeds anomaly scoring, so a missing value is safe.
  */
 import type { AppConfig } from '../config.js';
+import type { Clock, Logger } from '../types.js';
 import { isKnownCountry } from './centroids.js';
+import { MmdbGeoDatabase } from './mmdb.js';
 
 export interface GeoInfo {
   /** ISO 3166-1 alpha-2, upper case. */
@@ -26,6 +31,16 @@ export interface GeoInfo {
 /** The part of an HTTP request the resolver reads (Fastify's `request` satisfies it). */
 export interface GeoRequest {
   headers: Record<string, string | string[] | undefined>;
+  /** Client IP as resolved by Fastify (TRUST_PROXY applied). Read only in mmdb mode. */
+  ip?: string;
+}
+
+export interface GeoResolverOptions {
+  /** Warnings about the GeoIP database (mmdb mode). Default: JSON lines on stderr. */
+  log?: Logger;
+  clock?: Clock;
+  /** Use this database instead of opening config.mmdbPath (tests). */
+  mmdb?: MmdbGeoDatabase;
 }
 
 export type GeoConfig = AppConfig['geo'];
@@ -39,9 +54,15 @@ const REGION_RE = /^[\p{L}\p{M}\p{N} .,'()\-]+$/u;
 export class GeoResolver {
   private readonly mode: GeoConfig['mode'];
   private readonly names: { country?: string; lat?: string; lon?: string; region?: string };
+  /** The GeoIP database (mmdb mode only). */
+  readonly mmdb: MmdbGeoDatabase | undefined;
 
-  constructor(config: GeoConfig) {
+  constructor(config: GeoConfig, options: GeoResolverOptions = {}) {
     this.mode = config.mode;
+    if (config.mode === 'mmdb') {
+      // config.ts requires an absolute GEO_MMDB_PATH in this mode; an empty path just means "no database".
+      this.mmdb = options.mmdb ?? new MmdbGeoDatabase({ path: config.mmdbPath ?? '', log: options.log, clock: options.clock });
+    }
     if (config.mode === 'cloudflare') this.names = CLOUDFLARE;
     else if (config.mode === 'headers') {
       this.names = {
@@ -53,7 +74,9 @@ export class GeoResolver {
   }
 
   resolve(request: GeoRequest): GeoInfo {
-    if (this.mode === 'none' || !request || typeof request !== 'object' || !request.headers) return {};
+    if (this.mode === 'none' || !request || typeof request !== 'object') return {};
+    if (this.mode === 'mmdb') return this.mmdb ? this.mmdb.lookup(request.ip) : {};
+    if (!request.headers) return {};
     const out: GeoInfo = {};
     const country = normalizeCountry(header(request, this.names.country));
     if (country) out.country = country;

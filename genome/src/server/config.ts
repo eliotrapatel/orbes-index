@@ -42,7 +42,7 @@ export interface AppConfig {
   cookieSecret: string;                 // ≥ 32 chars
   ipHashPepper: string;                 // ≥ 32 chars, HMAC key for IP / device pseudonymisation
   trustProxy: boolean | string;         // passed to Fastify
-  geo: { mode: 'none' | 'cloudflare' | 'headers'; countryHeader?: string; latHeader?: string; lonHeader?: string };
+  geo: { mode: 'none' | 'cloudflare' | 'headers' | 'mmdb'; countryHeader?: string; latHeader?: string; lonHeader?: string; mmdbPath?: string /* absolute, mmdb mode */ };
   keys: { provider: 'local' | 'memory'; dir?: string; encryptionKey?: string /* base64url 32 bytes, AES-256-GCM */ };
   bootstrapAdmin?: { email: string; password: string };
   anomaly: AnomalyConfig;
@@ -217,7 +217,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const trustProxy = parseTrustProxy(e.TRUST_PROXY, issues);
 
   // Geo.
-  const geoMode = field('GEO_MODE', z.enum(['none', 'cloudflare', 'headers']), e.GEO_MODE) ?? 'none';
+  const geoMode = field('GEO_MODE', z.enum(['none', 'cloudflare', 'headers', 'mmdb']), e.GEO_MODE) ?? 'none';
   const geo: AppConfig['geo'] = { mode: geoMode };
   const countryHeader = field('GEO_COUNTRY_HEADER', zHeaderName, e.GEO_COUNTRY_HEADER);
   const latHeader = field('GEO_LAT_HEADER', zHeaderName, e.GEO_LAT_HEADER);
@@ -232,6 +232,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (countryHeader) geo.countryHeader = countryHeader;
     if (latHeader) geo.latHeader = latHeader;
     if (lonHeader) geo.lonHeader = lonHeader;
+  }
+  // mmdb: local GeoIP database file. Its existence is NOT checked here: a missing file degrades to no geo.
+  if (geoMode === 'mmdb') {
+    const p = e.GEO_MMDB_PATH;
+    if (p === undefined) issues.push('GEO_MMDB_PATH: required when GEO_MODE=mmdb');
+    else if (!isAbsolute(p) || p.length > 4096 || p.includes('\0')) issues.push('GEO_MMDB_PATH: must be an absolute path');
+    else geo.mmdbPath = p;
   }
 
   // Keys.
@@ -371,6 +378,11 @@ export function productionIssues(c: AppConfig): string[] {
   // bucket for everybody), and a cf-* header reaching the app directly is client-forged.
   if (c.geo.mode === 'cloudflare' && c.trustProxy === false) {
     issues.push('GEO_MODE: cloudflare mode requires TRUST_PROXY in production');
+  }
+  // Production always sits behind a TLS proxy (https:// is required): without proxy trust the client IP is
+  // the proxy's own private address, so every mmdb lookup would silently find nothing.
+  if (c.geo.mode === 'mmdb' && c.trustProxy === false) {
+    issues.push('GEO_MODE: mmdb mode requires TRUST_PROXY in production');
   }
   // `true` makes the LEFT-most X-Forwarded-For entry the client IP. Proxies append, so that entry is
   // whatever the client sent: rate limits (login, claim and transfer codes) and IP pseudonyms become forgeable.

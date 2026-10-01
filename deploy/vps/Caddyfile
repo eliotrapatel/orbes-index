@@ -1,0 +1,147 @@
+# ORBES GENOME CODE: TLS edge for the verification service on the OVH VPS.
+#
+# Runs in the official caddy:2 image (deploy/vps/compose.yaml). Every {$VAR}
+# comes from deploy/vps/.env through compose and is substituted when Caddy
+# loads this file. Validate a change before deploying it:
+#
+#   docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#
+# Switches (deploy/vps/.env):
+#   APP_DOMAIN          public host name, e.g. verify.theorbes.com (no scheme)
+#   TLS_MODE            acme (default: Let's Encrypt, ZeroSSL as fallback) | internal (Caddy's
+#                       own local CA: local tests only, browsers will not trust it)
+#   ACME_EMAIL          account e-mail for the ACME CA (expiry and incident notices)
+#   EDGE_MODE           direct (default: clients connect to this VPS) | cloudflare (orange-cloud
+#                       proxy in front: Cloudflare's ranges become trusted proxies, see below)
+#   ADMIN_ALLOWED_IPS   space-separated IPs/CIDRs allowed on /admin and /api/admin
+#                       (default 0.0.0.0/0 ::/0 = no restriction; the app still enforces TOTP)
+#
+# Client IP contract with the app (TRUST_PROXY = Caddy's fixed address on the
+# internal `edge` network, set by compose):
+#   * The app receives exactly ONE X-Forwarded-For entry: {client_ip}.
+#   * EDGE_MODE=direct: no proxy is trusted, so {client_ip} is the TCP peer.
+#     Any X-Forwarded-For / X-Real-IP / CF-* header sent by a client is
+#     discarded, never forwarded: clients cannot choose the IP the app sees
+#     (rate limits, IP pseudonyms and anomaly scoring stay per real client).
+#   * EDGE_MODE=cloudflare: only peers inside Cloudflare's published ranges are
+#     trusted, and {client_ip} comes from CF-Connecting-IP. Lock the origin to
+#     those ranges as well (docs/DEPLOYMENT.md §15.11).
+#
+# HSTS, CSP, frame and permission headers are set by the app itself: nothing
+# here adds or overrides security headers (no duplicates, no conflicts).
+
+{
+	# Admin API on the container's loopback only (used by `caddy reload` and the healthcheck).
+	admin localhost:2019
+	servers {
+		import edge_{$EDGE_MODE:direct}
+	}
+}
+
+# ── Edge modes (global `servers` options) ──────────────────────────────────
+
+(edge_direct) {
+	# No trusted proxies: Caddy ignores every client-supplied X-Forwarded-* header.
+	# HTTP/3 needs UDP 443 open (compose publishes it, bootstrap-ubuntu.sh allows it in ufw).
+	protocols h1 h2 h3
+}
+
+(edge_cloudflare) {
+	protocols h1 h2 h3
+	# Cloudflare's published ranges (https://www.cloudflare.com/ips/, checked 2026-10).
+	# Re-check them when enabling this mode and at least yearly.
+	trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	client_ip_headers CF-Connecting-IP
+	trusted_proxies_strict
+}
+
+# ── TLS modes (site block) ─────────────────────────────────────────────────
+
+(tls_acme) {
+	tls {$ACME_EMAIL}
+}
+
+(tls_internal) {
+	tls internal
+}
+
+# ── Upstream header policy per edge mode (inside reverse_proxy) ────────────
+
+(upstream_direct) {
+	# Nothing in front of Caddy may vouch for geolocation: drop forged Cloudflare headers
+	# so GEO_MODE=cloudflare can never be fed by a client.
+	header_up -Cf-Connecting-Ip
+	header_up -Cf-Ipcountry
+	header_up -Cf-Iplatitude
+	header_up -Cf-Iplongitude
+	header_up -Cf-Region
+	header_up -Cf-Ipcity
+	header_up -True-Client-Ip
+}
+
+(upstream_cloudflare) {
+	# cf-* headers are kept: the peer is a trusted Cloudflare edge (trusted_proxies_strict).
+	header_up -True-Client-Ip
+}
+
+{$APP_DOMAIN} {
+	import tls_{$TLS_MODE:acme}
+
+	# Access log: JSON on stdout, without query strings, cookies, headers or full client IPs.
+	# (The app logs no client IP at all; the masked prefix here is enough to triage abuse.)
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp \?.*$ ""
+				request>headers delete
+				resp_headers delete
+				request>tls delete
+				request>remote_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+				request>client_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+			}
+		}
+	}
+
+	# The app accepts JSON bodies up to 16 KB; anything far larger is refused at the edge.
+	request_body {
+		max_size 64KB
+	}
+
+	encode zstd gzip
+
+	# Optional allowlist for the admin console and the admin API (off by default).
+	@admin_blocked {
+		path /admin /admin/* /api/admin /api/admin/*
+		not client_ip {$ADMIN_ALLOWED_IPS:0.0.0.0/0 ::/0}
+	}
+	respond @admin_blocked "Forbidden" 403 {
+		close
+	}
+
+	header -Server
+
+	reverse_proxy app:8080 {
+		# Exactly one entry: the client IP as Caddy determined it (see the contract above).
+		header_up X-Forwarded-For {client_ip}
+		header_up -X-Real-Ip
+		header_up -Forwarded
+		import upstream_{$EDGE_MODE:direct}
+
+		# Ride out an app restart (deploy, rollback) instead of answering 502 at once.
+		lb_try_duration 15s
+		lb_try_interval 250ms
+		transport http {
+			dial_timeout 5s
+			# The app answers within 30 s (requestTimeout); give it a little more.
+			response_header_timeout 35s
+		}
+	}
+}
