@@ -180,7 +180,10 @@ export function primitiveToPathData(p: Primitive): string {
   }
 }
 
-/** True when the outline has a hole (it then carries an explicit evenodd rule). */
+/**
+ * True when the outline has a hole. Such paths also carry an explicit evenodd
+ * rule, so the hole survives editors that re-orient subpaths.
+ */
 function hasHole(p: Primitive): boolean {
   if (p.kind === 'ring') return p.r - p.width / 2 > 0;
   if (p.kind === 'arc') return p.end - p.start >= TAU - FULL_TURN_EPSILON && p.r - p.width / 2 > 0;
@@ -251,7 +254,7 @@ export function primitivesToSvg(primitives: readonly Primitive[], viewBox: ViewB
     if (tone === 0) continue;
     if (p.layer !== openLayer) {
       if (openLayer !== null) lines.push('</g>');
-      lines.push(`<g data-layer="${p.layer}">`);
+      lines.push(`<g data-layer="${escapeXml(p.layer)}">`);
       openLayer = p.layer;
     }
     const fill = tone === 1 ? '' : toneFill(tone, ink, paper);

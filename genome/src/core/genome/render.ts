@@ -3,7 +3,7 @@
  *
  * Two presentations of the same 8 glyphs:
  *   - 'row'   : the glyphs in reading order, separated by small centred points,
- *               the plain-text equivalent of "○ · ◐ · ◑ · …";
+ *               as the glyph hints read in plain text ("○ · ◠ · ◝ · …");
  *   - 'orbit' : the glyphs on their orbit around the ORBES SEAL, in exactly the
  *               proportions and positions they occupy in a CODE-01 artifact
  *               (glyph 0 at north, then clockwise every 45°).

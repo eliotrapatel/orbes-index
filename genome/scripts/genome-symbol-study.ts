@@ -51,7 +51,7 @@ const SPECIMEN_PATH = resolve(ROOT, 'docs/assets/genome-01-vocabulary.svg');
 
 /** Glyph diameters studied, in pixels. */
 const SIZES = [8, 10, 12, 16, 24];
-/** Diameters the selection optimises for: about 3 px per CODE-01 cell, the decodability limit of the data rings. */
+/** Diameters the selection optimises for: about 3 px per CODE-01 cell, the usual lower limit for sampling a cell code. */
 const SELECTION_SIZES = [10, 12];
 const BLURS = [0.6, 0.8, 1.0];
 const ROTATIONS_DEG = [-5, 0, 5];
@@ -62,7 +62,8 @@ const PATCH_SCALE = 1.3;
 const BLUR_PAD = 4;
 
 const MONTE_CARLO_TRIALS = 200;
-const MONTE_CARLO_NOISE = 0.06;
+/** Sensor noise σ relative to full contrast: a dim phone frame, then a stress level. */
+const MONTE_CARLO_NOISE = [0.06, 0.15];
 const MONTE_CARLO_SEED = 0x0b5e_5eed;
 
 type Patch = Float64Array;
@@ -254,6 +255,7 @@ function gaussian(rand: () => number): number {
 
 interface Classification {
   size: number;
+  noise: number;
   accuracy: number;
   confusions: Map<string, number>;
 }
@@ -263,7 +265,7 @@ interface Classification {
  * each trial applies a random rotation (±5°), offset (±0.5 px), blur
  * (σ 0.6–1.0), contrast (0.5–1.0) and additive Gaussian noise.
  */
-function classify(glyphs: readonly GlyphCandidate[], size: number, rand: () => number): Classification {
+function classify(glyphs: readonly GlyphCandidate[], size: number, noise: number, rand: () => number): Classification {
   const side = patchSide(size) + 2 * BLUR_PAD;
   const templates = glyphs.map((g) => normalise(blurAndCrop(renderInk(g, size, JITTERS[UPRIGHT]), side, 0.8)));
   const confusions = new Map<string, number>();
@@ -273,7 +275,7 @@ function classify(glyphs: readonly GlyphCandidate[], size: number, rand: () => n
       const jitter = { rotation: (rand() * 2 - 1) * 5, dx: rand() - 0.5, dy: rand() - 0.5 };
       const contrast = 0.5 + 0.5 * rand();
       const observed = blurAndCrop(renderInk(glyph, size, jitter), side, 0.6 + 0.4 * rand()).map(
-        (v) => contrast * v + MONTE_CARLO_NOISE * gaussian(rand),
+        (v) => contrast * v + noise * gaussian(rand),
       );
       const n = normalise(observed);
       let guess = 0;
@@ -289,7 +291,7 @@ function classify(glyphs: readonly GlyphCandidate[], size: number, rand: () => n
       }
     });
   }
-  return { size, accuracy: correct / (MONTE_CARLO_TRIALS * glyphs.length), confusions };
+  return { size, noise, accuracy: correct / (MONTE_CARLO_TRIALS * glyphs.length), confusions };
 }
 
 // ── Report ─────────────────────────────────────────────────────────────────
@@ -374,13 +376,14 @@ function writeReport(
     '  jittered render of the other, over every blur, in both directions. 0 means indistinguishable, 1 means',
     '  uncorrelated, 2 means inverted.',
     `- **Selection sizes.** ${SELECTION_SIZES.join(' and ')} px glyphs: a CODE-01 glyph spans ${2 * CODE01.genome.glyphRadius} cells, so this is`,
-    `  ${SELECTION_SIZES.map(cellPx).join('–')} px per cell, the smallest scale at which the data rings themselves stay decodable.`,
+    `  ${SELECTION_SIZES.map(cellPx).join('–')} px per cell, around the usual lower limit (≈ 3 px per cell) for sampling a printed cell code.`,
     '- **Selection.** Over every systematic structure (s symmetric forms + f oriented families × 4 = 16), maximise the',
     '  minimum pairwise dissimilarity at the selection sizes (each pair scored at its worse size). Ties are broken',
     '  leximin: then the second closest pair, and so on.',
     `- **Validation.** Monte-Carlo nearest-template classification of the frozen set: ${MONTE_CARLO_TRIALS} trials per glyph`,
     `  and size with random rotation (±5°), offset (±0.5 px), blur (σ 0.6–1.0 px), contrast (50–100 %) and additive`,
-    `  Gaussian noise (σ = ${MONTE_CARLO_NOISE} of full contrast). Templates are upright renders at σ = 0.8 px.`,
+    `  Gaussian noise (σ = ${MONTE_CARLO_NOISE.join(' or ')} of full contrast: a dim phone frame, then a stress level).`,
+    '  Templates are upright renders at σ = 0.8 px.',
     '',
     '## Candidates',
     '',
@@ -454,14 +457,14 @@ function writeReport(
     push(`| **${row}** | ${frozen.map((b) => (a === b ? '·' : reference[a][b].toFixed(2))).join(' | ')} |`);
   });
 
-  push('', '## Monte-Carlo validation', '', '| glyph diameter | accuracy | most frequent confusions |', '|---:|---:|---|');
+  push('', '## Monte-Carlo validation', '', '| glyph diameter | noise σ | accuracy | most frequent confusions |', '|---:|---:|---:|---|');
   for (const c of classifications) {
     const top = [...c.confusions.entries()]
       .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
       .slice(0, 3)
       .map(([k, n]) => `${k} (${n})`)
       .join(', ');
-    push(`| ${c.size} px | ${pct(c.accuracy)} | ${top || 'none'} |`);
+    push(`| ${c.size} px | ${c.noise} | ${pct(c.accuracy)} | ${top || 'none'} |`);
   }
 
   const withOrb = ranking.find((r) => r.members.includes(indexOf('ORB')))!;
@@ -600,15 +603,17 @@ function specimenSvg(): string {
     }),
   );
   const row = genomeLayout(example, 'row');
-  const rowR = 9;
-  const rowWidth = (row.viewBox.w / row.glyphRadius) * rowR;
-  parts.push(placedLayout(row, M - (row.viewBox.x / row.glyphRadius) * rowR, exampleTop + 62, rowR));
+  const rowR = 11;
   const orbit = genomeLayout(example, 'orbit');
-  const orbitR = 7;
-  const orbitCentre = M + rowWidth + (W - 2 * M - rowWidth) / 2;
-  parts.push(placedLayout(orbit, orbitCentre, exampleTop + 62, orbitR));
+  const orbitR = 8;
+  const orbitExtent = ((CODE01.genome.orbitRadius + CODE01.genome.glyphRadius) / CODE01.genome.glyphRadius) * orbitR;
+  const exampleCentreY = exampleTop + 76;
+  // Row: first glyph edge on the left margin. Orbit: outer glyph edge on the right margin.
   parts.push(
-    text(M, exampleTop + 112, example.glyphs.map((g) => GENOME01_GLYPHS[g].hint).join(' · '), 9, { tracking: 0.1 }),
+    placedLayout(row, M + rowR, exampleCentreY, rowR),
+    placedLayout(orbit, W - M - orbitExtent, exampleCentreY, orbitR),
+  );
+  parts.push(
     rule(M, W - M, H - 62, 0.5),
     text(M, H - 44, 'GENOME = PERMUTE(IDENTITY) · PUBLIC BIJECTION · AUTHENTICITY BY ED25519 SIGNATURE', 5.5, {
       tracking: 0.36,
@@ -640,7 +645,7 @@ function main(): void {
   const ranking = selectVocabulary(selectionDistance);
   const frozen = GENOME01_GLYPHS.map((g) => GENOME_GLYPH_CANDIDATES.findIndex((c) => c.id === g.id));
   const rand = mulberry32(MONTE_CARLO_SEED);
-  const classifications = SIZES.map((size) => classify(GENOME01_GLYPHS, size, rand));
+  const classifications = MONTE_CARLO_NOISE.flatMap((noise) => SIZES.map((size) => classify(GENOME01_GLYPHS, size, noise, rand)));
 
   mkdirSync(dirname(REPORT_PATH), { recursive: true });
   mkdirSync(dirname(SPECIMEN_PATH), { recursive: true });
@@ -650,7 +655,7 @@ function main(): void {
   const winner = ranking[0];
   console.log(`study winner (${winner.structure}, min d ${f3(winner.sorted[0])}):`);
   console.log('  ' + winner.members.map((i) => GENOME_GLYPH_CANDIDATES[i].id).join(' '));
-  for (const c of classifications) console.log(`  classification ${c.size} px: ${pct(c.accuracy)}`);
+  for (const c of classifications) console.log(`  classification ${c.size} px, noise ${c.noise}: ${pct(c.accuracy)}`);
   console.log(`wrote ${REPORT_PATH}\nwrote ${SPECIMEN_PATH}\n(${((performance.now() - started) / 1000).toFixed(1)} s)`);
 }
 

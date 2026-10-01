@@ -10,9 +10,12 @@ rotation and sub-pixel misregistration? The vocabulary must also read as one sys
 
 ## Method
 
-- **Candidates.** 39 glyphs (`GENOME_GLYPH_CANDIDATES` in `src/core/genome/vocabulary.ts`):
-  rotation-invariant forms plus oriented families of four. All ink lies within the glyph radius R; every stroke,
-  dot diameter and crescent thickness is at least 0.22 R. Orientations are absolute (relative to code north).
+- **Candidates.** 43 glyphs (`GENOME_GLYPH_CANDIDATES` in `src/core/genome/vocabulary.ts`):
+  rotation-invariant forms plus oriented families of four, all drawn with one orbit stroke (0.26 R). All ink lies
+  within the glyph radius R; every stroke, dot diameter and crescent thickness is at least 0.22 R. Orientations
+  are absolute (relative to code north). Figures made of isolated off-centre dots (a lone satellite, a binary
+  pair) were excluded before measurement: their orientation can only be read against the glyph grid and they
+  are confused with the separator points of a genome.
 - **Rendering.** resvg rasterises each candidate at glyph diameters of 8, 10, 12, 16, 24 px, centred in a patch
   1.3× the diameter, under 27 jitters: rotation -5° / 0° / 5° ×
   offsets -0.5 / 0 / 0.5 px on each axis.
@@ -21,152 +24,180 @@ rotation and sub-pixel misregistration? The vocabulary must also read as one sys
   matter), taken at the worst case: the highest correlation between the upright reference of one glyph and any
   jittered render of the other, over every blur, in both directions. 0 means indistinguishable, 1 means
   uncorrelated, 2 means inverted.
-- **Selection.** Among systematic structures (4 symmetric forms + 3 oriented families × 4 orientations, or 4
-  oriented families × 4), maximise the minimum pairwise dissimilarity at 10 and 12 px (each pair
-  scored by its worse size). Ties are broken leximin: then the second closest pair, and so on.
+- **Selection sizes.** 10 and 12 px glyphs: a CODE-01 glyph spans 3.5 cells, so this is
+  2.9–3.4 px per cell, around the usual lower limit (≈ 3 px per cell) for sampling a printed cell code.
+- **Selection.** Over every systematic structure (s symmetric forms + f oriented families × 4 = 16), maximise the
+  minimum pairwise dissimilarity at the selection sizes (each pair scored at its worse size). Ties are broken
+  leximin: then the second closest pair, and so on.
 - **Validation.** Monte-Carlo nearest-template classification of the frozen set: 200 trials per glyph
   and size with random rotation (±5°), offset (±0.5 px), blur (σ 0.6–1.0 px), contrast (50–100 %) and additive
-  Gaussian noise (σ = 0.06 of full contrast). Templates are upright renders at σ = 0.8 px.
+  Gaussian noise (σ = 0.06 or 0.15 of full contrast: a dim phone frame, then a stress level).
+  Templates are upright renders at σ = 0.8 px.
 
 ## Candidates
 
 Nearest neighbour of every candidate within the whole pool (d at 10/12 px, worse of the two).
 
-| # | id | family | hint | nearest candidate | d | in GENOME-01 |
+| # | id | family | hint | nearest candidate | d | GENOME-01 index |
 |---:|---|---|:---:|---|---:|:---:|
 | 0 | `FULL_ORBIT` | SYMMETRIC | ○ | `PLANET_W` | 0.055 | 0 |
-| 1 | `ORB` | SYMMETRIC | ● | `CORE_ORBIT` | 0.028 | 1 |
-| 2 | `POINT` | SYMMETRIC | • | `CORE_ORBIT` | 0.328 | 3 |
-| 3 | `RING_POINT` | SYMMETRIC | ◉ | `DOUBLE_ORBIT` | 0.029 | 2 |
-| 4 | `DOUBLE_ORBIT` | SYMMETRIC | ◎ | `RING_POINT` | 0.029 |  |
-| 5 | `CORE_ORBIT` | SYMMETRIC | ⦿ | `ORB` | 0.028 |  |
+| 1 | `RING_POINT` | SYMMETRIC | ◉ | `DOUBLE_ORBIT` | 0.035 | 1 |
+| 2 | `SMALL_ORBIT` | SYMMETRIC | ◦ | `ORB` | 0.027 | 2 |
+| 3 | `POINT` | SYMMETRIC | • | `ORB` | 0.233 | 3 |
+| 4 | `ORB` | SYMMETRIC | ● | `SMALL_ORBIT` | 0.027 |  |
+| 5 | `DOUBLE_ORBIT` | SYMMETRIC | ◎ | `RING_POINT` | 0.035 |  |
 | 6 | `HEAVY_ORBIT` | SYMMETRIC | ⭘ | `FULL_ORBIT` | 0.070 |  |
-| 7 | `HALF_ORBIT_N` | HALF_ORBIT | ◓ | `QUARTER_ORBIT_NW` | 0.102 | 4 |
-| 8 | `HALF_ORBIT_E` | HALF_ORBIT | ◑ | `QUARTER_ORBIT_SE` | 0.107 | 5 |
-| 9 | `HALF_ORBIT_S` | HALF_ORBIT | ◒ | `QUARTER_ORBIT_SW` | 0.102 | 6 |
-| 10 | `HALF_ORBIT_W` | HALF_ORBIT | ◐ | `QUARTER_ORBIT_NW` | 0.106 | 7 |
-| 11 | `HALF_ORB_N` | HALF_ORB | ⯊ | `ECLIPSE_N` | 0.040 |  |
-| 12 | `HALF_ORB_E` | HALF_ORB | ◗ | `ECLIPSE_E` | 0.042 |  |
-| 13 | `HALF_ORB_S` | HALF_ORB | ⯋ | `ECLIPSE_S` | 0.040 |  |
-| 14 | `HALF_ORB_W` | HALF_ORB | ◖ | `ECLIPSE_W` | 0.042 |  |
-| 15 | `ECLIPSE_N` | ECLIPSE | ◠ | `HALF_ARC_N` | 0.036 | 8 |
-| 16 | `ECLIPSE_E` | ECLIPSE | ☽ | `HALF_ARC_E` | 0.032 | 9 |
-| 17 | `ECLIPSE_S` | ECLIPSE | ◡ | `HALF_ARC_S` | 0.036 | 10 |
-| 18 | `ECLIPSE_W` | ECLIPSE | ☾ | `HALF_ARC_W` | 0.033 | 11 |
-| 19 | `OPEN_ORBIT_N` | OPEN_ORBIT | U | `HALF_ARC_S` | 0.146 | 12 |
-| 20 | `OPEN_ORBIT_E` | OPEN_ORBIT | Ↄ | `HALF_ARC_W` | 0.136 | 13 |
-| 21 | `OPEN_ORBIT_S` | OPEN_ORBIT | ∩ | `HALF_ARC_N` | 0.147 | 14 |
-| 22 | `OPEN_ORBIT_W` | OPEN_ORBIT | C | `HALF_ARC_E` | 0.136 | 15 |
-| 23 | `PLANET_N` | PLANET | ⏀ | `FULL_ORBIT` | 0.057 |  |
-| 24 | `PLANET_E` | PLANET | ⦶ | `FULL_ORBIT` | 0.057 |  |
-| 25 | `PLANET_S` | PLANET | ⦸ | `FULL_ORBIT` | 0.057 |  |
-| 26 | `PLANET_W` | PLANET | ⦷ | `FULL_ORBIT` | 0.055 |  |
-| 27 | `HALF_ARC_N` | HALF_ARC | ⌒ | `ECLIPSE_N` | 0.036 |  |
-| 28 | `HALF_ARC_E` | HALF_ARC | ) | `ECLIPSE_E` | 0.032 |  |
-| 29 | `HALF_ARC_S` | HALF_ARC | ‿ | `ECLIPSE_S` | 0.036 |  |
-| 30 | `HALF_ARC_W` | HALF_ARC | ( | `ECLIPSE_W` | 0.033 |  |
-| 31 | `QUARTER_ORBIT_NE` | QUARTER_ORBIT | ◔ | `HALF_ORBIT_N` | 0.103 |  |
-| 32 | `QUARTER_ORBIT_SE` | QUARTER_ORBIT | ◶ | `HALF_ORBIT_S` | 0.102 |  |
-| 33 | `QUARTER_ORBIT_SW` | QUARTER_ORBIT | ◵ | `HALF_ORBIT_S` | 0.102 |  |
-| 34 | `QUARTER_ORBIT_NW` | QUARTER_ORBIT | ◴ | `HALF_ORBIT_N` | 0.102 |  |
-| 35 | `ARC_PAIR_N` | ARC_PAIR | ⦅ | `OPEN_ORBIT_E` | 0.192 |  |
-| 36 | `ARC_PAIR_NE` | ARC_PAIR | ⟋ | `FULL_ORBIT` | 0.282 |  |
-| 37 | `ARC_PAIR_E` | ARC_PAIR | ⦆ | `OPEN_ORBIT_S` | 0.198 |  |
-| 38 | `ARC_PAIR_SE` | ARC_PAIR | ⟍ | `FULL_ORBIT` | 0.284 |  |
+| 7 | `HALF_ARC_N` | HALF_ARC | ◠ | `ECLIPSE_N` | 0.036 | 4 |
+| 8 | `HALF_ARC_E` | HALF_ARC | ) | `ECLIPSE_E` | 0.032 | 5 |
+| 9 | `HALF_ARC_S` | HALF_ARC | ◡ | `ECLIPSE_S` | 0.036 | 6 |
+| 10 | `HALF_ARC_W` | HALF_ARC | ( | `ECLIPSE_W` | 0.033 | 7 |
+| 11 | `ARC_PAIR_NS` | ARC_PAIR | ↕ | `OPEN_ORBIT_E` | 0.217 | 8 |
+| 12 | `ARC_PAIR_NESW` | ARC_PAIR | ⤢ | `FULL_ORBIT` | 0.327 | 9 |
+| 13 | `ARC_PAIR_EW` | ARC_PAIR | ↔ | `OPEN_ORBIT_S` | 0.222 | 10 |
+| 14 | `ARC_PAIR_NWSE` | ARC_PAIR | ⤡ | `QUARTER_ORBIT_NW` | 0.325 | 11 |
+| 15 | `QUARTER_ORB_NE` | QUARTER_ORB | ◝ | `HALF_ORB_E` | 0.194 | 12 |
+| 16 | `QUARTER_ORB_SE` | QUARTER_ORB | ◞ | `HALF_ORB_S` | 0.196 | 13 |
+| 17 | `QUARTER_ORB_SW` | QUARTER_ORB | ◟ | `HALF_ORB_S` | 0.192 | 14 |
+| 18 | `QUARTER_ORB_NW` | QUARTER_ORB | ◜ | `HALF_ORB_N` | 0.192 | 15 |
+| 19 | `HALF_ORBIT_N` | HALF_ORBIT | ◓ | `QUARTER_ORBIT_NW` | 0.102 |  |
+| 20 | `HALF_ORBIT_E` | HALF_ORBIT | ◑ | `QUARTER_ORBIT_SE` | 0.107 |  |
+| 21 | `HALF_ORBIT_S` | HALF_ORBIT | ◒ | `QUARTER_ORBIT_SW` | 0.102 |  |
+| 22 | `HALF_ORBIT_W` | HALF_ORBIT | ◐ | `QUARTER_ORBIT_NW` | 0.106 |  |
+| 23 | `HALF_ORB_N` | HALF_ORB | ⯊ | `ECLIPSE_N` | 0.040 |  |
+| 24 | `HALF_ORB_E` | HALF_ORB | ◗ | `ECLIPSE_E` | 0.042 |  |
+| 25 | `HALF_ORB_S` | HALF_ORB | ⯋ | `ECLIPSE_S` | 0.040 |  |
+| 26 | `HALF_ORB_W` | HALF_ORB | ◖ | `ECLIPSE_W` | 0.042 |  |
+| 27 | `ECLIPSE_N` | ECLIPSE | ⏜ | `HALF_ARC_N` | 0.036 |  |
+| 28 | `ECLIPSE_E` | ECLIPSE | ☽ | `HALF_ARC_E` | 0.032 |  |
+| 29 | `ECLIPSE_S` | ECLIPSE | ⏝ | `HALF_ARC_S` | 0.036 |  |
+| 30 | `ECLIPSE_W` | ECLIPSE | ☾ | `HALF_ARC_W` | 0.033 |  |
+| 31 | `OPEN_ORBIT_N` | OPEN_ORBIT | U | `HALF_ARC_S` | 0.146 |  |
+| 32 | `OPEN_ORBIT_E` | OPEN_ORBIT | Ↄ | `HALF_ARC_W` | 0.136 |  |
+| 33 | `OPEN_ORBIT_S` | OPEN_ORBIT | ∩ | `HALF_ARC_N` | 0.147 |  |
+| 34 | `OPEN_ORBIT_W` | OPEN_ORBIT | C | `HALF_ARC_E` | 0.136 |  |
+| 35 | `QUARTER_ORBIT_NE` | QUARTER_ORBIT | ◔ | `HALF_ORBIT_N` | 0.103 |  |
+| 36 | `QUARTER_ORBIT_SE` | QUARTER_ORBIT | ◶ | `HALF_ORBIT_S` | 0.102 |  |
+| 37 | `QUARTER_ORBIT_SW` | QUARTER_ORBIT | ◵ | `HALF_ORBIT_S` | 0.102 |  |
+| 38 | `QUARTER_ORBIT_NW` | QUARTER_ORBIT | ◴ | `HALF_ORBIT_N` | 0.102 |  |
+| 39 | `PLANET_N` | PLANET | ⏀ | `FULL_ORBIT` | 0.057 |  |
+| 40 | `PLANET_E` | PLANET | ⦶ | `FULL_ORBIT` | 0.057 |  |
+| 41 | `PLANET_S` | PLANET | ⦸ | `FULL_ORBIT` | 0.057 |  |
+| 42 | `PLANET_W` | PLANET | ⦷ | `FULL_ORBIT` | 0.055 |  |
 
 ## Selection
 
-Best structures by minimum pairwise dissimilarity at the selection sizes (leximin order):
+3066 candidate vocabularies evaluated. Best of each structure:
 
-| rank | structure | members | min d | 2nd | 3rd |
+| structure | best vocabulary | min d | 2nd | 3rd |
+|---|---|---:|---:|---:|
+| 4 symmetric + 3 families | FULL_ORBIT, RING_POINT, SMALL_ORBIT, POINT, HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4 | 0.282 | 0.283 | 0.297 |
+| 0 symmetric + 4 families | HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4, QUARTER_ORBIT ×4 | 0.257 | 0.258 | 0.258 |
+
+Overall ranking (leximin order):
+
+| rank | structure | vocabulary | min d | 2nd | 3rd |
 |---:|---|---|---:|---:|---:|
-| 1 | 0 symmetric + 4 families | HALF_ORB×4, OPEN_ORBIT×4, QUARTER_ORBIT×4, ARC_PAIR×4 | 0.192 | 0.197 | 0.198 |
-| 2 | 0 symmetric + 4 families | ECLIPSE×4, OPEN_ORBIT×4, QUARTER_ORBIT×4, ARC_PAIR×4 | 0.192 | 0.197 | 0.198 |
-| 3 | 0 symmetric + 4 families | HALF_ORB×4, HALF_ARC×4, QUARTER_ORBIT×4, ARC_PAIR×4 | 0.159 | 0.159 | 0.159 |
-| 4 | 0 symmetric + 4 families | HALF_ORBIT×4, OPEN_ORBIT×4, HALF_ARC×4, ARC_PAIR×4 | 0.136 | 0.136 | 0.146 |
-| 5 | 0 symmetric + 4 families | OPEN_ORBIT×4, HALF_ARC×4, QUARTER_ORBIT×4, ARC_PAIR×4 | 0.136 | 0.136 | 0.146 |
-| 6 | 0 symmetric + 4 families | HALF_ORB×4, OPEN_ORBIT×4, HALF_ARC×4, QUARTER_ORBIT×4 | 0.136 | 0.136 | 0.146 |
-| 7 | 0 symmetric + 4 families | HALF_ORB×4, OPEN_ORBIT×4, HALF_ARC×4, ARC_PAIR×4 | 0.136 | 0.136 | 0.146 |
-| 8 | 0 symmetric + 4 families | HALF_ORB×4, OPEN_ORBIT×4, PLANET×4, ARC_PAIR×4 | 0.118 | 0.118 | 0.118 |
-| 9 | 0 symmetric + 4 families | ECLIPSE×4, OPEN_ORBIT×4, PLANET×4, ARC_PAIR×4 | 0.118 | 0.118 | 0.118 |
-| 10 | 0 symmetric + 4 families | HALF_ORB×4, PLANET×4, HALF_ARC×4, ARC_PAIR×4 | 0.118 | 0.118 | 0.118 |
+| 1 | 4 symmetric + 3 families | FULL_ORBIT, RING_POINT, SMALL_ORBIT, POINT, HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4 | 0.282 | 0.283 | 0.297 |
+| 2 | 0 symmetric + 4 families | HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4, QUARTER_ORBIT ×4 | 0.257 | 0.258 | 0.258 |
+| 3 | 4 symmetric + 3 families | FULL_ORBIT, RING_POINT, SMALL_ORBIT, POINT, ARC_PAIR ×4, QUARTER_ORB ×4, ECLIPSE ×4 | 0.245 | 0.245 | 0.245 |
+| 4 | 0 symmetric + 4 families | ARC_PAIR ×4, QUARTER_ORB ×4, ECLIPSE ×4, QUARTER_ORBIT ×4 | 0.240 | 0.243 | 0.243 |
+| 5 | 4 symmetric + 3 families | RING_POINT, SMALL_ORBIT, POINT, HEAVY_ORBIT, HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4 | 0.237 | 0.283 | 0.297 |
+| 6 | 4 symmetric + 3 families | RING_POINT, SMALL_ORBIT, POINT, HEAVY_ORBIT, ARC_PAIR ×4, QUARTER_ORB ×4, ECLIPSE ×4 | 0.237 | 0.245 | 0.245 |
+| 7 | 0 symmetric + 4 families | HALF_ARC ×4, ARC_PAIR ×4, QUARTER_ORB ×4, HALF_ORBIT ×4 | 0.224 | 0.224 | 0.225 |
+| 8 | 0 symmetric + 4 families | ARC_PAIR ×4, QUARTER_ORB ×4, HALF_ORBIT ×4, OPEN_ORBIT ×4 | 0.217 | 0.220 | 0.222 |
 
-**Warning:** the frozen GENOME-01 vocabulary differs from the current study winner. GENOME-01 is frozen; a better set can only ship as a new genome version.
+The frozen GENOME-01 vocabulary is exactly the study winner (rank 1).
 
 ## Frozen GENOME-01 vocabulary
 
-Index order is permanent: the index is the 4-bit value a glyph encodes.
+Index order is permanent: the index is the 4-bit value a glyph encodes. Symmetric forms run from the outer
+orbit inwards, then each oriented family clockwise from north. Specimen: `docs/assets/genome-01-vocabulary.svg`.
 
 | index | nibble | id | name | family | hint | nearest in set | d |
 |---:|:---:|---|---|---|:---:|---|---:|
-| 0 | `0000` | `FULL_ORBIT` | Full orbit | SYMMETRIC | ○ | `OPEN_ORBIT_E` | 0.174 |
-| 1 | `0001` | `ORB` | Orb | SYMMETRIC | ● | `RING_POINT` | 0.083 |
-| 2 | `0010` | `RING_POINT` | Orbit with point | SYMMETRIC | ◉ | `ORB` | 0.083 |
-| 3 | `0011` | `POINT` | Point | SYMMETRIC | • | `ORB` | 0.418 |
-| 4 | `0100` | `HALF_ORBIT_N` | Half orbit N | HALF_ORBIT | ◓ | `ECLIPSE_N` | 0.110 |
-| 5 | `0101` | `HALF_ORBIT_E` | Half orbit E | HALF_ORBIT | ◑ | `ECLIPSE_E` | 0.113 |
-| 6 | `0110` | `HALF_ORBIT_S` | Half orbit S | HALF_ORBIT | ◒ | `ECLIPSE_S` | 0.110 |
-| 7 | `0111` | `HALF_ORBIT_W` | Half orbit W | HALF_ORBIT | ◐ | `ECLIPSE_W` | 0.109 |
-| 8 | `1000` | `ECLIPSE_N` | Eclipse N | ECLIPSE | ◠ | `HALF_ORBIT_N` | 0.110 |
-| 9 | `1001` | `ECLIPSE_E` | Eclipse E | ECLIPSE | ☽ | `HALF_ORBIT_E` | 0.113 |
-| 10 | `1010` | `ECLIPSE_S` | Eclipse S | ECLIPSE | ◡ | `HALF_ORBIT_S` | 0.110 |
-| 11 | `1011` | `ECLIPSE_W` | Eclipse W | ECLIPSE | ☾ | `HALF_ORBIT_W` | 0.109 |
-| 12 | `1100` | `OPEN_ORBIT_N` | Open orbit N | OPEN_ORBIT | U | `FULL_ORBIT` | 0.174 |
-| 13 | `1101` | `OPEN_ORBIT_E` | Open orbit E | OPEN_ORBIT | Ↄ | `FULL_ORBIT` | 0.174 |
-| 14 | `1110` | `OPEN_ORBIT_S` | Open orbit S | OPEN_ORBIT | ∩ | `FULL_ORBIT` | 0.176 |
-| 15 | `1111` | `OPEN_ORBIT_W` | Open orbit W | OPEN_ORBIT | C | `FULL_ORBIT` | 0.177 |
+| 0 | `0000` | `FULL_ORBIT` | Full orbit | SYMMETRIC | ○ | `RING_POINT` | 0.282 |
+| 1 | `0001` | `RING_POINT` | Orbit with core | SYMMETRIC | ◉ | `FULL_ORBIT` | 0.282 |
+| 2 | `0010` | `SMALL_ORBIT` | Small orbit | SYMMETRIC | ◦ | `RING_POINT` | 0.283 |
+| 3 | `0011` | `POINT` | Point | SYMMETRIC | • | `SMALL_ORBIT` | 0.297 |
+| 4 | `0100` | `HALF_ARC_N` | Half arc N | HALF_ARC | ◠ | `FULL_ORBIT` | 0.363 |
+| 5 | `0101` | `HALF_ARC_E` | Half arc E | HALF_ARC | ) | `FULL_ORBIT` | 0.361 |
+| 6 | `0110` | `HALF_ARC_S` | Half arc S | HALF_ARC | ◡ | `FULL_ORBIT` | 0.361 |
+| 7 | `0111` | `HALF_ARC_W` | Half arc W | HALF_ARC | ( | `FULL_ORBIT` | 0.358 |
+| 8 | `1000` | `ARC_PAIR_NS` | Arc pair NS | ARC_PAIR | ↕ | `FULL_ORBIT` | 0.339 |
+| 9 | `1001` | `ARC_PAIR_NESW` | Arc pair NESW | ARC_PAIR | ⤢ | `FULL_ORBIT` | 0.327 |
+| 10 | `1010` | `ARC_PAIR_EW` | Arc pair EW | ARC_PAIR | ↔ | `FULL_ORBIT` | 0.344 |
+| 11 | `1011` | `ARC_PAIR_NWSE` | Arc pair NWSE | ARC_PAIR | ⤡ | `FULL_ORBIT` | 0.327 |
+| 12 | `1100` | `QUARTER_ORB_NE` | Quarter orb NE | QUARTER_ORB | ◝ | `HALF_ARC_E` | 0.382 |
+| 13 | `1101` | `QUARTER_ORB_SE` | Quarter orb SE | QUARTER_ORB | ◞ | `HALF_ARC_E` | 0.377 |
+| 14 | `1110` | `QUARTER_ORB_SW` | Quarter orb SW | QUARTER_ORB | ◟ | `HALF_ARC_W` | 0.378 |
+| 15 | `1111` | `QUARTER_ORB_NW` | Quarter orb NW | QUARTER_ORB | ◜ | `HALF_ARC_W` | 0.380 |
 
 ## Distance summary by size
 
-| glyph diameter | min d (set) | closest pair | mean d (set) | min d (whole pool) |
-|---:|---:|---|---:|---:|
-| 8 px | 0.040 | `ORB` / `RING_POINT` | 0.381 | 0.011 |
-| 10 px | 0.083 | `ORB` / `RING_POINT` | 0.440 | 0.028 |
-| 12 px | 0.136 | `HALF_ORBIT_W` / `ECLIPSE_W` | 0.477 | 0.047 |
-| 16 px | 0.168 | `FULL_ORBIT` / `OPEN_ORBIT_W` | 0.482 | 0.057 |
-| 24 px | 0.166 | `FULL_ORBIT` / `OPEN_ORBIT_N` | 0.502 | 0.060 |
+| glyph diameter | px per cell | min d (set) | closest pair | mean d (set) | min d (whole pool) |
+|---:|---:|---:|---|---:|---:|
+| 8 px | 2.3 | 0.130 | `RING_POINT` / `SMALL_ORBIT` | 0.589 | 0.007 |
+| 10 px | 2.9 | 0.283 | `RING_POINT` / `SMALL_ORBIT` | 0.660 | 0.027 |
+| 12 px | 3.4 | 0.282 | `FULL_ORBIT` / `RING_POINT` | 0.702 | 0.046 |
+| 16 px | 4.6 | 0.248 | `FULL_ORBIT` / `RING_POINT` | 0.720 | 0.067 |
+| 24 px | 6.9 | 0.231 | `FULL_ORBIT` / `RING_POINT` | 0.752 | 0.070 |
 
 ### Pairwise dissimilarity of the frozen set at 12 px
 
 | | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **0** | · | 0.46 | 0.21 | 1.22 | 0.29 | 0.29 | 0.29 | 0.29 | 0.45 | 0.45 | 0.45 | 0.44 | 0.18 | 0.18 | 0.18 | 0.18 |
-| **1** | 0.46 | · | 0.16 | 0.50 | 0.18 | 0.18 | 0.18 | 0.18 | 0.43 | 0.43 | 0.43 | 0.43 | 0.51 | 0.52 | 0.51 | 0.51 |
-| **2** | 0.21 | 0.16 | · | 0.54 | 0.23 | 0.23 | 0.24 | 0.23 | 0.52 | 0.53 | 0.53 | 0.52 | 0.35 | 0.35 | 0.35 | 0.36 |
-| **3** | 1.22 | 0.50 | 0.54 | · | 0.65 | 0.65 | 0.65 | 0.65 | 0.92 | 0.92 | 0.92 | 0.92 | 1.17 | 1.17 | 1.17 | 1.17 |
-| **4** | 0.29 | 0.18 | 0.23 | 0.65 | · | 0.26 | 0.53 | 0.26 | 0.14 | 0.46 | 0.76 | 0.46 | 0.49 | 0.38 | 0.29 | 0.38 |
-| **5** | 0.29 | 0.18 | 0.23 | 0.65 | 0.26 | · | 0.26 | 0.53 | 0.46 | 0.14 | 0.46 | 0.76 | 0.38 | 0.49 | 0.38 | 0.29 |
-| **6** | 0.29 | 0.18 | 0.24 | 0.65 | 0.53 | 0.26 | · | 0.26 | 0.76 | 0.46 | 0.14 | 0.46 | 0.29 | 0.38 | 0.49 | 0.38 |
-| **7** | 0.29 | 0.18 | 0.23 | 0.65 | 0.26 | 0.53 | 0.26 | · | 0.46 | 0.76 | 0.46 | 0.14 | 0.38 | 0.29 | 0.38 | 0.49 |
-| **8** | 0.45 | 0.43 | 0.52 | 0.92 | 0.14 | 0.46 | 0.76 | 0.46 | · | 0.59 | 1.14 | 0.59 | 0.80 | 0.49 | 0.23 | 0.50 |
-| **9** | 0.45 | 0.43 | 0.53 | 0.92 | 0.46 | 0.14 | 0.46 | 0.76 | 0.59 | · | 0.59 | 1.13 | 0.50 | 0.79 | 0.49 | 0.23 |
-| **10** | 0.45 | 0.43 | 0.53 | 0.92 | 0.76 | 0.46 | 0.14 | 0.46 | 1.14 | 0.59 | · | 0.59 | 0.23 | 0.49 | 0.80 | 0.49 |
-| **11** | 0.44 | 0.43 | 0.52 | 0.92 | 0.46 | 0.76 | 0.46 | 0.14 | 0.59 | 1.13 | 0.59 | · | 0.50 | 0.24 | 0.50 | 0.79 |
-| **12** | 0.18 | 0.51 | 0.35 | 1.17 | 0.49 | 0.38 | 0.29 | 0.38 | 0.80 | 0.50 | 0.23 | 0.50 | · | 0.40 | 0.43 | 0.40 |
-| **13** | 0.18 | 0.52 | 0.35 | 1.17 | 0.38 | 0.49 | 0.38 | 0.29 | 0.49 | 0.79 | 0.49 | 0.24 | 0.40 | · | 0.40 | 0.42 |
-| **14** | 0.18 | 0.51 | 0.35 | 1.17 | 0.29 | 0.38 | 0.49 | 0.38 | 0.23 | 0.49 | 0.80 | 0.50 | 0.43 | 0.40 | · | 0.40 |
-| **15** | 0.18 | 0.51 | 0.36 | 1.17 | 0.38 | 0.29 | 0.38 | 0.49 | 0.50 | 0.23 | 0.49 | 0.79 | 0.40 | 0.42 | 0.40 | · |
+| **0** | · | 0.28 | 0.94 | 1.22 | 0.36 | 0.36 | 0.36 | 0.36 | 0.35 | 0.35 | 0.35 | 0.35 | 0.74 | 0.74 | 0.74 | 0.74 |
+| **1** | 0.28 | · | 0.45 | 0.44 | 0.54 | 0.54 | 0.54 | 0.54 | 0.53 | 0.54 | 0.53 | 0.53 | 0.54 | 0.54 | 0.54 | 0.54 |
+| **2** | 0.94 | 0.45 | · | 0.44 | 0.84 | 0.85 | 0.84 | 0.83 | 0.96 | 0.94 | 0.96 | 0.94 | 0.51 | 0.51 | 0.50 | 0.50 |
+| **3** | 1.22 | 0.44 | 0.44 | · | 1.12 | 1.12 | 1.12 | 1.12 | 1.14 | 1.14 | 1.14 | 1.14 | 0.60 | 0.60 | 0.60 | 0.59 |
+| **4** | 0.36 | 0.54 | 0.84 | 1.12 | · | 0.55 | 1.14 | 0.54 | 0.57 | 0.57 | 0.54 | 0.56 | 0.42 | 1.11 | 1.11 | 0.42 |
+| **5** | 0.36 | 0.54 | 0.85 | 1.12 | 0.55 | · | 0.55 | 1.15 | 0.54 | 0.56 | 0.56 | 0.56 | 0.42 | 0.42 | 1.11 | 1.11 |
+| **6** | 0.36 | 0.54 | 0.84 | 1.12 | 1.14 | 0.55 | · | 0.55 | 0.57 | 0.56 | 0.54 | 0.57 | 1.11 | 0.42 | 0.42 | 1.11 |
+| **7** | 0.36 | 0.54 | 0.83 | 1.12 | 0.54 | 1.15 | 0.55 | · | 0.54 | 0.56 | 0.56 | 0.56 | 1.11 | 1.11 | 0.42 | 0.42 |
+| **8** | 0.35 | 0.53 | 0.96 | 1.14 | 0.57 | 0.54 | 0.57 | 0.54 | · | 0.50 | 1.12 | 0.50 | 0.70 | 0.70 | 0.70 | 0.70 |
+| **9** | 0.35 | 0.54 | 0.94 | 1.14 | 0.57 | 0.56 | 0.56 | 0.56 | 0.50 | · | 0.50 | 1.13 | 0.46 | 1.10 | 0.46 | 1.10 |
+| **10** | 0.35 | 0.53 | 0.96 | 1.14 | 0.54 | 0.56 | 0.54 | 0.56 | 1.12 | 0.50 | · | 0.50 | 0.70 | 0.70 | 0.70 | 0.70 |
+| **11** | 0.35 | 0.53 | 0.94 | 1.14 | 0.56 | 0.56 | 0.57 | 0.56 | 0.50 | 1.13 | 0.50 | · | 1.10 | 0.46 | 1.10 | 0.46 |
+| **12** | 0.74 | 0.54 | 0.51 | 0.60 | 0.42 | 0.42 | 1.11 | 1.11 | 0.70 | 0.46 | 0.70 | 1.10 | · | 0.87 | 1.15 | 0.88 |
+| **13** | 0.74 | 0.54 | 0.51 | 0.60 | 1.11 | 0.42 | 0.42 | 1.11 | 0.70 | 1.10 | 0.70 | 0.46 | 0.87 | · | 0.87 | 1.15 |
+| **14** | 0.74 | 0.54 | 0.50 | 0.60 | 1.11 | 1.11 | 0.42 | 0.42 | 0.70 | 0.46 | 0.70 | 1.10 | 1.15 | 0.87 | · | 0.88 |
+| **15** | 0.74 | 0.54 | 0.50 | 0.59 | 0.42 | 1.11 | 1.11 | 0.42 | 0.70 | 1.10 | 0.70 | 0.46 | 0.88 | 1.15 | 0.88 | · |
 
 ## Monte-Carlo validation
 
-| glyph diameter | accuracy | most frequent confusions |
-|---:|---:|---|
-| 8 px | 99.75 % | RING_POINT → ORB (8) |
-| 10 px | 100.00 % | none |
-| 12 px | 100.00 % | none |
-| 16 px | 100.00 % | none |
-| 24 px | 100.00 % | none |
+| glyph diameter | noise σ | accuracy | most frequent confusions |
+|---:|---:|---:|---|
+| 8 px | 0.06 | 100.00 % | none |
+| 10 px | 0.06 | 100.00 % | none |
+| 12 px | 0.06 | 100.00 % | none |
+| 16 px | 0.06 | 100.00 % | none |
+| 24 px | 0.06 | 100.00 % | none |
+| 8 px | 0.15 | 99.09 % | HALF_ARC_E → QUARTER_ORB_NE (2), SMALL_ORBIT → RING_POINT (2), ARC_PAIR_EW → HALF_ARC_W (1) |
+| 10 px | 0.15 | 99.97 % | ARC_PAIR_NWSE → FULL_ORBIT (1) |
+| 12 px | 0.15 | 100.00 % | none |
+| 16 px | 0.15 | 100.00 % | none |
+| 24 px | 0.15 | 100.00 % | none |
 
-## Rationale
+## Findings and rationale
 
-- **Structure.** Four rotation-invariant forms plus three oriented families of four orientations make the
-  vocabulary systematic: the high two bits of a glyph value name its form family, the low two bits its compass
-  orientation (N, E, S, W). Every glyph is built from the same orbit stroke and the same proportions, so a
-  genome reads as one ORBES orbital figure and never as a matrix code.
-- **Compass orientations only.** 45° steps (the `ARC_PAIR` and diagonal families) lose contrast first under
-  rotation jitter and blur; 90° steps keep oriented members of a family nearly uncorrelated.
-- **Families that share a silhouette are mutually exclusive.** A half orb and a half orbit, or an open orbit and
-  a half arc, differ only by a thin stroke that blur erases. The selection keeps one family per silhouette.
-- **Small sizes.** At 8 px the closest pair is `ORB` / `RING_POINT` (d = 0.040).
-  Below about 10 px the genome is a human-facing identity and a secondary cross-check only: decoding never
-  depends on it (the Reed-Solomon protected data rings carry the signed identity).
+- **Fill and outline of one silhouette merge under blur.** A crescent and the half arc on the same side
+  (d = 0.036), a half orb and that crescent (d = 0.040) are nearly the same
+  low-frequency image, so at most one family per silhouette can ever be selected.
+- **A shared orbit dominates composite figures.** Members of the half-filled orbit family differ by one inner fill
+  but share the whole orbit: d(HALF_ORBIT_N, HALF_ORBIT_E) = 0.225, against
+  d(HALF_ARC_N, HALF_ARC_E) = 0.543 for the bare half arcs and
+  d(QUARTER_ORB_NE, QUARTER_ORB_SE) = 0.806 for bare quarter orbs. Oriented families
+  therefore work best as ring-free silhouettes; the orbit itself is kept as a symmetric form.
+- **The solid orb correlates with every centred figure** (d(ORB, RING_POINT) =
+  0.167, d(ORB, POINT) = 0.233). The best vocabulary containing it reaches min d =
+  0.188, against 0.282 without it. The orb stays the heart of the ORBES SEAL instead.
+- **Proportions were tuned on the same measurements**: a 0.42 R core in the orbit-with-core (the free point is
+  0.37 R) keeps it apart from both the full orbit (d = 0.282) and the small orbit
+  (d = 0.283); the arc pairs use 90° arcs so that they never approach a full orbit
+  (d(FULL_ORBIT, ARC_PAIR_NESW) = 0.327).
+- **Structure.** The winner has 4 symmetric + 3 families: the high two bits of a glyph value name its form family, the
+  low two bits its orientation. Every glyph uses the same orbit stroke and proportions, so a genome reads as one
+  ORBES orbital figure and never as a matrix code.
+- **Small sizes.** At 8 px (2.3 px per cell) the closest pair is `RING_POINT` /
+  `SMALL_ORBIT` (d = 0.130). The genome is a human-facing identity and a secondary cross-check:
+  decoding never depends on it, because the Reed-Solomon protected data rings carry the signed identity.
