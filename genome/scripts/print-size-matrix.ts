@@ -685,7 +685,7 @@ function writeReport(results: RowResult[], opts: RunInfo): void {
     `- **${smallest} mm** is read robustly on every substrate only by ${readersAt(smallest, all).join('; ') || 'no profile'}: not a production size for an audience with mixed phones.`,
   );
   L.push(
-    `- **Scanner.** Its "Move a little closer" hint (after NO_MOONS failures, src/web/verify/capture.ts \`scanHint\`) pushes phones that cannot focus that close into defocus; most failures here are ECC / FORMAT (blur, too few pixels), not NO_MOONS. For small codes, a "hold about 20 cm away and zoom" hint and a prominent zoom control are what make the iPhone Pro rows above reachable.`,
+    `- **Scanner** (implemented). The verify app opens the camera at about 2× zoom whenever the track exposes a zoom capability (clamped to its range; the 1× / 2× control resets it), which is what makes the "With 2× zoom" column reachable. Its guidance is distance-aware and never says "move closer", which pushes phones that cannot focus close into defocus: a code located but too small to read (most failures here: ECC / FORMAT, too few pixels) gets "Zoom in" when zoom is available and not applied, otherwise "Hold about 20 cm away" (src/web/verify/capture.ts \`scanHint\`; docs/BRAND-DESIGN-SYSTEM.md §4.3).`,
   );
   L.push('');
 

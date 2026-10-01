@@ -47,7 +47,7 @@ describe('labeled artifact layout', () => {
   it('scene: viewBox and physical height grow by the label area', () => {
     const it0 = item(1);
     const model = encodeOrbesCode(it0, {});
-    const plain = buildArtifactScene(model, { widthMm: 40, theme: 'black', label: false });
+    const plain = buildArtifactScene(model, { widthMm: 40, theme: 'classic', label: false });
     const labeled = buildArtifactScene(model, { widthMm: 40, theme: 'ivory', label: true, productId: it0.productId });
     expect(plain.viewBox).toEqual({ x: -25, y: -25, w: 50, h: 50 });
     expect(plain.heightMm).toBe(40);
@@ -55,8 +55,8 @@ describe('labeled artifact layout', () => {
     expect(labeled.viewBox.h).toBe(50 + LABEL_LAYOUT.height);
     expect(labeled.heightMm).toBeCloseTo(46, 9);
     expect(labeled.paper).toBe('#F6F2EA');
-    expect(() => buildArtifactScene(model, { widthMm: 40, theme: 'black', label: true })).toThrow(/product id/);
-    expect(() => buildArtifactScene(model, { widthMm: 0, theme: 'black', label: false })).toThrow(RangeError);
+    expect(() => buildArtifactScene(model, { widthMm: 40, theme: 'classic', label: true })).toThrow(/product id/);
+    expect(() => buildArtifactScene(model, { widthMm: 0, theme: 'classic', label: false })).toThrow(RangeError);
   });
 });
 
@@ -104,7 +104,7 @@ describe('multi-up sheets', () => {
     const items = Array.from({ length: 31 }, (_, i) => item(i + 1));
     const r = await renderPrintSheet(items, { widthMm: 25 }, { createdAt: new Date('2026-02-01T00:00:00Z') });
     expect(r.contentType).toBe('application/pdf');
-    expect(r.filename).toBe('ORBES-sheet-2026-02-01-31-black-25mm.pdf');
+    expect(r.filename).toBe('ORBES-sheet-2026-02-01-31-classic-25mm.pdf');
     const text = Buffer.from(r.body as Uint8Array).toString('latin1');
     expect(text.startsWith('%PDF-1.4')).toBe(true);
     const l = layoutSheet(25, 25 * (57.5 / 50), 31);

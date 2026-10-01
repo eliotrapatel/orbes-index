@@ -245,10 +245,10 @@ Both web apps import `shared/brand.css`, which mirrors the house style of theorb
 |---|---|---|---|
 | `--fs-nano` | 8px | `--track-micro` | 0.22em |
 | `--fs-micro` | 10px | `--track-label` | 0.28em |
-| `--fs-label` | 11px | `--track-display` | 0.32em *(defined, unused)* |
+| `--fs-label` | 11px | `--track-display` | 0.32em |
 | `--fs-line` | 12px | `--track-wordmark` | 0.62em |
 | `--fs-body` | 13px | | |
-| `--fs-lead` | 15px *(defined, unused)* | | |
+| `--fs-lead` | 15px | | |
 | `--fs-title` | 24px | | |
 | `--fs-wordmark` | 30px | | |
 
@@ -277,7 +277,7 @@ Both web apps import `shared/brand.css`, which mirrors the house style of theorb
 | Field input | 16px | 400 | 0.04em | 16px so iOS does not zoom; code input 18px / 0.28em |
 | Transfer code | 19px | 400 | 0.26em | tabular, on ivory |
 | Footnote | 10px | 400 | 0.02em | line-height 1.75 |
-| Result meta (VERIFIED · REF) | 7px | 400 | 0.30em | see §8, item 4 |
+| Result meta (VERIFIED · REF) | 10px | 400 | 0.22em | `--ink-soft`, tabular: the reference customers quote |
 | Landing meta | 7px | 400 | 0.32em | opacity 0.4, as theorbes.com's 6.5px meta at 0.28 |
 
 **Console — type in use**
@@ -312,7 +312,7 @@ Monospace (`ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberatio
 | `--hairline-strong` | `rgba(10,10,10,0.32)` | Section rules, field underlines, local brackets on ivory | — |
 | `--critical` (console only) | `#8A1C1C` oxblood | The few facts that require immediate action | 9.3 : 1 |
 | `--veil` (console only) | `rgba(246,242,234,0.86)` | Dialog backdrop | — |
-| Scanner ground | `#000000` | Camera view background | — |
+| Scanner ground | `--ink` `#0A0A0A` | Camera view background | — |
 | Scanner veil | `rgba(10,10,10,0.5)` → `0.78` when locked | Flat veil outside the orbit | — |
 
 theorbes.com itself uses pure `#FFFFFF` and `#000000`; the authentication apps soften the ink to `#0A0A0A` (see §8, item 2). The public verification app uses no colour: every state, including the gravest, is told in ink. `theme-color` is `#ffffff` for `/verify` and `#f6f2ea` for `/admin`. `::selection` inverts to white on ink.
@@ -459,8 +459,10 @@ Lines that accompany the states (`verify/copy.ts`, `view-model.ts`, `views/resul
 |---|---|
 | Status lines | PREPARING CAMERA… · SCANNING… · READING PHOTO… · VERIFYING… · ORBES CODE FOUND |
 | Scan guide | Align the ORBES CODE within the orbit |
-| Hints (after 6 s without a read) | Place the whole code inside the orbit · Hold steady — in even light · Move a little closer |
+| Hints (after 6 s without a read) | Place the whole code inside the orbit · Hold steady — in even light · Hold about 20 cm away · Zoom in |
 | Actions | SCAN ORBES CODE · UPLOAD A PHOTO · SCAN AGAIN · TRY AGAIN · RETURN · CLOSE · LIGHT · 2× / 1× |
+
+Hints never say "move closer": phones that cannot focus close (iPhone Pro, about 20 cm) only blur when moved in. The hint follows what the last few frames showed: nothing code-like, or a look-alike seal with no data orbits around it → *Place the whole code inside the orbit*; a code found but blurred or moving → *Hold steady — in even light*; a code too small to read → *Zoom in* when the camera has a zoom that is not applied, otherwise *Hold about 20 cm away* (also when the code is too large for the orbit). The scanner opens at about 2× zoom when the camera offers it; the 1× / 2× control resets it ([print-size matrix](reports/print-size-matrix.md), *Recommendation*).
 
 | Problem | Title | Message |
 |---|---|---|
@@ -535,12 +537,12 @@ Every screen after the landing shares one history entry, so the back button (or 
 </tr>
 <tr>
 <td valign="top"><b>1 · Landing.</b> The wordmark sits inside the resting orbit as the core sits inside the seal. One hairline button, one discreet link, © ORBES and PARIS at the foot (GENOME CODE joins them from 560 px).</td>
-<td valign="top"><b>2 · Scanning.</b> Full-bleed camera, a flat 50 % veil outside the orbit, the live reticle with its travelling arc and four moons (polaris top left). One status line, one guide sentence, LIGHT and 2× only when the camera offers them.</td>
+<td valign="top"><b>2 · Scanning.</b> Full-bleed camera, a flat 50 % veil outside the orbit, the live reticle with its travelling arc and four moons (polaris top left). One status line, one guide sentence, LIGHT and the zoom control only when the camera offers them (the camera opens at about 2× zoom; the control returns to 1×).</td>
 <td valign="top"><b>3 · Code found.</b> The frame freezes, the veil deepens to 78 %, the orbit closes (2 px, moons ×1.35) and the phone ticks. ORBES CODE FOUND for 420 ms, then VERIFYING… while the server answers.</td>
 </tr>
 </table>
 
-The scanner decodes only the square under the reticle (×1.45 margin), at most every 120 ms. On the camera screen the brackets and type turn white and the grain is removed.
+The scanner decodes only the square under the reticle (×1.45 margin), at most every 120 ms. A read that needed heavy error correction is only submitted once a second frame reads the same code, so the lock may take one frame longer on a worn code. On the camera screen the brackets and type turn white and the grain is removed.
 
 <table>
 <tr>
@@ -646,24 +648,24 @@ Physical test kit: [`assets/test-sheets/orbes-code-test-sheets.pdf`](assets/test
 Places where the implementation departs from this system or from itself. None affects decoding or security.
 
 1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it in Helvetica Neue at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four.
-2. **Ink.** theorbes.com uses `#000000`; the apps use `--ink: #0A0A0A`, while the scanner ground is pure `#000` (`genome/src/web/verify/styles.css`, `body[data-screen="scan"]`, `.view--scan`). The ivory colourway prints `#111111` (`ORBES_CODE_STYLES.ivory`) but the same GENOME on the ivory plates on screen is drawn in `#0A0A0A` (`genome/src/web/admin/ui/figures.ts`, `genome/src/web/verify/genome-view.ts` via `currentColor`).
+2. **Ink.** theorbes.com uses `#000000`; the apps use `--ink: #0A0A0A`. ~~The scanner ground is pure `#000` (`genome/src/web/verify/styles.css`, `body[data-screen="scan"]`, `.view--scan`).~~ **Resolved (verify app, 2026-10-01):** the scanner ground and veil use `var(--ink)` (guarded by `genome/test/web/verify.brand.test.ts`). Still open: The ivory colourway prints `#111111` (`ORBES_CODE_STYLES.ivory`) but the same GENOME on the ivory plates on screen is drawn in `#0A0A0A` (`genome/src/web/admin/ui/figures.ts`, `genome/src/web/verify/genome-view.ts` via `currentColor`).
 3. **`--metal` used for text that must be read**, against its own comment ("never used for text that must be read", 2.8 : 1, 2.5 : 1 on ivory): console navigation group titles `.side__group-title`, the sign-in foot "Internal use only · All actions are recorded" `.login__foot`, zero-value bar labels `.bar--zero`, and input placeholders `.cinput::placeholder` (`genome/src/web/admin/styles.css`). The `--ink-soft` comment also states 6.4 : 1; the measured ratio is 6.7 : 1 (`brand.css`).
-4. **The reference customers are asked to quote is 7 px.** Non-authentic results say "Please quote the reference below", but `REF …` is set at 7 px, `--ink-soft` (`.result__meta`, `genome/src/web/verify/styles.css`). It should be at least 10 px.
-5. **Repeated sentence for owners.** When the owner's piece has unusual activity elsewhere, the server message already says "Unusual activity has been recorded for it; ORBES Client Services can assist you." (`genome/src/server/services/copy.ts`, `UNUSUAL_ACTIVITY_OWNER_COPY`) and the client adds a notice with the same sentence (`genome/src/web/verify/view-model.ts`, line 190). One of the two should go.
+4. ~~**The reference customers are asked to quote is 7 px.**~~ **Resolved (verify app, 2026-10-01):** `.result__meta` is now 10 px (`--fs-micro`), `--ink-soft`, tabular, without the 8 px `.nano` class. Was: Non-authentic results say "Please quote the reference below", but `REF …` is set at 7 px, `--ink-soft` (`.result__meta`, `genome/src/web/verify/styles.css`). It should be at least 10 px.
+5. ~~**Repeated sentence for owners.**~~ **Resolved (verify app, 2026-10-01):** the client notice is only added when the server message does not already mention the unusual activity, so the sentence appears once. Was: When the owner's piece has unusual activity elsewhere, the server message already says "Unusual activity has been recorded for it; ORBES Client Services can assist you." (`genome/src/server/services/copy.ts`, `UNUSUAL_ACTIVITY_OWNER_COPY`) and the client adds a notice with the same sentence (`genome/src/web/verify/view-model.ts`, line 190). One of the two should go.
 6. **A forged genome version invites a rescan.** An unsupported genome version answers MALFORMED_CODE, "This code could not be read. Please scan it again…", for a code that was read perfectly ([counterfeit simulation](reports/counterfeit-simulation.md), gap 4a; `genome/src/server/services/verification.ts`).
-7. **Favicons do not follow the SEAL proportions.** `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`.
-8. **Token drift.** `--track-display` and `--fs-lead` are defined and unused; 25 distinct tracking values and 21 pixel font sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…) are hard-coded in `genome/src/web/verify/styles.css` and `genome/src/web/admin/styles.css`.
+7. **Favicons do not follow the SEAL proportions.** **Resolved (verify app, 2026-10-01):** `genome/src/web/verify/favicon.svg` is now core r 5.35, gap to 8.025, ring 8.025–10.7 (core 2 : gap 1 : ring 1). Still open: the console favicon. Was: `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`.
+8. **Token drift.** **Resolved (verify app, 2026-10-01):** `--track-display` (landing meta) and `--fs-lead` (problem title) are now used; every size and tracking in `genome/src/web/verify/styles.css` that equals a token uses it (8, 10, 11, 12, 15 px; 0.22, 0.28, 0.32 em). Still open: the console stylesheet and the remaining off-scale sizes. Was: `--track-display` and `--fs-lead` are defined and unused; 25 distinct tracking values and 21 pixel font sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…) are hard-coded in `genome/src/web/verify/styles.css` and `genome/src/web/admin/styles.css`.
 9. **Two primary buttons.** `brand.css` defines "the single hairline button" (outlined, fills on hover); the console's `.cbtn--primary` is filled ink and inverts on hover (`genome/src/web/admin/styles.css`). Defensible for a dense tool, but it should be a stated exception.
 10. **Status comment.** `genome/src/web/admin/model/tone.ts` describes *alert* as an "inverted label"; the CSS draws a rotated square and a bold label (`.status--alert`).
 11. **Date formats.** `/verify` writes `1 OCT 2026 · 14:32` in local time (`genome/src/web/verify/view-model.ts`); the console writes `01 OCT 2026 · 14:32 UTC` (`genome/src/web/admin/format.ts`). UTC in the console is deliberate; the zero-padded day is not explained.
 12. **Identifier case.** The dashboard KPI uppercases the key id (`ORBES-K001-…`) through `.kpi__note { text-transform: uppercase }`, while the definition list beside it shows the true lower-case `orbes-k001-…` (`genome/src/web/admin/styles.css`, `genome/src/web/admin/model/dashboard.ts`).
 13. **Colourway names.** `classic` in the core (`ORBES_CODE_STYLES`, ORBES-CODE-SPEC §8.3) is `black` in the artifact API and console (`genome/src/server/render/scene.ts`, `genome/src/web/admin/types.ts`) and "Black on white" in the console's theme menu.
 14. **Below-minimum sizes are not flagged.** The console accepts 5–500 mm (`genome/src/web/admin/ui/artifacts.ts`, `genome/src/server/render/artifact.ts` `ARTIFACT_LIMITS`) and shows only the cell pitch. A quiet warning under 30 mm (§2.6) would prevent unreadable prints.
-15. **Specimen palette.** `docs/assets/genome-01-vocabulary.svg` uses paper `#F7F5F0` and grey `#8A8780` (`SPECIMEN_PAPER`, `SPECIMEN_MUTED` in `genome/scripts/genome-symbol-study.ts`), not ivory `#F6F2EA` and `--ink-soft` / `--metal`.
-16. **Quiet band wording in the spec.** ORBES-CODE-SPEC §3 counts the band "between data and moons" as a quiet zone and §9 says quiet zones "MUST be free of ink", yet the decor horizon (r 24.0) and outer guide (r 23.5) are printed in that band by design (`genome/src/core/code/primitives.ts`; the horizon is about 34 % contrast in the classic colourway). The spec should limit "free of ink" to the seal quiet ring and the outer 2 u zone, and allow decor at ≥ 0.6 u clearance.
+15. ~~**Specimen palette.**~~ **Resolved (2026-10-01):** `SPECIMEN_PAPER` is ivory `#F6F2EA` and `SPECIMEN_MUTED` is `--ink-soft` `#5C5C5C`; the specimen was regenerated with unchanged geometry. Was: `docs/assets/genome-01-vocabulary.svg` uses paper `#F7F5F0` and grey `#8A8780` (`SPECIMEN_PAPER`, `SPECIMEN_MUTED` in `genome/scripts/genome-symbol-study.ts`), not ivory `#F6F2EA` and `--ink-soft` / `--metal`.
+16. ~~**Quiet band wording in the spec.**~~ **Resolved (2026-10-01):** ORBES-CODE-SPEC §3, §4.7 and §9 now keep the seal quiet ring and the 2 u margin ink-free and permit, in the outer quiet band only, the decorative hairlines at r 23.5 and 24.0 at their specified tones with ≥ 0.6 u clearance. Was: ORBES-CODE-SPEC §3 counts the band "between data and moons" as a quiet zone and §9 says quiet zones "MUST be free of ink", yet the decor horizon (r 24.0) and outer guide (r 23.5) are printed in that band by design (`genome/src/core/code/primitives.ts`; the horizon is about 34 % contrast in the classic colourway). The spec should limit "free of ink" to the seal quiet ring and the outer 2 u zone, and allow decor at ≥ 0.6 u clearance.
 17. **Customer vocabulary.** The AUTHENTIC message says "registered to an active **product**" (`genome/src/server/services/copy.ts`); every other customer sentence says "piece".
 18. **Platform fonts.** No web font is shipped, so Android and Windows visitors see Roboto or Arial and never the light weight (§3.1). Licensing and bundling a Helvetica Neue cut, or choosing a deliberate fallback, would make the experience consistent.
-19. **"REGISTRATION OPEN" after it has closed.** When the registration window of a scan has expired, the OWNERSHIP tab still heads the panel REGISTRATION OPEN above "The registration window of this scan has closed." (`genome/src/web/verify/views/ownership.ts`, `registerBlock`).
+19. ~~**"REGISTRATION OPEN" after it has closed.**~~ **Resolved (verify app, 2026-10-01):** the heading reads REGISTRATION CLOSED once the window has expired (`registrationStatus`, `genome/src/web/verify/view-model.ts`). Was: When the registration window of a scan has expired, the OWNERSHIP tab still heads the panel REGISTRATION OPEN above "The registration window of this scan has closed." (`genome/src/web/verify/views/ownership.ts`, `registerBlock`).
 
 ---
 

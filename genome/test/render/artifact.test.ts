@@ -8,6 +8,7 @@ import { encodePayload, frameCodeData, signingMessage } from '../../src/core/pay
 import { generateEd25519KeyPair, signEd25519 } from '../../src/server/crypto/ed25519-node.js';
 import {
   ARTIFACT_DEFAULTS,
+  ARTIFACT_LIMITS,
   ARTIFACT_THEMES,
   ArtifactOptionsError,
   artifactFilename,
@@ -70,6 +71,19 @@ describe('artifact options', () => {
     expect(resolveArtifactOptions('pdf', { widthMm: 12.3456 }).widthMm).toBe(12.35);
   });
 
+  it('names the reference colourway classic; black is a deprecated alias of it', () => {
+    expect(ARTIFACT_DEFAULTS.theme).toBe('classic');
+    expect(resolveArtifactOptions('svg', { theme: 'black' }).theme).toBe('classic');
+    expect(ARTIFACT_THEMES.classic).toEqual({ ink: '#0A0A0A', paper: '#FFFFFF' });
+    expect(Object.keys(ARTIFACT_THEMES)).toEqual(['classic', 'inverted', 'ivory']);
+  });
+
+  it('refuses widths under 10 mm (below every print and scan study)', () => {
+    expect(ARTIFACT_LIMITS.minWidthMm).toBe(10);
+    expect(() => resolveArtifactOptions('pdf', { widthMm: 9.99 })).toThrow(/between 10 and 500 mm/);
+    expect(resolveArtifactOptions('pdf', { widthMm: 10 }).widthMm).toBe(10);
+  });
+
   it('rejects out-of-range or malformed options', () => {
     const bad: unknown[] = [
       { widthMm: 4.99 },
@@ -98,7 +112,7 @@ describe('artifact options', () => {
     const o = resolveArtifactOptions('png', { widthMm: 12.5, theme: 'ivory', label: true, dpi: 1200 });
     expect(artifactFilename(meta, o, 'png')).toBe('ORBES-O26-J-00184-I1-ivory-12.5mm-label-1200dpi.png');
     expect(artifactFilename({ productId: 'O26-J-00184"\r\n', issue: 2 }, resolveArtifactOptions('svg'), 'svg')).toBe(
-      'ORBES-O26-J-00184-I2-black-30mm.svg',
+      'ORBES-O26-J-00184-I2-classic-30mm.svg',
     );
   });
 });
@@ -107,12 +121,12 @@ describe('SVG', () => {
   it('unlabeled artifacts are exactly the core renderer output', async () => {
     const r = await renderArtifact(input, 'svg', { widthMm: 22 }, meta);
     const model = encodeOrbesCode(input, { decor: true });
-    const expected = renderOrbesCodeSvg(model, { ...ARTIFACT_THEMES.black, decor: true, widthMm: 22, title: 'ORBES CODE O26-J-00184' });
+    const expected = renderOrbesCodeSvg(model, { ...ARTIFACT_THEMES.classic, decor: true, widthMm: 22, title: 'ORBES CODE O26-J-00184' });
     expect(r.body).toBe(expected);
     expect(r.contentType).toBe('image/svg+xml; charset=utf-8');
   });
 
-  it.each(['black', 'inverted', 'ivory'] as ArtifactTheme[])('theme %s sets paper and ink', async (theme) => {
+  it.each(['classic', 'inverted', 'ivory'] as ArtifactTheme[])('theme %s sets paper and ink', async (theme) => {
     const r = await renderArtifact(input, 'svg', { theme }, meta);
     const body = r.body as string;
     expect(body).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="-25 -25 50 50"/);
@@ -156,7 +170,7 @@ describe('PNG', () => {
     expect([labeled.width, labeled.height]).toEqual([400, 460]);
   });
 
-  it.each(['black', 'inverted', 'ivory'] as ArtifactTheme[])('theme %s: paper in the corner, ink at the seal core', async (theme) => {
+  it.each(['classic', 'inverted', 'ivory'] as ArtifactTheme[])('theme %s: paper in the corner, ink at the seal core', async (theme) => {
     const img = PNG.sync.read(Buffer.from((await renderArtifact(input, 'png', { theme, widthMm: 20, dpi: 300 }, meta)).body as Uint8Array));
     const px = (x: number, y: number) => {
       const i = (y * img.width + x) * 4;
@@ -178,7 +192,7 @@ describe('PNG', () => {
 
   describe('decodes back with the core decoder', () => {
     const cases: [string, Parameters<typeof renderArtifact>[2]][] = [
-      ['black', { theme: 'black', widthMm: 30, dpi: 300 }],
+      ['classic', { theme: 'classic', widthMm: 30, dpi: 300 }],
       ['ivory', { theme: 'ivory', widthMm: 30, dpi: 300 }],
       ['inverted', { theme: 'inverted', widthMm: 30, dpi: 300 }],
       ['labeled, no decor', { label: true, decor: false, widthMm: 30, dpi: 300 }],
@@ -212,7 +226,7 @@ const hasPdftoppm = (() => {
 })();
 
 describe.skipIf(!hasPdftoppm)('PDF rasterised by an independent renderer (poppler)', () => {
-  it.each(['black', 'ivory'] as ArtifactTheme[])('%s, labeled: decodes back to the same code', async (theme) => {
+  it.each(['classic', 'ivory'] as ArtifactTheme[])('%s, labeled: decodes back to the same code', async (theme) => {
     const decoder = await requireDecoder();
     const pdf = (await renderArtifact(input, 'pdf', { theme, label: true, widthMm: 30 }, meta)).body as Uint8Array;
     const dir = mkdtempSync(join(tmpdir(), 'orbes-pdf-'));
@@ -268,6 +282,32 @@ describe('PDF', () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
     const c = (await renderArtifact(input, 'pdf', {}, { ...meta, createdAt: new Date('2026-02-02T00:00:00Z') })).body as Uint8Array;
     expect(Buffer.from(a).equals(Buffer.from(c))).toBe(false);
+  });
+
+  it('K-only black (print shops): every colour is a DeviceCMYK K value, never RGB rich black', async () => {
+    const r = await renderArtifact(input, 'pdf', { kOnly: true, label: true }, meta);
+    expect(r.filename).toBe('ORBES-O26-J-00184-I1-classic-30mm-label-K.pdf');
+    const content = pdfStreams(r.body as Uint8Array);
+    expect(content).toMatch(/\/DeviceCMYK cs/);
+    expect(content).toMatch(/\/DeviceCMYK CS/); // stroked label lettering too
+    expect(content).not.toMatch(/\/DeviceRGB/);
+    expect(content).toContain('0 0 0 1 scn'); // ink: K 100 %
+    expect(content).toContain('0 0 0 0 scn'); // white paper: no ink
+    // Reduced tones become K tints of the same lightness (horizon #A9A9A9 ≈ K 33.7 %).
+    expect(content).toContain(`0 0 0 ${1 - 0xa9 / 255} scn`);
+    for (const m of content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) scn/g)) expect([m[1], m[2], m[3]]).toEqual(['0', '0', '0']);
+
+    const inverted = pdfStreams((await renderArtifact(input, 'pdf', { kOnly: true, theme: 'inverted' }, meta)).body as Uint8Array);
+    expect(inverted).toContain('0 0 0 1 scn'); // the black paper
+    expect(inverted).toContain('0 0 0 0 scn'); // the white ink is knocked out
+  });
+
+  it('K-only black is a PDF option for the neutral colourways only', () => {
+    expect(() => resolveArtifactOptions('pdf', { kOnly: true, theme: 'ivory' })).toThrow(/classic or inverted/);
+    expect(() => resolveArtifactOptions('svg', { kOnly: true })).toThrow(/PDF/);
+    expect(() => resolveArtifactOptions('png', { kOnly: true })).toThrow(/PDF/);
+    expect(() => resolveArtifactOptions('pdf', { kOnly: 'yes' } as never)).toThrow(ArtifactOptionsError);
+    expect(resolveArtifactOptions('pdf', {}).kOnly).toBe(false);
   });
 
   it('uses even-odd only for primitives with holes and the theme colours', async () => {

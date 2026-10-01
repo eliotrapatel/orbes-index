@@ -138,6 +138,39 @@ describe('AdminApi', () => {
     expect(png.contentType).toBe('image/png');
   });
 
+  it('keeps the new CSRF token of the session that TOTP enrolment rotates in', async () => {
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { ok: true, mfaPassed: true, csrfToken: 'tok-2' }), json(200, { items: [] }), json(200, { admin: { id: 'b' } }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.totpEnable('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', '123456');
+    expect(api.csrfToken).toBe('tok-2');
+    await api.admins();
+    await api.resetAdminTotp('b/1');
+    expect(calls[2].url).toBe('/api/admin/admins');
+    expect(calls[3].url).toBe('/api/admin/admins/b%2F1/totp/reset');
+    expect(header(calls[3], 'x-csrf-token')).toBe('tok-2');
+  });
+
+  it('extends a warranty and downloads a print sheet of several codes (POST, CSRF, blob)', async () => {
+    const pdf = new Response(new Uint8Array([37, 80, 68, 70]), {
+      status: 200,
+      headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="ORBES-sheet-2026-10-01-2-classic-25mm.pdf"' },
+    });
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { warranty: { durationMonths: 36 } }), pdf);
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.extendWarranty('O26-J-00184', 12);
+    expect(calls[1].url).toBe('/api/admin/products/O26-J-00184/warranty/extend');
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ months: 12 });
+    const sheet = await api.printSheet(['c1', 'c2'], { widthMm: 25, theme: 'classic', label: true, page: 'A4' });
+    expect(calls[2].url).toBe('/api/admin/codes/print-sheet');
+    expect(calls[2].init.method).toBe('POST');
+    expect(header(calls[2], 'x-csrf-token')).toBe('tok-1');
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ codeIds: ['c1', 'c2'], widthMm: 25, theme: 'classic', label: true, page: 'A4' });
+    expect(sheet).toMatchObject({ filename: 'ORBES-sheet-2026-10-01-2-classic-25mm.pdf', contentType: 'application/pdf' });
+    expect(sheet.blob.size).toBe(4);
+  });
+
   it('times out slow requests', async () => {
     vi.useFakeTimers();
     try {
