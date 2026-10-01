@@ -1233,7 +1233,8 @@ async function acceptTransfer(w: World, productId: string, to: AccountKey): Prom
 }
 
 async function openService(w: World, productId: string, type: ServiceType, location: string, notes: string): Promise<void> {
-  const record = await w.ctx.services.warranty.openService(productId, { type, location, notes, performedBy: ATELIER }, DEMO_SEED_ACTOR);
+  // The workshop that receives the piece performs the service.
+  const record = await w.ctx.services.warranty.openService(productId, { type, location, notes, performedBy: location }, DEMO_SEED_ACTOR);
   const list = w.openServices.get(productId) ?? [];
   list.push(record.id);
   w.openServices.set(productId, list);
