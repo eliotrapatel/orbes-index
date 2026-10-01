@@ -18,7 +18,11 @@ import {
   type ArtifactInput,
   type ArtifactTheme,
 } from '../../src/server/render/index.js';
-import { loadDecoder } from './decoder-support.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { requireDecoder } from './decoder-support.js';
 
 const identity = { year: 2026, categoryIndex: 1, serial: 184 };
 const meta = { productId: 'O26-J-00184', issue: 1, createdAt: new Date('2026-02-01T00:00:00.000Z') };
@@ -180,17 +184,54 @@ describe('PNG', () => {
       ['labeled, no decor', { label: true, decor: false, widthMm: 30, dpi: 300 }],
     ];
     it.each(cases)('%s', async (_name, opts) => {
-      const decoder = await loadDecoder();
-      if (!decoder) return; // decoder not built yet: covered by the parse checks above
+      const decoder = await requireDecoder();
       const img = PNG.sync.read(Buffer.from((await renderArtifact(input, 'png', opts, meta)).body as Uint8Array));
-      const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height), { tryInverted: true });
+      const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height), { tryInverted: true, readGenome: true });
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(res.payloadBytes).toEqual(payload);
+      expect(res.signature).toEqual(signature);
+      expect(res.data).toEqual(input.data);
+      // A clean digital render needs no error correction at all.
+      expect(res.quality.rsErrors + res.quality.rsErasures).toBe(0);
+      expect(res.quality.inverted).toBe(opts.theme === 'inverted');
+      // The genome orbit reads back as the signed identity's genome.
+      expect(res.genome?.glyphs).toEqual(input.genomeGlyphs);
+    });
+  });
+});
+
+// pdftoppm (poppler) is a system tool, not a project dependency: this cross-check runs where it exists.
+const hasPdftoppm = (() => {
+  try {
+    execFileSync('pdftoppm', ['-v'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!hasPdftoppm)('PDF rasterised by an independent renderer (poppler)', () => {
+  it.each(['black', 'ivory'] as ArtifactTheme[])('%s, labeled: decodes back to the same code', async (theme) => {
+    const decoder = await requireDecoder();
+    const pdf = (await renderArtifact(input, 'pdf', { theme, label: true, widthMm: 30 }, meta)).body as Uint8Array;
+    const dir = mkdtempSync(join(tmpdir(), 'orbes-pdf-'));
+    try {
+      writeFileSync(join(dir, 'a.pdf'), pdf);
+      execFileSync('pdftoppm', ['-r', '300', '-png', '-singlefile', join(dir, 'a.pdf'), join(dir, 'a')]);
+      const img = PNG.sync.read(readFileSync(join(dir, 'a.png')));
+      // 30 × 34.5 mm at 300 dpi = 354.3 × 407.5 px (poppler rounds up).
+      expect(Math.abs(img.width - 354.3)).toBeLessThan(1);
+      expect(Math.abs(img.height - 407.5)).toBeLessThan(1);
+      const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height), { readGenome: true });
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.payloadBytes).toEqual(payload);
-        expect(res.signature).toEqual(signature);
         expect(res.data).toEqual(input.data);
+        expect(res.genome?.glyphs).toEqual(input.genomeGlyphs);
       }
-    });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

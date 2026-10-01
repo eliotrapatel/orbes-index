@@ -15,7 +15,7 @@ import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { deriveSku, IssuanceService, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { loadDecoder } from '../render/decoder-support.js';
+import { requireDecoder } from '../render/decoder-support.js';
 
 const admin: Actor = { type: 'admin', id: 'admin-7', ipHash: 'iphash' };
 
@@ -445,14 +445,18 @@ describe('IssuanceService.renderCode', () => {
     expect(img.width).toBe(354); // 30 mm at 300 dpi
     expect(img.height).toBe(354);
 
-    const decoder = await loadDecoder();
-    if (!decoder) return; // core decoder not available in this build: parse checks only
-    const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height));
+    const decoder = await requireDecoder();
+    const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height), { readGenome: true });
     expect(res.ok).toBe(true);
     if (res.ok) {
       const row = await w.t.db.selectFrom('codes').selectAll().where('id', '=', codeId).executeTakeFirstOrThrow();
       expect(res.payloadBytes).toEqual(row.payload);
       expect(res.signature).toEqual(row.signature);
+      // What a scanner reads is exactly the stored code, signed by the registered key.
+      const key = await w.keys.publicKey(decodePayload(res.payloadBytes).keyId);
+      expect(verifyEd25519Node(key!.publicKey, signingMessage(res.payloadBytes), res.signature)).toBe(true);
+      const genome = await w.t.db.selectFrom('genomes').select('glyphs').where('id', '=', row.genome_id).executeTakeFirstOrThrow();
+      expect(res.genome?.glyphs).toEqual(genome.glyphs);
     }
   });
 

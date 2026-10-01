@@ -1,8 +1,8 @@
 /**
- * Optional access to the core decoder (src/core/decoder/, CONTRACTS §8) for
- * round-trip tests of rendered artifacts. The decoder is built by another
- * team; until it exists these helpers return undefined and the round-trip
- * assertions are skipped (parse checks still run).
+ * Access to the core decoder (src/core/decoder/, CONTRACTS §8) for round-trip
+ * tests of rendered artifacts. Loaded dynamically so this test code compiles
+ * against the contract alone; `requireDecoder()` fails the test if the
+ * decoder is missing.
  */
 export interface GrayImage {
   width: number;
@@ -11,7 +11,14 @@ export interface GrayImage {
 }
 
 export type DecodeResult =
-  | { ok: true; data: Uint8Array; payloadBytes: Uint8Array; signature: Uint8Array; quality: { inverted: boolean } }
+  | {
+      ok: true;
+      data: Uint8Array;
+      payloadBytes: Uint8Array;
+      signature: Uint8Array;
+      genome: { glyphs: (number | null)[]; confidence: number[] } | null;
+      quality: { inverted: boolean; rsErrors: number; rsErasures: number };
+    }
   | { ok: false; reason: string; detail?: string };
 
 export interface CoreDecoder {
@@ -41,4 +48,11 @@ export function loadDecoder(): Promise<CoreDecoder | undefined> {
     return found.decodeOrbesCode && found.rgbaToGray ? (found as CoreDecoder) : undefined;
   })();
   return cached;
+}
+
+/** The decoder, or a test failure explaining that it is missing. */
+export async function requireDecoder(): Promise<CoreDecoder> {
+  const d = await loadDecoder();
+  if (!d) throw new Error('core decoder (src/core/decoder: decodeOrbesCode, rgbaToGray) is not available');
+  return d;
 }

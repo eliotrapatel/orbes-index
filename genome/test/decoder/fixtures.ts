@@ -1,0 +1,79 @@
+/**
+ * Decoder test fixtures: real CODE-01 artifacts (seeded payload fields and
+ * signature bytes, CRC-valid frame, encoder output) rendered to luma, plus a
+ * seeded camera capture helper. Shared by the decoder tests and the scan
+ * matrix script so both measure the same thing.
+ */
+import { encodeOrbesCode, renderOrbesCodeSvg, type OrbesCodeModel } from '../../src/core/code/encoder.js';
+import { CODE01_SIZE } from '../../src/core/code/profile.js';
+import { computeGenome } from '../../src/core/genome/genome.js';
+import { packIdentity } from '../../src/core/identity.js';
+import { encodePayload, frameCodeData } from '../../src/core/payload.js';
+import type { CaptureParams } from '../support/camera-sim.js';
+import { simulateCapture } from '../support/camera-sim.js';
+import { Prng } from '../support/prng.js';
+import { svgToGray, type GrayImage } from '../support/raster.js';
+
+export interface CodeFixture {
+  seed: number;
+  data: Uint8Array;
+  payloadBytes: Uint8Array;
+  signature: Uint8Array;
+  genomeGlyphs: number[];
+  model: OrbesCodeModel;
+}
+
+/** A valid CODE-01 artifact whose payload fields and signature bytes are drawn from `seed`. */
+export function makeCode(seed: number, opts: { mask?: number; decor?: boolean } = {}): CodeFixture {
+  const rng = new Prng(`decoder-fixture-${seed}`);
+  const identity = { year: rng.int(2000, 2099), categoryIndex: rng.int(1, 31), serial: rng.int(1, 999_999) };
+  const nonce = Uint8Array.from({ length: 4 }, () => rng.int(0, 255));
+  const payloadBytes = encodePayload({
+    codeVersion: 1,
+    genomeVersion: 1,
+    keyId: rng.int(1, 255),
+    identity,
+    issue: rng.int(1, 255),
+    issuedDay: rng.int(0, 65535),
+    nonce,
+  });
+  // Decoding never verifies signatures, so random bytes exercise it fully.
+  const signature = Uint8Array.from({ length: 64 }, () => rng.int(0, 255));
+  const data = frameCodeData(payloadBytes, signature);
+  const genomeGlyphs = computeGenome(packIdentity(identity)).glyphs;
+  const model = encodeOrbesCode({ data, genomeGlyphs, ...(opts.mask === undefined ? {} : { mask: opts.mask }) }, { decor: opts.decor ?? true });
+  return { seed, data, payloadBytes, signature, genomeGlyphs, model };
+}
+
+const sourceCache = new Map<string, GrayImage>();
+
+/**
+ * The artifact rasterised at `pxPerU` (whole 50 u square, quiet zone
+ * included). Cached: tests photograph the same source many times.
+ */
+export function renderCode(code: CodeFixture, pxPerU: number, style: 'classic' | 'inverted' | 'ivory' = 'classic'): GrayImage {
+  const key = `${code.seed}/${code.model.mask}/${pxPerU}/${style}/${code.model.primitives.length}`;
+  const cached = sourceCache.get(key);
+  if (cached) return cached;
+  const colours = {
+    classic: { ink: '#0A0A0A', paper: '#FFFFFF' },
+    inverted: { ink: '#FFFFFF', paper: '#0A0A0A' },
+    ivory: { ink: '#111111', paper: '#F6F2EA' },
+  }[style];
+  const img = svgToGray(renderOrbesCodeSvg(code.model, colours), { widthPx: Math.round(CODE01_SIZE * pxPerU) });
+  if (sourceCache.size > 64) sourceCache.clear();
+  sourceCache.set(key, img);
+  return img;
+}
+
+/** Source resolution for camera captures: comfortably above any capture scale used. */
+export const SOURCE_PX_PER_U = 16;
+
+/**
+ * Photograph `code` with the camera simulator; `pxPerU` sets the apparent
+ * size (frame pixels per code unit, face-on).
+ */
+export function capture(code: CodeFixture, pxPerU: number, params: CaptureParams, seed: number): GrayImage {
+  const source = renderCode(code, Math.max(SOURCE_PX_PER_U, Math.ceil(pxPerU * 1.5)));
+  return simulateCapture(source, { ...params, codeWidthPx: pxPerU * CODE01_SIZE }, seed);
+}
