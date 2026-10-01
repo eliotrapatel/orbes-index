@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
+import { VERIFICATION_STATES } from '../../src/server/db/schema.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   POC_CATEGORIES,
@@ -116,7 +117,7 @@ describe('proof of concept run', () => {
   it.each<[TamperId, VerificationState, string]>([
     ['a', 'INVALID_SIGNATURE', 'BAD_SIGNATURE'],
     ['b1', 'INVALID_SIGNATURE', 'BAD_SIGNATURE'],
-    ['b2', 'GENOME_MISMATCH', 'GENOME_MISMATCH'],
+    ['b2', 'SUSPICIOUS_ACTIVITY', 'GENOME_MISMATCH'],
     ['c', 'INVALID_SIGNATURE', 'BAD_SIGNATURE'],
     ['d', 'INVALID_SIGNATURE', 'BAD_SIGNATURE'],
     ['e', 'INVALID_SIGNATURE', 'BAD_SIGNATURE'],
@@ -176,6 +177,11 @@ describe('proof of concept run', () => {
     expect(capture?.result.ok).toBe(false);
   });
 
+  it('reports only production public states (the reprinted genome is SUSPICIOUS_ACTIVITY, as on the server)', () => {
+    const states = [report.genuine.verdict.state, ...report.tampers.flatMap((t) => [t.expected, t.verdict.state])];
+    for (const state of states) expect(VERIFICATION_STATES).toContain(state);
+  });
+
   it('passes and tells the story in plain text', () => {
     expect(report.passed).toBe(true);
     const text = lines.join('\n');
@@ -185,7 +191,7 @@ describe('proof of concept run', () => {
       'MONOLITHE RING',
       'JEWELRY · 925 STERLING SILVER · CREATED 2026',
       'INVALID · INVALID SIGNATURE (BAD_SIGNATURE)',
-      'INVALID · GENOME MISMATCH (GENOME_MISMATCH)',
+      'SUSPICIOUS · SUSPICIOUS ACTIVITY (GENOME_MISMATCH)',
       'INVALID · MALFORMED CODE (DECODE_ECC)',
       'PROOF OF CONCEPT PASSED · 8 of 8 outcomes as expected',
     ]) {
@@ -268,7 +274,7 @@ describe('decideVerification', () => {
     const { ctx, data, glyphs } = world();
     const misread = (n: number) => glyphs.map((g, i) => (i < n ? (g + 1) % 16 : g));
     expect(decideVerification({ ok: true, data, genome: reading(misread(1)) }, ctx)).toMatchObject({ state: 'AUTHENTIC', genome: { mismatches: 1 } });
-    expect(decideVerification({ ok: true, data, genome: reading(misread(2)) }, ctx)).toMatchObject({ state: 'GENOME_MISMATCH', genome: { mismatches: 2 } });
+    expect(decideVerification({ ok: true, data, genome: reading(misread(2)) }, ctx)).toMatchObject({ state: 'SUSPICIOUS_ACTIVITY', reason: 'GENOME_MISMATCH', genome: { mismatches: 2 } });
   });
 
   it('is UNKNOWN for a validly signed code the registry does not hold', () => {

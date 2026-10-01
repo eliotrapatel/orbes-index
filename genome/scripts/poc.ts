@@ -6,7 +6,10 @@
  * One end-to-end run on the real core modules, with no server and no
  * database: key pair → product identity → GENOME-01 → signed canonical payload
  * → CODE-01 → SVG/PNG → phone capture → decode → verify → AUTHENTIC; then a
- * series of attacks, each of which must come out INVALID.
+ * series of attacks, each of which must be refused with the public state the
+ * production server answers: INVALID_SIGNATURE, MALFORMED_CODE, or
+ * SUSPICIOUS_ACTIVITY (reason GENOME_MISMATCH) for genuine data reprinted
+ * with another product's genome.
  *
  * Real: identity, payload, genome, Reed-Solomon/BCH/CRC, encoder, SVG
  * renderer, resvg rasterisation, decoder, Ed25519 (node:crypto signer,
@@ -76,6 +79,7 @@ import {
   type ProductIdentity,
 } from '../src/core/index.js';
 import { publicKeyFromSeed, signEd25519, verifyEd25519Node } from '../src/server/crypto/ed25519-node.js';
+import type { VerificationState as ServerVerificationState } from '../src/server/db/schema.js';
 import { PRESETS, simulateCapture, type CaptureParams } from '../test/support/camera-sim.js';
 import { writePng } from '../test/support/image-io.js';
 import { hashSeed, Prng } from '../test/support/prng.js';
@@ -174,7 +178,13 @@ export function issueCode(identity: ProductIdentity, signer: Signer, fields: { i
 
 // ── Verification decision ──────────────────────────────────────────────────
 
-export type VerificationState = 'AUTHENTIC' | 'UNKNOWN' | 'GENOME_MISMATCH' | 'INVALID_SIGNATURE' | 'MALFORMED_CODE';
+/**
+ * The public states the POC can reach: a subset of the production states
+ * (PLATFORM-CONTRACTS §2.4), so the POC never tells a story the server would
+ * not. A printed genome that disagrees with the signed identity is
+ * SUSPICIOUS_ACTIVITY with reason GENOME_MISMATCH, exactly as on the server.
+ */
+export type VerificationState = Extract<ServerVerificationState, 'AUTHENTIC' | 'UNKNOWN' | 'SUSPICIOUS_ACTIVITY' | 'INVALID_SIGNATURE' | 'MALFORMED_CODE'>;
 
 export interface GenomeReading {
   glyphs: readonly (number | null)[];
@@ -254,7 +264,8 @@ export function compareGenome(expected: readonly number[], reading: GenomeReadin
  *   2. key named by the code, Ed25519 signature            else INVALID_SIGNATURE
  *   3. supported genome version                            else MALFORMED_CODE
  *   4. product registered, this exact code on record       else UNKNOWN
- *   5. printed genome agrees with the signed identity      else GENOME_MISMATCH
+ *   5. printed genome agrees with the signed identity      else SUSPICIOUS_ACTIVITY
+ *                                                          (reason GENOME_MISMATCH)
  *
  * The signature is checked before any payload field is interpreted (only the
  * key id is read, to select the key), so an unsigned edit to any field, the
@@ -287,7 +298,7 @@ export function decideVerification(scan: ScanEvidence, ctx: VerificationContext)
 
   const expected = computeGenome(packed, payload.genomeVersion);
   const genome = { expected, ...compareGenome(expected.glyphs, scan.genome) };
-  if (genome.check === 'MISMATCH') return { state: 'GENOME_MISMATCH', reason: 'GENOME_MISMATCH', payload, genome };
+  if (genome.check === 'MISMATCH') return { state: 'SUSPICIOUS_ACTIVITY', reason: 'GENOME_MISMATCH', payload, genome };
 
   return {
     state: 'AUTHENTIC',
@@ -651,7 +662,7 @@ function authenticateAct(s: Session, iss: Issuance): Authentication {
   return { source, capture, decoded, verdict };
 }
 
-/** Act III: every attack must come out INVALID. */
+/** Act III: every attack must be refused (INVALID_SIGNATURE, MALFORMED_CODE or SUSPICIOUS_ACTIVITY). */
 function attackAct(s: Session, iss: Issuance, genuine: Authentication): TamperOutcome[] {
   const { say, artifacts } = s;
   say.part('III', 'ADVERSARIAL TRIALS');
@@ -693,7 +704,7 @@ function attackAct(s: Session, iss: Issuance, genuine: Authentication): TamperOu
   settle({
     id: 'b2',
     title: 'printed glyphs replaced',
-    expected: 'GENOME_MISMATCH',
+    expected: 'SUSPICIOUS_ACTIVITY',
     printed: iss.issued.data,
     capture: reprinted,
     verdict: reprintedVerdict,
@@ -803,7 +814,7 @@ const RULE_WIDTH = 74;
 const VERDICT_TEXT: Record<VerificationState, string> = {
   AUTHENTIC: 'AUTHENTIC',
   UNKNOWN: 'UNVERIFIED · UNKNOWN PRODUCT',
-  GENOME_MISMATCH: 'INVALID · GENOME MISMATCH',
+  SUSPICIOUS_ACTIVITY: 'SUSPICIOUS · SUSPICIOUS ACTIVITY',
   INVALID_SIGNATURE: 'INVALID · INVALID SIGNATURE',
   MALFORMED_CODE: 'INVALID · MALFORMED CODE',
 };
