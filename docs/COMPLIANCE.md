@@ -202,3 +202,26 @@ Every check re-run on commit `4e643de` with a clean working tree, after the reme
 | Hygiene | `git status --ignored`, `git ls-files`, grep for key material | no debug or scratch files (`zz-*`, `.dev-*`, `.prof*`) in `genome/src`, `genome/scripts`, `genome/test`; nothing under `node_modules/` tracked; no `.pem`, `.env` (other than the two `.env.example`) or key store tracked. Key-like literals only in the labelled public sample vector (`docs/vectors/code01-sample.json`), the RFC 8032 test vectors (`test/crypto/ed25519.test.ts`), test-only config secrets, and the dev cookie secret that production refuses. `genome/.gitignore` covers `out/`, `dist/`, `.data/`, `/keys/`, `*.pem`, `*.key.json`, `.env*`. |
 
 Still open, unchanged and out of scope for a software prototype: physical print validation (item 1), real-device measurements on iOS Safari and Android Chrome (item 2, the PARTIAL §28), a vendor KMS/HSM provider (item 4), the brand's master vector wordmark (item 9.1, needs `index.html`, which is off-limits) and a licensed web font (item 9.18). The scan-retention period (item 5) is a decision for counsel.
+
+---
+
+## 7. Production hosting: accepted deviations (2026-10-01)
+
+The first production deployment of `verify.theorbes.com` does not follow two assumptions of [DEPLOYMENT.md §15](DEPLOYMENT.md) and [LAUNCH.md](LAUNCH.md). The owner accepted both explicitly on 2026-10-01. The code and the stack (`deploy/vps/`) are unchanged.
+
+This repository is public, so this section deliberately names no host, address or co-hosted product. The detailed record stays with the owner.
+
+| # | Deviation | Requirement not met | Risk accepted | Mitigations | Exit path |
+|---|---|---|---|---|---|
+| H1 | The stack runs on a **shared** VPS, next to other Docker workloads that are managed separately. Some of those workloads have Docker API access (`docker.sock`), which is root-equivalent. | SECURITY-MODEL §5 and the DEPLOYMENT §15 checklist: "LocalKeyProvider on a dedicated host with encrypted disk". | Any person, process or container with root or Docker API access on that host can read `KEY_ENCRYPTION_KEY` and the keys volume, and could then issue codes that verify as AUTHENTIC. Rootless Docker was considered and rejected: it gives no isolation from root-equivalent surfaces, and its default port driver hides client IPs. | In place: ORBES runs as its own compose project, user and volumes. Agreed with the host owner, still to be completed: MFA on every console with Docker access; Docker API access removed wherever it is not needed; no automated agent with Docker access acts on untrusted input. Key compromise runbook: DEPLOYMENT §7.5 (revoke with the compromise time, then rotate). | A dedicated EU VPS via `backup.sh` → `restore.sh` (DEPLOYMENT §15.9, drilled), or a non-exportable KMS/HSM provider (open item 4). Exposure during the shared period cannot be undone, only answered by revocation and rotation. |
+| H2 | The VPS is outside the EU (Canada). | DEPLOYMENT §15 sizing row: "in an EU region … for data-protection simplicity". | Scan data (pseudonymised IP and device hashes, approximate location) and account data are processed outside the EU. | The privacy policy must state where data is processed (LAUNCH §10). Counsel to confirm the transfer basis. | The same move as H1. |
+
+Host preparation on the shared VPS also differs from LAUNCH §2. `bootstrap-ubuntu.sh` was **not** run in full, because its package upgrade, `daemon.json`, ufw, unattended-upgrades, fail2ban and SSH steps would change a host the stack does not own. Only `--units-only` (the backup and GeoIP timers) was run, and the `orbes` user, `/opt/orbes`, `/var/backups/orbes` and the `age` tool were set up by hand. The host's firewall, updates, swap and SSH policy stay with its owner.
+
+House rules for that host:
+
+- no `docker system|image|volume prune` with `-a` or `--volumes`: with the stack stopped, they delete the database and signing-key volumes or the rollback images;
+- old `orbes-genome:<tag>` images are removed by hand, keeping the current and previous tags;
+- an external uptime check on `/api/v1/health`, in addition to any monitor on the host itself.
+
+Revisit H1 and H2 before the public launch announcement (LAUNCH §10), and at least yearly.
