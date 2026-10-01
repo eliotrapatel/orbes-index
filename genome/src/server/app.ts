@@ -16,7 +16,7 @@ import type { Server } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import type { AppContext } from './context.js';
 import { DomainError } from './errors.js';
 import { ipHashOf } from './http/client.js';
@@ -51,7 +51,7 @@ export interface BuildAppOptions {
  * Typed against the plain HTTP/1.1 server this app runs on (the factory's generic option type
  * would otherwise be inferred against the HTTP/2 overloads).
  */
-export const frameworkErrors: NonNullable<FastifyServerOptions<Server>['frameworkErrors']> = (_error, _request, reply) => {
+export const frameworkErrors: NonNullable<FastifyServerOptions<Server>['frameworkErrors']> = (_error: FastifyError, _request: FastifyRequest, reply: FastifyReply) => {
   reply
     .code(400)
     .header('content-security-policy', CONTENT_SECURITY_POLICY)

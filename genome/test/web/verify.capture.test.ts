@@ -21,6 +21,7 @@ import {
   SEAL_CONFIDENT,
   SMALL_MODULE_PX,
   UPLOAD_MAX_SIDE,
+  uploadConfirmCrops,
   uploadCrops,
   zoomLabel,
   type ScanFailure,
@@ -28,7 +29,8 @@ import {
 import { HINTS } from '../../src/web/verify/copy.js';
 import { handleDecode } from '../../src/web/verify/frame-decoder.js';
 import { isDecodeRequest, MAX_FRAME_PIXELS, type DecodeFailureReason, type DecodeRequest, type DecodedCode } from '../../src/web/verify/protocol.js';
-import { makeCode } from '../decoder/fixtures.js';
+import { makeCode, renderCode } from '../decoder/fixtures.js';
+import { simulateCapture } from '../support/camera-sim.js';
 import { grayToRgba, svgToGray } from '../support/raster.js';
 
 describe('cameraCrop', () => {
@@ -92,6 +94,29 @@ describe('uploadCrops', () => {
     }
     // Each further crop sees the centre at a higher effective resolution.
     expect(plans[1].tw / plans[1].sw).toBeGreaterThan(plans[0].tw / plans[0].sw);
+  });
+});
+
+describe('uploadConfirmCrops', () => {
+  it('re-samples the photo differently (other scale, other framing) to confirm a heavily corrected read', () => {
+    for (const [w, h] of [
+      [1200, 900],
+      [4032, 3024],
+      [3024, 4032],
+    ]) {
+      const first = uploadCrops(w, h);
+      const plans = uploadConfirmCrops(w, h);
+      expect(plans.length).toBe(2);
+      for (const p of plans) {
+        expect(p.sx).toBeGreaterThanOrEqual(0);
+        expect(p.sy).toBeGreaterThanOrEqual(0);
+        expect(p.sx + p.sw).toBeLessThanOrEqual(w);
+        expect(p.sy + p.sh).toBeLessThanOrEqual(h);
+        expect(Math.max(p.tw, p.th)).toBeLessThanOrEqual(UPLOAD_MAX_SIDE);
+        // Never the same resampling as a plan already decoded.
+        for (const q of first) expect(p).not.toEqual(q);
+      }
+    }
   });
 });
 
@@ -326,6 +351,22 @@ describe('frame decoder (worker step)', () => {
     const reply = handleDecode({ type: 'decode', id: 1, width: w, height: h, buffer, options: { tryInverted: true, tryMirrored: false, readGenome: true } });
     expect(reply.ok).toBe(false);
     if (!reply.ok) expect(['NO_SEAL', 'NO_MOONS']).toContain(reply.reason);
+  });
+
+  it('passes on what a failure says about the frame: the scale of a code too small to read', () => {
+    // A hand-held capture of a code ≈ 75 px across (1.5 px per u): located, not readable.
+    const code = makeCode(3);
+    const frame = simulateCapture(
+      renderCode(code, 8),
+      { frame: { width: 400, height: 400 }, codeWidthPx: 75, rotationDeg: 9, tiltXDeg: 10, tiltYDeg: -7, substrate: 'paper', paperLevel: 0.87, inkLevel: 0.1, blurSigma: 0.85, noise: { sigma: 1.6, shot: 0.04 }, jpegQuality: 85 },
+      1,
+    );
+    const reply = handleDecode({ type: 'decode', id: 3, width: frame.width, height: frame.height, buffer: rgbaOf(frame), options: { tryInverted: true, tryMirrored: false, readGenome: true } });
+    expect(reply.ok).toBe(false);
+    if (reply.ok) return;
+    expect(['FORMAT', 'ECC', 'CRC']).toContain(reply.reason);
+    expect(reply.moduleSizePx).toBeGreaterThan(1);
+    expect(reply.moduleSizePx).toBeLessThan(SMALL_MODULE_PX);
   });
 
   it('validates requests structurally', () => {

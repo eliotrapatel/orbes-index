@@ -13,13 +13,18 @@
  * only with `--migrate` or MIGRATE_ON_START=true (otherwise the server
  * refuses to start on a schema with pending migrations).
  *
+ * `--demo` (or ORBES_DEMO=true; development/test only, DATABASE_URL must be
+ * pglite:memory): load the demo dataset at start, then serve it (demo.ts).
+ * Settings that are accepted but risky (configWarnings) are logged as warnings.
+ *
  * The startup log carries a redacted configuration summary: no secrets, no
  * anomaly thresholds, the database password masked.
  */
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import { ConfigError, loadConfig, redactConfig, type AppConfig } from './config.js';
+import { ConfigError, configWarnings, loadConfig, redactConfig, type AppConfig } from './config.js';
 import { createContext, startHousekeeping, type AppContext, type Housekeeping } from './context.js';
+import { demoBanner, demoRefusal, startDemo, type DemoStart } from './demo.js';
 import { createForwardingLogger, loggerOptions } from './http/logging.js';
 import { APP_VERSION } from './routes/public.js';
 
@@ -75,16 +80,29 @@ function loadConfigOrExit(): AppConfig {
 
 async function main(): Promise<void> {
   const config = loadConfigOrExit();
+  const demoMode = flag('demo', process.env.ORBES_DEMO);
+  if (demoMode && demoRefusal(config)) {
+    process.stderr.write(`--demo: ${demoRefusal(config)}\n`);
+    process.exit(78); // EX_CONFIG
+  }
   try {
-    ctx = await createContext(config, {
-      log,
-      ...(config.env === 'production' ? { migrate: flag('migrate', process.env.MIGRATE_ON_START) } : {}),
-    });
-    app = await buildApp(ctx, { serveStatic: true, logger: loggerOptions(config, process.env.LOG_LEVEL) });
+    let demo: DemoStart | undefined;
+    if (demoMode) {
+      demo = await startDemo(config, { log });
+      ctx = demo.ctx;
+    } else {
+      ctx = await createContext(config, {
+        log,
+        ...(config.env === 'production' ? { migrate: config.migrateOnStart || process.argv.includes('--migrate') } : {}),
+      });
+    }
+    app = await buildApp(ctx, { serveStatic: true, logger: loggerOptions(config) });
     log.attach(app.log);
+    for (const warning of configWarnings(config)) log.warn({ warning }, 'risky configuration');
     housekeeping = startHousekeeping(ctx);
     await app.listen({ host: config.host, port: config.port });
-    log.info({ version: APP_VERSION, config: redactConfig(config) }, 'ORBES GENOME server started');
+    log.info({ version: APP_VERSION, demo: demoMode, config: redactConfig(config) }, 'ORBES GENOME server started');
+    if (demo) process.stdout.write(demoBanner(demo, config.publicOrigin));
   } catch (e) {
     log.error({ err: errFields(e) }, 'startup failed');
     await shutdown('startup failed', 1);

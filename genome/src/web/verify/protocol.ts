@@ -39,7 +39,18 @@ export type DecodeFailureReason = 'NO_SEAL' | 'NO_MOONS' | 'FORMAT' | 'ECC' | 'C
 
 export type DecodeReply =
   | { type: 'result'; id: number; ok: true; decoded: DecodedCode; timing: DecodeTiming; buffer?: ArrayBuffer }
-  | { type: 'result'; id: number; ok: false; reason: DecodeFailureReason; timing: DecodeTiming; buffer?: ArrayBuffer };
+  | {
+      type: 'result';
+      id: number;
+      ok: false;
+      reason: DecodeFailureReason;
+      /** NO_MOONS: the most code-like seal found (scan guidance only). */
+      seal?: { confidence: number; unitPx: number };
+      /** FORMAT…PAYLOAD: scale (px per u) of the code located but not read (scan guidance only). */
+      moduleSizePx?: number;
+      timing: DecodeTiming;
+      buffer?: ArrayBuffer;
+    };
 
 export interface ReadyMessage {
   type: 'ready';

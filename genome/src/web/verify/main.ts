@@ -13,7 +13,7 @@
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
 import { ApiClient } from './api.js';
-import { buildVerifyInput } from './capture.js';
+import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
 import { HINTS, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
@@ -52,6 +52,8 @@ class App {
   /** The last verify request, for TRY AGAIN after a connection problem. */
   private lastInput: VerifyInput | null = null;
   private zoomed = false;
+  /** The default zoom level of the open camera (≈ 2×), null when it has no useful zoom. */
+  private zoomLevel: number | null = null;
   private resumeScan = false;
 
   start(): void {
@@ -147,6 +149,7 @@ class App {
     if (!decoder) return this.showProblem('decoder-failed');
     this.enter();
     this.zoomed = false;
+    this.zoomLevel = null;
 
     const view = scanView({
       onClose: () => this.goHome(),
@@ -160,7 +163,16 @@ class App {
       const caps = await this.camera.start(view.video);
       if (gen !== this.generation) return this.camera.stop();
       view.setTorch(caps.torch, false);
-      view.setZoom(caps.zoom !== null && caps.zoom.max >= 2, '2×', false);
+      // About 2× by default: small codes read from a distance the camera can focus at.
+      const level = defaultZoomLevel(caps.zoom);
+      this.zoomLevel = level;
+      if (level !== null && caps.zoom) {
+        this.zoomed = await this.camera.setZoom(level);
+        if (gen !== this.generation) return this.camera.stop();
+        view.setZoom(true, this.zoomed ? zoomLabel(caps.zoom.min) : zoomLabel(level), this.zoomed);
+      } else {
+        view.setZoom(false, '', false);
+      }
     } catch (e) {
       if (gen === this.generation) this.showProblem(e instanceof CameraError ? e.kind : 'camera-failed');
       return;
@@ -168,7 +180,7 @@ class App {
 
     let session: ScanSession;
     try {
-      session = new ScanSession({ video: view.video, reticleSize: () => view.reticleSize() }, decoder, {
+      session = new ScanSession({ video: view.video, reticleSize: () => view.reticleSize(), zoomState: () => this.zoomState() }, decoder, {
         onDecoded: (reply, ms) => void this.onDecoded(gen, view, reply, ms),
         onHint: (hint) => view.setHint(hint ? HINTS[hint] : null),
         onTimeout: () => gen === this.generation && this.showProblem('scan-timeout'),
@@ -206,13 +218,20 @@ class App {
     if (await this.camera.setTorch(on)) this.scan?.view.setTorch(true, on);
   }
 
+  private zoomState(): ZoomState {
+    if (this.zoomLevel === null) return 'none';
+    return this.zoomed ? 'applied' : 'available';
+  }
+
+  /** The zoom control switches between the default level and the camera's widest view. */
   private async toggleZoom(): Promise<void> {
     const z = this.camera.capabilities().zoom;
-    if (!z) return;
+    const level = this.zoomLevel;
+    if (!z || level === null) return;
     const next = !this.zoomed;
-    if (await this.camera.setZoom(next ? 2 : z.min)) {
+    if (await this.camera.setZoom(next ? level : z.min)) {
       this.zoomed = next;
-      this.scan?.view.setZoom(true, next ? '1×' : '2×', next);
+      this.scan?.view.setZoom(true, next ? zoomLabel(z.min) : zoomLabel(level), next);
     }
   }
 

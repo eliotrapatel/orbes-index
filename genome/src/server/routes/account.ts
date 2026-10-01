@@ -32,7 +32,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
     const { account, session } = await auth.registerAccount(
-      { email: b.email, password: b.password, displayName: b.displayName ?? null },
+      { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null },
       clientMeta(request, 'account', userAgentOf(request)),
     );
     setSessionCookie(reply, ctx.config, 'account', session);
@@ -52,6 +52,14 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     if (token && request.orbes.account) await auth.logout(token, 'account', { ipHash: request.orbes.ipHash });
     clearSessionCookie(reply, ctx.config, 'account');
     return { ok: true };
+  });
+
+  // Session probe for pages that only want to know whether someone is signed in: an anonymous visitor
+  // gets 200 { account: null } instead of /me's 401 (which browsers log as a console error).
+  app.get('/api/v1/account/session', { config: { guard: { session: 'optional' } } }, async (request) => {
+    const auth = request.orbes.account;
+    if (!auth) return { account: null };
+    return { account: accountJson(auth.account), csrfToken: auth.session.csrfToken };
   });
 
   app.get('/api/v1/account/me', async (request) => {

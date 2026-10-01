@@ -28,7 +28,17 @@ export function handleDecode(req: DecodeRequest): DecodeReply {
     });
     const t2 = now();
     const timing = { grayMs: round(t1 - t0), decodeMs: round(t2 - t1), totalMs: round(t2 - t0) };
-    if (!r.ok) return { type: 'result', id: req.id, ok: false, reason: r.reason, timing };
+    if (!r.ok) {
+      return {
+        type: 'result',
+        id: req.id,
+        ok: false,
+        reason: r.reason,
+        ...(r.seal ? { seal: { confidence: r.seal.confidence, unitPx: r.seal.unitPx } } : {}),
+        ...(typeof r.moduleSizePx === 'number' ? { moduleSizePx: r.moduleSizePx } : {}),
+        timing,
+      };
+    }
     const decoded: DecodedCode = {
       code: toBase64Url(r.data),
       codeVersion: r.codeVersion,

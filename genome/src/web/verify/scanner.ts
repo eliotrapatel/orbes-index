@@ -9,15 +9,30 @@
  *   ScanSession   the frame pump: every video frame (requestVideoFrameCallback
  *                 when available), at most every 120 ms and only while the
  *                 worker is idle, the square under the reticle is drawn to a
- *                 canvas (scaled to ≤ 960 px) and sent for decoding.
- *   readPhoto     the upload fallback: whole photo, then centred crops.
+ *                 canvas (scaled to ≤ 960 px) and sent for decoding. A read
+ *                 that needed heavy Reed-Solomon correction is only reported
+ *                 once a second video frame decodes to identical data.
+ *   readPhoto     the upload fallback: whole photo, then centred crops (a
+ *                 heavily corrected read is confirmed by a second resampling).
  *
  * Pure decisions (crop geometry, pacing, hints, error classification) live in
  * capture.ts and copy.ts, where they are unit tested.
  */
-import { cameraCrop, DECODE_WATCHDOG_MS, FrameThrottle, HINT_AFTER_MS, SCAN_TIMEOUT_MS, scanHint, uploadCrops, type CropPlan, type ScanHint } from './capture.js';
+import {
+  cameraCrop,
+  DECODE_WATCHDOG_MS,
+  FrameThrottle,
+  HintTracker,
+  ReadConfirmer,
+  SCAN_TIMEOUT_MS,
+  uploadConfirmCrops,
+  uploadCrops,
+  type CropPlan,
+  type ScanHint,
+  type ZoomState,
+} from './capture.js';
 import { classifyCameraError, type ProblemKind } from './copy.js';
-import type { DecodeFailureReason, DecodeReply, DecodeRequest, WorkerMessage } from './protocol.js';
+import type { DecodeReply, DecodeRequest, WorkerMessage } from './protocol.js';
 
 // ── Camera ─────────────────────────────────────────────────────────────────
 
@@ -359,10 +374,12 @@ interface FrameSource {
   video: HTMLVideoElement;
   /** Reticle diameter in CSS pixels (to crop the matching square of the frame). */
   reticleSize(): number;
+  /** Camera zoom state, for distance-aware guidance (default 'none'). */
+  zoomState?(): ZoomState;
 }
 
 type VideoWithFrameCallback = HTMLVideoElement & {
-  requestVideoFrameCallback?(cb: () => void): number;
+  requestVideoFrameCallback?(cb: (now: number, metadata?: { mediaTime?: number; presentedFrames?: number }) => void): number;
   cancelVideoFrameCallback?(handle: number): void;
 };
 
@@ -374,7 +391,9 @@ export class ScanSession {
   private readonly canvas = document.createElement('canvas');
   private readonly ctx2d: CanvasRenderingContext2D;
   private startedAt = 0;
-  private lastReason: DecodeFailureReason | null = null;
+  private readonly hints = new HintTracker();
+  private readonly confirmer = new ReadConfirmer();
+  private cropSide = 0;
   private lastHint: ScanHint = null;
   private hintTimer: ReturnType<typeof setInterval> | undefined;
   private consecutiveErrors = 0;
@@ -393,7 +412,8 @@ export class ScanSession {
     if (this.running) return;
     this.running = true;
     this.startedAt = performance.now();
-    this.lastReason = null;
+    this.hints.reset();
+    this.confirmer.reset();
     this.lastHint = null;
     this.throttle.reset();
     this.hintTimer = setInterval(() => this.tickHints(), 500);
@@ -414,7 +434,7 @@ export class ScanSession {
     const v = this.source.video as VideoWithFrameCallback;
     if (typeof v.requestVideoFrameCallback === 'function') {
       this.usesVfc = true;
-      this.handle = v.requestVideoFrameCallback(() => this.onFrame());
+      this.handle = v.requestVideoFrameCallback((_now, metadata) => this.onFrame(metadata));
     } else {
       this.usesVfc = false;
       this.handle = requestAnimationFrame(() => this.onFrame());
@@ -429,20 +449,22 @@ export class ScanSession {
       this.callbacks.onTimeout();
       return;
     }
-    const hint = elapsed >= HINT_AFTER_MS ? scanHint(this.lastReason, elapsed) : null;
+    const hint = this.hints.hint(elapsed, { cropSidePx: this.cropSide, zoom: this.source.zoomState?.() ?? 'none' });
     if (hint !== this.lastHint) {
       this.lastHint = hint;
       this.callbacks.onHint(hint);
     }
   }
 
-  private onFrame(): void {
+  private onFrame(metadata?: { mediaTime?: number; presentedFrames?: number }): void {
     if (!this.running) return;
     this.schedule();
     const video = this.source.video;
     const now = performance.now();
     if (video.readyState < 2 || video.videoWidth === 0 || !this.throttle.ready(now, this.decoder.busy)) return;
     this.throttle.sent(now);
+    // Identifies the video frame: a heavily corrected read must be confirmed by a different one.
+    const frameKey = metadata?.presentedFrames ?? metadata?.mediaTime ?? video.currentTime;
 
     const rect = video.getBoundingClientRect();
     const plan = cameraCrop({ width: video.videoWidth, height: video.videoHeight }, { width: rect.width, height: rect.height }, this.source.reticleSize());
@@ -452,16 +474,19 @@ export class ScanSession {
     } catch {
       return; // a frame that cannot be drawn (track ending): skip it
     }
+    this.cropSide = plan.tw;
     this.decoder
       .decode(image, { tryInverted: true, tryMirrored: false, readGenome: true })
       .then((reply) => {
         if (!this.running) return;
         this.consecutiveErrors = 0;
         if (reply.ok) {
+          const accepted = this.confirmer.offer(reply.decoded, frameKey);
+          if (!accepted) return; // heavily corrected: wait for a second frame to agree
           this.stop();
-          this.callbacks.onDecoded(reply, reply.timing.totalMs);
+          this.callbacks.onDecoded({ ...reply, decoded: accepted }, reply.timing.totalMs);
         } else {
-          this.lastReason = reply.reason;
+          this.hints.push({ reason: reply.reason, seal: reply.seal, moduleSizePx: reply.moduleSizePx });
         }
       })
       .catch((e: unknown) => {
@@ -531,9 +556,17 @@ export async function readPhoto(file: File, decoder: DecoderClient): Promise<{ r
   const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
   if (!ctx) throw new PhotoError('decoder-failed');
   let total = 0;
+  // A heavily corrected read is held until a second resampling of the photo agrees (ReadConfirmer).
+  const confirmer = new ReadConfirmer();
+  let held = false;
   try {
     if (bmp.width < 16 || bmp.height < 16) throw new PhotoError('upload-unreadable');
-    for (const plan of uploadCrops(bmp.width, bmp.height)) {
+    const plans = uploadCrops(bmp.width, bmp.height);
+    const confirmPlans = uploadConfirmCrops(bmp.width, bmp.height);
+    for (let i = 0; i < plans.length + confirmPlans.length; i++) {
+      // The confirmation readings only run while a read is waiting for one.
+      if (i >= plans.length && !held) break;
+      const plan = i < plans.length ? plans[i] : confirmPlans[i - plans.length];
       const image = drawCrop(canvas, ctx, bmp.source, plan);
       let reply: DecodeReply;
       try {
@@ -543,7 +576,10 @@ export async function readPhoto(file: File, decoder: DecoderClient): Promise<{ r
         continue; // watchdog: try the next (smaller) crop
       }
       total += reply.timing.totalMs;
-      if (reply.ok) return { reply, decodeMs: total };
+      if (!reply.ok) continue;
+      const accepted = confirmer.offer(reply.decoded, i);
+      if (accepted) return { reply: { ...reply, decoded: accepted }, decodeMs: total };
+      held = true;
     }
   } finally {
     bmp.close();

@@ -82,6 +82,25 @@ export function uploadCrops(width: number, height: number, maxSide = UPLOAD_MAX_
   return plans;
 }
 
+/**
+ * Second readings of an uploaded photo, used only to confirm a heavily
+ * corrected read (ReadConfirmer): the whole photo at three quarters of the
+ * first pass's size, and a centred crop of 80 % of the short side. Each
+ * resamples the pixels differently from every uploadCrops plan, so a
+ * miscorrection would have to repeat on different data to pass.
+ */
+export function uploadConfirmCrops(width: number, height: number, maxSide = UPLOAD_MAX_SIDE): CropPlan[] {
+  const w = Math.max(1, Math.floor(width));
+  const h = Math.max(1, Math.floor(height));
+  const k = 0.75 * Math.min(1, maxSide / Math.max(w, h));
+  const side = Math.max(1, Math.round(Math.min(w, h) * 0.8));
+  const t = Math.max(1, Math.min(side, maxSide));
+  return [
+    { sx: 0, sy: 0, sw: w, sh: h, tw: Math.max(1, Math.round(w * k)), th: Math.max(1, Math.round(h * k)) },
+    { sx: Math.floor((w - side) / 2), sy: Math.floor((h - side) / 2), sw: side, sh: side, tw: t, th: t },
+  ];
+}
+
 // ── Pacing ─────────────────────────────────────────────────────────────────
 
 /** Contract §4: frames go to the worker at most every 120 ms. */

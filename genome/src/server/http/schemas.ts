@@ -146,6 +146,7 @@ export const registerAccountBody = body({
   email,
   password,
   displayName: z.preprocess((v) => (v === '' ? null : v), z.string().max(80, 'At most 80 characters').nullable().optional()),
+  country: z.preprocess((v) => (v === '' ? null : v), country.nullable().optional()),
 });
 
 export const loginBody = body({ email, password });
