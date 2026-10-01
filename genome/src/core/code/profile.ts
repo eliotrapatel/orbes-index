@@ -190,8 +190,16 @@ export const CODE01_MASK_COUNT = MASK_SEEDS.length;
 
 const maskCache = new Map<number, Uint8Array>();
 
-/** Mask bits for data-cell positions 0..CODE01_DATA_CELLS.length-1. */
+/**
+ * Mask bits for data-cell positions 0..CODE01_DATA_CELLS.length-1. Returns a
+ * fresh copy each call so a caller mutating it can never corrupt later encodes
+ * or decodes in the same process (copying 1314 bytes is negligible).
+ */
 export function maskBits(mask: number): Uint8Array {
+  return maskBitsShared(mask).slice();
+}
+
+function maskBitsShared(mask: number): Uint8Array {
   if (!Number.isInteger(mask) || mask < 0 || mask >= MASK_SEEDS.length) {
     throw new RangeError(`invalid mask ${mask}`);
   }
