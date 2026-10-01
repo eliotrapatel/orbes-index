@@ -7,8 +7,10 @@
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   POC_CATEGORIES,
@@ -42,10 +44,11 @@ import {
   verifyCodeSignature,
   type ProductIdentity,
 } from '../../src/core/index.js';
+import * as core from '../../src/core/index.js';
 import { publicKeyFromSeed, signEd25519 } from '../../src/server/crypto/ed25519-node.js';
 import { readImage } from '../support/image-io.js';
 
-const GENOME_ROOT = resolve(import.meta.dirname, '../..');
+const GENOME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ISSUED_AT = new Date(Date.UTC(2026, 2, 14));
 const categories = staticCategoryResolver([...POC_CATEGORIES]);
 const ring = parseProductId(POC_PRODUCT.productId, categories);
@@ -146,9 +149,8 @@ describe('proof of concept run', () => {
     expect(verdict.genome?.mismatches).toBeGreaterThanOrEqual(2);
   });
 
-  it('(c) differs from the genuine frame in exactly one signature byte', () => {
-    const { payload } = tamper('c').verdict;
-    expect(payload?.identity).toEqual(ring);
+  it('(c) leaves the genuine payload untouched: only the signature was edited', () => {
+    expect(tamper('c').verdict.payload).toEqual(report.issued.payload);
   });
 
   it('(d) prints a forged code the decoder reads exactly, with the genuine signature reused', () => {
@@ -349,6 +351,38 @@ describe('issuance', () => {
   it('draws reproducible entropy from a seed', () => {
     expect(demoEntropy(1)(16)).toEqual(demoEntropy(1)(16));
     expect(demoEntropy(1)(16)).not.toEqual(demoEntropy(2)(16));
+  });
+});
+
+// ── Core barrel ────────────────────────────────────────────────────────────
+
+describe('core barrel (src/core/index.ts)', () => {
+  it('exposes the CONTRACTS.md §1–§8 API from one import', () => {
+    const contract = [
+      ...['concatBytes', 'toHex', 'fromHex', 'toBase64Url', 'fromBase64Url', 'utf8', 'equalBytes', 'readU16BE', 'readU32BE', 'writeU16BE', 'writeU32BE'],
+      ...['rsEncode', 'rsDecode', 'FORMAT_GENERATOR', 'FORMAT_XOR_MASK', 'bchFormatEncode', 'bchFormatDecode', 'crc16'],
+      ...['packIdentity', 'unpackIdentity', 'formatProductId', 'parseProductId', 'IdentityError', 'staticCategoryResolver'],
+      ...['PAYLOAD_V1_LENGTH', 'SIGNATURE_LENGTH', 'CODE_DATA_V1_LENGTH', 'SIGNING_DOMAIN_V1', 'ISSUED_DAY_EPOCH_UTC', 'PayloadError'],
+      ...['encodePayload', 'decodePayload', 'signingMessage', 'frameCodeData', 'unframeCodeData', 'issuedDayFromDate', 'dateFromIssuedDay'],
+      ...['verifyEd25519', 'verifyCodeSignature'],
+      ...['GENOME01_GLYPHS', 'SUPPORTED_GENOME_VERSIONS', 'computeGenome', 'identityFromGenomeGlyphs', 'genomePermute', 'genomeUnpermute'],
+      ...['genomeGlyphPrimitives', 'renderGenomeSvg', 'primitivesToSvg', 'primitiveToPathData'],
+      ...['encodeOrbesCode', 'renderOrbesCodeSvg', 'rgbaToGray', 'decodeOrbesCode'],
+    ];
+    expect(contract.filter((name) => !(name in core))).toEqual([]);
+  });
+
+  it('bundles for the browser: nothing in the core graph needs Node', async () => {
+    const result = await build({
+      entryPoints: [join(GENOME_ROOT, 'src/core/index.ts')],
+      bundle: true,
+      platform: 'browser',
+      format: 'esm',
+      write: false,
+      logLevel: 'silent',
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.outputFiles[0].text).not.toMatch(/\bfrom\s*["']node:|require\(["']node:/);
   });
 });
 

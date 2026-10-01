@@ -290,3 +290,28 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera scan (Chromium fake captu
     expect(problems).toEqual([]);
   }, 120_000);
 });
+
+describe.skipIf(!HAS_CHROMIUM)('verify web app: camera permission declined', () => {
+  let srv: VerifyServer;
+  let browser: Browser;
+
+  beforeAll(async () => {
+    srv = await startVerifyServer();
+    browser = await launchChromium({ args: ['--use-fake-device-for-media-stream', '--deny-permission-prompts'] });
+  }, 120_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    await srv?.close();
+  });
+
+  it('explains how to allow the camera and offers the photo upload instead', async () => {
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
+    expect(await resultTitle(page)).toBe('CAMERA ACCESS DECLINED');
+    await textOf(page.locator('.message__text'), /allow camera access/);
+    await visible(page.getByRole('button', { name: 'UPLOAD A PHOTO' }));
+    await visible(page.getByRole('button', { name: 'SCAN AGAIN' }));
+    expect(problems).toEqual([]);
+  }, 120_000);
+});

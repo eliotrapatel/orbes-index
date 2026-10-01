@@ -501,6 +501,7 @@ interface Authentication {
 
 const ECC_PARITY = CODE01.ecc.totalBytes - CODE01.ecc.dataBytes;
 
+/** The whole proof of concept. Throws when the genuine code cannot be decoded: there is nothing to attack then. */
 export function runPoc(options: PocOptions = {}): PocReport {
   const started = performance.now();
   const categories = staticCategoryResolver([...POC_CATEGORIES]);
@@ -609,7 +610,8 @@ function authenticateAct(s: Session, iss: Issuance): Authentication {
   const capture = photographAndDecode(source, 'genuine');
   say.step('07', 'CAMERA SCAN');
   say.row('camera', `typicalPhone · ${capture.frame.width} × ${capture.frame.height} px · code ≈ ${PHONE.codeWidthPx} px wide`);
-  say.row('pose', `rotated ${PHONE_POSE.rotationDeg + BURST_DRIFT_DEG * (capture.frames - 1)}° · tilted ${PHONE_POSE.tiltXDeg}° and ${PHONE_POSE.tiltYDeg}° · barrel lens`);
+  const rotation = PHONE_POSE.rotationDeg + BURST_DRIFT_DEG * (capture.frames - 1);
+  say.row('pose', `rotated ${rotation}° · tilted ${PHONE_POSE.tiltXDeg}° and ${PHONE_POSE.tiltYDeg}° · barrel lens`);
   say.row('optics & sensor', `defocus σ ${PHONE.blurSigma} px · read + shot noise · JPEG ${PHONE.jpegQuality} · desk clutter, paper`);
   say.row('frame', `${artifacts.gray('capture.png', capture.frame)} · simulated in ${ms(capture.captureMs)}`);
 
@@ -621,7 +623,8 @@ function authenticateAct(s: Session, iss: Issuance): Authentication {
   say.row('Reed-Solomon', `${q.rsErrors} byte errors and ${q.rsErasures} erasures corrected · CRC-16 valid`);
   say.row('geometry', `mask ${decoded.mask} · north at ${q.orientation.toFixed(1)}° · module ${q.moduleSizePx.toFixed(1)} px · contrast ${q.contrast.toFixed(2)}`);
   say.row('genome read', ...genomeReadLines(decoded.genome));
-  say.row('code data', `${decoded.data.length} bytes · ${equalBytes(decoded.data, iss.issued.data) ? 'identical to the issued bytes' : 'DIFFERENT from the issued bytes'}`);
+  const exact = equalBytes(decoded.data, iss.issued.data);
+  say.row('code data', `${decoded.data.length} bytes · ${exact ? 'identical to the issued bytes' : 'DIFFERENT from the issued bytes'}`);
 
   const read = unframeCodeData(decoded.data);
   const t0 = performance.now();
@@ -687,7 +690,14 @@ function attackAct(s: Session, iss: Issuance, genuine: Authentication): TamperOu
     const g = reprintedVerdict.genome;
     say.row('genome', `${g.mismatches} of ${g.read} glyphs differ from ${g.expected.fingerprint}, the signed identity's genome`);
   }
-  settle({ id: 'b2', title: 'printed glyphs replaced', expected: 'GENOME_MISMATCH', printed: iss.issued.data, capture: reprinted, verdict: reprintedVerdict });
+  settle({
+    id: 'b2',
+    title: 'printed glyphs replaced',
+    expected: 'GENOME_MISMATCH',
+    printed: iss.issued.data,
+    capture: reprinted,
+    verdict: reprintedVerdict,
+  });
 
   const resigned = forge(read.data, (_payload, signature) => {
     signature[0] ^= 0x01;
@@ -706,7 +716,14 @@ function attackAct(s: Session, iss: Issuance, genuine: Authentication): TamperOu
   say.row('print', `${artifacts.file('tamper-d-forged-code.svg', forgedSvg)} · mask ${forgedModel.mask} · a well-formed CODE-01`);
   say.capture(artifacts.gray('tamper-d-capture.png', forged.frame), forged);
   if (forged.result.ok) say.row('read as', `${claimOf(s, forged.result.data)} · format, Reed-Solomon, CRC-16, payload: all valid`);
-  settle({ id: 'd', title: 'forged code re-printed', expected: 'INVALID_SIGNATURE', printed: relabelled, capture: forged, verdict: decideVerification(forged.result, iss.ctx) });
+  settle({
+    id: 'd',
+    title: 'forged code re-printed',
+    expected: 'INVALID_SIGNATURE',
+    printed: relabelled,
+    capture: forged,
+    verdict: decideVerification(forged.result, iss.ctx),
+  });
 
   const fake = randomWellFormedFrame(s.random, POC_KEY_ID);
   const fakeModel = encodeOrbesCode({ data: fake.data, genomeGlyphs: computeGenome(packIdentity(fake.payload.identity), GENOME_VERSION).glyphs });
@@ -715,14 +732,27 @@ function attackAct(s: Session, iss: Issuance, genuine: Authentication): TamperOu
   say.row('bytes', `draw #${fake.draws}: the first 77 random bytes that parse as a payload naming key ${POC_KEY_ID}`);
   say.row('claims', `${claim(s, fake.payload)} · valid CRC-16 · genome printed to match`);
   say.capture(artifacts.gray('tamper-e-capture.png', fakeCapture.frame), fakeCapture);
-  settle({ id: 'e', title: 'random fake code', expected: 'INVALID_SIGNATURE', printed: fake.data, capture: fakeCapture, verdict: decideVerification(fakeCapture.result, iss.ctx) });
+  settle({
+    id: 'e',
+    title: 'random fake code',
+    expected: 'INVALID_SIGNATURE',
+    printed: fake.data,
+    capture: fakeCapture,
+    verdict: decideVerification(fakeCapture.result, iss.ctx),
+  });
 
   const damaged = photographAndDecode(scuff(genuine.source, 'orbes-poc/damage'), 'corrupted');
   say.trial('f', 'CORRUPTED IMAGE BEYOND ECC CAPACITY');
   say.row('damage', `ink smears and abrasion over 240° of data orbits 1–12 · ${damagedCodewordBytes()} of ${CODE01.ecc.totalBytes} codeword bytes hit`);
   say.row('capacity', say.dim(`Reed-Solomon repairs at most ${Math.floor(ECC_PARITY / 2)} unknown or ${ECC_PARITY} located bad bytes`));
   say.capture(artifacts.gray('tamper-f-capture.png', damaged.frame), damaged);
-  settle({ id: 'f', title: 'image corrupted beyond ECC', expected: 'MALFORMED_CODE', capture: damaged, verdict: decideVerification(damaged.result, iss.ctx) });
+  settle({
+    id: 'f',
+    title: 'image corrupted beyond ECC',
+    expected: 'MALFORMED_CODE',
+    capture: damaged,
+    verdict: decideVerification(damaged.result, iss.ctx),
+  });
 
   return outcomes;
 }
@@ -895,7 +925,8 @@ class Narrator {
     }
     const met = tampers.filter((t) => t.verdict.state === t.expected).length + (genuine.state === 'AUTHENTIC' ? 1 : 0);
     this.line();
-    this.line(`${this.bold(`PROOF OF CONCEPT ${passed ? 'PASSED' : 'FAILED'}`)} · ${met} of ${tampers.length + 1} outcomes as expected · ${(elapsedMs / 1000).toFixed(1)} s`);
+    const headline = this.bold(`PROOF OF CONCEPT ${passed ? 'PASSED' : 'FAILED'}`);
+    this.line(`${headline} · ${met} of ${tampers.length + 1} outcomes as expected · ${(elapsedMs / 1000).toFixed(1)} s`);
     if (outDir) this.line(this.dim(`artifacts in ${relative(process.cwd(), outDir) || '.'}`));
     this.line();
   }
