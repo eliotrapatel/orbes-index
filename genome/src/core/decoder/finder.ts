@@ -111,21 +111,33 @@ function crossCheck(bin: Uint8Array, w: number, h: number, x: number, y: number,
   return { unit, offset: (pos[0] - neg[0]) / 2 };
 }
 
+export type ScanAxis = 'rows' | 'columns';
+
 /**
- * Confirms a row hit along the column and both diagonals, re-centring as it
- * goes. Returns the refined centre and unit, or null.
+ * Confirms a scan hit along the perpendicular axis and both diagonals,
+ * re-centring as it goes. A second direction besides the scan line must show
+ * the seal pattern: that already rejects stripes and bars, yet keeps a seal
+ * crossed by a scratch or a strip on one side. The ray-based measurement
+ * (measureSeal) is the strict test.
  */
-function confirm(bin: Uint8Array, w: number, h: number, hit: Hit): Hit | null {
+function confirm(bin: Uint8Array, w: number, h: number, hit: Hit, axis: ScanAxis): Hit | null {
   const maxRun = Math.ceil(hit.unit * 8);
-  const xi = Math.floor(hit.x);
-  const yi = Math.floor(hit.y);
-  const vertical = crossCheck(bin, w, h, xi, yi, 0, 1, maxRun);
-  if (!vertical) return null;
-  const cy = yi + 0.5 + vertical.offset;
-  const horizontal = crossCheck(bin, w, h, xi, Math.floor(cy), 1, 0, maxRun);
-  if (!horizontal) return null;
-  const cx = xi + 0.5 + horizontal.offset;
-  const units = [vertical.unit, horizontal.unit];
+  const [px, py, ax, ay] = axis === 'rows' ? [0, 1, 1, 0] : [1, 0, 0, 1];
+  let cx = hit.x;
+  let cy = hit.y;
+  const units = [hit.unit];
+  const perp = crossCheck(bin, w, h, Math.floor(cx), Math.floor(cy), px, py, maxRun);
+  if (perp) {
+    units.push(perp.unit);
+    cx = Math.floor(cx) + 0.5 + px * perp.offset;
+    cy = Math.floor(cy) + 0.5 + py * perp.offset;
+    // Re-centre along the scan axis too, now that the line runs through the centre.
+    const along = crossCheck(bin, w, h, Math.floor(cx), Math.floor(cy), ax, ay, maxRun);
+    if (along) {
+      cx = Math.floor(cx) + 0.5 + ax * along.offset;
+      cy = Math.floor(cy) + 0.5 + ay * along.offset;
+    }
+  }
   for (const [dx, dy] of [
     [1, 1],
     [1, -1],
@@ -133,30 +145,34 @@ function confirm(bin: Uint8Array, w: number, h: number, hit: Hit): Hit | null {
     const diag = crossCheck(bin, w, h, Math.floor(cx), Math.floor(cy), dx, dy, maxRun);
     if (diag) units.push(diag.unit);
   }
-  // Both axes plus at least one diagonal: a stripe or a bar never passes all three.
-  if (units.length < 3) return null;
+  if (units.length < 2) return null;
+  const lo = Math.min(...units);
+  const hi = Math.max(...units);
+  // Foreshortening changes the unit with direction, but never by more than this.
+  if (hi > 1.8 * lo) return null;
   return { x: cx, y: cy, unit: units.reduce((s, u) => s + u, 0) / units.length };
 }
 
-interface Cluster {
+/** Clustered seal hits: approximate centre, unit and number of supporting scan lines. */
+export interface SealCluster {
   x: number;
   y: number;
   unit: number;
   count: number;
 }
 
-/** Row scan + confirmation + clustering on one binarised frame. */
-export function findSealHits(bin: Uint8Array, w: number, h: number): Cluster[] {
-  const clusters: Cluster[] = [];
-  const runs = new Int32Array(w + 2);
-  for (let y = 0; y < h; y++) {
-    // Run lengths of the row, starting with a (possibly empty) light run.
+/** Scan along rows or columns + confirmation + clustering on one binarised frame. */
+export function findSealHits(bin: Uint8Array, w: number, h: number, axis: ScanAxis = 'rows'): SealCluster[] {
+  const clusters: SealCluster[] = [];
+  const [lines, length, lineStride, step] = axis === 'rows' ? [h, w, w, 1] : [w, h, 1, w];
+  const runs = new Int32Array(length + 2);
+  for (let line = 0; line < lines; line++) {
+    // Run lengths along the line, starting with a (possibly empty) light run.
     let n = 0;
     let len = 0;
     let ink = 0;
-    const row = y * w;
-    for (let x = 0; x < w; x++) {
-      const v = bin[row + x];
+    for (let k = 0, idx = line * lineStride; k < length; k++, idx += step) {
+      const v = bin[idx];
       if (v !== ink) {
         runs[n++] = len;
         len = 0;
@@ -170,8 +186,9 @@ export function findSealHits(bin: Uint8Array, w: number, h: number): Cluster[] {
     for (let i = 1; i + 5 < n; i += 2) {
       const unit = sealPattern(runs[i], runs[i + 1], runs[i + 2], runs[i + 3], runs[i + 4]);
       if (unit > 0 && runs[i - 1] >= MIN_QUIET * unit && runs[i + 5] >= MIN_QUIET * unit) {
-        const coreStart = start + runs[i] + runs[i + 1];
-        const hit = confirm(bin, w, h, { x: coreStart + runs[i + 2] / 2, y: y + 0.5, unit });
+        const core = start + runs[i] + runs[i + 1] + runs[i + 2] / 2;
+        const seed = axis === 'rows' ? { x: core, y: line + 0.5, unit } : { x: line + 0.5, y: core, unit };
+        const hit = confirm(bin, w, h, seed, axis);
         if (hit) addToClusters(clusters, hit);
       }
       start += runs[i] + runs[i + 1];
@@ -180,7 +197,7 @@ export function findSealHits(bin: Uint8Array, w: number, h: number): Cluster[] {
   return clusters;
 }
 
-function addToClusters(clusters: Cluster[], hit: Hit): void {
+function addToClusters(clusters: SealCluster[], hit: Hit): void {
   for (const c of clusters) {
     if (Math.hypot(c.x - hit.x, c.y - hit.y) < 2 * Math.max(c.unit, hit.unit) && Math.abs(c.unit - hit.unit) < 0.5 * c.unit) {
       const k = c.count;
@@ -195,8 +212,8 @@ function addToClusters(clusters: Cluster[], hit: Hit): void {
 }
 
 /** Merge cluster lists found on several binarisations of the same frame. */
-export function mergeClusters(lists: readonly Cluster[][]): Cluster[] {
-  const merged: Cluster[] = [];
+export function mergeClusters(lists: readonly SealCluster[][]): SealCluster[] {
+  const merged: SealCluster[] = [];
   for (const list of lists) {
     for (const c of list) {
       const same = merged.find((m) => Math.hypot(m.x - c.x, m.y - c.y) < 2 * Math.max(m.unit, c.unit));
@@ -220,8 +237,17 @@ const RAY_COUNT = 48;
  * Precise seal measurement around a cluster: ray casting on the gray image,
  * sub-pixel edges, ellipse fits. Returns null if the rays do not show a seal.
  */
-export function measureSeal(img: GrayImage, cluster: Cluster): SealCandidate | null {
-  const { x: cx, y: cy, unit } = cluster;
+export function measureSeal(img: GrayImage, cluster: SealCluster): SealCandidate | null {
+  const first = measureAt(img, cluster.x, cluster.y, cluster.unit, cluster.count);
+  // Rays from an off-centre origin (a hit confirmed on a damaged seal) give
+  // skewed edge ratios: measure again from the fitted centre.
+  if (first && Math.hypot(first.center.x - cluster.x, first.center.y - cluster.y) > 0.3 * cluster.unit) {
+    return measureAt(img, first.center.x, first.center.y, first.unit, cluster.count) ?? first;
+  }
+  return first;
+}
+
+function measureAt(img: GrayImage, cx: number, cy: number, unit: number, hits: number): SealCandidate | null {
   const reach = 6.5 * unit;
   if (cx - reach < -unit || cy - reach < -unit || cx + reach > img.width + unit || cy + reach > img.height + unit) return null;
   const step = Math.min(0.5, unit / 6);
@@ -305,7 +331,7 @@ export function measureSeal(img: GrayImage, cluster: Cluster): SealCandidate | n
   if (!(Math.sqrt(Math.min(l1, l2) / Math.max(l1, l2)) > 0.3)) return null;
   if (sealUnit < MIN_UNIT * 0.8) return null;
   const support = ringFit.inliers / RAY_COUNT;
-  const score = support * (1 / (1 + ringFit.rms / sealUnit)) * Math.log2(2 + cluster.count) * ((paper - ink) / 255 + 0.2);
+  const score = support * (1 / (1 + ringFit.rms / sealUnit)) * Math.log2(2 + hits) * ((paper - ink) / 255 + 0.2);
   return { center: { x: ex, y: ey }, affine, unit: sealUnit, ink, paper, score };
 }
 

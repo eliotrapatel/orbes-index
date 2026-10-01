@@ -11,17 +11,22 @@ export interface IntegralImage {
   width: number;
   height: number;
   /** (width + 1) × (height + 1); entry (x, y) = sum of pixels [0, x) × [0, y). */
-  sums: Float64Array;
+  sums: Int32Array;
 }
 
+/** Largest image whose pixel sum fits a signed 32-bit table (255 · pixels < 2^31). */
+export const MAX_INTEGRAL_PIXELS = Math.floor((2 ** 31 - 1) / 255);
+
 /**
- * Float64 entries stay exact for any image the decoder accepts (255 · 2^32
- * < 2^53), so huge frames cannot overflow the way 32-bit tables would.
+ * 32-bit entries (faster than float tables in every engine). The decoder
+ * only builds tables for detection images, which it downscales well below
+ * MAX_INTEGRAL_PIXELS; larger inputs are rejected rather than overflowing.
  */
 export function integralImage(img: GrayImage): IntegralImage {
   const { width: w, height: h, data } = img;
+  if (w * h > MAX_INTEGRAL_PIXELS) throw new RangeError(`image too large for a 32-bit summed-area table: ${w}×${h}`);
   const stride = w + 1;
-  const sums = new Float64Array(stride * (h + 1));
+  const sums = new Int32Array(stride * (h + 1));
   for (let y = 0; y < h; y++) {
     let row = 0;
     const src = y * w;

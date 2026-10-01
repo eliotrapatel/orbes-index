@@ -146,6 +146,49 @@ export function haloDarkness(img: GrayImage, affine: Mat2, p: Point): number {
   return (paper - ringMean(img, affine, p, CODE01.moons.haloRadius, 24)) / (paper - ink);
 }
 
+/**
+ * Shape check of a dark blob at `c`: edge radius along 16 rays (frame of
+ * `affine`), which must be consistent (a disc, not an arc or a bar) and of
+ * moon size give or take perspective, and a ring just outside the edge that
+ * is mostly substrate (an isolated disc, not a blob inside the data orbits).
+ * Returns a quality factor in (0, 1], or 0 when the blob is not a moon.
+ */
+function discShape(img: GrayImage, affine: Mat2, c: Point, mid: number): number {
+  const RAYS = 16;
+  const STEP = 0.1;
+  const LIMIT = 2 * MOON_R;
+  const radii: number[] = [];
+  const dirs: [number, number][] = [];
+  for (let k = 0; k < RAYS; k++) {
+    const a = (k * 2 * Math.PI) / RAYS;
+    const ux = Math.sin(a);
+    const uy = -Math.cos(a);
+    const dx = affine[0] * ux + affine[1] * uy;
+    const dy = affine[2] * ux + affine[3] * uy;
+    dirs.push([dx, dy]);
+    let prev = sampleBilinear(img, c.x, c.y);
+    let edge = LIMIT;
+    for (let t = STEP; t <= LIMIT; t += STEP) {
+      const v = sampleBilinear(img, c.x + t * dx, c.y + t * dy);
+      if (v > mid) {
+        edge = t - STEP + (STEP * (mid - prev)) / Math.max(1e-6, v - prev);
+        break;
+      }
+      prev = v;
+    }
+    radii.push(edge);
+  }
+  const mean = radii.reduce((s, r) => s + r, 0) / RAYS;
+  const sd = Math.sqrt(radii.reduce((s, r) => s + (r - mean) ** 2, 0) / RAYS);
+  const cv = sd / mean;
+  if (mean < 0.55 * MOON_R || mean > 1.7 * MOON_R || cv > 0.3) return 0;
+  let light = 0;
+  for (const [dx, dy] of dirs) if (sampleBilinear(img, c.x + 1.3 * mean * dx, c.y + 1.3 * mean * dy) > mid) light++;
+  const isolation = light / RAYS;
+  if (isolation < 0.6) return 0;
+  return (1 - cv) * isolation;
+}
+
 interface Peak extends MoonDetection {
   /** Rectified polar coordinates around the seal (u, radians clockwise from north). */
   r: number;
@@ -223,11 +266,13 @@ function moonPeaks(img: GrayImage, ii: IntegralImage, seal: SealCandidate): Peak
     const { ink, paper } = moonLevels(img, affine, p);
     if (!(paper - ink > 0.25 * contrast)) continue;
     const c = refineCentroid(img, affine, p, ink, paper);
+    const shape = discShape(img, affine, c, (ink + paper) / 2);
+    if (!shape) continue;
     const dx = c.x - seal.center.x;
     const dy = c.y - seal.center.y;
     const q = { x: inv[0] * dx + inv[1] * dy, y: inv[2] * dx + inv[3] * dy };
     const a = Math.atan2(q.x, -q.y);
-    peaks.push({ x: c.x, y: c.y, response: p.v, halo: haloDarkness(img, affine, c), q, r: Math.hypot(q.x, q.y), a: a < 0 ? a + 2 * Math.PI : a });
+    peaks.push({ x: c.x, y: c.y, response: p.v * shape, halo: haloDarkness(img, affine, c), q, r: Math.hypot(q.x, q.y), a: a < 0 ? a + 2 * Math.PI : a });
   }
   return peaks;
 }

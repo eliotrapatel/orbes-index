@@ -53,14 +53,14 @@ import { bchFormatEncode, rsDecode } from '../ecc/index.js';
 import type { Point } from '../geometry.js';
 import { PayloadError, unframeCodeData } from '../payload.js';
 import { binarize } from './binarize.js';
-import { findSealHits, measureSeal, mergeClusters, type SealCandidate } from './finder.js';
+import { findSealHits, measureSeal, mergeClusters, type SealCandidate, type SealCluster } from './finder.js';
 import { readGenome } from './genome-reader.js';
 import { applyH, homographyFromPoints, jacobianH, multiplyH, type Homography } from './homography.js';
 import { downscaleImage, invertImage, isUsableImage, type GrayImage } from './image.js';
 import { integralImage, type IntegralImage } from './integral.js';
-import { findMoons, type MoonSet } from './moons.js';
+import { findMoons, invert2, moonLevels, refineCentroid, type Mat2, type MoonSet } from './moons.js';
 import { alignmentScore, refineControlPoints, refineOffsetField } from './refine.js';
-import { CELL_COUNT, classifyCells, sampleCells, type CellClassification, type OffsetField } from './sampler.js';
+import { CELL_COUNT, classifyCells, quietZoneScore, sampleCells, type CellClassification } from './sampler.js';
 
 export interface DecodeOptions {
   /** Also look for light ink on a dark substrate (default true). */
@@ -191,17 +191,40 @@ function detectionImage(img: GrayImage): Detection {
   return { image, integral: integralImage(image), factor };
 }
 
-function sealCandidates(det: Detection, max: number): SealCandidate[] {
+/**
+ * Seal candidates in passes of increasing cost: rows of the coarse-window
+ * binarisation, rows of the fine-window one, then columns of both (which
+ * catch seals whose left or right side is damaged). Each pass yields only
+ * seals not seen before, best first, so a frame whose code is found early
+ * never pays for the later passes.
+ */
+function* sealCandidates(det: Detection, max: number): Generator<SealCandidate> {
   const { image } = det;
   const side = Math.min(image.width, image.height);
   const windows = [...new Set([Math.max(8, Math.round(side / 8)), Math.max(6, Math.round(side / 16))])];
-  const clusters = mergeClusters(windows.map((w) => findSealHits(binarize(image, det.integral, w), image.width, image.height)));
-  const seals: SealCandidate[] = [];
-  for (const c of clusters.slice(0, MAX_CLUSTERS)) {
-    const s = measureSeal(image, c);
-    if (s) seals.push(s);
+  const binaries: Uint8Array[] = [];
+  const seen: SealCandidate[] = [];
+  const passes: (() => SealCluster[][])[] = [
+    ...windows.map((w) => () => {
+      const bin = binarize(image, det.integral, w);
+      binaries.push(bin);
+      return [findSealHits(bin, image.width, image.height, 'rows')];
+    }),
+    () => binaries.map((bin) => findSealHits(bin, image.width, image.height, 'columns')),
+  ];
+  for (const pass of passes) {
+    const fresh: SealCandidate[] = [];
+    for (const cluster of mergeClusters(pass()).slice(0, MAX_CLUSTERS)) {
+      if (seen.some((s) => Math.hypot(s.center.x - cluster.x, s.center.y - cluster.y) < 2 * s.unit)) continue;
+      const seal = measureSeal(image, cluster);
+      if (seal && !seen.some((s) => Math.hypot(s.center.x - seal.center.x, s.center.y - seal.center.y) < 2 * s.unit)) fresh.push(seal);
+    }
+    fresh.sort((a, b) => b.score - a.score);
+    for (const seal of fresh.slice(0, max)) {
+      seen.push(seal);
+      yield seal;
+    }
   }
-  return seals.sort((a, b) => b.score - a.score).slice(0, max);
 }
 
 // ── Stage: alignment ───────────────────────────────────────────────────────
@@ -213,41 +236,111 @@ interface Alignment {
   imagePoints: Point[];
   values: Float64Array;
   cls: CellClassification;
-  field?: OffsetField;
+  /** Per-cell image shift from the offset field, when one was fitted. */
+  shift: Float64Array | null;
 }
 
 function scale(p: Point, f: number): Point {
   return { x: p.x * f, y: p.y * f };
 }
 
+/** Minimum fraction of quiet-zone probes reading as substrate for a frame to be worth refining. */
+const MIN_QUIET_SCORE = 0.7;
+
 /**
- * Initial homography from seal + moons: the full fit and (with four moons)
- * each leave-one-out fit, keeping whichever samples the cells most sharply.
+ * Initial homography from seal + moons. Moon centroids are first re-measured
+ * at full resolution with their own local scale (the seal's affine frame is
+ * only exact at the centre; under perspective a moon's window would
+ * otherwise clip it or catch the polaris halo). With four moons the full fit
+ * and each leave-one-out fit compete on cell contrast, so one damaged moon
+ * cannot spoil the frame.
+ */
+/**
+ * Homography from the seal centre and the moons (frame-0 code points ↔ image
+ * points). With three moons the centre is collinear with the opposite pair,
+ * which leaves one degree of freedom open, so the seal itself supplies four
+ * more correspondences: points of its ring (r = 3.5 u) placed through the
+ * seal's affine frame, rotated to agree with the moons (2-D Procrustes).
+ */
+function fitFrame(center: Point, sealAffine: Mat2, pairs: readonly [Point, Point][]): Homography | null {
+  const code = [{ x: 0, y: 0 }, ...pairs.map(([c]) => c)];
+  const image = [center, ...pairs.map(([, p]) => p)];
+  if (pairs.length < 4) {
+    const inv = invert2(sealAffine);
+    if (!inv) return null;
+    // Rotation θ best mapping code moon vectors onto the seal-rectified image vectors.
+    let dot = 0;
+    let cross = 0;
+    for (const [c, p] of pairs) {
+      const qx = inv[0] * (p.x - center.x) + inv[1] * (p.y - center.y);
+      const qy = inv[2] * (p.x - center.x) + inv[3] * (p.y - center.y);
+      dot += c.x * qx + c.y * qy;
+      cross += c.x * qy - c.y * qx;
+    }
+    const theta = Math.atan2(cross, dot);
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    const R = 3.5;
+    for (const [ux, uy] of [
+      [R, 0],
+      [0, R],
+      [-R, 0],
+      [0, -R],
+    ]) {
+      const rx = cos * ux - sin * uy;
+      const ry = sin * ux + cos * uy;
+      code.push({ x: ux, y: uy });
+      image.push({ x: center.x + sealAffine[0] * rx + sealAffine[1] * ry, y: center.y + sealAffine[2] * rx + sealAffine[3] * ry });
+    }
+  }
+  return homographyFromPoints(code, image);
+}
+
+/**
+ * Initial homography from seal + moons. Moon centroids are first re-measured
+ * at full resolution with their own local scale (the seal's affine frame is
+ * only exact at the centre; under perspective a moon's window would
+ * otherwise clip it or catch the polaris halo). With four moons the full fit
+ * and each leave-one-out fit compete on cell contrast, so one damaged moon
+ * cannot spoil the frame.
  */
 function initialAlignment(img: GrayImage, seal: SealCandidate, moons: MoonSet, factor: number): Alignment | null {
   const center = scale(seal.center, factor);
-  const pairs: [Point, Point][] = [];
+  const sealAffine = seal.affine.map((v) => v * factor) as Mat2;
+  let pairs: [Point, Point][] = [];
   moons.slots.forEach((m, k) => {
     if (m) pairs.push([CODE01_MOONS[k], scale(m, factor)]);
   });
+  const rough = fitFrame(center, sealAffine, pairs);
+  if (!rough) return null;
+  pairs = pairs.map(([c, p]) => {
+    const local = jacobianH(rough, c.x, c.y);
+    const { ink, paper } = moonLevels(img, local, p);
+    return [c, refineCentroid(img, local, p, ink, paper)];
+  });
+
   const subsets: [Point, Point][][] = [pairs];
   if (pairs.length === 4) for (let skip = 0; skip < 4; skip++) subsets.push(pairs.filter((_, i) => i !== skip));
   let best: Alignment | null = null;
   let bestScore = -Infinity;
   for (const subset of subsets) {
-    const codePoints = [{ x: 0, y: 0 }, ...subset.map(([c]) => c)];
-    const imagePoints = [center, ...subset.map(([, p]) => p)];
-    const h = homographyFromPoints(codePoints, imagePoints);
+    const h = fitFrame(center, sealAffine, subset);
     if (!h) continue;
     const values = sampleCells(img, h, false);
     const cls = classifyCells(values);
     const score = alignmentScore(values, cls);
     if (score > bestScore) {
       bestScore = score;
-      // Refinement moves every control point, so the moon left out by the
-      // winning subset is re-added at its predicted position.
-      const full = CODE01_MOONS.map((c) => c);
-      best = { homography: h, codePoints: [{ x: 0, y: 0 }, ...full], imagePoints: [center, ...full.map((c) => applyH(h, c.x, c.y))], values, cls };
+      // Refinement moves every control point, so a moon left out by the
+      // winning subset re-enters at its predicted position.
+      best = {
+        homography: h,
+        codePoints: [{ x: 0, y: 0 }, ...CODE01_MOONS],
+        imagePoints: [center, ...CODE01_MOONS.map((c) => applyH(h, c.x, c.y))],
+        values,
+        cls,
+        shift: null,
+      };
     }
   }
   return best;
@@ -261,9 +354,9 @@ function refineAlignment(img: GrayImage, a: Alignment, unitPx: number): Alignmen
 }
 
 function withOffsetField(img: GrayImage, a: Alignment, unitPx: number): Alignment {
-  const { field } = refineOffsetField(img, a.homography, unitPx, a.cls);
-  const values = sampleCells(img, a.homography, true, field);
-  return { ...a, values, cls: classifyCells(values), field };
+  const { shift } = refineOffsetField(img, a.homography, unitPx, a.cls);
+  const values = sampleCells(img, a.homography, true, shift);
+  return { ...a, values, cls: classifyCells(values), shift };
 }
 
 // ── Stage: format, ECC, payload ────────────────────────────────────────────
@@ -320,11 +413,11 @@ function readCodeword(cls: CellClassification, g: number, mask: number): { codew
   return { codeword, byteConfidence };
 }
 
-function tryHypothesis(cls: CellClassification, g: number, mask: number, failure: Failure): CodeRead | null {
+function tryHypothesis(cls: CellClassification, g: number, mask: number, schedule: readonly number[], failure: Failure): CodeRead | null {
   const { codeword, byteConfidence } = readCodeword(cls, g, mask);
   const order = Array.from(byteConfidence.keys()).sort((a, b) => byteConfidence[a] - byteConfidence[b] || a - b);
   let lastErasures = -1;
-  for (const step of ERASURE_STEPS) {
+  for (const step of schedule) {
     // Never erase bytes that read cleanly: past that point more erasures only cost capacity.
     let count = 0;
     while (count < step && byteConfidence[order[count]] < 0.999) count++;
@@ -346,19 +439,23 @@ function tryHypothesis(cls: CellClassification, g: number, mask: number, failure
   return null;
 }
 
+/** Erasure schedule when brute-forcing masks (format unreadable): fewer, coarser steps. */
+const BRUTE_FORCE_ERASURES = [0, 30, 60];
+
 function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean, failure: Failure): CodeRead | null {
   const hyps = formatHypotheses(cls, moons, mirrored, failure);
-  for (const h of hyps) {
-    if (h.formatDistance > FORMAT_TRUST) break;
-    const read = tryHypothesis(cls, h.g, h.mask, failure);
+  const trusted = hyps.filter((h) => h.formatDistance <= FORMAT_TRUST);
+  for (const h of trusted) {
+    const read = tryHypothesis(cls, h.g, h.mask, ERASURE_STEPS, failure);
     if (read) return read;
   }
-  if (hyps.every((h) => h.formatDistance > FORMAT_TRUST)) failure.note('FORMAT', 'format word unreadable');
-  // Format unreadable or misleading: brute-force the masks, best hypotheses first.
+  if (trusted.length > 0) return null;
+  // Format unreadable (both copies damaged): brute-force the masks, the
+  // most plausible orientations first.
+  failure.note('FORMAT', 'format word unreadable');
   for (const h of hyps) {
     for (let mask = 0; mask < CODE01_MASK_COUNT; mask++) {
-      if (h.formatDistance <= FORMAT_TRUST && mask === h.mask) continue;
-      const read = tryHypothesis(cls, h.g, mask, failure);
+      const read = tryHypothesis(cls, h.g, mask, BRUTE_FORCE_ERASURES, failure);
       if (read) return read;
     }
   }
@@ -373,18 +470,26 @@ function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, de
     failure.note('NO_MOONS', 'degenerate moon configuration');
     return null;
   }
+  if (quietZoneScore(img, initial.homography, initial.cls) < MIN_QUIET_SCORE) {
+    failure.note('NO_MOONS', 'no code structure around the seal');
+    return null;
+  }
   const unitPx = seal.unit * det.factor;
   let T = now(); const lap = (l: string) => { const n = now(); (globalThis as any).DBG?.(l + ' ' + (n - T).toFixed(1)); T = n; };
-  lap('initial');
-  let alignment = refineAlignment(img, initial, unitPx);
-  lap('refine');
+  // Cheapest first: a sharp frontal capture decodes straight from the moon fit.
+  let alignment: Alignment = { ...initial, values: sampleCells(img, initial.homography, true) };
+  alignment.cls = classifyCells(alignment.values);
   let read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-  lap('decodeCells ' + !!read);
+  lap('initial ' + !!read);
+  if (!read) {
+    alignment = refineAlignment(img, initial, unitPx);
+    read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
+    lap('refine ' + !!read);
+  }
   if (!read) {
     alignment = withOffsetField(img, alignment, unitPx);
-    lap('field');
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
-    lap('decodeCells2 ' + !!read);
+    lap('field ' + !!read);
   }
   if (!read) return null;
 
@@ -432,9 +537,8 @@ function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, de
 function decodePolarity(img: GrayImage, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
   let T = now();
   const det = detectionImage(img);
-  const seals = sealCandidates(det, opts.maxSealCandidates);
-  (globalThis as any).DBG?.('seals ' + seals.length + ' ' + (now() - T).toFixed(1) + ' ' + seals.map(s => s.unit.toFixed(2) + '@' + s.score.toFixed(2)).join(' '));
-  for (const seal of seals) {
+  for (const seal of sealCandidates(det, opts.maxSealCandidates)) {
+    (globalThis as any).DBG?.('seal ' + seal.unit.toFixed(2) + '@' + seal.score.toFixed(2) + ' t=' + (now() - T).toFixed(1));
     const moons = findMoons(det.image, det.integral, seal);
     if (!moons) {
       failure.note('NO_MOONS', `seal at (${seal.center.x.toFixed(1)}, ${seal.center.y.toFixed(1)}) without moons`);

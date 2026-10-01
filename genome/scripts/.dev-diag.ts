@@ -54,7 +54,7 @@ for (const seal of seals) {
   console.log('  BER refined', ber(c1.bits), 'score', r.score.toFixed(1), 'trueScore', alignmentScore(sampleCells(img, Htrue, false), c0).toFixed(1));
   const t0 = performance.now();
   const f = refineOffsetField(img, r.homography, seal.unit, c1);
-  const v2 = sampleCells(img, r.homography, true, f.field); const c2 = classifyCells(v2);
+  const v2 = sampleCells(img, r.homography, true, f.shift); const c2 = classifyCells(v2);
   console.log('  BER field', ber(c2.bits), (performance.now() - t0).toFixed(1), 'ms');
   for (const [i, p] of r.points.entries()) { const t = i === 0 ? tc : truth(full[i - 1].x, full[i - 1].y); console.log('   ctrl err', Math.hypot(p.x - t.x, p.y - t.y).toFixed(2)); }
 }

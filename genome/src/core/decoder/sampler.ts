@@ -65,50 +65,59 @@ const NEIGHBOURS: Int16Array[] = (() => {
   return out;
 })();
 
-/** Optional smooth correction field: image-space offset (px) added after the homography. */
-export type OffsetField = (x: number, y: number) => { dx: number; dy: number };
-
 const FOOTPRINT = 0.2;
+/** Sub-samples per cell with the footprint (3 × 3) and without (centre only). */
+export const FOOTPRINT_SAMPLES = 9;
 
 /**
- * Mean gray value at each cell centre (footprint 3 × 3 sub-samples when
- * `footprint` is true, else the single centre sample — used while aligning).
+ * Image positions of the cell samples through `h`: interleaved x, y; one
+ * sample per cell, or FOOTPRINT_SAMPLES per cell (±0.2 u radially and
+ * tangentially) when `footprint` is set.
  */
-export function sampleCells(img: GrayImage, h: Homography, footprint: boolean, field?: OffsetField, out = new Float64Array(CELL_COUNT)): Float64Array {
+export function projectCells(h: Homography, footprint: boolean): Float64Array {
+  const per = footprint ? FOOTPRINT_SAMPLES : 1;
+  const out = new Float64Array(CELL_COUNT * per * 2);
   const { x: cxs, y: cys, theta } = CELL_GEOMETRY;
+  let o = 0;
   for (let i = 0; i < CELL_COUNT; i++) {
     const cx = cxs[i];
     const cy = cys[i];
-    if (!footprint) {
-      out[i] = sampleAt(img, h, cx, cy, field);
-      continue;
-    }
     // Radial unit vector (sin θ, −cos θ); tangential (cos θ, sin θ).
     const s = Math.sin(theta[i]);
     const c = Math.cos(theta[i]);
-    let sum = 0;
-    for (let a = -1; a <= 1; a++) {
-      for (let b = -1; b <= 1; b++) {
-        const dr = a * FOOTPRINT;
-        const dt = b * FOOTPRINT;
-        sum += sampleAt(img, h, cx + dr * s + dt * c, cy - dr * c + dt * s, field);
-      }
+    for (let k = 0; k < per; k++) {
+      const dr = footprint ? ((k % 3) - 1) * FOOTPRINT : 0;
+      const dt = footprint ? (Math.floor(k / 3) - 1) * FOOTPRINT : 0;
+      const x = cx + dr * s + dt * c;
+      const y = cy - dr * c + dt * s;
+      const w = h[6] * x + h[7] * y + h[8];
+      out[o++] = (h[0] * x + h[1] * y + h[2]) / w;
+      out[o++] = (h[3] * x + h[4] * y + h[5]) / w;
     }
-    out[i] = sum / 9;
   }
   return out;
 }
 
-function sampleAt(img: GrayImage, h: Homography, x: number, y: number, field?: OffsetField): number {
-  const w = h[6] * x + h[7] * y + h[8];
-  let px = (h[0] * x + h[1] * y + h[2]) / w;
-  let py = (h[3] * x + h[4] * y + h[5]) / w;
-  if (field) {
-    const o = field(x, y);
-    px += o.dx;
-    py += o.dy;
+/**
+ * Mean gray value per cell from projected sample positions, optionally
+ * shifted by a per-cell image offset (`shift`: interleaved dx, dy per cell).
+ */
+export function sampleProjected(img: GrayImage, pos: Float64Array, shift: Float64Array | null, out = new Float64Array(CELL_COUNT)): Float64Array {
+  const per = pos.length / (2 * CELL_COUNT);
+  let o = 0;
+  for (let i = 0; i < CELL_COUNT; i++) {
+    const dx = shift ? shift[2 * i] : 0;
+    const dy = shift ? shift[2 * i + 1] : 0;
+    let sum = 0;
+    for (let k = 0; k < per; k++, o += 2) sum += sampleBilinear(img, pos[o] + dx, pos[o + 1] + dy);
+    out[i] = sum / per;
   }
-  return sampleBilinear(img, px, py);
+  return out;
+}
+
+/** Cell values through `h` (see projectCells / sampleProjected). */
+export function sampleCells(img: GrayImage, h: Homography, footprint: boolean, shift: Float64Array | null = null): Float64Array {
+  return sampleProjected(img, projectCells(h, footprint), shift);
 }
 
 export interface CellClassification {
@@ -193,4 +202,45 @@ export function classifyCells(values: Float64Array): CellClassification {
 function median(a: Float64Array): number {
   const s = Float64Array.from(a).sort();
   return s.length ? s[s.length >> 1] : 0;
+}
+
+/** Rectified sample points of the quiet zones, with the cell whose local threshold applies. */
+const QUIET_PROBES = (() => {
+  const probes: { x: number; y: number; cell: number }[] = [];
+  const nearestCell = (ringIndex: number, a: number): number => {
+    const ring = CODE01_RINGS[ringIndex];
+    return ring.offset + (Math.floor((a / TAU) * ring.cells) % ring.cells);
+  };
+  // Outer quiet band between the data orbits and the moons, away from the
+  // diagonals where the moons and the polaris halo sit.
+  const OUTER = 24.6;
+  for (let k = 0; k < 96; k++) {
+    const a = ((k + 0.5) * TAU) / 96;
+    const fromDiagonal = Math.abs((((a - Math.PI / 4) % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2) - Math.PI / 4);
+    if (Math.PI / 4 - fromDiagonal < (12 * Math.PI) / 180) continue;
+    probes.push({ x: OUTER * Math.sin(a), y: -OUTER * Math.cos(a), cell: nearestCell(CODE01_RINGS.length - 1, a) });
+  }
+  // The seal's own quiet ring.
+  const INNER = 4.85;
+  for (let k = 0; k < 32; k++) {
+    const a = ((k + 0.5) * TAU) / 32;
+    probes.push({ x: INNER * Math.sin(a), y: -INNER * Math.cos(a), cell: nearestCell(0, a) });
+  }
+  return probes;
+})();
+
+/**
+ * Fraction of the quiet-zone probes that read as substrate under `h`. A true
+ * code scores near 1 (glare reads light too); a look-alike — a genome glyph
+ * mistaken for a seal, a misassigned moon — lands the probes on data or
+ * clutter and scores near ½. A cheap gate before expensive work.
+ */
+export function quietZoneScore(img: GrayImage, h: Homography, cls: CellClassification): number {
+  let light = 0;
+  for (const p of QUIET_PROBES) {
+    const w = h[6] * p.x + h[7] * p.y + h[8];
+    const v = sampleBilinear(img, (h[0] * p.x + h[1] * p.y + h[2]) / w, (h[3] * p.x + h[4] * p.y + h[5]) / w);
+    if (v >= cls.threshold[p.cell]) light++;
+  }
+  return light / QUIET_PROBES.length;
 }
