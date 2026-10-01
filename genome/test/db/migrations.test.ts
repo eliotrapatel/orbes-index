@@ -78,12 +78,14 @@ describe('migrations', () => {
   });
 
   it('roll back cleanly and re-apply', async () => {
-    const down = await migrateDown(t.db);
-    expect(down.reverted).toEqual(['0001_initial']);
+    // One migration per call, newest first, until none is applied.
+    const reverted: string[] = [];
+    for (let i = 0; i < Object.keys(MIGRATIONS).length; i++) reverted.push(...(await migrateDown(t.db)).reverted);
+    expect(reverted).toEqual(Object.keys(MIGRATIONS).reverse());
     const r = await sql<{ n: number }>`
       SELECT count(*)::int AS n FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name NOT LIKE 'kysely_%'`.execute(t.db);
     expect(r.rows[0].n).toBe(0);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0001_initial']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS));
   });
 });

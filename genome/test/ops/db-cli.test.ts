@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runDbCli, type CliIO } from '../../scripts/db.js';
+import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID } from '../../src/server/db/seed/demo.js';
 import { KeyService } from '../../src/server/keys/key-service.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
@@ -93,10 +94,11 @@ describe('db CLI: migrate and status', () => {
 
   it('applies pending migrations once and reports status', async () => {
     const before = await run(['status', '--json'], t.db);
-    expect(JSON.parse(before.io.stdout[0]).migrations).toEqual([{ name: '0001_initial' }]);
+    const names = Object.keys(MIGRATIONS);
+    expect(JSON.parse(before.io.stdout[0]).migrations).toEqual(names.map((name) => ({ name })));
     const first = await run(['migrate'], t.db);
     expect(first.code).toBe(0);
-    expect(first.io.text()).toBe('Applied 1 migration(s): 0001_initial');
+    expect(first.io.text()).toBe(`Applied ${names.length} migration(s): ${names.join(', ')}`);
     expect((await run(['migrate'], t.db)).io.text()).toBe('Schema is up to date.');
     const after = await run(['status'], t.db);
     expect(after.io.text()).toMatch(/applied {2}0001_initial {2}\d{4}-/);

@@ -2,17 +2,22 @@
  * Schema migrations. The provider is static (imports, not a directory scan)
  * so it keeps working when the server is bundled.
  *
- * Kysely's Migrator runs each migration in its own transaction and holds an
- * advisory lock on PostgreSQL, so concurrent instances starting together
- * apply each migration exactly once.
+ * Kysely 0.29's Migrator runs ALL pending migrations of one call inside ONE
+ * transaction (PostgreSQL has transactional DDL), under an advisory lock: a
+ * failing migration rolls back every migration of that run, not just itself,
+ * and concurrent instances starting together apply each migration exactly
+ * once. Write migrations so that they can share a transaction (no
+ * CREATE INDEX CONCURRENTLY, no VACUUM).
  */
 import type { Kysely } from 'kysely';
 import { Migrator, type Migration, type MigrationProvider, type MigrationResultSet } from 'kysely/migration';
 import * as m0001 from './migrations/0001_initial.js';
+import * as m0002 from './migrations/0002_platform_guards.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0001_initial': m0001,
+  '0002_platform_guards': m0002,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

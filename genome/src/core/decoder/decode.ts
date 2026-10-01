@@ -68,7 +68,7 @@ import { binarize } from './binarize.js';
 import { findSealHits, measureSeal, mergeClusters, type SealCandidate, type SealCluster } from './finder.js';
 import { readGenome } from './genome-reader.js';
 import { applyH, homographyFromPoints, jacobianH, multiplyH, type Homography } from './homography.js';
-import { asGrayImage, downscaleImage, invertImage, type GrayImage } from './image.js';
+import { asGrayImage, downscaleImage, invertImage, sampleBilinear, type GrayImage } from './image.js';
 import { integralImage, type IntegralImage } from './integral.js';
 import { inkBlobs } from './components.js';
 import { findMoonQuads, findMoons, invert2, moonLevels, refineCentroid, type Mat2, type MoonSet } from './moons.js';
@@ -109,7 +109,25 @@ export type DecodeResult =
       };
       geometry: { center: { x: number; y: number }; moons: { x: number; y: number }[]; homography: number[] };
     }
-  | { ok: false; reason: DecodeFailure; detail?: string; elapsedMs: number };
+  | {
+      ok: false;
+      reason: DecodeFailure;
+      detail?: string;
+      /**
+       * The most code-like seal that was found but could not be framed (reason
+       * NO_MOONS), for scan guidance: `confidence` (0–1) is the share of data
+       * orbits that show arc texture around it — near 1 for a real code whose
+       * moons were missed (cut off by the frame, too small, blurred), near 0
+       * for a look-alike in clutter — and `unitPx` its scale (px per u).
+       */
+      seal?: SealEvidence;
+      elapsedMs: number;
+    };
+
+export interface SealEvidence {
+  confidence: number;
+  unitPx: number;
+}
 
 // ── Static tables ──────────────────────────────────────────────────────────
 
@@ -196,12 +214,78 @@ const FAILURE_RANK: Record<DecodeFailure, number> = { NO_SEAL: 0, NO_MOONS: 1, F
 class Failure {
   reason: DecodeFailure = 'NO_SEAL';
   detail?: string;
+  /** Best evidence among seals that could not be framed (NO_MOONS). */
+  seal: SealEvidence | null = null;
   note(reason: DecodeFailure, detail?: string): void {
     if (FAILURE_RANK[reason] >= FAILURE_RANK[this.reason]) {
       this.reason = reason;
       this.detail = detail;
     }
   }
+  noteSeal(evidence: SealEvidence): void {
+    if (!this.seal || evidence.confidence > this.seal.confidence) this.seal = evidence;
+  }
+}
+
+// ── Seal evidence (scan guidance only) ─────────────────────────────────────
+
+/** Data rings probed for arc texture: every other ring, 1…11 (inside 23 u). */
+const EVIDENCE_RINGS = CODE01_RINGS.filter((r) => r.index % 2 === 1);
+/** Probe points per ring (≈ 2 per cell of the outermost probed ring). */
+const EVIDENCE_POINTS = 256;
+
+/**
+ * Share (0–1) of probed data rings that show the texture of CODE-01 data
+ * arcs around a seal: along the ring's centre line, between 20 % and 80 % ink
+ * and at least one ink/paper transition per 8 cells; along the light gap
+ * half a unit outside it, mostly paper. Circles in the code plane are
+ * ellipses through the seal's affine frame whatever the in-plane rotation,
+ * so no orientation is needed. Probes outside the frame are skipped; a ring
+ * with fewer than half of its probes inside does not count either way.
+ * Used only to word scan guidance: it never makes a decode succeed or fail.
+ */
+function sealEvidence(img: GrayImage, center: Point, affine: Mat2, ink: number, paper: number): number {
+  const threshold = (ink + paper) / 2;
+  const at = (r: number, a: number): number | null => {
+    const ux = r * Math.sin(a);
+    const uy = -r * Math.cos(a);
+    const x = center.x + affine[0] * ux + affine[1] * uy;
+    const y = center.y + affine[2] * ux + affine[3] * uy;
+    if (!(x >= 0 && y >= 0 && x < img.width - 1 && y < img.height - 1)) return null;
+    return sampleBilinear(img, x, y);
+  };
+  let counted = 0;
+  let textured = 0;
+  for (const ring of EVIDENCE_RINGS) {
+    let inside = 0;
+    let dark = 0;
+    let transitions = 0;
+    let gapLight = 0;
+    let gapInside = 0;
+    let prev: boolean | null = null;
+    for (let i = 0; i < EVIDENCE_POINTS; i++) {
+      const a = (i * 2 * Math.PI) / EVIDENCE_POINTS;
+      const v = at(ring.radius, a);
+      if (v !== null) {
+        inside++;
+        const isDark = v < threshold;
+        if (isDark) dark++;
+        if (prev !== null && prev !== isDark) transitions++;
+        prev = isDark;
+      } else prev = null;
+      const g = at(ring.radius + 0.5, a);
+      if (g !== null) {
+        gapInside++;
+        if (g >= threshold) gapLight++;
+      }
+    }
+    if (inside < EVIDENCE_POINTS / 2) continue;
+    counted++;
+    const share = dark / inside;
+    const cellsSeen = (ring.cells * inside) / EVIDENCE_POINTS;
+    if (share >= 0.2 && share <= 0.8 && transitions >= cellsSeen / 8 && gapLight >= 0.6 * gapInside) textured++;
+  }
+  return counted === 0 ? 0 : textured / Math.max(counted, EVIDENCE_RINGS.length / 2);
 }
 
 // ── Stage: seal candidates ─────────────────────────────────────────────────
@@ -767,16 +851,22 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
   let repairs = 0;
   for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, polarities)) {
     const view = det.view(inverted);
+    const evidence = (): void =>
+      failure.noteSeal({ confidence: sealEvidence(view.image, seal.center, seal.affine, seal.ink, seal.paper), unitPx: seal.unit * det.factor });
     const moons = findMoons(view.image, view.integral, seal);
     if (!moons) {
       failure.note('NO_MOONS', `seal at (${(seal.center.x * det.factor).toFixed(1)}, ${(seal.center.y * det.factor).toFixed(1)}) without moons`);
+      evidence();
       continue;
     }
     const center = scale(seal.center, det.factor);
     const sealAffine = seal.affine.map((v) => v * det.factor) as Mat2;
     const anchors = anchorsOf(view.frame, center, sealAffine, moons, det.factor);
     const attempt = prepareAttempt(view.frame, anchors, seal.unit * det.factor, moons, inverted, failure);
-    if (!attempt) continue;
+    if (!attempt) {
+      evidence();
+      continue;
+    }
     attempts.push(attempt);
     let read = quickDecode(attempt, opts, failure);
     if (!read && repairs < MAX_REPAIRS) {
@@ -818,5 +908,11 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
   } catch (e) {
     return { ok: false, reason: failure.reason, detail: `internal error: ${e instanceof Error ? e.message : String(e)}`, elapsedMs: now() - started };
   }
-  return { ok: false, reason: failure.reason, ...(failure.detail ? { detail: failure.detail } : {}), elapsedMs: now() - started };
+  return {
+    ok: false,
+    reason: failure.reason,
+    ...(failure.detail ? { detail: failure.detail } : {}),
+    ...(failure.reason === 'NO_MOONS' && failure.seal ? { seal: { confidence: Math.round(failure.seal.confidence * 1000) / 1000, unitPx: Math.round(failure.seal.unitPx * 100) / 100 } } : {}),
+    elapsedMs: now() - started,
+  };
 }

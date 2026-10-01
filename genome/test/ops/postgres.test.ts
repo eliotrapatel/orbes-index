@@ -21,6 +21,7 @@ import { frameCodeData } from '../../src/core/payload.js';
 import { loadConfig } from '../../src/server/config.js';
 import { createContext } from '../../src/server/context.js';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
+import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { createManualClock } from '../../src/server/types.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -69,7 +70,7 @@ describe.skipIf(!adminUrl)('operator CLIs on PostgreSQL', () => {
   };
 
   it('migrates, generates a key, seeds and verifies like the server would', async () => {
-    expect((await run(runDbCli, ['migrate'])).io.text()).toBe('Applied 1 migration(s): 0001_initial');
+    expect((await run(runDbCli, ['migrate'])).io.text()).toBe(`Applied ${Object.keys(MIGRATIONS).length} migration(s): ${Object.keys(MIGRATIONS).join(', ')}`);
     expect((await run(runKeysCli, ['generate'])).code).toBe(0);
     const seed = await run(runDbCli, ['seed', '--json']);
     expect(seed.code, seed.io.text()).toBe(0);

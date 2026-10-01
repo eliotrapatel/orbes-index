@@ -223,6 +223,10 @@ export interface AccountsTable {
   display_name: string | null;
   country: string | null;              // char(2)
   status: WithDefault<AccountStatus>;
+  /** Consecutive wrong passwords in the throttle window (migration 0002). */
+  failed_logins: WithDefault<number>;
+  /** Start of the current throttle window, null when there is no recent failure. */
+  failed_logins_since: TimestampNullable;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }

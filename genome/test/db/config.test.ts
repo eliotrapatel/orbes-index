@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigError, DEFAULT_ANOMALY_CONFIG, loadConfig, redactConfig, testConfig } from '../../src/server/config.js';
+import { ConfigError, configWarnings, DEFAULT_ANOMALY_CONFIG, loadConfig, redactConfig, testConfig } from '../../src/server/config.js';
 
 const KEY32 = Buffer.alloc(32, 7).toString('base64url'); // 'BwcH…' (43 chars, no padding)
 const RANDOMISH_KEY = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 0xff)).toString('base64url');
@@ -39,8 +39,11 @@ describe('loadConfig — development defaults', () => {
       trustProxy: false,
       geo: { mode: 'none' },
       keys: { provider: 'memory' },
-      rateLimits: { verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300 },
+      rateLimits: { verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300, apiPerMinute: 120 },
       sessionTtlHours: { account: 720, admin: 8 },
+      migrateOnStart: false,
+      logLevel: 'debug',
+      adminRequireMfa: false,
     });
     expect(c.anomaly).toEqual(DEFAULT_ANOMALY_CONFIG);
     expect(c.cookieSecret.length).toBeGreaterThanOrEqual(32);
@@ -213,6 +216,49 @@ describe('loadConfig — production hardening', () => {
   });
 });
 
+describe('loadConfig — operations settings', () => {
+  it('formalises MIGRATE_ON_START, LOG_LEVEL and ADMIN_REQUIRE_MFA with per-environment defaults', () => {
+    expect(loadConfig({ ORBES_ENV: 'test' })).toMatchObject({ migrateOnStart: false, logLevel: 'warn', adminRequireMfa: false });
+    expect(loadConfig(PROD)).toMatchObject({ migrateOnStart: false, logLevel: 'info', adminRequireMfa: true });
+    expect(loadConfig({ ...PROD, MIGRATE_ON_START: 'true', LOG_LEVEL: 'WARN', ADMIN_REQUIRE_MFA: 'false' })).toMatchObject({
+      migrateOnStart: true,
+      logLevel: 'warn',
+      adminRequireMfa: false,
+    });
+    expect(loadConfig({ ADMIN_REQUIRE_MFA: 'yes', MIGRATE_ON_START: '1', LOG_LEVEL: 'silent' })).toMatchObject({
+      adminRequireMfa: true,
+      migrateOnStart: true,
+      logLevel: 'silent',
+    });
+    expect(issues({ LOG_LEVEL: 'verbose', MIGRATE_ON_START: 'maybe', ADMIN_REQUIRE_MFA: '2' }).map((i) => i.split(':')[0])).toEqual([
+      'MIGRATE_ON_START',
+      'LOG_LEVEL',
+      'ADMIN_REQUIRE_MFA',
+    ]);
+  });
+
+  it('warns (without refusing) when production admin sessions may skip TOTP', () => {
+    expect(configWarnings(loadConfig(PROD))).toEqual([]);
+    expect(configWarnings(loadConfig({ ...PROD, ADMIN_REQUIRE_MFA: 'false' }))).toEqual([
+      expect.stringMatching(/^ADMIN_REQUIRE_MFA: .*TOTP/),
+    ]);
+    expect(configWarnings(loadConfig({}))).toEqual([]);
+  });
+
+  it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {
+    const c = loadConfig({ RATE_LIMIT_API_PER_MINUTE: '42', RATE_LIMIT_ADMIN_PER_MINUTE: '500' });
+    expect(c.rateLimits).toMatchObject({ apiPerMinute: 42, adminPerMinute: 500 });
+    expect(issues({ RATE_LIMIT_API_PER_MINUTE: '0' })[0]).toMatch(/^RATE_LIMIT_API_PER_MINUTE: /);
+  });
+
+  it('refuses proxy trust that a client could forge, and edge geo without proxy trust, in production', () => {
+    expect(issues({ ...PROD, TRUST_PROXY: 'true' })).toEqual([expect.stringMatching(/^TRUST_PROXY: "true" trusts every X-Forwarded-For hop/)]);
+    expect(issues({ ...PROD, TRUST_PROXY: '2' })).toEqual([expect.stringMatching(/^TRUST_PROXY: hop counts are not supported/)]);
+    expect(issues({ ...PROD, GEO_MODE: 'cloudflare' })).toEqual(['GEO_MODE: cloudflare mode requires TRUST_PROXY in production']);
+    expect(loadConfig({ ...PROD, GEO_MODE: 'cloudflare', TRUST_PROXY: '173.245.48.0/20' }).geo.mode).toBe('cloudflare');
+  });
+});
+
 describe('testConfig / redactConfig', () => {
   it('testConfig merges nested overrides on a valid test config', () => {
     const c = testConfig({ anomaly: { suspiciousThreshold: 10 }, rateLimits: { verifyPerMinute: 3 }, publicOrigin: 'https://t.test' });
@@ -220,7 +266,7 @@ describe('testConfig / redactConfig', () => {
     expect(c.databaseUrl).toBe('pglite:memory');
     expect(c.keys.provider).toBe('memory');
     expect(c.anomaly).toEqual({ ...DEFAULT_ANOMALY_CONFIG, suspiciousThreshold: 10 });
-    expect(c.rateLimits).toEqual({ verifyPerMinute: 3, authPerMinute: 10_000, adminPerMinute: 10_000 });
+    expect(c.rateLimits).toEqual({ verifyPerMinute: 3, authPerMinute: 10_000, adminPerMinute: 10_000, apiPerMinute: 10_000 });
     expect(c.publicOrigin).toBe('https://t.test');
     expect(Object.isFrozen(c.anomaly)).toBe(true);
   });

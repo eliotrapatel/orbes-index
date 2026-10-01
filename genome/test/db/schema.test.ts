@@ -407,6 +407,40 @@ describe('schema', () => {
     ).rejects.toSatisfy((e) => isUniqueViolation(e, 'audit_logs_prev_hash_key'));
   });
 
+  it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {
+    const { product } = await seedProduct(t.db);
+    const h = await t.db
+      .insertInto('product_status_history')
+      .values({ product_id: product.id, from_status: null, to_status: 'ISSUED', actor_type: 'system' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await expect(t.db.updateTable('product_status_history').set({ reason: 'rewritten' }).where('id', '=', h.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('product_status_history').where('id', '=', h.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`TRUNCATE product_status_history`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+
+    const genome = await t.db
+      .insertInto('genomes')
+      .values({
+        product_id: product.id,
+        genome_version: 1,
+        genome_id: product.product_id,
+        value: 0x0badf00d,
+        glyphs: [0, 11, 10, 13, 15, 0, 0, 13],
+        pattern: 'a·b·c·d·e·f·g·h',
+        fingerprint: 'G1-0BAD-F00D',
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await expect(t.db.deleteFrom('genomes').where('id', '=', genome.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    await t.db
+      .insertInto('cryptographic_keys')
+      .values({ key_id: 42, kid: 'k42', public_key: new Uint8Array(32).fill(42), status: 'REVOKED', provider: 'memory', provider_ref: 'mem:42', revoked_at: new Date() })
+      .execute();
+    await expect(t.db.deleteFrom('cryptographic_keys').where('key_id', '=', 42).execute()).rejects.toSatisfy(isGuardViolation);
+    expect(await t.db.selectFrom('cryptographic_keys').select('key_id').where('key_id', '=', 42).executeTakeFirst()).toEqual({ key_id: 42 });
+  });
+
   it('pg error helpers expose code and constraint', async () => {
     const e = await t.db.insertInto('categories').values({ id: 0, code: 'A', name: 'x' }).execute().catch((x: unknown) => x);
     expect(pgError(e)).toMatchObject({ code: '23514', constraint: 'categories_id_check', table: 'categories' });

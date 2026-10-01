@@ -11,4 +11,4 @@
  * Isomorphic: runs unchanged in a browser Web Worker and in Node.
  */
 export { rgbaToGray, type GrayImage } from './image.js';
-export { decodeOrbesCode, type DecodeFailure, type DecodeOptions, type DecodeResult } from './decode.js';
+export { decodeOrbesCode, type DecodeFailure, type DecodeOptions, type DecodeResult, type SealEvidence } from './decode.js';
