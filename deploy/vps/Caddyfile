@@ -56,6 +56,25 @@
 	tls internal
 }
 
+# ── Origin lock per edge mode (site block) ─────────────────────────────────
+
+(site_direct) {
+	# Clients connect directly: nothing to lock.
+}
+
+(site_cloudflare) {
+	# Only Cloudflare (a trusted proxy, caddy.d/edge-cloudflare.caddy) may talk to this
+	# origin; private peers stay allowed for checks run on the VPS itself (deploy.sh smoke
+	# tests). Defence in depth on top of the ufw rules of docs/DEPLOYMENT.md §15.11.
+	@not_cloudflare {
+		not vars {http.vars.trusted_proxy} true
+		not remote_ip private_ranges
+	}
+	respond @not_cloudflare "Forbidden" 403 {
+		close
+	}
+}
+
 # ── Upstream header policy per edge mode (inside reverse_proxy) ────────────
 
 (upstream_direct) {
@@ -77,6 +96,7 @@
 
 {$APP_DOMAIN} {
 	import tls_{$TLS_MODE:acme}
+	import site_{$EDGE_MODE:direct}
 
 	# Access log: JSON on stdout, without query strings, cookies, headers or full client IPs.
 	# (The app logs no client IP at all; the masked prefix here is enough to triage abuse.)

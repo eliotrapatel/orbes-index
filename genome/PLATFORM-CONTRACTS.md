@@ -64,7 +64,9 @@ export async function createContext(config: AppConfig, overrides?: Partial<…>)
 - `src/server/db/connection.ts` exports `createDb(url): Kysely<Database>`. It uses the `pg` Pool for `postgres://` URLs and Kysely's built-in `PGliteDialect` for `pglite:` URLs.
 - Test helper: `test/support/db.ts` exports `createTestDb()`, which returns a fresh in-memory PGlite database with all migrations applied.
 
-All timestamps are `timestamptz`. All ids are `uuid` (`gen_random_uuid()`) unless stated otherwise. Enumerations are `text` columns with `CHECK` constraints, which are simpler to migrate than PG enums. Every table has `created_at` and, where it is mutable, `updated_at`.
+All timestamps are `timestamptz`. All ids are `uuid` (`gen_random_uuid()`) unless stated otherwise. Enumerations are `text` columns with `CHECK` constraints, which are simpler to migrate than PG enums.
+
+Timestamp convention: every row records when it came into being, named after what it records — `created_at` on most tables, but `occurred_at` on the event logs (`scan_events`, `audit_logs`), `started_at` on `ownership`, `opened_at` on `service_records` and `first_seen_at` / `last_seen_at` on `anomalies`. Lifecycle moments have their own columns (`activated_at`, `retired_at`, `revoked_at`, `ended_at`, `completed_at`, `used_at`, `resolved_at`, …). Only the four tables with free-form mutable business data carry `updated_at`: `products`, `accounts`, `admin_users` and `warranties`; it is maintained by the `orbes_touch_updated_at()` trigger. Services set `updated_at` from their injected clock; the trigger stamps `now()` only when an UPDATE leaves the value unchanged, so an explicit value equal to the old one (a frozen test clock) is replaced by the database clock — tests must not compare `updated_at` with the injected clock across two updates at the same instant. Append-only and write-once tables (logs, history, genomes, codes, keys, tokens) have no `updated_at`.
 
 | Table | Columns (constraints) |
 |---|---|
@@ -116,7 +118,7 @@ export class MemoryKeyProvider implements KeyProvider { /* dev/test only; refuse
 export class KeyService {
   activeSigner(): Promise<{ keyId: number; kid: string; sign(msg: Uint8Array): Promise<Uint8Array> }>;
   publicKey(keyId: number): Promise<KeyRecord | undefined>;      // cached, invalidated on change
-  listPublic(): Promise<PublicKeyInfo[]>;                         // { keyId, kid, alg, publicKey(b64url), status, activatedAt, retiredAt, revokedAt }
+  listPublic(): Promise<PublicKeyInfo[]>;                         // { keyId, kid, alg, publicKey(b64url), status, activatedAt, retiredAt, revokedAt, compromisedAt }
   rotate(actor, kid?): Promise<KeyRecord>;                        // generate new, ACTIVE; previous ACTIVE → RETIRED (verify-only)
   retire(keyId, actor): Promise<void>;
   revoke(keyId, { compromisedAt?: Date; reason: string }, actor): Promise<void>;
@@ -150,24 +152,26 @@ export interface ScanMeta { deviceHash?: string; sessionHash?: string; accountId
 verify(input: VerifyInput, meta: ScanMeta): Promise<VerifyOutcome>;
 ```
 
-The decision procedure is normative. Each step that ends the procedure records the reason.
+The decision procedure is normative. Each step that ends the procedure records the reason. The order is: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators.
 
-1. Decode base64url (≤ 200 chars), `unframeCodeData`, then `decodePayload`. Any failure gives `MALFORMED_CODE`.
-2. An unsupported code or genome version gives `MALFORMED_CODE`.
-3. Look up `keyId`. If no key exists, the result is `INVALID_SIGNATURE` (reason `UNKNOWN_KEY`).
-4. Verify Ed25519 over `signingMessage(payload)` using **`verifyEd25519Node` from `src/server/crypto/ed25519-node.ts`**. Never call `crypto.verify` directly. That helper is strict: it rejects small-order and non-canonical public keys *before* calling OpenSSL, because OpenSSL 3.5 accepts the identity point as a key, which enables a universal forgery with R = identity and S = 0. A failure gives `INVALID_SIGNATURE`. `KeyService` must also refuse to register any public key that fails the same weak-key check.
-5. Look up the product by `packed_identity` and the code by `(product, issue)`. If the product or code is missing, the result is `UNKNOWN` with a CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED`. If the code exists but `payload_hash` differs, the result is `SUSPICIOUS_ACTIVITY` with a CRITICAL anomaly `CODE_MISMATCH`.
-6. Revoked key: the code is trusted only if its DB record was created before `compromised_at` (or `revoked_at` when `compromised_at` is null). Otherwise the result is `INVALID_SIGNATURE` (reason `KEY_REVOKED`).
-7. Genome cross-check: recompute the genome from the signed identity and genome version. If at least 6 glyphs were provided with confidence ≥ 0.5 and at least 2 of those mismatch, the result is `SUSPICIOUS_ACTIVITY` with anomaly `GENOME_MISMATCH`. Record `genome_check`.
-8. Code status `SUPERSEDED` or `REVOKED` gives `REVOKED`. Product status `REVOKED`, `COUNTERFEIT_FLAGGED` or `RETIRED` gives `REVOKED`. Product status `LOST` or `STOLEN` gives `SUSPICIOUS_ACTIVITY`.
-9. Insert the scan event, then run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY`. The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'`.
-10. Ownership, when the result is not already decided:
+1. **Strict structural parse.** Any string of at most 1024 characters (the empty string included) reaches this step (the route refuses only a missing, non-string or longer `code` with 400, unrecorded). Decode base64url (≤ 200 characters), `unframeCodeData` (79 bytes, CRC-16), then strict `decodePayload` (code version 1; reserved values such as genome version, key id or issue 0; field ranges). Any failure gives `MALFORMED_CODE` (reason `MALFORMED:<INPUT|ENCODING|LENGTH|CRC|VERSION|RESERVED|RANGE>`), recorded as a scan.
+2. **Key lookup.** Look up `keyId`. If no key exists, the result is `INVALID_SIGNATURE` (reason `UNKNOWN_KEY`).
+3. **Signature.** Verify Ed25519 over `signingMessage(payload)` using **`verifyEd25519Node` from `src/server/crypto/ed25519-node.ts`**. Never call `crypto.verify` directly. That helper is strict: it rejects small-order and non-canonical public keys *before* calling OpenSSL, because OpenSSL 3.5 accepts the identity point as a key, which enables a universal forgery with R = identity and S = 0. A failure gives `INVALID_SIGNATURE` (reason `BAD_SIGNATURE`). `KeyService` must also refuse to register any public key that fails the same weak-key check. The signature covers every payload field, the genome version included: an edited genome version is a forgery, not an unreadable code.
+4. **Revoked-key trust.** Look up the product by `packed_identity` and the code by `(product, issue)`. If the key is `REVOKED`, it vouches only for a code whose registry record exists and was created before `compromised_at` (or `revoked_at` when `compromised_at` is null). Otherwise — no product, no code of that issue, or a record created at or after the cut-off — the result is `INVALID_SIGNATURE` (reason `KEY_REVOKED`), with no anomaly (the key is already known compromised). A record older than the cut-off whose payload hash differs continues to step 6 (`CODE_MISMATCH`).
+5. **Genome-version support.** A validly signed (and trusted) code whose genome version this server does not support gives `UNKNOWN` (reason `UNSUPPORTED_GENOME_VERSION`) and a log warning: the server is outdated, the code may be genuine. No anomaly is recorded.
+6. **Registry.** If the product or code is missing, the result is `UNKNOWN` with a CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED` (reasons `PRODUCT_NOT_REGISTERED` / `CODE_NOT_REGISTERED`). If the code exists but `payload_hash` differs, the result is `SUSPICIOUS_ACTIVITY` with a CRITICAL anomaly `CODE_MISMATCH`.
+7. **Genome cross-check:** recompute the genome from the signed identity and genome version. If at least 6 glyphs were provided with confidence ≥ 0.5 and at least 2 of those mismatch, the result is `SUSPICIOUS_ACTIVITY` with anomaly `GENOME_MISMATCH`. Record `genome_check`.
+8. **Statuses.** Code status `SUPERSEDED` or `REVOKED` gives `REVOKED`. Product status `REVOKED`, `COUNTERFEIT_FLAGGED` or `RETIRED` gives `REVOKED`. Product status `LOST` or `STOLEN` gives `SUSPICIOUS_ACTIVITY`.
+9. **Anomalies.** The scan event is inserted (for every request, steps 1–8 included) with the provisional `result_state` `'PENDING'` when no earlier step decided, and updated to the final state in the same transaction (step 12). For a trusted, registered code, run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY` (reason `RISK_THRESHOLD`). The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'` (reason `RISK_THRESHOLD_OWNER`).
+10. **Ownership**, when the result is not already decided:
     - The viewer is the current owner: `AUTHENTIC_OWNERSHIP_VERIFIED`.
     - Another current owner exists: `AUTHENTIC_REGISTERED`.
     - There is no owner and the status is `ACTIVATED`, `RESOLD` or `SERVICED` (not a pre-sale service entered from `ISSUED`, §2.6): `AUTHENTIC_FIRST_REGISTRATION`, plus a single-use registration token (32 random bytes, valid 15 minutes).
     - Otherwise: `AUTHENTIC`.
-11. Authenticator policy (`AuthenticatorRegistry.evaluate`): when the policy requires hardware evidence that was not provided, add `assurance: 'CODE_ONLY'` and `hardwareProofRequired: true`. The state stays the same.
-12. Persist the `authentication_events` row. Return the outcome (below). Target latency is p95 < 300 ms.
+
+    **Anomaly-poisoning exception:** when the result is `SUSPICIOUS_ACTIVITY` *only* because of the risk score (step 9; not a status, genome or code finding), the product has no owner, its status is registrable as above and it **has a claim secret**, a registration token is still issued with `claimCodeRequired: true` (reason `REGISTRATION_WITH_CLAIM_CODE`). Strangers scanning copies cannot lock out the buyer who holds the certificate claim code, and the token is useless without it. Products without a claim secret get no token while suspicious.
+11. **Authenticators.** Authenticator policy (`AuthenticatorRegistry.evaluate`): when the policy requires hardware evidence that was not provided, add `assurance: 'CODE_ONLY'` and `hardwareProofRequired: true`. The state stays the same.
+12. **Persist** the `authentication_events` row and the final `scan_events.result_state`. Return the outcome (below). Target latency is p95 < 300 ms.
 
 `VerifyOutcome` is the API response body. The internal risk score, thresholds and raw status are never included.
 
@@ -181,7 +185,7 @@ The decision procedure is normative. Each step that ends the procedure records t
   genome?: { id: string /* product id */; version: 'GENOME-01'; fingerprint; glyphs: number[]; ids: string[] }, // AUTHENTIC*, SUSPICIOUS, REVOKED
   warranty?: { status: 'NOT_STARTED' | 'ACTIVE' | 'EXPIRED' | 'VOID'; startDate?: string; endDate?: string },  // AUTHENTIC* only
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean },                             // AUTHENTIC* only
-  registration?: { token: string; expiresAt: string; claimCodeRequired: boolean } }                          // FIRST_REGISTRATION only
+  registration?: { token: string; expiresAt: string; claimCodeRequired: boolean } }                          // FIRST_REGISTRATION; SUSPICIOUS only per step 10's exception (claimCodeRequired: true)
 ```
 
 ### 2.5 AnomalyService (`anomaly.ts`)
@@ -198,17 +202,19 @@ The rules are pure functions over the code's recent scan history, which keeps th
 
 | Rule | Condition | Severity / weight |
 |---|---|---|
-| `IMPOSSIBLE_TRAVEL` | Consecutive scans from different coarse locations (country centroid, or lat/lon when available) where `distance ≥ minTravelKm` and `speed > impossibleTravelKmh` | HIGH / 60 |
-| `SCAN_VELOCITY` | More than `velocityMaxScans` scans in `velocityWindowMin` minutes from at least `velocityMinDevices` distinct devices | MEDIUM / 35 |
-| `DEVICE_DIVERSITY` | More than `deviceMax` distinct devices in `deviceWindowDays` | MEDIUM / 30 |
+| `IMPOSSIBLE_TRAVEL` | Consecutive located scans (lat/lon when available, else the country) whose distance is `≥ minTravelKm` and whose speed is `> impossibleTravelKmh`. The distance is a **lower bound**: exact between two coordinates; zero inside one country when a side has only the country; otherwise the distance between the best known points (coordinates, else the country centroid) minus the radius of each country-only side | HIGH / 60 |
+| `SCAN_VELOCITY` | More than `velocityMaxScans` scans in `velocityWindowMin` minutes from at least `velocityMinDevices` distinct **sources** | MEDIUM / 45 |
+| `DEVICE_DIVERSITY` | More than `deviceMax` distinct **sources** in `deviceWindowDays` | MEDIUM / 30 |
 | `GEO_DISPERSION` | More than `geoMaxCountries` distinct countries in `geoWindowDays` | HIGH / 45 |
 | `LOST_STOLEN_SCAN` | Scan of a product whose status is `LOST` or `STOLEN` | HIGH / 50 |
 | `POST_REVOCATION_SCAN` | Scan of a revoked or superseded code | MEDIUM / 30 |
 
 The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) are recorded by the verification service.
 
-- **Risk score:** `100 · (1 − Π(1 − wᵢ·decayᵢ/100))`, rounded. `decay` is linear over `decayDays`.
-- **Owner adjustment:** scans by the authenticated owner never trigger `DEVICE_DIVERSITY` or `SCAN_VELOCITY` on their own.
+- **Sources, not cookies (SEC-7):** `SCAN_VELOCITY` and `DEVICE_DIVERSITY` count distinct sources: the IP pseudonym (`ip_hash`) when present, else the device-cookie pseudonym, else the session pseudonym; scans with none share one bucket. A client that drops its cookie on every request (one address) is one source; so is a boutique wifi with many phones. The config names `velocityMinDevices` / `deviceMax` are kept and apply to sources. `IMPOSSIBLE_TRAVEL` and `GEO_DISPERSION` use the geo fields, not sources.
+- **Risk score:** `100 · (1 − Π(1 − wᵢ·decayᵢ/100))`, rounded. `decay` is linear over `decayDays`, from the time of each rule's most recent violation. A same-place burst (`SCAN_VELOCITY` ⊕ `DEVICE_DIVERSITY`) scores 62 ≥ 60.
+- **Owner adjustment:** scans of the product's current owner — the authenticated owner's scan being verified, and every past scan whose `account_id` is the current owner's — are left out of `DEVICE_DIVERSITY` and `SCAN_VELOCITY`, so the owner never triggers them; they still count for travel and dispersion.
+- **New findings only:** every finding contributes its decayed weight to the score, but only findings whose violation involves the scan being verified are recorded (upserted into `anomalies`); an old burst is not re-counted as a new occurrence on every later scan.
 - **Defaults:** threshold 60, 900 km/h, 500 km, 60 min / 20 scans / 5 devices, 7 days / 12 devices, 7 days / 3 countries, 30-day decay.
 - **Country centroids:** `src/server/geo/centroids.ts` holds approximate centroids for ISO 3166-1 alpha-2 codes.
 
@@ -308,9 +314,9 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/health` | Returns `{ ok, version }`. |
-| GET | `/api/v1/keys` and `/.well-known/orbes-keys.json` | Public keys (`listPublic`). |
+| GET | `/api/v1/keys` and `/.well-known/orbes-keys.json` | Public keys (`listPublic`), including `revokedAt` and `compromisedAt` so offline verifiers apply the same trust cut-off. |
 | GET | `/api/v1/categories` | Returns `[{ code, index, name }]` for active categories. |
-| POST | `/api/v1/verify` | Takes `VerifyInput`, returns `VerifyOutcome`. Rate-limited. Reads the session cookie optionally to detect the owner. |
+| POST | `/api/v1/verify` | Takes `VerifyInput` (`code`: any string of at most 1024 characters; undecodable codes are recorded as `MALFORMED_CODE`), returns `VerifyOutcome`. Missing, non-string or longer codes and other schema violations → 400, not recorded. Rate-limited. Reads the session cookie optionally to detect the owner. |
 
 ### Account routes (cookie `orbes_session`, `__Host-` prefixed in production)
 

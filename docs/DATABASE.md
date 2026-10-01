@@ -126,7 +126,8 @@ PGlite has a **single connection**. Kysely serialises access to it, which is why
   - `categories.id` and `categories.code` are immutable and categories are never deleted;
   - the cryptographic identity columns of `products`, `codes` and `cryptographic_keys` are immutable; `genomes` rows cannot be updated at all;
   - `genomes` and `cryptographic_keys` rows are never deleted (`DELETE` and `TRUNCATE` raise): a key id is a 1-byte value signed into every code and must never be reused.
-- **`updated_at`:** maintained by the trigger function `orbes_touch_updated_at()` on `products`, `accounts`, `admin_users` and `warranties`. Services pass their injectable clock explicitly; when a statement leaves `updated_at` unchanged (including setting it to its current value), the trigger stamps `now()` (the transaction start time).
+- **Timestamps per table:** every row records when it came into being, named after what it records: `created_at` on most tables, `occurred_at` on `scan_events` and `audit_logs`, `started_at` on `ownership`, `opened_at` on `service_records`, `first_seen_at` on `anomalies`. Lifecycle moments have their own columns (`activated_at`, `revoked_at`, `ended_at`, `used_at`, …).
+- **`updated_at`:** only on the four tables with free-form mutable business data — `products`, `accounts`, `admin_users` and `warranties` — maintained by the trigger function `orbes_touch_updated_at()`. Services set `updated_at` from their injectable clock; when a statement leaves `updated_at` unchanged (including setting it to its current value), the trigger stamps `now()` (the transaction start time). **Clock mixing:** with a frozen or coarse injected clock, a second update at the same instant writes the old value again and therefore gets the database clock instead; compare `updated_at` with the injected clock only across distinct instants, and never order rows across tables by `updated_at`.
 - **No business seed data.** The migration creates no categories, models, keys or users. Categories, collections and models are created through the admin API. The first admin is created at startup from `BOOTSTRAP_ADMIN_*`; the first signing key is created at startup in development and test, and through `POST /api/admin/keys/rotate` in production (§9.4).
 
 ### 3.1 Trigger functions
@@ -613,7 +614,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `lon` | `real` | NULL | — | `CHECK (BETWEEN -180 AND 180)`. Rounded to 1 decimal place; present only together with `lat`. |
 | `user_agent_family` | `text` | NULL | — | Coarse `Browser/OS`, e.g. `Safari/iOS`, `Chrome/Android`, `Bot/Other`. No versions. |
 | `client_metrics` | `jsonb` | NULL | — | Decoder metrics sent by the client (`rsErrors`, `rsErasures`, `moduleSizePx`, `decodeMs`, `source`). Informational; invalid values are dropped. |
-| `result_state` | `text` | NOT NULL | — | The verification state (see [API §9.3](API.md#93-states-and-public-wording)). No `CHECK`: the row is inserted with a provisional value and updated to the final state in the same transaction. |
+| `result_state` | `text` | NOT NULL | — | The verification state (see [API §9.3](API.md#93-states-and-public-wording)). No `CHECK`: the row is inserted before the decision completes — with the state already decided by steps 1–8, or the provisional value `'PENDING'` while anomaly scoring and ownership (steps 9–10) still run — and updated to the final state in the same transaction, so `'PENDING'` is never visible after commit. |
 | `latency_ms` | `int` | NULL | — | `CHECK (latency_ms >= 0)`. Server-side processing time. |
 
 - **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_occurred_at_idx (occurred_at)`.
@@ -655,9 +656,9 @@ The internal decision record for each scan event. Never exposed publicly; visibl
 | `signature_valid` | `boolean` | NOT NULL | — | Ed25519 signature valid under the named key. |
 | `genome_check` | `text` | NOT NULL | — | `CHECK (genome_check IN ('MATCH','MISMATCH','NOT_PROVIDED','INCONCLUSIVE'))` |
 | `state` | `text` | NOT NULL | — | `CHECK` in the 9 verification states. |
-| `reasons` | `text[]` | NOT NULL | `'{}'` | Machine reasons, e.g. `MALFORMED:CRC`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`. |
+| `reasons` | `text[]` | NOT NULL | `'{}'` | Machine reasons, e.g. `MALFORMED:CRC`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a scan that is suspicious from its history alone). |
 | `risk_score` | `int` | NOT NULL | — | `CHECK (BETWEEN 0 AND 100)`. Internal. |
-| `authenticators` | `jsonb` | NOT NULL | `'[]'` | Written as an object: `{ "policy", "assurance", "results": [{ "kind", "status", "detail"? }] }`, or `{ "policy": null, "results": [] }` when the policy was not evaluated. |
+| `authenticators` | `jsonb` | NOT NULL | `'{}'` | Written as an object: `{ "policy", "assurance", "results": [{ "kind", "status", "detail"? }] }`, or `{ "policy": null, "results": [] }` when the policy was not evaluated. The default is the empty object (migration `0003_authentication_events_default`; `0001` declared `'[]'`), so every row holds the same JSON type. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 
 - **Indexes:** primary key; `authentication_events_scan_event_id_idx`; `authentication_events_code_id_idx`; `authentication_events_product_id_idx (product_id, created_at)`.
@@ -876,7 +877,7 @@ Transaction-scoped advisory locks (`pg_advisory_xact_lock`, released at COMMIT o
 | `CATEGORY_ALLOCATION` | `0x4F520002` | Category creation (lowest free index 1–31). |
 | `SERIAL_ALLOCATION` | `0x4F520003`, sub-key `(year − 2000) × 32 + category index` | Serial allocation per (year, category) at issuance. Two-part (int4, int4) form. |
 | `KEY_ROTATION` | `0x4F520004` | Key rotation, first-key creation, retirement and revocation. |
-| `ANOMALY_UNREGISTERED_LOCK` | `0x4F520101` (defined in `services/anomaly.ts`) | Recording of findings without a product id, which the partial unique index cannot deduplicate. |
+| `ANOMALY_UNREGISTERED` | `0x4F520101` | Recording of findings without a product id (`VALID_SIGNATURE_UNREGISTERED`), which the partial unique index cannot deduplicate. `services/anomaly.ts` keeps `ANOMALY_UNREGISTERED_LOCK` as an alias. |
 
 In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occupy separate key spaces. Kysely's migrator uses its own session-level advisory lock (§9.2).
 
@@ -886,7 +887,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 
 ### 9.1 Layout
 
-- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), and any later entry of `MIGRATIONS`.
+- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), and any later entry of `MIGRATIONS`.
 - A migration is a list of SQL strings executed one by one: PGlite runs queries through the extended protocol, which refuses multi-statement strings.
 - Value lists for `CHECK` constraints are literal in the migration, so a migration never changes when application constants evolve; a test asserts they still match `schema.ts`.
 - Rules: append new migrations to `MIGRATIONS`; never edit an applied migration.

@@ -32,7 +32,8 @@ None of these layers proves that the scanned object is the original physical ite
 - **Weak keys:** one strict rule, `isStrictEd25519PublicKey` in `src/server/crypto/ed25519-node.ts` (canonical encoding of a point of order > 8), is applied by `verifyEd25519Node` before OpenSSL and by `KeyService` before it registers any key: small-order and non-canonical keys (with which `R = identity, S = 0` verifies for every message) can neither verify nor be registered.
 - **Key ids:** a 1-byte key id is carried in every code and resolved only through the `cryptographic_keys` registry. Unknown ids give `INVALID_SIGNATURE`.
 - **Verify-after-sign:** every signature produced at issuance is verified with the registered public key before it is stored.
-- **Key states:** ACTIVE (one at a time, enforced by a partial unique index), RETIRED (verify-only) and REVOKED (with `compromised_at`). Codes registered before the compromise remain trusted. Anything else signed by a revoked key fails.
+- **Key states:** ACTIVE (one at a time, enforced by a partial unique index), RETIRED (verify-only) and REVOKED (with `compromised_at`). Codes registered before the compromise remain trusted. Anything else signed by a revoked key — a later code, or an identity ORBES never registered — fails with `INVALID_SIGNATURE`: the revoked-key rule runs right after the signature check, before the registry lookup can answer `UNKNOWN`. The public key list publishes `revokedAt` and `compromisedAt` (never the reason).
+- **Decision order:** parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (PLATFORM-CONTRACTS §2.4). Every signed field is authenticated before it is interpreted: an edited genome version is `INVALID_SIGNATURE`; only a *validly signed* unsupported version is `UNKNOWN` (server outdated, logged).
 
 ### 3.2 Key custody
 - `KeyProvider` interface: `generate`, `sign`.
@@ -58,7 +59,7 @@ None of these layers proves that the scanned object is the original physical ite
   - Each session has its own CSRF token.
 
 ### 3.4 Request integrity
-- **Input validation:** strict zod schemas (unknown keys rejected), a 16 KB body limit, and length bounds on every string. The code input is base64url, at most 200 characters, and exactly 79 bytes once decoded.
+- **Input validation:** strict zod schemas (unknown keys rejected), a 16 KB body limit, and length bounds on every string. The verify route accepts any `code` string of at most 1024 characters, so that every undecodable submission is recorded as a `MALFORMED_CODE` scan (evidence for the console); the service reads only strings of 1–200 base64url characters that decode to exactly 79 bytes. Longer or non-string codes are refused with 400 and not recorded.
 - **CSRF:** every cookie-authenticated mutation requires `x-csrf-token` equal to the session's token. The `Origin` must match the configured public origin (or `Sec-Fetch-Site: same-origin`).
 - **Rate limits:** per IP and route group, covering verify, authentication, admin, claim attempts per product and transfer acceptance.
 - **Replay:** registration tokens and transfer codes are random, stored hashed, single-use and time-limited, and consumed transactionally. Transfer codes (60 bits) are stored as HMAC-SHA256 under a server key derived with HKDF from `COOKIE_SECRET` (info `orbes/transfer-code/v1`): the lookup stays deterministic, but a leaked `ownership_transfers` table cannot be brute-forced offline. Rotating `COOKIE_SECRET` invalidates pending transfer codes.
@@ -91,6 +92,9 @@ None of these layers proves that the scanned object is the original physical ite
 - The rules are pure functions over scan history. Thresholds are configuration and are never exposed.
 - The system never revokes automatically. A human reviews anomalies.
 - A logged-in current owner keeps `AUTHENTIC_OWNERSHIP_VERIFIED`, with an `UNUSUAL_ACTIVITY` notice. This limits the damage of anomaly poisoning.
+- **Before first registration**, anomaly poisoning cannot lock out the buyer either: when a scan is `SUSPICIOUS_ACTIVITY` only because of the risk score, the product has no owner, is open for registration and ships with a claim code, the response still carries a registration token with `claimCodeRequired: true`. The token is useless without the claim code from the certificate card; products without a claim code get no token while suspicious.
+- **Sources, not cookies (SEC-7):** scan velocity and diversity count distinct sources — the IP pseudonym, else the device-cookie pseudonym, else the session — because device cookies are client-controlled: a client that drops its cookie on every request would otherwise look like many devices. Accepted trade-off: many phones behind one address (a boutique wifi, a carrier NAT) count once. Travel and dispersion use the coarse geography.
+- Weights and thresholds are internal (PLATFORM-CONTRACTS §2.5). A same-place burst (scan velocity 45 ⊕ source diversity 30 = 62) reaches the default threshold of 60 without a geographic signal.
 
 ## 4. Configuration hardening (production)
 

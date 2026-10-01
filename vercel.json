@@ -1,0 +1,14 @@
+{
+  "redirects": [
+    {
+      "source": "/verify",
+      "destination": "https://verify.theorbes.com/verify",
+      "statusCode": 307
+    },
+    {
+      "source": "/verify/:path*",
+      "destination": "https://verify.theorbes.com/verify/:path*",
+      "statusCode": 307
+    }
+  ]
+}

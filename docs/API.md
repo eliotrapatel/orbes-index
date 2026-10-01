@@ -153,7 +153,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 ## 4. Device cookie and request metadata
 
-`POST /api/v1/verify` issues an `orbes_device` cookie (`__Host-orbes_device` in production) when the client has none (or presents an invalid one): a random 128-bit id, signed with `COOKIE_SECRET`. A forged or truncated value is replaced, never trusted. The id is used only to count distinct devices in anomaly scoring.
+`POST /api/v1/verify` issues an `orbes_device` cookie (`__Host-orbes_device` in production) when the client has none (or presents an invalid one): a random 128-bit id, signed with `COOKIE_SECRET`. A forged or truncated value is replaced, never trusted. The id is used only in anomaly scoring, as the source key of a scan that has no IP pseudonym: the rules count distinct sources — the IP pseudonym first, then this device id, then the session — because a client can drop its cookie at will.
 
 What the server records about a verification request (see [DATABASE §5.16](DATABASE.md#516-scan_events)):
 
@@ -421,7 +421,8 @@ Headers: `Cache-Control: public, max-age=300`, `Access-Control-Allow-Origin: *`,
       "status": "ACTIVE",
       "activatedAt": "2026-10-01T08:13:21.929Z",
       "retiredAt": null,
-      "revokedAt": null
+      "revokedAt": null,
+      "compromisedAt": null
     }
   ]
 }
@@ -434,7 +435,8 @@ Headers: `Cache-Control: public, max-age=300`, `Access-Control-Allow-Origin: *`,
 | `alg` | `"Ed25519"` | |
 | `publicKey` | string | base64url (no padding) of the 32-byte public key. |
 | `status` | `"ACTIVE"` \| `"RETIRED"` \| `"REVOKED"` | ACTIVE signs new codes; RETIRED only verifies; REVOKED: see §19.4. |
-| `activatedAt`, `retiredAt`, `revokedAt` | ISO timestamp or `null` | The compromise time of a revoked key is not published. |
+| `activatedAt`, `retiredAt`, `revokedAt` | ISO timestamp or `null` | |
+| `compromisedAt` | ISO timestamp or `null` | REVOKED keys only, when a compromise time was given. The trust cut-off: codes recorded strictly before `compromisedAt` (or, when it is `null`, before `revokedAt`) keep verifying; anything else the key signed is refused. Published so offline verifiers can apply the cut-off (§19.3). The revocation reason is never published. |
 
 ### 8.3 `GET /api/v1/categories`
 
@@ -469,7 +471,7 @@ Submits a decoded ORBES CODE and returns the public verification outcome. No ses
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `code` | string | yes | base64url without padding (`A–Z a–z 0–9 - _` only) of the 79-byte framed code data (payload ‖ signature ‖ CRC-16). 1–200 characters; a well-formed code is exactly 106 characters. |
+| `code` | string | yes | Any string of at most 1024 characters. A well-formed code is base64url without padding (`A–Z a–z 0–9 - _` only) of the 79-byte framed code data (payload ‖ signature ‖ CRC-16): exactly 106 characters. |
 | `genome` | object | no | The genome as read by the client's decoder, for the cross-check. |
 | `genome.glyphs` | array of 8 | yes, if `genome` | Each an integer 0–15, or `null` for an unread glyph. |
 | `genome.confidence` | array of 8 numbers | no | Each 0–1. When absent, every non-null glyph counts with confidence 1. |
@@ -479,7 +481,7 @@ Submits a decoded ORBES CODE and returns the public verification outcome. No ses
 | `client.decodeMs` | number | no | 0–600 000 |
 | `client.source` | `"camera"` \| `"upload"` | no | |
 
-Requests that violate these rules (empty code, more than 200 characters, characters outside base64url, a wrong genome array, unknown fields) are refused with `400 VALIDATION_FAILED` **and are not recorded**. A `code` that passes these rules but cannot be decoded (wrong length, CRC, payload) is processed, recorded and answered `200` with state `MALFORMED_CODE`.
+Any string `code` of at most 1024 characters reaches the verification service (contract step 1). One that cannot be decoded — empty, characters outside base64url, more than 200 characters, wrong length, CRC or payload fields — is processed, **recorded** as a scan and answered `200` with state `MALFORMED_CODE`. Only requests outside the schema — a missing or non-string `code`, a `code` over 1024 characters, a wrong genome array, out-of-range client metrics, unknown fields — are refused with `400 VALIDATION_FAILED` **and are not recorded**.
 
 ### 9.2 Response
 
@@ -525,20 +527,20 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `ownership.registered` | boolean | The product has a current owner. |
 | `ownership.you` | boolean | The logged-in viewer is that owner. |
 | `ownership.transferPending` | `true` | Only when registered and an unexpired transfer is pending. |
-| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION` only. |
+| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION`; and `SUSPICIOUS_ACTIVITY` when only the scan history made the scan suspicious, the product has no owner, is open for registration and ships with a claim code (then `claimCodeRequired` is always `true`; §9.4 step 10). |
 | `registration.token` | string | Single-use registration token (base64url, 43 characters) for `POST /api/v1/ownership/register`. |
 | `registration.expiresAt` | ISO timestamp | 15 minutes after the scan. |
 | `registration.claimCodeRequired` | boolean | The product ships with a claim code that must be supplied at registration. |
 
-Note on `product.collection`: the verification lookup reads only the product's own collection. A product that inherits its collection from its model (product `collection_id` NULL) has no `collection` field here, although the admin and owner views show the model's collection.
+Note on `product.collection`: the product's own collection, else its model's — the same rule as `product_overview` and the owner's product list.
 
 ### 9.3 States and public wording
 
-The wording comes from `services/copy.ts`. It states what the system established and never claims that the object is genuine.
+The wording comes from `services/copy.ts`, the single source of these sentences (the verify app displays `title` and `message` and keeps no copy of its own, the owner's unusual-activity variant included). It states what the system established and never claims that the object is genuine. Customer vocabulary: the object is a "piece", never a "product".
 
 | `state` | `title` | `message` |
 |---|---|---|
-| `AUTHENTIC` | `AUTHENTIC` | This ORBES identity was issued and signed by ORBES and is registered to an active product. |
+| `AUTHENTIC` | `AUTHENTIC` | This ORBES identity was issued and signed by ORBES and is registered to an active piece. |
 | `AUTHENTIC_FIRST_REGISTRATION` | `AUTHENTIC — FIRST REGISTRATION` | This ORBES identity was issued and signed by ORBES and has not yet been registered. You may register it to your ORBES account. |
 | `AUTHENTIC_REGISTERED` | `AUTHENTIC — REGISTERED` | This ORBES identity was issued and signed by ORBES and is registered to its owner. |
 | `AUTHENTIC_OWNERSHIP_VERIFIED` | `AUTHENTIC — OWNERSHIP VERIFIED` | This ORBES identity was issued and signed by ORBES and is registered to your account. |
@@ -553,24 +555,24 @@ The wording comes from `services/copy.ts`. It states what the system established
 
 ### 9.4 Decision procedure
 
-The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case.
+The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case. Order: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (normative: `genome/PLATFORM-CONTRACTS.md` §2.4).
 
 | Step | Condition | Result |
 |---|---|---|
-| 1 | The code does not decode: base64url, length (79 bytes), CRC-16 or strict payload decoding fails. | `MALFORMED_CODE` |
-| 2 | Unsupported code version or genome version. | `MALFORMED_CODE` |
-| 3 | The key id named by the code is not in the key registry. | `INVALID_SIGNATURE` |
-| 4 | The Ed25519 signature over `"ORBES-CODE/v1" ‖ 0x00 ‖ payload` does not verify (strict: small-order and non-canonical keys and non-canonical signatures are rejected). | `INVALID_SIGNATURE` |
-| 5 | The signed identity is not a registered product, or the product has no code with this issue number. | `UNKNOWN` (CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED`) |
-| 5 | The registered code's payload hash differs from the scanned payload's. | `SUSPICIOUS_ACTIVITY` (CRITICAL anomaly `CODE_MISMATCH`) |
-| 6 | The key is REVOKED and the code was recorded at or after its compromise time (or revocation time when no compromise time is set). ACTIVE and RETIRED keys are always trusted. | `INVALID_SIGNATURE` |
+| 1 | Strict structural parse fails: base64url (≤ 200 characters), length (79 bytes), CRC-16, or strict payload decoding (code version 1, reserved values such as genome version / key id / issue 0, field ranges). | `MALFORMED_CODE` |
+| 2 | The key id named by the code is not in the key registry. | `INVALID_SIGNATURE` |
+| 3 | The Ed25519 signature over `"ORBES-CODE/v1" ‖ 0x00 ‖ payload` does not verify (strict: small-order and non-canonical keys and non-canonical signatures are rejected). Every payload field is signed, the genome version included, so an edited version fails here. | `INVALID_SIGNATURE` |
+| 4 | The key is REVOKED and there is no registry record of this code (product + issue) created before its compromise time (or revocation time when no compromise time is set) — whether the identity is registered or not. ACTIVE and RETIRED keys are always trusted. | `INVALID_SIGNATURE` |
+| 5 | Validly signed, but the genome version is not supported by this server (the server is outdated; logged as a warning, no anomaly). | `UNKNOWN` |
+| 6 | The signed identity is not a registered product, or the product has no code with this issue number. | `UNKNOWN` (CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED`) |
+| 6 | The registered code's payload hash differs from the scanned payload's. | `SUSPICIOUS_ACTIVITY` (CRITICAL anomaly `CODE_MISMATCH`) |
 | 7 | Genome cross-check: at least 6 glyphs with confidence ≥ 0.5 were provided and 2 or more of them differ from the genome recomputed from the signed identity. Fewer than 6 is inconclusive and never flagged. | `SUSPICIOUS_ACTIVITY` (anomaly `GENOME_MISMATCH`) |
 | 8 | Code status SUPERSEDED or REVOKED; or product status REVOKED, COUNTERFEIT_FLAGGED or RETIRED. | `REVOKED` |
 | 8 | Product status LOST or STOLEN. | `SUSPICIOUS_ACTIVITY` |
-| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, device diversity, geographic dispersion, lost/stolen and post-revocation scans). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
-| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token; otherwise `AUTHENTIC`. | as stated |
+| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
+| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token; otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true`, so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
 | 11 | Authenticator policy: may set `assurance: "CODE_ONLY"` and `hardwareProofRequired`. Never changes the state. | — |
-| 12 | The authentication record is persisted and the outcome returned. | — |
+| 12 | The authentication record and the final scan state are persisted and the outcome returned. | — |
 
 ### 9.5 Examples
 
@@ -584,7 +586,7 @@ The responses below were captured from a development instance (in-memory databas
   "scanId": "0c60c3b6-1e77-4b80-a64e-fe1240da84f9",
   "verifiedAt": "2026-10-01T08:13:21.929Z",
   "title": "AUTHENTIC",
-  "message": "This ORBES identity was issued and signed by ORBES and is registered to an active product.",
+  "message": "This ORBES identity was issued and signed by ORBES and is registered to an active piece.",
   "verification": {
     "signature": "VALID",
     "keyId": 1,
@@ -731,7 +733,7 @@ The responses below were captured from a development instance (in-memory databas
 }
 ```
 
-When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 5), `genome` is present but `verification` is absent.
+When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genome` is present but `verification` is absent. When it results from the scan history alone on an unregistered product shipped with a claim code (step 10's exception), the body also carries `registration` with `"claimCodeRequired": true`.
 
 **`REVOKED`** — the original code of a product whose code was re-issued (status SUPERSEDED); revoked codes and revoked, retired or counterfeit-flagged products answer the same way:
 
@@ -1606,7 +1608,7 @@ Item:
 }
 ```
 
-`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`.
+`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
 
 ### 16.2 `GET /api/admin/owners`
 
@@ -1641,7 +1643,7 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
 }
 ```
 
-Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise.
+Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
@@ -1826,7 +1828,7 @@ What a scanner decodes from the printed ORBES CODE is 79 bytes: `payload (13) �
 
 - Call `POST /api/v1/verify` with `{ "code": "<106 base64url characters>" }` from your **server**. The endpoint sends no CORS headers, so browser code on another origin cannot read its response.
 - No credentials or CSRF token are needed. The default budget is 60 requests per minute per client IP; a 429 answer carries `Retry-After`.
-- **Keep the `orbes_device` cookie** the first response sets and send it back on later calls. Without it, each call is counted as a new device, and many scans of one product from "many devices" can raise anomaly findings (device diversity, scan velocity) that turn later results into `SUSPICIOUS_ACTIVITY` for genuine customers.
+- **Keep the `orbes_device` cookie** the first response sets and send it back on later calls; it identifies your installation in the scan history. The anomaly rules count distinct *sources* — the client IP pseudonym first, then the device cookie, then the session — so calls from one address count once whether or not the cookie is kept, while the same product verified from many addresses within minutes (many stores, many networks) can raise anomaly findings (source diversity, scan velocity) that turn later results into `SUSPICIOUS_ACTIVITY` for genuine customers.
 - Every call is recorded as a scan of the product and feeds its anomaly history. Verify when a product is actually in hand; do not poll.
 - Use `state` for decisions, and show `title` / `message` to people. All states answer HTTP 200.
 
@@ -1851,7 +1853,7 @@ What a scanner decodes from the printed ORBES CODE is 79 bytes: `payload (13) �
 6. **Verify Ed25519 strictly** (RFC 8032): reject non-canonical encodings, `S ≥ L`, and small-order public keys. Some libraries are permissive by default; in particular, OpenSSL 3.5 (which backs Node's `crypto.verify`) accepts the identity point as a public key, which makes the signature `R = identity, S = 0` verify for every message. With `@noble/curves`, pass `{ zip215: false }`.
 7. **Interpret the key status:**
    - `ACTIVE` or `RETIRED`: a valid signature means ORBES issued this code.
-   - `REVOKED`: codes created before the key's compromise remain valid for ORBES, but neither the compromise time nor the code's creation time is published, so an offline verifier **cannot decide**. Treat the result as not verifiable offline and use the online API.
+   - `REVOKED`: the key list publishes the trust cut-off: `compromisedAt`, or `revokedAt` when no compromise time was given. ORBES keeps trusting only codes whose **registry record** was created strictly before the cut-off. Offline, the only date available is the signed `issuedDay` — and whoever stole the key can sign any `issuedDay`, so a date before the cut-off proves nothing. Apply the cut-off one way only: a code whose `issuedDay` (UTC) falls on a day after the cut-off's UTC day is **refused** (ORBES refuses it too); any other code under a revoked key is **not verifiable offline** — use the online API.
 8. **Derive the product id** for display: look up the category letter for `categoryIndex` in `GET /api/v1/categories` (or a cached copy), then format `O{YY}-{C}-{serial}` with the serial zero-padded to at least 5 digits (e.g. `O26-J-00184`).
 
 Reference implementation (Node.js 22, `@noble/curves` 2.x), tested against the public sample vector:
@@ -1898,9 +1900,17 @@ export function verifyOrbesCode(data, keys) {
     valid = false;
   }
   if (!valid) return { ok: false, reason: 'BAD_SIGNATURE' };
-  if (key.status === 'REVOKED') return { ok: false, reason: 'KEY_REVOKED_VERIFY_ONLINE' };
+  const issuedDay = (payload[7] << 8) | payload[8];
+  if (key.status === 'REVOKED') {
+    const DAY = 86_400_000;
+    const cutoff = Date.parse(key.compromisedAt ?? key.revokedAt); // the published trust cut-off
+    const issuedAt = Date.UTC(2024, 0, 1) + issuedDay * DAY; // 00:00 UTC of the signed issue day
+    // Issued on a later UTC day than the cut-off: refused. Earlier dates can be forged with the stolen key.
+    if (Number.isFinite(cutoff) && issuedAt >= Math.floor(cutoff / DAY) * DAY + DAY) return { ok: false, reason: 'KEY_REVOKED' };
+    return { ok: false, reason: 'KEY_REVOKED_VERIFY_ONLINE' };
+  }
 
-  return { ok: true, keyId, keyStatus: key.status, genomeVersion, identity, issue, issuedDay: (payload[7] << 8) | payload[8] };
+  return { ok: true, keyId, keyStatus: key.status, genomeVersion, identity, issue, issuedDay };
 }
 ```
 

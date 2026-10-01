@@ -98,7 +98,7 @@ log "db.dump: $(stat -c %s "$WORK/db.dump") bytes, $(grep -c 'TABLE DATA' "$WORK
 
 psql_q() { compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -XAtqc \"$1\""; }
 MIGRATIONS="$(psql_q "select coalesce(json_agg(name order by name), '[]') from kysely_migration")"
-KEYS_JSON="$(psql_q "select coalesce(json_agg(json_build_object('keyId', id, 'kid', kid, 'status', status) order by id), '[]') from cryptographic_keys")"
+KEYS_JSON="$(psql_q "select coalesce(json_agg(json_build_object('keyId', key_id, 'kid', kid, 'status', status) order by key_id), '[]') from cryptographic_keys")"
 PG_VERSION="$(psql_q 'show server_version')"
 
 # ── Signing-key files ──────────────────────────────────────────────────────
@@ -179,15 +179,15 @@ prune "$WEEKLY" "$KEEP_WEEKLY"
 if [[ -n "$RCLONE_DEST" && "$UPLOAD" == true ]]; then
   step "off-site copy to $RCLONE_DEST"
   need_cmd rclone
-  rclone copy --no-traverse "$DAILY" "$RCLONE_DEST/daily" --include "$NAME" --include "$NAME.sha256"
-  rclone check --one-way "$DAILY" "$RCLONE_DEST/daily" --include "$NAME"
-  if [[ -f "$WEEKLY/orbes-$WEEK-${NAME#orbes-}" ]]; then
-    rclone copy --no-traverse "$WEEKLY" "$RCLONE_DEST/weekly" --include "orbes-$WEEK-${NAME#orbes-}" --include "orbes-$WEEK-${NAME#orbes-}.sha256"
-  fi
-  # Remote retention mirrors the local one (by age). An Object Lock / versioning policy
-  # on the bucket (docs §15.8) protects against a compromised server deleting backups.
-  rclone delete --min-age "$((KEEP_DAILY + 1))d" "$RCLONE_DEST/daily" || warn "remote daily pruning failed"
-  rclone delete --min-age "$((KEEP_WEEKLY * 7 + 7))d" "$RCLONE_DEST/weekly" || warn "remote weekly pruning failed"
+  # copy (never sync): only archives missing remotely are sent, so a missed upload
+  # (network outage, remote added later) catches up on the next run.
+  rclone copy -q "$DAILY" "$RCLONE_DEST/daily" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
+  rclone copy -q "$WEEKLY" "$RCLONE_DEST/weekly" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
+  rclone check -q --one-way "$DAILY" "$RCLONE_DEST/daily" --include "$NAME"
+  # Remote retention mirrors the local one, by age. An Object Lock / versioning policy on
+  # the bucket (docs/DEPLOYMENT.md §15.8) protects against a compromised server deleting backups.
+  rclone delete -q --min-age "$((KEEP_DAILY + 1))d" "$RCLONE_DEST/daily" || warn "remote daily pruning failed"
+  rclone delete -q --min-age "$((KEEP_WEEKLY * 7 + 7))d" "$RCLONE_DEST/weekly" || warn "remote weekly pruning failed"
   log "copied and checked off-site"
 fi
 

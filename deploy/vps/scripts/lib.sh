@@ -120,6 +120,9 @@ wait_healthy() {
     cid="$(service_container "$svc")"
     if [[ -n "$cid" ]]; then
       status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+      if (( $(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0) >= 3 )); then
+        warn "$svc is crash-looping (restarted 3 times)"; return 1
+      fi
       case "$status" in
         healthy) log "$svc is healthy"; return 0 ;;
         unhealthy) warn "$svc is unhealthy"; return 1 ;;

@@ -77,7 +77,9 @@ WORK_PARENT="${ORBES_RESTORE_WORKDIR:-$BACKUP_DIR}"
 install -d -m 0700 "$WORK_PARENT"
 WORK="$(mktemp -d "$WORK_PARENT/.restore.XXXXXX")"
 trap 'rm -rf -- "$WORK"' EXIT
-age -d -i "$IDENTITY" "$ARCHIVE" | tar -C "$WORK" -xf - manifest.json db.dump keys.tar
+if ! age -d -i "$IDENTITY" "$ARCHIVE" 2>"$WORK/age.err" | tar -C "$WORK" -xf - manifest.json db.dump keys.tar 2>/dev/null; then
+  die "cannot decrypt/unpack $ARCHIVE with $IDENTITY: $(head -c 300 "$WORK/age.err" | tr '\n' ' ')(wrong identity, or a damaged archive)"
+fi
 for f in db.dump keys.tar; do
   want="$(sed -n "/\"$f\"/s/.*\"sha256\": \"\\([0-9a-f]*\\)\".*/\\1/p" "$WORK/manifest.json")"
   [[ -n "$want" && "$(sha256sum "$WORK/$f" | cut -d' ' -f1)" == "$want" ]] || die "$f does not match the manifest checksum"

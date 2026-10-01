@@ -504,12 +504,11 @@ describe('anomaly poisoning from a single client', () => {
       last = safeJson(await h.client({ ip: '198.51.100.77' }).post('/api/v1/verify', { code: p.code.data }));
       h.clock.advance(30_000);
     }
-    // Known residual (review SEC-7): device diversity is inflated (cookies are free), but the
-    // velocity + diversity weights combine to 55 < 60, so the public result does not flip and the
-    // genuine buyer can still register.
+    // SEC-7 (fixed): the rules count distinct sources (IP pseudonym first), not device cookies, so
+    // 40 fresh cookies from one address are one source: no finding, and the buyer can still register.
     expect(last.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
     const types = (await h.ctx.db.selectFrom('anomalies').select('type').where('product_id', '=', p.product.id).execute()).map((r) => r.type).sort();
-    expect(types).toEqual(['DEVICE_DIVERSITY', 'SCAN_VELOCITY']);
+    expect(types).toEqual([]);
   });
 });
 

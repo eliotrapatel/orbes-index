@@ -20,6 +20,7 @@ Contents
 12. [Upgrade and rollback](#12-upgrade-and-rollback)
 13. [Smoke tests](#13-smoke-tests)
 14. [Production security checklist](#14-production-security-checklist)
+15. [OVH VPS deployment](#15-ovh-vps-deployment) (the production setup: Caddy + app + PostgreSQL on one VPS, `theorbes.com` on Vercel)
 
 ---
 
@@ -66,17 +67,17 @@ The web apps reference their assets and the API with **absolute paths** (`/asset
 
 The ORBES website is a single static file (`index.html` at the repository root, with every asset embedded). Neither option below changes it or its hosting.
 
-**Option A: dedicated subdomain (recommended).** Serve the service at `https://verify.theorbes.com` and add a redirect at the edge or on the static host:
+**Option A: dedicated subdomain (recommended, and the production choice: §15).** Serve the service at `https://verify.theorbes.com` and add a redirect at the edge or on the static host. In production the static host is Vercel and the redirect is the root `vercel.json` (temporary `307` while the address may still change, §15.10):
 
 ```
-https://theorbes.com/verify      301 → https://verify.theorbes.com/verify
-https://theorbes.com/verify/*    301 → https://verify.theorbes.com/verify/$1
+https://theorbes.com/verify      307 → https://verify.theorbes.com/verify
+https://theorbes.com/verify/*    307 → https://verify.theorbes.com/verify/*      (path kept)
 ```
 
 - `PUBLIC_ORIGIN=https://verify.theorbes.com`.
 - The service gets its own origin. Its CSP, cookies (`__Host-orbes_session`, `__Host-orbes_admin`, `__Host-orbes_device` in production: host-only by construction), HSTS and rate limits stay isolated from the marketing site.
 - The app sends `Strict-Transport-Security: max-age=63072000; includeSubDomains` in production. On `verify.theorbes.com` this only covers that host and its own subdomains.
-- Nothing has to change on the static host except the redirect. With Cloudflare in front of `theorbes.com`, a Redirect Rule does it. On a host without redirect rules, a CDN in front can do it.
+- Nothing has to change on the static host except the redirect: `vercel.json` on Vercel (§15.10). With Cloudflare in front of `theorbes.com`, a Redirect Rule would do the same.
 
 **Option B: path routing on `theorbes.com`.** The edge sends these paths to the service and everything else to the static host:
 
@@ -408,7 +409,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## 5. First deployment
 
-The steps below use the single-host compose stack (`genome/docker-compose.yml`: the app plus `postgres:17`, two named volumes `pgdata` and `keys`, the app published on `127.0.0.1:8080`, read-only root filesystem, all capabilities dropped, `no-new-privileges`). §5.6 covers the same steps without compose.
+**Production on the OVH VPS uses `deploy/vps/` and its scripts instead: follow §15.** The steps below describe the generic single-host compose stack (`genome/docker-compose.yml`: the app plus `postgres:17`, two named volumes `pgdata` and `keys`, the app published on `127.0.0.1:8080`, read-only root filesystem, all capabilities dropped, `no-new-privileges`). §5.6 covers the same steps without compose.
 
 ### 5.1 Prepare the configuration
 
@@ -842,7 +843,7 @@ docker compose exec app node --import tsx scripts/admin.ts reset-totp --email op
 
 ## 10. Backups and point-in-time recovery
 
-Full guidance: [DATABASE §11](DATABASE.md#11-backup-restore-and-point-in-time-recovery). In short:
+Full guidance: [DATABASE §11](DATABASE.md#11-backup-restore-and-point-in-time-recovery). On the OVH VPS, `deploy/vps/scripts/backup.sh` and `restore.sh` implement the database and key-file rows below (age-encrypted, retention, OVH Object Storage): §15.8–15.9. In short:
 
 | What | How | Notes |
 |---|---|---|
@@ -1025,3 +1026,270 @@ Operations
 - [ ] Alerts are configured (§9.3), CRITICAL anomalies first.
 - [ ] Keys are rotated at least yearly. The compromise runbook (§7.5) has been rehearsed on staging, and the key register (ids, kids, fingerprints) is current.
 - [ ] The image is rebuilt regularly for base-image patches. `npm audit` findings are triaged.
+
+---
+
+## 15. OVH VPS deployment
+
+The production decision: the backend and its database run on **one OVH VPS** (Ubuntu 26.04 LTS), and the website `theorbes.com` stays on **Vercel**, unchanged except for a redirect of `/verify` (§15.10). Everything lives in [`deploy/vps/`](../deploy/vps/) (quick start: [deploy/vps/README.md](../deploy/vps/README.md)). This chapter is the complete runbook; the general sections above still apply (configuration §3, keys §7, admins §8, monitoring §9).
+
+```
+ phone / browser ──HTTPS──▶ theorbes.com/verify (Vercel) ──307──▶ https://verify.theorbes.com/verify
+                                                                       │
+ ┌─────────────────────────────── OVH VPS (Ubuntu 26.04) ──────────────┼─────────────────────────────┐
+ │ ufw + (optional) OVH Edge Network Firewall: 22, 80, 443/tcp, 443/udp ▼                             │
+ │  caddy:2 ── ports 80/443 ── Let's Encrypt, HTTP→HTTPS, JSON access log, X-Forwarded-For = client  │
+ │     │ network `edge` (internal, 172.30.80.0/28; Caddy fixed at 172.30.80.2 = the app's TRUST_PROXY)│
+ │     ▼                                                                                              │
+ │  app (orbes-genome:<commit>) :8080 · uid 1000 · read-only · no capabilities · GeoIP volume (ro)    │
+ │     │ network `backend` (internal)                                                                 │
+ │     ▼                                                                                              │
+ │  postgres:17 (volume pgdata, never published)                                                      │
+ │                                                                                                    │
+ │  systemd timers: orbes-backup (nightly, age-encrypted → /var/backups/orbes [→ OVH Object Storage]) │
+ │                  orbes-geoip  (monthly, DB-IP City Lite → volume geoip)                            │
+ └────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Piece | Where | Notes |
+|---|---|---|
+| Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. |
+| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. |
+| Configuration | `deploy/vps/.env` (from `.env.example`) | Mode `0600`, owner `orbes`, git-ignored. Parsed by the scripts, never sourced. |
+| Scripts | `deploy/vps/scripts/` | `bootstrap-ubuntu.sh`, `setup.sh`, `deploy.sh`, `backup.sh`, `restore.sh`, `geoip-update.sh`; each has `--help`. |
+| Timers | `deploy/vps/systemd/` | Installed by `bootstrap-ubuntu.sh` (`--units-only` to refresh). |
+
+### 15.1 Prerequisites
+
+| Item | Recommendation |
+|---|---|
+| VPS | **≥ 2 vCPU, 4 GB RAM, 40 GB SSD/NVMe**, in an **EU region** (for example one of OVH's French data centres) for data-protection simplicity. The stack's limits (`.env`: app 768 MB, PostgreSQL 1 GB, Caddy 256 MB) leave room for the OS, Docker builds and the page cache. A 2 GB VPS works for a trial (the bootstrap adds swap below 2 GB). x86_64 and arm64 are both supported. |
+| Image | **Ubuntu 26.04 LTS**, with your SSH public key added at order time (OVH's image then lets you in as `ubuntu`, with sudo). |
+| Domain | Control of the DNS zone of `theorbes.com` (§15.2). |
+| Accounts | An e-mail address for Let's Encrypt notices; optionally an OVH Public Cloud project for Object Storage (§15.8). |
+| Offline storage | A password manager / vault **and** a sealed offline copy for: the backup decryption key (age identity), `KEY_ENCRYPTION_KEY`, `COOKIE_SECRET`, `IP_HASH_PEPPER`, the first admin's password. |
+| Repository access | The VPS clones this repository. For a private repository use a read-only **deploy key** of the `orbes` user. |
+
+### 15.2 DNS
+
+1. Find out where the zone of `theorbes.com` is hosted: `dig +short NS theorbes.com`.
+   - `ns1.vercel-dns.com` / `ns2.vercel-dns.com`: the zone is at **Vercel**. Vercel dashboard → *Domains* → `theorbes.com` → DNS records, or `vercel dns add theorbes.com verify A <VPS IPv4>`.
+   - anything else (the registrar's, OVH's `dns*.ovh.net`, Cloudflare…): add the record at that provider.
+2. Add **`verify` A `<VPS IPv4>`** (TTL 300 s while you set things up). Do not touch the apex or `www` records: they keep pointing at Vercel.
+3. **AAAA: leave it out** unless you have enabled IPv6 on the VPS *and* in Docker for this stack. Without IPv6 in Docker, IPv6 clients reach Caddy through Docker's userland proxy and all of them appear with one internal IPv4 address, which merges their rate-limit buckets and IP pseudonyms.
+4. Check propagation before running `setup.sh` (Let's Encrypt validates through public DNS):
+   ```bash
+   dig +short verify.theorbes.com @1.1.1.1      # must print the VPS address
+   dig +short verify.theorbes.com @8.8.8.8
+   ```
+   If ACME fails anyway, Caddy retries with back-off; `docker compose logs caddy | grep -i -E 'acme|certificate'` shows why.
+
+### 15.3 OVH network firewall (optional)
+
+`bootstrap-ubuntu.sh` configures **ufw** (deny incoming; allow the SSH port(s) sshd listens on, 80/tcp, 443/tcp, 443/udp). Two caveats:
+
+- **Docker-published ports bypass ufw** (Docker inserts its own iptables rules). The stack publishes only Caddy's 80/443, which ufw allows anyway, so both views agree; never publish the app or PostgreSQL.
+- For filtering **in front of** the VPS, OVH offers a stateless network firewall on the public IP (in the OVHcloud Control Panel, on the VPS's IP address: *Edge Network Firewall*). If you enable it, mirror ufw: allow TCP 22, 80, 443 and UDP 443 (and established TCP), deny the rest. Test SSH from a second session before relying on it.
+
+### 15.4 First deployment, step by step
+
+**1. Prepare the server (as `ubuntu`, once).**
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+sudo git clone https://github.com/<org>/orbes-index.git /opt/orbes/orbes-index     # or a deploy key URL
+sudo /opt/orbes/orbes-index/deploy/vps/scripts/bootstrap-ubuntu.sh --dry-run       # prints every change
+sudo /opt/orbes/orbes-index/deploy/vps/scripts/bootstrap-ubuntu.sh
+```
+
+What the bootstrap does (idempotent, rerun it any time; `--help` lists the options):
+
+| Step | Detail |
+|---|---|
+| System | `apt-get update && upgrade`; `curl git jq openssl age rclone ufw fail2ban unattended-upgrades`. |
+| Docker | Reads the release codename from `/etc/os-release` and the architecture from dpkg. If Docker's apt repository publishes that codename for that architecture (`download.docker.com/linux/ubuntu/dists/<codename>/stable/binary-<arch>/`), installs `docker-ce`, `docker-compose-plugin`, `docker-buildx-plugin` from it; otherwise Ubuntu's `docker.io`, `docker-compose-v2`, `docker-buildx`. `--docker-source docker|ubuntu` forces one. Refuses Compose < 2.24. Writes `/etc/docker/daemon.json` (json-file log rotation, `live-restore`) when absent. |
+| Firewall | ufw as above. |
+| Updates | unattended-upgrades daily (security origin); `--auto-reboot` reboots at 04:00 when a kernel update needs it (containers come back by themselves: `restart: unless-stopped`). |
+| fail2ban | `sshd` jail on the systemd journal: 5 failures in 10 min → banned 1 h. |
+| Clock | Keeps an active NTP client (chrony is Ubuntu's default since 25.10), else installs and enables systemd-timesyncd. TOTP, session expiry and audit timestamps assume an accurate clock: `timedatectl` must show `System clock synchronized: yes`. |
+| Swap | 2 GB `/swapfile` when RAM < 2 GB and no swap exists. |
+| Deploy user | `orbes` (no password, no sudo, member of `docker`, which is root-equivalent: protect this account); `/opt/orbes` (0750) and `/var/backups/orbes` (0700) owned by it; the checkout is chowned to it. |
+| Timers | `orbes-backup.timer` (nightly ≈ 03:17 + up to 20 min) and `orbes-geoip.timer` (5th of each month), running the scripts as `orbes` from `--app-dir` (default `/opt/orbes/orbes-index`). |
+
+**Optional SSH hardening:** `sudo …/bootstrap-ubuntu.sh --harden-ssh` writes `/etc/ssh/sshd_config.d/10-orbes-hardening.conf` (`PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `MaxAuthTries 4`; it sorts before cloud-init's `50-cloud-init.conf`, and sshd keeps the first value it reads). It refuses unless a non-root member of `sudo` has a valid non-empty `~/.ssh/authorized_keys` **and** working sudo (a `NOPASSWD` rule, as on OVH's `ubuntu` user, or a password), validates with `sshd -t` (and removes the file again if that fails), then reloads sshd. **Keep your session open and test a new login (`ssh ubuntu@<ip> sudo -v`) before closing it.**
+
+**2. DNS** (§15.2), and wait until `verify.theorbes.com` resolves to the VPS.
+
+**3. Configure and deploy (as `orbes`).**
+
+```bash
+sudo -iu orbes
+cd /opt/orbes/orbes-index/deploy/vps
+scripts/setup.sh --domain verify.theorbes.com --acme-email ops@theorbes.com --admin-email <first admin e-mail>
+# optional: --age-recipient age1…  (a backup key you generated offline with age-keygen: recommended)
+```
+
+`setup.sh`:
+
+1. creates `.env` from `.env.example` (mode 0600); an existing `.env` is kept and only **empty** secrets are filled in, so a rerun never rotates a secret. It refuses to generate `POSTGRES_PASSWORD` or `KEY_ENCRYPTION_KEY` when the matching volume already exists (put the escrowed values back instead);
+2. generates `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `COOKIE_SECRET` and `IP_HASH_PEPPER` (48 random bytes, base64url), `KEY_ENCRYPTION_KEY` (32 bytes, base64url) and `BOOTSTRAP_ADMIN_PASSWORD`;
+3. backup encryption: uses `--age-recipient` if given, otherwise generates an age key pair **in memory**, prints the private key once and writes only the public key to `BACKUP_AGE_RECIPIENTS_FILE` (`/opt/orbes/backup-recipients.txt`);
+4. prints the new secrets once, in an **escrow block**: store them offline now (password manager + sealed copy). The backups deliberately do not contain them;
+5. runs `scripts/deploy.sh` (§15.7) and `scripts/geoip-update.sh` (§15.6, a failure only warns);
+6. checks that the timers are installed.
+
+The app is then live at `https://verify.theorbes.com/verify`, with its first signing key. Record the key's id, kid and fingerprint (`docker compose exec app npm run keys:list`) in the key register (§5.4).
+
+### 15.5 First admin: TOTP enrolment
+
+In production every admin must pass TOTP. Enrol the bootstrap admin **from the shell before the password is ever used in the console** (§8.1):
+
+```bash
+cd /opt/orbes/orbes-index/deploy/vps
+docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <first admin>
+#   prints the secret and an otpauth:// URI once: hand them to the admin in person
+docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <current code>
+```
+
+Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env`, then `scripts/deploy.sh` (or `docker compose up -d caddy`): `/admin*` and `/api/admin*` answer 403 elsewhere.
+
+### 15.6 GeoIP database (anomaly scoring without Cloudflare)
+
+`GEO_MODE=mmdb` (the stack's default) locates scans from the client IP that Caddy forwards, with the DB-IP "IP to City Lite" file in the `geoip` volume (§3.4: data, licence and attribution, privacy, reload behaviour). The volume is mounted **read-only** in the app; only the updater writes to it.
+
+```bash
+scripts/geoip-update.sh                 # download, validate, install atomically (monthly timer does this)
+scripts/geoip-update.sh --check         # validate the installed file (no network)
+scripts/geoip-update.sh --rollback      # back to the previous edition
+scripts/geoip-update.sh --from-file dbip-city-lite-2026-10.mmdb   # air-gapped install, validated first
+```
+
+It runs `genome/scripts/geoip-update.ts` in the app image as the one-off service `geoip-update` (uid 1000, read-only root, the only container besides Caddy with outbound access), chowns a fresh volume to uid 1000 first, and keeps `<file>.previous`. The app picks a new file up within 10 minutes without a restart (`docker compose logs app | grep geoip`). A missing file only disables geolocation; verification is never affected.
+
+### 15.7 Updates and rollback: `deploy.sh`
+
+```bash
+cd /opt/orbes/orbes-index && git pull            # or: git fetch --tags
+cd deploy/vps && scripts/deploy.sh                # HEAD; or --ref v1.2.0 / --ref <commit>
+```
+
+| Step | Detail |
+|---|---|
+| Source | `git archive <ref> genome` into a temporary build context: the checkout is never modified, and uncommitted changes are never deployed by accident (warned; `--worktree` builds the working tree as is, tagged `<commit>-dirty-<time>`). |
+| Build | `docker build` → `orbes-genome:<commit12>` (an existing tag is reused). `BUILD_EXTRA_CA_FILE` in `.env` passes a proxy CA as the `extra_ca` BuildKit secret (§5.2); not needed on OVH. |
+| Backup | When the stack is running: `backup.sh --reason pre-deploy-<tag>` first (`--no-backup` skips it). |
+| Roll out | `ORBES_IMAGE_TAG=<tag>` written to `.env`, `docker compose up -d`; waits for PostgreSQL, the app (healthcheck = `/api/v1/health`, migrations run at start with `MIGRATE_ON_START=true`) and Caddy; a crash loop fails fast. A changed `Caddyfile`/`caddy.d` recreates Caddy (config hash label). |
+| Keys | Runs `npm run keys:generate` in the app when no key is ACTIVE (first deployment only; idempotent). |
+| Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
+| Rollback | Any failure of the last three steps redeploys the previous image tag and waits for health; the outcome is appended to `.state/deploys.log`. |
+
+Manual rollback to any image still on the host: `scripts/deploy.sh --image <tag>` (tags in `.state/deploys.log`, `docker images orbes-genome`). **Migrations:** an older image refuses a schema with migrations it does not know (§12.2). If a release applied a migration and must be rolled back, restore its pre-deploy backup (§15.9) instead. Clean up old images now and then: `docker image prune` (keep the last two tags).
+
+Operating system updates arrive through unattended-upgrades (`live-restore` keeps containers running across a Docker daemon restart). Rebuild regularly for `node:22-slim` security patches, even without code changes: `scripts/deploy.sh --rebuild` (same commit, `docker build --pull`, new tag `<commit>-r<time>`, so the previous image stays available for rollback).
+
+### 15.8 Backups
+
+**What and how** (`scripts/backup.sh`, nightly via `orbes-backup.timer`, and before every deploy):
+
+1. `pg_dump --format=custom` from the `postgres` container (first), checked with `pg_restore --list`;
+2. a tar of the `keys` volume (the key files stay AES-GCM-encrypted under `KEY_ENCRYPTION_KEY`, which is **not** in the backup);
+3. `manifest.json` (time, reason, image, schema migrations, key ids and status, SHA-256 of both parts);
+4. one tar of the three, **encrypted with age** to every public key in `BACKUP_AGE_RECIPIENTS_FILE`, written to `/var/backups/orbes/daily/orbes-<UTC time>[-<reason>].tar.age` plus a `.sha256` file. The bytes on disk are re-read and compared with the bytes streamed, and the age header and recipient count are checked;
+5. retention: the newest `BACKUP_KEEP_DAILY` (14) archives in `daily/`, and the first archive of each ISO week hard-linked into `weekly/` (newest `BACKUP_KEEP_WEEKLY`, 8);
+6. optional off-site copy with rclone (below).
+
+The server holds only the public key: it **cannot decrypt its own backups**, and a stolen backup is useless without the offline identity. The plaintext dump exists only in a `0700` work directory under `/var/backups/orbes` while the backup runs (removed on exit, also on failure). `--verify-identity <file>` additionally decrypts the new archive and compares checksums (restore drills; do not leave the identity on the server). Check freshness with `cat .state/last-backup`, `systemctl list-timers 'orbes-*'` and `journalctl -u orbes-backup`.
+
+**Off-site copy to OVH Object Storage (S3-compatible).**
+
+1. In the OVHcloud Control Panel, open (or create) a **Public Cloud** project → *Object Storage* → create an **S3 API** object container (bucket), e.g. `orbes-backups`, in an EU region, **private**. If offered, enable **versioning and Object Lock** at creation: a compromised server then cannot destroy older backups.
+2. *Users & Roles* (Object Storage users) → create a user with the Object Storage operator role, then generate its **S3 credentials** (access key + secret key). Prefer a user dedicated to backups.
+3. The container's page shows its **S3 endpoint**; for the Standard storage class it has the form `https://s3.<region>.io.cloud.ovh.net` (`<region>` in lower case, as shown in the Control Panel). Use the value shown there.
+4. As `orbes`, configure rclone (`rclone config`, or write `~/.config/rclone/rclone.conf`, mode 0600):
+   ```ini
+   [ovh-s3]
+   type = s3
+   provider = Other
+   env_auth = false
+   access_key_id = <access key>
+   secret_access_key = <secret key>
+   region = <region>
+   endpoint = https://s3.<region>.io.cloud.ovh.net
+   acl = private
+   ```
+   Check with `rclone lsd ovh-s3:` (the bucket is listed) and `rclone ls ovh-s3:orbes-backups`.
+5. In `.env`: `BACKUP_RCLONE_DEST=ovh-s3:orbes-backups/verify`. The next backup copies every local archive missing remotely into `…/daily` and `…/weekly` (copy, never sync), checks the new one, and deletes remote copies older than the local retention (`--min-age`). With Object Lock, those deletions are refused until the lock expires (logged as a warning): set the bucket's retention accordingly.
+
+### 15.9 Restore and the restore drill
+
+`scripts/restore.sh --identity <age identity file> (--archive <file> | --latest) [--db-only | --keys-only] [--yes] [--dry-run]`:
+
+1. checks the `.sha256` file, decrypts, verifies the manifest checksums, `pg_restore --list` and `tar -t` (`--dry-run` stops here and prints the manifest);
+2. asks you to **type the domain** (or `--yes`);
+3. takes a safety backup of the current state when PostgreSQL is running;
+4. stops the app; **recreates the `pgdata` volume** and restores into the empty database (`--exit-on-error --single-transaction`; the append-only audit log makes restoring over existing data impossible by design); **empties the `keys` volume** and extracts the key files (owner 1000, `0700`/`0600`);
+5. starts the stack if the image exists (otherwise run `scripts/deploy.sh`), waits for health, checks `/api/v1/health` through Caddy and lists the signing keys.
+
+The restored stack needs the **same `KEY_ENCRYPTION_KEY`** as the backup (from escrow); with another one the key files cannot be decrypted (verification still works, issuance does not, §7.3).
+
+**Restore drill (quarterly, on a separate VPS):**
+
+```bash
+# New VPS: §15.4 step 1, then as orbes, BEFORE setup: put the escrowed secrets into .env
+cd /opt/orbes/orbes-index/deploy/vps && cp .env.example .env && chmod 600 .env
+#   edit .env: KEY_ENCRYPTION_KEY, COOKIE_SECRET, IP_HASH_PEPPER from escrow; APP_DOMAIN of the drill host
+scripts/setup.sh --no-deploy --domain <drill host> --acme-email <e-mail> --age-recipient <your age public key>
+rclone copy ovh-s3:orbes-backups/verify/daily /var/backups/orbes/daily --max-age 2d   # or scp an archive
+install -m 600 /dev/stdin /dev/shm/orbes.agekey      # paste the identity, Ctrl-D (RAM only)
+scripts/restore.sh --identity /dev/shm/orbes.agekey --latest --yes
+scripts/deploy.sh --no-backup                         # builds and starts the app (no new key: one is ACTIVE)
+shred -u /dev/shm/orbes.agekey
+```
+
+Then: `docker compose exec app npm run keys:list` shows the same key ids and fingerprints as the register; `npm run keys:generate` answers "already ACTIVE; nothing to do" (the restored key file decrypts and signs); a code issued before the backup verifies **AUTHENTIC** (`POST /api/v1/verify`); compare `GET /api/admin/audit/verify` with the last exported anchor (§10).
+
+### 15.10 The Vercel redirect
+
+`vercel.json` at the repository root contains **only** two redirects (checked by `genome/test/ops/vps-stack.test.ts`; `.vercelignore` keeps `genome/`, `docs/` and `.github/` off the website):
+
+```json
+{ "redirects": [
+  { "source": "/verify",        "destination": "https://verify.theorbes.com/verify",        "statusCode": 307 },
+  { "source": "/verify/:path*", "destination": "https://verify.theorbes.com/verify/:path*", "statusCode": 307 } ] }
+```
+
+- `https://theorbes.com/verify` and everything below it answer **307** with `Location: https://verify.theorbes.com/verify…` (path kept). Every other URL of `theorbes.com`, including `/`, is served exactly as before.
+- **307 (temporary)** on purpose: browsers do not cache it permanently, so the target can still change. Once the service's address is final, switching to `308` (permanent) is a one-line change.
+- Printed material and QR codes may therefore point at either `https://theorbes.com/verify` (one extra hop) or `https://verify.theorbes.com/verify` (direct).
+- After the Vercel deployment, check: `curl -sI https://theorbes.com/verify/x | grep -i -E '^(HTTP|location)'` → `307` and `location: https://verify.theorbes.com/verify/x`; and that a query string survives the hop (`curl -sI 'https://theorbes.com/verify?ref=qr'`).
+
+### 15.11 Optional: Cloudflare in front
+
+Not the default (§15 decision), but supported. Behind Cloudflare's proxy every request reaches the VPS from a Cloudflare address, so the stack must trust Cloudflare, and only Cloudflare:
+
+1. Put only the `verify` record behind the proxy (orange cloud); `theorbes.com` itself stays on Vercel (DNS-only records). This requires the zone to be on Cloudflare.
+2. Obtain the certificate before enabling the proxy (record DNS-only, run `setup.sh`), then enable the proxy with SSL/TLS mode **Full (strict)**. If a renewal later fails behind the proxy, use a Cloudflare Origin CA certificate or a DNS challenge (a Caddy build with the Cloudflare DNS module); `docker compose logs caddy` shows the reason.
+3. In `.env`: `EDGE_MODE=cloudflare` (Caddy trusts the ranges of `caddy.d/edge-cloudflare.caddy`, reads the client IP from `CF-Connecting-IP`, and answers **403 to any public peer that is not Cloudflare**); keep `GEO_MODE=mmdb` (it now sees the real client IP) or set `GEO_MODE=cloudflare` to use Cloudflare's `cf-ipcountry`/coordinates headers. Then `scripts/deploy.sh`.
+4. **Re-check the ranges** in `caddy.d/edge-cloudflare.caddy` against <https://www.cloudflare.com/ips/> when enabling the mode, and yearly.
+5. Lock the origin at the network level too: since Docker-published ports bypass ufw, use OVH's Edge Network Firewall (§15.3) to allow 80/443 only from Cloudflare's ranges.
+
+The app's `TRUST_PROXY` stays Caddy's address in both modes: Caddy always hands the app exactly one `X-Forwarded-For` entry, the client IP it determined.
+
+### 15.12 Monitoring and routine checks
+
+| What | How |
+|---|---|
+| Availability | An external uptime checker (any HTTP monitor) on `https://verify.theorbes.com/api/v1/health`, every 1–5 min, expecting `200` and `"ok":true` (a `503` means the database is unreachable). Alert after 2 failures. |
+| Containers | `docker compose ps` (all `healthy`); `docker compose logs --since 1h app | grep '"level":50'` for errors; the alert list of §9.3 applies. |
+| Disk | `df -h / /var/lib/docker /var/backups/orbes` weekly, or the uptime checker's agent; alert above 80 %. Logs are capped (json-file 10 MB × 5 per container). Old images: `docker image prune`. |
+| Backups | `cat deploy/vps/.state/last-backup` younger than 26 h; `journalctl -u orbes-backup --since yesterday`; the off-site bucket lists the latest archive. Restore drill quarterly (§15.9). |
+| Certificates | Automatic: Caddy renews well before expiry (about a third of the lifetime remaining). `docker compose logs caddy | grep -i certificate` shows renewals; an uptime checker that reports certificate expiry is a cheap extra alarm. |
+| GeoIP | `journalctl -u orbes-geoip`; `scripts/geoip-update.sh --check`. |
+| Clock | `timedatectl` → synchronized. |
+| Security updates | `/var/log/unattended-upgrades/`; `cat /var/run/reboot-required` after kernel updates (or `--auto-reboot`). |
+
+**Key rotation and compromise:** the runbooks of §7.4 and §7.5 apply unchanged; run their commands from `deploy/vps` as `orbes` (`docker compose exec app npm run keys:rotate`, `docker compose exec app node --import tsx scripts/keys.ts revoke …`). Back up right after any rotation: `scripts/backup.sh --reason post-rotation`. On suspicion of a host compromise also rotate `POSTGRES_PASSWORD`, `COOKIE_SECRET` (§4.3) and the backup age key (new key pair; re-encrypting old archives is not needed, but they stay readable with the old identity).
+
+### 15.13 How this stack was validated
+
+Run in a sandbox before release (Docker 29, Compose 5, `caddy:2` 2.11, `postgres:17`): shellcheck clean on all scripts; `bootstrap-ubuntu.sh --dry-run` in `ubuntu:26.04` containers (Docker repository detected for `resolute/amd64`, fallback to Ubuntu's archive without a download tool, swap below 2 GB, `--harden-ssh` refused without a fallback sudo user and accepted with one; the drop-in passes `sshd -t` and overrides `50-cloud-init.conf`); `systemd-analyze verify` on the units; the full stack with `TLS_MODE=internal` and `APP_DOMAIN=verify.orbes.test` (`deploy.sh` build, migrations, first key, smoke tests; automatic rollback from a crash-looping image); a demo code verified AUTHENTIC through Caddy; forged `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `CF-Connecting-IP` and `True-Client-IP` headers left the stored IP pseudonym and the rate-limit bucket unchanged, while a client with another address got another pseudonym; the access log held no query string, cookie or header; the admin allowlist and the 64 KB body limit; `backup.sh` (retention, rclone copy) then `restore.sh` into a stack whose volumes had all been deleted: same row counts, byte-identical key file, the signing key usable, and codes issued before the backup verifying AUTHENTIC / REVOKED as before. `genome/test/ops/vps-stack.test.ts` guards the static properties in CI.

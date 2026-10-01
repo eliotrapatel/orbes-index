@@ -107,14 +107,17 @@ The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorre
 
 ### 4.4 Verification (server-side, authoritative)
 
-1. base64url-decode the submitted code (≤ 200 characters). It must be exactly 79 bytes.
-2. Check the CRC-16. Decode the payload strictly (§3).
-3. Resolve `keyId` in the key registry. An unknown key gives `INVALID_SIGNATURE`.
-4. Verify Ed25519 **strictly**:
+The order is normative ([PLATFORM-CONTRACTS](../genome/PLATFORM-CONTRACTS.md) §2.4): parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators.
+
+1. base64url-decode the submitted code (≤ 200 characters). It must be exactly 79 bytes. Check the CRC-16. Decode the payload strictly (§3: code version 1, reserved values such as genome version 0 refused). Any failure gives `MALFORMED_CODE`.
+2. Resolve `keyId` in the key registry. An unknown key gives `INVALID_SIGNATURE`.
+3. Verify Ed25519 **strictly** (a failure gives `INVALID_SIGNATURE`). The signature covers every payload field, so it is checked **before** the genome version is interpreted: a code whose genome version was edited is a forgery (`INVALID_SIGNATURE`), not an unreadable code.
    - **Weak keys:** the public key must be a canonical encoding of a point that is not of small order. **This is checked explicitly before calling OpenSSL.** OpenSSL 3.5, which backs `node:crypto`, accepts the identity point as a public key, and with it the signature `R = identity, S = 0` verifies for *every* message. The rule is one exported function, `isStrictEd25519PublicKey` in `src/server/crypto/ed25519-node.ts`: `verifyEd25519Node` applies it before OpenSSL, and `KeyService` applies the same function before it registers any key, so a key that could never verify can never be registered either.
    - **Malleability:** `S` must be canonical (`S < L`); the `S + L` variant is rejected.
    - **Isomorphic verifier:** the `@noble/curves` verifier runs with `zip215: false`, i.e. strict RFC 8032 rules rather than the permissive ZIP-215 rules.
-5. Registry checks (product, code issue and payload hash, revocations, lifecycle). These are described in [SECURITY-MODEL](SECURITY-MODEL.md) and implemented in `services/verification.ts`.
+4. **Revoked-key trust**, before any registry outcome: a `REVOKED` key vouches only for a code whose registry record (product + issue) was created before the key's cut-off (`compromised_at`, else `revoked_at`). Anything else it signed — a later code, an identity that was never registered, an issue that does not exist — gives `INVALID_SIGNATURE` (reason `KEY_REVOKED`), so a stolen key cannot even produce an `UNKNOWN` answer after revocation.
+5. **Genome-version support:** a validly signed, trusted code whose genome version this server does not know gives `UNKNOWN` (reason `UNSUPPORTED_GENOME_VERSION`) and a server warning: the server is outdated, not the code.
+6. Registry checks (product, code issue and payload hash), genome cross-check, revocations and lifecycle. These are described in [SECURITY-MODEL](SECURITY-MODEL.md) and implemented in `services/verification.ts`.
 
 **Malformed input.** Wrong lengths, invalid points, non-canonical encodings and non-canonical `S` all make verification return `false`. None of them throws.
 
@@ -133,7 +136,9 @@ The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorre
 |---|---|---|
 | `ACTIVE` | yes (exactly one key, DB-enforced) | yes |
 | `RETIRED` | no | yes. Historical products stay verifiable forever. |
-| `REVOKED` | no | Only codes whose registry record predates `compromised_at` (or `revoked_at`). Anything else is `INVALID_SIGNATURE`. |
+| `REVOKED` | no | Only codes whose registry record predates `compromised_at` (or `revoked_at`). Anything else it signed, registered identity or not, is `INVALID_SIGNATURE` (checked right after the signature, before the registry, §4.4). |
+
+**Publication.** `GET /api/v1/keys` and `/.well-known/orbes-keys.json` publish every key with `status`, `activatedAt`, `retiredAt`, `revokedAt` and `compromisedAt` (never the revocation reason), so offline verifiers know the cut-off. Offline, only the signed `issuedDay` is available, and a stolen key can sign any date: a code dated after the cut-off day can be refused offline, anything else under a revoked key needs the online check ([API §19.3](API.md#193-offline-signature-verification)).
 
 **Key ids** are allocated as the lowest unused value and are never reused: registry rows are never deleted (a database trigger rejects `DELETE` and `TRUNCATE` on `cryptographic_keys`, see [DATABASE §5.7](DATABASE.md#57-cryptographic_keys)), so an id once used stays bound to its public key. Every code carries its `keyId`, so verification always picks the key that signed it, whatever key is active today.
 

@@ -2,6 +2,10 @@
 # ORBES GENOME CODE: deploy a git ref of this repository to the VPS stack.
 #
 #   scripts/deploy.sh [--ref <git-ref>] [--worktree] [--no-backup] [--skip-smoke] [--timeout <s>] [--dry-run]
+#   scripts/deploy.sh --image <tag>      roll out an image that already exists (e.g. a previous
+#                                        tag from .state/deploys.log), without building
+#   scripts/deploy.sh --rebuild          rebuild the same commit with fresh base images
+#                                        (docker build --pull; tag <commit>-r<time>)
 #
 # Steps
 #   1. Export the ref (default HEAD) with `git archive` into a temporary build
@@ -32,6 +36,8 @@ usage() {
 }
 
 REF=HEAD
+IMAGE_TAG=""
+REBUILD=false
 WORKTREE=false
 BACKUP=true
 SMOKE=true
@@ -41,6 +47,8 @@ while (($#)); do
     --ref) REF=${2:?--ref needs a value}; shift 2 ;;
     --ref=*) REF=${1#*=}; shift ;;
     --worktree) WORKTREE=true; shift ;;
+    --image) IMAGE_TAG=${2:?--image needs a tag}; shift 2 ;;
+    --rebuild) REBUILD=true; shift ;;
     --no-backup) BACKUP=false; shift ;;
     --skip-smoke) SMOKE=false; shift ;;
     --timeout) TIMEOUT=${2:?--timeout needs seconds}; shift 2 ;;
@@ -58,53 +66,63 @@ ensure_state_dir
 DOMAIN="$(env_get APP_DOMAIN)"
 [[ -n "$DOMAIN" ]] || die "APP_DOMAIN is empty in $ENV_FILE"
 
-# ── 1. Source snapshot ─────────────────────────────────────────────────────
-step "source"
-BUILD_CTX="$(mktemp -d "${TMPDIR:-/tmp}/orbes-build.XXXXXX")"
-cleanup() { rm -rf -- "$BUILD_CTX"; }
-trap cleanup EXIT
-
-if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  COMMIT="$(git -C "$REPO_DIR" rev-parse --verify --quiet "${REF}^{commit}")" || die "unknown git ref: $REF (git fetch first?)"
-  SHORT="${COMMIT:0:12}"
+# ── 1–2. Source snapshot and build (skipped with --image) ─────────────────
+if [[ -n "$IMAGE_TAG" ]]; then
+  [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_.-]{1,128}$ ]] || die "invalid image tag: $IMAGE_TAG"
+  TAG="$IMAGE_TAG"
+  IMAGE="orbes-genome:$TAG"
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE not found (docker images orbes-genome)"
+  log "rolling out the existing image $IMAGE (no build)"
 else
-  [[ "$WORKTREE" == true ]] || die "$REPO_DIR is not a git checkout: use --worktree"
-  COMMIT=unknown
-  SHORT=nogit
-fi
+  step "source"
+  BUILD_CTX="$(mktemp -d "${TMPDIR:-/tmp}/orbes-build.XXXXXX")"
+  cleanup() { rm -rf -- "$BUILD_CTX"; }
+  trap cleanup EXIT
 
-if [[ "$WORKTREE" == true ]]; then
-  TAG="${SHORT}-dirty-$(date -u +%Y%m%d%H%M%S)"
-  log "building the working tree of $REPO_DIR/genome as is (tag $TAG)"
-  # Same exclusions as the image build itself (.dockerignore), applied by docker build.
-  tar -C "$REPO_DIR/genome" --exclude=./node_modules --exclude=./dist --exclude=./out \
-    --exclude=./.vitest --exclude='./*.y4m' -cf - . | tar -C "$BUILD_CTX" -xf -
-else
-  TAG="$SHORT"
-  log "ref $REF = commit $COMMIT (tag $TAG)"
-  if [[ -n "$(git -C "$REPO_DIR" status --porcelain -- genome 2>/dev/null)" && "$REF" == HEAD ]]; then
-    warn "genome/ has uncommitted changes: they are NOT deployed (commit them, or use --worktree)"
+  if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    COMMIT="$(git -C "$REPO_DIR" rev-parse --verify --quiet "${REF}^{commit}")" || die "unknown git ref: $REF (git fetch first?)"
+    SHORT="${COMMIT:0:12}"
+  else
+    [[ "$WORKTREE" == true ]] || die "$REPO_DIR is not a git checkout: use --worktree"
+    COMMIT=unknown
+    SHORT=nogit
   fi
-  git -C "$REPO_DIR" archive --format=tar "$COMMIT" genome | tar -C "$BUILD_CTX" -xf - --strip-components=1
-fi
-[[ -f "$BUILD_CTX/Dockerfile" ]] || die "no genome/Dockerfile in the build context"
 
-# ── 2. Build ───────────────────────────────────────────────────────────────
-step "build orbes-genome:$TAG"
-IMAGE="orbes-genome:$TAG"
-build_args=(--label "org.opencontainers.image.revision=$COMMIT" --label "org.opencontainers.image.version=$TAG" -t "$IMAGE")
-EXTRA_CA="$(env_get BUILD_EXTRA_CA_FILE)"
-if [[ -n "$EXTRA_CA" ]]; then
-  [[ -r "$EXTRA_CA" ]] || die "BUILD_EXTRA_CA_FILE=$EXTRA_CA is not readable"
-  build_args+=(--secret "id=extra_ca,src=$EXTRA_CA")
-fi
-for v in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
-  if [[ -n "${!v:-}" ]]; then build_args+=(--build-arg "$v=${!v}"); fi
-done
-if docker image inspect "$IMAGE" >/dev/null 2>&1 && [[ "$WORKTREE" != true ]]; then
-  log "$IMAGE already exists: reusing it"
-else
-  run env DOCKER_BUILDKIT=1 docker build "${build_args[@]}" "$BUILD_CTX"
+  if [[ "$WORKTREE" == true ]]; then
+    TAG="${SHORT}-dirty-$(date -u +%Y%m%d%H%M%S)"
+    log "building the working tree of $REPO_DIR/genome as is (tag $TAG)"
+    # Same exclusions as the image build itself (.dockerignore), applied by docker build.
+    tar -C "$REPO_DIR/genome" --exclude=./node_modules --exclude=./dist --exclude=./out \
+      --exclude=./.vitest --exclude='./*.y4m' -cf - . | tar -C "$BUILD_CTX" -xf -
+  else
+    TAG="$SHORT"
+    if [[ "$REBUILD" == true ]]; then TAG="${SHORT}-r$(date -u +%Y%m%d%H%M%S)"; fi
+    log "ref $REF = commit $COMMIT (tag $TAG)"
+    if [[ -n "$(git -C "$REPO_DIR" status --porcelain -- genome 2>/dev/null)" && "$REF" == HEAD ]]; then
+      warn "genome/ has uncommitted changes: they are NOT deployed (commit them, or use --worktree)"
+    fi
+    git -C "$REPO_DIR" archive --format=tar "$COMMIT" genome | tar -C "$BUILD_CTX" -xf - --strip-components=1
+  fi
+  [[ -f "$BUILD_CTX/Dockerfile" ]] || die "no genome/Dockerfile in the build context"
+
+  # ── 2. Build ───────────────────────────────────────────────────────────────
+  step "build orbes-genome:$TAG"
+  IMAGE="orbes-genome:$TAG"
+  build_args=(--label "org.opencontainers.image.revision=$COMMIT" --label "org.opencontainers.image.version=$TAG" -t "$IMAGE")
+  if [[ "$REBUILD" == true ]]; then build_args+=(--pull); fi
+  EXTRA_CA="$(env_get BUILD_EXTRA_CA_FILE)"
+  if [[ -n "$EXTRA_CA" ]]; then
+    [[ -r "$EXTRA_CA" ]] || die "BUILD_EXTRA_CA_FILE=$EXTRA_CA is not readable"
+    build_args+=(--secret "id=extra_ca,src=$EXTRA_CA")
+  fi
+  for v in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
+    if [[ -n "${!v:-}" ]]; then build_args+=(--build-arg "$v=${!v}"); fi
+  done
+  if docker image inspect "$IMAGE" >/dev/null 2>&1 && [[ "$WORKTREE" != true ]]; then
+    log "$IMAGE already exists: reusing it"
+  else
+    run env DOCKER_BUILDKIT=1 docker build "${build_args[@]}" "$BUILD_CTX"
+  fi
 fi
 
 # ── 3. Pre-deploy backup ───────────────────────────────────────────────────
@@ -199,4 +217,4 @@ fi
 
 printf '%s deploy %s OK (previous %s)\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_DIR/deploys.log"
 printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
-log "deployed $IMAGE (previous: $PREV_TAG). Roll back by hand: scripts/deploy.sh --ref <previous commit>"
+log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
