@@ -1,0 +1,32 @@
+# Build context is genome/. Keep it small, reproducible and free of secrets:
+# dependencies are installed from package-lock.json inside the image, the web
+# apps are built there, and no local state, key or env file is ever sent.
+
+# Installed / generated
+node_modules
+dist
+out
+coverage
+test-results
+playwright-report
+.vitest
+*.tsbuildinfo
+
+# Local state and secrets
+.data
+.secrets
+.env
+.env.*
+!.env.example
+*.local
+*.key.json
+*.pem
+*.log
+
+# Not needed in the image
+test
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore

@@ -669,7 +669,7 @@ async function benchDatabase(label: string, open: () => Promise<World>, o: Optio
   try {
     let serverVersion: string | null = null;
     try {
-      serverVersion = (await sql<{ v: string }>`SHOW server_version`.execute(w.ctx.db)).rows[0]?.v ?? null;
+      serverVersion = (await sql<{ v: string }>`SELECT current_setting('server_version') AS v`.execute(w.ctx.db)).rows[0]?.v ?? null;
     } catch {
       serverVersion = null;
     }

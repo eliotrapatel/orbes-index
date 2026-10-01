@@ -15,8 +15,11 @@
  *
  * The target is recognition < 1 s (ARCHITECTURE.md, PLATFORM-CONTRACTS §4).
  * A shared, loaded VM makes wall-clock assertions noisy, so the hard
- * assertion is a generous ceiling per scan plus the target on the best of
- * the repeated runs; ORBES_E2E_STRICT=1 enforces the target on the median.
+ * assertions are load-independent (every frame of the clip is readable, so
+ * the first or second frame sent must be read) plus a generous ceiling per
+ * scan; the target is asserted on the best of the repeated runs while the
+ * load stays under 1.5 per CPU (recorded otherwise), and on the median with
+ * ORBES_E2E_STRICT=1.
  * Numbers go to genome/out/e2e/camera-scan.json, screenshots to genome/out/e2e/.
  *
  * Skipped (not failed) when the Chromium binary is absent.
