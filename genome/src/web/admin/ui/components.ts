@@ -129,7 +129,9 @@ export function table<T>(columns: Column<T>[], rows: T[], opts: { empty?: string
 }
 
 /** `01–50 OF 1 204` and PREVIOUS / NEXT. */
-export function pager(p: { page: number; pageSize: number; total: number }, go: (page: number) => void): HTMLElement {
+export function pager(p: { page: number; pageSize: number; total: number }, go: (page: number) => void): HTMLElement | null {
+  // Nothing to page through: the empty state says it all.
+  if (p.total === 0 && p.page <= 1) return null;
   const pages = Math.max(1, Math.ceil(p.total / p.pageSize));
   const from = p.total === 0 ? 0 : (p.page - 1) * p.pageSize + 1;
   const to = Math.min(p.total, p.page * p.pageSize);

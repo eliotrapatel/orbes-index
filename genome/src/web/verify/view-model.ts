@@ -104,6 +104,16 @@ export function formatDate(value: string | undefined): string {
   return `${Number(m[3])} ${month} ${m[1]}`;
 }
 
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** 'YYYY-MM-DD' → '20 September 2028', for dates inside sentences. Unparseable input is returned as is. */
+export function formatDateLong(value: string | undefined): string {
+  if (!value) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const month = m ? MONTHS_LONG[Number(m[2]) - 1] : undefined;
+  return m && month ? `${Number(m[3])} ${month} ${m[1]}` : value;
+}
+
 /**
  * ISO date-time → '1 OCT 2026 · 14:32' at a fixed offset from UTC
  * (`offsetMinutes` = minutes EAST of UTC; the page passes the viewer's own).
@@ -227,7 +237,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
       const rows: Row[] = [['STATUS', WARRANTY_STATUS[w.status]]];
       if (w.startDate) rows.push(['FROM', formatDate(w.startDate)]);
       if (w.endDate) rows.push(['UNTIL', formatDate(w.endDate)]);
-      vm.warranty = { status: WARRANTY_STATUS[w.status], rows, note: warrantyNote(w.status, formatDate(w.endDate)) };
+      vm.warranty = { status: WARRANTY_STATUS[w.status], rows, note: warrantyNote(w.status, formatDateLong(w.endDate)) };
     }
     vm.ownership = ownershipMode(outcome);
     vm.footnote = ASSURANCE_NOTE;

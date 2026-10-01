@@ -219,7 +219,8 @@ class App {
   private onVisibility(): void {
     if (document.visibilityState === 'hidden') {
       // Release the camera in the background (battery, privacy indicator); resume on return.
-      if (this.screen === 'scan' && this.scan) {
+      // Only while the camera is live: a code already read keeps verifying in the background.
+      if (this.screen === 'scan' && this.scan && this.camera.active) {
         this.generation++;
         this.stopCamera();
         this.resumeScan = true;

@@ -25,6 +25,8 @@ export interface SheetRow {
   tone: Tone;
   note?: string;
   mono?: boolean;
+  /** A quantity, not a status: shown without a status mark. */
+  plain?: boolean;
 }
 
 type DetailCode = CodeJson & { verification: LiveCodeCheck };
@@ -86,6 +88,7 @@ export function productSheet(d: ProductDetail): SheetRow[] {
     label: 'Scan count',
     value: formatCount(d.scans.count),
     tone: 'solid',
+    plain: true,
     note: d.scans.lastAt ? `Last ${formatDate(d.scans.lastAt)}` : 'Never scanned',
   });
 

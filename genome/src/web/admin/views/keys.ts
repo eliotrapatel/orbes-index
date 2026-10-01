@@ -5,7 +5,7 @@
  * console: only public keys and registry metadata are listed.
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime, groupChars, humanize } from '../format.js';
+import { formatDateTime, humanize, shortHash } from '../format.js';
 import { can } from '../model/permissions.js';
 import { compromiseTime, confirmationPhrase, keyActions } from '../model/registry.js';
 import { toneOf } from '../model/tone.js';
@@ -98,25 +98,29 @@ export async function keysView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Kid', cell: (k) => mono(k.kid), kind: ['nowrap'] },
         {
           label: 'Public key (base64url)',
-          cell: (k) => h('span', { class: 'keycell' }, mono(k.publicKey, groupChars(k.publicKey, 11, ' ')), copyButton(k.publicKey, 'Copy')),
-          kind: ['wide'],
+          cell: (k) => h('span', { class: 'keycell' }, mono(k.publicKey, shortHash(k.publicKey, 14, 6)), copyButton(k.publicKey, 'Copy')),
+          kind: ['wide', 'nowrap'],
         },
         { label: 'Provider', cell: (k) => humanize(k.provider), kind: ['nowrap'] },
-        { label: 'Active since', cell: (k) => formatDateTime(k.activatedAt), kind: ['nowrap'] },
         {
-          label: 'Ended',
+          label: 'Lifetime',
           cell: (k) =>
-            k.revokedAt
-              ? h('span', { attrs: { title: k.revocationReason ?? '' } }, `REVOKED ${formatDateTime(k.revokedAt)}`, k.compromisedAt ? h('span', { class: 'cell-sub' }, `Compromised ${formatDateTime(k.compromisedAt)}`) : null)
-              : k.retiredAt
-                ? `RETIRED ${formatDateTime(k.retiredAt)}`
-                : '—',
+            h(
+              'span',
+              { attrs: { title: k.revocationReason ?? '' } },
+              `From ${formatDateTime(k.activatedAt)}`,
+              k.revokedAt
+                ? h('span', { class: 'cell-sub' }, `Revoked ${formatDateTime(k.revokedAt)}${k.compromisedAt ? ` · compromised ${formatDateTime(k.compromisedAt)}` : ''}`)
+                : k.retiredAt
+                  ? h('span', { class: 'cell-sub' }, `Retired ${formatDateTime(k.retiredAt)} · verify only`)
+                  : h('span', { class: 'cell-sub' }, 'Signing'),
+            ),
           kind: ['nowrap'],
         },
         ...(manage
           ? [
               {
-                label: 'Actions',
+                label: '',
                 kind: ['actions' as const],
                 cell: (k: KeyJson) => {
                   const a = keyActions(k);

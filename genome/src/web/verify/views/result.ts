@@ -17,11 +17,11 @@
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
-import { CLIENT_SERVICES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import type { ResultViewModel, TabId } from '../view-model.js';
-import { rows, sectionLabel, toneMark, viewRoot } from './common.js';
+import { toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
+import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { tabsView } from './tabs.js';
 
 export interface ResultHandlers {
@@ -75,20 +75,11 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     const build = (id: TabId): HTMLElement => {
       switch (id) {
         case 'product':
-          return h(
-            'div',
-            { class: 'panel' },
-            rows(vm.productRows),
-            vm.verificationRows.length > 0 ? sectionLabel('VERIFICATION') : null,
-            vm.verificationRows.length > 0 ? rows(vm.verificationRows) : null,
-            vm.assuranceNote ? h('p', { class: 'prose panel__note', text: vm.assuranceNote }) : null,
-          );
+          return productPanel(vm);
         case 'warranty':
-          return vm.warranty
-            ? h('div', { class: 'panel' }, rows(vm.warranty.rows), h('p', { class: 'prose panel__note', text: vm.warranty.note }))
-            : h('div', { class: 'panel' }, h('p', { class: 'prose', text: `Warranty details for this piece are available from ${titleCase(CLIENT_SERVICES)}.` }));
+          return warrantyPanel(vm);
         case 'care':
-          return h('div', { class: 'panel' }, h('p', { class: 'prose panel__care', text: vm.care }));
+          return carePanel(vm);
         case 'ownership':
           ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh });
           return h('div', { class: 'panel' }, ownership.root);
@@ -100,7 +91,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
       h(
         'section',
         { class: 'result__help' },
-        h('p', { class: 'prose', text: `${titleCase(CLIENT_SERVICES)} can help with any question about this piece. Please quote the reference below.` }),
+        h('p', { class: 'prose', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
       ),
     );
   }
@@ -120,12 +111,4 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
 
   root.append(head, ...sections.filter((x): x is HTMLElement => x !== null), foot);
   return { root, dispose: () => (ownership as OwnershipPanel | null)?.dispose() };
-}
-
-function titleCase(s: string): string {
-  return s
-    .toLowerCase()
-    .split(' ')
-    .map((w) => (w === 'orbes' ? 'ORBES' : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(' ');
 }

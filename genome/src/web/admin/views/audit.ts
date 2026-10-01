@@ -44,7 +44,7 @@ export async function auditView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Security',
       title: 'Audit log',
-      lead: 'Append-only, hash-chained: hash = SHA-256(previous hash ‖ canonical entry).',
+      lead: 'Append-only, hash-chained: hash = SHA-256(previous hash || canonical entry).',
       actions: [verify],
     }),
     verdict,

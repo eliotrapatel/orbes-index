@@ -68,6 +68,7 @@ export class Camera {
   private stream: MediaStream | null = null;
   private track: MediaStreamTrack | null = null;
   private torchOn = false;
+  private attempt = 0;
 
   get active(): boolean {
     return this.track !== null && this.track.readyState === 'live';
@@ -82,13 +83,16 @@ export class Camera {
     const env = cameraEnvironment();
     if (!env.isSecureContext || !env.hasGetUserMedia) throw new CameraError(classifyCameraError(null, env));
     this.stop();
+    // A stop() (or a newer start()) while this one awaits makes it stale: its stream is released on arrival.
+    const attempt = this.attempt;
+    const stale = () => attempt !== this.attempt;
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia(PREFERRED);
     } catch (e) {
       // Old or unusual devices reject the ideal set as a whole; retry with the bare minimum.
       const name = (e as { name?: string })?.name;
-      if (name !== 'OverconstrainedError' && name !== 'ConstraintNotSatisfiedError' && name !== 'TypeError') {
+      if (stale() || (name !== 'OverconstrainedError' && name !== 'ConstraintNotSatisfiedError' && name !== 'TypeError')) {
         throw new CameraError(classifyCameraError(e, env), e);
       }
       try {
@@ -96,6 +100,10 @@ export class Camera {
       } catch (e2) {
         throw new CameraError(classifyCameraError(e2, env), e2);
       }
+    }
+    if (stale()) {
+      stopTracks(stream);
+      throw new CameraError('camera-failed');
     }
     this.stream = stream;
     this.track = stream.getVideoTracks()[0] ?? null;
@@ -111,11 +119,13 @@ export class Camera {
     try {
       await video.play();
     } catch (e) {
-      // Autoplay of a muted inline stream is allowed everywhere we target; a failure here is real.
-      this.stop();
+      // Autoplay of a muted inline stream is allowed everywhere we target; a failure here is real
+      // (or the camera was stopped meanwhile, which interrupts play()).
+      if (!stale()) this.stop();
       throw new CameraError('camera-failed', e);
     }
     await waitForDimensions(video);
+    if (stale()) throw new CameraError('camera-failed');
 
     const caps = this.capabilities();
     // Continuous focus where the constraint exists but was not applied at open time.
@@ -127,7 +137,8 @@ export class Camera {
   }
 
   stop(): void {
-    if (this.stream) for (const t of this.stream.getTracks()) t.stop();
+    this.attempt++;
+    if (this.stream) stopTracks(this.stream);
     this.stream = null;
     this.track = null;
     this.torchOn = false;
@@ -174,6 +185,10 @@ export class Camera {
       return false;
     }
   }
+}
+
+function stopTracks(stream: MediaStream): void {
+  for (const t of stream.getTracks()) t.stop();
 }
 
 function waitForDimensions(video: HTMLVideoElement, timeoutMs = 4_000): Promise<void> {
@@ -280,7 +295,13 @@ export class DecoderClient {
     if (this.worker) return this.worker;
     if (this.failures >= 3) throw new DecoderUnavailableError('decoder worker keeps failing');
     if (typeof Worker === 'undefined') throw new DecoderUnavailableError('Web Workers are not available');
-    const w = new Worker(this.url, { type: 'module', name: 'orbes-decoder' });
+    let w: Worker;
+    try {
+      w = new Worker(this.url, { type: 'module', name: 'orbes-decoder' });
+    } catch {
+      // Browsers without module workers (Firefox < 114): the bundle has no imports, so it also runs classic.
+      w = new Worker(this.url, { name: 'orbes-decoder' });
+    }
     w.addEventListener('message', (ev: MessageEvent<WorkerMessage>) => this.onMessage(ev.data));
     w.addEventListener('error', (ev) => {
       ev.preventDefault();

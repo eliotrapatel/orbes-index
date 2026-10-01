@@ -31,10 +31,24 @@ export async function scansView(ctx: ViewContext): Promise<HTMLElement> {
     form,
     table(
       [
-        { label: 'When', cell: (r) => formatDateTime(r.occurredAt, { seconds: true }), kind: ['nowrap'] },
+        {
+          label: 'When',
+          cell: (r) => h('span', null, formatDateTime(r.occurredAt, { seconds: true }), r.latencyMs === null ? null : h('span', { class: 'cell-sub' }, `${r.latencyMs} ms`)),
+          kind: ['nowrap'],
+        },
         { label: 'Product', cell: (r) => (r.productId ? h('a', { class: 'idlink', attrs: { href: productHref(r.productId) } }, r.productId) : h('span', { class: 'soft' }, '—')), kind: ['nowrap'] },
         { label: 'Event', cell: (r) => humanize(r.eventType), kind: ['nowrap'] },
-        { label: 'Result', cell: (r) => statusMark(humanize(r.state), toneOf('verification', r.state)), kind: ['nowrap'] },
+        {
+          label: 'Result',
+          cell: (r) =>
+            h(
+              'span',
+              null,
+              statusMark(humanize(r.state), toneOf('verification', r.state)),
+              r.authentication?.reasons?.length ? h('span', { class: 'cell-details' }, r.authentication.reasons.map(humanize).join(' · ')) : null,
+            ),
+          kind: ['wide'],
+        },
         {
           label: 'Signature',
           cell: (r) => (r.authentication ? (r.authentication.signatureValid ? 'VALID' : statusMark('INVALID', 'critical')) : '—'),
@@ -42,10 +56,8 @@ export async function scansView(ctx: ViewContext): Promise<HTMLElement> {
         },
         { label: 'Genome', cell: (r) => humanize(r.authentication?.genomeCheck), kind: ['nowrap'] },
         { label: 'Risk', cell: (r) => (r.authentication ? String(r.authentication.riskScore) : '—'), kind: ['num'] },
-        { label: 'Reasons', cell: (r) => h('span', { class: 'cell-details' }, (r.authentication?.reasons ?? []).map(humanize).join(' · ')), kind: ['wide'] },
         { label: 'Where', cell: (r) => [r.country, r.region].filter(Boolean).join(' · ') || '—', kind: ['nowrap'] },
         { label: 'Device', cell: (r) => mono(r.deviceHash, shortHash(r.deviceHash, 6, 2)), kind: ['nowrap'] },
-        { label: 'ms', cell: (r) => (r.latencyMs === null ? '—' : String(r.latencyMs)), kind: ['num'] },
       ],
       list.items,
       { empty: q.productId || q.state ? 'No event matches these filters.' : 'No verification yet.', caption: 'Verification events' },

@@ -26,6 +26,15 @@ import type { ViewContext } from './context.js';
 /** A code re-issued on this page, kept (in memory only) so its preview survives reloads until dismissed. */
 let freshCode: { productId: string; code: IssuedCodeJson; glyphs: number[] } | null = null;
 
+/**
+ * Forget any re-issued code held for preview. Called whenever the session
+ * ends: the framed data is scannable and must never be shown to the next
+ * admin signing in on the same tab.
+ */
+export function resetProductViewState(): void {
+  freshCode = null;
+}
+
 export async function productView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.productId;
   const [d, scans] = await Promise.all([ctx.api.product(id), ctx.api.scans({ productId: id, pageSize: 10 })]);
@@ -50,7 +59,7 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
             h('span', { class: 'hero__caption-label' }, 'Genome'),
             mono(d.genome.fingerprint),
             h('span', { class: 'hero__caption-sub' }, d.genome.versionLabel),
-            h('span', { class: 'hero__caption-ids mono' }, d.genome.ids.join(' · ')),
+            h('span', { class: 'hero__caption-ids mono' }, d.genome.ids.join('\u00a0· ')),
           )
         : null,
     ),
@@ -65,7 +74,13 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
           h(
             'dd',
             { class: 'sheet__value' },
-            r.key === 'product' ? h('span', { class: 'sheet__id' }, r.value) : r.mono ? mono(r.value) : statusMark(r.value, r.tone),
+            r.key === 'product'
+              ? h('span', { class: 'sheet__id' }, r.value)
+              : r.mono
+                ? mono(r.value)
+                : r.plain
+                  ? h('span', { class: 'sheet__plain' }, r.value)
+                  : statusMark(r.value, r.tone),
             r.note ? h('span', { class: 'sheet__note' }, r.note) : null,
           ),
         ),
@@ -83,7 +98,7 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
     hero,
   ];
 
-  if (freshCode) parts.push(freshCodePanel(ctx, freshCode));
+  if (freshCode && actions.canDownload) parts.push(freshCodePanel(ctx, freshCode));
   parts.push(actionsPanel(ctx, d, actions));
 
   const active = d.codes.find((c) => c.status === 'ACTIVE');
@@ -147,6 +162,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
       : null,
     a.canReinstate
       ? button('Reinstate', {
+          testId: 'action-reinstate',
           onClick: () =>
             void openDialog({
               title: `Reinstate ${pid}`,

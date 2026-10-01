@@ -42,7 +42,7 @@ import type {
   ScanRecord,
   ServiceRecord,
   ServiceType,
-  StatusHistoryEntry,
+  StatusChange,
   TotpEnrollment,
   WarrantyRecord,
 } from './types.js';
@@ -298,11 +298,11 @@ export class AdminApi {
     return this.post('/api/admin/products', input);
   }
 
-  transition(productId: string, to: ProductStatus, reason?: string): Promise<{ statusChange: StatusHistoryEntry; lifecycle: LifecycleSnapshot }> {
+  transition(productId: string, to: ProductStatus, reason?: string): Promise<{ statusChange: StatusChange; lifecycle: LifecycleSnapshot }> {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/transitions`, { to, ...(reason ? { reason } : {}) });
   }
 
-  reinstate(productId: string, reason?: string): Promise<{ lifecycle: LifecycleSnapshot }> {
+  reinstate(productId: string, reason?: string): Promise<{ statusChange: StatusChange; lifecycle: LifecycleSnapshot }> {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/reinstate`, reason ? { reason } : {});
   }
 

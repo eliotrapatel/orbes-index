@@ -26,7 +26,7 @@ import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { loginView } from './views/login.js';
 import { ownersView } from './views/owners.js';
-import { productView } from './views/product.js';
+import { productView, resetProductViewState } from './views/product.js';
 import { productsView } from './views/products.js';
 import { revocationsView } from './views/revocations.js';
 import { scansView } from './views/scans.js';
@@ -176,6 +176,7 @@ function markNav(active: RouteName | null): void {
 function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
+  resetProductViewState();
   setTitle('Sign in');
   mount(
     app,

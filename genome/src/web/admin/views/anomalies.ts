@@ -25,32 +25,33 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
   status.addEventListener('change', () => ctx.setQuery({ status: status.value, page: undefined }));
   severity.addEventListener('change', () => ctx.setQuery({ severity: severity.value, page: undefined }));
 
-  const triage = (a: AnomalyRecord) =>
-    h(
-      'span',
-      { class: 'row-actions' },
-      ...triageMoves(a.status).map((m) =>
-        button(m.label, {
-          kind: 'ghost',
-          testId: `triage-${m.to.toLowerCase()}`,
-          onClick: () =>
-            void openDialog({
-              title: `${m.label} · ${humanize(a.type)}`,
-              eyebrow: a.productId ?? 'Unregistered identity',
-              body: h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'),
-              fields: [{ name: 'note', label: m.noteRequired ? 'Resolution note' : 'Note', kind: 'textarea', required: m.noteRequired, maxlength: 2000 }],
-              confirmLabel: m.label,
-              submit: async (v) => {
-                await ctx.api.updateAnomaly(a.id, m.to, v.note?.trim() || undefined);
-              },
-            }).then((r) => {
-              if (!r) return;
-              notify(`Finding ${humanize(m.to)}.`);
-              ctx.reload();
-            }),
+  const triage = (a: AnomalyRecord) => {
+    const moves = triageMoves(a.status);
+    if (moves.length === 0) return null;
+    return button('Triage', {
+      kind: 'ghost',
+      testId: 'triage',
+      onClick: () =>
+        void openDialog({
+          title: humanize(a.type),
+          eyebrow: `${a.severity} · ${a.productId ?? 'Unregistered identity'} · ${humanize(a.status)}`,
+          body: h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'),
+          fields: [
+            { name: 'status', label: 'Decision', kind: 'select', required: true, options: moves.map((m) => ({ value: m.to, label: `${m.label} → ${humanize(m.to)}` })) },
+            { name: 'note', label: 'Note', kind: 'textarea', maxlength: 2000, hint: 'Required to resolve, dismiss or reopen a closed finding.' },
+          ],
+          validate: (v) => (moves.find((m) => m.to === v.status)?.noteRequired && !v.note?.trim() ? 'Explain the decision in the note.' : null),
+          confirmLabel: 'Record decision',
+          submit: async (v) => {
+            await ctx.api.updateAnomaly(a.id, v.status as AnomalyRecord['status'], v.note?.trim() || undefined);
+          },
+        }).then((r) => {
+          if (!r) return;
+          notify(`Finding ${humanize(r.status)}.`);
+          ctx.reload();
         }),
-      ),
-    );
+    });
+  };
 
   return h(
     'div',
@@ -60,24 +61,24 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
     table(
       [
         { label: 'Severity', cell: (a) => statusMark(a.severity, toneOf('severity', a.severity)), kind: ['nowrap'] },
-        { label: 'Finding', cell: (a) => humanize(a.type), kind: ['nowrap'] },
+        {
+          label: 'Finding',
+          cell: (a) =>
+            h(
+              'span',
+              null,
+              humanize(a.type),
+              h('span', { class: 'cell-details' }, summarizeDetails(a.details, 220)),
+              a.resolutionNote ? h('span', { class: 'cell-sub' }, `${a.resolvedBy ? `${a.resolvedBy}: ` : ''}${a.resolutionNote}`) : null,
+            ),
+          kind: ['wide'],
+        },
         { label: 'Product', cell: (a) => (a.productId ? h('a', { class: 'idlink', attrs: { href: productHref(a.productId) } }, a.productId) : h('span', { class: 'soft' }, 'Unregistered')), kind: ['nowrap'] },
         { label: 'Status', cell: (a) => statusMark(humanize(a.status), toneOf('anomaly', a.status)), kind: ['nowrap'] },
         { label: 'Risk', cell: (a) => String(a.riskScore), kind: ['num'] },
         { label: 'Seen', cell: (a) => String(a.occurrences), kind: ['num'] },
         { label: 'Last seen', cell: (a) => formatDateTime(a.lastSeenAt), kind: ['nowrap'] },
-        {
-          label: 'Details',
-          cell: (a) =>
-            h(
-              'span',
-              { class: 'cell-details' },
-              summarizeDetails(a.details),
-              a.resolutionNote ? h('span', { class: 'cell-sub' }, `${a.resolvedBy ? `${a.resolvedBy}: ` : ''}${a.resolutionNote}`) : null,
-            ),
-          kind: ['wide'],
-        },
-        ...(canTriage ? [{ label: 'Triage', cell: triage, kind: ['actions' as const] }] : []),
+        ...(canTriage ? [{ label: '', cell: triage, kind: ['actions' as const] }] : []),
       ],
       list.items,
       { empty: q.status || q.severity ? 'No finding matches these filters.' : 'No anomaly recorded.', caption: 'Anomalies' },

@@ -20,7 +20,7 @@ export async function genomesView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Genome', cell: (g) => genomeFigure(g, { layout: 'row', size: 'sm', framed: false }), kind: ['nowrap'] },
         { label: 'Product', cell: (g) => h('a', { class: 'idlink', attrs: { href: productHref(g.productId) } }, g.productId), kind: ['nowrap'] },
         { label: 'Fingerprint', cell: (g) => mono(g.fingerprint), kind: ['nowrap'] },
-        { label: 'Pattern', cell: (g) => h('span', { class: 'cell-details' }, g.pattern), kind: ['wide'] },
+        { label: 'Pattern', cell: (g) => h('span', { class: 'cell-details mono' }, g.ids.join('\u00a0· ')), kind: ['wide'] },
         { label: 'Version', cell: (g) => g.versionLabel, kind: ['nowrap'] },
         { label: 'Value', cell: (g) => mono(`0x${(g.value >>> 0).toString(16).toUpperCase().padStart(8, '0')}`), kind: ['nowrap'] },
         { label: 'Created', cell: (g) => formatDate(g.createdAt), kind: ['nowrap'] },

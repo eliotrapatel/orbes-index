@@ -231,7 +231,7 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
           defList([
             { label: 'Fingerprint', value: mono(g.fingerprint) },
             { label: 'Version', value: g.versionLabel },
-            { label: 'Glyphs', value: mono(g.ids.join(' · ')) },
+            { label: 'Glyphs', value: mono(g.ids.join('\u00a0· ')) },
           ]),
         ),
       ),

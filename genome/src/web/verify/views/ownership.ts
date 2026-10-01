@@ -64,6 +64,8 @@ export class OwnershipPanel {
   private readonly state: PanelState;
   private readonly now: () => number;
   private unsubscribe: (() => void) | null = null;
+  /** /account/me could not be reached: offer the sign-in forms rather than wait forever. */
+  private sessionUnavailable = false;
 
   constructor(
     mode: OwnershipMode,
@@ -71,12 +73,14 @@ export class OwnershipPanel {
   ) {
     this.now = deps.now ?? (() => Date.now());
     this.state = { mode, authTab: 'signin', offer: null, confirmation: null, error: null, notice: null, busy: false };
-    this.root = h('div', { class: 'ownership', attrs: { 'aria-live': 'polite' } });
+    // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
+    this.root = h('div', { class: 'ownership' });
     this.unsubscribe = deps.session.subscribe(() => this.render());
     this.render();
     if (deps.session.state.status === 'unknown') {
       deps.session.ensure().catch(() => {
-        // Offline: the panel offers sign-in; the error appears if the user tries.
+        // Offline: offer sign-in anyway; the error appears if the user tries.
+        this.sessionUnavailable = true;
         this.render();
       });
     }
@@ -240,6 +244,10 @@ export class OwnershipPanel {
   // ── Forms ────────────────────────────────────────────────────────────────
 
   private authBlock(lead: string): HTMLElement[] {
+    if (this.deps.session.state.status === 'unknown' && !this.sessionUnavailable) {
+      // Still asking the server who is signed in: no flash of sign-in forms for an owner.
+      return [h('p', { class: 'ownership__meta nano soft', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
+    }
     const tab = this.state.authTab;
     const switcher = h(
       'div',

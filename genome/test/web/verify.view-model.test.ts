@@ -1,0 +1,377 @@
+import { describe, expect, it } from 'vitest';
+import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
+import { ApiError } from '../../src/web/verify/api.js';
+import {
+  ACTION_LABELS,
+  ASSURANCE_NOTE,
+  classifyCameraError,
+  DEFAULT_CARE,
+  FALLBACK_TITLES,
+  HINTS,
+  PROBLEMS,
+  problemForApiError,
+  STATUS,
+  type ProblemKind,
+} from '../../src/web/verify/copy.js';
+import { VERIFICATION_STATES, type VerificationState, type VerifyOutcome } from '../../src/web/verify/types.js';
+import {
+  formatDate,
+  formatDateLong,
+  formatDateTime,
+  isAuthenticState,
+  normalizeCodeInput,
+  registrationOpen,
+  resultViewModel,
+  shortReference,
+  splitTitle,
+  toneOf,
+} from '../../src/web/verify/view-model.js';
+
+const GENOME = {
+  id: 'O26-J-00184',
+  version: 'GENOME-01',
+  fingerprint: 'G1-E1DC-BE52',
+  glyphs: [14, 1, 13, 12, 11, 14, 5, 2],
+  ids: ['QUARTER_ORB_SW', 'RING_POINT', 'QUARTER_ORB_SE', 'QUARTER_ORB_NE', 'ARC_PAIR_NWSE', 'QUARTER_ORB_SW', 'HALF_ARC_E', 'SMALL_ORBIT'],
+};
+
+const PRODUCT = {
+  productId: 'O26-J-00184',
+  category: { code: 'J', name: 'Jewelry' },
+  collection: 'Orbit',
+  model: 'Monolithe',
+  type: 'Ring',
+  material: '925 Sterling Silver',
+  createdYear: 2026,
+  productionDate: '2026-09-12',
+  care: 'Wipe with a soft, dry cloth.',
+};
+
+function outcome(state: VerificationState, extra: Partial<VerifyOutcome> = {}): VerifyOutcome {
+  const authentic = state.startsWith('AUTHENTIC');
+  return {
+    state,
+    scanId: '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b',
+    verifiedAt: '2026-10-01T08:30:00.000Z',
+    title: VERIFICATION_COPY[state].title,
+    message: VERIFICATION_COPY[state].message,
+    ...(authentic || state === 'SUSPICIOUS_ACTIVITY' || state === 'REVOKED'
+      ? {
+          verification: { signature: 'VALID', keyId: 1, codeVersion: 'CODE-01', genomeVersion: 'GENOME-01', issuedAt: '2026-10-01', issue: 1, assurance: 'CODE' },
+          genome: GENOME,
+        }
+      : {}),
+    ...(authentic
+      ? {
+          product: PRODUCT,
+          warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
+          ownership: { registered: false, you: false },
+        }
+      : {}),
+    ...extra,
+  } as VerifyOutcome;
+}
+
+describe('verify view-model: tone and titles', () => {
+  it('maps every state to a tone; only AUTHENTIC* are positive', () => {
+    const tones = Object.fromEntries(VERIFICATION_STATES.map((s) => [s, toneOf(s)]));
+    expect(tones).toEqual({
+      AUTHENTIC: 'authentic',
+      AUTHENTIC_FIRST_REGISTRATION: 'authentic',
+      AUTHENTIC_REGISTERED: 'authentic',
+      AUTHENTIC_OWNERSHIP_VERIFIED: 'authentic',
+      SUSPICIOUS_ACTIVITY: 'caution',
+      REVOKED: 'void',
+      UNKNOWN: 'void',
+      INVALID_SIGNATURE: 'void',
+      MALFORMED_CODE: 'caution',
+    });
+    expect(VERIFICATION_STATES.filter(isAuthenticState)).toHaveLength(4);
+  });
+
+  it('splits server titles into a main title and a sub-title', () => {
+    expect(splitTitle('AUTHENTIC — FIRST REGISTRATION')).toEqual({ main: 'AUTHENTIC', sub: 'FIRST REGISTRATION' });
+    expect(splitTitle('AUTHENTIC - REGISTERED')).toEqual({ main: 'AUTHENTIC', sub: 'REGISTERED' });
+    expect(splitTitle('UNUSUAL ACTIVITY DETECTED')).toEqual({ main: 'UNUSUAL ACTIVITY DETECTED' });
+    // A hyphen inside a word is not a separator.
+    expect(splitTitle('NON-STANDARD')).toEqual({ main: 'NON-STANDARD' });
+  });
+
+  it('keeps the fallback titles identical to the server copy', () => {
+    for (const s of VERIFICATION_STATES) expect(FALLBACK_TITLES[s], s).toBe(VERIFICATION_COPY[s].title);
+  });
+});
+
+describe('verify view-model: AUTHENTIC', () => {
+  const vm = resultViewModel(outcome('AUTHENTIC'), { offsetMinutes: 120 });
+
+  it('shows the state, the genome and the brand product lines', () => {
+    expect(vm.tone).toBe('authentic');
+    expect(vm.titleMain).toBe('AUTHENTIC');
+    expect(vm.titleSub).toBeUndefined();
+    expect(vm.message).toBe(VERIFICATION_COPY.AUTHENTIC.message);
+    expect(vm.genome).toMatchObject({ id: 'O26-J-00184', fingerprint: 'G1-E1DC-BE52', versionNumber: 1, glyphs: GENOME.glyphs });
+    expect(vm.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+  });
+
+  it('offers the four tabs in the specified order', () => {
+    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+  });
+
+  it('fills the product and verification rows', () => {
+    expect(vm.productRows).toEqual([
+      ['PRODUCT ID', 'O26-J-00184'],
+      ['COLLECTION', 'ORBIT'],
+      ['MODEL', 'MONOLITHE'],
+      ['TYPE', 'RING'],
+      ['CATEGORY', 'JEWELRY'],
+      ['MATERIAL', '925 STERLING SILVER'],
+      ['CREATED', '2026'],
+      ['PRODUCTION DATE', '12 SEP 2026'],
+    ]);
+    expect(vm.verificationRows).toEqual([
+      ['SIGNATURE', 'VALID · ORBES KEY 01'],
+      ['CODE', 'CODE-01 · ISSUE 1'],
+      ['GENOME', 'GENOME-01'],
+      ['ISSUED', '1 OCT 2026'],
+      ['ASSURANCE', 'PRINTED CODE'],
+    ]);
+    expect(vm.assuranceNote).toBeUndefined();
+  });
+
+  it('describes the warranty, the care and the limits of a code', () => {
+    expect(vm.warranty).toEqual({
+      status: 'ACTIVE',
+      rows: [
+        ['STATUS', 'ACTIVE'],
+        ['FROM', '20 SEP 2026'],
+        ['UNTIL', '20 SEP 2028'],
+      ],
+      note: 'This piece is covered by the ORBES warranty until 20 September 2028.',
+    });
+    expect(vm.care).toBe('Wipe with a soft, dry cloth.');
+    expect(vm.footnote).toBe(ASSURANCE_NOTE);
+    expect(vm.footnote).toMatch(/cannot prove that an object is genuine/);
+  });
+
+  it('shows the time of verification in the viewer zone and a short reference', () => {
+    expect(vm.verifiedAt).toBe('1 OCT 2026 · 10:30');
+    expect(vm.reference).toBe('4515B884');
+  });
+
+  it('has no ownership action when the piece is not yet registrable', () => {
+    expect(vm.ownership).toEqual({ kind: 'unregistered' });
+  });
+
+  it('includes a variant line and falls back to the default care text', () => {
+    const v = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: 'Size 52', care: '  ' } }));
+    expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'SIZE 52', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(v.productRows).toContainEqual(['VARIANT', 'SIZE 52']);
+    expect(v.care).toBe(DEFAULT_CARE);
+  });
+});
+
+describe('verify view-model: ownership modes', () => {
+  it('FIRST_REGISTRATION opens registration with the scan token', () => {
+    const vm = resultViewModel(
+      outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true } }),
+    );
+    expect(vm.titleMain).toBe('AUTHENTIC');
+    expect(vm.titleSub).toBe('FIRST REGISTRATION');
+    expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true });
+  });
+
+  it('FIRST_REGISTRATION without a token offers nothing to register', () => {
+    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION')).ownership).toEqual({ kind: 'unregistered' });
+  });
+
+  it('OWNERSHIP_VERIFIED is the viewer’s own piece, with any pending transfer', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ownership: { registered: true, you: true, transferPending: true } }));
+    expect(vm.titleSub).toBe('OWNERSHIP VERIFIED');
+    expect(vm.ownership).toEqual({ kind: 'yours', productId: 'O26-J-00184', transferPending: true });
+    expect(vm.notice).toBeUndefined();
+  });
+
+  it('carries the owner notice for unusual activity', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY', ownership: { registered: true, you: true } }));
+    expect(vm.notice).toMatch(/Unusual activity has been recorded/);
+    expect(vm.tone).toBe('authentic');
+  });
+
+  it('REGISTERED belongs to someone else', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false } }));
+    expect(vm.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: false });
+  });
+});
+
+describe('verify view-model: negative states', () => {
+  it('SUSPICIOUS_ACTIVITY shows the genome but no product, tabs or footnote', () => {
+    // Defensive: even if a product block were present, a non-authentic result never shows it.
+    const vm = resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { product: PRODUCT, warranty: { status: 'ACTIVE' } }));
+    expect(vm.tone).toBe('caution');
+    expect(vm.titleMain).toBe('UNUSUAL ACTIVITY DETECTED');
+    expect(vm.genome?.id).toBe('O26-J-00184');
+    expect(vm.productLines).toEqual([]);
+    expect(vm.tabs).toEqual([]);
+    expect(vm.warranty).toBeUndefined();
+    expect(vm.footnote).toBeUndefined();
+    expect(vm.ownership).toEqual({ kind: 'unregistered' });
+  });
+
+  it('REVOKED keeps the genome for reference', () => {
+    const vm = resultViewModel(outcome('REVOKED'));
+    expect(vm.tone).toBe('void');
+    expect(vm.titleMain).toBe('REVOKED');
+    expect(vm.genome).toBeDefined();
+    expect(vm.tabs).toEqual([]);
+  });
+
+  it.each(['UNKNOWN', 'INVALID_SIGNATURE', 'MALFORMED_CODE'] as const)('%s shows only the state and message', (state) => {
+    const vm = resultViewModel(outcome(state));
+    expect(vm.titleMain).toBe(VERIFICATION_COPY[state].title);
+    expect(vm.genome).toBeUndefined();
+    expect(vm.productLines).toEqual([]);
+    expect(vm.verificationRows).toEqual([]);
+    expect(vm.tabs).toEqual([]);
+    expect(vm.footnote).toBeUndefined();
+  });
+
+  it('treats an unknown state as unreadable and never upgrades it', () => {
+    const vm = resultViewModel({ ...outcome('AUTHENTIC'), state: 'GENUINE' as VerificationState, title: '' });
+    expect(vm.state).toBe('MALFORMED_CODE');
+    expect(vm.tone).toBe('caution');
+    expect(vm.titleMain).toBe('UNREADABLE CODE');
+    expect(vm.tabs).toEqual([]);
+    expect(vm.productLines).toEqual([]);
+  });
+
+  it('drops a malformed genome instead of drawing it', () => {
+    expect(resultViewModel(outcome('AUTHENTIC', { genome: { ...GENOME, glyphs: [1, 2, 3] } })).genome).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC', { genome: { ...GENOME, glyphs: [1, 2, 3, 4, 5, 6, 7, 16] } })).genome).toBeUndefined();
+  });
+});
+
+describe('verify view-model: assurance and warranty notes', () => {
+  it('explains a missing hardware proof without changing the state', () => {
+    const o = outcome('AUTHENTIC');
+    const vm = resultViewModel({ ...o, verification: { ...o.verification!, assurance: 'CODE_ONLY', hardwareProofRequired: true } });
+    expect(vm.state).toBe('AUTHENTIC');
+    expect(vm.verificationRows.at(-1)).toEqual(['ASSURANCE', 'PRINTED CODE ONLY']);
+    expect(vm.assuranceNote).toMatch(/secure hardware check/);
+  });
+
+  it.each([
+    ['NOT_STARTED', 'NOT YET STARTED', /begins on the date of purchase/],
+    ['EXPIRED', 'EXPIRED', /has ended/],
+    ['VOID', 'NO LONGER VALID', /no longer applies/],
+  ] as const)('warranty %s', (status, label, note) => {
+    const vm = resultViewModel(outcome('AUTHENTIC', { warranty: { status } }));
+    expect(vm.warranty?.status).toBe(label);
+    expect(vm.warranty?.rows).toEqual([['STATUS', label]]);
+    expect(vm.warranty?.note).toMatch(note);
+  });
+
+  it('never surfaces fields the server did not send', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC'));
+    const text = JSON.stringify(vm).toLowerCase();
+    for (const word of ['risk', 'score', 'threshold', 'anomal', 'reason']) expect(text).not.toContain(word);
+  });
+});
+
+describe('verify view-model: formatting helpers', () => {
+  it('formats dates without locale dependence', () => {
+    expect(formatDate('2026-01-05')).toBe('5 JAN 2026');
+    expect(formatDate('2028-12-31T23:00:00.000Z')).toBe('31 DEC 2028');
+    expect(formatDate('soon')).toBe('soon');
+    expect(formatDate(undefined)).toBe('');
+    expect(formatDateLong('2028-09-20')).toBe('20 September 2028');
+    expect(formatDateLong('2028-13-01')).toBe('2028-13-01');
+  });
+
+  it('formats date-times at a fixed offset', () => {
+    expect(formatDateTime('2026-10-01T23:30:00.000Z', 0)).toBe('1 OCT 2026 · 23:30');
+    expect(formatDateTime('2026-10-01T23:30:00.000Z', 120)).toBe('2 OCT 2026 · 01:30');
+    expect(formatDateTime('2026-10-01T01:30:00.000Z', -300)).toBe('30 SEP 2026 · 20:30');
+    expect(formatDateTime('not a date')).toBe('');
+  });
+
+  it('shortens scan ids', () => {
+    expect(shortReference('4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b')).toBe('4515B884');
+    expect(shortReference('<script>')).toBe('');
+    expect(shortReference('')).toBe('');
+  });
+
+  it('checks the registration window against the clock', () => {
+    const now = Date.parse('2026-10-01T08:30:00.000Z');
+    expect(registrationOpen('2026-10-01T08:45:00.000Z', now)).toBe(true);
+    expect(registrationOpen('2026-10-01T08:30:00.000Z', now)).toBe(false);
+    expect(registrationOpen('garbage', now)).toBe(false);
+  });
+
+  it('normalises typed claim and transfer codes', () => {
+    expect(normalizeCodeInput('ab12cd34ef56')).toBe('AB12-CD34-EF56');
+    expect(normalizeCodeInput(' ab12-cd34 ef56 ')).toBe('AB12-CD34-EF56');
+    expect(normalizeCodeInput('ab12c')).toBe('AB12-C');
+    expect(normalizeCodeInput('AB12CD34EF56XYZ')).toBe('AB12-CD34-EF56');
+    expect(normalizeCodeInput('')).toBe('');
+  });
+});
+
+describe('verify copy', () => {
+  const kinds = Object.keys(PROBLEMS) as ProblemKind[];
+
+  it('gives every problem a title, a sentence and labelled actions', () => {
+    for (const k of kinds) {
+      const p = PROBLEMS[k];
+      expect(p.title, k).toMatch(/^[A-Z ,—’'-]+$/);
+      expect(p.message.length, k).toBeGreaterThan(20);
+      expect(ACTION_LABELS[p.primary], k).toBeDefined();
+      if (p.secondary) expect(ACTION_LABELS[p.secondary], k).toBeDefined();
+      expect(p.secondary, k).not.toBe(p.primary);
+    }
+  });
+
+  it('every camera problem offers the photo upload', () => {
+    for (const k of kinds.filter((x) => x.startsWith('camera-'))) {
+      expect([PROBLEMS[k].primary, PROBLEMS[k].secondary], k).toContain('upload');
+    }
+  });
+
+  it('never claims that an object is genuine', () => {
+    const all = [
+      ...Object.values(PROBLEMS).flatMap((p) => [p.title, p.message]),
+      ...Object.values(STATUS),
+      ...Object.values(HINTS),
+      DEFAULT_CARE,
+    ].join(' ');
+    expect(all.toLowerCase()).not.toMatch(/genuine|guarantee|certif(y|ies) (that|this)/);
+    // The single mention of "genuine" is the explicit limitation.
+    expect(ASSURANCE_NOTE).toMatch(/cannot prove/);
+  });
+
+  it('classifies camera failures', () => {
+    const env = { isSecureContext: true, hasGetUserMedia: true };
+    const err = (name: string) => Object.assign(new Error(name), { name });
+    expect(classifyCameraError(err('NotAllowedError'), env)).toBe('camera-denied');
+    expect(classifyCameraError(err('PermissionDeniedError'), env)).toBe('camera-denied');
+    expect(classifyCameraError(err('SecurityError'), env)).toBe('camera-denied');
+    expect(classifyCameraError(err('NotFoundError'), env)).toBe('camera-missing');
+    expect(classifyCameraError(err('OverconstrainedError'), env)).toBe('camera-missing');
+    expect(classifyCameraError(err('NotReadableError'), env)).toBe('camera-in-use');
+    expect(classifyCameraError(err('AbortError'), env)).toBe('camera-in-use');
+    expect(classifyCameraError(err('TypeError'), env)).toBe('camera-unsupported');
+    expect(classifyCameraError(err('Weird'), env)).toBe('camera-failed');
+    expect(classifyCameraError(null, env)).toBe('camera-failed');
+    expect(classifyCameraError(err('NotAllowedError'), { isSecureContext: false, hasGetUserMedia: false })).toBe('camera-insecure');
+    expect(classifyCameraError(undefined, { isSecureContext: true, hasGetUserMedia: false })).toBe('camera-unsupported');
+  });
+
+  it('maps API failures to problem screens', () => {
+    expect(problemForApiError(new ApiError(0, 'NETWORK', 'x'))).toBe('network');
+    expect(problemForApiError(new ApiError(0, 'TIMEOUT', 'x'))).toBe('network');
+    expect(problemForApiError(new ApiError(429, 'RATE_LIMITED', 'x'))).toBe('rate-limited');
+    expect(problemForApiError(new ApiError(500, 'INTERNAL_ERROR', 'x'))).toBe('server');
+    expect(problemForApiError(new ApiError(400, 'VALIDATION_FAILED', 'x'))).toBe('server');
+    expect(problemForApiError(new Error('boom'))).toBe('server');
+  });
+});

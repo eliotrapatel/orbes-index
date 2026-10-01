@@ -255,6 +255,15 @@ export interface StatusHistoryEntry {
   at: Iso;
 }
 
+export interface StatusChange {
+  id: string;
+  productId: string;
+  from: ProductStatus;
+  to: ProductStatus;
+  reason: string | null;
+  at: Iso;
+}
+
 export interface LifecycleSnapshot {
   status: ProductStatus;
   allowed: ProductStatus[];

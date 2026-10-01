@@ -231,6 +231,7 @@ describe('admin console (E2E, Chromium)', () => {
     await page.goto(`${origin}/admin`);
     await page.waitForSelector('[data-testid=login-form]');
     await shot(page, 'login');
+    expect(await page.isVisible('input[name=totp]')).toBe(false);
     await signIn(page, ADMIN.email, 'not the password at all');
     await expect.poll(async () => page.locator('.login__error').textContent()).toMatch(/invalid email or password/i);
     expect(await page.inputValue('input[name=password]')).toBe('');
@@ -266,6 +267,9 @@ describe('admin console (E2E, Chromium)', () => {
     expect(await page.inputValue('input[name=material]')).toBe('925 STERLING SILVER'); // model default
     await page.fill('input[name=variant]', '52');
     await page.fill('input[name=productionBatch]', 'B-2026-10-A');
+    // Pin the identity year so the expected id does not depend on the date the suite runs.
+    await page.fill('input[name=year]', '2026');
+    expect(await page.locator('.gen__identity-id').textContent()).toBe('O26-J-·····');
     expect(await page.isChecked('input[name=withClaimSecret]')).toBe(true);
     await shot(page, 'generator-form');
 
@@ -348,6 +352,18 @@ describe('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
     await go(page, '#/products', 'Products');
     await shot(page, 'products');
+    for (const [hash, heading, name] of [
+      ['#/genomes', 'Genomes', 'genomes'],
+      ['#/codes', 'Codes', 'codes'],
+      ['#/scans', 'Verification events', 'scans'],
+      ['#/owners', 'Owners', 'owners'],
+      ['#/warranties', 'Warranties', 'warranties'],
+      ['#/revocations', 'Revocations', 'revocations'],
+    ] as const) {
+      await go(page, hash, heading);
+      expect(await page.locator('.failure').count(), hash).toBe(0);
+      await shot(page, name);
+    }
     await go(page, '#/anomalies?status=OPEN', 'Anomalies');
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     await shot(page, 'anomalies');
@@ -356,9 +372,16 @@ describe('admin console (E2E, Chromium)', () => {
 
   it('triages an anomaly', async () => {
     await go(page, '#/anomalies?status=OPEN&severity=CRITICAL', 'Anomalies');
-    await page.locator('[data-testid=triage-acknowledged]').first().click();
+    await page.locator('[data-testid=triage]').first().click();
+    // Resolving needs a note: the dialog refuses without one.
+    await page.selectOption('dialog select[name=status]', 'RESOLVED');
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/note/i);
+    await page.selectOption('dialog select[name=status]', 'ACKNOWLEDGED');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("ACKNOWLEDGED")');
+    await go(page, '#/anomalies?status=ACKNOWLEDGED', 'Anomalies');
+    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
   }, STEP_TIMEOUT);
 
   it('rotates the signing key with a typed confirmation', async () => {
@@ -368,6 +391,7 @@ describe('admin console (E2E, Chromium)', () => {
     expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
     await page.fill('[data-testid=dialog-phrase]', 'rotat');
     expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await shot(page, 'dialog');
     await confirmDialog(page, 'ROTATE');
     await page.waitForSelector('.toast:has-text("New signing key active.")');
     await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(2);
@@ -375,6 +399,29 @@ describe('admin console (E2E, Chromium)', () => {
     expect(rows[0]).toMatch(/#2.*ACTIVE/);
     expect(rows[1]).toMatch(/#1.*RETIRED/);
     await shot(page, 'keys');
+  }, STEP_TIMEOUT);
+
+  it('revokes a product only after the typed phrase, then reinstates it', async () => {
+    const pid = 'O26-J-00009';
+    const row = (key: string) => page.locator(`[data-testid=product-sheet] [data-row=${key}]`);
+    await go(page, `#/products/${pid}`, pid);
+    await page.click('[data-testid=action-transition]');
+    await page.selectOption('dialog select[name=to]', 'REVOKED');
+    await page.fill('dialog textarea[name=reason]', 'Counterfeit investigation');
+    await page.click('[data-testid=dialog-confirm]');
+    // Second step: the irreversible move needs the exact phrase.
+    await page.waitForSelector('[data-testid=dialog-phrase]');
+    await page.fill('[data-testid=dialog-phrase]', 'REVOKE O26-J-00008');
+    expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await confirmDialog(page, `revoke ${pid.toLowerCase()}`);
+    await expect.poll(() => row('status').textContent()).toContain('REVOKED');
+
+    await page.click('[data-testid=action-reinstate]');
+    await confirmDialog(page);
+    await expect.poll(() => row('status').textContent()).toContain('ISSUED');
+
+    await go(page, '#/revocations', 'Revocations');
+    await expect.poll(() => page.locator(`td a:has-text("${pid}")`).count()).toBe(1);
   }, STEP_TIMEOUT);
 
   it('verifies the audit chain', async () => {
@@ -392,6 +439,15 @@ describe('admin console (E2E, Chromium)', () => {
     await page.waitForSelector('[data-testid=login-form]');
     const me = await page.evaluate(async () => (await fetch('/api/admin/auth/me')).status);
     expect(me).toBe(401);
+    // The re-issued code previewed earlier in this tab is forgotten with the session.
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    await go(page, `#/products/${issuedProductId}`, issuedProductId);
+    expect(await page.locator('#fresh-code').count()).toBe(0);
+    await page.click('[data-testid=sign-out]');
+    await page.waitForSelector('[data-testid=login-form]');
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -408,6 +464,7 @@ describe('admin console (E2E, Chromium)', () => {
     await go(p, '#/security', 'Security');
     await p.click('[data-testid=totp-begin]');
     const secret = ((await p.locator('[data-testid=totp-secret]').textContent()) ?? '').replace(/\s/g, '');
+    await shot(p, 'security');
     expect(secret).toMatch(/^[A-Z2-7]{32}$/);
     await p.fill('input[name=code]', totp(base32Decode(secret), Date.now()));
     await p.click('[data-testid=totp-confirm]');
@@ -418,6 +475,7 @@ describe('admin console (E2E, Chromium)', () => {
     await p.fill('input[name=password]', operator.password);
     await p.click('[data-testid=login-submit]');
     await p.waitForSelector('input[name=totp]:visible');
+    await shot(p, 'login-totp');
     // The enrolment consumed the current step; the next one is within the accepted window.
     await p.fill('input[name=totp]', totp(base32Decode(secret), Date.now() + 30_000));
     await p.click('[data-testid=login-submit]');

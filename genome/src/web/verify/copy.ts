@@ -201,4 +201,3 @@ export const ASSURANCE_NOTE =
 export const DEFAULT_CARE =
   'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
 
-export const CLIENT_SERVICES = 'ORBES CLIENT SERVICES';

@@ -57,6 +57,11 @@ body[data-screen="scan"] .corners {
   to { opacity: 1; transform: none; }
 }
 
+/* Headings receive focus programmatically on screen changes (for screen readers); no ring for that. */
+h1[tabindex="-1"]:focus {
+  outline: none;
+}
+
 .boot-error {
   position: fixed;
   inset: 45% 0 auto;
