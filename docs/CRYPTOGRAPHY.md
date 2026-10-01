@@ -103,7 +103,7 @@ The domain string binds the signature to this exact use and format version. A si
 framed = payload ‖ signature ‖ CRC-16/CCITT-FALSE(payload ‖ signature)   = 79 bytes
 ```
 
-The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorrection before the data reaches the server.
+The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorrection before the data reaches the server. It is the last of three guards: the reference decoder caps Reed-Solomon erasures at 70 so that parity still checks every correction, and the verify app confirms heavily corrected reads with a second frame (ORBES-CODE-SPEC §11). A miscorrection that slipped through would reach the server as a well-formed code with a wrong signature, that is, a false INVALID SIGNATURE on a genuine piece.
 
 ### 4.4 Verification (server-side, authoritative)
 
@@ -111,7 +111,7 @@ The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorre
 2. Check the CRC-16. Decode the payload strictly (§3).
 3. Resolve `keyId` in the key registry. An unknown key gives `INVALID_SIGNATURE`.
 4. Verify Ed25519 **strictly**:
-   - **Weak keys:** the public key must be a canonical encoding of a point that is not of small order. **This is checked explicitly before calling OpenSSL.** OpenSSL 3.5, which backs `node:crypto`, accepts the identity point as a public key, and with it the signature `R = identity, S = 0` verifies for *every* message. The guard is in `verifyEd25519Node` (`src/server/crypto/ed25519-node.ts`), and the key registry refuses such keys at registration.
+   - **Weak keys:** the public key must be a canonical encoding of a point that is not of small order. **This is checked explicitly before calling OpenSSL.** OpenSSL 3.5, which backs `node:crypto`, accepts the identity point as a public key, and with it the signature `R = identity, S = 0` verifies for *every* message. The rule is one exported function, `isStrictEd25519PublicKey` in `src/server/crypto/ed25519-node.ts`: `verifyEd25519Node` applies it before OpenSSL, and `KeyService` applies the same function before it registers any key, so a key that could never verify can never be registered either.
    - **Malleability:** `S` must be canonical (`S < L`); the `S + L` variant is rejected.
    - **Isomorphic verifier:** the `@noble/curves` verifier runs with `zip215: false`, i.e. strict RFC 8032 rules rather than the permissive ZIP-215 rules.
 5. Registry checks (product, code issue and payload hash, revocations, lifecycle). These are described in [SECURITY-MODEL](SECURITY-MODEL.md) and implemented in `services/verification.ts`.
@@ -135,7 +135,7 @@ The CRC is **not** a security control. Its job is to catch Reed-Solomon miscorre
 | `RETIRED` | no | yes. Historical products stay verifiable forever. |
 | `REVOKED` | no | Only codes whose registry record predates `compromised_at` (or `revoked_at`). Anything else is `INVALID_SIGNATURE`. |
 
-**Key ids** are allocated as the lowest unused value and are never reused. Every code carries its `keyId`, so verification always picks the key that signed it, whatever key is active today.
+**Key ids** are allocated as the lowest unused value and are never reused: registry rows are never deleted (a database trigger rejects `DELETE` and `TRUNCATE` on `cryptographic_keys`, see [DATABASE §5.7](DATABASE.md#57-cryptographic_keys)), so an id once used stays bound to its public key. Every code carries its `keyId`, so verification always picks the key that signed it, whatever key is active today.
 
 ### 5.2 Rotation
 Rotation is `POST /api/admin/keys/rotate` (ADMIN) or `npm run keys:generate`:
@@ -176,8 +176,9 @@ The rest of the system only ever sees a `providerRef` and public keys.
 | Use | Construction |
 |---|---|
 | Passwords, claim codes | scrypt N = 2¹⁵, r = 8, p = 1, 16-byte salt, 32-byte output; constant-time compare. Encoded as `scrypt$15$8$1$salt$hash`. |
-| Sessions | 32-byte CSPRNG token in a cookie; SHA-256(token) in the DB. |
-| Registration tokens, transfer codes | CSPRNG, stored hashed (SHA-256 with domain separation), single use, short TTL. |
+| Sessions | 32-byte CSPRNG token in a cookie; SHA-256(token) in the DB. A new token on login and on the admin step-up to MFA (TOTP enrolment). |
+| Registration tokens | CSPRNG (32 bytes), stored hashed (SHA-256 with domain separation), single use, 15-minute TTL. |
+| Transfer codes | CSPRNG, 12 Crockford base32 characters (60 bits), single use, 7-day TTL. Stored as HMAC-SHA-256 of the canonical code under a key derived with HKDF-SHA-256 from `COOKIE_SECRET` (salt `ORBES`, info `orbes/transfer-code/v1`): deterministic for the lookup, but a leaked table cannot be brute-forced without the server secret. |
 | TOTP (admins) | RFC 6238 (HMAC-SHA-1, 30 s, 6 digits, ±1 step, replay-protected). The secret is sealed with AES-256-GCM under a key derived with HKDF-SHA-256. |
 | IP / device pseudonyms | HMAC-SHA-256(`IP_HASH_PEPPER`, value). Raw values are never stored. |
 | Audit log | Hash chain: `hash_n = SHA-256(hash_{n−1} ‖ canonicalJSON(entry_n))`, genesis = 32 zero bytes. |

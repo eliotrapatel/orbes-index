@@ -5,7 +5,8 @@
  * so protection is the default and a route opts OUT explicitly through its
  * `config.guard` (login/register are the only session-less ones):
  *
- *   1. session  — the scope's cookie (`orbes_session` / `orbes_admin`) must
+ *   1. session  — the scope's cookie (`orbes_session` / `orbes_admin`, with the
+ *                 `__Host-` prefix in production) must
  *                 resolve to a live session of an active subject (401);
  *   2. CSRF     — unsafe methods need `Origin == PUBLIC_ORIGIN` (or no Origin
  *                 and `Sec-Fetch-Site: same-origin`) and, with a session,
@@ -23,7 +24,7 @@ import type { AppConfig } from '../config.js';
 import type { AdminRole, SessionSubjectType } from '../db/schema.js';
 import { DomainError, unauthorized } from '../errors.js';
 import type { AccountProfile, AdminProfile, ClientMeta } from '../services/auth.js';
-import { checkCsrf, SESSION_COOKIE, sessionCookieOptions, type IssuedSession, type SessionInfo } from '../services/sessions.js';
+import { checkCsrf, sessionCookieName, sessionCookieOptions, type IssuedSession, type SessionInfo } from '../services/sessions.js';
 import type { Actor } from '../types.js';
 import type { AppContext } from '../context.js';
 
@@ -96,17 +97,17 @@ const mfaRequired = () =>
 
 // ── Cookies ────────────────────────────────────────────────────────────────
 
-export function sessionToken(request: FastifyRequest, kind: SessionSubjectType): string | undefined {
-  const v = request.cookies?.[SESSION_COOKIE[kind]];
+export function sessionToken(request: FastifyRequest, config: Pick<AppConfig, 'env'>, kind: SessionSubjectType): string | undefined {
+  const v = request.cookies?.[sessionCookieName(config, kind)];
   return typeof v === 'string' && v.length > 0 && v.length <= 256 ? v : undefined;
 }
 
 export function setSessionCookie(reply: FastifyReply, config: Pick<AppConfig, 'env'>, kind: SessionSubjectType, session: IssuedSession): void {
-  reply.setCookie(SESSION_COOKIE[kind], session.token, sessionCookieOptions(config, session.expiresAt));
+  reply.setCookie(sessionCookieName(config, kind), session.token, sessionCookieOptions(config, session.expiresAt));
 }
 
 export function clearSessionCookie(reply: FastifyReply, config: Pick<AppConfig, 'env'>, kind: SessionSubjectType): void {
-  reply.clearCookie(SESSION_COOKIE[kind], sessionCookieOptions(config));
+  reply.clearCookie(sessionCookieName(config, kind), sessionCookieOptions(config));
 }
 
 // ── CSRF ───────────────────────────────────────────────────────────────────
@@ -133,7 +134,7 @@ export function assertCsrf(config: Pick<AppConfig, 'publicOrigin'>, request: Pic
 /** The caller's account session, looked up once per request (null when absent or invalid). */
 export async function loadAccount(ctx: AppContext, request: FastifyRequest): Promise<AccountAuth | null> {
   if (request.orbes.account !== undefined) return request.orbes.account;
-  const token = sessionToken(request, 'account');
+  const token = sessionToken(request, ctx.config, 'account');
   let auth: AccountAuth | null = null;
   if (token) {
     const r = await ctx.services.auth.authenticateAccount(token);
@@ -145,7 +146,7 @@ export async function loadAccount(ctx: AppContext, request: FastifyRequest): Pro
 
 export async function loadAdmin(ctx: AppContext, request: FastifyRequest): Promise<AdminAuth | null> {
   if (request.orbes.admin !== undefined) return request.orbes.admin;
-  const token = sessionToken(request, 'admin');
+  const token = sessionToken(request, ctx.config, 'admin');
   let auth: AdminAuth | null = null;
   if (token) {
     const r = await ctx.services.auth.authenticateAdmin(token);
@@ -178,8 +179,8 @@ export function adminActor(request: FastifyRequest): Actor {
   return { type: 'admin', id: requireAdmin(request).admin.id, ipHash: request.orbes.ipHash };
 }
 
-export function clientMeta(request: FastifyRequest, kind: SessionSubjectType, userAgent: string | null): ClientMeta {
-  return { ipHash: request.orbes.ipHash, userAgent, previousToken: sessionToken(request, kind) ?? null };
+export function clientMeta(request: FastifyRequest, config: Pick<AppConfig, 'env'>, kind: SessionSubjectType, userAgent: string | null): ClientMeta {
+  return { ipHash: request.orbes.ipHash, userAgent, previousToken: sessionToken(request, config, kind) ?? null };
 }
 
 // ── The guard ──────────────────────────────────────────────────────────────
@@ -205,7 +206,7 @@ export function sessionGuard(ctx: AppContext, opts: SessionGuardOptions): onRequ
     }
 
     const auth = opts.kind === 'admin' ? await loadAdmin(ctx, request) : await loadAccount(ctx, request);
-    if (!auth && sessionToken(request, opts.kind)) {
+    if (!auth && sessionToken(request, config, opts.kind)) {
       // Expired or revoked: drop the dead cookie so the browser stops presenting it.
       clearSessionCookie(reply, config, opts.kind);
     }

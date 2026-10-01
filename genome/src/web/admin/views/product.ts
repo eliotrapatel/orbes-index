@@ -245,6 +245,23 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
             }).then((r) => r && done(ctx, 'Warranty activated.')),
         })
       : null,
+    a.canExtendWarranty
+      ? button('Extend warranty', {
+          testId: 'action-warranty-extend',
+          onClick: () =>
+            void openDialog({
+              title: 'Extend the warranty',
+              eyebrow: pid,
+              body: h('p', { class: 'dialog__text' }, `The end date moves by whole months from the start date (now ${formatDate(d.warranty?.endDate ?? null)}).`),
+              fields: [{ name: 'months', label: 'Months to add (1–120)', required: true, maxlength: 3, value: '12' }],
+              validate: (v) => (/^\d{1,3}$/.test(v.months.trim()) && Number(v.months) >= 1 && Number(v.months) <= 120 ? null : 'Enter a whole number of months from 1 to 120.'),
+              confirmLabel: 'Extend',
+              submit: async (v) => {
+                await api.extendWarranty(pid, Number(v.months.trim()));
+              },
+            }).then((r) => r && done(ctx, 'Warranty extended.')),
+        })
+      : null,
     a.canVoidWarranty
       ? button('Void warranty', {
           kind: 'danger',

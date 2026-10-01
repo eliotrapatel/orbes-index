@@ -33,7 +33,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const b = parse(registerAccountBody, request.body);
     const { account, session } = await auth.registerAccount(
       { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null },
-      clientMeta(request, 'account', userAgentOf(request)),
+      clientMeta(request, ctx.config, 'account', userAgentOf(request)),
     );
     setSessionCookie(reply, ctx.config, 'account', session);
     reply.code(201);
@@ -42,13 +42,13 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
 
   app.post('/api/v1/account/login', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(loginBody, request.body);
-    const { account, session } = await auth.login({ email: b.email, password: b.password }, clientMeta(request, 'account', userAgentOf(request)));
+    const { account, session } = await auth.login({ email: b.email, password: b.password }, clientMeta(request, ctx.config, 'account', userAgentOf(request)));
     setSessionCookie(reply, ctx.config, 'account', session);
     return { account: accountJson(account), csrfToken: session.csrfToken };
   });
 
   app.post('/api/v1/account/logout', { config: { guard: { session: 'optional' } } }, async (request, reply) => {
-    const token = sessionToken(request, 'account');
+    const token = sessionToken(request, ctx.config, 'account');
     if (token && request.orbes.account) await auth.logout(token, 'account', { ipHash: request.orbes.ipHash });
     clearSessionCookie(reply, ctx.config, 'account');
     return { ok: true };

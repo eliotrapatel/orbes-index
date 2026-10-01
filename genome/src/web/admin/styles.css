@@ -80,12 +80,10 @@ body {
   border-bottom: 1px solid var(--hairline);
 }
 
+/* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
 .side__wordmark {
-  display: block;
-  font-size: 15px;
-  letter-spacing: 0.62em;
-  text-transform: uppercase;
-  line-height: 1;
+  font-size: var(--fs-lead);
+  text-indent: 0;
 }
 
 .side__product {
@@ -111,7 +109,7 @@ body {
   font-size: var(--fs-nano);
   letter-spacing: 0.34em;
   text-transform: uppercase;
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 .side__list {
@@ -208,7 +206,7 @@ body {
   font-size: var(--fs-nano);
   letter-spacing: 0.4em;
   text-transform: uppercase;
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 .main {
@@ -233,7 +231,7 @@ body {
 .topbar__crumb {
   flex: 1;
   font-size: var(--fs-nano);
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-display);
   text-transform: uppercase;
   color: var(--ink-soft);
   white-space: nowrap;
@@ -288,7 +286,7 @@ body {
 
 .page-head__title {
   margin-top: 12px;
-  font-size: 30px;
+  font-size: var(--fs-wordmark);
   font-weight: 300;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -340,7 +338,7 @@ body {
 
 .panel__note {
   font-size: var(--fs-nano);
-  letter-spacing: 0.28em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--ink-soft);
 }
@@ -451,7 +449,7 @@ body {
 
 .kpi__label {
   font-size: var(--fs-nano);
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-display);
   text-transform: uppercase;
   color: var(--ink-soft);
 }
@@ -469,7 +467,7 @@ body {
   margin-top: 14px;
   font-size: var(--fs-micro);
   letter-spacing: 0.12em;
-  text-transform: uppercase;
+  /* No text-transform: notes are uppercase in the model, identifiers (the key id) keep their true case. */
   color: var(--ink-soft);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -507,7 +505,7 @@ body {
 
 .bar__label {
   font-size: var(--fs-micro);
-  letter-spacing: 0.22em;
+  letter-spacing: var(--track-micro);
   text-transform: uppercase;
   text-decoration: none;
   white-space: nowrap;
@@ -578,7 +576,7 @@ a.bar__label:hover {
 
 .bar--zero .bar__label,
 .bar--zero .bar__value {
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 /* ── Status marks ──────────────────────────────────────────────────────── */
@@ -825,7 +823,7 @@ a.bar__label:hover {
 .pager__range,
 .pager__page {
   font-size: var(--fs-nano);
-  letter-spacing: 0.28em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--ink-soft);
 }
@@ -894,14 +892,17 @@ a.bar__label:hover {
   color: var(--white);
 }
 
+/* The single hairline button (brand.css .btn): outlined in ink, filled only on hover or keyboard focus. */
 .cbtn--primary {
-  background: var(--ink);
-  color: var(--white);
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
-.cbtn--primary:hover {
-  background: var(--white);
-  color: var(--ink);
+.cbtn--primary:hover,
+.cbtn--primary:focus-visible {
+  background: var(--ink);
+  color: var(--white);
 }
 
 .cbtn--ghost {
@@ -981,7 +982,7 @@ a.bar__label:hover {
 }
 
 .cinput::placeholder {
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 .cinput--select {
@@ -1245,7 +1246,7 @@ a.bar__label:hover {
 }
 
 .sheet__value .status {
-  font-size: 13px;
+  font-size: var(--fs-body);
   letter-spacing: 0.24em;
 }
 
@@ -1255,7 +1256,7 @@ a.bar__label:hover {
 }
 
 .sheet__value .mono {
-  font-size: 13px;
+  font-size: var(--fs-body);
   letter-spacing: 0.08em;
 }
 
@@ -1268,7 +1269,7 @@ a.bar__label:hover {
 .sheet__id {
   font-size: 22px;
   font-weight: 300;
-  letter-spacing: 0.22em;
+  letter-spacing: var(--track-micro);
 }
 
 .sheet__note {
@@ -1429,6 +1430,39 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* Print-size advice (BRAND §2.6): a quiet note under 30 mm; under 15 mm without "Test print", a refusal. */
+.artifact__size {
+  min-height: 16px;
+  margin-top: 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.artifact__size--refuse {
+  color: var(--critical);
+}
+
+/* Codes list: print-sheet selection. */
+.sheet__pick {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.sheet__count {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel--sheet {
+  margin-bottom: 48px;
+}
+
 /* ── Generator ─────────────────────────────────────────────────────────── */
 
 .gen__aside {
@@ -1496,7 +1530,7 @@ a.bar__label:hover {
 .gen__steps li::before {
   content: counter(step, decimal-leading-zero);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--ink-soft);
 }
 
@@ -1531,7 +1565,7 @@ a.bar__label:hover {
 
 .claim__code {
   margin-top: 10px;
-  font-size: 30px;
+  font-size: var(--fs-wordmark);
   letter-spacing: 0.24em;
 }
 
@@ -1552,7 +1586,7 @@ a.bar__label:hover {
 }
 
 .claim.is-hidden .claim__code {
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 /* ── Enrolment ─────────────────────────────────────────────────────────── */
@@ -1673,7 +1707,7 @@ a.bar__label:hover {
 
 .failure__title {
   font-size: var(--fs-label);
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-display);
   text-transform: uppercase;
 }
 
@@ -1821,7 +1855,7 @@ a.bar__label:hover {
 }
 
 .login__wordmark {
-  font-size: 30px;
+  font-size: var(--fs-wordmark);
 }
 
 .login__subtitle {
@@ -1869,7 +1903,7 @@ a.bar__label:hover {
   letter-spacing: 0.3em;
   text-indent: 0.3em;
   text-transform: uppercase;
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 .login__place {
@@ -1882,7 +1916,7 @@ a.bar__label:hover {
   letter-spacing: 0.5em;
   text-indent: 0.5em;
   text-transform: uppercase;
-  color: var(--metal);
+  color: var(--ink-soft);
 }
 
 /* ── Narrow screens ────────────────────────────────────────────────────── */

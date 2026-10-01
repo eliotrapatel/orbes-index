@@ -2,8 +2,8 @@
  * Server-side sessions for accounts and admins (contract §2.9).
  *
  * - The client holds a 32-byte random token (base64url) in an httpOnly,
- *   SameSite=Strict cookie (`orbes_session` / `orbes_admin`, Secure in
- *   production). The database stores only sha256(token): a leaked sessions
+ *   SameSite=Strict cookie (`orbes_session` / `orbes_admin`; in production
+ *   `__Host-orbes_session` / `__Host-orbes_admin`, Secure, Path=/, no Domain). The database stores only sha256(token): a leaked sessions
  *   table cannot be replayed as cookies.
  * - Every session has its own CSRF token, compared in constant time.
  * - Expiry is absolute (no sliding renewal): a stolen cookie dies with its
@@ -24,10 +24,27 @@ import { SESSION_SUBJECT_TYPES, type SessionRow, type SessionSubjectType } from 
 import { validationError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
 
+/** Base cookie names; production prefixes them with `__Host-` (see sessionCookieName). */
 export const SESSION_COOKIE: Readonly<Record<SessionSubjectType, string>> = Object.freeze({
   account: 'orbes_session',
   admin: 'orbes_admin',
 });
+
+/**
+ * The cookie prefix browsers enforce for host-only cookies: Secure, Path=/,
+ * no Domain. A sibling subdomain or a plain-HTTP response cannot set or
+ * shadow such a cookie. Production only (it needs Secure, hence HTTPS).
+ */
+export const HOST_COOKIE_PREFIX = '__Host-';
+
+/** `__Host-` + base name in production; the base name in development and test. */
+export function cookieName(config: Pick<AppConfig, 'env'>, base: string): string {
+  return config.env === 'production' ? `${HOST_COOKIE_PREFIX}${base}` : base;
+}
+
+export function sessionCookieName(config: Pick<AppConfig, 'env'>, kind: SessionSubjectType): string {
+  return cookieName(config, SESSION_COOKIE[kind]);
+}
 
 export const SESSION_TOKEN_BYTES = 32;
 export const CSRF_TOKEN_BYTES = 32;

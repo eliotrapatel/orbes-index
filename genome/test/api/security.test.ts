@@ -44,17 +44,23 @@ describe('production configuration', () => {
   it('marks every cookie Secure, HttpOnly and SameSite', async () => {
     const { client } = await accountClient(h);
     const me = await client.post('/api/v1/account/login', { email: (safeJson(await client.get('/api/v1/account/me')) as any).account.email, password: PASSWORD });
-    const session = me.cookies.find((x) => x.name === 'orbes_session')!;
+    const session = me.cookies.find((x) => x.name === '__Host-orbes_session')!;
     expect(session).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Strict', path: '/' });
+    expect(session.domain).toBeUndefined();
+    expect(me.cookies.find((x) => x.name === 'orbes_session')).toBeUndefined();
 
     const creds = await createAdmin(h.ctx, 'ADMIN');
     const admin = await h.client().post('/api/admin/auth/login', { email: creds.email, password: creds.password });
-    expect(admin.cookies.find((x) => x.name === 'orbes_admin')).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Strict' });
+    expect(admin.cookies.find((x) => x.name === '__Host-orbes_admin')).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Strict', path: '/' });
 
     const catalog = await seedCatalog(h.ctx);
     const p = await issue(h.ctx, catalog);
     const v = await h.client().post('/api/v1/verify', { code: p.code.data });
-    expect(v.cookies.find((x) => x.name === 'orbes_device')).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Lax' });
+    expect(v.cookies.find((x) => x.name === '__Host-orbes_device')).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Lax', path: '/' });
+    // An unprefixed cookie planted by a sibling subdomain or over plain HTTP is not a session in production.
+    const planted = h.client();
+    planted.cookies.set('orbes_session', session.value);
+    expect((await planted.get('/api/v1/account/me')).statusCode).toBe(401);
   });
 
   it('enforces admin MFA by default', async () => {

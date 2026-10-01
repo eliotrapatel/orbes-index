@@ -189,3 +189,26 @@ describe('admin management routes', () => {
     expect((await h.ctx.audit.list({ action: 'warranty.extend' })).items[0]).toMatchObject({ targetId: pid });
   });
 });
+
+describe('pre-sale service (ISSUED → SERVICED)', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await createHarness();
+  });
+  afterAll(() => h?.close());
+
+  it('does not open first registration for a piece that was never sold', async () => {
+    const catalog = await seedCatalog(h.ctx);
+    const p = await issue(h.ctx, catalog);
+    const svc = await h.ctx.services.warranty.openService(p.product.productId, { type: 'INSPECTION' }, { type: 'system', id: 'qa' });
+    const res = await h.client().post('/api/v1/verify', { code: p.code.data });
+    const outcome = safeJson(res) as { state: string; registration?: unknown };
+    expect(outcome.state).toBe('AUTHENTIC');
+    expect(outcome.registration).toBeUndefined();
+    // After the inspection the piece is ISSUED again; once sold (activated) it opens for registration.
+    await h.ctx.services.warranty.completeService(svc.id, {}, { type: 'system', id: 'qa' });
+    await h.ctx.services.warranty.activate(p.product.productId, {}, { type: 'system', id: 'retail' });
+    const sold = safeJson(await h.client().post('/api/v1/verify', { code: p.code.data })) as { state: string };
+    expect(sold.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+  });
+});

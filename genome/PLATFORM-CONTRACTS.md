@@ -23,13 +23,15 @@ export interface AppConfig {
   keys: { provider: 'local' | 'memory'; dir?: string; encryptionKey?: string /* base64url 32 bytes, AES-256-GCM */ };
   bootstrapAdmin?: { email: string; password: string };   // first-run only
   anomaly: AnomalyConfig;               // internal thresholds — NEVER exposed via API
-  rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number };
+  rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number; apiPerMinute: number };
   sessionTtlHours: { account: number; admin: number };
 }
 export function loadConfig(env?: NodeJS.ProcessEnv): AppConfig;
 ```
 
-In production, `loadConfig` refuses: a `pglite:` database URL, the `memory` key provider, default or short secrets, and an `http:` `publicOrigin`.
+Further fields: `migrateOnStart` (`MIGRATE_ON_START`, apply pending migrations at a production start; `--migrate` does the same), `logLevel` (`LOG_LEVEL`: fatal | error | warn | info | debug | trace | silent; default info / debug / warn by environment) and `adminRequireMfa` (`ADMIN_REQUIRE_MFA`, admin sessions must pass TOTP; default true in production only). `RATE_LIMIT_API_PER_MINUTE` (default 120) sets `rateLimits.apiPerMinute`, the budget of the `api` route group.
+
+In production, `loadConfig` refuses: a `pglite:` database URL, the `memory` key provider, default, short or low-variety secrets (and identical cookie secret and pepper), an `http:` `publicOrigin`, `TRUST_PROXY=true`, a numeric `TRUST_PROXY` (refused everywhere), and `GEO_MODE=cloudflare|headers` without `TRUST_PROXY`. `configWarnings(config)` lists accepted but risky settings (`ADMIN_REQUIRE_MFA=false` in production), logged at start.
 
 `src/server/context.ts`:
 
@@ -47,6 +49,7 @@ export interface AppContext {
     issuance: IssuanceService; verification: VerificationService; anomaly: AnomalyService;
     lifecycle: LifecycleService; ownership: OwnershipService; warranty: WarrantyService;
     auth: AuthService; authenticators: AuthenticatorRegistry;
+    catalog: CatalogService;              // collections and models (categories: CategoryRegistry)
   };
 }
 export async function createContext(config: AppConfig, overrides?: Partial<…>): Promise<AppContext>;
@@ -127,7 +130,9 @@ issueProduct(input: { categoryCode: string; year?: number; modelId: string; coll
   variant?: string; material: string; productionBatch?: string; productionDate?: string; serial?: number;
   withClaimSecret?: boolean; authPolicy?: string }, actor): Promise<{ product; genome; code; claimCode?: string }>;
 reissueCode(productId: string, reason: string, actor): Promise<CodeRecord>;     // old ACTIVE → SUPERSEDED, issue+1
-renderCode(codeId: string, format: 'svg' | 'png' | 'pdf', opts?: { widthMm?: number; theme?: 'black' | 'inverted' | 'ivory'; decor?: boolean; dpi?: number; label?: boolean }): Promise<{ contentType: string; body: Uint8Array | string; filename: string }>;
+revokeCode(codeId: string, reason: string, actor): Promise<CodeRecord>;         // ACTIVE|SUPERSEDED → REVOKED + revocations row + audit
+renderCode(codeId: string, format: 'svg' | 'png' | 'pdf', opts?: { widthMm?: number /* 10–500 */; theme?: 'classic' | 'inverted' | 'ivory' /* 'black' = deprecated alias of classic */; decor?: boolean; dpi?: number; label?: boolean; kOnly?: boolean /* PDF, classic|inverted: DeviceCMYK K only */ }): Promise<{ contentType: string; body: Uint8Array | string; filename: string }>;
+renderPrintSheet(codeIds: string[], opts?: { widthMm?; theme?; decor?; label?; kOnly?; page?: 'A4' | 'A3' | 'LETTER'; cropMarks? }, actor?): Promise<RenderedArtifact>;
 ```
 - Serial allocation is atomic: `max(serial)+1` per `(year, category)` inside a transaction with retry on unique violation. An explicit serial is also allowed.
 - Payload: `issuedDay` is today, `nonce` is 4 random bytes, `keyId` is the active key, `genomeVersion` is 1, `codeVersion` is 1.
@@ -159,7 +164,7 @@ The decision procedure is normative. Each step that ends the procedure records t
 10. Ownership, when the result is not already decided:
     - The viewer is the current owner: `AUTHENTIC_OWNERSHIP_VERIFIED`.
     - Another current owner exists: `AUTHENTIC_REGISTERED`.
-    - There is no owner and the status is `ACTIVATED`, `RESOLD` or `SERVICED`: `AUTHENTIC_FIRST_REGISTRATION`, plus a single-use registration token (32 random bytes, valid 15 minutes).
+    - There is no owner and the status is `ACTIVATED`, `RESOLD` or `SERVICED` (not a pre-sale service entered from `ISSUED`, §2.6): `AUTHENTIC_FIRST_REGISTRATION`, plus a single-use registration token (32 random bytes, valid 15 minutes).
     - Otherwise: `AUTHENTIC`.
 11. Authenticator policy (`AuthenticatorRegistry.evaluate`): when the policy requires hardware evidence that was not provided, add `assurance: 'CODE_ONLY'` and `hardwareProofRequired: true`. The state stays the same.
 12. Persist the `authentication_events` row. Return the outcome (below). Target latency is p95 < 300 ms.
@@ -213,19 +218,19 @@ The state machine is data, not scattered `if`s: `TRANSITIONS: Record<ProductStat
 
 | From | Allowed next statuses |
 |---|---|
-| `ISSUED` | `ACTIVATED`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
+| `ISSUED` | `ACTIVATED`, `SERVICED` (pre-sale inspection / QA), `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `ACTIVATED` | `REGISTERED`, `OWNED`, `SERVICED`, `RESOLD`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `REGISTERED` | `OWNED`, `TRANSFERRED`, `SERVICED`, `RESOLD`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `OWNED` | `TRANSFERRED`, `SERVICED`, `RESOLD`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `TRANSFERRED` | `OWNED`, `TRANSFERRED`, `SERVICED`, `RESOLD`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
-| `SERVICED` | Return to the pre-service status (one of `ACTIVATED`, `REGISTERED`, `OWNED`, `TRANSFERRED`, `RESOLD`), or `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
+| `SERVICED` | Return to the pre-service status (one of `ISSUED`, `ACTIVATED`, `REGISTERED`, `OWNED`, `TRANSFERRED`, `RESOLD`), or `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `RESOLD` | `REGISTERED`, `OWNED`, `SERVICED`, `RETIRED`, `REVOKED`, `COUNTERFEIT_FLAGGED`, `LOST`, `STOLEN` |
 | `LOST`, `STOLEN` | Recovery to the previous non-incident status, or `RETIRED`, `REVOKED` |
 | `COUNTERFEIT_FLAGGED` | Clear to the previous status, or `REVOKED`, `RETIRED` |
 | `REVOKED` | Reinstatement only: `reinstate(productId, reason, actor)` back to the status before the revocation (ADMIN only) |
 | `RETIRED` | None (terminal) |
 
-The service API: `transition(productId, to, { reason }, actor)`, `history(productId)` and `allowedTransitions(productId)`. Every transition writes `product_status_history` and an audit entry. Transitions to `REVOKED` also insert a `revocations` row.
+The service API: `transition(productId, to, { reason }, actor)`, `history(productId)`, `allowedTransitions(productId)` and `isPreSaleService(productId)` (SERVICED entered from ISSUED: never sold, so not open for first registration; ownership refuses it with `REGISTRATION_NOT_ALLOWED`, and verification step 10 must not offer a registration token for it). Every transition writes `product_status_history` (append-only, DB-enforced) and an audit entry. Transitions to `REVOKED` also insert a `revocations` row.
 
 ### 2.7 OwnershipService (`ownership.ts`)
 
@@ -247,7 +252,7 @@ Ownership never changes any cryptographic identity: products, genomes and codes 
 |---|---|
 | `activate(productId, { purchaseDate, retailer, country }, actor)` | Retailer or admin activation. Status goes `ISSUED` → `ACTIVATED`. `start_date` is the purchase date. `end_date` is the start plus the category's warranty months. |
 | `status(productId, now)` | Returns `NOT_STARTED`, `ACTIVE`, `EXPIRED` or `VOID`. |
-| `void(productId, reason, actor)` / `extend(productId, months, actor)` | — |
+| `void(productId, reason, actor)` / `extend(productId, months, actor)` | `extend`: 1–120 whole months on an activated, non-void warranty; the end date is recomputed from the start (HTTP: `POST /api/admin/products/:productId/warranty/extend`). |
 | `openService(productId, { type, location, notes }, actor)` | Moves the product to `SERVICED`. |
 | `completeService(serviceId, { notes }, actor)` | Returns the product to its pre-service status. |
 | `services(productId)` | — |
@@ -255,9 +260,9 @@ Ownership never changes any cryptographic identity: products, genomes and codes 
 ### 2.9 AuthService (`auth.ts`)
 
 - **Passwords:** scrypt (`node:crypto`) with N = 2^15, r = 8, p = 1, a 16-byte salt and a 32-byte key. Encoded as `scrypt$15$8$1$<salt b64url>$<hash b64url>`. Verification uses `timingSafeEqual`. Minimum password length is 12.
-- **Accounts:** `registerAccount`, `login` and `logout`.
-- **Admins:** `adminLogin` (password, then TOTP when enabled; lockout after 10 failures for 15 minutes), `createAdmin` and `enableTotp`. TOTP follows RFC 6238 (SHA-1, 30 s, 6 digits, ±1 step) and the secret is stored AES-GCM encrypted.
-- **Sessions:** a 32-byte random token goes into an httpOnly, Secure (in prod), SameSite=Strict cookie (`orbes_session` / `orbes_admin`). Only the sha256 of the token is stored in the DB. There is a per-session CSRF token. Session ids rotate on login.
+- **Accounts:** `registerAccount` (optional ISO `country`), `login` (per-account throttle: 10 wrong passwords in 15 minutes → refused with the generic `INVALID_CREDENTIALS`, `accounts.failed_logins` / `failed_logins_since`) and `logout`.
+- **Admins:** `adminLogin` (password, then TOTP when enabled; lockout after 10 failures for 15 minutes), `createAdmin`, `createTotpEnrollment` + `enableTotp`, `disableTotp` (the reset: also revokes every session of that admin), `listAdmins`, `findAdminByEmail`. TOTP follows RFC 6238 (SHA-1, 30 s, 6 digits, ±1 step) and the secret is stored AES-GCM encrypted. Operator CLI: `scripts/admin.ts`.
+- **Sessions:** a 32-byte random token goes into an httpOnly, Secure (in prod), SameSite=Strict cookie (`orbes_session` / `orbes_admin`; `__Host-orbes_session` / `__Host-orbes_admin` in production). Only the sha256 of the token is stored in the DB. There is a per-session CSRF token. Session ids rotate on login and on the MFA step-up (`SessionService.rotate`: TOTP enrolment issues a new MFA-passed token, same expiry).
 - **Bootstrap:** `bootstrapAdmin(config)` runs on first start when there are no admins.
 
 ### 2.10 AuditService (`audit.ts`)
@@ -295,7 +300,8 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 - **Security headers:** `@fastify/helmet`. The CSP is `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, plus `Permissions-Policy: camera=(self)`, HSTS in production and `Referrer-Policy: no-referrer`.
 - **CSRF:** cookie-authenticated mutating routes require `x-csrf-token` to equal the session's token, and the `Origin` must equal `publicOrigin` (or be absent with `Sec-Fetch-Site: same-origin`).
 - **Rate limits:** `@fastify/rate-limit` per route group.
-- **Device cookie:** `orbes_device` is a random 128-bit id set by the server (httpOnly, SameSite=Lax, 2 years). The server stores only `HMAC(pepper, id)`.
+- **Device cookie:** `orbes_device` (`__Host-orbes_device` in production) is a random 128-bit id set by the server (httpOnly, SameSite=Lax, 2 years). The server stores only `HMAC(pepper, id)`.
+- **Shutdown:** requests arriving while the server drains get `503 { error: { code: 'SERVICE_UNAVAILABLE', message } }` with `Connection: close`.
 
 ### Public routes
 
@@ -306,13 +312,14 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | GET | `/api/v1/categories` | Returns `[{ code, index, name }]` for active categories. |
 | POST | `/api/v1/verify` | Takes `VerifyInput`, returns `VerifyOutcome`. Rate-limited. Reads the session cookie optionally to detect the owner. |
 
-### Account routes (cookie `orbes_session`)
+### Account routes (cookie `orbes_session`, `__Host-` prefixed in production)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/account/register` | Body `{ email, password, displayName? }`. Creates the account and logs in. |
+| POST | `/api/v1/account/register` | Body `{ email, password, displayName?, country? }`. Creates the account and logs in. |
 | POST | `/api/v1/account/login` | Body `{ email, password }`. |
 | POST | `/api/v1/account/logout` | — |
+| GET | `/api/v1/account/session` | Session probe: `{ account: null }` (200) when signed out, else the `me` body. Never 401. |
 | GET | `/api/v1/account/me` | Returns `{ account: { email, displayName }, csrfToken }`. 401 if not logged in. |
 | GET | `/api/v1/account/products` | The caller's current products, each with genome and warranty summary. |
 | POST | `/api/v1/ownership/register` | Body `{ registrationToken, claimCode? }`. |
@@ -322,9 +329,9 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | POST | `/api/v1/ownership/incidents` | Body `{ productId, type: 'LOST' \| 'STOLEN' }`. |
 | GET | `/api/v1/products/:productId/service-history` | Owner only. |
 
-### Admin routes (cookie `orbes_admin`; roles ADMIN > OPERATOR > AUDITOR)
+### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR)
 
-AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation, reinstatement and categories.
+AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories and console users.
 
 | Method | Path | Description |
 |---|---|---|
@@ -346,10 +353,11 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation,
 | POST | `/api/admin/products/:productId/codes/reissue` | Body `{ reason }`. |
 | POST | `/api/admin/products/:productId/warranty/activate` | Activates the warranty. |
 | POST | `/api/admin/products/:productId/warranty/void` | Voids the warranty. |
+| POST | `/api/admin/products/:productId/warranty/extend` | Body `{ months }` (1–120). Extends an activated warranty (extension). |
 | POST | `/api/admin/products/:productId/services` | Opens a service record. |
 | POST | `/api/admin/services/:id/complete` | Completes a service record. |
 | POST | `/api/admin/products/:productId/ownership/confirm` | Confirms ownership. |
-| GET | `/api/admin/codes/:codeId/artifact.(svg\|png\|pdf)?widthMm&theme&decor&label&dpi` | Downloads the code artifact. |
+| GET | `/api/admin/codes/:codeId/artifact.(svg\|png\|pdf)?widthMm&theme&decor&label&dpi&kOnly` | Downloads the code artifact (`theme`: classic \| inverted \| ivory; `black` = deprecated alias). |
 | POST | `/api/admin/codes/:codeId/revoke` | Body `{ reason }`. |
 | GET | `/api/admin/genomes?page` | — |
 | GET | `/api/admin/codes?page` | — |
@@ -366,6 +374,10 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation,
 | POST | `/api/admin/keys/:keyId/revoke` | Body `{ reason, compromisedAt? }`. |
 | GET | `/api/admin/audit?page` | Lists audit entries. |
 | GET | `/api/admin/audit/verify` | Verifies the audit hash chain. |
+| POST | `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable` | TOTP enrolment (extension); enable rotates the session token. |
+| POST | `/api/admin/codes/print-sheet` | Multi-up PDF of ACTIVE codes (extension). |
+| GET | `/api/admin/admins` | ADMIN. Console users (extension). |
+| POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). |
 
 Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, pageSize, total }`.
 

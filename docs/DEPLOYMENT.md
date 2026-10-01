@@ -2,7 +2,7 @@
 
 Status: v0.1 · Owner: ORBES Digital Identity · Companion documents: [ARCHITECTURE](ARCHITECTURE.md) (§D, §E phase 13), [SECURITY-MODEL](SECURITY-MODEL.md), [CRYPTOGRAPHY](CRYPTOGRAPHY.md) (§5 key management), [DATABASE](DATABASE.md) (§9 migrations, §11 backups), [API](API.md).
 
-This is the runbook for running the verification service in production: what to deploy, how to configure it, how to bring it up the first time, and what to do on key rotation, key compromise, upgrade and restore. Every variable name, default and rule below is taken from `genome/src/server/config.ts`, `genome/src/server/index.ts`, `genome/src/server/context.ts`, `genome/scripts/db.ts`, `genome/scripts/keys.ts`, `genome/Dockerfile` and `genome/docker-compose.yml`. When this document and the code disagree, the code wins: please fix the document.
+This is the runbook for running the verification service in production: what to deploy, how to configure it, how to bring it up the first time, and what to do on key rotation, key compromise, upgrade and restore. Every variable name, default and rule below is taken from `genome/src/server/config.ts`, `genome/src/server/index.ts`, `genome/src/server/context.ts`, `genome/scripts/db.ts`, `genome/scripts/keys.ts`, `genome/scripts/admin.ts`, `genome/Dockerfile` and `genome/docker-compose.yml`. When this document and the code disagree, the code wins: please fix the document.
 
 Contents
 
@@ -74,7 +74,7 @@ https://theorbes.com/verify/*    301 → https://verify.theorbes.com/verify/$1
 ```
 
 - `PUBLIC_ORIGIN=https://verify.theorbes.com`.
-- The service gets its own origin. Its CSP, cookies (`orbes_session`, `orbes_admin`, `orbes_device`), HSTS and rate limits stay isolated from the marketing site.
+- The service gets its own origin. Its CSP, cookies (`__Host-orbes_session`, `__Host-orbes_admin`, `__Host-orbes_device` in production: host-only by construction), HSTS and rate limits stay isolated from the marketing site.
 - The app sends `Strict-Transport-Security: max-age=63072000; includeSubDomains` in production. On `verify.theorbes.com` this only covers that host and its own subdomains.
 - Nothing has to change on the static host except the redirect. With Cloudflare in front of `theorbes.com`, a Redirect Rule does it. On a host without redirect rules, a CDN in front can do it.
 
@@ -181,9 +181,11 @@ All configuration comes from environment variables. It is parsed **once at start
 | `HOST` | `0.0.0.0` in production, `127.0.0.1` otherwise. Compose pins `0.0.0.0`. | Hostname or IP address characters (`[A-Za-z0-9.:_-[]]`), 1–255. |
 | `PORT` | `8080` | Integer 1–65535. Compose pins `8080` inside the container. |
 | `PUBLIC_ORIGIN` | `http://localhost:<PORT>` outside production. **Required in production.** | Absolute `http`/`https` URL origin: no credentials, path, query, fragment or trailing slash. **Production: must be `https://`.** Used for the CSRF `Origin` check, so it must match the browser's address bar exactly. |
-| `TRUST_PROXY` | `false` | `true`/`yes` → trust every hop. `false`/`no`/`0` → trust none. A bare number (hop count) is **refused** in every environment. Anything else is passed to Fastify as a comma-separated list of IPs, CIDRs or the names `loopback`, `linklocal`, `uniquelocal`. **Production refuses `true`** (the left-most `X-Forwarded-For` entry is client-forgeable). |
-| `LOG_LEVEL` | `info` in production, `debug` in development, `warn` in test | pino level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`. Read by `index.ts`, not validated by `loadConfig()`. |
-| `MIGRATE_ON_START` | unset (compose: `true`) | Production only: `1`, `true` or `yes` (case-insensitive) applies pending migrations at start, like the `--migrate` flag. Development and test always migrate. |
+| `TRUST_PROXY` | `false` | `true`/`yes` → trust every hop. `false`/`no`/`0` → trust none. A bare number (hop count) is **refused** in every environment. Anything else is passed to Fastify as a comma-separated list of IPs, CIDRs or the names `loopback`, `linklocal`, `uniquelocal`. **Production refuses `true`** (the left-most `X-Forwarded-For` entry is client-forgeable). See §3.3. |
+| `LOG_LEVEL` | `info` in production, `debug` in development, `warn` in test | pino level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` (case-insensitive). Validated by `loadConfig()` (`config.logLevel`); anything else is a configuration error. |
+| `MIGRATE_ON_START` | `false` (compose: `true`) | `1`/`true`/`yes` or `0`/`false`/`no` (case-insensitive; anything else is a configuration error, `config.migrateOnStart`). Production only: `true` applies pending migrations at start, like the `--migrate` flag. Development and test always migrate. |
+| `ADMIN_REQUIRE_MFA` | `true` in production, `false` otherwise | Same boolean syntax (`config.adminRequireMfa`). Admin sessions must have passed TOTP before using any admin route except sign-in and enrolment. `false` in production is accepted but logged as a warning at every start (`risky configuration`): use it only for an enrolment window, and prefer enrolling admins with `scripts/admin.ts` (§8.1). |
+| `ORBES_DEMO` | unset | Same as the `--demo` flag (§13.1): development and test only, `DATABASE_URL=pglite:memory` only. |
 
 **Database**
 
@@ -230,7 +232,8 @@ All configuration comes from environment variables. It is parsed **once at start
 |---|---|---|
 | `RATE_LIMIT_VERIFY_PER_MINUTE` | `60` | Integer 1–1 000 000. Applies to `POST /api/v1/verify`. |
 | `RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Same range. Applies to logins, registration, claim and transfer codes, and TOTP enrolment, all sharing one budget. |
-| `RATE_LIMIT_ADMIN_PER_MINUTE` | `300` | Same range. Applies to every other admin route **and** to the remaining public/account routes (health, keys, categories, …). |
+| `RATE_LIMIT_ADMIN_PER_MINUTE` | `300` | Same range. Applies to every other admin route. |
+| `RATE_LIMIT_API_PER_MINUTE` | `120` | Same range. Applies to the remaining public and account routes (health, keys, categories, account reads, …): the `api` group. |
 
 Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a default.
 
@@ -266,6 +269,7 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 | `ORBES_IMAGE_TAG` | `latest` | Compose: image tag built and run (`orbes-genome:<tag>`). |
 | `ORBES_ENV_FILE` | `.env` | Compose: path of the env file, e.g. `/etc/orbes/genome.env`. Export it in the shell. |
 | `DEMO_ACCOUNT_PASSWORD` | random, printed once | `db seed` / `db reset-demo` only, ≥ 12 characters. Both commands refuse production. |
+| `ADMIN_PASSWORD` | unset | `scripts/admin.ts create` only: the new admin's password (12–1024 characters), read from the environment so it never appears in argv or shell history. |
 
 `genome/.env.example` lists every variable above with the production template values. The test `test/ops/deployment-files.test.ts` keeps it in sync with the code.
 
@@ -290,8 +294,9 @@ With `ORBES_ENV=production` (or `NODE_ENV=production` and no `ORBES_ENV`), the s
 
 Production also changes behaviour at runtime:
 
-- admin sessions must pass **TOTP** before any admin route except sign-in and TOTP enrolment (`MFA_REQUIRED`, 403);
-- cookies are `Secure`, and HSTS is sent;
+- admin sessions must pass **TOTP** before any admin route except sign-in and TOTP enrolment (`MFA_REQUIRED`, 403), unless `ADMIN_REQUIRE_MFA=false` (warned at start);
+- cookies are `Secure` and `__Host-` prefixed (`__Host-orbes_session`, `__Host-orbes_admin`, `__Host-orbes_device`: `Path=/`, no `Domain`), and HSTS is sent;
+- `--demo` / `ORBES_DEMO` is refused;
 - no signing key is created automatically;
 - `db seed`, `db reset-demo` and `scripts/export-demo-codes.ts` refuse to run.
 
@@ -346,7 +351,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 | Secret | Effect of changing it | Procedure |
 |---|---|---|
-| `COOKIE_SECRET` | Every session is signed out. Device cookies are re-issued, so devices look new to the anomaly rules for a while. | Change and restart. Schedule a quiet period. |
+| `COOKIE_SECRET` | Device cookies are re-issued, so devices look new to the anomaly rules for a while (session cookies are not signed and survive). Pending ownership transfer codes stop working (their lookup key is derived from it): owners start a new transfer. When `KEY_ENCRYPTION_KEY` is unset, enrolled admin TOTP secrets can no longer be opened either. | Change and restart. Schedule a quiet period. |
 | `IP_HASH_PEPPER` | New IP, device and session pseudonyms cannot be linked to older scans. Anomaly scoring (device, IP and geo diversity) starts again from scratch. | Change and restart. Rotate only when it may have leaked or on a planned schedule. |
 | `KEY_ENCRYPTION_KEY` | Existing key files can no longer be decrypted, and enrolled admin TOTP secrets can no longer be opened. | Follow §7.7. Never just swap it. |
 | `POSTGRES_PASSWORD` | The app cannot connect until `DATABASE_URL` matches. | `ALTER ROLE … PASSWORD …`, update the env file, restart. With compose, the `POSTGRES_PASSWORD` variable only applies when the data volume is first created. |
@@ -448,7 +453,7 @@ docker compose exec app npm run keys:list
 
 ### 5.5 First admin and TOTP
 
-See §8.1. In short: sign in at `https://<origin>/admin` with the bootstrap credentials, enrol TOTP when the console asks, then remove `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` from the env file and run `docker compose up -d` (the container is recreated with the new environment).
+See §8.1. In short: enrol the bootstrap admin's TOTP from the shell (`scripts/admin.ts totp-setup` / `totp-enable`, recommended) or in the console when it asks, sign in at `https://<origin>/admin`, then remove `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` from the env file and run `docker compose up -d` (the container is recreated with the new environment).
 
 Finish with the smoke tests (§13) and the checklist (§14).
 
@@ -706,20 +711,38 @@ Procedure:
 
 1. Before the first start, set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (12–1024 characters). On start, if `admin_users` is empty, one **ADMIN** is created. The log says `bootstrap admin created`. The step is idempotent and race-safe across instances, and the variables are ignored once any admin exists.
 2. Open `https://<origin>/admin` and sign in. In production the response says `"mfaRequired": true, "mfaPassed": false`, and every admin route except sign-in and enrolment answers `403 MFA_REQUIRED` until TOTP is enrolled.
-3. Enrol when the console asks:
+3. Enrol TOTP. **Recommended: from the shell, before the password is ever used in the console** (enrolment in the console is trust on first use: whoever signs in first with the password enrols their device):
+   ```sh
+   docker compose exec app node --import tsx scripts/admin.ts totp-setup --email admin@theorbes.com
+   #   prints the secret and the otpauth:// URI once; hand them to the admin in person
+   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email admin@theorbes.com --secret <SECRET> --code <current code>
+   ```
+   Or when the console asks:
    - the console calls `POST /api/admin/auth/totp/setup` and shows the `otpauth://` URI / QR code;
    - scan it with an authenticator app (RFC 6238: SHA-1, 6 digits, 30 s) and enter the current code;
-   - `POST /api/admin/auth/totp/enable` verifies it, stores the secret sealed with AES-256-GCM and marks the current session as MFA-passed.
+   - `POST /api/admin/auth/totp/enable` verifies it, stores the secret sealed with AES-256-GCM and replaces the session by a new MFA-passed one (new cookie and CSRF token).
 
    Every later sign-in asks for a code. Each code is accepted once, ±1 time step.
 4. Remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from the environment and recreate the container (`docker compose up -d`).
 
 Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `SESSION_TTL_ADMIN_HOURS` (8 h by default).
 
-### 8.2 Known gaps
+### 8.2 Further admins, lost authenticators: `scripts/admin.ts`
 
-- **No HTTP endpoint creates further staff accounts or roles** (OPERATOR, AUDITOR), changes passwords or disables TOTP ([API](API.md), "extensions of the platform contract"). Those operations exist in `AuthService` only. Until a CLI or admin route exists, a second ADMIN can only be created by a developer-run script calling `AuthService.createAdmin`, or by starting once against an empty `admin_users` table.
-- **A lost authenticator** needs the break-glass statement of §7.7 step 4 for that admin, with a second person approving the change.
+Console users are managed from the shell (every change is audited as `system:cli:admin:<os user>`):
+
+```sh
+# a new OPERATOR (or ADMIN, AUDITOR); the password comes from the environment, never argv
+docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role OPERATOR
+docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, locked/disabled
+docker compose exec app node --import tsx scripts/admin.ts totp-setup --email ops@theorbes.com
+docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>
+docker compose exec app node --import tsx scripts/admin.ts reset-totp --email ops@theorbes.com --yes   # lost device
+```
+
+- **A lost authenticator:** after an identity check, an ADMIN resets it from the console (SECURITY page, *Reset two-factor*, typed confirmation; `POST /api/admin/admins/:id/totp/reset`) or with `reset-totp` above. The reset removes the enrolment and ends every session of that admin; they sign in with the password and enrol again. If no ADMIN with a working second factor is left, use the shell command.
+- **Lockout as denial of service:** anyone who knows an admin's email can keep that admin locked out with wrong passwords (10 per 15 minutes suffice). Keep admin emails private and, ideally, put `/admin` and `/api/admin` behind an IP allow-list or VPN at the edge (SECURITY-MODEL §3.3).
+- **Still missing:** changing passwords, changing roles and disabling admins have no command or route yet (they exist in `AuthService` or need a statement in SQL).
 
 ---
 
@@ -733,18 +756,18 @@ Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `
 |---|---|---|
 | Healthy | `200` | `{"ok":true,"version":"0.1.0"}` |
 | Database unreachable | `503` | `{"ok":false,"version":"0.1.0"}`. The reason goes to the log (`health check: database unavailable`), never to the response. |
-| Server shutting down | `503` | Fastify `return503OnClosing`. |
+| Server shutting down | `503` | `{"error":{"code":"SERVICE_UNAVAILABLE","message":…}}` with `Connection: close`, for requests still arriving on open connections. |
 
 - The image's `HEALTHCHECK` calls the endpoint with Node's built-in `fetch` (interval 30 s, timeout 5 s, start period 40 s, 3 retries). `docker compose ps` shows `healthy`.
 - On an orchestrator, use the endpoint as the **readiness** probe. For **liveness**, prefer a TCP check or a generous failure threshold. Otherwise a database outage restarts every instance in a loop.
-- Health is rate-limited with the `api` group (`RATE_LIMIT_ADMIN_PER_MINUTE` per client IP, 300 by default). Probes every few seconds are far below that.
+- Health is rate-limited with the `api` group (`RATE_LIMIT_API_PER_MINUTE` per client IP, 120 by default). Probes every few seconds are far below that.
 
 **Shutdown.** On `SIGTERM`/`SIGINT` the server stops accepting connections, lets in-flight requests finish (up to 25 s), stops housekeeping, closes the database and exits 0. Compose gives it 30 s (`stop_grace_period`), and `docker run --stop-timeout 30` does the same. Fatal errors (unhandled rejection, uncaught exception, failed start) go through the same shutdown with exit code 1, so the orchestrator restarts a clean process.
 
 ### 9.2 Logging
 
 - **Format.** JSON lines (pino) on **stdout**. Lines written before the HTTP logger exists (migrations, bootstrap, key self-test) are JSON on **stderr**. Configuration errors are plain text on stderr, followed by exit code 78.
-- **Level.** `LOG_LEVEL` (default `info` in production).
+- **Level.** `LOG_LEVEL` (default `info` in production). Accepted but risky settings (`ADMIN_REQUIRE_MFA=false` in production) are logged as `risky configuration` warnings at every start.
 - **Contents.** Each request logs the method, the path **without the query string**, a server-generated request id (`reqId`; client-supplied ids are ignored), the status code and the response time. **Never logged:** client IPs, cookies, the CSRF header, `Set-Cookie`, request bodies or secrets. The startup line carries a redacted configuration summary (database password masked, secrets shown as `[set]`, no anomaly thresholds).
 - **Shipping.** Collect stdout and stderr with the platform's log driver. With plain Docker, cap local logs in a compose override:
   ```yaml
@@ -895,10 +918,10 @@ curl -fsS -X POST -H 'content-type: application/json' -d '{"code":"AAAA"}' "$ORI
 **One-time proxy-trust check** (after the first deployment and after any change to the proxy chain or `TRUST_PROXY`; run it in a quiet period). It proves that the app sees real client IPs, i.e. that clients do not share one rate-limit bucket:
 
 ```sh
-# From one machine: exceed the `api` budget (RATE_LIMIT_ADMIN_PER_MINUTE, 300 by default) on a no-store route
-for i in $(seq 1 301); do curl -s -o /dev/null -w '%{http_code}\n' "$ORIGIN/api/v1/health"; done | sort | uniq -c
-#   300 200      (fewer if you made other requests in the last minute)
-#     1 429      (with x-ratelimit-limit: 300 and retry-after headers)
+# From one machine: exceed the `api` budget (RATE_LIMIT_API_PER_MINUTE, 120 by default) on a no-store route
+for i in $(seq 1 121); do curl -s -o /dev/null -w '%{http_code}\n' "$ORIGIN/api/v1/health"; done | sort | uniq -c
+#   120 200      (fewer if you made other requests in the last minute)
+#     1 429      (with x-ratelimit-limit: 120 and retry-after headers)
 # Within the same minute, from ANOTHER network (e.g. a phone on mobile data):
 curl -s -o /dev/null -w '%{http_code}\n' "$ORIGIN/api/v1/health"       # must be 200; 429 means TRUST_PROXY is wrong (§3.3)
 ```
@@ -908,6 +931,15 @@ Then, in a browser on a phone:
 - open `$ORIGIN/verify`: the camera starts after permission;
 - scan a code issued from the console GENERATOR: AUTHENTIC;
 - sign in to `$ORIGIN/admin` with TOTP and check that the dashboard loads.
+
+### 13.1 Local demo (development only)
+
+```sh
+cd genome && npx tsx scripts/build-web.ts            # once, for /verify and /admin
+node --import tsx src/server/index.ts --demo          # or ORBES_DEMO=true; npm start -- --demo
+```
+
+The server starts on `pglite:memory`, loads the demo dataset through the real services (41 products, 8 accounts, scan histories and anomalies; about 15 s), then serves it; the clock replays the catalogue's history during the seed and follows real time afterwards. It prints the console sign-in once: `BOOTSTRAP_ADMIN_*` when set, otherwise `demo-admin@example.com` with a random password, plus the demo accounts' password and a claim code. Everything is lost on exit. `--demo` is refused in production and with any `DATABASE_URL` other than `pglite:memory`. (`package.json` has no `npm run demo` alias: it cannot be edited in this change; `npm start -- --demo` is the equivalent.)
 
 ---
 

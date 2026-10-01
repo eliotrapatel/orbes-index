@@ -159,7 +159,7 @@ The physical size of a code is the side of its 50 u square, quiet zone included.
 | GENOME glyph, on screen | 12 px glyph diameter | [Symbol study](reports/genome-symbol-study.md): 100 % template classification from 12 px (99.09 % at 8 px). The verify specimen renders glyphs at ≈ 21 px on a 390 px screen. |
 | ORBES SEAL, printed standalone | 4.8 mm diameter | Its size inside a 30 mm code (8 u). |
 
-The renderer accepts 5–500 mm (`ARTIFACT_LIMITS`). That is a technical bound for memory and resolution, not a brand permission.
+The renderer accepts 10–500 mm (`ARTIFACT_LIMITS`). That is a technical bound for memory and resolution, not a brand permission: the console warns under 30 mm and refuses under 15 mm unless the operator checks *Test print* (`artifactSizeAdvice`, `genome/src/web/admin/model/generator.ts`).
 
 ### 2.7 Colourways
 
@@ -167,9 +167,9 @@ Three presentations exist, defined once in `ORBES_CODE_STYLES` and shared by the
 
 | Colourway (`ORBES_CODE_STYLES`) | Console theme / label | Ink | Paper | Horizon (tone 0.35) | Guides (tone 0.25) | Use |
 |---|---|---|---|---|---|---|
-| `classic` | `black` · "Black on white" | `#0A0A0A` | `#FFFFFF` | `#A9A9A9` | `#C2C2C2` | The reference rendition: paper, card, certificates |
-| `inverted` | `inverted` · "White on black" | `#FFFFFF` | `#0A0A0A` | `#606060` | `#474747` | Black card, dark leather, white or light foil |
-| `ivory` | `ivory` · "Ink on ivory" | `#111111` | `#F6F2EA` | `#A6A39E` | `#BDBAB4` | Ivory stock, hang tags, leather swing tags |
+| `classic` | `classic` · "CLASSIC — BLACK ON WHITE" | `#0A0A0A` | `#FFFFFF` | `#A9A9A9` | `#C2C2C2` | The reference rendition: paper, card, certificates |
+| `inverted` | `inverted` · "INVERTED — WHITE ON BLACK" | `#FFFFFF` | `#0A0A0A` | `#606060` | `#474747` | Black card, dark leather, white or light foil |
+| `ivory` | `ivory` · "IVORY — INK ON IVORY" | `#111111` | `#F6F2EA` | `#A6A39E` | `#BDBAB4` | Ivory stock, hang tags, leather swing tags |
 
 Decor tones are the opaque pre-mixes the renderer writes (values from the sample SVGs). There are no other colourways: no brand colour, no per-collection or per-product tint, no metallic gradient. Physical substrates other than these three are reproduced by matching the *relationship* (dark on light, or light on dark), not by inventing a new palette.
 
@@ -197,6 +197,8 @@ Tolerances that every process must hold (ORBES-CODE-SPEC §9), converted to mill
 | 17.5 mm | 0.35 mm | 0.70 mm | 0.25 mm | 0.10 mm | 0.042 mm | ±0.035 mm |
 
 Beyond 0.12 u of spread, adjacent rings start to merge. Foil, deboss fill and engraving burr are the usual offenders; test them at the intended size.
+
+**Black ink at the print shop.** The PDF artifacts are RGB by default. A print shop that converts them to CMYK may build the black from four inks (rich black), and four plates out of register blur thin rings at small sizes. For such shops, download the PDF with **K-only black** (console option, API `kOnly=true`, `classic` and `inverted` only): ink is K 100 %, white is no ink, the decor tones are K tints. Limitations: no ICC profile or output intent (ask the shop not to convert), K 100 % alone is a dense dark grey rather than a deep black on uncoated stock, and the decor tints print as halftone screens (decorative, never read by the decoder) ([API §15.2](API.md#152-get-apiadmincodescodeidartifactformat)).
 
 ### 2.9 Polarity rules
 
@@ -284,7 +286,7 @@ Both web apps import `shared/brand.css`, which mirrors the house style of theorb
 
 | Role | Size | Weight | Tracking |
 |---|---|---|---|
-| Sidebar wordmark | 15px | 400 | 0.62em |
+| Sidebar wordmark | 15px | 400 | 0.62em (the shared `.wordmark`, `--track-wordmark`) |
 | Page title | 30px | 300 | 0.20em |
 | Product id (fact sheet) / generator identity | 22px / 26px | 300 | 0.22em / 0.20em |
 | KPI value | 46px | 300 | 0.04em, tabular |
@@ -307,7 +309,7 @@ Monospace (`ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberatio
 | `--ivory` | `#F6F2EA` | Specimen plates and figures, console sidebar, panels that hold a secret or a fresh result (claim code, transfer code, enrolment, generator identity) | — |
 | `--ink` | `#0A0A0A` | Text, rules that structure, buttons | 19.8 : 1 / 17.7 : 1 |
 | `--ink-soft` | `#5C5C5C` | Secondary text | 6.7 : 1 / 6.0 : 1 (AA) |
-| `--metal` | `#9A9A9A` | Decorative only: separators, zero rows, placeholders | 2.8 : 1 / 2.5 : 1 (not for text that must be read) |
+| `--metal` | `#9A9A9A` | Decorative only: separators, muted bar fills and status marks; never text (zero rows, placeholders and navigation titles use `--ink-soft`) | 2.8 : 1 / 2.5 : 1 (not for text that must be read) |
 | `--hairline` | `rgba(10,10,10,0.12)` | Default 1 px rule (≈ `#E2E2E2` on white) | — |
 | `--hairline-strong` | `rgba(10,10,10,0.32)` | Section rules, field underlines, local brackets on ivory | — |
 | `--critical` (console only) | `#8A1C1C` oxblood | The few facts that require immediate action | 9.3 : 1 |
@@ -370,7 +372,7 @@ There are no icons in the pictographic sense. Every mark is built from the orbit
 | **Empty state** | 9 px `--metal` circle | "Nothing to show." |
 | **History timeline** | 7 px circles on a 1 px line; the latest filled | Status history |
 | **Separators** | `·` in `--metal` | Between tabs and options |
-| **Favicons** | `/verify`: ring and core on a white disc. `/admin`: ring and core with four moons on an ivory square | Browser tabs |
+| **Favicons** | Both in the SEAL proportions (core r 5.35, ring 8.025–10.7: core 2 : gap 1 : ring 1). `/verify`: ring and core on a white disc. `/admin`: ring and core with four corner moons on an ivory square | Browser tabs |
 
 ### 3.6 Motion
 
@@ -411,7 +413,7 @@ The verification app carries theorbes.com's film grain: a fixed SVG `feTurbulenc
 - **The text link** (`.textlink`): 8 px tracked caps at 62 % opacity, rising to 100 % with an underline drawn on hover or focus. For the secondary action.
 - **Fields**: a label in 8 px tracked caps, a single 1 px underline (`--hairline-strong`, ink on focus), no box.
 - **Focus**: a 1 px `currentColor` outline 4 px outside the element, keyboard only (`:focus-visible`); headings that receive focus programmatically on screen changes show none.
-- **Console buttons** (`.cbtn`): 38 px, 8 px tracked caps, square; *primary* is filled ink, *secondary* outlined, *ghost* an underlined word, *danger* outlined in oxblood. See §8, item 9.
+- **Console buttons** (`.cbtn`): 38 px, 8 px tracked caps, square; *primary* is the hairline button (outlined in ink, filled only on hover or keyboard focus), *secondary* outlined, *ghost* an underlined word, *danger* outlined in oxblood.
 
 ---
 
@@ -613,7 +615,7 @@ The console is an internal instrument in the house style, not a SaaS dashboard: 
 
 ![Console dashboard: ivory sidebar, KPI figures, hairline bars by status and by severity, signing key](assets/ui/admin-01-dashboard.png)
 
-*Dashboard, 1 440 × 900.* Four figures in 46 px light numerals separated by hairlines; products by lifecycle status and open anomalies by severity as 3 px ink bars on a 1 px track (zero rows recede to `--metal`); the signing key in force; recent verification events below the fold.
+*Dashboard, 1 440 × 900.* Four figures in 46 px light numerals separated by hairlines; products by lifecycle status and open anomalies by severity as 3 px ink bars on a 1 px track (zero rows recede to `--ink-soft`); the signing key in force; recent verification events below the fold.
 
 ![Console product page for O26-J-00184: GENOME on its orbit around the seal on an ivory plate, fact sheet with status marks](assets/ui/admin-02-product.png)
 
@@ -621,7 +623,7 @@ The console is an internal instrument in the house style, not a SaaS dashboard: 
 
 ![Generator result: issued identity O26-J-00200, hidden claim code, GENOME and signed code facts, code preview and print options](assets/ui/admin-03-generator-result.png)
 
-*Generator result (full page).* The issued identity, the claim code panel after *hide*, the GENOME and the signed-code facts, and the print panel: the code preview rendered in the browser from the signed data with the same encoder as print, width, theme (Black on white, White on black, Ink on ivory), resolution, label and decor options, SVG / PNG / PDF.
+*Generator result (full page).* The issued identity, the claim code panel after *hide*, the GENOME and the signed-code facts, and the print panel: the code preview rendered in the browser from the signed data with the same encoder as print, width, theme (CLASSIC — BLACK ON WHITE, INVERTED — WHITE ON BLACK, IVORY — INK ON IVORY), resolution, label, decor, *Test print* and K-only black (PDF) options, the size advice under 30 mm, SVG / PNG / PDF.
 
 ---
 
@@ -647,20 +649,20 @@ Physical test kit: [`assets/test-sheets/orbes-code-test-sheets.pdf`](assets/test
 
 Places where the implementation departs from this system or from itself. None affects decoding or security.
 
-1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it in Helvetica Neue at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four.
+1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it in Helvetica Neue at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four. **Partly resolved (console, 2026-10-01):** the sidebar wordmark is the shared `.wordmark` (`--track-wordmark`, 0.62 em) at 15 px, no longer a copy of its values. Still open: one vector wordmark for the specimen, the print label and theorbes.com.
 2. **Ink.** theorbes.com uses `#000000`; the apps use `--ink: #0A0A0A`. ~~The scanner ground is pure `#000` (`genome/src/web/verify/styles.css`, `body[data-screen="scan"]`, `.view--scan`).~~ **Resolved (verify app, 2026-10-01):** the scanner ground and veil use `var(--ink)` (guarded by `genome/test/web/verify.brand.test.ts`). Still open: The ivory colourway prints `#111111` (`ORBES_CODE_STYLES.ivory`) but the same GENOME on the ivory plates on screen is drawn in `#0A0A0A` (`genome/src/web/admin/ui/figures.ts`, `genome/src/web/verify/genome-view.ts` via `currentColor`).
-3. **`--metal` used for text that must be read**, against its own comment ("never used for text that must be read", 2.8 : 1, 2.5 : 1 on ivory): console navigation group titles `.side__group-title`, the sign-in foot "Internal use only · All actions are recorded" `.login__foot`, zero-value bar labels `.bar--zero`, and input placeholders `.cinput::placeholder` (`genome/src/web/admin/styles.css`). The `--ink-soft` comment also states 6.4 : 1; the measured ratio is 6.7 : 1 (`brand.css`).
+3. **`--metal` used for text that must be read.** **Resolved (console, 2026-10-01):** every readable text of `genome/src/web/admin/styles.css` that was `--metal` (`.side__group-title`, `.login__foot`, `.bar--zero` labels, `.cinput::placeholder`, the sidebar and sign-in place lines, the hidden claim code) is now `--ink-soft` (6.7 : 1 on white, 6.0 : 1 on ivory); no rule sets text colour to `--metal` any more, and the `brand.css` comment states 6.7 : 1 (checked by `test/web/admin.brand.test.ts`). Was: `--metal` used, against its own comment ("never used for text that must be read", 2.8 : 1, 2.5 : 1 on ivory): console navigation group titles `.side__group-title`, the sign-in foot "Internal use only · All actions are recorded" `.login__foot`, zero-value bar labels `.bar--zero`, and input placeholders `.cinput::placeholder` (`genome/src/web/admin/styles.css`). The `--ink-soft` comment also states 6.4 : 1; the measured ratio is 6.7 : 1 (`brand.css`).
 4. ~~**The reference customers are asked to quote is 7 px.**~~ **Resolved (verify app, 2026-10-01):** `.result__meta` is now 10 px (`--fs-micro`), `--ink-soft`, tabular, without the 8 px `.nano` class. Was: Non-authentic results say "Please quote the reference below", but `REF …` is set at 7 px, `--ink-soft` (`.result__meta`, `genome/src/web/verify/styles.css`). It should be at least 10 px.
 5. ~~**Repeated sentence for owners.**~~ **Resolved (verify app, 2026-10-01):** the client notice is only added when the server message does not already mention the unusual activity, so the sentence appears once. Was: When the owner's piece has unusual activity elsewhere, the server message already says "Unusual activity has been recorded for it; ORBES Client Services can assist you." (`genome/src/server/services/copy.ts`, `UNUSUAL_ACTIVITY_OWNER_COPY`) and the client adds a notice with the same sentence (`genome/src/web/verify/view-model.ts`, line 190). One of the two should go.
 6. **A forged genome version invites a rescan.** An unsupported genome version answers MALFORMED_CODE, "This code could not be read. Please scan it again…", for a code that was read perfectly ([counterfeit simulation](reports/counterfeit-simulation.md), gap 4a; `genome/src/server/services/verification.ts`).
-7. **Favicons do not follow the SEAL proportions.** **Resolved (verify app, 2026-10-01):** `genome/src/web/verify/favicon.svg` is now core r 5.35, gap to 8.025, ring 8.025–10.7 (core 2 : gap 1 : ring 1). Still open: the console favicon. Was: `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`.
-8. **Token drift.** **Resolved (verify app, 2026-10-01):** `--track-display` (landing meta) and `--fs-lead` (problem title) are now used; every size and tracking in `genome/src/web/verify/styles.css` that equals a token uses it (8, 10, 11, 12, 15 px; 0.22, 0.28, 0.32 em). Still open: the console stylesheet and the remaining off-scale sizes. Was: `--track-display` and `--fs-lead` are defined and unused; 25 distinct tracking values and 21 pixel font sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…) are hard-coded in `genome/src/web/verify/styles.css` and `genome/src/web/admin/styles.css`.
-9. **Two primary buttons.** `brand.css` defines "the single hairline button" (outlined, fills on hover); the console's `.cbtn--primary` is filled ink and inverts on hover (`genome/src/web/admin/styles.css`). Defensible for a dense tool, but it should be a stated exception.
-10. **Status comment.** `genome/src/web/admin/model/tone.ts` describes *alert* as an "inverted label"; the CSS draws a rotated square and a bold label (`.status--alert`).
+7. **Favicons do not follow the SEAL proportions.** **Resolved (verify app, 2026-10-01):** `genome/src/web/verify/favicon.svg` is now core r 5.35, gap to 8.025, ring 8.025–10.7 (core 2 : gap 1 : ring 1). **Resolved (console, 2026-10-01):** `genome/src/web/admin/favicon.svg` uses the same seal (core r 5.35, ring 8.025–10.7) with four corner moons on ivory. Was: `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`.
+8. **Token drift.** **Resolved (verify app, 2026-10-01):** `--track-display` (landing meta) and `--fs-lead` (problem title) are now used; every size and tracking in `genome/src/web/verify/styles.css` that equals a token uses it (8, 10, 11, 12, 15 px; 0.22, 0.28, 0.32 em). **Resolved (console, 2026-10-01):** every font size and tracking in `genome/src/web/admin/styles.css` that equals a token now uses it (8, 10, 11, 12, 13 px; 0.22, 0.28, 0.32, 0.62 em). Still open: the off-scale sizes of both apps (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…), which have no token yet. Was: `--track-display` and `--fs-lead` are defined and unused; 25 distinct tracking values and 21 pixel font sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…) are hard-coded in `genome/src/web/verify/styles.css` and `genome/src/web/admin/styles.css`.
+9. **Two primary buttons.** **Resolved (console, 2026-10-01):** `.cbtn--primary` is the single hairline button (transparent, 1 px ink border, ink text; fills with ink on hover and `:focus-visible`), and artifact downloads are secondary buttons. Was: `brand.css` defines "the single hairline button" (outlined, fills on hover); the console's `.cbtn--primary` is filled ink and inverts on hover (`genome/src/web/admin/styles.css`). Defensible for a dense tool, but it should be a stated exception.
+10. **Status comment.** **Resolved (2026-10-01):** the comment now reads "rotated square (diamond) and a bold label", as `.status--alert` draws it. Was: `genome/src/web/admin/model/tone.ts` describes *alert* as an "inverted label"; the CSS draws a rotated square and a bold label (`.status--alert`).
 11. **Date formats.** `/verify` writes `1 OCT 2026 · 14:32` in local time (`genome/src/web/verify/view-model.ts`); the console writes `01 OCT 2026 · 14:32 UTC` (`genome/src/web/admin/format.ts`). UTC in the console is deliberate; the zero-padded day is not explained.
-12. **Identifier case.** The dashboard KPI uppercases the key id (`ORBES-K001-…`) through `.kpi__note { text-transform: uppercase }`, while the definition list beside it shows the true lower-case `orbes-k001-…` (`genome/src/web/admin/styles.css`, `genome/src/web/admin/model/dashboard.ts`).
-13. **Colourway names.** `classic` in the core (`ORBES_CODE_STYLES`, ORBES-CODE-SPEC §8.3) is `black` in the artifact API and console (`genome/src/server/render/scene.ts`, `genome/src/web/admin/types.ts`) and "Black on white" in the console's theme menu.
-14. **Below-minimum sizes are not flagged.** The console accepts 5–500 mm (`genome/src/web/admin/ui/artifacts.ts`, `genome/src/server/render/artifact.ts` `ARTIFACT_LIMITS`) and shows only the cell pitch. A quiet warning under 30 mm (§2.6) would prevent unreadable prints.
+12. **Identifier case.** **Resolved (2026-10-01):** `.kpi__note` no longer transforms case; the model writes the other notes in capitals and the key id in its true case. Was: the dashboard KPI uppercases the key id (`ORBES-K001-…`) through `.kpi__note { text-transform: uppercase }`, while the definition list beside it shows the true lower-case `orbes-k001-…` (`genome/src/web/admin/styles.css`, `genome/src/web/admin/model/dashboard.ts`).
+13. **Colourway names.** **Resolved (2026-10-01):** one name, `classic`, everywhere: `ArtifactTheme` is `classic | inverted | ivory` in the renderer (`genome/src/server/render/scene.ts`), the artifact and print-sheet API (`black` stays accepted as a deprecated alias of `classic`), the console and file names; the console menu reads CLASSIC — BLACK ON WHITE, INVERTED — WHITE ON BLACK, IVORY — INK ON IVORY. Was: `classic` in the core (`ORBES_CODE_STYLES`, ORBES-CODE-SPEC §8.3) is `black` in the artifact API and console (`genome/src/server/render/scene.ts`, `genome/src/web/admin/types.ts`) and "Black on white" in the console's theme menu.
+14. **Below-minimum sizes are not flagged.** **Resolved (2026-10-01):** the console warns under 30 mm (§2.6), refuses under 15 mm unless *Test print* is checked (the generator panel and the print-sheet panel alike), and the server floor (`ARTIFACT_LIMITS.minWidthMm`) is 10 mm. Was: the console accepts 5–500 mm (`genome/src/web/admin/ui/artifacts.ts`, `genome/src/server/render/artifact.ts` `ARTIFACT_LIMITS`) and shows only the cell pitch. A quiet warning under 30 mm (§2.6) would prevent unreadable prints.
 15. ~~**Specimen palette.**~~ **Resolved (2026-10-01):** `SPECIMEN_PAPER` is ivory `#F6F2EA` and `SPECIMEN_MUTED` is `--ink-soft` `#5C5C5C`; the specimen was regenerated with unchanged geometry. Was: `docs/assets/genome-01-vocabulary.svg` uses paper `#F7F5F0` and grey `#8A8780` (`SPECIMEN_PAPER`, `SPECIMEN_MUTED` in `genome/scripts/genome-symbol-study.ts`), not ivory `#F6F2EA` and `--ink-soft` / `--metal`.
 16. ~~**Quiet band wording in the spec.**~~ **Resolved (2026-10-01):** ORBES-CODE-SPEC §3, §4.7 and §9 now keep the seal quiet ring and the 2 u margin ink-free and permit, in the outer quiet band only, the decorative hairlines at r 23.5 and 24.0 at their specified tones with ≥ 0.6 u clearance. Was: ORBES-CODE-SPEC §3 counts the band "between data and moons" as a quiet zone and §9 says quiet zones "MUST be free of ink", yet the decor horizon (r 24.0) and outer guide (r 23.5) are printed in that band by design (`genome/src/core/code/primitives.ts`; the horizon is about 34 % contrast in the classic colourway). The spec should limit "free of ink" to the seal quiet ring and the outer 2 u zone, and allow decor at ≥ 0.6 u clearance.
 17. **Customer vocabulary.** The AUTHENTIC message says "registered to an active **product**" (`genome/src/server/services/copy.ts`); every other customer sentence says "piece".

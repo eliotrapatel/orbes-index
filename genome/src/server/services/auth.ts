@@ -462,6 +462,14 @@ export class AuthService {
     });
   }
 
+  /** The admin with this email (case-insensitive), or undefined. For operator tooling (scripts/admin.ts). */
+  async findAdminByEmail(email: string): Promise<AdminProfile | undefined> {
+    const e = normalizeEmail(email);
+    if (!e) return undefined;
+    const row = await this.db.selectFrom('admin_users').selectAll().where('email_normalized', '=', e.normalized).executeTakeFirst();
+    return row ? adminProfile(row) : undefined;
+  }
+
   /** Console users, by email (ADMIN view: role, second factor, lock and disable state; never secrets). */
   async listAdmins(): Promise<AdminSummary[]> {
     const rows = await this.db.selectFrom('admin_users').selectAll().orderBy('email_normalized').execute();

@@ -308,6 +308,13 @@ describe('product view model (spec §22)', () => {
   it('follows the server rules for warranty, re-issue and ownership confirmation', () => {
     const issued = detail({ warranty: null, lifecycle: { status: 'ISSUED', allowed: ['ACTIVATED'], returnTo: null, canReinstate: false } });
     expect(productActions(issued, 'OPERATOR').canActivateWarranty).toBe(true);
+    // Extension needs a started, non-void warranty (server: WARRANTY_NOT_STARTED / WARRANTY_VOID).
+    expect(productActions(issued, 'OPERATOR').canExtendWarranty).toBe(false);
+    expect(productActions(detail(), 'OPERATOR').canExtendWarranty).toBe(true);
+    expect(productActions(detail(), 'AUDITOR').canExtendWarranty).toBe(false);
+    const voided = detail();
+    voided.warranty = { ...voided.warranty!, voidedAt: '2026-05-01T00:00:00.000Z', status: 'VOID' };
+    expect(productActions(voided, 'OPERATOR').canExtendWarranty).toBe(false);
     for (const s of serverSchema.PRODUCT_STATUSES) {
       const d = detail({ warranty: null, lifecycle: { status: s, allowed: [], returnTo: null, canReinstate: false } });
       expect(productActions(d, 'OPERATOR').canActivateWarranty, s).toBe(ACTIVATABLE_STATUSES.includes(s));
@@ -504,6 +511,7 @@ describe('registry view rules', () => {
     expect(confirmationPhrase('revoke-key', 3)).toBe('REVOKE KEY 3');
     expect(confirmationPhrase('revoke-product', 'O26-J-00184')).toBe('REVOKE O26-J-00184');
     expect(confirmationPhrase('revoke-code', 2)).toBe('REVOKE ISSUE 2');
+    expect(confirmationPhrase('reset-totp', 'ops@theorbes.com')).toBe('RESET 2FA ops@theorbes.com');
     expect(phraseMatches('  revoke   key 3 ', 'REVOKE KEY 3')).toBe(true);
     expect(phraseMatches('REVOKE KEY 4', 'REVOKE KEY 3')).toBe(false);
     expect(phraseMatches('', 'ROTATE')).toBe(false);

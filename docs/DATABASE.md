@@ -9,7 +9,7 @@ Implementation:
 - `genome/src/server/db/connection.ts` (drivers, type normalisation, transactions, advisory locks)
 - `genome/src/server/db/migrate.ts` (migration runner)
 - `genome/src/server/db/pg-errors.ts` (SQLSTATE helpers)
-- `genome/src/server/services/*.ts`, `genome/src/server/keys/key-service.ts` and `genome/src/server/routes/admin/{catalog,code-revocation}.ts` (the writers)
+- `genome/src/server/services/*.ts`, `genome/src/server/keys/key-service.ts` and `genome/src/server/services/catalog.ts` (collections and models) (the writers)
 - Contract: `genome/PLATFORM-CONTRACTS.md` §1
 
 Related documents: [ARCHITECTURE](ARCHITECTURE.md) · [CRYPTOGRAPHY](CRYPTOGRAPHY.md) · [ORBES-GENOME-SPEC](ORBES-GENOME-SPEC.md) · [SECURITY-MODEL](SECURITY-MODEL.md) · [API](API.md)
@@ -122,9 +122,10 @@ PGlite has a **single connection**. Kysely serialises access to it, which is why
 - **Enumerations:** `text` columns with `CHECK (… IN (…))`, which are simpler to migrate than PostgreSQL enums.
 - **Foreign keys:** every foreign key is `ON DELETE RESTRICT` and every foreign-key column is the leading column of an index (checked by `test/db/migrations.test.ts`).
 - **Integrity guards** (defence in depth against application bugs and ad-hoc SQL), all raising SQLSTATE `OR001`:
-  - `audit_logs` is append-only: `UPDATE`, `DELETE` and `TRUNCATE` are rejected;
+  - `audit_logs` and `product_status_history` are append-only: `UPDATE`, `DELETE` and `TRUNCATE` are rejected;
   - `categories.id` and `categories.code` are immutable and categories are never deleted;
-  - the cryptographic identity columns of `products`, `codes` and `cryptographic_keys` are immutable, and `genomes` rows cannot be updated at all.
+  - the cryptographic identity columns of `products`, `codes` and `cryptographic_keys` are immutable; `genomes` rows cannot be updated at all;
+  - `genomes` and `cryptographic_keys` rows are never deleted (`DELETE` and `TRUNCATE` raise): a key id is a 1-byte value signed into every code and must never be reused.
 - **`updated_at`:** maintained by the trigger function `orbes_touch_updated_at()` on `products`, `accounts`, `admin_users` and `warranties`. Services pass their injectable clock explicitly; when a statement leaves `updated_at` unchanged (including setting it to its current value), the trigger stamps `now()` (the transaction start time).
 - **No business seed data.** The migration creates no categories, models, keys or users. Categories, collections and models are created through the admin API. The first admin is created at startup from `BOOTSTRAP_ADMIN_*`; the first signing key is created at startup in development and test, and through `POST /api/admin/keys/rotate` in production (§9.4).
 
@@ -272,7 +273,7 @@ Product categories and their **immutable 5-bit index**. The index is packed into
 | `name` | `text` | NOT NULL | — | UNIQUE. `CHECK (length(btrim(name)) > 0)`. The API limits it to 100 characters. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 
-- **Written by:** the route `POST /api/admin/collections` (OPERATOR), which inserts the row and the audit entry `collection.create` in one transaction. No update or delete path exists.
+- **Written by:** `CatalogService.createCollection` (`POST /api/admin/collections`, OPERATOR), which inserts the row and the audit entry `collection.create` in one transaction. No update or delete path exists.
 
 ### 5.3 `models`
 
@@ -289,7 +290,7 @@ Product categories and their **immutable 5-bit index**. The index is packed into
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 
 - **Indexes:** primary key; unique `sku_prefix`; `models_collection_id_idx (collection_id)`; `models_category_id_idx (category_id)`.
-- **Written by:** the route `POST /api/admin/models` (OPERATOR), insert plus audit `model.create` in one transaction. No update or delete path exists.
+- **Written by:** `CatalogService.createModel` (`POST /api/admin/models`, OPERATOR), insert plus audit `model.create` in one transaction. No update or delete path exists.
 
 ### 5.4 `products`
 
@@ -348,7 +349,7 @@ Every status a product has held, oldest first. The lifecycle's "return to the pr
 | `created_at` | `timestamptz` | NOT NULL | `now()` | The service bumps it by 1 ms past the latest row when the clock has not moved, so the order per product is strict. |
 
 - **Indexes:** primary key; `product_status_history_product_idx (product_id, created_at)`.
-- **Triggers:** none. The table is append-only by convention: no code path updates or deletes rows, but the database does not enforce it. Editing it changes where a recovery or reinstatement leads.
+- **Triggers:** `product_status_history_append_only` (BEFORE UPDATE OR DELETE) and `product_status_history_no_truncate` reject every change with "product_status_history is append-only" (`OR001`, migration `0002_platform_guards`). Editing the history would change where a recovery or reinstatement leads.
 - **Written by:** `IssuanceService` (the `NULL → ISSUED` row, reason `Product issued`) and `LifecycleService.apply` (every other change, in the same transaction as the status update and its audit entry).
 
 ### 5.6 `genomes`
@@ -368,7 +369,7 @@ The GENOME-01 visual identity of a product. It is a pure function of the signed 
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 
 - **Indexes:** primary key; unique `(product_id, genome_version)`; unique `(genome_version, value)`; unique `fingerprint`. The two last constraints restate the genome bijection as a database invariant.
-- **Triggers:** `genomes_immutable` (BEFORE UPDATE) rejects every update with "genomes are immutable" (`OR001`). Deletion is not trigger-guarded; it is blocked by the `RESTRICT` foreign key from `codes.genome_id` whenever a code references the genome.
+- **Triggers:** `genomes_immutable` (BEFORE UPDATE) rejects every update with "genomes are immutable"; `genomes_no_delete` and `genomes_no_truncate` (migration `0002_platform_guards`) reject deletion with "genomes are permanent" (`OR001`), even for a genome no code references.
 - **Written by:** `IssuanceService.issueProduct` only.
 
 ### 5.7 `cryptographic_keys`
@@ -380,7 +381,7 @@ The public registry of Ed25519 signing keys. Private keys stay with the key cust
 | `key_id` | `smallint` | NOT NULL | — | PK. `CHECK (key_id BETWEEN 1 AND 255)`. Allocated by `KeyService` as the lowest unused id; never reused. Carried in every code payload. Immutable. |
 | `kid` | `text` | NOT NULL | — | UNIQUE, non-blank. Default label `orbes-k<NNN>-<yyyymmdd>-<4 hex>`; custom labels must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. Immutable. |
 | `algorithm` | `text` | NOT NULL | `'Ed25519'` | `CHECK (algorithm = 'Ed25519')`. Immutable. |
-| `public_key` | `bytea` | NOT NULL | — | UNIQUE. `CHECK (octet_length(public_key) = 32)`. The service also refuses non-canonical and small-order points. Immutable. |
+| `public_key` | `bytea` | NOT NULL | — | UNIQUE. `CHECK (octet_length(public_key) = 32)`. The service also refuses non-canonical and small-order points (`isStrictEd25519PublicKey`, the same rule verification applies). Immutable. |
 | `status` | `text` | NOT NULL | — | `CHECK (status IN ('ACTIVE','RETIRED','REVOKED'))` |
 | `provider` | `text` | NOT NULL | — | Custody provider name (`local`, `memory`). Immutable. |
 | `provider_ref` | `text` | NOT NULL | — | Opaque provider reference (file name, KMS key reference). **Never a secret.** Immutable. |
@@ -398,7 +399,7 @@ The public registry of Ed25519 signing keys. Private keys stay with the key cust
 | `REVOKED` | No | Only codes recorded before the cut-off (`compromised_at`, else `revoked_at`). Otherwise the result is `INVALID_SIGNATURE`. |
 
 - **Indexes:** primary key; unique `kid`; unique `public_key`; `cryptographic_keys_single_active`: unique `(status) WHERE status = 'ACTIVE'`.
-- **Triggers:** `cryptographic_keys_immutable_identity` guards `key_id`, `kid`, `algorithm`, `public_key`, `provider`, `provider_ref`, `created_at` (`OR001`).
+- **Triggers:** `cryptographic_keys_immutable_identity` guards `key_id`, `kid`, `algorithm`, `public_key`, `provider`, `provider_ref`, `created_at` (`OR001`). `cryptographic_keys_no_delete` and `cryptographic_keys_no_truncate` (migration `0002_platform_guards`) reject deletion ("key ids are never reused; retire or revoke the key instead"): a deleted row would let `KeyService` allocate its id to a new key, and every code carrying that id would then be judged against the wrong public key.
 - **Written by:** `KeyService` under the `KEY_ROTATION` advisory lock: `rotate` / `ensureActiveKey` (insert ACTIVE; the previous ACTIVE row becomes RETIRED first), `retire`, `revoke` (also inserts a `revocations` row), and a repeated `revoke` that may only move `compromised_at` earlier. Audit actions `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`. Rows are never deleted.
 
 ### 5.8 `codes`
@@ -431,7 +432,7 @@ Every ORBES CODE ever signed. The `payload` and `signature` are exactly what is 
 
 - **Indexes:** primary key; unique `(product_id, issue)`; unique `payload_hash`; `codes_single_active_per_product`: unique `(product_id) WHERE status = 'ACTIVE'`; `codes_genome_id_idx`; `codes_key_id_idx`.
 - **Triggers:** `codes_immutable_identity` guards every column except `status`, `revoked_at` and `revocation_reason` (`OR001`).
-- **Written by:** `IssuanceService` (`issueProduct`, `reissueCode`; audit `product.issue`, `code.reissue`) and the code-revocation helper in `routes/admin/code-revocation.ts` (audit `code.revoke`, plus a `revocations` row). Before an artifact is rendered, the stored row is re-verified end to end (payload fields, hash, genome, key trust, signature); a tampered row is refused.
+- **Written by:** `IssuanceService` (`issueProduct`, `reissueCode`, `revokeCode`; audit `product.issue`, `code.reissue`, `code.revoke`; a revocation also inserts a `revocations` row). Before an artifact is rendered, the stored row is re-verified end to end (payload fields, hash, genome, key trust, signature); a tampered row is refused.
 
 ### 5.9 `accounts`
 
@@ -444,14 +445,16 @@ Customer accounts.
 | `email_normalized` | `text` | NOT NULL | — | UNIQUE. Lower-cased `email`: the lookup key. |
 | `password_hash` | `text` | NOT NULL | — | scrypt, `scrypt$15$8$1$<salt>$<hash>`. Re-hashed on login when parameters change. |
 | `display_name` | `text` | NULL | — | ≤ 80 characters, no control characters or `<` `>`. |
-| `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')`. The HTTP registration body has no country field, so it stays NULL for accounts created through the API. |
+| `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')`. Optional `country` of the registration body (ISO 3166-1 alpha-2, stored upper case). |
 | `status` | `text` | NOT NULL | `'ACTIVE'` | `CHECK (status IN ('ACTIVE','LOCKED','DELETED'))`. Only ACTIVE accounts can log in or use a session. No code path sets LOCKED or DELETED in this version. |
+| `failed_logins` | `int` | NOT NULL | `0` | `CHECK (failed_logins >= 0)`. Wrong passwords in the current throttle window (migration `0002_platform_guards`). From 10 within 15 minutes, logins to the account are refused with the generic `INVALID_CREDENTIALS` until the window ends; reset to 0 by a successful login. |
+| `failed_logins_since` | `timestamptz` | NULL | — | Start of the throttle window (the first failure); NULL when there is none. A failure after the window has ended starts a new one. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL | `now()` | Trigger-maintained. |
 
 - **Indexes:** primary key; unique `email_normalized`.
 - **Triggers:** `accounts_touch_updated_at`.
-- **Written by:** `AuthService.registerAccount` (audit `account.register`), `AuthService.login` (password re-hash only), `AuthService.changePassword` (service only, no HTTP route).
+- **Written by:** `AuthService.registerAccount` (audit `account.register`), `AuthService.login` (password re-hash; throttle counter, audit `account.login_failed` with `failedLogins`, `account.login_throttled`), `AuthService.changePassword` (service only, no HTTP route).
 - **Privacy:** `email` and `display_name` are personal data. They are **never written to `audit_logs`**, whose entries name account ids only, so that an erasure request does not collide with the append-only log.
 
 ### 5.10 `admin_users`
@@ -525,7 +528,7 @@ Transfer offers from the current owner to another account.
 | `product_id` | `uuid` | NOT NULL | — | FK → `products.id` |
 | `from_account_id` | `uuid` | NOT NULL | — | FK → `accounts.id` |
 | `to_account_id` | `uuid` | NULL | — | FK → `accounts.id`. Set on acceptance. |
-| `token_hash` | `bytea` | NOT NULL | — | UNIQUE. `CHECK (octet_length = 32)`. SHA-256 of `"ORBES-TRANSFER/v1" ‖ 0x00 ‖` the canonical 12-character transfer code. The code (`XXXX-XXXX-XXXX`, 60 bits) is shown once to the sender. |
+| `token_hash` | `bytea` | NOT NULL | — | UNIQUE. `CHECK (octet_length = 32)`. HMAC-SHA256 of the canonical 12-character transfer code under a server key derived with HKDF-SHA256 from `COOKIE_SECRET` (salt `ORBES`, info `orbes/transfer-code/v1`). Deterministic, so the lookup is a unique-index probe; keyed, so a leaked table cannot be brute-forced offline. The code (`XXXX-XXXX-XXXX`, 60 bits) is shown once to the sender. Rotating `COOKIE_SECRET` invalidates pending codes. |
 | `status` | `text` | NOT NULL | `'PENDING'` | `CHECK (status IN ('PENDING','ACCEPTED','CANCELLED','EXPIRED'))` |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 | `expires_at` | `timestamptz` | NOT NULL | — | Creation + 7 days. |
@@ -616,7 +619,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 - **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_occurred_at_idx (occurred_at)`.
 - **Written by:** `VerificationService.verify` only, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token.
 - **Privacy:**
-  - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
+  - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie, `__Host-orbes_device` in production) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
   - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`). With `GEO_MODE=none` (the default), no location is stored.
   - No raw user-agent string is stored here, only the family.
   - Retention: no automatic purge is implemented (§10).
@@ -702,7 +705,7 @@ Register of revocations of codes, products and keys.
 | `lifted_by` | `text` | NULL | — | |
 
 - **Indexes:** primary key; `revocations_target_idx (target_type, target_id)`.
-- **Written by:** `LifecycleService` (a transition to REVOKED inserts a PRODUCT row; reinstatement lifts it), the code-revocation helper (CODE), `KeyService.revoke` (KEY). A code superseded by re-issue gets no revocation row.
+- **Written by:** `LifecycleService` (a transition to REVOKED inserts a PRODUCT row; reinstatement lifts it), `IssuanceService.revokeCode` (CODE), `KeyService.revoke` (KEY). A code superseded by re-issue gets no revocation row.
 
 ### 5.21 `audit_logs`
 
@@ -794,7 +797,7 @@ The state machine is data (`TRANSITIONS` in `services/lifecycle.ts`). Every chan
 | `REGISTERED` | Registered to an owner without proof (no claim code) | First registration without a claim code, admin transition | Owned: `AUTHENTIC_REGISTERED` / `AUTHENTIC_OWNERSHIP_VERIFIED` |
 | `OWNED` | Registered with proof (claim code, or confirmed by client services) | First registration with claim code, ownership confirmation, admin transition | as above |
 | `TRANSFERRED` | Changed hands through an accepted transfer | Transfer acceptance, admin transition | as above |
-| `SERVICED` | In after-sales service | Opening a service record, admin transition | Unowned: `AUTHENTIC_FIRST_REGISTRATION`; owned: as above |
+| `SERVICED` | In service: after-sales, or a pre-sale inspection / quality control (entered from ISSUED) | Opening a service record, admin transition | Unowned after sale: `AUTHENTIC_FIRST_REGISTRATION`; owned: as above. A pre-sale service is not open for first registration. |
 | `RESOLD` | Resold through a channel | Admin transition only | Unowned: `AUTHENTIC_FIRST_REGISTRATION`; owned: as above |
 | `RETIRED` | Out of circulation (terminal) | Admin transition | `REVOKED` |
 | `REVOKED` | Identity revoked | Admin transition (ADMIN role) or revocation | `REVOKED` |
@@ -810,21 +813,21 @@ Further effects: codes cannot be rendered for printing while the product is RETI
 
 | From | Allowed next statuses |
 |---|---|
-| `ISSUED` | ACTIVATED, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
+| `ISSUED` | ACTIVATED, SERVICED (pre-sale inspection / quality control), RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `ACTIVATED` | REGISTERED, OWNED, SERVICED, RESOLD, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `REGISTERED` | OWNED, TRANSFERRED, SERVICED, RESOLD, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `OWNED` | TRANSFERRED, SERVICED, RESOLD, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `TRANSFERRED` | OWNED, TRANSFERRED, SERVICED, RESOLD, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
-| `SERVICED` | Return to the pre-service status (one of ACTIVATED, REGISTERED, OWNED, TRANSFERRED, RESOLD); RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
+| `SERVICED` | Return to the pre-service status (one of ISSUED, ACTIVATED, REGISTERED, OWNED, TRANSFERRED, RESOLD); RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `RESOLD` | REGISTERED, OWNED, SERVICED, RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST, STOLEN |
 | `LOST`, `STOLEN` | Return to the previous status (one of ISSUED, ACTIVATED, REGISTERED, OWNED, TRANSFERRED, SERVICED, RESOLD); RETIRED, REVOKED |
 | `COUNTERFEIT_FLAGGED` | Return to the previous status (same set); REVOKED, RETIRED |
 | `REVOKED` | None through `transition`. Only reinstatement, back to the status held before the revocation (ADMIN). |
 | `RETIRED` | None (terminal) |
 
-"Return" moves are allowed only towards the one status held before the current episode. That status is derived by replaying `product_status_history`, never stored separately. When it cannot be determined (history edited outside the service), the move fails with `PREVIOUS_STATUS_UNKNOWN`. One exception: a first registration may move a SERVICED product to REGISTERED or OWNED even when that is not its pre-service status.
+"Return" moves are allowed only towards the one status held before the current episode. That status is derived by replaying `product_status_history`, never stored separately. When it cannot be determined (history edited outside the service), the move fails with `PREVIOUS_STATUS_UNKNOWN`. One exception: a first registration may move a SERVICED product to REGISTERED or OWNED even when that is not its pre-service status, **unless the service started before sale** (ISSUED → SERVICED, `isPreSaleService`): such a piece was never sold and returns to ISSUED when its service record is completed.
 
-Note that ISSUED → SERVICED is not allowed, so a service record cannot be opened for an unsold product.
+ISSUED → SERVICED is allowed for pre-sale inspection and quality control: a service record can be opened for an unsold product, and completing it returns the product to ISSUED.
 
 ### 7.3 Ownership state
 
@@ -883,7 +886,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 
 ### 9.1 Layout
 
-- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled). Today there is one: `0001_initial`.
+- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), and any later entry of `MIGRATIONS`.
 - A migration is a list of SQL strings executed one by one: PGlite runs queries through the extended protocol, which refuses multi-statement strings.
 - Value lists for `CHECK` constraints are literal in the migration, so a migration never changes when application constants evolve; a test asserts they still match `schema.ts`.
 - Rules: append new migrations to `MIGRATIONS`; never edit an applied migration.
@@ -892,8 +895,8 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 ### 9.2 Behaviour
 
 - `migrateToLatest(db)` applies every pending migration and returns the names applied; a failure throws `MigrationError` naming the failed migration.
-- On PostgreSQL, Kysely takes a session-level advisory lock for the run and executes the pending migrations inside **one transaction** (transactional DDL). Instances that start together therefore apply each migration exactly once, and a failed run leaves the schema unchanged.
-- `migrationStatus(db)` lists every known migration with its execution time. `migrateDown(db)` rolls back the most recent migration; it is development tooling only (`0001_initial`'s down step drops every object).
+- Kysely 0.29 runs **all pending migrations of one call inside one transaction** (transactional DDL), under an advisory lock on PostgreSQL. Instances that start together therefore apply each migration exactly once, and a failure rolls back every migration of that run, not only the failing one: the schema is left unchanged. Migrations must therefore be transaction-safe (no `CREATE INDEX CONCURRENTLY`, no `VACUUM`).
+- `migrationStatus(db)` lists every known migration with its execution time. `migrateDown(db)` rolls back the most recent migration; it is development tooling only (`scripts/db.ts reset-demo` rolls back one migration at a time until none is applied; `0001_initial`'s down step drops every object).
 
 ### 9.3 How to run them
 
@@ -901,7 +904,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 |---|---|
 | Development, test | Automatic: `createContext()` applies pending migrations at startup whenever the environment is `development` or `test` (`npm run dev`, `npm start`, and every test database). |
 | Production | **Not automatic.** Start the server with `--migrate` (`npm start -- --migrate`) or with `MIGRATE_ON_START` set to `1`, `true` or `yes` (case-insensitive). Without either, the server refuses to start when migrations are pending, with "database schema is not up to date (pending: …); run the migrations first". |
-| Stand-alone | `package.json` declares `npm run db:migrate` (`tsx scripts/db.ts migrate`) and `npm run db:seed`. **`scripts/db.ts` is not present in the repository at the time of writing, so these commands fail.** Until it exists, use the production start-up flag, or call `migrateToLatest(createDb(DATABASE_URL))` from a one-off script. |
+| Stand-alone | `scripts/db.ts` against `DATABASE_URL`: `npm run db:migrate` (apply pending migrations; safe in production), `npm run db:status` (applied / PENDING per migration, `--json`), `npm run db:seed` (demo dataset into an empty database; refused in production) and `npm run db:reset-demo` (`tsx scripts/db.ts reset-demo --yes [--force]`: roll every migration back, migrate and reseed; refused in production). Signing keys: `scripts/keys.ts` (`npm run keys:generate`, `keys:rotate`, `keys:list`; `tsx scripts/keys.ts retire <id> --yes`, `revoke <id> --reason … [--compromised-at …] --yes`). Console users: `scripts/admin.ts` (`create`, `list`, `totp-setup`, `totp-enable`, `reset-totp`). See [DEPLOYMENT](DEPLOYMENT.md). |
 
 Recommended production procedure: run the migration once, from a single deployment step with a role that owns the schema, then start the application instances without `--migrate` (they verify that nothing is pending).
 
@@ -911,7 +914,7 @@ After the schema is current, `createContext()` also:
 
 - loads the category cache;
 - creates the bootstrap ADMIN from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` when no admin exists (idempotent and race-safe);
-- in development and test, creates a signing key when none is ACTIVE; in production, runs a signing self-test instead and logs an error (issuance unavailable, verification unaffected) when there is no usable ACTIVE key. An ADMIN then creates one with `POST /api/admin/keys/rotate`.
+- in development and test, creates a signing key when none is ACTIVE; in production, runs a signing self-test instead and logs an error (issuance unavailable, verification unaffected) when there is no usable ACTIVE key. An ADMIN then creates one with `POST /api/admin/keys/rotate`, or an operator with `npm run keys:generate`.
 
 ---
 

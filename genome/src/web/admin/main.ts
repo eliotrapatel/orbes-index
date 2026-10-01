@@ -137,7 +137,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     h(
       'aside',
       { class: 'side' },
-      h('a', { class: 'side__brand', attrs: { href: href('dashboard') } }, h('span', { class: 'side__wordmark' }, 'Orbes'), h('span', { class: 'side__product' }, 'Genome console')),
+      h('a', { class: 'side__brand', attrs: { href: href('dashboard') } }, h('span', { class: ['wordmark', 'side__wordmark'] }, 'Orbes'), h('span', { class: 'side__product' }, 'Genome console')),
       nav,
       h(
         'div',

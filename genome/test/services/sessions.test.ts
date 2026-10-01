@@ -5,6 +5,7 @@ import {
   checkCsrf,
   hashSessionToken,
   SESSION_COOKIE,
+  sessionCookieName,
   sessionCookieOptions,
   SessionService,
 } from '../../src/server/services/sessions.js';
@@ -179,6 +180,13 @@ describe('CSRF and cookies', () => {
 
   it('cookie names and attributes follow the contract', () => {
     expect(SESSION_COOKIE).toEqual({ account: 'orbes_session', admin: 'orbes_admin' });
+    // Production: the __Host- prefix (Secure, Path=/, no Domain) so no subdomain or plain-HTTP response can plant or shadow them.
+    expect(sessionCookieName({ env: 'production' }, 'account')).toBe('__Host-orbes_session');
+    expect(sessionCookieName({ env: 'production' }, 'admin')).toBe('__Host-orbes_admin');
+    expect(sessionCookieName({ env: 'development' }, 'admin')).toBe('orbes_admin');
+    expect(sessionCookieName({ env: 'test' }, 'account')).toBe('orbes_session');
+    expect(sessionCookieOptions({ env: 'production' })).toMatchObject({ secure: true, path: '/' });
+    expect(sessionCookieOptions({ env: 'production' })).not.toHaveProperty('domain');
     const exp = new Date('2026-05-01T00:00:00Z');
     expect(sessionCookieOptions({ env: 'production' }, exp)).toEqual({ httpOnly: true, secure: true, sameSite: 'strict', path: '/', expires: exp });
     expect(sessionCookieOptions({ env: 'development' })).toEqual({ httpOnly: true, secure: false, sameSite: 'strict', path: '/' });

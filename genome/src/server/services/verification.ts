@@ -41,6 +41,7 @@ import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { ANOMALY_WEIGHTS, type ServiceFindingType } from './anomaly-rules.js';
 import type { AnomalyFinding, AnomalyService } from './anomaly.js';
 import { copyFor } from './copy.js';
+import { isPreSaleService } from './lifecycle.js';
 import { createScanToken, SCAN_TOKEN_TTL_MS } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantyStatus } from './warranty.js';
 
@@ -314,7 +315,8 @@ export class VerificationService {
         if (w.state === undefined) {
           if (w.isOwner) w.state = 'AUTHENTIC_OWNERSHIP_VERIFIED';
           else if (reg.ownerAccountId !== null) w.state = 'AUTHENTIC_REGISTERED';
-          else if (REGISTRABLE.includes(reg.status)) {
+          // A pre-sale service (ISSUED → SERVICED) was never sold: not open for first registration.
+          else if (REGISTRABLE.includes(reg.status) && !(await isPreSaleService(trx, { id: reg.productUuid, status: reg.status }))) {
             w.state = 'AUTHENTIC_FIRST_REGISTRATION';
             const token = await createScanToken(trx, {
               productId: reg.productUuid,

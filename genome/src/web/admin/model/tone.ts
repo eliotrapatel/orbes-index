@@ -7,7 +7,7 @@
  *   solid    filled black mark: in force (ACTIVE, OWNED, AUTHENTIC)
  *   outline  hollow mark: pending / in progress (ISSUED, OPEN, NOT STARTED)
  *   muted    grey: historical (RETIRED, SUPERSEDED, RESOLVED, EXPIRED)
- *   alert    inverted label: needs attention (REVOKED, LOST, SUSPICIOUS)
+ *   alert    rotated square (diamond) and a bold label: needs attention (REVOKED, LOST, SUSPICIOUS)
  *   critical red: act now
  */
 export type Tone = 'solid' | 'outline' | 'muted' | 'alert' | 'critical';

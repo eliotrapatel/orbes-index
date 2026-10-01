@@ -40,7 +40,7 @@ export interface ArtifactOptions {
    * PDF only, classic and inverted only: write every colour as a DeviceCMYK
    * K value (ink K 100 %, tones as K tints, white as no ink) instead of RGB,
    * so a print shop's conversion cannot turn the black into a four-colour
-   * rich black that misregisters at small sizes. See ORBES-CODE-SPEC §10.
+   * rich black that misregisters at small sizes. Limitations: docs/API.md §15.2.
    */
   kOnly?: boolean;
 }

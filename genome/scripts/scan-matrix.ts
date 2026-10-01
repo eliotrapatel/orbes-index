@@ -16,7 +16,9 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CODE01_SIZE } from '../src/core/code/profile.js';
+import { MAX_RS_ERASURES } from '../src/core/decoder/decode.js';
 import { decodeOrbesCode } from '../src/core/decoder/index.js';
+import { HEAVY_CORRECTION_LOAD } from '../src/web/verify/capture.js';
 import { renderCode, makeCode, SOURCE_PX_PER_U, type CodeFixture } from '../test/decoder/fixtures.js';
 import { writePng } from '../test/support/image-io.js';
 import { PRESETS, simulateCapture, type CaptureParams, type Substrate } from '../test/support/camera-sim.js';
@@ -263,6 +265,10 @@ interface LevelResult {
   ok: number;
   times: number[];
   failures: Record<string, number>;
+  /** Correct reads whose correction load (2·errors + erasures) exceeds HEAVY_CORRECTION_LOAD: the verify app confirms them with a second frame. */
+  heavy: number;
+  /** Largest Reed-Solomon erasure count of a correct read. */
+  maxErasures: number;
 }
 
 function percentile(values: number[], p: number): number {
@@ -289,7 +295,7 @@ function codeFor(index: number): CodeFixture {
 const CODE_POOL = 12;
 
 function runLevel(sweep: Sweep, level: Level, trials: number): LevelResult {
-  const result: LevelResult = { label: level.label, trials, ok: 0, times: [], failures: {} };
+  const result: LevelResult = { label: level.label, trials, ok: 0, times: [], failures: {}, heavy: 0, maxErasures: 0 };
   for (let t = 0; t < trials; t++) {
     const seed = hashSeed('scan-matrix', sweep.name, level.label, t);
     const rng = new Prng(seed);
@@ -308,8 +314,11 @@ function runLevel(sweep: Sweep, level: Level, trials: number): LevelResult {
     const res = decodeOrbesCode(frame);
     result.times.push(res.ok ? res.quality.elapsedMs : res.elapsedMs);
     const correct = res.ok && res.data.every((b, i) => b === code.data[i]);
-    if (correct) result.ok++;
-    else {
+    if (correct) {
+      result.ok++;
+      if (2 * res.quality.rsErrors + res.quality.rsErasures > HEAVY_CORRECTION_LOAD) result.heavy++;
+      result.maxErasures = Math.max(result.maxErasures, res.quality.rsErasures);
+    } else {
       const reason = res.ok ? 'WRONG_DATA' : res.reason;
       result.failures[reason] = (result.failures[reason] ?? 0) + 1;
       if (verbose) console.log(`    ✗ ${sweep.name} / ${level.label} / trial ${t}: ${reason}${res.ok ? '' : ` (${res.detail ?? ''})`}`);
@@ -420,6 +429,21 @@ function writeReport(results: { sweep: Sweep; levels: LevelResult[] }[], fp: { f
     }
     lines.push('');
   }
+  const levelsAll = results.flatMap((r) => r.levels);
+  const reads = levelsAll.reduce((n, l) => n + l.ok, 0);
+  const heavy = levelsAll.reduce((n, l) => n + l.heavy, 0);
+  const maxErasures = levelsAll.reduce((m, l) => Math.max(m, l.maxErasures), 0);
+  const heavyWhere = results.flatMap((r) => r.levels.filter((l) => l.heavy > 0).map((l) => `${r.sweep.title} · ${l.label} (${l.heavy})`));
+  lines.push('## Miscorrection safety');
+  lines.push('');
+  lines.push(
+    `A miscorrected word that passes CRC-16 would reach the server as a well-formed code with a wrong signature and show a genuine piece as INVALID SIGNATURE (ORBES-CODE-SPEC §11). The decoder therefore never erases more than **${MAX_RS_ERASURES}** codeword bytes, keeping at least 15 of the 85 parity bytes to check the rest (80 before 2026-10-01: 18 miscorrections in 100 000 random words at 80 erasures, 0 in 100 000 at 70), and the verify app holds a read whose correction load 2·errors + erasures exceeds ${HEAVY_CORRECTION_LOAD} until a second, independent frame decodes to identical data.`,
+  );
+  lines.push('');
+  lines.push(
+    `In this run: largest erasure count of a correct read **${maxErasures}**; correct reads above the confirmation load **${heavy} of ${reads}** (${reads ? ((100 * heavy) / reads).toFixed(1) : '0'} %)${heavyWhere.length ? `: ${heavyWhere.join('; ')}` : ''}. A held read costs one more frame (≥ 120 ms) in the live scanner. Lowering the cap from 80 to 70 left every success rate in this matrix unchanged (re-run of 2026-10-01 against the previous report).`,
+  );
+  lines.push('');
   lines.push('## Smallest reliable printed size');
   lines.push('');
   if (typical === null) {

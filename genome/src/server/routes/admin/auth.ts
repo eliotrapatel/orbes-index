@@ -30,7 +30,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
       const b = parse(adminLoginBody, request.body);
       const { admin, session } = await auth.adminLogin(
         { email: b.email, password: b.password, totp: b.totp ?? null },
-        clientMeta(request, 'admin', userAgentOf(request)),
+        clientMeta(request, ctx.config, 'admin', userAgentOf(request)),
       );
       setSessionCookie(reply, ctx.config, 'admin', session);
       return { admin: adminJson(admin), csrfToken: session.csrfToken, mfaPassed: session.mfaPassed, mfaRequired: requireMfa };
@@ -41,7 +41,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     '/api/admin/auth/logout',
     { config: { guard: { session: 'optional', mfaExempt: true, minRole: 'AUDITOR' } } },
     async (request, reply) => {
-      const token = sessionToken(request, 'admin');
+      const token = sessionToken(request, ctx.config, 'admin');
       if (token && request.orbes.admin) await auth.logout(token, 'admin', { ipHash: request.orbes.ipHash });
       clearSessionCookie(reply, ctx.config, 'admin');
       return { ok: true };

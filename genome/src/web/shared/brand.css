@@ -17,7 +17,7 @@
   --white: #ffffff;
   --ivory: #f6f2ea;
   --ink: #0a0a0a;
-  /* Secondary text: the darkest grey that still reads as "quiet" (6.4:1 on white, AA). */
+  /* Secondary text: the darkest grey that still reads as "quiet" (6.7:1 on white, 6.0:1 on ivory; AA). */
   --ink-soft: #5c5c5c;
   /* Decorative only (rules, glyph separators): 2.8:1, never used for text that must be read. */
   --metal: #9a9a9a;

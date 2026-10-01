@@ -365,8 +365,7 @@ export class LifecycleService {
    */
   async isPreSaleService(productId: string, trx?: Db): Promise<boolean> {
     const db = trx ?? this.db;
-    const product = await requireProduct(db, productId);
-    return product.status === 'SERVICED' && (await this.returnTargetOf(db, product)) === 'ISSUED';
+    return isPreSaleService(db, await requireProduct(db, productId));
   }
 
   /**
@@ -396,30 +395,11 @@ export class LifecycleService {
   // ── internals ────────────────────────────────────────────────────────────
 
   private async returnTargetOf(db: Db, product: ProductRow): Promise<ProductStatus | null> {
-    if (!SUSPENDING_STATUSES.includes(product.status)) return null;
-    const rows = await this.loadHistory(db, product.id);
-    return returnTargetFromHistory(rows, product.status);
+    return returnTargetOf(db, product);
   }
 
   private async loadHistory(db: Db, productUuid: string) {
-    const rows = await db
-      .selectFrom('product_status_history')
-      .select(['id', 'from_status', 'to_status', 'reason', 'actor_type', 'actor_id', 'created_at'])
-      .where('product_id', '=', productUuid)
-      .orderBy('created_at', 'asc')
-      .orderBy('id', 'asc')
-      .execute();
-    return orderHistory(
-      rows.map((r) => ({
-        id: r.id,
-        from: r.from_status,
-        to: r.to_status,
-        reason: r.reason,
-        actorType: r.actor_type,
-        actorId: r.actor_id,
-        at: r.created_at,
-      })),
-    );
+    return loadStatusHistory(db, productUuid);
   }
 
   private async apply(
@@ -531,4 +511,41 @@ function previousUnknown(status: ProductStatus): DomainError {
   return new DomainError('PREVIOUS_STATUS_UNKNOWN', 409, 'The previous status of this product cannot be determined.', {
     detail: `no return target recorded for ${status}`,
   });
+}
+
+/** Where a return move from the product's current status leads, or null (pure read of the history). */
+export async function returnTargetOf(db: Db, product: Pick<ProductRow, 'id' | 'status'>): Promise<ProductStatus | null> {
+  if (!SUSPENDING_STATUSES.includes(product.status)) return null;
+  return returnTargetFromHistory(await loadStatusHistory(db, product.id), product.status);
+}
+
+/**
+ * A SERVICED product whose service started before sale (ISSUED → SERVICED:
+ * inspection, quality control): never sold, so not open for first
+ * registration (ownership registration and verification step 10).
+ */
+export async function isPreSaleService(db: Db, product: Pick<ProductRow, 'id' | 'status'>): Promise<boolean> {
+  return product.status === 'SERVICED' && (await returnTargetOf(db, product)) === 'ISSUED';
+}
+
+/** A product's status history, oldest first (ties ordered by chaining from → to). */
+export async function loadStatusHistory(db: Db, productUuid: string) {
+  const rows = await db
+    .selectFrom('product_status_history')
+    .select(['id', 'from_status', 'to_status', 'reason', 'actor_type', 'actor_id', 'created_at'])
+    .where('product_id', '=', productUuid)
+    .orderBy('created_at', 'asc')
+    .orderBy('id', 'asc')
+    .execute();
+  return orderHistory(
+    rows.map((r) => ({
+      id: r.id,
+      from: r.from_status,
+      to: r.to_status,
+      reason: r.reason,
+      actorType: r.actor_type,
+      actorId: r.actor_id,
+      at: r.created_at,
+    })),
+  );
 }

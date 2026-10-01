@@ -64,20 +64,21 @@ export function severityBars(bySeverity: Partial<Record<string, number>>): BarRo
 export function dashboardKpis(d: DashboardData): Kpi[] {
   const critical = d.anomalies.openBySeverity.CRITICAL ?? 0;
   return [
-    { key: 'products', label: 'Products', value: formatCount(d.products.total), note: 'Issued identities', tone: 'solid' },
-    { key: 'scans24', label: 'Verifications · 24 h', value: formatCount(d.scans.last24h), note: `${formatCount(d.scans.last7d)} in 7 days`, tone: 'solid' },
+    { key: 'products', label: 'Products', value: formatCount(d.products.total), note: 'ISSUED IDENTITIES', tone: 'solid' },
+    { key: 'scans24', label: 'Verifications · 24 h', value: formatCount(d.scans.last24h), note: `${formatCount(d.scans.last7d)} IN 7 DAYS`, tone: 'solid' },
     {
       key: 'anomalies',
       label: 'Open anomalies',
       value: formatCount(d.anomalies.open),
-      note: critical > 0 ? `${formatCount(critical)} critical` : 'None critical',
+      note: critical > 0 ? `${formatCount(critical)} CRITICAL` : 'NONE CRITICAL',
       tone: critical > 0 ? 'critical' : 'solid',
     },
     {
       key: 'key',
       label: 'Signing key',
       value: d.activeKey ? `#${d.activeKey.keyId}` : '—',
-      note: d.activeKey ? d.activeKey.kid : 'No active key — issuance halted',
+      // The kid is case-sensitive: shown as is (the stylesheet does not uppercase notes).
+      note: d.activeKey ? d.activeKey.kid : 'NO ACTIVE KEY — ISSUANCE HALTED',
       tone: d.activeKey ? 'solid' : 'critical',
     },
   ];

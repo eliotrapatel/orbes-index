@@ -15,6 +15,7 @@
 # or the same CLIs through node directly), e.g.
 #   docker compose exec app npm run keys:generate      # = node --import tsx scripts/keys.ts generate
 #   docker compose exec app npm run db:migrate         # = node --import tsx scripts/db.ts migrate
+#   docker compose exec -e ADMIN_PASSWORD app node --import tsx scripts/admin.ts create --email … --role ADMIN
 # Full runbook: docs/DEPLOYMENT.md.
 
 ARG NODE_IMAGE=node:22-slim
@@ -75,7 +76,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json ./
 COPY src/core ./src/core
 COPY src/server ./src/server
-COPY scripts/db.ts scripts/keys.ts ./scripts/
+COPY scripts/db.ts scripts/keys.ts scripts/admin.ts ./scripts/
 COPY --from=web /app/dist/web ./dist/web
 
 USER node

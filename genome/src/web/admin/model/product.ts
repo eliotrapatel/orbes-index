@@ -138,6 +138,8 @@ export interface ProductActions {
   canDownload: boolean;
   canActivateWarranty: boolean;
   canVoidWarranty: boolean;
+  /** Add months to a started, non-void warranty (POST …/warranty/extend). */
+  canExtendWarranty: boolean;
   canOpenService: boolean;
   /** Open service records the admin may complete. */
   completableServices: ServiceRecord[];
@@ -158,6 +160,7 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     canDownload: can(role, 'download'),
     canActivateWarranty: can(role, 'warranty') && WARRANTY_ACTIVATABLE.has(status) && !w?.startDate && !w?.voidedAt,
     canVoidWarranty: can(role, 'warranty') && !w?.voidedAt,
+    canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt,
     canOpenService: can(role, 'service') && d.lifecycle.allowed.includes('SERVICED'),
     completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN') : [],
     canConfirmOwnership: can(role, 'confirmOwnership') && owner !== null && !owner.verified,

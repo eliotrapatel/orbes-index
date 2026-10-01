@@ -69,7 +69,7 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const op = client();
     const login = await op.post('/api/admin/auth/login', { email: 'root@orbes.example', password: PASSWORD });
     expect(login.statusCode).toBe(200);
-    expect(login.cookies.find((x) => x.name === 'orbes_admin')?.secure).toBe(true);
+    expect(login.cookies.find((x) => x.name === '__Host-orbes_admin')?.secure).toBe(true);
     expect((await op.get('/api/admin/dashboard')).statusCode).toBe(403);
     const { secret } = safeJson(await op.post('/api/admin/auth/totp/setup')) as { secret: string };
     expect((await op.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), Date.now()) })).statusCode).toBe(200);

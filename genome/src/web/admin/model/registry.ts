@@ -54,8 +54,10 @@ export function keyActions(k: Pick<KeyJson, 'status'>): KeyActions {
 }
 
 /** The phrase an admin types to confirm an irreversible action, e.g. `REVOKE KEY 3`. */
-export function confirmationPhrase(action: 'revoke-key' | 'revoke-product' | 'revoke-code' | 'retire-key' | 'rotate-key', target: string | number): string {
+export function confirmationPhrase(action: 'revoke-key' | 'revoke-product' | 'revoke-code' | 'retire-key' | 'rotate-key' | 'reset-totp', target: string | number): string {
   switch (action) {
+    case 'reset-totp':
+      return `RESET 2FA ${target}`;
     case 'revoke-key':
       return `REVOKE KEY ${target}`;
     case 'retire-key':

@@ -29,6 +29,7 @@ None of these layers proves that the scanned object is the original physical ite
 ### 3.1 Cryptographic controls
 - **Signing:** Ed25519 (RFC 8032, pure). Domain-separated message: `"ORBES-CODE/v1" ‖ 0x00 ‖ payload`.
 - **Verification:** `node:crypto`. Verification fails if the signature is not exactly 64 bytes or the key is not exactly 32 bytes. Malformed inputs never throw past the verification boundary.
+- **Weak keys:** one strict rule, `isStrictEd25519PublicKey` in `src/server/crypto/ed25519-node.ts` (canonical encoding of a point of order > 8), is applied by `verifyEd25519Node` before OpenSSL and by `KeyService` before it registers any key: small-order and non-canonical keys (with which `R = identity, S = 0` verifies for every message) can neither verify nor be registered.
 - **Key ids:** a 1-byte key id is carried in every code and resolved only through the `cryptographic_keys` registry. Unknown ids give `INVALID_SIGNATURE`.
 - **Verify-after-sign:** every signature produced at issuance is verified with the registered public key before it is stored.
 - **Key states:** ACTIVE (one at a time, enforced by a partial unique index), RETIRED (verify-only) and REVOKED (with `compromised_at`). Codes registered before the compromise remain trusted. Anything else signed by a revoked key fails.
@@ -42,21 +43,25 @@ None of these layers proves that the scanned object is the original physical ite
 
 ### 3.3 Authentication and sessions
 - **Passwords:** scrypt (N = 2¹⁵, r = 8, p = 1), 16-byte salt, 32-byte output, constant-time comparison, minimum 12 characters.
+- **Customers:**
+  - Per-account login throttle: after 10 wrong passwords within 15 minutes, logins to that account are refused for the rest of the window without checking the password, with the same `INVALID_CREDENTIALS` answer and timing as a wrong password (no lockout oracle, no enumeration). It complements the per-IP `auth` rate limit, which a distributed guesser can spread across addresses.
+  - **Accepted:** registration answers `409 EMAIL_TAKEN` for an existing email, which lets a caller test whether an email has an account. Without an email channel (no verification or reset mail exists yet) registration cannot answer both cases alike; the `auth` rate limit bounds the probing rate. Revisit when email verification is added.
 - **Admins:**
-  - Lockout after 10 failures for 15 minutes.
-  - Optional TOTP (RFC 6238); the secret is stored with AES-256-GCM.
+  - Lockout after 10 failures for 15 minutes, re-locking while the counter stays at the threshold, so guessing gets a bounded budget. **Trade-off (accepted):** anyone who knows an admin's email can keep that admin locked out by sending wrong passwords (slowed to 10 attempts per minute per IP by the `auth` rate limit). Mitigations: admin emails are not published, the console sits behind the same origin as the public app only if needed (an IP allow-list or VPN in front of `/admin` and `/api/admin` removes the exposure), and another ADMIN or `scripts/admin.ts` can act meanwhile.
+  - TOTP (RFC 6238); the secret is stored with AES-256-GCM. Required in production (`ADMIN_REQUIRE_MFA`, default true; `false` is accepted with a warning at every start). An ADMIN can reset a lost second factor (`POST /api/admin/admins/:id/totp/reset`, audited); the reset ends every session of that admin.
+  - **First enrolment is trust on first use:** in the console, whoever first signs in with an admin's password can enrol their own authenticator. Recommended: enrol new admins from the shell (`scripts/admin.ts totp-setup` then `totp-enable`) and hand the secret over in person, before the password is used in the console.
   - Roles: ADMIN > OPERATOR > AUDITOR, where AUDITOR is read-only.
 - **Sessions:**
-  - The token is 32 random bytes in an httpOnly, SameSite=Strict cookie, Secure in production.
+  - The token is 32 random bytes in an httpOnly, SameSite=Strict cookie, Secure in production. In production the cookies carry the `__Host-` prefix (`__Host-orbes_session`, `__Host-orbes_admin`, `__Host-orbes_device`): browsers then require Secure, `Path=/` and no `Domain`, so a sibling subdomain or a plain-HTTP response cannot plant or shadow them (session fixation, cookie tossing).
   - The database stores only the token's SHA-256 hash.
-  - The session id rotates on login. Session lifetime is bounded.
+  - The token rotates on login **and on every privilege change**: TOTP enrolment replaces the session by a new MFA-passed one (new token and CSRF token, same absolute expiry), so a token captured before the step-up never carries MFA. Session lifetime is bounded (absolute expiry).
   - Each session has its own CSRF token.
 
 ### 3.4 Request integrity
 - **Input validation:** strict zod schemas (unknown keys rejected), a 16 KB body limit, and length bounds on every string. The code input is base64url, at most 200 characters, and exactly 79 bytes once decoded.
 - **CSRF:** every cookie-authenticated mutation requires `x-csrf-token` equal to the session's token. The `Origin` must match the configured public origin (or `Sec-Fetch-Site: same-origin`).
 - **Rate limits:** per IP and route group, covering verify, authentication, admin, claim attempts per product and transfer acceptance.
-- **Replay:** registration tokens and transfer codes are random, stored hashed, single-use and time-limited, and consumed transactionally.
+- **Replay:** registration tokens and transfer codes are random, stored hashed, single-use and time-limited, and consumed transactionally. Transfer codes (60 bits) are stored as HMAC-SHA256 under a server key derived with HKDF from `COOKIE_SECRET` (info `orbes/transfer-code/v1`): the lookup stays deterministic, but a leaked `ownership_transfers` table cannot be brute-forced offline. Rotating `COOKIE_SECRET` invalidates pending transfer codes.
 - **SQL:** all queries go through Kysely's parameterised builder. Raw SQL is limited to migrations and static statements.
 
 ### 3.5 Response hygiene
@@ -77,9 +82,10 @@ None of these layers proves that the scanned object is the original physical ite
 
 ### 3.7 Audit and integrity monitoring
 - `audit_logs` is append-only: a trigger rejects UPDATE and DELETE.
+- `product_status_history` is append-only as well (UPDATE, DELETE and TRUNCATE raise). `genomes` and `cryptographic_keys` can never be deleted: a key id is a 1-byte value signed into every code, so a deleted key row would let a later key reuse the id. Keys are retired or revoked instead (migration `0002_platform_guards`).
 - Each entry stores `prev_hash` and `hash = SHA-256(prev_hash ‖ canonical JSON(entry))`.
 - `GET /api/admin/audit/verify` recomputes the chain and reports the first inconsistent entry.
-- Audited actions include product issuance, code reissue and revocation, lifecycle transitions, ownership changes, warranty actions, key generation, rotation, retirement and revocation, category creation, anomaly status changes, and admin logins.
+- Audited actions include product issuance, code reissue and revocation, lifecycle transitions, ownership changes, warranty actions, key generation, rotation, retirement and revocation, category, collection and model creation, anomaly status changes, admin logins, admin creation, TOTP enrolment and reset, and customer login failures and throttling.
 
 ### 3.8 Anomaly detection
 - The rules are pure functions over scan history. Thresholds are configuration and are never exposed.
@@ -91,9 +97,16 @@ None of these layers proves that the scanned object is the original physical ite
 `loadConfig` refuses to start in production when any of these hold:
 - the database is PGlite;
 - the key provider is `memory`;
-- `COOKIE_SECRET` or `IP_HASH_PEPPER` is shorter than 32 characters or still the development default;
+- `COOKIE_SECRET` or `IP_HASH_PEPPER` is shorter than 32 characters, still the development default, or has too little variety; or both are the same secret;
 - `PUBLIC_ORIGIN` is not `https:`;
-- the local key provider has no `KEY_ENCRYPTION_KEY`.
+- the local key provider has no `KEY_ENCRYPTION_KEY`, or it is degenerate (all bytes identical);
+- `TRUST_PROXY=true`: Fastify would take the left-most `X-Forwarded-For` entry as the client IP, and that entry is written by the client, so rate limits (logins, claim and transfer codes) and IP pseudonyms become forgeable. List the proxy addresses or ranges instead;
+- `TRUST_PROXY` is a number (a hop count such as `1`): ambiguous, and Fastify's handling of numbers trusts nothing or everything depending on the version. Also refused outside production;
+- `GEO_MODE=cloudflare` or `GEO_MODE=headers` without `TRUST_PROXY`: the location headers would be accepted from any client (and, behind Cloudflare, every client would share the edge's IP for rate limiting).
+
+Accepted with a warning at every start (`configWarnings`): `ADMIN_REQUIRE_MFA=false` in production.
+
+`npm start -- --demo` (demo mode) is refused in production and with any `DATABASE_URL` other than `pglite:memory`.
 
 ## 5. Operational security checklist
 

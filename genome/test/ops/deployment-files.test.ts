@@ -36,7 +36,7 @@ describe('.env.example', () => {
   const example = parseEnvExample(read('.env.example'));
 
   it('documents every environment variable the server and the CLIs read', () => {
-    const sources = ['src/server/config.ts', 'src/server/index.ts', 'scripts/db.ts', 'docker-compose.yml'].map(read).join('\n');
+    const sources = ['src/server/config.ts', 'src/server/index.ts', 'scripts/db.ts', 'scripts/admin.ts', 'docker-compose.yml'].map(read).join('\n');
     const names = new Set<string>();
     for (const m of sources.matchAll(/\b(?:e|env|process\.env)\.([A-Z][A-Z0-9_]+)/g)) names.add(m[1]);
     for (const m of read('src/server/config.ts').matchAll(/^\s+((?:ANOMALY|RATE_LIMIT)_[A-Z_]+):/gm)) names.add(m[1]);
@@ -71,7 +71,7 @@ describe('.env.example', () => {
     const c = loadConfig(env);
     expect(c.env).toBe('production');
     expect(c.keys).toEqual({ provider: 'local', dir: '/var/lib/orbes/keys', encryptionKey: env.KEY_ENCRYPTION_KEY });
-    expect(c.rateLimits).toEqual({ verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300 });
+    expect(c.rateLimits).toEqual({ verifyPerMinute: 60, authPerMinute: 10, adminPerMinute: 300, apiPerMinute: 120 });
     expect(c.sessionTtlHours).toEqual({ account: 720, admin: 8 });
     expect(c.trustProxy).toBe('uniquelocal');
     expect(c.anomaly).toEqual(DEFAULT_ANOMALY_CONFIG);
@@ -98,6 +98,8 @@ describe('Dockerfile, docker-compose.yml, .dockerignore', () => {
     expect(dockerfile).toMatch(/npm ci --omit=dev --ignore-scripts/);
     expect(dockerfile).toMatch(/npm run build:web/);
     expect(dockerfile).toMatch(/^USER node$/m);
+    // The operator CLIs ship in the runtime image (migrations, keys, console users).
+    expect(dockerfile).toMatch(/^COPY scripts\/db\.ts scripts\/keys\.ts scripts\/admin\.ts \.\/scripts\/$/m);
     expect(dockerfile).toMatch(/^HEALTHCHECK [^\n]*\\\n\s+CMD [^\n]*\/api\/v1\/health/m);
     expect(dockerfile).toMatch(/^CMD \["node", "--import", "tsx", "src\/server\/index\.ts"\]$/m);
     // No secret ever baked into an image layer.

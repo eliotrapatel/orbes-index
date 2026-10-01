@@ -15,7 +15,7 @@
  * the generator result and the product page to genome/out/.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -38,6 +38,7 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { svgToGray } from '../support/raster.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const HAS_CHROMIUM = existsSync(CHROMIUM);
 const ADMIN = { email: 'console@orbes.test', password: 'orbes console passphrase 2026' };
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
@@ -103,7 +104,7 @@ async function seedRegistry(ctx: AppContext, modelId: string): Promise<IssueResu
   return issued;
 }
 
-describe('admin console (E2E, Chromium)', () => {
+describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   let workDir: string;
   let t: TestDb;
   let ctx: AppContext;
@@ -297,11 +298,21 @@ describe('admin console (E2E, Chromium)', () => {
     // Hiding drops the only copy the console holds.
     await page.getByRole('button', { name: /I have recorded it/ }).click();
     expect(await page.locator('[data-testid=claim-code]').textContent()).not.toContain(body.claimCode.slice(0, 4));
-    await page.selectOption('select[name=theme]', 'black');
+    await page.selectOption('select[name=theme]', 'classic');
+    expect(await page.locator('select[name=theme] option').allTextContents()).toEqual(['CLASSIC — BLACK ON WHITE', 'INVERTED — WHITE ON BLACK', 'IVORY — INK ON IVORY']);
+
+    // Print size: a quiet warning under 30 mm, a refusal under 15 mm unless marked as a test print.
+    await page.fill('input[name=widthMm]', '25');
+    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent()).toMatch(/below the 30 mm minimum/);
+    await page.fill('input[name=widthMm]', '12');
+    await page.click('[data-testid=download-svg]');
+    await expect.poll(() => page.locator('.artifact__error').textContent()).toMatch(/test print/);
+    await page.fill('input[name=widthMm]', '30');
+    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent()).toBe('');
 
     // ── Download the SVG, rasterise it, decode it, verify it ──────────────
     const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-svg]')]);
-    expect(download.suggestedFilename()).toMatch(/^ORBES-O26-J-00010-I1-black-30mm\.svg$/);
+    expect(download.suggestedFilename()).toMatch(/^ORBES-O26-J-00010-I1-classic-30mm\.svg$/);
     const svg = readFileSync((await download.path())!, 'utf8');
     expect(svg).toMatch(/^<svg[^>]+viewBox="/);
     expect(svg).toContain('</svg>');
@@ -335,6 +346,11 @@ describe('admin console (E2E, Chromium)', () => {
     await expect.poll(() => row('status').textContent()).toContain('ACTIVATED');
     await shot(page, 'product', { full: true });
 
+    // Extend the warranty by 12 months (the dialog's default).
+    await page.click('[data-testid=action-warranty-extend]');
+    await confirmDialog(page);
+    await expect.poll(async () => (await ctx.services.warranty.get(issuedProductId))?.durationMonths).toBe(36);
+
     // Re-issue: the new code is signed and previewed; the old one is superseded.
     await page.click('[data-testid=action-reissue]');
     await page.fill('dialog textarea[name=reason]', 'Engraving damaged during sizing');
@@ -343,6 +359,18 @@ describe('admin console (E2E, Chromium)', () => {
     await expect.poll(() => row('code').textContent()).toContain('Issue 2');
     expect(await page.locator('#codes tbody tr').count()).toBe(2);
     expect(await page.locator('#codes tbody tr').nth(1).textContent()).toContain('SUPERSEDED');
+  }, STEP_TIMEOUT);
+
+  it('downloads a print sheet of codes selected in the codes list', async () => {
+    await go(page, '#/codes', 'Codes');
+    const picks = page.locator('[data-testid=sheet-select]');
+    await expect.poll(() => picks.count()).toBeGreaterThan(2);
+    await picks.nth(0).check();
+    await picks.nth(1).check();
+    await expect.poll(() => page.locator('[data-testid=sheet-count]').textContent()).toBe('2 codes selected');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-sheet]')]);
+    expect(download.suggestedFilename()).toMatch(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-2-classic-30mm\.pdf$/);
+    expect(readFileSync((await download.path())!).subarray(0, 5).toString('latin1')).toBe('%PDF-');
   }, STEP_TIMEOUT);
 
   it('lists the product, filters by status and opens it from the table', async () => {
@@ -482,6 +510,23 @@ describe('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     expect(await cspViolations(p)).toEqual([]);
     await p.close();
+
+    // The device is lost: an ADMIN resets the operator's second factor from the security page.
+    const operatorId = (await ctx.services.auth.listAdmins()).find((a) => a.email === operator.email)!.id;
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const a = await adminContext.newPage();
+    await watch(a);
+    await signIn(a, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await go(a, '#/security', 'Security');
+    const userRow = a.locator('[data-testid=admin-users] tr', { hasText: operator.email });
+    await userRow.locator('[data-testid=reset-totp]').click();
+    await confirmDialog(a, `RESET 2FA ${operator.email}`);
+    await expect.poll(async () => (await ctx.services.auth.getAdmin(operatorId)).totpEnabled).toBe(false);
+    await expect.poll(() => userRow.textContent()).toContain('NOT ENROLLED');
+    expect(await cspViolations(a)).toEqual([]);
+    await a.click('[data-testid=sign-out]');
+    await adminContext.close();
   }, STEP_TIMEOUT);
 
   it('gives an AUDITOR a read-only console', async () => {

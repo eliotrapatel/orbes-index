@@ -85,6 +85,7 @@ export KEY_PROVIDER=local KEY_DIR=$PWD/.secrets/keys
 export KEY_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
 export BOOTSTRAP_ADMIN_EMAIL=admin@orbes.test BOOTSTRAP_ADMIN_PASSWORD='a long local passphrase'
 npm run build:web && npm run dev                     # then http://localhost:8080/verify and /admin
+npm run build:web && npm start -- --demo              # same, with the demo dataset loaded (pglite:memory; sign-in printed once)
 ```
 
 `.data/` and `.secrets/` are git-ignored. Configuration is the same as in production; every variable is listed in [.env.example](.env.example) and [DEPLOYMENT §3](../docs/DEPLOYMENT.md#3-configuration-reference). Outside production, admins do not need TOTP and a signing key is created on demand.
@@ -111,6 +112,7 @@ All of them read the server's configuration and exit with `0` success, `1` failu
 | `npm run keys:rotate` | `tsx scripts/keys.ts rotate [--kid <label>]`: new ACTIVE key, the previous one RETIRED |
 | `npm run keys:list` | `tsx scripts/keys.ts list`: every key with status, dates and fingerprint |
 | (no npm alias) | `tsx scripts/keys.ts retire <keyId> --yes` and `tsx scripts/keys.ts revoke <keyId> --reason <text> [--compromised-at <ISO 8601>] --yes` |
+| (no npm alias) | `ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <e> --role ADMIN\|OPERATOR\|AUDITOR`, `list`, `totp-setup --email <e>`, `totp-enable --email <e> --secret <s> --code <c>`, `reset-totp --email <e> --yes`: console users ([DEPLOYMENT §8](../docs/DEPLOYMENT.md#8-admin-accounts)) |
 
 `keys:generate` and `keys:rotate` refuse `KEY_PROVIDER=memory`, because the key would vanish when the command exits. Runbooks: [DEPLOYMENT §7](../docs/DEPLOYMENT.md#7-signing-keys).
 
