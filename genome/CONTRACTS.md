@@ -178,8 +178,14 @@ export type DecodeResult =
       genome: { glyphs: (number | null)[]; confidence: number[] } | null;
       quality: { rsErrors: number; rsErasures: number; contrast: number; moduleSizePx: number; inverted: boolean; mirrored: boolean; orientation: number; elapsedMs: number };
       geometry: { center: { x: number; y: number }; moons: { x: number; y: number }[]; homography: number[] } }
-  | { ok: false; reason: 'NO_SEAL' | 'NO_MOONS' | 'FORMAT' | 'ECC' | 'CRC' | 'PAYLOAD'; detail?: string; elapsedMs: number };
+  | { ok: false; reason: 'NO_SEAL' | 'NO_MOONS' | 'FORMAT' | 'ECC' | 'CRC' | 'PAYLOAD'; detail?: string;
+      seal?: { confidence: number; unitPx: number };   // NO_MOONS: most code-like seal found (0–1 share of data orbits with arc texture)
+      moduleSizePx?: number;                             // FORMAT…PAYLOAD: px per u of the code located but not read
+      elapsedMs: number };
 export function decodeOrbesCode(img: GrayImage, opts?: DecodeOptions): DecodeResult;
+export const MAX_RS_ERASURES = 70;   // decode.ts: Reed-Solomon never erases more bytes (miscorrection safety, ORBES-CODE-SPEC §11)
 ```
+
+`seal` and `moduleSizePx` serve scan guidance only; they never change whether a decode succeeds.
 
 The decoder never verifies signatures. That is the server's job. It returns the bytes it read.

@@ -39,6 +39,7 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         decor: q.decor ?? true,
         label: q.label ?? false,
         ...(q.dpi !== undefined ? { dpi: q.dpi } : {}),
+        ...(q.kOnly !== undefined ? { kOnly: q.kOnly } : {}),
       },
       adminActor(request),
     );

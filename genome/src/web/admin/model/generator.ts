@@ -1,13 +1,13 @@
 /**
  * Code generator view model: the issue form (raw strings from inputs → the
  * POST /api/admin/products body) and the artifact options (width, theme,
- * label, dpi) for downloads.
+ * label, dpi, K-only black) for downloads, with the print-size advice.
  *
  * The client checks shapes and bounds to give immediate feedback; the
  * server re-validates everything with its own strict schema.
  */
-import type { ArtifactOptions } from '../api.js';
-import { AUTH_POLICY_KINDS, ARTIFACT_THEMES, type ArtifactFormat, type ArtifactTheme, type IssueInput, type Model } from '../types.js';
+import type { ArtifactOptions, PrintSheetOptions } from '../api.js';
+import { AUTH_POLICY_KINDS, ARTIFACT_THEMES, type ArtifactFormat, type ArtifactTheme, type CodeJson, type IssueInput, type Model } from '../types.js';
 
 export interface IssueForm {
   categoryCode: string;
@@ -128,8 +128,38 @@ export function modelsFor(models: readonly Model[], categoryCode: string): Model
 // ── Artifacts ──────────────────────────────────────────────────────────────
 
 /** Mirrors the server's ARTIFACT_LIMITS (src/server/render/artifact.ts). */
-export const ARTIFACT_LIMITS = Object.freeze({ minWidthMm: 5, maxWidthMm: 500, minDpi: 72, maxDpi: 2400, maxSidePx: 8000 });
-export const ARTIFACT_DEFAULTS = Object.freeze({ widthMm: 30, theme: 'black' as ArtifactTheme, label: false, decor: true, dpi: 600 });
+export const ARTIFACT_LIMITS = Object.freeze({ minWidthMm: 10, maxWidthMm: 500, minDpi: 72, maxDpi: 2400, maxSidePx: 8000 });
+export const ARTIFACT_DEFAULTS = Object.freeze({ widthMm: 30, theme: 'classic' as ArtifactTheme, label: false, decor: true, dpi: 600 });
+
+/** Theme menu: the brand system's colourway names (BRAND-DESIGN-SYSTEM §2.7). */
+export const THEME_OPTIONS: readonly { value: ArtifactTheme; label: string }[] = Object.freeze([
+  { value: 'classic', label: 'CLASSIC — BLACK ON WHITE' },
+  { value: 'inverted', label: 'INVERTED — WHITE ON BLACK' },
+  { value: 'ivory', label: 'IVORY — INK ON IVORY' },
+]);
+
+/**
+ * Print sizes (BRAND-DESIGN-SYSTEM §2.6, docs/reports/print-size-matrix.md):
+ * 30 mm is the brand minimum for every substrate; under 15 mm a code only
+ * reads reliably with 2× camera zoom, so such files are test prints only.
+ */
+export const ARTIFACT_SIZE_ADVICE = Object.freeze({ recommendedMinMm: 30, testPrintBelowMm: 15 });
+
+export type SizeAdvice = { level: 'ok' } | { level: 'warn' | 'refuse'; message: string };
+
+export function artifactSizeAdvice(widthMm: number, testPrint: boolean): SizeAdvice {
+  const A = ARTIFACT_SIZE_ADVICE;
+  if (!Number.isFinite(widthMm) || widthMm >= A.recommendedMinMm) return { level: 'ok' };
+  if (widthMm < A.testPrintBelowMm) {
+    return testPrint
+      ? { level: 'warn', message: `Test print: under ${A.testPrintBelowMm} mm codes are not for production.` }
+      : { level: 'refuse', message: `Under ${A.testPrintBelowMm} mm only as a test print: check "Test print" to continue.` };
+  }
+  return { level: 'warn', message: `${widthMm} mm is below the ${A.recommendedMinMm} mm minimum; phones may need to zoom in.` };
+}
+
+/** Colourways K-only black can express (neutral paper and ink). */
+const K_ONLY_THEMES: readonly ArtifactTheme[] = ['classic', 'inverted'];
 
 export interface ArtifactForm {
   widthMm: string;
@@ -137,21 +167,33 @@ export interface ArtifactForm {
   label: boolean;
   decor: boolean;
   dpi: string;
+  /** Allow widths under ARTIFACT_SIZE_ADVICE.testPrintBelowMm (explicit opt-in). */
+  testPrint: boolean;
+  /** K-only black (PDF; classic and inverted). Ignored for SVG and PNG. */
+  kOnly: boolean;
 }
 
-export function buildArtifactOptions(f: ArtifactForm, format: ArtifactFormat): Validated<ArtifactOptions> {
-  const errors: Record<string, string> = {};
+export type ArtifactErrors = Partial<Record<'widthMm' | 'theme' | 'dpi' | 'kOnly', string>>;
+
+export function buildArtifactOptions(f: ArtifactForm, format: ArtifactFormat): { ok: true; value: ArtifactOptions } | { ok: false; errors: ArtifactErrors } {
+  const errors: ArtifactErrors = {};
   const L = ARTIFACT_LIMITS;
   const widthMm = Number((f.widthMm ?? '').trim() || ARTIFACT_DEFAULTS.widthMm);
   if (!Number.isFinite(widthMm) || widthMm < L.minWidthMm || widthMm > L.maxWidthMm) errors.widthMm = `Width ${L.minWidthMm}–${L.maxWidthMm} mm.`;
+  else {
+    const advice = artifactSizeAdvice(widthMm, f.testPrint === true);
+    if (advice.level === 'refuse') errors.widthMm = advice.message;
+  }
   const theme = (f.theme || ARTIFACT_DEFAULTS.theme) as ArtifactTheme;
   if (!ARTIFACT_THEMES.includes(theme)) errors.theme = 'Unknown theme.';
+  const kOnly = format === 'pdf' && f.kOnly === true;
+  if (kOnly && !K_ONLY_THEMES.includes(theme)) errors.kOnly = 'K-only black needs the classic or inverted colourway.';
   const dpi = Number((f.dpi ?? '').trim() || ARTIFACT_DEFAULTS.dpi);
   if (format === 'png') {
     if (!Number.isInteger(dpi) || dpi < L.minDpi || dpi > L.maxDpi) errors.dpi = `Resolution ${L.minDpi}–${L.maxDpi} dpi.`;
     else if (Number.isFinite(widthMm) && Math.round((widthMm / 25.4) * dpi) > L.maxSidePx) errors.dpi = 'PNG too large: lower the width or resolution.';
   }
-  if (Object.keys(errors).length > 0) return { ok: false, errors: errors as FieldErrors };
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
     value: {
@@ -160,8 +202,39 @@ export function buildArtifactOptions(f: ArtifactForm, format: ArtifactFormat): V
       label: !!f.label,
       decor: f.decor !== false,
       ...(format === 'png' ? { dpi } : {}),
+      ...(kOnly ? { kOnly: true } : {}),
     },
   };
+}
+
+// ── Print sheets ───────────────────────────────────────────────────────────
+
+/** Mirrors the server's print-sheet bounds (MAX_SHEET_ITEMS, SHEET_PAGES). */
+export const PRINT_SHEET_LIMITS = Object.freeze({ maxCodes: 200, pages: ['A4', 'A3', 'LETTER'] as const });
+export type SheetPage = (typeof PRINT_SHEET_LIMITS.pages)[number];
+
+export interface PrintSheetForm extends ArtifactForm {
+  page: string;
+}
+
+/** Only ACTIVE codes print: superseded and revoked ones verify as REVOKED. */
+export function isSheetSelectable(code: Pick<CodeJson, 'status'>): boolean {
+  return code.status === 'ACTIVE';
+}
+
+export function buildPrintSheetOptions(
+  f: PrintSheetForm,
+  selected: number,
+): { ok: true; value: PrintSheetOptions } | { ok: false; errors: ArtifactErrors & { codes?: string; page?: string } } {
+  const errors: ArtifactErrors & { codes?: string; page?: string } = {};
+  if (selected < 1 || selected > PRINT_SHEET_LIMITS.maxCodes) errors.codes = `Select 1 to ${PRINT_SHEET_LIMITS.maxCodes} active codes.`;
+  const page = (f.page || 'A4') as SheetPage;
+  if (!PRINT_SHEET_LIMITS.pages.includes(page)) errors.page = 'Page must be A4, A3 or LETTER.';
+  const artifact = buildArtifactOptions(f, 'pdf');
+  if (!artifact.ok) Object.assign(errors, artifact.errors);
+  if (!artifact.ok || Object.keys(errors).length > 0) return { ok: false, errors };
+  const { widthMm, theme, label, decor, kOnly } = artifact.value;
+  return { ok: true, value: { widthMm, theme, label, decor, page, ...(kOnly ? { kOnly } : {}) } };
 }
 
 /**

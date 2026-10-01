@@ -66,7 +66,7 @@ describe('export-demo-codes', () => {
     const code = await runExportCli(['--out', out, '--products', 'O26-J-00184,O26-J-00198,O26-J-00193', '--dpi', '300', '--json'], { env, io, now: () => NOW });
     expect(code, io.text()).toBe(0);
     manifest = JSON.parse(io.stdout.join('\n'));
-    expect(manifest).toMatchObject({ ephemeral: false, sheet: 'demo-codes-sheet.pdf', options: { widthMm: 30, dpi: 300, theme: 'black', formats: ['svg', 'png', 'pdf'] } });
+    expect(manifest).toMatchObject({ ephemeral: false, sheet: 'demo-codes-sheet.pdf', options: { widthMm: 30, dpi: 300, theme: 'classic', formats: ['svg', 'png', 'pdf'] } });
     expect(manifest.warning).toBeUndefined();
     expect(manifest.codes.map((c) => [c.productId, c.issue, c.codeStatus, c.expectedStateAfterSeed])).toEqual([
       ['O26-J-00184', 1, 'ACTIVE', 'AUTHENTIC_FIRST_REGISTRATION'],

@@ -36,4 +36,16 @@ export {
   type SheetPageSize,
 } from './print-sheet.js';
 export { LABEL_CHARSET, measureText, textRun } from './label-font.js';
-export { ARTIFACT_THEMES, ARTIFACT_THEME_NAMES, mixTone, mmToPt, type ArtifactScene, type ArtifactTheme, type StrokePath, type ViewBox } from './scene.js';
+export {
+  ARTIFACT_THEMES,
+  ARTIFACT_THEME_NAMES,
+  DEPRECATED_THEME_ALIASES,
+  mixTone,
+  mmToPt,
+  normalizeArtifactTheme,
+  type ArtifactScene,
+  type ArtifactTheme,
+  type ArtifactThemeInput,
+  type StrokePath,
+  type ViewBox,
+} from './scene.js';

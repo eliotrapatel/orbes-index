@@ -262,21 +262,26 @@ export const codeParams = z.object({ codeId: uuid });
 
 export const artifactParams = z.object({ codeId: uuid, format: z.enum(['svg', 'png', 'pdf']) });
 
+/** classic | inverted | ivory; `black` stays accepted as a deprecated alias of classic. */
+const artifactTheme = z.enum(['classic', 'inverted', 'ivory', 'black']);
+
 export const artifactQuery = z.object({
   widthMm: queryNumber,
-  theme: z.enum(['black', 'inverted', 'ivory']).optional(),
+  theme: artifactTheme.optional(),
   decor: queryBool,
   label: queryBool,
   dpi: queryNumber,
+  kOnly: queryBool,
 });
 
 /** Multi-up PDF print sheet (extension of the contract's artifact route; 200 codes fit in the 16 KB body). */
 export const printSheetBody = body({
   codeIds: z.array(uuid).min(1, 'Select at least one code').max(200, 'At most 200 codes per sheet'),
   widthMm: z.number().finite().optional(),
-  theme: z.enum(['black', 'inverted', 'ivory']).optional(),
+  theme: artifactTheme.optional(),
   decor: z.boolean().optional(),
   label: z.boolean().optional(),
+  kOnly: z.boolean().optional(),
   page: z.enum(['A4', 'A3', 'LETTER']).optional(),
   cropMarks: z.boolean().optional(),
 });

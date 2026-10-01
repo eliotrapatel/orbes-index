@@ -49,7 +49,8 @@ export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 /** Authenticator kinds a product policy may combine (contract §2.11); only PRINTED_CODE is implemented. */
 export const AUTH_POLICY_KINDS = ['PRINTED_CODE', 'SECURE_NFC', 'SECURE_ELEMENT', 'TAMPER_EVIDENT'] as const;
 
-export const ARTIFACT_THEMES = ['black', 'inverted', 'ivory'] as const;
+/** Colourways, named as in the core and the artifact API (classic = black on white, the reference). */
+export const ARTIFACT_THEMES = ['classic', 'inverted', 'ivory'] as const;
 export type ArtifactTheme = (typeof ARTIFACT_THEMES)[number];
 export type ArtifactFormat = 'svg' | 'png' | 'pdf';
 
@@ -73,6 +74,13 @@ export interface AdminProfile {
   email: string;
   role: AdminRole;
   totpEnabled: boolean;
+}
+
+/** GET /api/admin/admins (ADMIN only). */
+export interface AdminUser extends AdminProfile {
+  locked: boolean;
+  disabled: boolean;
+  createdAt: Iso;
 }
 
 export interface AdminSession {

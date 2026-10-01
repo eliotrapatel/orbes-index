@@ -41,12 +41,25 @@ export interface ArtifactScene {
   title: string;
 }
 
-export type ArtifactTheme = 'black' | 'inverted' | 'ivory';
-export const ARTIFACT_THEME_NAMES: readonly ArtifactTheme[] = ['black', 'inverted', 'ivory'];
+/** Colourways, named as in the core (`ORBES_CODE_STYLES`): classic (black on white) is the reference. */
+export type ArtifactTheme = 'classic' | 'inverted' | 'ivory';
+export const ARTIFACT_THEME_NAMES: readonly ArtifactTheme[] = ['classic', 'inverted', 'ivory'];
+
+/** Accepted on input for compatibility: `black` was the API's earlier name of `classic`. @deprecated */
+export const DEPRECATED_THEME_ALIASES: Readonly<Record<string, ArtifactTheme>> = Object.freeze({ black: 'classic' });
+/** A theme as callers may spell it (the deprecated alias included). */
+export type ArtifactThemeInput = ArtifactTheme | 'black';
+
+/** The canonical theme name, or undefined for an unknown one. */
+export function normalizeArtifactTheme(theme: unknown): ArtifactTheme | undefined {
+  if (typeof theme !== 'string') return undefined;
+  if ((ARTIFACT_THEME_NAMES as readonly string[]).includes(theme)) return theme as ArtifactTheme;
+  return Object.hasOwn(DEPRECATED_THEME_ALIASES, theme) ? DEPRECATED_THEME_ALIASES[theme] : undefined;
+}
 
 /** Theme → colours, from the core brand presentations so every surface agrees. */
 export const ARTIFACT_THEMES: Readonly<Record<ArtifactTheme, { ink: string; paper: string }>> = Object.freeze({
-  black: ORBES_CODE_STYLES.classic,
+  classic: ORBES_CODE_STYLES.classic,
   inverted: ORBES_CODE_STYLES.inverted,
   ivory: ORBES_CODE_STYLES.ivory,
 });

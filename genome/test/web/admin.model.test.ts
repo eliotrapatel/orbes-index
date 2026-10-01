@@ -2,18 +2,27 @@ import { describe, expect, it } from 'vitest';
 import * as serverSchema from '../../src/server/db/schema.js';
 import { ROLE_RANK as SERVER_ROLE_RANK } from '../../src/server/http/sessions.js';
 import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS } from '../../src/server/render/artifact.js';
+import { ARTIFACT_THEME_NAMES as SERVER_THEME_NAMES } from '../../src/server/render/scene.js';
 import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
 import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
 import { dashboardKpis, severityBars, statusBars } from '../../src/web/admin/model/dashboard.js';
 import {
   ARTIFACT_DEFAULTS,
   ARTIFACT_LIMITS,
+  ARTIFACT_SIZE_ADVICE,
+  artifactSizeAdvice,
   buildArtifactOptions,
+  buildPrintSheetOptions,
+  isSheetSelectable,
+  PRINT_SHEET_LIMITS,
+  type PrintSheetForm,
   buildIssueInput,
   cellPitchNote,
   formatClaimCode,
   modelsFor,
   normalizePolicy,
+  THEME_OPTIONS,
+  type ArtifactForm,
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
@@ -46,6 +55,7 @@ describe('admin enums mirror the server', () => {
     expect(ROLE_RANK).toEqual(SERVER_ROLE_RANK);
     for (const k of Object.keys(ARTIFACT_LIMITS) as (keyof typeof ARTIFACT_LIMITS)[]) expect(ARTIFACT_LIMITS[k], k).toBe(SERVER_ARTIFACT_LIMITS[k]);
     expect(ARTIFACT_DEFAULTS).toMatchObject({ widthMm: SERVER_ARTIFACT_DEFAULTS.widthMm, theme: SERVER_ARTIFACT_DEFAULTS.theme, dpi: SERVER_ARTIFACT_DEFAULTS.dpi });
+    expect([...web.ARTIFACT_THEMES]).toEqual([...SERVER_THEME_NAMES]);
   });
 });
 
@@ -406,17 +416,68 @@ describe('generator view model', () => {
   });
 
   it('validates artifact options within the server bounds', () => {
-    const ok = buildArtifactOptions({ widthMm: '25.555', theme: 'ivory', label: true, decor: false, dpi: '1200' }, 'png');
+    const f = (o: Partial<ArtifactForm>): ArtifactForm => ({ widthMm: '30', theme: 'classic', label: false, decor: true, dpi: '', testPrint: false, kOnly: false, ...o });
+    const ok = buildArtifactOptions(f({ widthMm: '25.555', theme: 'ivory', label: true, decor: false, dpi: '1200' }), 'png');
     expect(ok).toEqual({ ok: true, value: { widthMm: 25.56, theme: 'ivory', label: true, decor: false, dpi: 1200 } });
-    const svg = buildArtifactOptions({ widthMm: '', theme: '', label: false, decor: true, dpi: 'garbage' }, 'svg');
-    expect(svg).toEqual({ ok: true, value: { widthMm: 30, theme: 'black', label: false, decor: true } });
-    expect(buildArtifactOptions({ widthMm: '4', theme: 'black', label: false, decor: true, dpi: '' }, 'pdf').ok).toBe(false);
-    expect(buildArtifactOptions({ widthMm: '30', theme: 'neon', label: false, decor: true, dpi: '' }, 'svg').ok).toBe(false);
-    expect(buildArtifactOptions({ widthMm: '30', theme: 'black', label: false, decor: true, dpi: '71' }, 'png').ok).toBe(false);
-    const huge = buildArtifactOptions({ widthMm: '500', theme: 'black', label: false, decor: true, dpi: '2400' }, 'png');
+    const svg = buildArtifactOptions(f({ widthMm: '', theme: '', dpi: 'garbage' }), 'svg');
+    expect(svg).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: false, decor: true } });
+    expect(buildArtifactOptions(f({ widthMm: '9.5', testPrint: true }), 'pdf').ok).toBe(false); // under the server floor
+    expect(buildArtifactOptions(f({ theme: 'neon' }), 'svg').ok).toBe(false);
+    expect(buildArtifactOptions(f({ dpi: '71' }), 'png').ok).toBe(false);
+    const huge = buildArtifactOptions(f({ widthMm: '500', dpi: '2400' }), 'png');
     expect(!huge.ok && huge.errors).toMatchObject({ dpi: expect.stringMatching(/too large/) });
     expect(cellPitchNote(30)).toBe('Cell pitch 0.60 mm');
     expect(cellPitchNote(Number.NaN)).toBe('');
+  });
+
+  it('names the colourways classic / inverted / ivory, labelled as in the brand system', () => {
+    expect([...web.ARTIFACT_THEMES]).toEqual(['classic', 'inverted', 'ivory']);
+    expect(ARTIFACT_DEFAULTS.theme).toBe('classic');
+    expect(THEME_OPTIONS).toEqual([
+      { value: 'classic', label: 'CLASSIC — BLACK ON WHITE' },
+      { value: 'inverted', label: 'INVERTED — WHITE ON BLACK' },
+      { value: 'ivory', label: 'IVORY — INK ON IVORY' },
+    ]);
+  });
+
+  it('warns under 30 mm and refuses under 15 mm unless the file is marked as a test print', () => {
+    const f = (widthMm: string, testPrint = false): ArtifactForm => ({ widthMm, theme: 'classic', label: false, decor: true, dpi: '', testPrint, kOnly: false });
+    expect(ARTIFACT_SIZE_ADVICE).toEqual({ recommendedMinMm: 30, testPrintBelowMm: 15 });
+    expect(artifactSizeAdvice(30, false)).toEqual({ level: 'ok' });
+    expect(artifactSizeAdvice(25, false)).toEqual({ level: 'warn', message: expect.stringMatching(/below the 30 mm minimum/) });
+    expect(artifactSizeAdvice(14.5, false)).toEqual({ level: 'refuse', message: expect.stringMatching(/Under 15 mm.*test print/) });
+    expect(artifactSizeAdvice(14.5, true)).toEqual({ level: 'warn', message: expect.stringMatching(/test print/i) });
+    expect(buildArtifactOptions(f('25'), 'pdf').ok).toBe(true);
+    const refused = buildArtifactOptions(f('12'), 'pdf');
+    expect(!refused.ok && refused.errors).toMatchObject({ widthMm: expect.stringMatching(/test print/) });
+    expect(buildArtifactOptions(f('12', true), 'pdf')).toMatchObject({ ok: true, value: { widthMm: 12 } });
+  });
+
+  it('offers K-only black for PDF in the neutral colourways only', () => {
+    const f = (o: Partial<ArtifactForm>): ArtifactForm => ({ widthMm: '30', theme: 'classic', label: false, decor: true, dpi: '', testPrint: false, kOnly: true, ...o });
+    expect(buildArtifactOptions(f({}), 'pdf')).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: false, decor: true, kOnly: true } });
+    expect(buildArtifactOptions(f({}), 'svg')).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: false, decor: true } });
+    const ivory = buildArtifactOptions(f({ theme: 'ivory' }), 'pdf');
+    expect(!ivory.ok && ivory.errors).toMatchObject({ kOnly: expect.stringMatching(/classic or inverted/) });
+  });
+
+  it('builds print-sheet options for 1 to 200 selected ACTIVE codes', () => {
+    expect(PRINT_SHEET_LIMITS).toEqual({ maxCodes: 200, pages: ['A4', 'A3', 'LETTER'] });
+    const f: PrintSheetForm = { widthMm: '', theme: 'classic', label: true, decor: true, dpi: '', testPrint: false, kOnly: false, page: 'A4' };
+    expect(buildPrintSheetOptions(f, 2)).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: true, decor: true, page: 'A4' } });
+    expect(buildPrintSheetOptions({ ...f, kOnly: true, page: 'A3' }, 2)).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: true, decor: true, page: 'A3', kOnly: true } });
+    const none = buildPrintSheetOptions(f, 0);
+    expect(!none.ok && none.errors).toMatchObject({ codes: expect.stringMatching(/Select/) });
+    expect(buildPrintSheetOptions(f, 201).ok).toBe(false);
+    expect(buildPrintSheetOptions({ ...f, page: 'B5' }, 1).ok).toBe(false);
+    expect(buildPrintSheetOptions({ ...f, widthMm: '12' }, 1).ok).toBe(false); // test-print rule applies to sheets too
+    expect(isSheetSelectable({ status: 'ACTIVE' })).toBe(true);
+    for (const status of ['SUPERSEDED', 'REVOKED'] as const) expect(isSheetSelectable({ status })).toBe(false);
+  });
+
+  it('only an ADMIN manages console users', () => {
+    expect(can('ADMIN', 'manageAdmins')).toBe(true);
+    expect(can('OPERATOR', 'manageAdmins')).toBe(false);
   });
 
   it('groups claim codes for display', () => {

@@ -293,8 +293,9 @@ describe('PDF', () => {
     expect(content).not.toMatch(/\/DeviceRGB/);
     expect(content).toContain('0 0 0 1 scn'); // ink: K 100 %
     expect(content).toContain('0 0 0 0 scn'); // white paper: no ink
-    // Reduced tones become K tints of the same lightness (horizon #A9A9A9 ≈ K 33.7 %).
-    expect(content).toContain(`0 0 0 ${1 - 0xa9 / 255} scn`);
+    // Reduced tones become K tints at the same tone: horizon 35 %, guides 25 %.
+    expect(content).toContain('0 0 0 0.35 scn');
+    expect(content).toContain('0 0 0 0.25 scn');
     for (const m of content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) scn/g)) expect([m[1], m[2], m[3]]).toEqual(['0', '0', '0']);
 
     const inverted = pdfStreams((await renderArtifact(input, 'pdf', { kOnly: true, theme: 'inverted' }, meta)).body as Uint8Array);

@@ -5,6 +5,14 @@
  * is ever written, so the file prints crisply at any size and a RIP cannot
  * resample anything machine-critical.
  *
+ * Colour: DeviceRGB by default (the screen colours of the theme). With
+ * `colorMode: 'k-only'` every colour is written as DeviceCMYK with C = M =
+ * Y = 0: a dark ink or paper (the theme's #0A0A0A included) becomes solid
+ * K 100 %, a light one no ink (K 0), and a reduced tone the K tint at that
+ * tone between the two (decor horizon 35 %, guides 25 %). For print shops
+ * that would otherwise convert RGB black into a four-colour rich black. Only
+ * neutral colours can be expressed that way.
+ *
  * Pages are sized in millimetres to the artifact (plus label) for single
  * artifacts, or to a standard paper size for multi-up sheets. Output is
  * deterministic for a given input and creation date (pdfkit derives the file
@@ -13,7 +21,7 @@
 import PDFDocument from 'pdfkit';
 import { TAU, type Primitive } from '../../core/geometry.js';
 import { primitiveToPathData } from '../../core/render/svg.js';
-import { mixTone, mmToPt, type ArtifactScene, type StrokePath } from './scene.js';
+import { mixTone, mmToPt, parseHexColor, type ArtifactScene, type StrokePath } from './scene.js';
 
 export interface PdfPlacement {
   scene: ArtifactScene;
@@ -38,7 +46,22 @@ export interface PdfMeta {
   keywords?: string;
   /** Recorded as CreationDate/ModDate; also seeds the deterministic file ID. */
   creationDate: Date;
+  /** 'rgb' (default) or 'k-only' (DeviceCMYK, K channel only; neutral colours only). */
+  colorMode?: PdfColorMode;
 }
+
+export type PdfColorMode = 'rgb' | 'k-only';
+
+type Cmyk = [number, number, number, number];
+
+/** K-only solid of a neutral colour: dark (≥ 50 % grey) → K 100, light → K 0. */
+export function kSolid(color: string): number {
+  const rgb = parseHexColor(color);
+  if (!rgb || rgb[0] !== rgb[1] || rgb[1] !== rgb[2]) throw new RangeError(`K-only output needs neutral colours, got ${color}`);
+  return rgb[0] < 128 ? 100 : 0;
+}
+
+const kTint = (percent: number): Cmyk => [0, 0, 0, Math.round(percent * 100) / 100];
 
 const FULL_TURN_EPSILON = 1e-9;
 
@@ -49,13 +72,16 @@ function hasHole(p: Primitive): boolean {
   return false;
 }
 
-function drawScene(doc: PDFKit.PDFDocument, scene: ArtifactScene, xMm: number, yMm: number): void {
+function drawScene(doc: PDFKit.PDFDocument, scene: ArtifactScene, xMm: number, yMm: number, mode: PdfColorMode): void {
+  const kOnly = mode === 'k-only';
+  const inkK = kOnly ? kSolid(scene.ink) : 100;
+  const paperK = kOnly && scene.paper !== null ? kSolid(scene.paper) : 0;
   const vb = scene.viewBox;
   const s = mmToPt(scene.widthMm) / vb.w;
   doc.save();
   // Scene units → page points; pdfkit's user space is already y-down like SVG.
   doc.transform(s, 0, 0, s, mmToPt(xMm) - vb.x * s, mmToPt(yMm) - vb.y * s);
-  if (scene.paper !== null) doc.rect(vb.x, vb.y, vb.w, vb.h).fill(scene.paper);
+  if (scene.paper !== null) doc.rect(vb.x, vb.y, vb.w, vb.h).fill(kOnly ? kTint(paperK) : scene.paper);
 
   for (const p of scene.primitives) {
     const tone = p.tone ?? 1;
@@ -63,6 +89,11 @@ function drawScene(doc: PDFKit.PDFDocument, scene: ArtifactScene, xMm: number, y
     if (tone === 0) continue;
     const rule = hasHole(p) ? 'even-odd' : 'non-zero';
     doc.path(primitiveToPathData(p));
+    if (kOnly) {
+      // The same tone rule as the RGB mix, applied to the K values of paper and ink.
+      doc.fill(kTint(paperK + (inkK - paperK) * tone), rule);
+      continue;
+    }
     if (tone === 1) {
       doc.fill(scene.ink, rule);
       continue;
@@ -76,7 +107,7 @@ function drawScene(doc: PDFKit.PDFDocument, scene: ArtifactScene, xMm: number, y
   }
 
   for (const st of scene.strokes) {
-    doc.path(st.d).lineWidth(st.width).lineCap('round').lineJoin('round').stroke(scene.ink);
+    doc.path(st.d).lineWidth(st.width).lineCap('round').lineJoin('round').stroke(kOnly ? kTint(inkK) : scene.ink);
   }
   doc.restore();
 }
@@ -110,16 +141,18 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
   // If drawing throws, that error is the one reported; a stream error after it must not go unhandled.
   finished.catch(() => {});
 
+  const mode = meta.colorMode ?? 'rgb';
   try {
     for (const page of pages) {
       doc.addPage({ size: [mmToPt(page.widthMm), mmToPt(page.heightMm)], margin: 0 });
-      for (const pl of page.placements) drawScene(doc, pl.scene, pl.xMm, pl.yMm);
+      for (const pl of page.placements) drawScene(doc, pl.scene, pl.xMm, pl.yMm, mode);
       if (page.marks && page.marks.length > 0) {
         doc.save();
         const k = mmToPt(1);
         doc.transform(k, 0, 0, k, 0, 0);
         for (const m of page.marks) {
-          doc.path(m.d).lineWidth(m.width).lineCap('round').lineJoin('round').stroke(page.markColor ?? '#000000');
+          const markColor = page.markColor ?? '#000000';
+          doc.path(m.d).lineWidth(m.width).lineCap('round').lineJoin('round').stroke(mode === 'k-only' ? kTint(kSolid(markColor)) : markColor);
         }
         doc.restore();
       }

@@ -13,7 +13,9 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  AdminProfile,
   AdminSession,
+  AdminUser,
   AnomalyRecord,
   AnomalyStatus,
   ArtifactFormat,
@@ -117,6 +119,18 @@ export interface ArtifactOptions {
   decor?: boolean;
   label?: boolean;
   dpi?: number;
+  /** PDF only: K-only black for print shops. */
+  kOnly?: boolean;
+}
+
+export interface PrintSheetOptions {
+  widthMm?: number;
+  theme?: ArtifactTheme;
+  decor?: boolean;
+  label?: boolean;
+  kOnly?: boolean;
+  page?: 'A4' | 'A3' | 'LETTER';
+  cropMarks?: boolean;
 }
 
 export interface Download {
@@ -242,8 +256,21 @@ export class AdminApi {
     return this.post('/api/admin/auth/totp/setup');
   }
 
-  totpEnable(secret: string, code: string): Promise<{ ok: true; mfaPassed: true }> {
-    return this.post('/api/admin/auth/totp/enable', { secret, code });
+  /** Enrol TOTP. The server replaces the session by a new, MFA-passed one: keep its CSRF token. */
+  async totpEnable(secret: string, code: string): Promise<{ ok: true; mfaPassed: true; csrfToken: string }> {
+    const r = await this.post<{ ok: true; mfaPassed: true; csrfToken: string }>('/api/admin/auth/totp/enable', { secret, code });
+    if (typeof r?.csrfToken === 'string' && r.csrfToken) this.csrf = r.csrfToken;
+    return r;
+  }
+
+  // ── Console users (ADMIN) ────────────────────────────────────────────────
+
+  admins(): Promise<Items<AdminUser>> {
+    return this.get('/api/admin/admins');
+  }
+
+  resetAdminTotp(adminId: string): Promise<{ admin: AdminProfile }> {
+    return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/totp/reset`);
   }
 
   // ── Dashboard & catalogue ────────────────────────────────────────────────
@@ -314,6 +341,10 @@ export class AdminApi {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/warranty/activate`, input);
   }
 
+  extendWarranty(productId: string, months: number): Promise<{ warranty: WarrantyRecord }> {
+    return this.post(`/api/admin/products/${encodeURIComponent(productId)}/warranty/extend`, { months });
+  }
+
   voidWarranty(productId: string, reason?: string): Promise<{ warranty: WarrantyRecord }> {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/warranty/void`, reason ? { reason } : {});
   }
@@ -335,11 +366,22 @@ export class AdminApi {
   async artifact(codeId: string, format: ArtifactFormat, opts: ArtifactOptions = {}): Promise<Download> {
     const res = await this.request<Response>('GET', `/api/admin/codes/${encodeURIComponent(codeId)}/artifact.${format}`, {
       raw: true,
-      query: { widthMm: opts.widthMm, theme: opts.theme, decor: opts.decor, label: opts.label, dpi: format === 'png' ? opts.dpi : undefined },
+      query: {
+        widthMm: opts.widthMm,
+        theme: opts.theme,
+        decor: opts.decor,
+        label: opts.label,
+        dpi: format === 'png' ? opts.dpi : undefined,
+        kOnly: format === 'pdf' && opts.kOnly ? true : undefined,
+      },
     });
-    const blob = await res.blob();
-    const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
-    return { blob, contentType, filename: filenameFromDisposition(res.headers.get('content-disposition'), `orbes-code.${format}`) };
+    return toDownload(res, `orbes-code.${format}`);
+  }
+
+  /** One PDF of several codes with labels and crop marks (POST: it carries a list; audited per code). */
+  async printSheet(codeIds: readonly string[], opts: PrintSheetOptions = {}): Promise<Download> {
+    const res = await this.request<Response>('POST', '/api/admin/codes/print-sheet', { raw: true, body: { codeIds: [...codeIds], ...opts } });
+    return toDownload(res, 'orbes-print-sheet.pdf');
   }
 
   revokeCode(codeId: string, reason: string): Promise<{ code: CodeJson }> {
@@ -411,6 +453,12 @@ export class AdminApi {
   verifyAudit(): Promise<ChainVerification> {
     return this.get('/api/admin/audit/verify');
   }
+}
+
+async function toDownload(res: Response, fallback: string): Promise<Download> {
+  const blob = await res.blob();
+  const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+  return { blob, contentType, filename: filenameFromDisposition(res.headers.get('content-disposition'), fallback) };
 }
 
 async function toApiError(res: Response): Promise<ApiError> {

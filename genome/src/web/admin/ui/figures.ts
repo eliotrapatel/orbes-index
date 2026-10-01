@@ -30,7 +30,7 @@ export function genomeFigure(g: GenomeJson, opts: { layout?: 'orbit' | 'row'; si
 }
 
 export const THEME_COLORS: Readonly<Record<ArtifactTheme, { ink: string; paper: string }>> = Object.freeze({
-  black: ORBES_CODE_STYLES.classic,
+  classic: ORBES_CODE_STYLES.classic,
   inverted: ORBES_CODE_STYLES.inverted,
   ivory: ORBES_CODE_STYLES.ivory,
 });

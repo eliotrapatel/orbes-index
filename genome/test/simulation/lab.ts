@@ -552,7 +552,7 @@ export class Lab {
   }
 
   /** A forger's print: arbitrary 79 bytes and glyphs through the server's render module (same pipeline as genuine prints). */
-  async forgeArtifact(label: string, data: Uint8Array, glyphs: readonly number[], theme: ArtifactTheme = 'black'): Promise<Artifact> {
+  async forgeArtifact(label: string, data: Uint8Array, glyphs: readonly number[], theme: ArtifactTheme = 'classic'): Promise<Artifact> {
     const r = await renderArtifact(
       { data, genomeGlyphs: glyphs },
       'png',

@@ -4,7 +4,7 @@
  * genome/out/demo-codes/ (git-ignored).
  *
  *   tsx scripts/export-demo-codes.ts [--out <dir>] [--formats svg,png,pdf] [--products O26-J-00184,…]
- *                                    [--width-mm 30] [--dpi 600] [--theme black|inverted|ivory]
+ *                                    [--width-mm 30] [--dpi 600] [--theme classic|inverted|ivory]
  *                                    [--label] [--no-sheet] [--json]
  *
  * Where the codes come from
@@ -61,7 +61,7 @@ import {
   type ArtifactOptions,
   type PrintSheetItem,
 } from '../src/server/render/artifact.js';
-import { ARTIFACT_THEME_NAMES, type ArtifactTheme } from '../src/server/render/scene.js';
+import { ARTIFACT_THEME_NAMES, normalizeArtifactTheme } from '../src/server/render/scene.js';
 import { AuditService } from '../src/server/services/audit.js';
 import { createManualClock, noopLogger } from '../src/server/types.js';
 import {
@@ -94,7 +94,7 @@ Options
   --products <ids>        Comma-separated product ids (default every demo product)
   --width-mm <n>          Code width in mm (default 30)
   --dpi <n>               PNG resolution (default 600)
-  --theme <name>          black | inverted | ivory (default black)
+  --theme <name>          classic | inverted | ivory (default classic; black = classic)
   --label                 Print the product id under each code
   --no-sheet              Skip the multi-up PDF print sheet
   --json                  Print the manifest instead of a summary
@@ -159,8 +159,8 @@ export async function runExportCli(argv: string[], deps: CliDeps = {}): Promise<
   if (formats.length === 0 || formats.some((f) => !(ARTIFACT_FORMATS as readonly string[]).includes(f))) {
     return usage('--formats must list svg, png and/or pdf');
   }
-  const theme = (values.theme ?? 'black') as string;
-  if (!(ARTIFACT_THEME_NAMES as readonly string[]).includes(theme)) return usage('--theme must be black, inverted or ivory');
+  const theme = normalizeArtifactTheme(values.theme ?? 'classic');
+  if (theme === undefined) return usage(`--theme must be ${ARTIFACT_THEME_NAMES.join(', ')}`);
   const num = (name: 'width-mm' | 'dpi', fallback: number): number | undefined => {
     const v = values[name];
     if (v === undefined) return fallback;
@@ -170,7 +170,7 @@ export async function runExportCli(argv: string[], deps: CliDeps = {}): Promise<
   const widthMm = num('width-mm', 30);
   const dpi = num('dpi', 600);
   if (widthMm === undefined || dpi === undefined) return usage('--width-mm and --dpi must be numbers');
-  const artifactOptions: ArtifactOptions = { widthMm, dpi, theme: theme as ArtifactTheme, label: values.label === true, decor: true };
+  const artifactOptions: ArtifactOptions = { widthMm, dpi, theme, label: values.label === true, decor: true };
   try {
     for (const f of formats) resolveArtifactOptions(f as ArtifactFormat, artifactOptions);
   } catch (e) {
@@ -376,7 +376,7 @@ export async function exportCodes(db: Db, keys: KeyService, products: readonly D
     const day = o.now.toISOString().slice(0, 10);
     const rendered = await renderPrintSheet(
       sheetItems,
-      { widthMm: Math.min(o.artifactOptions.widthMm ?? 30, 40), theme: o.artifactOptions.theme ?? 'black', label: true },
+      { widthMm: Math.min(o.artifactOptions.widthMm ?? 30, 40), theme: o.artifactOptions.theme ?? 'classic', label: true },
       { createdAt: o.now, caption: `ORBES DEMO CODES · ${day} · ${sheetItems.length} CODES` },
     );
     sheet = 'demo-codes-sheet.pdf';

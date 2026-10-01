@@ -128,8 +128,8 @@ describe('AdminApi', () => {
       new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { 'content-type': 'image/png' } }),
     );
     const api = new AdminApi({ fetch });
-    const svg = await api.artifact('c0de', 'svg', { widthMm: 30, theme: 'black', label: true, dpi: 600 });
-    expect(calls[0].url).toBe('/api/admin/codes/c0de/artifact.svg?widthMm=30&theme=black&label=true');
+    const svg = await api.artifact('c0de', 'svg', { widthMm: 30, theme: 'classic', label: true, dpi: 600 });
+    expect(calls[0].url).toBe('/api/admin/codes/c0de/artifact.svg?widthMm=30&theme=classic&label=true');
     expect(svg.filename).toBe('ORBES-O26-J-00001-I1-black-30mm.svg');
     expect(await svg.blob.text()).toBe('<svg/>');
     const png = await api.artifact('c0de', 'png', { dpi: 1200 });

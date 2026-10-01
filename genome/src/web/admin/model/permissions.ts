@@ -29,6 +29,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   createRevocation: 'ADMIN',
   manageKeys: 'ADMIN',
   createCategory: 'ADMIN',
+  /** Console users: list, reset a lost second factor. */
+  manageAdmins: 'ADMIN',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;
