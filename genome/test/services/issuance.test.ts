@@ -465,7 +465,7 @@ describe('IssuanceService.renderCode', () => {
     expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
     // 25.4 mm = 72 pt wide; label adds 7.5/50 of the width.
     expect(text).toMatch(/\/MediaBox \[0 0 72 82\.8\]/);
-    expect(text).not.toMatch(/\/Subtype \/Image|\/Font/);
+    expect(text.replace(/(?<!end)stream\r?\n[\s\S]*?endstream/g, '')).not.toMatch(/\/Subtype \/Image|\/Font/);
   });
 
   it('audits downloads when an actor is given', async () => {
@@ -545,5 +545,68 @@ describe('helpers', () => {
     expect(normalizeAuthPolicy(undefined)).toBe('PRINTED_CODE');
     expect(normalizeAuthPolicy(' printed_code + secure_element ')).toBe('PRINTED_CODE+SECURE_ELEMENT');
     expect(() => normalizeAuthPolicy('PRINTED_CODE+PRINTED_CODE')).toThrow(DomainError);
+  });
+});
+
+/**
+ * Opt-in: true parallelism on PostgreSQL (pool of 8), with a key rotation in
+ * the middle of the burst.
+ *
+ *   ORBES_TEST_POSTGRES_URL=postgres://user:pass@127.0.0.1:5432/postgres npx vitest run test/services/issuance.test.ts
+ */
+const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
+describe.skipIf(!pgUrl)('IssuanceService on PostgreSQL', () => {
+  it('issues 50 products from 5 service instances in parallel while the key rotates', async () => {
+    const { sql } = await import('kysely');
+    const { closeDb, createDb } = await import('../../src/server/db/connection.js');
+    const { migrateToLatest } = await import('../../src/server/db/migrate.js');
+    const { randomBytes } = await import('node:crypto');
+    const adminDb = createDb(pgUrl!);
+    const dbName = `orbes_iss_${randomBytes(6).toString('hex')}`;
+    await sql`CREATE DATABASE ${sql.id(dbName)}`.execute(adminDb);
+    const u = new URL(pgUrl!);
+    u.pathname = `/${dbName}`;
+    const db = createDb(u.toString(), { poolMax: 8 });
+    try {
+      await migrateToLatest(db);
+      const audit = new AuditService({ db });
+      const categories = new CategoryRegistry({ db, audit });
+      await categories.load();
+      await categories.create({ code: 'J', name: 'Jewelry' }, admin);
+      const model = await db
+        .insertInto('models')
+        .values({ category_id: 1, name: 'MONOLITHE', type: 'RING', sku_prefix: 'MNL-RG' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const provider = new MemoryKeyProvider({ env: 'test' });
+      const instances = Array.from({ length: 5 }, () => {
+        const keys = new KeyService({ db, provider, audit });
+        const cats = new CategoryRegistry({ db, audit });
+        return { keys, issuance: new IssuanceService({ db, keys, audit, categories: cats }), cats };
+      });
+      await Promise.all(instances.map((i) => i.cats.load()));
+      await instances[0].keys.rotate({ type: 'system' });
+
+      const jobs = Array.from({ length: 50 }, (_, n) =>
+        instances[n % 5].issuance.issueProduct({ categoryCode: 'J', modelId: model.id, material: 'SILVER' }, { type: 'system' }),
+      );
+      jobs.splice(25, 0, instances[1].keys.rotate({ type: 'system' }) as never);
+      const settled = await Promise.all(jobs);
+      const results = settled.filter((r): r is Awaited<ReturnType<IssuanceService['issueProduct']>> => 'product' in (r as object));
+      expect(results).toHaveLength(50);
+      expect(new Set(results.map((r) => r.product.serial)).size).toBe(50);
+      expect(Math.max(...results.map((r) => r.product.serial))).toBe(50);
+      const keyRows = await db.selectFrom('cryptographic_keys').selectAll().execute();
+      expect(keyRows.map((k) => k.status).sort()).toEqual(['ACTIVE', 'RETIRED']);
+      for (const r of results) {
+        const key = keyRows.find((k) => k.key_id === r.code.keyId)!;
+        expect(verifyEd25519Node(key.public_key, signingMessage(r.code.payload), r.code.signature)).toBe(true);
+      }
+      expect((await audit.verifyChain()).ok).toBe(true);
+    } finally {
+      await closeDb(db);
+      await sql`DROP DATABASE IF EXISTS ${sql.id(dbName)} WITH (FORCE)`.execute(adminDb);
+      await closeDb(adminDb);
+    }
   });
 });

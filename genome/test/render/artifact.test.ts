@@ -55,6 +55,11 @@ function pdfStreams(pdf: Uint8Array): string {
   return out;
 }
 
+/** The PDF without its (binary) stream bodies: dictionaries and objects only. */
+function pdfObjects(pdf: Uint8Array): string {
+  return latin1(pdf).replace(/(?<!end)stream\r?\n[\s\S]*?endstream/g, 'stream endstream');
+}
+
 describe('artifact options', () => {
   it('applies defaults and keeps widths to 0.01 mm', () => {
     expect(resolveArtifactOptions('svg')).toEqual(ARTIFACT_DEFAULTS);
@@ -204,8 +209,8 @@ describe('PDF', () => {
 
   it('is pure vector: filled paths and stroked lettering, no raster image, no font', async () => {
     const pdf = (await renderArtifact(input, 'pdf', { label: true }, meta)).body as Uint8Array;
-    const text = latin1(pdf);
-    expect(text).not.toMatch(/\/Subtype\s*\/Image|\/XObject|\/Font|\/DCTDecode|\/JPXDecode|\bBI\b/);
+    // Dictionaries only: compressed stream bytes could contain any byte sequence by chance.
+    expect(pdfObjects(pdf)).not.toMatch(/\/Subtype\s*\/Image|\/XObject|\/Font|\/DCTDecode|\/JPXDecode/);
     const content = pdfStreams(pdf);
     expect(content).not.toMatch(/\bBI\b|\bDo\b|\bTj\b|\bTJ\b|\bBT\b/); // no inline images, XObjects or text
     const model = encodeOrbesCode(input, { decor: true });

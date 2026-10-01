@@ -267,6 +267,8 @@ export function deriveSku(skuPrefix: string, variant: string | undefined): strin
 
 // ── Internal errors ────────────────────────────────────────────────────────
 
+type WorkKind = 'auto-serial' | 'explicit-serial' | 'reissue';
+
 /** The signer fetched before the transaction is no longer the ACTIVE key: retry with a fresh one. */
 class StaleSignerError extends Error {
   override readonly name = 'StaleSignerError';
@@ -334,7 +336,7 @@ export class IssuanceService {
             claimHash,
           }),
         ),
-      { explicitSerial: p.serial !== undefined },
+      p.serial !== undefined ? 'explicit-serial' : 'auto-serial',
     );
     return claimCode ? { ...result, claimCode } : result;
   }
@@ -351,9 +353,7 @@ export class IssuanceService {
     const product = await this.findProduct(this.db, productRef);
     if (!product) throw notFound('Product', 'PRODUCT_NOT_FOUND');
 
-    return this.withRetries((signer) => inTransaction(this.db, (trx) => this.reissueIn(trx, signer, product.id, why, actor)), {
-      explicitSerial: true,
-    });
+    return this.withRetries((signer) => inTransaction(this.db, (trx) => this.reissueIn(trx, signer, product.id, why, actor)), 'reissue');
   }
 
   /**
@@ -418,7 +418,12 @@ export class IssuanceService {
 
   // ── Transactions ─────────────────────────────────────────────────────────
 
-  private async withRetries<T>(work: (signer: ActiveSigner) => Promise<T>, opts: { explicitSerial: boolean }): Promise<T> {
+  /**
+   * Run `work` with the current signer, retrying (fresh signer, fresh
+   * transaction) on a stale signer, a serial race (auto-allocated serials
+   * only) or a serialization failure / deadlock.
+   */
+  private async withRetries<T>(work: (signer: ActiveSigner) => Promise<T>, kind: WorkKind): Promise<T> {
     for (let attempt = 1; ; attempt++) {
       const signer = await this.keys.activeSigner();
       try {
@@ -432,8 +437,8 @@ export class IssuanceService {
             detail: 'active key kept changing during issuance',
           });
         }
-        if (!last && ((!opts.explicitSerial && isUniqueViolation(e)) || isRetryableTxError(e))) continue;
-        throw mapDbError(e, opts.explicitSerial);
+        if (!last && ((kind === 'auto-serial' && isUniqueViolation(e)) || isRetryableTxError(e))) continue;
+        throw mapDbError(e, kind);
       }
     }
   }
@@ -768,10 +773,10 @@ export class IssuanceService {
 
 // ── Mapping ────────────────────────────────────────────────────────────────
 
-function mapDbError(e: unknown, explicitSerial: boolean): unknown {
+function mapDbError(e: unknown, kind: WorkKind): unknown {
   if (e instanceof DomainError) return e;
   if (isUniqueViolation(e)) {
-    if (explicitSerial) return conflict('SERIAL_TAKEN', 'This serial number is already used.');
+    if (kind === 'explicit-serial') return conflict('SERIAL_TAKEN', 'This serial number is already used.');
     return conflict('ISSUANCE_CONFLICT', 'A concurrent change prevented issuance. Please retry.');
   }
   if (isForeignKeyViolation(e)) return notFound('Referenced record', 'REFERENCE_NOT_FOUND');

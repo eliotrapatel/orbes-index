@@ -109,7 +109,7 @@ describe('multi-up sheets', () => {
     expect(text.startsWith('%PDF-1.4')).toBe(true);
     const l = layoutSheet(25, 25 * (57.5 / 50), 31);
     expect(text).toMatch(new RegExp(`/Count ${l.pages.length}\\b`));
-    expect(text).not.toMatch(/\/Subtype\s*\/Image|\/Font/);
+    expect(text.replace(/(?<!end)stream\r?\n[\s\S]*?endstream/g, '')).not.toMatch(/\/Subtype\s*\/Image|\/Font/);
   });
 
   it('validates sheet requests', async () => {
