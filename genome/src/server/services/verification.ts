@@ -20,7 +20,8 @@ import { z } from 'zod';
 import { equalBytes, fromBase64Url } from '../../core/bytes.js';
 import { computeGenome, SUPPORTED_GENOME_VERSIONS, type Genome } from '../../core/genome/genome.js';
 import { packIdentity } from '../../core/identity.js';
-import { dateFromIssuedDay, PayloadError, signingMessage, unframeCodeData, type CodePayloadV1 } from '../../core/payload.js';
+import { CODE_PROFILES, unframeAnyCodeData } from '../../core/code-profiles.js';
+import { dateFromIssuedDay, PayloadError, type CodePayloadV1 } from '../../core/payload.js';
 import type { AnomalyConfig } from '../config.js';
 import { verifyEd25519Node } from '../crypto/ed25519-node.js';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -209,6 +210,8 @@ interface Work {
   trusted: boolean;
   /** Step 5 ended the decision: a validly signed genome version this server does not support. */
   unsupportedGenomeVersion?: number;
+  /** A well-formed code of a code version without a profile on this server (outdated server). */
+  unsupportedCodeVersion?: number;
   genome?: Genome;
   genomeCheck: GenomeCheck;
   serviceFinding?: { type: ServiceFindingType; details: JsonObject };
@@ -356,22 +359,27 @@ export class VerificationService {
   // ── Steps 1–8 (read-only) ──────────────────────────────────────────────
 
   private async decide(w: Work, code: unknown, genomeReading: CleanGenome | undefined): Promise<void> {
-    // Step 1: strict structural parse: base64url, unframe (length + CRC), strict payload decoding
-    // (code version 1, reserved values such as genome version / key id / issue 0).
+    // Step 1: strict structural parse: base64url, then the code version's profile (high nibble of byte 0,
+    // CODE_PROFILES): unframe (length + CRC) and strict payload decoding (reserved values such as genome
+    // version / key id / issue 0). An intact frame of a code version this server has no profile for is not
+    // damage: the server is outdated, as for an unsupported genome version (step 5). Nothing in it can be
+    // checked (no key, signature or registry rules), so it is UNKNOWN, with a server warning.
     if (typeof code !== 'string' || code.length === 0 || code.length > MAX_CODE_CHARS) {
       return end(w, 'MALFORMED_CODE', 'MALFORMED:INPUT');
     }
-    let unframed: ReturnType<typeof unframeCodeData>;
+    let unframed: ReturnType<typeof unframeAnyCodeData<CodePayloadV1>>;
     try {
-      unframed = unframeCodeData(fromBase64Url(code));
+      unframed = unframeAnyCodeData(fromBase64Url(code), CODE_PROFILES);
     } catch (e) {
+      if (e instanceof PayloadError && e.code === 'UNSUPPORTED_VERSION') {
+        w.unsupportedCodeVersion = e.codeVersion;
+        return end(w, 'UNKNOWN', 'UNSUPPORTED_CODE_VERSION');
+      }
       return end(w, 'MALFORMED_CODE', e instanceof PayloadError ? `MALFORMED:${e.code}` : 'MALFORMED:ENCODING');
     }
-    const { payload, payloadBytes, signature } = unframed;
+    const { payload, payloadBytes, signature, profile } = unframed;
     w.payload = payload;
     w.payloadBytes = payloadBytes;
-    // decodePayload already pins the code version; kept as a guard should the core decoder ever widen.
-    if (payload.codeVersion !== 1) return end(w, 'MALFORMED_CODE', 'UNSUPPORTED_CODE_VERSION');
 
     // Step 2: the key named by the code.
     const key = await this.keys.publicKey(payload.keyId);
@@ -380,7 +388,7 @@ export class VerificationService {
 
     // Step 3: strict Ed25519 (rejects small-order / non-canonical keys before OpenSSL). Every signed
     // field, the genome version included, is authenticated here: an edited version fails as a forgery.
-    if (!verifyEd25519Node(key.publicKey, signingMessage(payloadBytes), signature)) {
+    if (!verifyEd25519Node(key.publicKey, profile.signingMessage(payloadBytes), signature)) {
       return end(w, 'INVALID_SIGNATURE', 'BAD_SIGNATURE');
     }
     w.signatureValid = true;
@@ -547,6 +555,12 @@ export class VerificationService {
     await trx.updateTable('scan_events').set({ result_state: state, latency_ms: latencyMs }).where('id', '=', scanId).execute();
     if (state === 'SUSPICIOUS_ACTIVITY' || w.notice) {
       this.log.warn({ scanId, state, reasons: w.reasons }, 'verification flagged');
+    }
+    if (w.unsupportedCodeVersion !== undefined) {
+      this.log.warn(
+        { scanId, codeVersion: w.unsupportedCodeVersion },
+        'well-formed code of an unsupported code version: this server is outdated (or the version nibble was edited)',
+      );
     }
     if (w.unsupportedGenomeVersion !== undefined) {
       this.log.warn(

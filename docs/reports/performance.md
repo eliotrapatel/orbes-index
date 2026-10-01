@@ -12,10 +12,10 @@ Status: measured 2026-10-01 · Owner: QA / performance · Sources:
 | Camera recognition < 1 s (camera start → code decoded) | E2E, real browser; 3 runs × 4 fresh scans, reduced motion | medians **468 / 526 / 529 ms**, range 370–1 243 ms | Met at the median in every run; 1 of 12 scans exceeded 1 s, during a load spike |
 | Camera recognition, scan with the designed motion | E2E, 1 scan per run | 675 ms (load 1.4 per CPU); 1 124 and 1 331 ms (load ≥ 2.4 per CPU) | Met when the VM was less loaded; above target in 2 of 3 runs, dominated by the cold worker's first decode (see Observations) |
 | Verify API < 300 ms p95, excluding network | bench (b), 1 000 sequential `app.inject` requests, PGlite | p95 **28.6 / 32.0 ms** (two runs), p99 36.4 / 39.9 ms | Met, ≈ 10× headroom |
-| Verify API on PostgreSQL 16 | bench (b) | **not measured**: this session had no `ORBES_TEST_POSTGRES_URL` | Open. Command below |
+| Verify API on PostgreSQL 16 | bench (b), 1 000 requests, pg pool of 10, localhost (PostgreSQL 16.14) | sequential p50 **9.9 / 10.8 ms**, p95 **14.1 / 15.9 ms**, p99 17.3 / 22.9 ms; 8 in flight p95 38.6 / 56.9 ms at 302 / 210 req/s; 0 non-200 (two runs, §3) | Met, ≈ 20× headroom |
 | Time to result (tap → result screen) | E2E | medians 615–707 ms with reduced motion; 2.4–3.1 s with the designed pauses | No contract target; the pauses (≈ 1.6 s) are deliberate |
 | Decoder, 1280×720 frame with a code | bench (a), 72 decodes per environment | Chromium worker p50 46–53 ms, p95 94–102 ms; Node p50 46–72 ms, p95 78–162 ms | Comfortable for a 120 ms frame cadence |
-| Decoder, 1280×720 code-free frame | bench (a), 36 decodes per environment | Chromium worker p50 155–185 ms, p95 306–370 ms | 3–4× slower than a frame with a code |
+| Decoder, 1280×720 code-free frame | bench (a), 36 decodes per environment | Chromium worker p50 127–185 ms, p95 190–370 ms (three runs) | Within the qualified ORBES-CODE-SPEC §10 budget (code-free median < 200 ms, p95 < 400 ms), checked by `bench.ts`; 3–4× slower than a frame with a code |
 | Verify page first load | bench (d) | **30.4 KB gzip** (26.0 KB brotli) + 23.8 KB gzip decoder worker, loaded at idle | — |
 | Admin first load | bench (d) | 46.9 KB gzip (40.0 KB brotli) | — |
 | Issuance throughput | bench (c), PGlite | 55–57 products/s sequential (p95 28–29 ms) | No target |
@@ -30,7 +30,7 @@ The camera path works end to end in Chromium. A real issued code goes through si
 | Memory | 15.7 GiB |
 | OS | Linux 6.18.44 (Firecracker VM) |
 | Runtime | Node v22.22.0 · Chromium 141.0.7390.37 headless (playwright-core 1.56.1) |
-| Databases | PGlite 0.5.8 in memory (reports PostgreSQL 18.3, WASM). PostgreSQL 16 not measured (see Limitations) |
+| Databases | PGlite 0.5.8 in memory (reports PostgreSQL 18.3, WASM). PostgreSQL 16.14 on localhost (pg pool of 10), §3 |
 
 **This VM is shared and was busy.** Other engineers ran their test suites at the same time as these measurements. The 1-minute load average was 5.9–12.0 during the benchmarks (on 4 CPUs) and 1.4–3.3 per CPU during the E2E runs. Each benchmark ran twice. Between the two runs, decoder latencies differ by up to 1.6× and the API p95 by 12 %. Read every number as one sample from a noisy, oversubscribed machine. An idle machine would most likely be faster. The E2E suite records the load next to its numbers (`setup.machine`, `reducedMotion.loadPerCpuAtEnd`).
 
@@ -142,6 +142,8 @@ Each environment does 6 warm-up decodes, then 3 repetitions of each frame. All 2
 
 Values are given as run 1 / run 2.
 
+**Run 3 (2026-10-01, after the code-version registry, load 2.5 on 4 CPUs).** Chromium worker: with a code p50 37.4 ms, p95 55.3 ms; code-free p50 127.0 ms, p95 189.6 ms. Node: with a code p50 43.0 ms, p95 59.1 ms; code-free p50 154.3 ms, p95 208.6 ms. 216/216 decodes correct. `bench.ts` now judges the Chromium worker run against the ORBES-CODE-SPEC §10 budget (frames with a code p50 < 100 ms; code-free p50 < 200 ms, p95 < 400 ms; `scripts/decoder-budget.ts`) and exits 1 when it is exceeded: **PASS**. Runs 1 and 2 above are within that budget as well.
+
 These are **whole 1280×720 frames**. The live scanner sends only the square under the reticle (478–566 px on this phone viewport, at most 960 px), so its per-frame work is smaller. In the E2E runs, worker decodes of a cold worker's first frame took 173–792 ms under load.
 
 ## 3. Verify API latency (`bench.ts` b)
@@ -168,7 +170,16 @@ These are **whole 1280×720 frames**. The live scanner sends only the square und
 - **States returned (sequential run):** AUTHENTIC 369, FIRST_REGISTRATION 271, REGISTERED 173, REVOKED 87, INVALID_SIGNATURE 50, MALFORMED_CODE 50. There were no non-200 answers.
 - **p95 by kind:** genuine 27–34 ms; invalid signature 10–23 ms; malformed 9–13 ms. The last two stop before any registry or history query.
 - **Concurrency on PGlite.** PGlite is a single in-process connection, so 8 in flight gives **no extra throughput**. The latency then counts queueing (≈ 8 × the service time). This is the expected behaviour of the dev/test database and not a property of the service. With 8 in flight the p99 was 251–261 ms and one request reached 308 ms, just over the 300 ms target. That figure is queueing on one connection, not service time.
-- **PostgreSQL 16.** Not measured, see Limitations.
+- **PostgreSQL 16.** Measured twice (2026-10-01) with `ORBES_TEST_POSTGRES_URL` pointing at a local PostgreSQL 16.14 (the benchmark creates and drops a throwaway database; same seed and mix):
+
+| PostgreSQL 16 (pg pool of 10, localhost) | n | p50 | p95 | p99 | max | throughput | non-200 |
+|---|---|---|---|---|---|---|---|
+| sequential, run 1 (compliance audit) | 1 000 | 9.9 ms | **14.1 ms** | 17.3 ms | — | — | 0 |
+| sequential, run 2 | 1 000 | 10.8 ms | **15.9 ms** | 22.9 ms | 42.0 ms | 89 req/s | 0 |
+| 8 in flight, run 1 (compliance audit) | 1 000 | — | 38.6 ms | — | — | 302 req/s | 0 |
+| 8 in flight, run 2 | 1 000 | 36.9 ms | 56.9 ms | 76.6 ms | 106.6 ms | 210 req/s | 0 |
+
+  Unlike PGlite, a real pool serves requests concurrently: 8 in flight raises throughput 2.4–3.4× and the p95 stays far below the 300 ms target. Issuance on PostgreSQL (run 2): 83 products/s sequential (p95 16.6 ms), 110 products/s with 8 in flight (p95 83.0 ms). Run 1's figures not shown were not recorded by the audit.
 
 ## 4. Issuance throughput (`bench.ts` c)
 
@@ -216,7 +227,8 @@ The verify page boots the worker at idle time after the landing page renders. It
 - **The CPU is a desktop Xeon core.** Recent flagship phones may decode faster, and mid-range Android phones may be several times slower. Neither was measured. A real-device run, for example over remote debugging, is still needed before the 1 s target can be claimed on phones.
 - **Headless Chromium on Linux** composites in software. Safari/WebKit and Firefox were not measured.
 - **No network.** The API numbers use `app.inject`, as the target specifies (excluding network). The E2E `/verify` call crosses loopback HTTP only.
-- **PostgreSQL 16 was not measured.** This session had no credentials for the local server: `ORBES_TEST_POSTGRES_URL` was not set, and no role was available to it. The benchmark creates a throwaway database, runs the same seed, API and issuance workloads, and drops the database. That code path mirrors `test/api/postgres.test.ts` but **has not been executed**. To fill the gap: `ORBES_TEST_POSTGRES_URL=postgres://<role with CREATEDB>@127.0.0.1:5432/postgres npx tsx scripts/bench.ts --only api,issuance`.
+- **PostgreSQL 16 on localhost only.** Measured since (§3), on the same machine as the benchmark: no network between the app and the database, a pool of 10, no other tenants. A managed database across a network adds its round-trip time to each of the handful of queries a verification makes.
+- **No real phone and no iOS Safari / WebKit.** Recognition on real devices (camera start → decode on a recent iPhone and a mid-range Android, over remote debugging) is outside what this software prototype can measure: it needs the physical devices. The procedure is in `docs/COMPLIANCE.md` §4.1 item 2.
 - **Assertions are deliberately tolerant.** The E2E tests assert:
   - correctness: states, product id, nothing disclosed on invalid codes, permissions, camera release;
   - "read on the first or second frame sent";
@@ -245,7 +257,7 @@ Two caveats from the re-run:
 - **The 1 s target was not asserted in any of the 3 re-runs.** The load per CPU at the end of the timing test was 1.68, 2.2 and 3.04, all above the 1.5 gate, so the test only recorded the numbers. On a busy shared machine the timing assertion is effectively dormant; use `ORBES_E2E_STRICT=1` on a quiet machine to enforce it.
 - **The settling test does not assert that blurred frames are rejected.** The fake camera loops the clip, so whether a blurred frame is sampled depends on start-up timing. The rejections above come from the recorded metrics; the test title was changed to say only what it asserts.
 
-PostgreSQL 16 remains unmeasured: this re-run had no database role either.
+PostgreSQL 16 was unmeasured at this re-run (no database role); it has been measured since (§3).
 
 ## Reproduce
 

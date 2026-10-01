@@ -5,6 +5,9 @@
 # * Only Caddy publishes ports (80/tcp, 443/tcp, 443/udp). The app and
 #   PostgreSQL sit on internal networks: unreachable from the internet and
 #   without outbound internet access themselves.
+# * The app connects to PostgreSQL as POSTGRES_APP_USER (SELECT/INSERT/UPDATE/DELETE
+#   only); POSTGRES_USER (superuser, schema owner) is used by the scripts alone, for
+#   migrations, backups and restores.
 # * Caddy has a FIXED address on the `edge` network (CADDY_EDGE_IP) and the
 #   app trusts exactly that address (TRUST_PROXY): the client IP the app sees
 #   is the one Caddy determined, never a client-supplied X-Forwarded-For.
@@ -13,7 +16,7 @@
 #   ${…} interpolation below; each container gets only the variables listed.
 #
 # Day-to-day commands (run from deploy/vps/, as the `orbes` user):
-#   scripts/deploy.sh                       build the current commit, roll out, smoke test, roll back on failure
+#   scripts/deploy.sh                       build the current commit, migrate, roll out, smoke test, roll back on failure
 #   docker compose ps                       state and health of the three services
 #   docker compose logs -f app caddy        logs (JSON lines)
 #   scripts/backup.sh / scripts/restore.sh  encrypted backups (docs/DEPLOYMENT.md §15)
@@ -37,10 +40,14 @@ services:
     depends_on:
       app:
         condition: service_started
+    # IPv4 only, on purpose: Docker would publish on [::] too, through its userland proxy,
+    # and every IPv6 client would then reach Caddy with ONE internal IPv4 address (one
+    # shared rate-limit bucket and IP pseudonym, no geolocation, and a pass through the
+    # Cloudflare origin lock, which admits private peers). No AAAA record (DEPLOYMENT §15.2).
     ports:
-      - "${HTTP_PORT:-80}:80/tcp"
-      - "${HTTPS_PORT:-443}:443/tcp"
-      - "${HTTPS_PORT:-443}:443/udp"
+      - "0.0.0.0:${HTTP_PORT:-80}:80/tcp"
+      - "0.0.0.0:${HTTPS_PORT:-443}:443/tcp"
+      - "0.0.0.0:${HTTPS_PORT:-443}:443/udp"
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in deploy/vps/.env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/vps/.env}
@@ -91,13 +98,16 @@ services:
       # Wired by this file.
       ORBES_ENV: production
       PUBLIC_ORIGIN: https://${APP_DOMAIN:?set APP_DOMAIN in deploy/vps/.env}
-      DATABASE_URL: postgres://${POSTGRES_USER:-orbes}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/vps/.env}@postgres:5432/${POSTGRES_DB:-orbes}
+      # Least-privilege role (DML only, no DDL, not a superuser), created and granted by
+      # scripts/deploy.sh and restore.sh. Migrations run separately as POSTGRES_USER.
+      DATABASE_URL: postgres://${POSTGRES_APP_USER:-orbes_app}:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in deploy/vps/.env}@postgres:5432/${POSTGRES_DB:-orbes}
       HOST: 0.0.0.0
       PORT: "8080"
       TRUST_PROXY: ${CADDY_EDGE_IP:-172.30.80.2}
       KEY_PROVIDER: local
       KEY_DIR: /var/lib/orbes/keys
-      MIGRATE_ON_START: "true"
+      # The app role cannot run DDL: scripts/deploy.sh migrates (as the owner) before starting it.
+      MIGRATE_ON_START: "false"
       GEO_MODE: ${GEO_MODE:-mmdb}
       GEO_MMDB_PATH: /var/lib/orbes/geoip/${GEOIP_FILE:-dbip-city-lite.mmdb}
       # Secrets.
@@ -115,6 +125,7 @@ services:
       RATE_LIMIT_API_PER_MINUTE: ${RATE_LIMIT_API_PER_MINUTE:-}
       SESSION_TTL_ACCOUNT_HOURS: ${SESSION_TTL_ACCOUNT_HOURS:-}
       SESSION_TTL_ADMIN_HOURS: ${SESSION_TTL_ADMIN_HOURS:-}
+      SCAN_RETENTION_DAYS: ${SCAN_RETENTION_DAYS:-}
       ANOMALY_SUSPICIOUS_THRESHOLD: ${ANOMALY_SUSPICIOUS_THRESHOLD:-}
       ANOMALY_IMPOSSIBLE_TRAVEL_KMH: ${ANOMALY_IMPOSSIBLE_TRAVEL_KMH:-}
       ANOMALY_MIN_TRAVEL_KM: ${ANOMALY_MIN_TRAVEL_KM:-}

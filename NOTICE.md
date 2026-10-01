@@ -14,8 +14,8 @@ address of a scan. The location is used only for internal anomaly scoring
 - Copyright: © DB-IP.com
 - Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
   <https://creativecommons.org/licenses/by/4.0/>
-- Changes: none to the data. It is downloaded monthly
-  (`genome/scripts/geoip-update.ts`) and read as published; values are
-  rounded at lookup time.
+- Changes: none to the data. DB-IP publishes a new edition monthly; the VPS
+  checks for it weekly (`genome/scripts/geoip-update.ts`, systemd timer
+  `orbes-geoip`) and reads it as published; values are rounded at lookup time.
 
 The database file itself is not part of this repository.

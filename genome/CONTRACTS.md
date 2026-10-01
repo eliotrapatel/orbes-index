@@ -106,7 +106,24 @@ export function frameCodeData(payloadBytes: Uint8Array, signature: Uint8Array): 
 export function unframeCodeData(data: Uint8Array): { payloadBytes: Uint8Array; signature: Uint8Array; payload: CodePayloadV1 }; // checks CRC → PayloadError('CRC')
 export function issuedDayFromDate(d: Date): number;
 export function dateFromIssuedDay(day: number): Date;
-export class PayloadError extends Error { code: 'LENGTH' | 'VERSION' | 'RANGE' | 'CRC' | 'RESERVED' }
+export class PayloadError extends Error { code: 'LENGTH' | 'VERSION' | 'RANGE' | 'CRC' | 'RESERVED' | 'UNSUPPORTED_VERSION'; codeVersion?: number }
+```
+
+`src/core/code-profiles.ts` — code-version registry (ORBES-CODE-SPEC §12):
+
+```ts
+export interface CodeProfileEntry<P = unknown> {
+  version: number; id: string; layout: typeof CODE01; dataLength: number; signingDomain: string;
+  unframe(data: Uint8Array): { payloadBytes: Uint8Array; signature: Uint8Array; payload: P };   // strict, throws PayloadError
+  signingMessage(payloadBytes: Uint8Array): Uint8Array;
+}
+export type CodeProfileRegistry<P = unknown> = ReadonlyMap<number, CodeProfileEntry<P>>;
+export const CODE01_PROFILE: CodeProfileEntry<CodePayloadV1>;
+export const CODE_PROFILES: CodeProfileRegistry<CodePayloadV1>;          // {1 → CODE-01}
+export function codeVersionOf(data: Uint8Array): number;                  // high nibble of byte 0
+// Dispatch on the high nibble. Unregistered version 1..8 with an intact envelope
+// (≥ 67 bytes, CRC-16 trailer) → PayloadError('UNSUPPORTED_VERSION', codeVersion); else 'VERSION'.
+export function unframeAnyCodeData<P>(data: Uint8Array, profiles: CodeProfileRegistry<P>): { codeVersion: number; profile: CodeProfileEntry<P>; payloadBytes; signature; payload: P };
 ```
 
 `src/core/verify/ed25519.ts` (isomorphic, noble):
@@ -154,15 +171,15 @@ Deterministic output (fixed decimal precision, stable attribute order), so snaps
 ## 7. Encoder — `src/core/code/encoder.ts`
 
 ```ts
-export interface EncodeInput { data: Uint8Array /* 79 bytes */; genomeGlyphs: readonly number[] /* 8 */; codeVersion?: 1; mask?: number /* force mask */ }
+export interface EncodeInput { data: Uint8Array /* 79 bytes */; genomeGlyphs: readonly number[] /* 8 */; codeVersion?: number /* default 1; must be in the registry */; mask?: number /* force mask */ }
 export interface OrbesCodeModel {
-  profile: 'CODE-01'; codeVersion: 1; mask: number; formatWord: number;
+  profile: 'CODE-01'; codeVersion: number; mask: number; formatWord: number;
   codeword: Uint8Array;   // 164 bytes (data ‖ RS parity)
   cells: Uint8Array;      // CODE01_TOTAL_CELLS, final printed state (1 = ink), mask applied
   genomeGlyphs: number[];
   primitives: Primitive[]; // seal, moons, polaris halo, format/data arcs, genome glyphs, decor
 }
-export function encodeOrbesCode(input: EncodeInput, opts?: { decor?: boolean }): OrbesCodeModel;
+export function encodeOrbesCode(input: EncodeInput, opts?: { decor?: boolean; codeProfiles?: CodeProfileRegistry }): OrbesCodeModel;
 export function renderOrbesCodeSvg(model: OrbesCodeModel, style?: SvgStyle): string; // viewBox −25..25
 ```
 
@@ -171,7 +188,7 @@ export function renderOrbesCodeSvg(model: OrbesCodeModel, style?: SvgStyle): str
 ```ts
 export interface GrayImage { width: number; height: number; data: Uint8Array }  // 8-bit luma, row-major
 export function rgbaToGray(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): GrayImage;
-export interface DecodeOptions { tryInverted?: boolean; tryMirrored?: boolean; readGenome?: boolean; maxSealCandidates?: number }
+export interface DecodeOptions { tryInverted?: boolean; tryMirrored?: boolean; readGenome?: boolean; maxSealCandidates?: number; codeProfiles?: CodeProfileRegistry /* default CODE_PROFILES */ }
 export type DecodeResult =
   | { ok: true; data: Uint8Array; payloadBytes: Uint8Array; signature: Uint8Array;
       codeVersion: number; mask: number;

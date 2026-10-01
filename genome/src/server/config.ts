@@ -54,6 +54,12 @@ export interface AppConfig {
   logLevel: LogLevel;
   /** ADMIN_REQUIRE_MFA: admin sessions must have passed TOTP outside the auth routes (default: production only). */
   adminRequireMfa: boolean;
+  /**
+   * SCAN_RETENTION_DAYS: scan history (scan_events with their authentication_events and scan_tokens)
+   * older than this many days is purged by housekeeping. null (unset, the default) keeps it indefinitely;
+   * production then logs a warning. Never shorter than the anomaly look-back (scanLookbackDays).
+   */
+  scanRetentionDays: number | null;
 }
 
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -111,6 +117,18 @@ const TEST_RATE_LIMITS = { verifyPerMinute: 10_000, authPerMinute: 10_000, admin
 const DEFAULT_LOG_LEVEL: Readonly<Record<OrbesEnv, LogLevel>> = { production: 'info', test: 'warn', development: 'debug' };
 
 const DEFAULT_SESSION_TTL_HOURS = { account: 720, admin: 8 };
+
+/** SCAN_RETENTION_DAYS bounds (whole days). */
+export const SCAN_RETENTION_LIMITS = Object.freeze({ min: 30, max: 3_650 });
+
+/**
+ * Longest stretch of scan history (whole days) that anomaly scoring reads: the device and geography
+ * windows, the velocity window and the decay period. A retention period below it would erase evidence
+ * the scorer still uses.
+ */
+export function scanLookbackDays(a: AnomalyConfig): number {
+  return Math.ceil(Math.max(a.deviceWindowDays, a.geoWindowDays, a.decayDays, a.velocityWindowMin / 1_440));
+}
 
 // Well-known non-production secrets. Production refuses them by value.
 const DEV_COOKIE_SECRET = 'orbes-dev-cookie-secret-not-for-production-use-0001';
@@ -319,6 +337,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     DEFAULT_LOG_LEVEL[orbesEnv];
   const adminRequireMfa = field('ADMIN_REQUIRE_MFA', zSwitch, e.ADMIN_REQUIRE_MFA) ?? prod;
 
+  // Scan-history retention (period agreed with counsel; unset keeps everything).
+  const scanRetentionDays =
+    field(
+      'SCAN_RETENTION_DAYS',
+      z.string().regex(/^\d+$/, 'must be a whole number of days').transform(Number).pipe(z.number().int().min(SCAN_RETENTION_LIMITS.min).max(SCAN_RETENTION_LIMITS.max)),
+      e.SCAN_RETENTION_DAYS,
+    ) ?? null;
+  if (scanRetentionDays !== null && scanRetentionDays < scanLookbackDays(anomaly)) {
+    issues.push(`SCAN_RETENTION_DAYS: must be at least the anomaly look-back of ${scanLookbackDays(anomaly)} days (longest ANOMALY_*_WINDOW / ANOMALY_DECAY_DAYS)`);
+  }
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -339,6 +368,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     migrateOnStart,
     logLevel,
     adminRequireMfa,
+    scanRetentionDays,
   };
 
   if (prod) {
@@ -396,12 +426,17 @@ export function productionIssues(c: AppConfig): string[] {
  * Accepted but risky settings, logged as warnings at startup (never values).
  * ADMIN_REQUIRE_MFA=false in production lets a stolen admin password alone
  * reach every console action: it is allowed for a first-run enrolment window,
- * not as a steady state.
+ * not as a steady state. An unset SCAN_RETENTION_DAYS in production keeps
+ * pseudonymous scan history without limit (the period is a legal decision,
+ * so it has no default).
  */
 export function configWarnings(c: AppConfig): string[] {
   const warnings: string[] = [];
   if (c.env === 'production' && !c.adminRequireMfa) {
     warnings.push('ADMIN_REQUIRE_MFA: disabled in production; admin sessions without TOTP can use the whole console (enrol every admin, then remove the override)');
+  }
+  if (c.env === 'production' && c.scanRetentionDays === null) {
+    warnings.push('SCAN_RETENTION_DAYS: not set in production; pseudonymous scan history is kept indefinitely (set the retention period agreed with counsel, at least 30 days)');
   }
   return warnings;
 }
@@ -455,6 +490,7 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
     migrateOnStart: c.migrateOnStart,
     logLevel: c.logLevel,
     adminRequireMfa: c.adminRequireMfa,
+    scanRetentionDays: c.scanRetentionDays,
   };
 }
 

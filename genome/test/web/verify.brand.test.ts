@@ -8,6 +8,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CODE01 } from '../../src/core/code/profile.js';
+import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
+import { computeGenome } from '../../src/core/genome/index.js';
+import { packIdentity } from '../../src/core/identity.js';
+import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
@@ -39,6 +43,16 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(rule(styles, 'body[data-screen="scan"]').background).toBe('var(--ink)');
     expect(rule(styles, '.view--scan').background).toBe('var(--ink)');
     expect(styles).not.toMatch(/#000(000)?\b|\bblack\b|rgba?\(\s*0\s*,\s*0\s*,\s*0\b/i);
+  });
+
+  it('draws the GENOME on its ivory plate in the ivory colourway ink (#111111), as it is printed', () => {
+    const g = computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 }), 1);
+    const markup = genomeRowMarkup({ id: 'O26-J-00184', version: 'GENOME-01', versionNumber: 1, fingerprint: g.fingerprint, glyphs: [...g.glyphs], ids: [...g.ids] });
+    expect(markup).not.toBeNull();
+    const inks = new Set([...markup!.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
+    expect([...inks]).toEqual([ORBES_CODE_STYLES.ivory.ink]);
+    expect(rule(styles, '.result__genome').background).toBe('var(--ivory)');
+    expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
   });
 
   it('sets the customer-quotable reference (VERIFIED · REF) at ≥ 10 px in a readable tone', () => {
@@ -77,6 +91,12 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       if (prop === 'font-size' && bySize[value]) literal.push(`${prop}: ${value} → var(${bySize[value]})`);
       if (prop !== 'font-size' && byTrack[value]) literal.push(`${prop}: ${value} → var(${byTrack[value]})`);
     }
+    expect(literal).toEqual([]);
+  });
+
+  it('sets every fixed font size of both apps from a brand.css token (no off-scale literal sizes)', () => {
+    const admin = readFileSync(join(WEB, 'admin/styles.css'), 'utf8');
+    const literal = [styles, admin].flatMap((css) => [...css.matchAll(/^\s*font-size:\s*([0-9.]+px)\s*;/gm)].map((m) => m[1]));
     expect(literal).toEqual([]);
   });
 

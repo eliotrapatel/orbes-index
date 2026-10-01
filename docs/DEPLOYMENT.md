@@ -246,6 +246,12 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 | `SESSION_TTL_ACCOUNT_HOURS` | `720` | Integer 1–8760. |
 | `SESSION_TTL_ADMIN_HOURS` | `8` | Integer 1–168. |
 
+**Data retention**
+
+| Variable | Default | Rules |
+|---|---|---|
+| `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events and scan tokens (DATABASE §10). Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
+
 **Anomaly thresholds** (internal, never exposed by the API). Any other `ANOMALY_*` name is rejected.
 
 | Variable | Default | Range |
@@ -717,6 +723,8 @@ interface KeyProvider {
 
 The rest of the system only sees public keys and the opaque `providerRef`, which is stored in `cryptographic_keys.provider_ref` and is never a secret. A KMS/HSM provider is a code change.
 
+**No KMS/HSM provider ships with this prototype.** Writing one needs the chosen vendor's account, its non-exportable Ed25519 key type and its SDK or signed-request client, none of which a self-contained prototype can exercise; an untested provider would be worse than none. The interface, the configuration switch (`KEY_PROVIDER`) and the acceptance suite (`test/keys/provider-contract.ts`) are in place.
+
 1. **Implement the provider** (for example `src/server/keys/kms-provider.ts`).
    - `generate` creates a **non-exportable Ed25519** key in the KMS/HSM and returns its raw 32-byte public key and the KMS key reference.
    - `sign` calls the KMS with the **raw message** (PureEdDSA, not Ed25519ph or a pre-hash) and returns the 64-byte signature.
@@ -725,7 +733,7 @@ The rest of the system only sees public keys and the opaque `providerRef`, which
    - Add the provider name to the `KEY_PROVIDER` enum and its settings to `loadConfig()` (`src/server/config.ts`).
    - Add the provider to `createKeyProvider()` (`src/server/keys/index.ts`).
    - Document the new variables in `.env.example`.
-   - Add the provider tests next to `test/keys/local-provider.test.ts`.
+   - Run the shared provider contract against it: add a `describeKeyProviderContract('<name>', …)` line to `test/keys/provider-contract.test.ts` (strict Ed25519 public keys, 64-byte RFC 8032 signatures valid only under their key, no kid reuse, documented error codes, no key bytes in errors), plus provider-specific tests next to `test/keys/local-provider.test.ts`.
 3. **No custom safety code is needed.** `KeyService` refuses weak or non-canonical public keys, requires a proof-of-possession signature before registering a key, and verifies every signature after signing. A faulty KMS cannot put an invalid code into circulation.
 4. **Cut over** with an ordinary rotation: deploy with `KEY_PROVIDER=<kms>`, then run `npm run keys:rotate`.
    - The new ACTIVE key lives in the KMS, and the local keys become RETIRED. They keep verifying, because their public keys are in the database.
@@ -815,7 +823,7 @@ docker compose exec app node --import tsx scripts/admin.ts reset-totp --email op
 ### 9.2 Logging
 
 - **Format.** JSON lines (pino) on **stdout**. Lines written before the HTTP logger exists (migrations, bootstrap, key self-test) are JSON on **stderr**. Configuration errors are plain text on stderr, followed by exit code 78.
-- **Level.** `LOG_LEVEL` (default `info` in production). Accepted but risky settings (`ADMIN_REQUIRE_MFA=false` in production) are logged as `risky configuration` warnings at every start.
+- **Level.** `LOG_LEVEL` (default `info` in production). Accepted but risky settings (`ADMIN_REQUIRE_MFA=false`, or no `SCAN_RETENTION_DAYS`, in production) are logged as `risky configuration` warnings at every start.
 - **Contents.** Each request logs the method, the path **without the query string**, a server-generated request id (`reqId`; client-supplied ids are ignored), the status code and the response time. **Never logged:** client IPs, cookies, the CSRF header, `Set-Cookie`, request bodies or secrets. The startup line carries a redacted configuration summary (database password masked, secrets shown as `[set]`, no anomaly thresholds).
 - **Shipping.** Collect stdout and stderr with the platform's log driver. With plain Docker, cap local logs in a compose override:
   ```yaml
@@ -943,7 +951,7 @@ curl -fsS "$ORIGIN/api/v1/health"
 # 2. Public keys: the ACTIVE key (and RETIRED/REVOKED ones) with the fingerprint recorded in §5.4
 curl -fsS "$ORIGIN/api/v1/keys"
 #   {"keys":[{"keyId":1,"kid":"orbes-k001-20261001-e562","alg":"Ed25519","publicKey":"ZTvRQVVP…","status":"ACTIVE",
-#             "activatedAt":"2026-10-01T10:55:37.987Z","retiredAt":null,"revokedAt":null}]}
+#             "activatedAt":"2026-10-01T10:55:37.987Z","retiredAt":null,"revokedAt":null,"compromisedAt":null}]}
 curl -fsS "$ORIGIN/.well-known/orbes-keys.json"           # same document, CORS *, max-age=300
 
 # 3. Scanner page: 200, CSP, camera permission, HSTS
@@ -987,7 +995,7 @@ cd genome && npx tsx scripts/build-web.ts            # once, for /verify and /ad
 node --import tsx src/server/index.ts --demo          # or ORBES_DEMO=true; npm start -- --demo
 ```
 
-The server starts on `pglite:memory`, loads the demo dataset through the real services (41 products, 8 accounts, scan histories and anomalies; about 15 s), then serves it; the clock replays the catalogue's history during the seed and follows real time afterwards. It prints the console sign-in once: `BOOTSTRAP_ADMIN_*` when set, otherwise `demo-admin@example.com` with a random password, plus the demo accounts' password and a claim code. Everything is lost on exit. `--demo` is refused in production and with any `DATABASE_URL` other than `pglite:memory`. (`package.json` has no `npm run demo` alias: it cannot be edited in this change; `npm start -- --demo` is the equivalent.)
+The server starts on `pglite:memory`, loads the demo dataset through the real services (41 products, 8 accounts, scan histories and anomalies; about 15 s), then serves it; the clock replays the catalogue's history during the seed and follows real time afterwards. It prints the console sign-in once: `BOOTSTRAP_ADMIN_*` when set, otherwise `demo-admin@example.com` with a random password, plus the demo accounts' password and a claim code. Everything is lost on exit. `--demo` is refused in production and with any `DATABASE_URL` other than `pglite:memory`. `npm run demo` (`tsx src/server/index.ts --demo`) and `npm start -- --demo` are equivalent shortcuts.
 
 ---
 
@@ -1053,7 +1061,8 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
 
 | Piece | Where | Notes |
 |---|---|---|
-| Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. |
+| Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. Caddy publishes 80/443 on **IPv4 only** (§15.2). |
+| Database roles | `deploy/vps/scripts/lib.sh` (`db_*`) | §6.2 applied: the app connects as **`POSTGRES_APP_USER`** (`orbes_app`: `SELECT`/`INSERT`/`UPDATE`/`DELETE` on the tables, sequence use, read-only on `kysely_migration*`; no superuser, no DDL, `MIGRATE_ON_START=false`). The superuser `POSTGRES_USER` owns the schema and is used only by the scripts: migrations (`deploy.sh`, `restore.sh`), backups and restores. A compromised app therefore cannot `SET session_replication_role` or `ALTER … DISABLE TRIGGER` to rewrite the append-only audit log, nor run `COPY … TO PROGRAM`. |
 | TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. |
 | Configuration | `deploy/vps/.env` (from `.env.example`) | Mode `0600`, owner `orbes`, git-ignored. Parsed by the scripts, never sourced. |
 | Scripts | `deploy/vps/scripts/` | `bootstrap-ubuntu.sh`, `setup.sh`, `deploy.sh`, `backup.sh`, `restore.sh`, `geoip-update.sh`; each has `--help`. |
@@ -1076,7 +1085,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
    - `ns1.vercel-dns.com` / `ns2.vercel-dns.com`: the zone is at **Vercel**. Vercel dashboard → *Domains* → `theorbes.com` → DNS records, or `vercel dns add theorbes.com verify A <VPS IPv4>`.
    - anything else (the registrar's, OVH's `dns*.ovh.net`, Cloudflare…): add the record at that provider.
 2. Add **`verify` A `<VPS IPv4>`** (TTL 300 s while you set things up). Do not touch the apex or `www` records: they keep pointing at Vercel.
-3. **AAAA: leave it out** unless you have enabled IPv6 on the VPS *and* in Docker for this stack. Without IPv6 in Docker, IPv6 clients reach Caddy through Docker's userland proxy and all of them appear with one internal IPv4 address, which merges their rate-limit buckets and IP pseudonyms.
+3. **AAAA: leave it out**, even though OVH VPSs have an IPv6 address. Caddy is published on IPv4 only (§15.3): through Docker's userland proxy every IPv6 client would appear with one internal IPv4 address, which merges their rate-limit buckets and IP pseudonyms and hides their location. Serving IPv6 needs IPv6 enabled in Docker for the `public` network first (then publish on `[::]` as well), and a new test of §13's rate-limit check over IPv6.
 4. Check propagation before running `setup.sh` (Let's Encrypt validates through public DNS):
    ```bash
    dig +short verify.theorbes.com @1.1.1.1      # must print the VPS address
@@ -1089,6 +1098,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
 `bootstrap-ubuntu.sh` configures **ufw** (deny incoming; allow the SSH port(s) sshd listens on, 80/tcp, 443/tcp, 443/udp). Two caveats:
 
 - **Docker-published ports bypass ufw** (Docker inserts its own iptables rules). The stack publishes only Caddy's 80/443, which ufw allows anyway, so both views agree; never publish the app or PostgreSQL.
+- **IPv4 only.** Caddy's ports are published on `0.0.0.0`, not on `[::]`: an IPv6 publish would go through Docker's userland proxy, and every IPv6 client would reach Caddy with one internal IPv4 address (one shared rate-limit bucket and IP pseudonym, no geolocation, and in Cloudflare mode a way around the origin lock, which admits private peers for the VPS's own checks). Hence no AAAA record (§15.2).
 - For filtering **in front of** the VPS, OVH offers a stateless network firewall on the public IP (in the OVHcloud Control Panel, on the VPS's IP address: *Edge Network Firewall*). If you enable it, mirror ufw: allow TCP 22, 80, 443 and UDP 443 (and established TCP), deny the rest. Test SSH from a second session before relying on it.
 
 ### 15.4 First deployment, step by step
@@ -1132,7 +1142,7 @@ scripts/setup.sh --domain verify.theorbes.com --acme-email ops@theorbes.com --ad
 `setup.sh`:
 
 1. creates `.env` from `.env.example` (mode 0600); an existing `.env` is kept and only **empty** secrets are filled in, so a rerun never rotates a secret. It refuses to generate `POSTGRES_PASSWORD` or `KEY_ENCRYPTION_KEY` when the matching volume already exists (put the escrowed values back instead);
-2. generates `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `COOKIE_SECRET` and `IP_HASH_PEPPER` (48 random bytes, base64url), `KEY_ENCRYPTION_KEY` (32 bytes, base64url) and `BOOTSTRAP_ADMIN_PASSWORD`;
+2. generates `POSTGRES_PASSWORD` (the superuser/owner, scripts only) and `POSTGRES_APP_PASSWORD` (the app's DML-only role; re-applied to the role by every deploy) with `openssl rand -hex 24`, `COOKIE_SECRET` and `IP_HASH_PEPPER` (48 random bytes, base64url), `KEY_ENCRYPTION_KEY` (32 bytes, base64url) and `BOOTSTRAP_ADMIN_PASSWORD`. A `.env` from before the two roles existed: rerun `setup.sh` (it only fills in the missing `POSTGRES_APP_PASSWORD`), then `deploy.sh`;
 3. backup encryption: uses `--age-recipient` if given, otherwise generates an age key pair **in memory**, prints the private key once and writes only the public key to `BACKUP_AGE_RECIPIENTS_FILE` (`/opt/orbes/backup-recipients.txt`);
 4. prints the new secrets once, in an **escrow block**: store them offline now (password manager + sealed copy). The backups deliberately do not contain them;
 5. runs `scripts/deploy.sh` (§15.7) and `scripts/geoip-update.sh` (§15.6, a failure only warns);
@@ -1151,7 +1161,7 @@ docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <f
 docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <current code>
 ```
 
-Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env`, then `scripts/deploy.sh` (or `docker compose up -d caddy`): `/admin*` and `/api/admin*` answer 403 elsewhere.
+Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env` (**space**-separated; a comma makes the configuration invalid), then `scripts/deploy.sh`: `/admin*` and `/api/admin*` answer 403 elsewhere. `deploy.sh` validates the Caddy configuration with the new values before changing anything; a bare `docker compose up -d caddy` does not, and an invalid value stops Caddy, which takes the whole site down.
 
 ### 15.6 GeoIP database (anomaly scoring without Cloudflare)
 
@@ -1177,8 +1187,10 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 |---|---|
 | Source | `git archive <ref> genome` into a temporary build context: the checkout is never modified, and uncommitted changes are never deployed by accident (warned; `--worktree` builds the working tree as is, tagged `<commit>-dirty-<time>`). |
 | Build | `docker build` → `orbes-genome:<commit12>` (an existing tag is reused). `BUILD_EXTRA_CA_FILE` in `.env` passes a proxy CA as the `extra_ca` BuildKit secret (§5.2); not needed on OVH. |
+| Caddy | `caddy validate` of `Caddyfile` + `caddy.d/` with the values of `.env` (`TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`…), in a throw-away `caddy:2` container: an invalid configuration stops the deployment before anything changes. |
 | Backup | When the stack is running: `backup.sh --reason pre-deploy-<tag>` first (`--no-backup` skips it). |
-| Roll out | `ORBES_IMAGE_TAG=<tag>` written to `.env`, `docker compose up -d`; waits for PostgreSQL, the app (healthcheck = `/api/v1/health`, migrations run at start with `MIGRATE_ON_START=true`) and Caddy; a crash loop fails fast. A changed `Caddyfile`/`caddy.d` recreates Caddy (config hash label). |
+| Database | `ORBES_IMAGE_TAG=<tag>` written to `.env`; PostgreSQL started; the app role ensured (created if missing, attributes and password re-applied); when the image changes, the running app is stopped first (old code never runs on a newer schema); pending migrations applied by a one-off container of the **new** image as the schema owner (`scripts/db.ts migrate`; the owner URL is passed through the environment, never on a command line); privileges granted again. |
+| Roll out | `docker compose up -d`; waits for the app (healthcheck = `/api/v1/health`; the app itself refuses to start while a migration is pending) and Caddy; a crash loop fails fast. A changed `Caddyfile`/`caddy.d` recreates Caddy (config hash label). |
 | Keys | Runs `npm run keys:generate` in the app when no key is ACTIVE (first deployment only; idempotent). |
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback | Any failure of the last three steps redeploys the previous image tag and waits for health; the outcome is appended to `.state/deploys.log`. |
@@ -1195,7 +1207,7 @@ Operating system updates arrive through unattended-upgrades (`live-restore` keep
 2. a tar of the `keys` volume (the key files stay AES-GCM-encrypted under `KEY_ENCRYPTION_KEY`, which is **not** in the backup);
 3. `manifest.json` (time, reason, image, schema migrations, key ids and status, SHA-256 of both parts);
 4. one tar of the three, **encrypted with age** to every public key in `BACKUP_AGE_RECIPIENTS_FILE`, written to `/var/backups/orbes/daily/orbes-<UTC time>[-<reason>].tar.age` plus a `.sha256` file. The bytes on disk are re-read and compared with the bytes streamed, and the age header and recipient count are checked;
-5. retention: the newest `BACKUP_KEEP_DAILY` (14) archives in `daily/`, and the first archive of each ISO week hard-linked into `weekly/` (newest `BACKUP_KEEP_WEEKLY`, 8);
+5. retention: the newest `BACKUP_KEEP_DAILY` (14) archives in `daily/`, and the first archive of each ISO week hard-linked into `weekly/` (newest `BACKUP_KEEP_WEEKLY`, 8). Scheduled archives (nightly) and event archives (`pre-deploy-*`, `pre-restore`, other `--reason` values) are counted separately, so a day with many deployments never pushes the nightly history out;
 6. optional off-site copy with rclone (below).
 
 The server holds only the public key: it **cannot decrypt its own backups**, and a stolen backup is useless without the offline identity. The plaintext dump exists only in a `0700` work directory under `/var/backups/orbes` while the backup runs (removed on exit, also on failure). `--verify-identity <file>` additionally decrypts the new archive and compares checksums (restore drills; do not leave the identity on the server). Check freshness with `cat .state/last-backup`, `systemctl list-timers 'orbes-*'` and `journalctl -u orbes-backup`.
@@ -1224,11 +1236,11 @@ The server holds only the public key: it **cannot decrypt its own backups**, and
 
 `scripts/restore.sh --identity <age identity file> (--archive <file> | --latest) [--db-only | --keys-only] [--yes] [--dry-run]`:
 
-1. checks the `.sha256` file, decrypts, verifies the manifest checksums, `pg_restore --list` and `tar -t` (`--dry-run` stops here and prints the manifest);
+1. checks the `.sha256` file, decrypts, verifies the manifest checksums, `pg_restore --list` and `tar -t` (`--dry-run` stops here and prints the manifest). `--latest` takes the newest archive **except** the `pre-restore` safety backups this script writes itself, so running the same restore twice never restores the state that was being replaced (restore those by `--archive` only);
 2. asks you to **type the domain** (or `--yes`);
 3. takes a safety backup of the current state when PostgreSQL is running;
-4. stops the app; **recreates the `pgdata` volume** and restores into the empty database (`--exit-on-error --single-transaction`; the append-only audit log makes restoring over existing data impossible by design); **empties the `keys` volume** and extracts the key files (owner 1000, `0700`/`0600`);
-5. starts the stack if the image exists (otherwise run `scripts/deploy.sh`), waits for health, checks `/api/v1/health` through Caddy and lists the signing keys.
+4. stops the app; **recreates the `pgdata` volume**, creates the app role, and restores into the empty database as the owner (`--exit-on-error --single-transaction --no-privileges`; the append-only audit log makes restoring over existing data impossible by design), then grants the app role its DML rights; **empties the `keys` volume** and extracts the key files (owner 1000, `0700`/`0600`);
+5. starts the stack if the image exists (otherwise run `scripts/deploy.sh`): migrations of that image first (an older archive), then waits for health, checks `/api/v1/health` through Caddy and lists the signing keys.
 
 The restored stack needs the **same `KEY_ENCRYPTION_KEY`** as the backup (from escrow); with another one the key files cannot be decrypted (verification still works, issuance does not, §7.3).
 
@@ -1250,7 +1262,7 @@ Then: `docker compose exec app npm run keys:list` shows the same key ids and fin
 
 ### 15.10 The Vercel redirect
 
-`vercel.json` at the repository root contains **only** two redirects (checked by `genome/test/ops/vps-stack.test.ts`; `.vercelignore` keeps `genome/`, `docs/` and `.github/` off the website):
+`vercel.json` at the repository root contains **only** two redirects (checked by `genome/test/ops/vps-stack.test.ts`; `.vercelignore` keeps `genome/`, `docs/`, `deploy/`, `.github/` and `node_modules/` off the website):
 
 ```json
 { "redirects": [
@@ -1308,5 +1320,8 @@ Last full run: 2026-10-01, in a sandbox (Docker 29.6, Compose 5.3, `caddy:2` = 2
 | Edge | access log; 70 KB body; `ADMIN_ALLOWED_IPS`; `caddy validate` in acme/internal × direct/cloudflare | no query string, cookie, header or full IP in Caddy's log; 413; `/admin*` and `/api/admin*` 403 outside the list (forged XFF does not help), `/verify` unaffected; all valid |
 | Backups | `backup.sh` (incl. `--verify-identity`, retention with `BACKUP_KEEP_DAILY=2`, rclone copy/check to a test remote, `--dry-run`) | archives written and re-read, full decryption check OK, pruning and weekly hard link as designed, remote copy checked |
 | Restore | `docker compose down -v` (every volume deleted), archive fetched back from the remote, `restore.sh --identity … --yes` (after `--dry-run`, a wrong identity and a non-interactive run without `--yes`, all refused) | stack healthy in 20 s; row counts, key registry and key file (SHA-256, mode 0600, owner 1000) identical; a code issued before the backup AUTHENTIC, one issued after it UNKNOWN; `keys:generate` → "already ACTIVE"; a new product issued with the restored key verified AUTHENTIC; admin TOTP still valid; audit chain verified |
+| Adversarial review (2026-10-01, same sandbox) | Isolated Caddy harness (the real `Caddyfile`, an echo upstream, a "public" `198.51.100.0/24` network): forged `X-Forwarded-For`/`X-Real-IP`/`Forwarded`/`CF-*`/`True-Client-IP`, duplicate XFF headers; 18 `/admin` path variants (`/ADMIN`, `//admin`, `/%61dmin`, `/x/../admin`, `/api//admin/…`, `%2f`, `;`, `%00`, `\`); Cloudflare mode with a trusted and an untrusted public peer; an upstream outage; `ADMIN_ALLOWED_IPS` with a comma | the upstream always receives exactly the peer address; every variant the app would route is 403 (the rest are 404 in the app: checked with Fastify's router); Cloudflare mode: 403 for the untrusted peer, `CF-Connecting-IP` honoured for the trusted one; **fixed**: the error log (`http.log.error`, a 502) carried the full IP, query string and headers: the runtime log is now filtered like the access log; **fixed**: a comma crash-looped Caddy (the whole site): `deploy.sh` now validates first |
+| Least-privilege database (2026-10-01) | Stack redeployed with the two roles (`setup.sh`, `deploy.sh`); as the app role: `SET session_replication_role`, `COPY … TO PROGRAM`, `DELETE`/`TRUNCATE audit_logs`, `ALTER TABLE … DISABLE TRIGGER`, `CREATE TABLE` | all refused (with the former superuser connection, `SET session_replication_role = replica` let a `DELETE` empty `audit_logs` (rolled back) and `COPY … TO PROGRAM` ran a shell command in the database container); issuance, verification, TOTP login, key generation, audit verify all work under the app role |
+| Full drill (2026-10-01) | backup (`--verify-identity`, off-site copy) → `down -v`, local archives, image and `.state` deleted → archive fetched back with rclone → `restore.sh --latest --yes` → `deploy.sh` (rebuild) → second `restore.sh` with the image present; `deploy.sh --image <crash-looping image>`; 5 backups with `BACKUP_KEEP_DAILY=2` | counts, key file (SHA-256, 0600, uid 1000) identical; pre-backup code AUTHENTIC, post-backup code UNKNOWN; TOTP login; audit chain verified; new issuance with the restored key AUTHENTIC; `keys:generate` "already ACTIVE"; `--latest` skipped the newer `pre-restore` safety archive; crash loop rolled back with migrations run as the owner each way; 2 nightly + 2 event archives kept; a scan from a GB address with a forged JP `X-Forwarded-For`/`CF-IPCountry` stored `GB 51.5/-0.1` and only the IP hash; Caddy log `81.2.69.0`; no password in any log, image history or config |
 
 `genome/test/ops/vps-stack.test.ts` guards the static properties (vercel.json, compose isolation and hardening, TRUST_PROXY pinning, Caddyfile client-IP and log rules, scripts, timers) in CI.

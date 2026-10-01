@@ -99,4 +99,60 @@ describe('housekeeping', () => {
       await t.close();
     }
   });
+
+  it('purges scan history older than SCAN_RETENTION_DAYS, dependants first, and keeps everything when unset', async () => {
+    const t = await createTestDb();
+    const clock = createManualClock('2026-05-01T00:00:00.000Z');
+    const day = 86_400_000;
+    const at = (daysAgo: number) => new Date(clock.now().getTime() - daysAgo * day);
+    const seed = async (daysAgo: number) => {
+      const [scan] = await t.db
+        .insertInto('scan_events')
+        .values({ occurred_at: at(daysAgo), event_type: 'VERIFY', result_state: 'UNKNOWN' })
+        .returning('id')
+        .execute();
+      await t.db
+        .insertInto('authentication_events')
+        .values({ scan_event_id: scan.id, signature_valid: false, genome_check: 'NOT_PROVIDED', state: 'UNKNOWN', risk_score: 0, created_at: at(daysAgo) })
+        .execute();
+      return scan.id;
+    };
+    const counts = async () => ({
+      scans: (await t.db.selectFrom('scan_events').select('id').execute()).length,
+      auth: (await t.db.selectFrom('authentication_events').select('id').execute()).length,
+    });
+    try {
+      for (const daysAgo of [400, 120, 31, 29, 1]) await seed(daysAgo);
+
+      // Unset (the default): nothing is purged.
+      const keepAll = await createContext(testConfig(), { db: t.db, clock: clock.now });
+      const hk0 = startHousekeeping(keepAll, { intervalMs: 3_600_000 });
+      expect((await hk0.runOnce()).scanHistory).toBe(0);
+      await hk0.stop();
+      expect(await counts()).toEqual({ scans: 5, auth: 5 });
+
+      const log = captureLog();
+      const ctx = await createContext(testConfig({ scanRetentionDays: 30 }), { db: t.db, clock: clock.now, log });
+      const hk = startHousekeeping(ctx, { intervalMs: 3_600_000, scanHistoryBatchSize: 2 });
+      try {
+        const r = await hk.runOnce();
+        expect(r.scanHistory).toBe(3);
+        expect(await counts()).toEqual({ scans: 2, auth: 2 });
+        const left = await t.db.selectFrom('scan_events').select('occurred_at').orderBy('occurred_at').execute();
+        expect(left.map((x) => new Date(x.occurred_at).getTime())).toEqual([at(29).getTime(), at(1).getTime()]);
+        expect(log.lines.some((l) => l.level === 'info' && (l.o as { scanHistory?: number }).scanHistory === 3)).toBe(true);
+        expect((await hk.runOnce()).scanHistory).toBe(0);
+        // Thirty days later the remaining two age out as well.
+        clock.advance(30 * day);
+        expect((await hk.runOnce()).scanHistory).toBe(2);
+        expect(await counts()).toEqual({ scans: 0, auth: 0 });
+      } finally {
+        await hk.stop();
+        await ctx.close();
+      }
+      await keepAll.close();
+    } finally {
+      await t.close();
+    }
+  });
 });

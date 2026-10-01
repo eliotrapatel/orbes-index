@@ -13,11 +13,13 @@
  * Isomorphic: no Node.js or DOM dependencies.
  */
 
+import { CODE_PROFILES, code01CompatibleProfiles, type CodeProfileRegistry } from '../code-profiles.js';
 import { bchFormatEncode, rsEncode } from '../ecc/index.js';
 import { TAU, type Primitive } from '../geometry.js';
 import { primitivesToSvg, type SvgStyle } from '../render/svg.js';
 import { assertCellArray, cyclicRuns, placeCells, type CellRun } from './layout.js';
 import { orbesCodePrimitives } from './primitives.js';
+import { ORBES_CODE_STYLES } from './styles.js';
 import {
   CODE01,
   CODE01_MASK_COUNT,
@@ -33,14 +35,19 @@ export interface EncodeInput {
   data: Uint8Array;
   /** The eight GENOME-01 glyph indices, glyph 0 at north. */
   genomeGlyphs: readonly number[];
-  codeVersion?: 1;
+  /**
+   * Code version written into the format word (default 1). Must name a
+   * profile of the registry (`opts.codeProfiles`, default CODE_PROFILES) with
+   * the CODE-01 geometry. The data's own version nibble is the caller's.
+   */
+  codeVersion?: number;
   /** Force a mask (0..3) instead of selecting the one with the lowest penalty. */
   mask?: number;
 }
 
 export interface OrbesCodeModel {
   profile: 'CODE-01';
-  codeVersion: 1;
+  codeVersion: number;
   mask: number;
   formatWord: number;
   /** 164 bytes: data ‖ Reed-Solomon parity. */
@@ -63,17 +70,11 @@ export interface MaskPenalty {
   total: number;
 }
 
-/** Brand presentations of the code (ink on paper). */
-export const ORBES_CODE_STYLES = {
-  /** Black on white, the reference rendition. */
-  classic: { ink: '#0A0A0A', paper: '#FFFFFF' },
-  /** White on black; decoders must enable inverted reading. */
-  inverted: { ink: '#FFFFFF', paper: '#0A0A0A' },
-  /** Soft black on ivory, for paper goods and leather tags. */
-  ivory: { ink: '#111111', paper: '#F6F2EA' },
-} as const satisfies Record<string, SvgStyle>;
+/** Brand presentations of the code (ink on paper); defined in styles.ts, re-exported here. */
+export { ORBES_CODE_STYLES };
 
-const CODE_VERSION = 1;
+/** CODE-01, the version written when the input names none. */
+const DEFAULT_CODE_VERSION = 1;
 const PARITY_BYTES = CODE01.ecc.totalBytes - CODE01.ecc.dataBytes;
 
 // ── Mask penalty ───────────────────────────────────────────────────────────
@@ -175,13 +176,14 @@ export function maskPenalty(cells: Uint8Array): MaskPenalty {
 
 // ── Encoder ────────────────────────────────────────────────────────────────
 
-function requireInput(input: EncodeInput): void {
+function requireInput(input: EncodeInput, profiles: CodeProfileRegistry<unknown>): number {
   if (input === null || typeof input !== 'object') throw new RangeError('encode input must be an object');
   if (!(input.data instanceof Uint8Array) || input.data.length !== CODE01.ecc.dataBytes) {
     throw new RangeError(`CODE-01 data must be exactly ${CODE01.ecc.dataBytes} bytes`);
   }
-  if (input.codeVersion !== undefined && input.codeVersion !== CODE_VERSION) {
-    throw new RangeError(`unsupported code version ${String(input.codeVersion)}`);
+  const version = input.codeVersion ?? DEFAULT_CODE_VERSION;
+  if (!code01CompatibleProfiles(profiles).some((p) => p.version === version)) {
+    throw new RangeError(`unsupported code version ${String(version)}`);
   }
   if (!Array.isArray(input.genomeGlyphs) || input.genomeGlyphs.length !== CODE01.genome.count) {
     throw new RangeError(`a CODE-01 genome has ${CODE01.genome.count} glyphs`);
@@ -190,6 +192,7 @@ function requireInput(input: EncodeInput): void {
   if (mask !== undefined && !(Number.isInteger(mask) && mask >= 0 && mask < CODE01_MASK_COUNT)) {
     throw new RangeError(`invalid mask ${String(mask)}`);
   }
+  return version;
 }
 
 /** The candidate with the lowest total penalty; the first (lowest mask id) wins ties. */
@@ -208,19 +211,19 @@ function lowestPenalty<T extends { cells: Uint8Array }>(candidates: readonly T[]
  * same input always yields the same mask, cells and primitives. Throws
  * RangeError on invalid input.
  */
-export function encodeOrbesCode(input: EncodeInput, opts: { decor?: boolean } = {}): OrbesCodeModel {
-  requireInput(input);
+export function encodeOrbesCode(input: EncodeInput, opts: { decor?: boolean; codeProfiles?: CodeProfileRegistry<unknown> } = {}): OrbesCodeModel {
+  const version = requireInput(input, opts.codeProfiles ?? CODE_PROFILES);
   const codeword = rsEncode(input.data, PARITY_BYTES);
   const masks = input.mask === undefined ? Array.from({ length: CODE01_MASK_COUNT }, (_, m) => m) : [input.mask];
   const layouts = masks.map((mask) => {
-    const formatWord = bchFormatEncode(formatInfoValue(CODE_VERSION, mask));
+    const formatWord = bchFormatEncode(formatInfoValue(version, mask));
     return { mask, formatWord, cells: placeCells(codeword, mask, formatWord) };
   });
   const chosen = layouts.length === 1 ? layouts[0] : lowestPenalty(layouts);
   const genomeGlyphs = [...input.genomeGlyphs];
   return {
     profile: 'CODE-01',
-    codeVersion: CODE_VERSION,
+    codeVersion: version,
     mask: chosen.mask,
     formatWord: chosen.formatWord,
     codeword,

@@ -65,7 +65,7 @@ The Genome is the identity. The Code is the authentication carrier. The signatur
 ISSUANCE (server, admin-only)
   admin form ─► product identity O26-J-00184 ─► GENOME-01 (8 glyphs)
             ─► canonical payload (13 bytes, fixed binary layout)
-            ─► Ed25519 signature by active key (KeyProvider: local | KMS/HSM)
+            ─► Ed25519 signature by active key (KeyProvider: local; KMS/HSM-ready interface)
             ─► data = payload ‖ signature ‖ CRC-16      (79 bytes)
             ─► Reed-Solomon RS(164,79) over GF(256)    (85 parity bytes)
             ─► mask + BCH format word ─► orbital cell layout (CODE-01)
@@ -83,27 +83,41 @@ VERIFICATION
 
 ### B.3 Components
 
+The layout of `genome/` (same as [genome/README.md](../genome/README.md) "Directory layout"):
+
 ```
 genome/
-  src/core/            isomorphic library (browser + Node, no Node APIs)
-    geometry.ts          shared vector primitives
-    ecc/                 GF(256) Reed-Solomon (errors+erasures), BCH(15,5), CRC-16
-    identity.ts          canonical product identity  O{YY}-{C}-{NNNNN}
-    payload.ts           canonical CODE-01 payload, signing message, data framing
-    genome/              GENOME-01 vocabulary, permutation, renderer
-    code/                CODE-01 profile, encoder, SVG renderer
-    decoder/             image pipeline → decoded payload (runs in a Web Worker)
-    verify/              isomorphic Ed25519 verification helpers (noble)
-  src/server/          Fastify verification + admin service
-    keys/                KeyProvider (local | KMS-ready), keyring, rotation
-    db/                  Kysely schema, migrations (PostgreSQL; PGlite in dev/test)
-    services/            issuance, verification, lifecycle, ownership, warranty,
-                         anomaly, audit, authenticators (PhysicalAuthenticator)
-    routes/              public, account, admin
-    security/            sessions, CSRF, rate limiting, headers, validation
-  src/web/             verify (mobile scanner) + admin console (vanilla TS)
-  scripts/             keys, db, POC, test sheets, scan matrix, symbol study
-  test/                unit, decoder robustness, counterfeit simulation, API, E2E
+  src/core/            isomorphic library (browser + Node; no node:* imports, no Buffer)
+    bytes.ts identity.ts payload.ts geometry.ts
+    code-profiles.ts     code-version registry (CODE_PROFILES): profile per version, dispatch
+    ecc/                 GF(256) Reed-Solomon (errors + erasures), BCH(15,5), CRC-16
+    genome/              GENOME-01 vocabulary, bijective permutation, renderer
+    code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
+    decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
+    verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
+    render/              shared vector primitives → SVG paths
+  src/server/          Fastify service (Node only)
+    config.ts            environment → AppConfig (zod; fail fast; production hardening)
+    context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping
+    index.ts             entry point (npm start), graceful shutdown
+    app.ts               HTTP app: plugins, security headers, rate limits, routes, static web
+    demo.ts              demo mode (npm run demo): in-memory database with the demo dataset
+    db/                  Kysely schema, migrations, connection (pg | PGlite), demo seed
+    keys/                KeyProvider (local AES-GCM files | memory; KMS/HSM-ready interface), KeyService
+    crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
+    services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
+                         scan tokens, scan-history retention
+    authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
+    http/                sessions, CSRF, rate limiting, security headers, validation, static files
+    routes/              public, account, ownership, admin
+    geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
+    render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets
+  src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
+    verify/              mobile scanner: camera capture, decoder worker, result views
+    admin/               admin console: catalogue, generator, keys, anomalies, audit
+    shared/              brand CSS and DOM helpers
+  scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
+  test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
 docs/                  specifications (this folder)
 ```
 
@@ -116,7 +130,7 @@ Each state describes what was actually proven: an authentic signature, a registe
 ### B.5 Extensibility hooks
 
 - **Categories** come from a registry table. Each category has an immutable 5-bit index. Nothing in the code base hardcodes them.
-- **Versions.** `code_version` (CODE-01…08) is carried in both the format word and the signed payload, and `genome_version` (GENOME-01…15) is in the signed payload. Decoders and genome generators are looked up through version registries, so historical products stay verifiable.
+- **Versions.** `code_version` (CODE-01…08) is carried in both the format word and the signed payload, and `genome_version` (GENOME-01…15) is in the signed payload. Code versions are looked up in the `CODE_PROFILES` registry (`src/core/code-profiles.ts`): the decoder picks the profile the format word names, payload decoding dispatches on the high nibble of byte 0, and the server answers a well-formed code of a version it has no profile for with UNKNOWN (`UNSUPPORTED_CODE_VERSION`) and a warning. Genome generators are looked up by version (`SUPPORTED_GENOME_VERSIONS`, `computeGenome`). CODE-01 is today the only code profile; the decoder's sampling tables are those of the CODE-01 geometry, so a CODE-02 with a different layout also needs them generalised. Historical products stay verifiable.
 - **Keys.** A 1-byte `key_id` is carried in every code. Keys can be ACTIVE, RETIRED or REVOKED. Historical verification always uses the key named by the code.
 - **Hardware.** A `PhysicalAuthenticator` interface with `PrintedCodeAuthenticator` today. A per-product authentication policy can later require secure NFC or secure-element evidence.
 
@@ -136,7 +150,7 @@ Full analysis: [THREAT-MODEL.md](THREAT-MODEL.md).
 | F Database compromise | No private keys in the DB. Hashed IP data. Hash-chained audit log. Codes remain self-verifying. | Integrity of lifecycle data depends on DB controls. |
 | G Private key compromise | KMS/HSM-ready providers. Key revocation with a compromise timestamp. The DB nonce match defeats forged codes for existing products. | Forged codes for unregistered identities until revocation. |
 | H Malicious frontend | All verification is server-side. CSP. No secrets in the frontend. | The user can be shown a fake UI on a compromised device. |
-| I Fake verification website | Canonical domain education. Public key endpoint. Owner-account notifications. | Phishing remains possible. |
+| I Fake verification website | Canonical domain education. Public key endpoint. | Phishing remains possible. Future mitigation: owner-account notifications (no notification channel exists yet; see THREAT-MODEL I). |
 | J Mass-produced counterfeits using one identity | Geography/velocity anomalies. Ownership conflicts. Code revocation and re-issue. | Detection, not prevention, until hardware binding exists. |
 
 ---
@@ -149,7 +163,7 @@ Full analysis: [THREAT-MODEL.md](THREAT-MODEL.md).
 | Runtime | Node.js ≥ 22 | LTS. Native Ed25519 in `node:crypto`. |
 | Signatures | **Ed25519** (RFC 8032) via `node:crypto` (server) and `@noble/curves` (isomorphic verification, tooling) | A modern, deterministic standard with 64-byte signatures. The spec's preferred algorithm. |
 | Hashing | SHA-256 (`@noble/hashes`, `node:crypto`) | Standard. |
-| Payload encoding | Fixed-layout canonical binary (13 bytes) | Every bit in the code costs print area. Deterministic CBOR (RFC 8949 §4.2) was evaluated: the same fields take ≈ 30–35 bytes because of map keys and type headers, which would grow the code by ≈ 20 %. A fixed, versioned binary layout has exactly one encoding per value, so it is canonical by construction. See [CRYPTOGRAPHY](CRYPTOGRAPHY.md). |
+| Payload encoding | Fixed-layout canonical binary (13 bytes) | Every bit in the code costs print area. Deterministic CBOR (RFC 8949 §4.2.1) was evaluated: with integer keys the same fields take 25–32 bytes because of map keys and type headers (+7–12 % data cells), and with field names 117 bytes (two Reed-Solomon blocks); figures from `genome/scripts/payload-encodings.ts`. A fixed, versioned binary layout has exactly one encoding per value, so it is canonical by construction. See [CRYPTOGRAPHY](CRYPTOGRAPHY.md). |
 | Error correction | Reed-Solomon over GF(256), errors + erasures (Berlekamp-Massey, Forney); BCH(15,5) for the format word; CRC-16/CCITT for miscorrection detection | Established, well-understood codes that are also used by QR and Data Matrix. Erasure decoding doubles the tolerance to known-bad regions such as glare and occlusion. |
 | Server | Fastify 5, zod 4 validation | Fast, schema-first, with mature plugins for security headers, rate limiting and cookies. |
 | Database | PostgreSQL via Kysely (type-safe query builder). PGlite (Postgres compiled to WASM) for dev, tests and the demo | One SQL dialect from laptop to production. Real Postgres semantics in tests. |

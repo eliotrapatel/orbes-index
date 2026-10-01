@@ -21,6 +21,9 @@
 #
 # Retention: newest BACKUP_KEEP_DAILY archives in daily/, plus the first archive
 # of each ISO week hard-linked into weekly/ (newest BACKUP_KEEP_WEEKLY kept).
+# Scheduled archives (nightly) and event archives (pre-deploy-*, pre-restore,
+# other --reason values) are counted separately: many deploys in one day never
+# push the nightly history out.
 # Off-site: with BACKUP_RCLONE_DEST (e.g. ovh-s3:orbes-backups/verify) each new
 # archive is copied with rclone, checked, and remote copies older than the
 # local retention are deleted.
@@ -161,10 +164,17 @@ if ! compgen -G "$WEEKLY/orbes-$WEEK-*.tar.age" >/dev/null; then
   log "weekly copy for $WEEK"
 fi
 
+# prune DIR KEEP scheduled|event: keep the newest KEEP archives of one kind. Scheduled
+# (nightly, or no reason) and event backups (pre-deploy-*, pre-restore, manual reasons)
+# are counted separately, so a day of many deploys never pushes the nightly history out.
 prune() {
-  local dir=$1 keep=$2 f
+  local dir=$1 keep=$2 kind=$3 f name
   local -a files=()
-  mapfile -t files < <(find "$dir" -maxdepth 1 -type f -name 'orbes-*.tar.age' -printf '%f\n' | sort -r)
+  while IFS= read -r name; do
+    local this=event
+    if [[ "$name" =~ ^orbes-([0-9]{4}-W[0-9]{2}-)?[0-9]{8}T[0-9]{6}Z(-nightly)?\.tar\.age$ ]]; then this=scheduled; fi
+    if [[ "$this" == "$kind" ]]; then files+=("$name"); fi
+  done < <(find "$dir" -maxdepth 1 -type f -name 'orbes-*.tar.age' -printf '%f\n' | sort -r)
   local i
   for ((i = keep; i < ${#files[@]}; i++)); do
     f="$dir/${files[i]}"
@@ -172,8 +182,10 @@ prune() {
     log "pruned ${files[i]}"
   done
 }
-prune "$DAILY" "$KEEP_DAILY"
-prune "$WEEKLY" "$KEEP_WEEKLY"
+prune "$DAILY" "$KEEP_DAILY" scheduled
+prune "$DAILY" "$KEEP_DAILY" event
+prune "$WEEKLY" "$KEEP_WEEKLY" scheduled
+prune "$WEEKLY" "$KEEP_WEEKLY" event
 
 # ── Off-site copy (rclone → OVH Object Storage) ────────────────────────────
 if [[ -n "$RCLONE_DEST" && "$UPLOAD" == true ]]; then

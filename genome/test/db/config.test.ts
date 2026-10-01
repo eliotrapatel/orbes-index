@@ -15,6 +15,7 @@ const PROD = {
   KEY_PROVIDER: 'local',
   KEY_DIR: '/var/lib/orbes/keys',
   KEY_ENCRYPTION_KEY: RANDOMISH_KEY,
+  SCAN_RETENTION_DAYS: '395',
 };
 
 function issues(env: NodeJS.ProcessEnv): string[] {
@@ -243,6 +244,27 @@ describe('loadConfig — operations settings', () => {
       expect.stringMatching(/^ADMIN_REQUIRE_MFA: .*TOTP/),
     ]);
     expect(configWarnings(loadConfig({}))).toEqual([]);
+  });
+
+  it('SCAN_RETENTION_DAYS: off by default, 30..3650 whole days, never shorter than the anomaly look-back', () => {
+    expect(loadConfig({}).scanRetentionDays).toBeNull();
+    expect(loadConfig({ SCAN_RETENTION_DAYS: '400' }).scanRetentionDays).toBe(400);
+    expect(loadConfig({ SCAN_RETENTION_DAYS: '30' }).scanRetentionDays).toBe(30);
+    for (const bad of ['29', '3651', '45.5', 'forever', '-1']) {
+      expect(issues({ SCAN_RETENTION_DAYS: bad }).map((i) => i.split(':')[0]), bad).toEqual(['SCAN_RETENTION_DAYS']);
+    }
+    // The purge must never remove history that anomaly scoring still reads.
+    expect(issues({ SCAN_RETENTION_DAYS: '45', ANOMALY_GEO_WINDOW_DAYS: '60' })).toEqual([
+      expect.stringMatching(/^SCAN_RETENTION_DAYS: .*60 days/),
+    ]);
+    expect(issues({ SCAN_RETENTION_DAYS: '45', ANOMALY_DECAY_DAYS: '50.5' })).toEqual([expect.stringMatching(/^SCAN_RETENTION_DAYS: .*51 days/)]);
+    expect(loadConfig({ SCAN_RETENTION_DAYS: '60', ANOMALY_GEO_WINDOW_DAYS: '60' }).scanRetentionDays).toBe(60);
+    expect(redactConfig(loadConfig({ SCAN_RETENTION_DAYS: '400' }))).toMatchObject({ scanRetentionDays: 400 });
+  });
+
+  it('warns in production while no scan retention period is set (scan history would grow without bound)', () => {
+    expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: undefined }))).toEqual([expect.stringMatching(/^SCAN_RETENTION_DAYS: /)]);
+    expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: '395' }))).toEqual([]);
   });
 
   it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {

@@ -237,11 +237,26 @@ fi
 
 # ── Firewall ───────────────────────────────────────────────────────────────
 step "ufw"
-SSH_PORTS=22
-if command -v sshd >/dev/null 2>&1; then
-  ports="$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' | sort -u | tr '\n' ' ' || true)"
-  if [[ -n "${ports// /}" ]]; then SSH_PORTS="${ports% }"; fi
-fi
+# Every port SSH may be reached on, so enabling ufw can never lock the operator out:
+#   * sshd -T (the configured Port lines);
+#   * ssh.socket's Listen= (Ubuntu ≥ 24.04 socket-activates sshd: the socket, not sshd_config,
+#     decides the listening port until the next daemon-reload, and it may carry an override);
+#   * the local port of every established sshd session (the operator's own connection).
+ssh_ports() {
+  local -a ports=()
+  if command -v sshd >/dev/null 2>&1; then
+    mapfile -t -O "${#ports[@]}" ports < <(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' || true)
+  fi
+  if [[ "$HAVE_SYSTEMD" == true ]] && systemctl is-active --quiet ssh.socket 2>/dev/null; then
+    mapfile -t -O "${#ports[@]}" ports < <(systemctl show -p Listen --value ssh.socket 2>/dev/null | grep -oE ':[0-9]+ \(Stream\)' | tr -dc '0-9\n' || true)
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    mapfile -t -O "${#ports[@]}" ports < <(ss -Htnp state established 2>/dev/null | awk '/"sshd/ {n = split($3, a, ":"); print a[n]}' || true)
+  fi
+  printf '%s\n' "${ports[@]}" | grep -E '^[0-9]{1,5}$' | sort -un | tr '\n' ' ' | sed 's/ $//' || true
+}
+SSH_PORTS="$(ssh_ports)"
+[[ -n "$SSH_PORTS" ]] || SSH_PORTS=22
 log "SSH port(s): $SSH_PORTS (kept open)"
 run ufw default deny incoming
 run ufw default allow outgoing

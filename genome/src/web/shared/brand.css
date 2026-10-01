@@ -35,6 +35,20 @@
   --fs-lead: 15px;
   --fs-title: 24px;
   --fs-wordmark: 30px;
+  /* Component sizes between the steps above (BRAND-DESIGN-SYSTEM §3.1). */
+  --fs-hint: 7px;
+  --fs-overline: 8.5px;
+  --fs-caption: 9px;
+  --fs-mono-sm: 10.5px;
+  --fs-mono: 11.5px;
+  --fs-mono-lg: 12.5px;
+  --fs-sub: 14px;
+  --fs-heading: 17px;
+  --fs-heading-lg: 18px;
+  --fs-code: 19px;
+  --fs-display-sm: 22px;
+  --fs-display: 26px;
+  --fs-figure: 46px;
   --track-micro: 0.22em;
   --track-label: 0.28em;
   --track-display: 0.32em;

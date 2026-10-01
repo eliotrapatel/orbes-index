@@ -176,7 +176,7 @@ h1[tabindex="-1"]:focus {
 
 .landing__sub {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: var(--fs-caption);
   letter-spacing: 0.4em;
   text-indent: 0.4em;
 }
@@ -198,7 +198,7 @@ h1[tabindex="-1"]:focus {
   display: flex;
   justify-content: space-between;
   padding: 0 calc(56px + var(--safe-left)) 0 calc(56px + var(--safe-right));
-  font-size: 7px;
+  font-size: var(--fs-hint);
   letter-spacing: var(--track-display);
   opacity: 0.4;
   animation: brand-fade 1s ease 1.2s both;
@@ -563,7 +563,7 @@ h1[tabindex="-1"]:focus {
 
 .view--result[data-tone="caution"] .result__title,
 .view--result[data-tone="void"] .result__title {
-  font-size: 18px;
+  font-size: var(--fs-heading-lg);
   line-height: 1.55;
 }
 
@@ -626,7 +626,7 @@ h1[tabindex="-1"]:focus {
 
 .genome__id {
   margin-top: 16px;
-  font-size: 17px;
+  font-size: var(--fs-heading);
   letter-spacing: var(--track-micro);
   text-indent: var(--track-micro);
   font-weight: 400;
@@ -700,7 +700,7 @@ h1[tabindex="-1"]:focus {
   border: 0;
   background: none;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: var(--fs-caption);
   letter-spacing: var(--track-micro);
   text-transform: uppercase;
   cursor: pointer;
@@ -733,7 +733,7 @@ h1[tabindex="-1"]:focus {
 
 .tabs__dot {
   color: var(--metal);
-  font-size: 9px;
+  font-size: var(--fs-caption);
   line-height: 1;
 }
 
@@ -770,7 +770,7 @@ h1[tabindex="-1"]:focus {
 
 .rows__label {
   flex: none;
-  font-size: 9px;
+  font-size: var(--fs-caption);
   letter-spacing: var(--track-label);
   color: var(--ink-soft);
   text-transform: uppercase;
@@ -787,7 +787,7 @@ h1[tabindex="-1"]:focus {
 
 .section-label {
   margin-top: 36px;
-  font-size: 8.5px;
+  font-size: var(--fs-overline);
   font-weight: 400;
   letter-spacing: 0.34em;
   color: var(--ink-soft);
@@ -844,7 +844,7 @@ h1[tabindex="-1"]:focus {
   border-bottom: 1px solid transparent;
   background: none;
   color: var(--ink-soft);
-  font-size: 8.5px;
+  font-size: var(--fs-overline);
   letter-spacing: 0.26em;
   text-transform: uppercase;
   cursor: pointer;
@@ -896,7 +896,7 @@ h1[tabindex="-1"]:focus {
 
 .transfer-code__value {
   margin: 10px 0 8px;
-  font-size: 19px;
+  font-size: var(--fs-code);
   letter-spacing: 0.26em;
   text-indent: 0.26em;
   font-variant-numeric: tabular-nums;

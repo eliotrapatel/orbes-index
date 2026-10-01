@@ -20,7 +20,7 @@ The Genome is a **public identity**. It is not a secret and not a security mecha
 |---|---|
 | Deterministic: same identity + same version gives the same Genome | Pure function of `(packedIdentity, version)` |
 | Two products never share a Genome | The derivation is a **bijection** on 32-bit identities, so uniqueness is a mathematical guarantee, not a database check |
-| Not "simply a serial number" | Neighbouring serials produce unrelated-looking Genomes (on average 7.3 of 8 glyphs differ between consecutive serials) |
+| Not "simply a serial number" | Neighbouring serials produce unrelated-looking Genomes (on average ≈ 7.5 of 8 glyphs differ between consecutive serials, 7.50 measured over the 20 000 consecutive serials of `test/genome/genome.test.ts`, which is the 8 × 15/16 = 7.5 expected for unrelated values; the test asserts > 7.3) |
 | Recognisable at small size | The vocabulary was selected by measurement: ≥ 99 % correct template classification at 8 px glyph diameter, 100 % from 12 px |
 | Distinctly ORBES | Orbital forms only: orbits, arcs, points and orb segments, drawn with one stroke weight |
 | Versioned | `genomeVersion` (1…15) is part of the signed payload |

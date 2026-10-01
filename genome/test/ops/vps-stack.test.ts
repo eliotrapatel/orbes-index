@@ -3,8 +3,8 @@
  * shape and their safety properties:
  *
  *  - vercel.json holds ONLY the two /verify redirects to verify.theorbes.com
- *    (temporary 307), and .vercelignore still keeps genome/, docs/ and
- *    .github/ off the public website;
+ *    (temporary 307), and .vercelignore still keeps genome/, docs/, deploy/,
+ *    .github/ and node_modules/ off the public website;
  *  - compose.yaml publishes ports from Caddy only, keeps the app and
  *    PostgreSQL on internal networks, hardens the app container, and pins the
  *    app's TRUST_PROXY to Caddy's fixed address (outside the dynamic range);
@@ -91,13 +91,21 @@ describe('vercel.json (theorbes.com stays a static site on Vercel)', () => {
     ]);
   });
 
-  it('.vercelignore still keeps the system, its documentation and CI off the website', () => {
+  it('.vercelignore still keeps the system, its documentation, the VPS stack, CI and tool caches off the website', () => {
     const ignored = read(REPO, '.vercelignore')
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('#'));
-    for (const entry of ['genome/', 'docs/', '.github/']) expect(ignored, entry).toContain(entry);
+    for (const entry of ['genome/', 'docs/', 'deploy/', '.github/', 'node_modules/']) expect(ignored, entry).toContain(entry);
     expect(ignored).not.toContain('index.html');
+  });
+
+  it('the repository root ignores node_modules/ (tool caches written by a run from the root)', () => {
+    const ignored = read(REPO, '.gitignore')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    expect(ignored).toContain('node_modules/');
   });
 });
 
@@ -124,6 +132,11 @@ describe('deploy/vps/compose.yaml', () => {
     expect(caddy).toMatch(/:80\/tcp"/);
     expect(caddy).toMatch(/:443\/tcp"/);
     expect(caddy).toMatch(/:443\/udp"/);
+    // IPv4 only: an IPv6 publish goes through Docker's userland proxy and hides every IPv6 client
+    // behind one internal address (shared rate limit, no geo, Cloudflare origin lock bypassed).
+    const published = [...caddy.matchAll(/\n {6}- "([^"]+)"/g)].map((m) => m[1]).filter((p) => /:\d+\/(tcp|udp)$/.test(p));
+    expect(published.length).toBe(3);
+    for (const p of published) expect(p, p).toMatch(/^0\.0\.0\.0:/);
   });
 
   it('keeps the app and PostgreSQL on internal networks only', () => {
@@ -201,7 +214,11 @@ describe('deploy/vps/compose.yaml', () => {
     // Without secrets, compose itself refuses to start the stack.
     expect(() => interpolate(environment(svc.get('app')!).get('COOKIE_SECRET')!, vars)).toThrow(/COOKIE_SECRET is required/);
 
+    expect(vars.get('POSTGRES_APP_PASSWORD')).toBe('');
+    expect(() => interpolate(environment(svc.get('app')!).get('DATABASE_URL')!, vars)).toThrow(/POSTGRES_APP_PASSWORD is required/);
+
     vars.set('POSTGRES_PASSWORD', randomBytes(24).toString('hex'));
+    vars.set('POSTGRES_APP_PASSWORD', randomBytes(24).toString('hex'));
     vars.set('COOKIE_SECRET', randomBytes(48).toString('base64url'));
     vars.set('IP_HASH_PEPPER', randomBytes(48).toString('base64url'));
     vars.set('KEY_ENCRYPTION_KEY', randomBytes(32).toString('base64url'));
@@ -212,10 +229,34 @@ describe('deploy/vps/compose.yaml', () => {
     expect(c.publicOrigin).toBe('https://verify.theorbes.com');
     expect(c.port).toBe(8080);
     expect(c.trustProxy).toBe('172.30.80.2');
-    expect(c.migrateOnStart).toBe(true);
+    // The app's role cannot run DDL: deploy.sh / restore.sh migrate as the owner first.
+    expect(c.migrateOnStart).toBe(false);
     expect(c.keys).toMatchObject({ provider: 'local', dir: '/var/lib/orbes/keys' });
     expect(c.geo).toMatchObject({ mode: 'mmdb', mmdbPath: '/var/lib/orbes/geoip/dbip-city-lite.mmdb' });
-    expect(c.databaseUrl).toMatch(/^postgres:\/\/orbes:[0-9a-f]{48}@postgres:5432\/orbes$/);
+    // Least privilege: the app connects as its own DML-only role, never as the superuser/owner.
+    expect(c.databaseUrl).toMatch(/^postgres:\/\/orbes_app:[0-9a-f]{48}@postgres:5432\/orbes$/);
+    expect(c.databaseUrl).not.toContain(vars.get('POSTGRES_PASSWORD')!);
+    expect(example.active.get('POSTGRES_APP_USER')).not.toBe(example.active.get('POSTGRES_USER'));
+  });
+
+  it('migrates as the schema owner and grants the app role DML only (scripts)', () => {
+    const lib = read(STACK, 'scripts', 'lib.sh');
+    const fn = (name: string) => new RegExp(`\\n${name}\\(\\) \\{\\n([\\s\\S]*?)\\n\\}\\n`).exec(lib)?.[1] ?? '';
+    // Migrations: one-off app container with the OWNER's URL (from the environment, not argv).
+    expect(fn('db_migrate')).toMatch(/DATABASE_URL="postgres:\/\/\$\(db_owner\):\$\{pw\}@postgres:5432\/\$\(db_name\)"/);
+    expect(fn('db_migrate')).toMatch(/compose run --rm --no-deps -T -e DATABASE_URL app /);
+    // The role: never a superuser, no DDL; only SELECT/INSERT/UPDATE/DELETE and sequence use.
+    expect(fn('db_ensure_app_role')).toMatch(/NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
+    const grants = fn('db_grant_app_role');
+    expect(grants).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I/);
+    expect(grants).toMatch(/REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
+    expect(grants).not.toMatch(/GRANT (ALL|.*TRUNCATE|.*CREATE ON SCHEMA)/);
+    expect(fn('check_db_names')).toMatch(/POSTGRES_APP_USER must differ from POSTGRES_USER/);
+    // deploy.sh prepares the database before the app starts; restore.sh does it after pg_restore.
+    expect(read(STACK, 'scripts', 'deploy.sh')).toMatch(/db_prepare \|\| return 1\n {2}compose up -d --remove-orphans/);
+    const restore = read(STACK, 'scripts', 'restore.sh');
+    expect(restore).toMatch(/db_ensure_app_role\n[\s\S]*pg_restore [^\n]*--no-privileges[^\n]*\n {2}db_grant_app_role/);
+    expect(restore).toMatch(/db_prepare \|\| die[^\n]*\ncompose up -d\n/);
   });
 });
 
@@ -252,6 +293,14 @@ describe('deploy/vps/Caddyfile', () => {
     expect(d).toMatch(/resp_headers delete/);
     expect(d).toMatch(/request>client_ip ip_mask/);
     expect(d).toMatch(/exclude http\.log\.access/);
+    // The runtime log carries http.log.error, which embeds the whole request (e.g. a 502 while
+    // the app restarts): it gets the same filter, so no full IP, query string or header there either.
+    const runtime = /log default \{([\s\S]*?)\n\t\}/.exec(d)?.[1] ?? '';
+    expect(runtime).toMatch(/format filter \{/);
+    expect(runtime).toMatch(/request>uri regexp \\\?\.\*\$ ""/);
+    expect(runtime).toMatch(/request>headers delete/);
+    expect(runtime).toMatch(/request>remote_ip ip_mask/);
+    expect(runtime).toMatch(/request>client_ip ip_mask/);
   });
 
   it('leaves security headers to the app, limits bodies, compresses, and supports tls internal and an admin allowlist', () => {
@@ -307,6 +356,19 @@ describe('deploy/vps scripts and systemd units', () => {
     // edition is out keeps the previous one, so a monthly timer could lag by a month).
     expect(read(STACK, 'systemd', 'orbes-backup.timer')).toMatch(/\nOnCalendar=\*-\*-\* \d\d:\d\d:\d\d\n/);
     expect(read(STACK, 'systemd', 'orbes-geoip.timer')).toMatch(/\nOnCalendar=(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \*-\*-\* \d\d:\d\d:\d\d\n/);
+  });
+
+  it('fail safe for a careless operator: Caddy validated before rollout, --latest never picks a safety backup, retention per kind', () => {
+    const deploy = read(STACK, 'scripts', 'deploy.sh');
+    // A typo in .env (EDGE_MODE, a comma in ADMIN_ALLOWED_IPS) must not crash-loop the only public entry point.
+    expect(deploy.indexOf('caddy_validate || die')).toBeGreaterThan(0);
+    expect(deploy.indexOf('caddy_validate || die')).toBeLessThan(deploy.indexOf('step "pre-deploy backup"'));
+    expect(read(STACK, 'scripts', 'lib.sh')).toMatch(/caddy:2 caddy validate --config \/etc\/caddy\/Caddyfile --adapter caddyfile/);
+    // Restoring "the latest" twice must not restore the state that was being replaced.
+    expect(read(STACK, 'scripts', 'restore.sh')).toMatch(/--latest[\s\S]*! -name '\*-pre-restore\.tar\.age'/);
+    // Many deploys in a day (pre-deploy backups) never prune the nightly history.
+    const backup = read(STACK, 'scripts', 'backup.sh');
+    expect(backup).toMatch(/prune "\$DAILY" "\$KEEP_DAILY" scheduled\nprune "\$DAILY" "\$KEEP_DAILY" event\n/);
   });
 
   it('keep the filled-in .env and local state out of git', () => {

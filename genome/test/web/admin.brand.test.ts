@@ -10,7 +10,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CODE01 } from '../../src/core/code/profile.js';
+import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
+import { computeGenome } from '../../src/core/genome/index.js';
+import { packIdentity } from '../../src/core/identity.js';
 import { dashboardKpis } from '../../src/web/admin/model/dashboard.js';
+import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import type { DashboardData } from '../../src/web/admin/types.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
@@ -56,6 +60,16 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     // The comment in brand.css states the measured ratio.
     expect(contrast(tokens['--ink-soft'], '#ffffff').toFixed(1)).toBe('6.7');
     expect(brand).toMatch(/Secondary text[^\n]*6\.7:1 on white/);
+  });
+
+  it('draws the GENOME on its ivory plates in the ivory colourway ink (#111111), as it is printed', () => {
+    const g = computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 }), 1);
+    const json = { id: 'g', productId: 'p', version: 1, versionLabel: 'GENOME-01', value: g.value, glyphs: [...g.glyphs], ids: [...g.ids], pattern: '', fingerprint: g.fingerprint, createdAt: '2026-01-01T00:00:00.000Z' };
+    for (const layout of ['orbit', 'row'] as const) {
+      const markup = genomeFigureMarkup(json, layout);
+      const inks = new Set([...markup.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
+      expect([...inks], layout).toEqual([ORBES_CODE_STYLES.ivory.ink]);
+    }
   });
 
   it('uses the one wordmark spec of brand.css (.wordmark tracking) in the sidebar', () => {

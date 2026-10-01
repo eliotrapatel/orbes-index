@@ -35,9 +35,26 @@
 	# Runtime log (stderr). Access lines never go here: the only access log is the
 	# filtered one of the site below (otherwise the automatic HTTP→HTTPS redirect and
 	# requests for unknown hosts would be logged unfiltered: full IPs, query strings).
+	# The error logger (http.log.error, e.g. a 502 while the app restarts) embeds the
+	# whole request, so this log gets the same filter as the access log.
 	log default {
 		output stderr
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp \?.*$ ""
+				request>headers delete
+				request>tls delete
+				request>remote_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+				request>client_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+			}
+		}
 		exclude http.log.access
 	}
 	servers {

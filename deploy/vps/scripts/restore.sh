@@ -14,12 +14,18 @@
 #   2. Safety backup of the current stack when its database is running
 #      (scripts/backup.sh --reason pre-restore; --no-safety-backup skips it).
 #   3. Stop the app. Database: remove the postgres container and its volume,
-#      start an empty postgres, pg_restore --exit-on-error --single-transaction
-#      (the audit log refuses TRUNCATE/DELETE, so restoring over data cannot
-#      work by design). Keys: empty the keys volume, extract, chown 1000:1000,
-#      0700 directory / 0600 files.
-#   4. Start the stack when the app image exists (else run scripts/deploy.sh),
-#      wait for health, smoke test through Caddy, list the signing keys.
+#      start an empty postgres, create the app role, pg_restore --exit-on-error
+#      --single-transaction --no-privileges (the audit log refuses
+#      TRUNCATE/DELETE, so restoring over data cannot work by design), then
+#      grant the app role its DML rights again. Keys: empty the keys volume,
+#      extract, chown 1000:1000, 0700 directory / 0600 files.
+#   4. Start the stack when the app image exists (else run scripts/deploy.sh):
+#      pending migrations of that image first (an older backup), then wait for
+#      health, smoke test through Caddy, list the signing keys.
+#
+# --latest picks the newest archive in $BACKUP_DIR/daily, SKIPPING the
+# "pre-restore" safety backups this script itself takes (so running the same
+# restore twice never restores the state you were replacing).
 #
 # Needs the same KEY_ENCRYPTION_KEY (.env, from escrow) as when the backup was
 # taken: the key files are encrypted under it. Exit codes: 0 ok, 1 failure,
@@ -58,12 +64,14 @@ done
 
 need_cmd docker age sha256sum tar
 require_env_file
+check_db_names
 BACKUP_DIR="$(env_get BACKUP_DIR /var/backups/orbes)"
 DOMAIN="$(env_get APP_DOMAIN)"
 if [[ -z "$ARCHIVE" ]]; then
   [[ "$LATEST" == true ]] || die "name the archive (--archive <file>) or pass --latest"
-  ARCHIVE="$(find "$BACKUP_DIR/daily" -maxdepth 1 -type f -name 'orbes-*.tar.age' 2>/dev/null | sort | tail -n1)"
-  [[ -n "$ARCHIVE" ]] || die "no archive in $BACKUP_DIR/daily"
+  ARCHIVE="$(find "$BACKUP_DIR/daily" -maxdepth 1 -type f -name 'orbes-*.tar.age' ! -name '*-pre-restore.tar.age' 2>/dev/null | sort | tail -n1)"
+  [[ -n "$ARCHIVE" ]] || die "no archive in $BACKUP_DIR/daily (pre-restore safety backups are only restored by name)"
+  log "--latest: $ARCHIVE"
 fi
 [[ -r "$ARCHIVE" ]] || die "cannot read $ARCHIVE"
 
@@ -136,9 +144,12 @@ if [[ "$DO_DB" == true ]]; then
   if docker volume inspect "$PGDATA_VOLUME" >/dev/null 2>&1; then docker volume rm "$PGDATA_VOLUME" >/dev/null; fi
   compose up -d postgres
   wait_healthy postgres 180 || die "postgres did not become healthy"
+  db_ensure_app_role
+  # --no-privileges: the archive's GRANTs name the source host's roles; db_grant_app_role sets them here.
   # shellcheck disable=SC2016 # expanded by the container's shell
-  compose exec -T postgres sh -c 'exec pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' <"$WORK/db.dump"
-  log "database restored"
+  compose exec -T postgres sh -c 'exec pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges --exit-on-error --single-transaction' <"$WORK/db.dump"
+  db_grant_app_role
+  log "database restored; app role $(db_app_user) granted"
 fi
 
 if [[ "$DO_KEYS" == true ]]; then
@@ -164,6 +175,9 @@ fi
 step "start the stack"
 CADDY_CONFIG_HASH="$(cat "$STACK_DIR/Caddyfile" "$STACK_DIR"/caddy.d/*.caddy | sha256sum | cut -c1-16)"
 export CADDY_CONFIG_HASH
+compose up -d postgres
+wait_healthy postgres 180 || die "postgres did not become healthy"
+db_prepare || die "database preparation (role, migrations of orbes-genome:$TAG, privileges) failed"
 compose up -d
 wait_healthy app 240 || die "the app is not healthy after the restore: docker compose logs app"
 wait_healthy caddy 60 || die "caddy is not healthy"

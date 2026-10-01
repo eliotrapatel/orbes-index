@@ -158,7 +158,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 What the server records about a verification request (see [DATABASE §5.16](DATABASE.md#516-scan_events)):
 
 - `HMAC(IP_HASH_PEPPER, device id)`, `HMAC(IP_HASH_PEPPER, IP)` and, for a logged-in viewer, an HMAC of the session id. Raw IP addresses and device ids are never stored or logged.
-- Country, and latitude/longitude rounded to 0.1° (about 10 km), only when supplied by the edge (`GEO_MODE=cloudflare`) or a trusted proxy (`GEO_MODE=headers` with `TRUST_PROXY`). The default `GEO_MODE=none` records no location.
+- Country, and latitude/longitude rounded to 0.1° (about 10 km), only when supplied by the edge (`GEO_MODE=cloudflare`, which also gives a `region`) or a trusted proxy (`GEO_MODE=headers` with `TRUST_PROXY`), or looked up by the server in a local GeoIP database from `request.ip` (`GEO_MODE=mmdb`, DB-IP / MaxMind format at `GEO_MMDB_PATH`; no `region`; `TRUST_PROXY` required in production so that `request.ip` is the client's address, not the proxy's). The default `GEO_MODE=none` records no location.
 - A coarse browser family such as `Safari/iOS`, never the full user-agent string.
 - Optional decoder metrics sent by the client.
 
@@ -559,7 +559,8 @@ The first step that decides the state ends the decision; the scan event, authent
 
 | Step | Condition | Result |
 |---|---|---|
-| 1 | Strict structural parse fails: base64url (≤ 200 characters), length (79 bytes), CRC-16, or strict payload decoding (code version 1, reserved values such as genome version / key id / issue 0, field ranges). | `MALFORMED_CODE` |
+| 1 | Strict structural parse fails: base64url (≤ 200 characters), then the code version's profile (high nibble of byte 0, `CODE_PROFILES`; CODE-01 today): length (79 bytes), CRC-16, strict payload decoding (reserved values such as genome version / key id / issue 0, field ranges). A version outside 1–8, or an unknown version whose envelope is broken, is `MALFORMED:VERSION`. | `MALFORMED_CODE` |
+| 1 | The frame is intact (≥ 67 bytes, CRC-16 over everything before it) but names a code version 2–8 this server has no profile for: the server is outdated (or the version nibble was edited). Nothing else can be checked; logged as a warning, no anomaly (reason `UNSUPPORTED_CODE_VERSION`). | `UNKNOWN` |
 | 2 | The key id named by the code is not in the key registry. | `INVALID_SIGNATURE` |
 | 3 | The Ed25519 signature over `"ORBES-CODE/v1" ‖ 0x00 ‖ payload` does not verify (strict: small-order and non-canonical keys and non-canonical signatures are rejected). Every payload field is signed, the genome version included, so an edited version fails here. | `INVALID_SIGNATURE` |
 | 4 | The key is REVOKED and there is no registry record of this code (product + issue) created before its compromise time (or revocation time when no compromise time is set) — whether the identity is registered or not. ACTIVE and RETIRED keys are always trusted. | `INVALID_SIGNATURE` |
@@ -1608,7 +1609,7 @@ Item:
 }
 ```
 
-`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
+`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
 
 ### 16.2 `GET /api/admin/owners`
 

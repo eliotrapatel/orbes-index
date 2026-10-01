@@ -35,10 +35,14 @@
  *     format copies to the nearest BCH(15,5) word (polaris hint breaks ties)
  *     and decoded with RS(164,79): errors only first, then with more and more
  *     erasures on the least confident bytes, never more than 70 (miscorrection
- *     safety, see MAX_RS_ERASURES). Unless the format read is
- *     certain, the other masks are then brute-forced. CRC-16 and strict
- *     payload parsing (unframeCodeData) catch miscorrections; a failure moves
- *     on to the next hypothesis.
+ *     safety, see MAX_RS_ERASURES). The format word names the code version:
+ *     only versions with a profile in `codeProfiles` (code-profiles.ts,
+ *     CODE-01 geometry) are read; a word naming another version read with
+ *     certainty fails as FORMAT "unsupported code version N" (a newer code,
+ *     not damage). Unless the format read is certain, the other (version,
+ *     mask) pairs are then brute-forced. CRC-16 and the version's strict
+ *     unframing (CODE-01: unframeCodeData) catch miscorrections; a failure
+ *     moves on to the next hypothesis.
  *  7. Alignment repair, when step 6 fails, cheapest first, each stage
  *     followed by steps 5–6 again: the fits leaving one moon out (a damaged
  *     moon); then, for at most two located codes per frame (a frame too
@@ -63,6 +67,7 @@ import { CODE01, CODE01_DATA_CELLS, CODE01_FORMAT_CELLS, CODE01_MASK_COUNT, CODE
 import { decodeCellsToCodeword } from '../code/layout.js';
 import { bchFormatEncode, rsDecode } from '../ecc/index.js';
 import type { Point } from '../geometry.js';
+import { CODE_PROFILES, code01CompatibleProfiles, type CodeProfileEntry, type CodeProfileRegistry } from '../code-profiles.js';
 import { PayloadError, unframeCodeData } from '../payload.js';
 import { binarize } from './binarize.js';
 import { findSealHits, measureSeal, mergeClusters, type SealCandidate, type SealCluster } from './finder.js';
@@ -84,6 +89,12 @@ export interface DecodeOptions {
   readGenome?: boolean;
   /** Seal candidates examined per polarity (default 4). */
   maxSealCandidates?: number;
+  /**
+   * Code versions to read (default CODE_PROFILES). The format word names the
+   * version; its profile's strict unframing then validates the data. Only
+   * profiles with the CODE-01 geometry are usable by this decoder.
+   */
+  codeProfiles?: CodeProfileRegistry<unknown>;
 }
 
 export type DecodeFailure = 'NO_SEAL' | 'NO_MOONS' | 'FORMAT' | 'ECC' | 'CRC' | 'PAYLOAD';
@@ -138,7 +149,6 @@ export interface SealEvidence {
 // ── Static tables ──────────────────────────────────────────────────────────
 
 const NSYM = CODE01.ecc.totalBytes - CODE01.ecc.dataBytes;
-const CODE_VERSION = 1;
 /** Largest detection image (pixels) before downscaling. */
 const MAX_DETECTION_PIXELS = 2_500_000;
 /** Smallest frame side worth examining: a seal needs ≥ 8 u × 1.2 px. */
@@ -224,7 +234,10 @@ class Failure {
   seal: SealEvidence | null = null;
   /** Scale of the best located code (highest quiet-zone score). */
   located: { unitPx: number; quiet: number } | null = null;
+  /** Set once a format word cleanly named a version without a readable profile: that detail wins among FORMAT failures. */
+  unsupportedVersion = false;
   note(reason: DecodeFailure, detail?: string): void {
+    if (reason === 'FORMAT' && this.reason === 'FORMAT' && this.unsupportedVersion) return;
     if (FAILURE_RANK[reason] >= FAILURE_RANK[this.reason]) {
       this.reason = reason;
       this.detail = detail;
@@ -546,6 +559,8 @@ function withRingLattice(img: GrayImage, a: Alignment, unitPx: number): Alignmen
 
 interface Hypothesis {
   g: number;
+  /** Best-matching format word among the readable versions: its version (profile) and mask. */
+  profile: CodeProfileEntry<unknown>;
   mask: number;
   formatDistance: number;
   hint: number;
@@ -553,6 +568,7 @@ interface Hypothesis {
 
 interface CodeRead {
   g: number;
+  codeVersion: number;
   mask: number;
   data: Uint8Array;
   payloadBytes: Uint8Array;
@@ -561,25 +577,35 @@ interface CodeRead {
   erasures: number;
 }
 
-/** Format distance of the best version-1 word for each dihedral hypothesis. */
-function formatHypotheses(cls: CellClassification, moons: MoonSet, mirrored: boolean, failure: Failure): Hypothesis[] {
+/**
+ * Format distance of the best word of a readable version for each dihedral
+ * hypothesis. A word of another version read cleanly is noted as an
+ * unsupported code version (a newer code, not damage).
+ */
+function formatHypotheses(cls: CellClassification, moons: MoonSet, opts: DecodeSettings, failure: Failure): { hyps: Hypothesis[]; unsupported: number | null } {
   const out: Hypothesis[] = [];
-  for (let g = 0; g < (mirrored ? 8 : 4); g++) {
+  let unsupported: number | null = null;
+  for (let g = 0; g < (opts.tryMirrored ? 8 : 4); g++) {
     const perm = DIHEDRAL_PERMS[g];
     const [w0, w1] = CODE01_FORMAT_CELLS.map((copy) => copy.reduce((w, flat) => (w << 1) | cls.bits[perm[flat]], 0));
-    let bestV1 = { mask: 0, d: Infinity };
-    let bestAny = Infinity;
+    let best = { profile: opts.profiles[0], mask: 0, d: Infinity };
+    let bestAny = { version: 0, d: Infinity };
     FORMAT_WORDS.forEach((word, v) => {
       const d = popcount(w0 ^ word) + popcount(w1 ^ word);
-      bestAny = Math.min(bestAny, d);
       const info = parseFormatInfoValue(v);
-      if (info.codeVersion === CODE_VERSION && d < bestV1.d) bestV1 = { mask: info.mask, d };
+      if (d < bestAny.d) bestAny = { version: info.codeVersion, d };
+      const profile = opts.byVersion.get(info.codeVersion);
+      if (profile && d < best.d) best = { profile, mask: info.mask, d };
     });
-    if (bestAny <= FORMAT_TRUST && bestV1.d > FORMAT_TRUST) failure.note('FORMAT', 'unsupported code version');
+    if (bestAny.d <= FORMAT_TRUST && best.d > FORMAT_TRUST) {
+      failure.note('FORMAT', `unsupported code version ${bestAny.version}`);
+      if (failure.reason === 'FORMAT') failure.unsupportedVersion = true;
+      if (bestAny.d <= FORMAT_CERTAIN) unsupported = bestAny.version;
+    }
     const polaris = moons.slots[moonSlot(g, 0)];
-    out.push({ g, mask: bestV1.mask, formatDistance: bestV1.d, hint: polaris ? polaris.halo : 0 });
+    out.push({ g, profile: best.profile, mask: best.mask, formatDistance: best.d, hint: polaris ? polaris.halo : 0 });
   }
-  return out.sort((a, b) => a.formatDistance - b.formatDistance || b.hint - a.hint);
+  return { hyps: out.sort((a, b) => a.formatDistance - b.formatDistance || b.hint - a.hint), unsupported };
 }
 
 function readCodeword(cls: CellClassification, g: number, mask: number): { codeword: Uint8Array; byteConfidence: Float64Array } {
@@ -609,14 +635,16 @@ export interface ProgressiveRead {
  * Reed-Solomon over an erasure schedule: errors only first, then the `step`
  * least confident bytes erased, for each step of `schedule` (steps above
  * MAX_RS_ERASURES are clamped to it). Each candidate must pass CRC-16 and
- * strict payload parsing. `onFailure` hears every rejected attempt. Null
- * when no step yields a valid frame.
+ * strict payload parsing (`unframe`, the code version's profile; CODE-01 by
+ * default). `onFailure` hears every rejected attempt. Null when no step
+ * yields a valid frame.
  */
 export function decodeCodewordProgressive(
   codeword: Uint8Array,
   byteConfidence: Float64Array,
   schedule: readonly number[] = ERASURE_STEPS,
   onFailure?: (reason: 'ECC' | 'CRC' | 'PAYLOAD', detail: string, erasures: number) => void,
+  unframe: (data: Uint8Array) => { payloadBytes: Uint8Array; signature: Uint8Array } = unframeCodeData,
 ): ProgressiveRead | null {
   const order = Array.from(byteConfidence.keys()).sort((a, b) => byteConfidence[a] - byteConfidence[b] || a - b);
   let lastErasures = -1;
@@ -633,7 +661,7 @@ export function decodeCodewordProgressive(
       continue;
     }
     try {
-      const framed = unframeCodeData(rs.data);
+      const framed = unframe(rs.data);
       return { data: rs.data, payloadBytes: framed.payloadBytes, signature: framed.signature, errors: rs.errors, erasures: rs.erasures };
     } catch (e) {
       if (e instanceof PayloadError && e.code === 'CRC') onFailure?.('CRC', 'CRC-16 mismatch after Reed-Solomon', count);
@@ -648,40 +676,71 @@ export function decodeCodewordProgressive(
  * `guessed` marks brute-forced masks, whose Reed-Solomon failures say nothing
  * beyond the unreadable format already noted.
  */
-function tryHypothesis(cls: CellClassification, g: number, mask: number, schedule: readonly number[], guessed: boolean, failure: Failure): CodeRead | null {
+function tryHypothesis(
+  cls: CellClassification,
+  g: number,
+  profile: CodeProfileEntry<unknown>,
+  mask: number,
+  schedule: readonly number[],
+  guessed: boolean,
+  failure: Failure,
+): CodeRead | null {
   const { codeword, byteConfidence } = readCodeword(cls, g, mask);
-  const read = decodeCodewordProgressive(codeword, byteConfidence, schedule, (reason, detail, count) => {
-    if (reason !== 'ECC') failure.note(reason, detail);
-    else if (!guessed) failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
-  });
-  return read && { g, mask, ...read };
+  const read = decodeCodewordProgressive(
+    codeword,
+    byteConfidence,
+    schedule,
+    (reason, detail, count) => {
+      if (reason !== 'ECC') failure.note(reason, detail);
+      else if (!guessed) failure.note('ECC', `Reed-Solomon failed (mask ${mask}, ${count} erasures)`);
+    },
+    (data) => profile.unframe(data),
+  );
+  return read && { g, codeVersion: profile.version, mask, ...read };
 }
 
 /** Erasure schedule when brute-forcing masks (format unreadable): fewer, coarser steps. */
 const BRUTE_FORCE_ERASURES = [0, 30, 60];
 
-function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean, failure: Failure): CodeRead | null {
-  const hyps = formatHypotheses(cls, moons, mirrored, failure);
+function decodeCells(cls: CellClassification, moons: MoonSet, opts: DecodeSettings, failure: Failure): CodeRead | null {
+  const { hyps, unsupported } = formatHypotheses(cls, moons, opts, failure);
   const trusted = hyps.filter((h) => h.formatDistance <= FORMAT_TRUST);
   for (const h of trusted) {
-    const read = tryHypothesis(cls, h.g, h.mask, ERASURE_STEPS, false, failure);
+    const read = tryHypothesis(cls, h.g, h.profile, h.mask, ERASURE_STEPS, false, failure);
     if (read) return read;
   }
-  if (trusted.length === 0) failure.note('FORMAT', 'format word unreadable');
-  else if (trusted[0].formatDistance <= FORMAT_CERTAIN) return null;
+  if (trusted.length === 0) {
+    // A format word read with certainty that names a version this decoder has no profile for is a
+    // newer code, not damage: brute-forcing the readable versions' masks could only misread it.
+    if (unsupported !== null) return null;
+    failure.note('FORMAT', 'format word unreadable');
+  } else if (trusted[0].formatDistance <= FORMAT_CERTAIN) return null;
   // Format unreadable, or damaged into a wrong but plausible word: brute-force
-  // the masks not tried yet, the most plausible orientations first.
+  // the (version, mask) pairs not tried yet, the most plausible orientations first.
   for (const h of hyps) {
-    for (let mask = 0; mask < CODE01_MASK_COUNT; mask++) {
-      if (h.formatDistance <= FORMAT_TRUST && mask === h.mask) continue;
-      const read = tryHypothesis(cls, h.g, mask, BRUTE_FORCE_ERASURES, true, failure);
-      if (read) return read;
+    for (const profile of opts.profiles) {
+      for (let mask = 0; mask < CODE01_MASK_COUNT; mask++) {
+        if (h.formatDistance <= FORMAT_TRUST && mask === h.mask && profile === h.profile) continue;
+        const read = tryHypothesis(cls, h.g, profile, mask, BRUTE_FORCE_ERASURES, true, failure);
+        if (read) return read;
+      }
     }
   }
   return null;
 }
 
 // ── Orchestration ──────────────────────────────────────────────────────────
+
+/** Resolved decode options: the switches plus the readable code profiles. */
+interface DecodeSettings {
+  tryInverted: boolean;
+  tryMirrored: boolean;
+  readGenome: boolean;
+  maxSealCandidates: number;
+  /** Readable profiles (CODE-01 geometry), lowest version first, and the same by version. */
+  profiles: CodeProfileEntry<unknown>[];
+  byVersion: Map<number, CodeProfileEntry<unknown>>;
+}
 
 /** A located code whose anchor fit passed the quiet-zone check, with its alignment state. */
 interface Attempt {
@@ -719,13 +778,13 @@ function prepareAttempt(img: GrayImage, anchors: Anchors | null, unitPx: number,
 }
 
 /** The cheap stages, which decode most captures: the anchor fit, then the fits leaving one moon out. */
-function quickDecode(a: Attempt, opts: Required<DecodeOptions>, failure: Failure): CodeRead | null {
-  const read = decodeCells(a.alignment.cls, a.moons, opts.tryMirrored, failure);
+function quickDecode(a: Attempt, opts: DecodeSettings, failure: Failure): CodeRead | null {
+  const read = decodeCells(a.alignment.cls, a.moons, opts, failure);
   if (read) return read;
   const robust = leaveOneOut(a.img, a.anchors, a.alignment);
   if (!robust) return null;
   a.alignment = robust;
-  return decodeCells(robust.cls, a.moons, opts.tryMirrored, failure);
+  return decodeCells(robust.cls, a.moons, opts, failure);
 }
 
 /**
@@ -735,21 +794,21 @@ function quickDecode(a: Attempt, opts: Required<DecodeOptions>, failure: Failure
  * kept only when it decodes: on flat surfaces, where it has nothing to fix,
  * the contrast descents start from the best fit so far.
  */
-function repairDecode(a: Attempt, opts: Required<DecodeOptions>, failure: Failure): CodeRead | null {
+function repairDecode(a: Attempt, opts: DecodeSettings, failure: Failure): CodeRead | null {
   const lattice = withRingLattice(a.img, a.fitted, a.unitPx);
-  const read = lattice && decodeCells(lattice.cls, a.moons, opts.tryMirrored, failure);
+  const read = lattice && decodeCells(lattice.cls, a.moons, opts, failure);
   if (lattice && read) {
     a.alignment = lattice;
     return read;
   }
   a.alignment = refineAlignment(a.img, a.alignment, a.unitPx);
-  const refined = decodeCells(a.alignment.cls, a.moons, opts.tryMirrored, failure);
+  const refined = decodeCells(a.alignment.cls, a.moons, opts, failure);
   if (refined) return refined;
   a.alignment = withOffsetField(a.img, a.alignment, a.unitPx);
-  return decodeCells(a.alignment.cls, a.moons, opts.tryMirrored, failure);
+  return decodeCells(a.alignment.cls, a.moons, opts, failure);
 }
 
-function decodeResult(a: Attempt, read: CodeRead, opts: Required<DecodeOptions>, started: number): DecodeResult {
+function decodeResult(a: Attempt, read: CodeRead, opts: DecodeSettings, started: number): DecodeResult {
   const g = read.g;
   const h = multiplyH(a.alignment.homography, dihedralMatrix(g));
   let genome: { glyphs: (number | null)[]; confidence: number[] } | null = null;
@@ -770,7 +829,7 @@ function decodeResult(a: Attempt, read: CodeRead, opts: Required<DecodeOptions>,
     data: read.data,
     payloadBytes: read.payloadBytes,
     signature: read.signature,
-    codeVersion: CODE_VERSION,
+    codeVersion: read.codeVersion,
     mask: read.mask,
     genome,
     quality: {
@@ -822,7 +881,7 @@ const MAX_REPAIRS = 2;
  * cheaply, e.g. a seal under a glare stripe or crossed by a scratch. New
  * attempts are appended to `attempts`.
  */
-function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polarities: readonly boolean[], attempts: Attempt[], failure: Failure, started: number): DecodeResult | null {
+function decodeFromMoons(det: Detection, opts: DecodeSettings, polarities: readonly boolean[], attempts: Attempt[], failure: Failure, started: number): DecodeResult | null {
   const { image } = det;
   for (const inverted of polarities) {
     // A moon (r = 1.75 u) of at least 2 px radius, at most a third of the short side across.
@@ -853,7 +912,7 @@ function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polariti
  * fallback get them afterwards, best quiet zone first. MAX_REPAIRS bounds
  * the total either way.
  */
-function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: Failure, started: number): DecodeResult | null {
+function decodeFrame(frame: GrayImage, opts: DecodeSettings, failure: Failure, started: number): DecodeResult | null {
   const det = new Detection(frame);
   const polarities = opts.tryInverted ? [false, true] : [false];
   const attempts: Attempt[] = [];
@@ -906,11 +965,15 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
       return { ok: false, reason: 'NO_SEAL', detail: 'image too small or malformed', elapsedMs: now() - started };
     }
     const o: DecodeOptions = opts !== null && typeof opts === 'object' ? opts : {};
-    const options: Required<DecodeOptions> = {
+    const profiles = code01CompatibleProfiles(o.codeProfiles instanceof Map ? o.codeProfiles : CODE_PROFILES).sort((a, b) => a.version - b.version);
+    if (profiles.length === 0) return { ok: false, reason: 'FORMAT', detail: 'no readable code profile', elapsedMs: now() - started };
+    const options: DecodeSettings = {
       tryInverted: o.tryInverted ?? true,
       tryMirrored: o.tryMirrored ?? false,
       readGenome: o.readGenome ?? true,
       maxSealCandidates: Number.isFinite(o.maxSealCandidates) ? Math.max(1, Math.min(16, Math.floor(o.maxSealCandidates as number))) : 4,
+      profiles,
+      byVersion: new Map(profiles.map((p) => [p.version, p])),
     };
     const result = decodeFrame(frame, options, failure, started);
     if (result) return result;

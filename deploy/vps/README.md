@@ -11,12 +11,12 @@ internet ──80/443──▶ caddy ──edge (internal)──▶ app:8080 ─
 
 | File | Purpose |
 |---|---|
-| `compose.yaml` | The three services and the `geoip-update` tool. Only Caddy publishes ports. |
+| `compose.yaml` | The three services and the `geoip-update` tool. Only Caddy publishes ports (IPv4 only). The app connects as `POSTGRES_APP_USER`, a role with SELECT/INSERT/UPDATE/DELETE only; the superuser `POSTGRES_USER` is used by the scripts alone. |
 | `Caddyfile`, `caddy.d/` | TLS, HTTP→HTTPS, one trusted `X-Forwarded-For` entry, filtered JSON access log, optional `/admin` allowlist, optional Cloudflare mode. |
 | `.env.example` | Every stack variable. `scripts/setup.sh` turns it into `.env` (mode 0600, never committed). |
 | `scripts/bootstrap-ubuntu.sh` | Once, as root: updates, Docker, ufw, fail2ban, unattended-upgrades, time sync, swap, the `orbes` user, systemd timers, optional SSH hardening. |
 | `scripts/setup.sh` | Once, as `orbes`: `.env` with generated secrets, backup key, first deployment, GeoIP database. |
-| `scripts/deploy.sh` | Build a git ref, roll out, first signing key, smoke tests, automatic rollback. |
+| `scripts/deploy.sh` | Build a git ref, validate the Caddy configuration, back up, migrate (as the schema owner), roll out, first signing key, smoke tests, automatic rollback. |
 | `scripts/backup.sh` / `restore.sh` | Encrypted (age) database + key-volume archives, retention, optional copy to OVH Object Storage; restore with checks and confirmation. |
 | `scripts/geoip-update.sh` | DB-IP City Lite refresh into the `geoip` volume (weekly timer; a new edition appears monthly). |
 | `systemd/` | `orbes-backup.timer` (nightly), `orbes-geoip.timer` (weekly). |
@@ -55,6 +55,8 @@ docker compose logs -f --tail 100 app    # JSON logs
 scripts/backup.sh                        # on-demand encrypted backup (nightly via systemd anyway)
 systemctl list-timers 'orbes-*'          # next backup / GeoIP refresh
 ```
+
+Changing `.env` (e.g. `ADMIN_ALLOWED_IPS="203.0.113.7/32 198.51.100.0/24"`, space-separated, no commas): apply it with `scripts/deploy.sh`, which validates the Caddy configuration before touching anything. A bare `docker compose up -d` skips that check, and an invalid value stops Caddy, i.e. the whole site.
 
 ## Local trial of the whole stack
 

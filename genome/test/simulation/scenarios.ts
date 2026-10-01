@@ -436,7 +436,7 @@ const corrupted: Scenario = {
   key: 'corrupted',
   title: 'Corrupted code',
   setup:
-    'A label is scuffed far beyond Reed-Solomon capacity (900 ink/abrasion spots over a 240° sector of data orbits 1–12) and photographed; a control label is scuffed lightly (150 spots over 40°). Then hand-made malformed submissions: bad CRC, wrong lengths, a partial byte, reserved / unknown version fields with a valid CRC, an empty code, non-base64url characters and a 600-character code (all processed, recorded and answered MALFORMED_CODE, contract §2.4 step 1); and requests outside the API schema (a code over 1024 characters, a non-string code: refused with 400 and not recorded).',
+    'A label is scuffed far beyond Reed-Solomon capacity (900 ink/abrasion spots over a 240° sector of data orbits 1–12) and photographed; a control label is scuffed lightly (150 spots over 40°). Then hand-made malformed submissions: bad CRC, wrong lengths, a partial byte, a reserved key id and a code version outside the format word range with a valid CRC, an empty code, non-base64url characters and a 600-character code (all processed, recorded and answered MALFORMED_CODE, contract §2.4 step 1); an intact frame naming code version 2, which this server has no profile for (UNKNOWN, UNSUPPORTED_CODE_VERSION, never authentic); and requests outside the API schema (a code over 1024 characters, a non-string code: refused with 400 and not recorded).',
   knownGaps: [],
   knownLimits: [],
   async run(lab) {
@@ -465,11 +465,15 @@ const corrupted: Scenario = {
       ['6f', '80 bytes (one appended)', b64([...read, 0]), 'MALFORMED:LENGTH'],
       ['6g', '105 base64url characters (not a whole number of bytes)', p.code.data.slice(0, 105), 'MALFORMED:ENCODING'],
       ['6h', 'key id 0 (reserved), CRC recomputed', b64(reframe(read, { payload: (b) => void (b[1] = 0) })), 'MALFORMED:RESERVED'],
-      ['6i', 'code version nibble 2, CRC recomputed', b64(reframe(read, { payload: (b) => void (b[0] = (2 << 4) | (b[0] & 0x0f)) })), 'MALFORMED:VERSION'],
+      ['6i', 'code version nibble 0 (outside the format word range), CRC recomputed', b64(reframe(read, { payload: (b) => void (b[0] = b[0] & 0x0f) })), 'MALFORMED:VERSION'],
     ];
     for (const [id, title, code, reason] of cases) {
       await lab.expectState(id, title, await lab.submit(phone, { code }), 'MALFORMED_CODE', { reason });
     }
+    // An intact frame naming a code version without a profile on this server reads as a newer code the
+    // server cannot check (ORBES-CODE-SPEC §12): UNKNOWN, never authentic, logged as a server warning.
+    const v2 = b64(reframe(read, { payload: (b) => void (b[0] = (2 << 4) | (b[0] & 0x0f)) }));
+    await lab.expectState('6j', 'code version nibble 2, CRC recomputed (no CODE-02 profile on this server)', await lab.submit(phone, { code: v2 }), 'UNKNOWN', { reason: 'UNSUPPORTED_CODE_VERSION' });
     // Any string up to 1 KiB reaches the service (schemas.ts verifyBody): an empty code, characters outside
     // base64url or more than 200 characters are contract §2.4 step 1 failures, recorded as MALFORMED_CODE scans.
     const m0 = await lab.scanEventCount();

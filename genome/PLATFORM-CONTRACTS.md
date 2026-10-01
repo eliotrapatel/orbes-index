@@ -19,19 +19,20 @@ export interface AppConfig {
   cookieSecret: string;                 // ≥ 32 chars (signing cookies)
   ipHashPepper: string;                 // ≥ 32 chars, HMAC key for IP / device pseudonymisation
   trustProxy: boolean | string;         // passed to Fastify
-  geo: { mode: 'none' | 'cloudflare' | 'headers'; countryHeader?: string; latHeader?: string; lonHeader?: string };
+  geo: { mode: 'none' | 'cloudflare' | 'headers' | 'mmdb'; countryHeader?: string; latHeader?: string; lonHeader?: string; mmdbPath?: string /* absolute, mmdb mode */ };
   keys: { provider: 'local' | 'memory'; dir?: string; encryptionKey?: string /* base64url 32 bytes, AES-256-GCM */ };
   bootstrapAdmin?: { email: string; password: string };   // first-run only
   anomaly: AnomalyConfig;               // internal thresholds — NEVER exposed via API
   rateLimits: { verifyPerMinute: number; authPerMinute: number; adminPerMinute: number; apiPerMinute: number };
   sessionTtlHours: { account: number; admin: number };
+  scanRetentionDays: number | null;    // SCAN_RETENTION_DAYS; null = keep scan history indefinitely
 }
 export function loadConfig(env?: NodeJS.ProcessEnv): AppConfig;
 ```
 
-Further fields: `migrateOnStart` (`MIGRATE_ON_START`, apply pending migrations at a production start; `--migrate` does the same), `logLevel` (`LOG_LEVEL`: fatal | error | warn | info | debug | trace | silent; default info / debug / warn by environment) and `adminRequireMfa` (`ADMIN_REQUIRE_MFA`, admin sessions must pass TOTP; default true in production only). `RATE_LIMIT_API_PER_MINUTE` (default 120) sets `rateLimits.apiPerMinute`, the budget of the `api` route group.
+Further fields: `migrateOnStart` (`MIGRATE_ON_START`, apply pending migrations at a production start; `--migrate` does the same), `logLevel` (`LOG_LEVEL`: fatal | error | warn | info | debug | trace | silent; default info / debug / warn by environment) and `adminRequireMfa` (`ADMIN_REQUIRE_MFA`, admin sessions must pass TOTP; default true in production only). `RATE_LIMIT_API_PER_MINUTE` (default 120) sets `rateLimits.apiPerMinute`, the budget of the `api` route group. `scanRetentionDays` (`SCAN_RETENTION_DAYS`, whole days 30–3650, never below `scanLookbackDays(anomaly)`, the longest anomaly window or decay period) makes housekeeping purge older scan history (`startHousekeeping`, DATABASE §10); unset is `null`.
 
-In production, `loadConfig` refuses: a `pglite:` database URL, the `memory` key provider, default, short or low-variety secrets (and identical cookie secret and pepper), an `http:` `publicOrigin`, `TRUST_PROXY=true`, a numeric `TRUST_PROXY` (refused everywhere), and `GEO_MODE=cloudflare|headers` without `TRUST_PROXY`. `configWarnings(config)` lists accepted but risky settings (`ADMIN_REQUIRE_MFA=false` in production), logged at start.
+In production, `loadConfig` refuses: a `pglite:` database URL, the `memory` key provider, default, short or low-variety secrets (and identical cookie secret and pepper), an `http:` `publicOrigin`, `TRUST_PROXY=true`, a numeric `TRUST_PROXY` (refused everywhere), and `GEO_MODE=cloudflare|headers|mmdb` without `TRUST_PROXY`. In every environment `GEO_MODE=mmdb` requires an absolute `GEO_MMDB_PATH` (a missing file only disables lookups). `configWarnings(config)` lists accepted but risky settings (`ADMIN_REQUIRE_MFA=false`, or no `SCAN_RETENTION_DAYS`, in production), logged at start.
 
 `src/server/context.ts`:
 
@@ -78,7 +79,7 @@ Timestamp convention: every row records when it came into being, named after wha
 | `genomes` | `id uuid PK` · `product_id uuid FK` · `genome_version smallint` · `genome_id text` (= canonical product id string) · `value bigint` (u32) · `glyphs smallint[]` (8) · `pattern text` (glyph ids joined by `·`) · `fingerprint text` · `UNIQUE(product_id, genome_version)` · `UNIQUE(genome_version, value)` · `UNIQUE(fingerprint)` · `created_at` |
 | `cryptographic_keys` | `key_id smallint PK CHECK 1..255` · `kid text UNIQUE` · `algorithm text CHECK = 'Ed25519'` · `public_key bytea CHECK length 32` · `status text CHECK in ('ACTIVE','RETIRED','REVOKED')` · `provider text` · `provider_ref text` (reference, never a secret) · `created_at` · `activated_at NULL` · `retired_at NULL` · `revoked_at NULL` · `compromised_at NULL` · `revocation_reason text NULL` · partial `UNIQUE INDEX ON (status) WHERE status='ACTIVE'` |
 | `codes` | `id uuid PK` · `product_id FK` · `genome_id uuid FK` → `genomes.id` · `key_id smallint FK` · `code_version smallint` · `issue smallint` · `issued_day int` · `nonce bytea` (4) · `payload bytea` (13) · `signature bytea` (64) · `payload_hash bytea UNIQUE` (sha256) · `status text CHECK in ('ACTIVE','SUPERSEDED','REVOKED')` · `revoked_at NULL` · `revocation_reason NULL` · `UNIQUE(product_id, issue)` · `created_at` |
-| `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `created_at` · `updated_at` |
+| `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `failed_logins int NOT NULL DEFAULT 0 CHECK >= 0` · `failed_logins_since NULL` (login throttle, migration 0002) · `created_at` · `updated_at` |
 | `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `created_at` · `updated_at` |
 | `sessions` | `id_hash bytea PK` (sha256 of the random token) · `subject_type text CHECK in ('account','admin')` · `subject_id uuid` · `csrf_token text` · `mfa_passed boolean DEFAULT false` · `created_at` · `expires_at` · `last_seen_at` · `ip_hash text NULL` · `user_agent text NULL` |
 | `ownership` | `id uuid PK` · `product_id FK` · `account_id FK` · `acquired_via text CHECK in ('FIRST_REGISTRATION','TRANSFER','RESALE','ADMIN')` · `verified boolean` (claim secret / retailer proof) · `started_at` · `ended_at NULL` · `ended_reason text NULL` · partial `UNIQUE (product_id) WHERE ended_at IS NULL` |
@@ -154,7 +155,7 @@ verify(input: VerifyInput, meta: ScanMeta): Promise<VerifyOutcome>;
 
 The decision procedure is normative. Each step that ends the procedure records the reason. The order is: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators.
 
-1. **Strict structural parse.** Any string of at most 1024 characters (the empty string included) reaches this step (the route refuses only a missing, non-string or longer `code` with 400, unrecorded). Decode base64url (≤ 200 characters), `unframeCodeData` (79 bytes, CRC-16), then strict `decodePayload` (code version 1; reserved values such as genome version, key id or issue 0; field ranges). Any failure gives `MALFORMED_CODE` (reason `MALFORMED:<INPUT|ENCODING|LENGTH|CRC|VERSION|RESERVED|RANGE>`), recorded as a scan.
+1. **Strict structural parse.** Any string of at most 1024 characters (the empty string included) reaches this step (the route refuses only a missing, non-string or longer `code` with 400, unrecorded). Decode base64url (≤ 200 characters), then `unframeAnyCodeData(bytes, CODE_PROFILES)` (`src/core/code-profiles.ts`): the high nibble of byte 0 picks the code version's profile, whose strict unframing applies (CODE-01: `unframeCodeData`, 79 bytes, CRC-16, then `decodePayload`: reserved values such as genome version, key id or issue 0; field ranges). Any failure gives `MALFORMED_CODE` (reason `MALFORMED:<INPUT|ENCODING|LENGTH|CRC|VERSION|RESERVED|RANGE>`), recorded as a scan. **Exception:** an intact frame (≥ 67 bytes, CRC-16 over everything before it) naming a code version 2–8 without a profile on this server gives `UNKNOWN` (reason `UNSUPPORTED_CODE_VERSION`) and a log warning, like step 5: the server is outdated (or the nibble was edited; it can never reach an authentic state). No anomaly is recorded. The signature (step 3) is verified over the profile's `signingMessage`.
 2. **Key lookup.** Look up `keyId`. If no key exists, the result is `INVALID_SIGNATURE` (reason `UNKNOWN_KEY`).
 3. **Signature.** Verify Ed25519 over `signingMessage(payload)` using **`verifyEd25519Node` from `src/server/crypto/ed25519-node.ts`**. Never call `crypto.verify` directly. That helper is strict: it rejects small-order and non-canonical public keys *before* calling OpenSSL, because OpenSSL 3.5 accepts the identity point as a key, which enables a universal forgery with R = identity and S = 0. A failure gives `INVALID_SIGNATURE` (reason `BAD_SIGNATURE`). `KeyService` must also refuse to register any public key that fails the same weak-key check. The signature covers every payload field, the genome version included: an edited genome version is a forgery, not an unreadable code.
 4. **Revoked-key trust.** Look up the product by `packed_identity` and the code by `(product, issue)`. If the key is `REVOKED`, it vouches only for a code whose registry record exists and was created before `compromised_at` (or `revoked_at` when `compromised_at` is null). Otherwise — no product, no code of that issue, or a record created at or after the cut-off — the result is `INVALID_SIGNATURE` (reason `KEY_REVOKED`), with no anomaly (the key is already known compromised). A record older than the cut-off whose payload hash differs continues to step 6 (`CODE_MISMATCH`).
@@ -292,8 +293,9 @@ Hardware authenticators are **not implemented**. The registry reports `UNSUPPORT
 `resolve(request): GeoInfo { country?: string; region?: string; lat?: number; lon?: number }`. Behaviour depends on the mode:
 
 - `none`: returns nothing.
-- `cloudflare`: reads `cf-ipcountry`, `cf-iplatitude` and `cf-iplongitude`.
-- `headers`: reads the configured header names. Only use this behind a trusted proxy.
+- `cloudflare`: reads `cf-ipcountry`, `cf-iplatitude`, `cf-iplongitude` and `cf-region` (the only mode that fills `region`).
+- `headers`: reads the configured header names (country, optional lat/lon). Only use this behind a trusted proxy.
+- `mmdb`: looks `request.ip` up in the local GeoIP database at `GEO_MMDB_PATH` (`src/server/geo/mmdb.ts`, DB-IP / MaxMind format; country, lat/lon; no region). `request.ip` is the client only behind `TRUST_PROXY`, which production requires. A missing or unreadable file gives no location, never an error.
 
 Coordinates are rounded to 1 decimal place, which is roughly 10 km. Raw IP addresses are never stored. Only `ipHash`, the HMAC with the pepper, is kept.
 
@@ -391,7 +393,8 @@ Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, page
 
 | Path | Serves |
 |---|---|
-| `/verify` (and `/`) | `dist/web/verify/index.html` |
+| `/` | `302` redirect to `/verify` |
+| `/verify` | `dist/web/verify/index.html` |
 | `/admin` | `dist/web/admin/index.html` |
 | `/assets/*` | Bundles and css, built by `scripts/build-web.ts` (esbuild) |
 

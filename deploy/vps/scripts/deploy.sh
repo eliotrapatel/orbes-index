@@ -15,10 +15,15 @@
 #      the working tree as it is, tagged <commit>-dirty-<time>).
 #   2. docker build -> orbes-genome:<commit12>. BUILD_EXTRA_CA_FILE (.env) is
 #      passed as the extra_ca BuildKit secret when set (TLS-inspecting proxy).
-#   3. Encrypted backup first (scripts/backup.sh) when the stack is already
-#      running and holds data (--no-backup skips it).
-#   4. ORBES_IMAGE_TAG=<tag> in .env, `docker compose up -d`, wait until the
-#      app is healthy (migrations run at start: MIGRATE_ON_START=true).
+#   3. The Caddy configuration is validated with the values of .env (a typo
+#      must not take the only public entry point down), then an encrypted
+#      backup (scripts/backup.sh) when the stack is already running and holds
+#      data (--no-backup skips it).
+#   4. ORBES_IMAGE_TAG=<tag> in .env; PostgreSQL up; the app role
+#      (POSTGRES_APP_USER, DML only) ensured; pending migrations applied with
+#      the new image as the schema owner (the app is stopped first when its
+#      image changes, so old code never runs on a newer schema); privileges
+#      granted; `docker compose up -d`; wait until everything is healthy.
 #   5. First signing key if none is ACTIVE (npm run keys:generate in the app).
 #   6. Smoke tests through Caddy: https://$APP_DOMAIN/api/v1/health,
 #      /.well-known/orbes-keys.json (an ACTIVE key), /verify.
@@ -64,6 +69,7 @@ done
 need_cmd docker curl git tar sha256sum
 docker compose version >/dev/null 2>&1 || die "the docker compose plugin is missing"
 require_env_file
+check_db_names
 ensure_state_dir
 DOMAIN="$(env_get APP_DOMAIN)"
 [[ -n "$DOMAIN" ]] || die "APP_DOMAIN is empty in $ENV_FILE"
@@ -127,7 +133,10 @@ else
   fi
 fi
 
-# ── 3. Pre-deploy backup ───────────────────────────────────────────────────
+# ── 3. Caddy configuration, pre-deploy backup ─────────────────────────────
+step "Caddy configuration"
+caddy_validate || die "fix $ENV_FILE (or the Caddyfile) first: nothing was changed"
+
 PREV_TAG="$(env_get ORBES_IMAGE_TAG latest)"
 APP_CID="$(service_container app)"
 if [[ -n "$APP_CID" ]]; then
@@ -148,11 +157,20 @@ fi
 CADDY_CONFIG_HASH="$(cat "$STACK_DIR/Caddyfile" "$STACK_DIR"/caddy.d/*.caddy | sha256sum | cut -c1-16)"
 export CADDY_CONFIG_HASH
 
+# Called as `rollout … || rollback …` (errexit is off in there): every step checks itself.
 rollout() {
-  local tag=$1
+  local tag=$1 running
   env_set ORBES_IMAGE_TAG "$tag"
-  compose up -d --remove-orphans
-  wait_healthy postgres "$TIMEOUT" && wait_healthy app "$TIMEOUT" && wait_healthy caddy 60
+  compose up -d postgres || return 1
+  wait_healthy postgres "$TIMEOUT" || return 1
+  running="$(service_container app)"
+  if [[ -n "$running" && "$(docker inspect -f '{{.Config.Image}}' "$running" 2>/dev/null)" != "orbes-genome:$tag" ]]; then
+    log "stopping the running app before migrating to $tag"
+    compose stop app >/dev/null || return 1
+  fi
+  db_prepare || return 1
+  compose up -d --remove-orphans || return 1
+  wait_healthy app "$TIMEOUT" && wait_healthy caddy 60
 }
 
 ACTIVE_KEY_CHECK='const keys=JSON.parse(require("fs").readFileSync(0,"utf8"));const list=Array.isArray(keys)?keys:(keys.keys||[]);process.exit(list.some(k=>k.status==="ACTIVE")?0:1)'
@@ -221,6 +239,8 @@ printf '%s deploy %s OK (previous %s)\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_D
 if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
   printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
   log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
+elif [[ "$PREV_TAG" == "$TAG" ]]; then
+  log "redeployed $IMAGE (same image as before)"
 else
   log "deployed $IMAGE (no previous image on this host to roll back to)"
 fi

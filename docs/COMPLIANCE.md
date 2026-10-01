@@ -1,17 +1,10 @@
 # ORBES GENOME CODE™ — Master specification compliance audit
 
-Status: audit of 2026-10-01, against commit `c28230a` (plus a clean working tree) · Scope: every section 0–38 of the master specification, the nine required documents and DEPLOYMENT · Method: code reading, the test suite, and running the system.
+Status: audit of 2026-10-01, against commit `c28230a` (plus a clean working tree), **remediated the same day** (see [§5](#5-remediation-2026-10-01)) · Scope: every section 0–38 of the master specification, the nine required documents and DEPLOYMENT · Method: code reading, the test suite, and running the system.
 
-**Verdict.** Every section of the master specification is implemented. 33 sections are **MET**, 6 are **PARTIAL**, and none is **MISSING**. The PARTIAL sections are:
+**Verdict after remediation.** Every section of the master specification is implemented. 38 sections are **MET** and 1 is **PARTIAL**; none is **MISSING**. The remaining PARTIAL section is §28 (real-device evidence: iOS Safari and Android Chrome on physical phones), which a software prototype cannot produce; it is recorded as **out of scope here**, with the procedure, not faked. Two MET sections keep items that are equally out of scope: KMS/HSM custody (§12: needs a vendor account; the interface, switch and acceptance suite are ready) and physical print validation (§30: needs printed material and phones). All 23 document inaccuracies are corrected. One repository action is left to a maintainer: untracking a stray cache file with `git rm --cached` (this pass did not run state-changing git commands; it is no longer published, see item 8).
 
-- §8: a latency target for code-free frames;
-- §26: the code-version dispatch;
-- §28: real-device evidence;
-- §29: a low-light test gate;
-- §37: data retention;
-- §38: website hygiene.
-
-Two MET sections carry open items: KMS custody (§12) and physical print validation (§30). 23 document inaccuracies were found. None of them affects security or decoding. All of them are listed under [Open items](#4-open-items) with a fix.
+**Verdict of the original audit** (kept for the record). 33 sections were **MET**, 6 **PARTIAL** (§8 latency target for code-free frames; §26 code-version dispatch; §28 real-device evidence; §29 low-light test gate; §37 data retention; §38 website hygiene), none **MISSING**, with open items on §12 and §30 and 23 document inaccuracies. Each is listed under [Open items](#4-open-items) with its resolution.
 
 Status legend:
 

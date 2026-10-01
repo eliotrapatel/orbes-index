@@ -8,7 +8,8 @@
  * genome only.
  */
 import { fromBase64Url } from '../../../core/bytes.js';
-import { encodeOrbesCode, ORBES_CODE_STYLES, renderOrbesCodeSvg } from '../../../core/code/encoder.js';
+import { encodeOrbesCode, renderOrbesCodeSvg } from '../../../core/code/encoder.js';
+import { ORBES_CODE_STYLES } from '../../../core/code/styles.js';
 import type { Genome } from '../../../core/genome/genome.js';
 import { renderGenomeSvg } from '../../../core/genome/render.js';
 import { bracket } from '../../shared/corners.js';
@@ -20,9 +21,18 @@ export function toCoreGenome(g: GenomeJson): Genome {
   return { version: g.version, packedIdentity: 0, value: g.value, glyphs: [...g.glyphs], ids: [...g.ids], fingerprint: g.fingerprint };
 }
 
+/**
+ * SVG markup of a genome. Figures sit on ivory plates, so the glyphs are
+ * drawn in the ivory colourway's ink, exactly as the ivory code prints them
+ * (BRAND-DESIGN-SYSTEM §2.4).
+ */
+export function genomeFigureMarkup(g: GenomeJson, layout: 'orbit' | 'row' = 'orbit'): string {
+  return renderGenomeSvg(toCoreGenome(g), { layout, ink: ORBES_CODE_STYLES.ivory.ink, paper: null });
+}
+
 /** Genome on its orbit around the seal, as in the printed code. */
 export function genomeFigure(g: GenomeJson, opts: { layout?: 'orbit' | 'row'; size?: 'lg' | 'md' | 'sm'; framed?: boolean } = {}): HTMLElement {
-  const svg = parseSvg(renderGenomeSvg(toCoreGenome(g), { layout: opts.layout ?? 'orbit', ink: '#0A0A0A', paper: null }));
+  const svg = parseSvg(genomeFigureMarkup(g, opts.layout ?? 'orbit'));
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', `Genome ${g.fingerprint}`);
   const fig = h('figure', { class: ['figure', `figure--${opts.size ?? 'md'}`, `figure--${opts.layout ?? 'orbit'}`], data: { testid: 'genome-figure' } }, svg);

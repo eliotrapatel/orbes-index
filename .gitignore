@@ -1,0 +1,6 @@
+# Repository root. The website is the single static index.html; the system
+# lives in genome/ (which has its own .gitignore) and deploy/vps/.
+# Tool caches written when a command is run from the root (e.g. Vitest's
+# node_modules/.vite results cache) must never be committed.
+node_modules/
+.DS_Store

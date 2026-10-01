@@ -8,6 +8,7 @@
  * an inconsistent response, and the row is then not drawn at all (the
  * fingerprint text still shows what the server said).
  */
+import { ORBES_CODE_STYLES } from '../../core/code/styles.js';
 import { computeGenome, identityFromGenomeGlyphs, renderGenomeSvg, SUPPORTED_GENOME_VERSIONS, type Genome } from '../../core/genome/index.js';
 import { h, parseSvg } from '../shared/dom.js';
 import type { GenomeModel } from './view-model.js';
@@ -25,11 +26,23 @@ export function genomeFromModel(m: GenomeModel): Genome | null {
   }
 }
 
-/** The glyph row as an inline SVG in `currentColor`, or null when it cannot be drawn faithfully. */
-export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): SVGSVGElement | null {
+/**
+ * SVG markup of the glyph row, or null when it cannot be drawn faithfully.
+ * The GENOME sits on an ivory plate (`.result__genome`), so it is drawn in
+ * the ivory colourway's ink, exactly as the ivory code prints it
+ * (BRAND-DESIGN-SYSTEM §2.4).
+ */
+export function genomeRowMarkup(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): string | null {
   const genome = genomeFromModel(m);
   if (!genome) return null;
-  const svg = parseSvg(renderGenomeSvg(genome, { layout: opts.layout ?? 'row', ink: 'currentColor', paper: null }));
+  return renderGenomeSvg(genome, { layout: opts.layout ?? 'row', ink: ORBES_CODE_STYLES.ivory.ink, paper: null });
+}
+
+/** The glyph row as an inline SVG (ivory colourway ink), or null when it cannot be drawn faithfully. */
+export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): SVGSVGElement | null {
+  const markup = genomeRowMarkup(m, opts);
+  if (markup === null) return null;
+  const svg = parseSvg(markup);
   svg.setAttribute('class', `genome-svg genome-svg--${opts.layout ?? 'row'}`);
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', `GENOME ${m.fingerprint}: ${m.ids.map((id) => id.replace(/_/g, ' ').toLowerCase()).join(', ')}`);

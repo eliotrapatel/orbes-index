@@ -87,6 +87,8 @@ env_set() {
 
 require_env_file() {
   [[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found: run scripts/setup.sh first (or copy .env.example)"
+  # Unreadable (e.g. created with sudo, owned by root) would silently mean "all defaults".
+  [[ -r "$ENV_FILE" ]] || die "$ENV_FILE is not readable by $(id -un): it must belong to the deploy user (chown orbes: $ENV_FILE)"
   local mode
   mode="$(stat -c '%a' "$ENV_FILE")"
   if [[ "$mode" != 600 && "$mode" != 400 ]]; then
@@ -132,6 +134,112 @@ wait_healthy() {
     if (( $(date +%s) >= deadline )); then warn "$svc not healthy after ${timeout}s (last status: ${status:-none})"; return 1; fi
     sleep 2
   done
+}
+
+# ── Database roles (least privilege) ───────────────────────────────────────
+# POSTGRES_USER (superuser created by the postgres image) owns the schema: it runs the
+# migrations, backups and restores. The app connects as POSTGRES_APP_USER: no superuser,
+# no DDL, only SELECT/INSERT/UPDATE/DELETE on the tables, so the append-only guards
+# (audit log, key ids) hold against it, and it cannot SET session_replication_role,
+# COPY … TO PROGRAM or ALTER/DROP anything (docs/DEPLOYMENT.md §6.2).
+
+db_owner() { env_get POSTGRES_USER orbes; }
+db_name() { env_get POSTGRES_DB orbes; }
+db_app_user() { env_get POSTGRES_APP_USER orbes_app; }
+
+check_db_names() {
+  local owner app db pw
+  owner="$(db_owner)"; app="$(db_app_user)"; db="$(db_name)"; pw="$(env_get POSTGRES_APP_PASSWORD)"
+  local re='^[a-z_][a-z0-9_]{0,62}$'
+  [[ "$owner" =~ $re && "$app" =~ $re && "$db" =~ $re ]] || die "POSTGRES_USER, POSTGRES_APP_USER and POSTGRES_DB: lower-case letters, digits and _ only"
+  [[ "$app" != "$owner" ]] || die "POSTGRES_APP_USER must differ from POSTGRES_USER (the app must not own the schema)"
+  [[ "$pw" =~ ^[A-Za-z0-9_-]{16,}$ ]] || die "POSTGRES_APP_PASSWORD: at least 16 URL-safe characters (scripts/setup.sh generates it)"
+}
+
+# psql as the owner inside the postgres container; SQL on stdin (never on a command line).
+db_psql_owner() {
+  # shellcheck disable=SC2016 # expanded by the container's shell
+  compose exec -T postgres sh -c 'exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+}
+
+# Create the app role if missing and (re)set its password and attributes. Idempotent.
+db_ensure_app_role() {
+  check_db_names
+  local app pw
+  app="$(db_app_user)"; pw="$(env_get POSTGRES_APP_PASSWORD)"
+  db_psql_owner >/dev/null <<SQL
+\\set app '$app'
+\\set pw '$pw'
+-- Keep the password out of the server log (only the generated statement carries it).
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SELECT format('CREATE ROLE %I LOGIN', :'app') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app') \\gexec
+SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT 30 PASSWORD %L', :'app', :'pw') \\gexec
+SQL
+}
+
+# Privileges of the app role on everything the migrations created. Idempotent; run after
+# every migration and restore (new tables get them from the default privileges as well).
+db_grant_app_role() {
+  check_db_names
+  local app owner db
+  app="$(db_app_user)"; owner="$(db_owner)"; db="$(db_name)"
+  db_psql_owner >/dev/null <<SQL
+\\set app '$app'
+\\set owner '$owner'
+\\set db '$db'
+SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'db') \\gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'db', :'app') \\gexec
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SELECT format('REVOKE ALL ON SCHEMA public FROM %I', :'app') \\gexec
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app') \\gexec
+SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', :'app') \\gexec
+SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', :'app') \\gexec
+-- The migration bookkeeping is read-only for the app (it only checks that nothing is pending).
+SELECT format('REVOKE INSERT, UPDATE, DELETE ON TABLE %I.%I FROM %I', schemaname, tablename, :'app')
+  FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('kysely_migration', 'kysely_migration_lock') \\gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', :'owner', :'app') \\gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', :'owner', :'app') \\gexec
+SQL
+}
+
+# Apply pending migrations with the CURRENT image (ORBES_IMAGE_TAG) as the schema owner, in a
+# one-off app container (the running app has no DDL rights). The owner URL travels in the
+# environment of the compose process, never on a command line.
+db_migrate() {
+  check_db_names
+  local pw
+  pw="$(env_get POSTGRES_PASSWORD)"
+  [[ -n "$pw" ]] || die "POSTGRES_PASSWORD is empty in $ENV_FILE"
+  DATABASE_URL="postgres://$(db_owner):${pw}@postgres:5432/$(db_name)" \
+    compose run --rm --no-deps -T -e DATABASE_URL app node --import tsx scripts/db.ts migrate
+}
+
+# Everything the database needs before the app starts: role, migrations, privileges.
+db_prepare() {
+  db_ensure_app_role || return 1
+  db_migrate || return 1
+  db_grant_app_role || return 1
+  log "database ready: migrations applied, app role $(db_app_user) has DML rights only"
+}
+
+# Validate Caddyfile + caddy.d with the values of .env BEFORE Caddy is (re)created: a typo
+# (EDGE_MODE, a comma in ADMIN_ALLOWED_IPS…) would otherwise crash-loop the only public
+# entry point. Same defaults as compose.yaml. Prints Caddy's error on failure.
+caddy_validate() {
+  local out
+  if out="$(docker run --rm --network none -w /etc/caddy \
+    -e APP_DOMAIN="$(env_get APP_DOMAIN)" -e ACME_EMAIL="$(env_get ACME_EMAIL)" \
+    -e TLS_MODE="$(env_get TLS_MODE acme)" -e EDGE_MODE="$(env_get EDGE_MODE direct)" \
+    -e ADMIN_ALLOWED_IPS="$(env_get ADMIN_ALLOWED_IPS '0.0.0.0/0 ::/0')" \
+    -v "$STACK_DIR/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$STACK_DIR/caddy.d:/etc/caddy/caddy.d:ro" \
+    caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)"; then
+    log "Caddy configuration valid (TLS_MODE=$(env_get TLS_MODE acme), EDGE_MODE=$(env_get EDGE_MODE direct))"
+  else
+    printf '%s\n' "$out" | grep -E '^Error|"level":"error"' | tail -n 3 >&2
+    warn "the Caddy configuration is invalid with the values of $ENV_FILE (TLS_MODE, EDGE_MODE, ADMIN_ALLOWED_IPS…)"
+    return 1
+  fi
 }
 
 # Root CA of Caddy's internal issuer (TLS_MODE=internal), for curl --cacert.

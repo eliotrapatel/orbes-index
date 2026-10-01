@@ -253,8 +253,10 @@ These are the targets of the reference decoder. Measured values are published in
 | Contrast | ≥ 30 % luminance difference (e.g. ink 110 / paper 220); both polarities |
 | Blur and noise | Defocus σ ≤ 0.5 u; sensor noise σ ≤ 12/255; JPEG quality ≥ 60 |
 | Substrates | Paper, ivory, textured paper, leather grain, brushed metal; moderate cylindrical curvature |
-| Latency | < 100 ms per 1280 × 720 frame on a laptop; recognition < 1 s on a modern phone |
+| Latency | Whole 1280 × 720 frame on a laptop, production decoder worker (Chromium): frames with a code median < 100 ms; code-free frames median < 200 ms and p95 < 400 ms. Recognition (camera start → decoded code) < 1 s on a modern phone |
 | False positives | 0 on noise and clutter images |
+
+**Latency target, qualified (2026-10-01).** Earlier versions of this table promised "< 100 ms per 1280 × 720 frame" without distinguishing frames. Frames with a code meet it (median 46–53 ms; p95 94–102 ms). Code-free frames — most frames before the code is in view — cannot stop at the first pass: a seal that is damaged, under glare or crossed by a scratch is only found by the later passes (finer binarisation window, column scans, the seal-less moon fallback, `decode.ts` steps 2 and 8), and stopping early on code-free frames would give up exactly those scans. They measure median 155–185 ms and p95 306–370 ms ([performance report](reports/performance.md) §2). That cost delays the next decode attempt, never the camera preview: the scanner keeps at most one frame in flight and sends only the square under the reticle (≤ 960 px, about a third of a 1280 × 720 frame on a phone viewport). `npm run bench` checks these budgets on the Chromium worker run (`genome/scripts/decoder-budget.ts`) and exits 1 when one is exceeded.
 
 ## 11. Reference decoding procedure (informative)
 
@@ -288,6 +290,9 @@ The decoder never verifies signatures. Verification is the server's responsibili
 | Invariant across versions | The seal, the moons and the format cells (ring 0, cells 0–14 and 24–38). Every future version MUST keep them, so any decoder can find a code and read its version before interpreting the rest. |
 | What a new version may change | Ring layout, data capacity, ECC parameters and payload. |
 | Historical codes | They remain verifiable forever. Verifiers keep every published profile, and keys are looked up by the key id carried in the code. |
+| Envelope invariant across versions | Every version's protected data is `payload ‖ signature (64 bytes) ‖ CRC-16/CCITT` over everything before it, with the code version in the high nibble of payload byte 0. A reader can therefore tell an intact code of an unknown version from a damaged one without knowing its layout. |
+| Profile registry (reference implementation) | `CODE_PROFILES` (`genome/src/core/code-profiles.ts`) maps each supported version to its profile: geometry, data length, strict unframing and signing domain. The decoder reads the format word with the invariant format cells and decodes the data with the profile the word names, which also rejects a payload whose own version differs (the mismatch rule above); payload decoding dispatches on the high nibble of byte 0 (`unframeAnyCodeData`). The decoder's sampling tables are those of the CODE-01 geometry: a profile with another ring layout also needs them generalised. |
+| Unsupported versions | A decoder that reads, with certainty, a format word naming a version it has no profile for reports it ("unsupported code version N") instead of brute-forcing its own versions' masks. The server answers an intact frame of a version 2–8 without a profile with **UNKNOWN** (reason `UNSUPPORTED_CODE_VERSION`) and a server warning, never `MALFORMED_CODE`: the reader is outdated, the code is not damaged. Nothing in such a frame is checked, so it can never reach an authentic state (THREAT-MODEL S). Versions 0 and 9–15, or a broken envelope, remain `MALFORMED_CODE`. |
 
 ## 13. Test vectors
 

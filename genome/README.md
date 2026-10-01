@@ -18,22 +18,25 @@ Architecture overview: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). Producti
 genome/
   src/core/            isomorphic library (browser + Node; no node:* imports, no Buffer)
     bytes.ts identity.ts payload.ts geometry.ts
+    code-profiles.ts     code-version registry (CODE_PROFILES): profile per version, payload dispatch
     ecc/                 GF(256) Reed-Solomon (errors + erasures), BCH(15,5), CRC-16
     genome/              GENOME-01 vocabulary, bijective permutation, renderer
-    code/                CODE-01 profile (single source of truth), encoder, SVG renderer
+    code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
     decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
     verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
     render/              shared vector primitives → SVG paths
   src/server/          Fastify service (Node only)
     config.ts            environment → AppConfig (zod; fail fast; production hardening)
-    context.ts           wiring: database, migrations, services, bootstrap admin, key self-test
+    context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping
     index.ts             entry point (npm start), graceful shutdown
     app.ts               HTTP app: plugins, security headers, rate limits, routes, static web
     db/                  Kysely schema, migrations, connection (pg | PGlite), demo seed
     keys/                KeyProvider (local AES-GCM files | memory), KeyService (rotation, revocation)
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
-    services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit
+    services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
+                         scan tokens, scan-history retention
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
+    demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
@@ -75,6 +78,7 @@ npm ci
 |---|---|
 | `npm run dev` | Development server with reload (`tsx watch`). Listens on `127.0.0.1:8080`. In-memory PGlite and keys, migrated and keyed automatically. Everything is lost on restart. |
 | `npm start` | Same server without reload (`node --import tsx src/server/index.ts`), which is how the container runs it. In production add `-- --migrate` or `MIGRATE_ON_START=true` to apply migrations. |
+| `npm run demo` | The server in demo mode (`tsx src/server/index.ts --demo`, the same as `npm start -- --demo`): in-memory PGlite loaded with the demo dataset through the real services; a demo console sign-in is printed once. Development and test only. Serves the web apps when `dist/web/` has been built. |
 | `npm run build:web` | Builds `src/web/*` into `dist/web/` (esbuild, minified, content-hashed, CSP-checked). The server serves `/verify`, `/admin` and `/assets/*` from there when it exists. `npx tsx scripts/build-web.ts --dev` gives unminified output with sourcemaps. |
 
 For a persistent local setup, point `DATABASE_URL` at a directory or a PostgreSQL database, and keep keys on disk:
@@ -139,7 +143,7 @@ This runs the core end to end without a server or database: key pair → identit
 
 - Chromium uses a fake camera fed with simulated phone video (Y4M) of real issued codes, against the real server and web build.
 - They look for Chromium at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, or at `ORBES_CHROMIUM`.
-- Most skip when it is missing, but `test/web/admin.e2e.test.ts` does not. Install a matching browser and export its path:
+- Every one of them skips cleanly when it is missing (`describe.skipIf`). Install a matching browser and export its path:
   ```sh
   npx playwright-core install chromium
   export ORBES_CHROMIUM=$(node -p "require('playwright-core').chromium.executablePath()")
@@ -160,11 +164,12 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | Command | Output |
 |---|---|
 | `npm run scan-matrix` | Scan test matrix: real CODE-01 artifacts through the camera simulator under one varied condition at a time. Success rate and decode time per condition, smallest reliable printed size. Writes `docs/reports/scan-matrix.md` (`-- --no-write`, `--only a,b`, `--trials N`, `--dump DIR`). |
-| `npm run bench` | Performance benchmarks: decoder (Node and the production Web Worker in Chromium), verify API, issuance, bundle sizes. Markdown tables plus `out/bench/results.json`. `-- --quick`, `--only decoder,api,issuance,bundles`, `--no-chromium`. With `ORBES_TEST_POSTGRES_URL` it adds PostgreSQL runs. Summary: `docs/reports/performance.md`. |
+| `npm run bench` | Performance benchmarks: decoder (Node and the production Web Worker in Chromium), verify API, issuance, bundle sizes. Markdown tables plus `out/bench/results.json`. Exits 1 when the Chromium decoder run exceeds the ORBES-CODE-SPEC §10 latency budget (`scripts/decoder-budget.ts`). `-- --quick`, `--only decoder,api,issuance,bundles`, `--no-chromium`. With `ORBES_TEST_POSTGRES_URL` it adds PostgreSQL runs. Summary: `docs/reports/performance.md`. |
 | `npm run sheets` | Physical A4 print test kit (PDF + one SVG per page) in `docs/assets/test-sheets/`. `-- --check` exits 1 when the committed files are stale, and `--out DIR` writes elsewhere. The codes are real CODE-01 artifacts signed by the public **sample** key and labelled "SAMPLE - NOT VALID". |
 | `npx tsx scripts/print-size-matrix.ts` | Print size × substrate × distance × phone model → `docs/reports/print-size-matrix.md`. |
 | `npx tsx scripts/counterfeit-simulation.ts` | Counterfeit scenarios → `docs/reports/counterfeit-simulation.md`. |
 | `npx tsx scripts/genome-symbol-study.ts` | GENOME-01 vocabulary selection → `docs/reports/genome-symbol-study.md` and `docs/assets/genome-01-vocabulary.svg`. |
+| `npx tsx scripts/payload-encodings.ts` | Payload size in the fixed layout vs deterministic CBOR and JSON → the table of CRYPTOGRAPHY §3.1 (`--json` for raw figures). |
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.

@@ -250,9 +250,29 @@ describe('step 1–2: decoding and versions', () => {
     expect(await reasonOf(toBase64Url(raw))).toEqual(['MALFORMED:CRC']);
   });
 
-  it('rejects unsupported code versions and reserved values (CRC-valid frames)', async () => {
-    expect(await reasonOf(reframe(data, { payload: (p) => void (p[0] = (2 << 4) | 1) }))).toEqual(['MALFORMED:VERSION']);
+  it('rejects code versions outside the format word range and reserved values (CRC-valid frames)', async () => {
+    expect(await reasonOf(reframe(data, { payload: (p) => void (p[0] = (0 << 4) | 1) }))).toEqual(['MALFORMED:VERSION']);
+    expect(await reasonOf(reframe(data, { payload: (p) => void (p[0] = (9 << 4) | 1) }))).toEqual(['MALFORMED:VERSION']);
     expect(await reasonOf(reframe(data, { payload: (p) => void (p[1] = 0) }))).toEqual(['MALFORMED:RESERVED']);
+  });
+
+  it('a well-formed code of a code version this server has no profile for → UNKNOWN (UNSUPPORTED_CODE_VERSION), logged as a server warning', async () => {
+    const warnings: unknown[] = [];
+    const log = { info: () => {}, error: () => {}, warn: (o: unknown) => void warnings.push(o) };
+    const svc = new VerificationService({ db: w.t.db, keys: w.keys, anomaly: w.anomaly, config: w.config, clock: w.clock.now, log });
+    for (const v of [2, 8]) {
+      const out = await svc.verify({ code: reframe(data, { payload: (p) => void (p[0] = (v << 4) | 1) }) }, {});
+      expect(out.state).toBe('UNKNOWN');
+      expect(Object.keys(out).sort()).toEqual(['message', 'scanId', 'state', 'title', 'verifiedAt']);
+      // Nothing about the code can be checked: no key, no signature, no product.
+      expect(await authEvent(w, out.scanId)).toMatchObject({ reasons: ['UNSUPPORTED_CODE_VERSION'], signature_valid: false, key_id: null, product_id: null, code_id: null });
+      expect(warnings.at(-1)).toEqual(expect.objectContaining({ scanId: out.scanId, codeVersion: v }));
+    }
+    expect(warnings).toHaveLength(2);
+    // A damaged frame of an unknown version stays MALFORMED_CODE.
+    const raw = fromBase64Url(reframe(data, { payload: (p) => void (p[0] = (2 << 4) | 1) }));
+    raw[78] ^= 1;
+    expect(await reasonOf(toBase64Url(raw))).toEqual(['MALFORMED:VERSION']);
   });
 
   it('a reserved genome version (0) is a structural failure', async () => {

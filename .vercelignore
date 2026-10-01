@@ -1,10 +1,13 @@
 # The theorbes.com website deployed by Vercel is the static index.html only.
-# The ORBES GENOME CODE system (genome/), its specifications (docs/) and CI
-# configuration are not part of the public website and must never be served
-# as static files. The verification service is deployed separately
-# (see docs/DEPLOYMENT.md).
+# The ORBES GENOME CODE system (genome/), its specifications (docs/), the VPS
+# stack (deploy/: scripts, Caddyfile, .env.example), CI configuration and
+# local tool caches (node_modules/) are not part of the public website and
+# must never be served as static files. The verification service is deployed
+# separately (see docs/DEPLOYMENT.md).
 genome/
 docs/
+deploy/
 .github/
+node_modules/
 README.md
 NOTICE.md

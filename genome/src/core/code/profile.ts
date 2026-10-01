@@ -18,9 +18,12 @@
  *                 seal keeps its full 1.75 u clearance, ORBES-CODE-SPEC §4.2)
  *   r 10.0─ 23.0  DATA orbits: 13 rings, centre radii 10.5…22.5, pitch 1
  *                 ring 0 carries 2 copies of the BCH format word
- *   r 23.0─ 25.75 quiet band (light)                          machine-critical
- *                 (ink-free except the decor hairlines at r 23.5 and 24.0,
- *                 ≥ 0.6 u from machine-critical ink, ORBES-CODE-SPEC §4.7)
+ *   r 22.86─ 24.70 / 25.75  outer quiet band (light)         machine-critical
+ *                 from the outer edge of data ring 12 (22.5 + 0.72/2) to
+ *                 the polaris halo (24.70, NW diagonal) or the moons (25.75,
+ *                 the other diagonals); ink-free except the decor hairlines
+ *                 at r 23.5 and 24.0, ≥ 0.6 u from machine-critical ink
+ *                 (ORBES-CODE-SPEC §4.7)
  *   moons         4 solid discs, radius 1.75, centre radius 27.5 at the
  *                 diagonals (NW, NE, SE, SW); the NW moon ("polaris") carries a
  *                 thin concentric halo used only as an orientation hint.

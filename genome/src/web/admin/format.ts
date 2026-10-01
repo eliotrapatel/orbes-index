@@ -1,7 +1,10 @@
 /**
  * Pure formatters for the console. Dates are shown in UTC: operators in
  * Paris, workshops and auditors elsewhere must read the same instant, and
- * the audit log is in UTC too.
+ * the audit log is in UTC too. The day is zero-padded (`01 OCT 2026`, unlike
+ * the customer-facing `1 OCT 2026` of /verify) so that dates stacked in table
+ * columns and timelines align character for character in tabular numerals
+ * (BRAND-DESIGN-SYSTEM §8, item 11).
  */
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];

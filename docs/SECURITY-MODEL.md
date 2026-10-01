@@ -78,8 +78,9 @@ None of these layers proves that the scanned object is the original physical ite
 ### 3.6 Privacy
 - Device identifiers are random cookies. Only `HMAC(pepper, id)` is stored.
 - IP addresses are never stored. Only `HMAC(pepper, ip)` is kept, for rate limiting and diversity counting.
-- Geography is coarse: a country, plus lat/lon rounded to 0.1° when the trusted edge provides it.
+- Geography is coarse: a country, plus lat/lon rounded to 0.1°, when the trusted edge provides them (`GEO_MODE=cloudflare` or `headers`) or, with `GEO_MODE=mmdb`, from a local GeoIP database lookup of the client IP on the server (`src/server/geo/mmdb.ts`; the IP is looked up in memory and never stored, and no region is derived).
 - Codes contain no personal data.
+- Retention: with `SCAN_RETENTION_DAYS` set, housekeeping deletes scan events older than the period, with their authentication events and scan tokens (DATABASE §10). The period is a legal decision; it cannot be shorter than the anomaly look-back (30 days by default), and production warns at every start while it is unset (scan history is then kept indefinitely).
 
 ### 3.7 Audit and integrity monitoring
 - `audit_logs` is append-only: a trigger rejects UPDATE and DELETE.
@@ -106,9 +107,12 @@ None of these layers proves that the scanned object is the original physical ite
 - the local key provider has no `KEY_ENCRYPTION_KEY`, or it is degenerate (all bytes identical);
 - `TRUST_PROXY=true`: Fastify would take the left-most `X-Forwarded-For` entry as the client IP, and that entry is written by the client, so rate limits (logins, claim and transfer codes) and IP pseudonyms become forgeable. List the proxy addresses or ranges instead;
 - `TRUST_PROXY` is a number (a hop count such as `1`): ambiguous, and Fastify's handling of numbers trusts nothing or everything depending on the version. Also refused outside production;
-- `GEO_MODE=cloudflare` or `GEO_MODE=headers` without `TRUST_PROXY`: the location headers would be accepted from any client (and, behind Cloudflare, every client would share the edge's IP for rate limiting).
+- `GEO_MODE=cloudflare` or `GEO_MODE=headers` without `TRUST_PROXY`: the location headers would be accepted from any client (and, behind Cloudflare, every client would share the edge's IP for rate limiting);
+- `GEO_MODE=mmdb` without `TRUST_PROXY`: production always sits behind a TLS proxy, so the client IP would be the proxy's own address and every lookup would silently find nothing.
 
-Accepted with a warning at every start (`configWarnings`): `ADMIN_REQUIRE_MFA=false` in production.
+Refused in every environment: `GEO_MODE=mmdb` without an absolute `GEO_MMDB_PATH` (a missing file at that path is not an error: location is then simply unknown).
+
+Accepted with a warning at every start (`configWarnings`): `ADMIN_REQUIRE_MFA=false` in production, and no `SCAN_RETENTION_DAYS` in production.
 
 `npm start -- --demo` (demo mode) is refused in production and with any `DATABASE_URL` other than `pglite:memory`.
 

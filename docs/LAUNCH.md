@@ -130,7 +130,7 @@ docker compose ps                                                # caddy, app, p
 1. On GitHub, open a pull request from `claude/orbes-genome-code-system-o8bmnk` into `main`, review it and merge it.
    - Vercel redeploys `theorbes.com`.
    - The only visible change is that `theorbes.com/verify` redirects to `https://verify.theorbes.com/verify` (`vercel.json`).
-   - `.vercelignore` keeps `genome/`, `docs/`, `.github/` and `NOTICE.md` off the website.
+   - `.vercelignore` keeps `genome/`, `docs/`, `deploy/`, `.github/`, `node_modules/`, `README.md` and `NOTICE.md` off the website.
 2. Check:
    - `https://theorbes.com` looks exactly as before;
    - `https://theorbes.com/verify` lands on the scanner.

@@ -81,6 +81,21 @@ describe('decoder robustness — damage, lighting, materials', () => {
     expect([...contrast.failures, ...light.failures]).toEqual([]);
   });
 
+  it('reads ≥ 95 % of low-light captures at 4 px/u (lowLight preset: underexposed, noisy, defocused, hand shake, JPEG 70)', () => {
+    const trials = 20;
+    const r = runTrials('low-light', trials, (rng) => ({
+      pxPerU: 4,
+      params: {
+        ...PRESETS.lowLight,
+        rotationDeg: rng.range(0, 360),
+        tiltXDeg: rng.range(-12, 12),
+        tiltYDeg: rng.range(-12, 12),
+        offset: { x: rng.range(-60, 60), y: rng.range(-40, 40) },
+      },
+    }));
+    expect(r.ok / trials, r.failures.join('\n')).toBeGreaterThanOrEqual(0.95);
+  });
+
   it('reads light ink on a dark substrate', () => {
     const r = runTrials('inverted', 6, (rng) => ({ pxPerU: 5, params: phone(rng), style: 'inverted' }));
     expect(r.failures).toEqual([]);

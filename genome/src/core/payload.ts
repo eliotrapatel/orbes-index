@@ -48,17 +48,26 @@ export interface CodePayloadV1 {
   nonce: Uint8Array;
 }
 
-export type PayloadErrorCode = 'LENGTH' | 'VERSION' | 'RANGE' | 'CRC' | 'RESERVED';
+/**
+ * LENGTH, VERSION, RANGE, CRC and RESERVED mean a damaged or invalid frame.
+ * UNSUPPORTED_VERSION (code-profiles.ts `unframeAnyCodeData` only) means an
+ * intact frame of a code version this build has no profile for: the reader
+ * is outdated, the code is not damaged.
+ */
+export type PayloadErrorCode = 'LENGTH' | 'VERSION' | 'RANGE' | 'CRC' | 'RESERVED' | 'UNSUPPORTED_VERSION';
 
 export class PayloadError extends Error {
   override readonly name = 'PayloadError';
+  /** The code version read from the frame (UNSUPPORTED_VERSION). */
+  readonly codeVersion?: number;
 
   constructor(
     readonly code: PayloadErrorCode,
     message: string,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; codeVersion?: number },
   ) {
     super(message, options);
+    if (options?.codeVersion !== undefined) this.codeVersion = options.codeVersion;
   }
 }
 

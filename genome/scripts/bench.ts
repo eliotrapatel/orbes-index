@@ -29,6 +29,7 @@
  * (or --json PATH). Frames and request mixes are seeded: same arguments → same
  * work; times depend on the machine and on what else runs on it.
  */
+import { DECODER_LATENCY_BUDGET_MS, decoderBudgetIssues } from './decoder-budget.js';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -417,7 +418,16 @@ async function benchDecoder(o: Options) {
   }
   log(table(['environment', 'frames', 'correct', 'p50 ms', 'p95 ms', 'max ms', 'decode p50', 'RGBA→luma p50'], rows));
   log(`\ncold first frame: Node ${fmt(node.coldFirstFrameMs)} ms${browser ? `, Chromium worker ${fmt(browser.coldFirstFrameMs)} ms` : ''}\n`);
-  return { frames: { code: o.frames, free: o.free, width: 1280, height: 720, reps: o.reps, warmup: o.warmup }, node, chromium: browser };
+  // ORBES-CODE-SPEC §10 budget, judged on the production path (the Chromium worker) only.
+  let budget: { checked: boolean; issues: string[] } = { checked: false, issues: [] };
+  if (browser) {
+    const issues = decoderBudgetIssues({ code: { p50: browser.code.wallMs.p50 }, free: { p50: browser.free.wallMs.p50, p95: browser.free.wallMs.p95 } });
+    budget = { checked: true, issues };
+    const b = DECODER_LATENCY_BUDGET_MS;
+    log(`latency budget (ORBES-CODE-SPEC §10: code p50 < ${b.codeP50} ms; code-free p50 < ${b.freeP50} ms, p95 < ${b.freeP95} ms): ${issues.length === 0 ? 'PASS' : `FAIL — ${issues.join('; ')}`}\n`);
+    if (issues.length > 0) process.exitCode = 1;
+  } else log('latency budget: not checked (no Chromium run)\n');
+  return { frames: { code: o.frames, free: o.free, width: 1280, height: 720, reps: o.reps, warmup: o.warmup }, node, chromium: browser, budget };
 }
 
 // ── (b) Verify API and (c) issuance: shared world ──────────────────────────

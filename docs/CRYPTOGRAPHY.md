@@ -69,17 +69,19 @@ Two different byte strings never decode to the same payload, so the bytes that a
 
 ### 3.1 Why not CBOR or JSON (decision record)
 
-We measured the same fields in alternative encodings:
+The same fields of the sample code (`docs/vectors/code01-sample.json`) in alternative encodings, computed by `genome/scripts/payload-encodings.ts` (`npx tsx scripts/payload-encodings.ts`; deterministic CBOR per RFC 8949 §4.2.1; the table is checked against the script by `test/crypto/payload-encodings.test.ts`):
 
 | Encoding | Bytes | Framed data with signature + CRC | Effect on the code |
 |---|---:|---:|---|
-| **Fixed binary (chosen)** | **13** | **79** | RS(164,79), 1 344 cells, 50 u |
-| Deterministic CBOR, integer keys, packed identity | 25 | 91 | ≈ 189-byte codeword, +15 % cells |
-| Deterministic CBOR, integer keys, text product ID | 32 | 98 | ≈ 203-byte codeword, +24 % cells |
-| Deterministic CBOR, short string keys (incl. genome_id) | 64 | 130 | > 255 bytes: two RS blocks, +65 % cells |
-| JSON | 140 | 206 | impractical for small jewellery |
+| Fixed binary (chosen) | 13 | 79 | RS(164,79), 1 344 cells, 50 u |
+| Deterministic CBOR, integer keys, packed identity | 25 | 91 | 176-byte codeword, +7 % data cells |
+| Deterministic CBOR, integer keys, text product ID | 32 | 98 | 183-byte codeword, +12 % data cells |
+| Deterministic CBOR, field-name keys (incl. genome_id) | 117 | 183 | 353-byte codeword in 2 RS blocks, +115 % data cells |
+| JSON, field-name keys (incl. genome_id) | 146 | 212 | 382-byte codeword in 2 RS blocks, +133 % data cells |
 
-Every byte costs print area, which matters for jewellery (target ≤ 20 mm). Deterministic CBOR (RFC 8949 §4.2.1) solves canonicality but adds type headers and keys. A versioned fixed layout is canonical by construction and 2–2.5× smaller.
+The effect column keeps CODE-01's 85 Reed-Solomon parity bytes per block (a GF(256) block holds at most 255 bytes) and compares the data cells needed with CODE-01's 1 312. The field-name variants carry the snake-case names of the specification's fields plus `genome_id` (the fingerprint `G1-E1DC-BE52`); JSON is compact, with the nonce in base64url.
+
+Every byte costs print area, which matters for jewellery (target ≤ 20 mm). Deterministic CBOR (RFC 8949 §4.2.1) solves canonicality but adds type headers and keys: even with integer keys it is about 2–2.5× larger than the fixed layout, and with field names it no longer fits one Reed-Solomon block. A versioned fixed layout is canonical by construction.
 
 CBOR remains the recommended encoding for *server-side* signed artifacts that are not printed, such as future verification receipts.
 
@@ -174,7 +176,9 @@ The rest of the system only ever sees a `providerRef` and public keys.
 |---|---|---|
 | `LocalKeyProvider` | Development, small deployments | Ed25519 seed encrypted with **AES-256-GCM** under `KEY_ENCRYPTION_KEY` (32 bytes) with a random 96-bit IV, AAD = kid. One file per key in `KEY_DIR` (dir 0700, files 0600). Tampered files are refused (GCM tag). |
 | `MemoryKeyProvider` | Tests, demo | In-process only. Refused when `ORBES_ENV=production`. |
-| KMS / HSM provider (to implement per vendor) | Production | Non-exportable Ed25519 key inside the KMS/HSM. `sign` is an authenticated API call; the private key never enters the process. Check the vendor's Ed25519 (EdDSA) support at integration time. |
+| KMS / HSM provider (**not implemented**: to write per vendor) | Production | Non-exportable Ed25519 key inside the KMS/HSM. `sign` is an authenticated API call; the private key never enters the process. Check the vendor's Ed25519 (EdDSA) support at integration time. |
+
+No KMS/HSM provider ships with this prototype: it needs the chosen vendor's account, key type and client, which cannot be exercised here, and an untested provider is not offered. What is ready: the interface above, the `KEY_PROVIDER` switch (`config.ts`, `createKeyProvider`), the safety checks of `KeyService` (strict public keys, proof of possession, verify-after-sign) and a provider acceptance suite, `genome/test/keys/provider-contract.ts`, which the memory and local providers pass and a vendor provider must pass too (DEPLOYMENT §7.6).
 
 ## 6. Other cryptographic uses
 
@@ -182,7 +186,7 @@ The rest of the system only ever sees a `providerRef` and public keys.
 |---|---|
 | Passwords, claim codes | scrypt N = 2¹⁵, r = 8, p = 1, 16-byte salt, 32-byte output; constant-time compare. Encoded as `scrypt$15$8$1$salt$hash`. |
 | Sessions | 32-byte CSPRNG token in a cookie; SHA-256(token) in the DB. A new token on login and on the admin step-up to MFA (TOTP enrolment). |
-| Registration tokens | CSPRNG (32 bytes), stored hashed (SHA-256 with domain separation), single use, 15-minute TTL. |
+| Registration tokens | CSPRNG (32 bytes), stored hashed (SHA-256 of the 32 random bytes, `hashScanToken` in `services/scan-tokens.ts`; no domain label is needed for a uniformly random 256-bit value), single use, 15-minute TTL. |
 | Transfer codes | CSPRNG, 12 Crockford base32 characters (60 bits), single use, 7-day TTL. Stored as HMAC-SHA-256 of the canonical code under a key derived with HKDF-SHA-256 from `COOKIE_SECRET` (salt `ORBES`, info `orbes/transfer-code/v1`): deterministic for the lookup, but a leaked table cannot be brute-forced without the server secret. |
 | TOTP (admins) | RFC 6238 (HMAC-SHA-1, 30 s, 6 digits, ±1 step, replay-protected). The secret is sealed with AES-256-GCM under a key derived with HKDF-SHA-256. |
 | IP / device pseudonyms | HMAC-SHA-256(`IP_HASH_PEPPER`, value). Raw values are never stored. |

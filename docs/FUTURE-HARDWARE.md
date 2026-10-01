@@ -29,9 +29,9 @@ interface PhysicalAuthenticator {
 | Authenticator | Status | Proves |
 |---|---|---|
 | `PrintedCodeAuthenticator` | **Implemented** | The scanned code is signed by ORBES and registered (signature + registry + lifecycle). |
-| `SecureNFCAuthenticator` | Interface only → `UNSUPPORTED` | The physical tag holds the private key bound to this product. |
-| `SecureElementAuthenticator` | Interface only → `UNSUPPORTED` | Same, for a secure element connected through a companion device. |
-| `TamperEvidentAuthenticator` | Interface only → `UNSUPPORTED` | A tamper-evident seal or label is intact (e.g. an optical/void label, read by a dedicated reader). |
+| `SECURE_NFC` — placeholder `UnimplementedAuthenticator('SECURE_NFC')`; a future `SecureNFCAuthenticator` class replaces it | Placeholder only → `UNSUPPORTED` | The physical tag holds the private key bound to this product. |
+| `SECURE_ELEMENT` — placeholder `UnimplementedAuthenticator('SECURE_ELEMENT')`; a future `SecureElementAuthenticator` replaces it | Placeholder only → `UNSUPPORTED` | Same, for a secure element connected through a companion device. |
+| `TAMPER_EVIDENT` — placeholder `UnimplementedAuthenticator('TAMPER_EVIDENT')`; a future `TamperEvidentAuthenticator` replaces it | Placeholder only → `UNSUPPORTED` | A tamper-evident seal or label is intact (e.g. an optical/void label, read by a dedicated reader). |
 
 ### Authentication policy
 
@@ -71,7 +71,7 @@ Recommended candidate: NFC Forum Type 4 tags with AES-128 SUN/SDM (e.g. NXP NTAG
 scanner ──(1) GET /api/v1/hardware/challenge?product=… ──► server: random 16-byte challenge, 60 s TTL, single use
 scanner ──(2) NFC: tag computes SUN MAC / ECDSA signature over challenge (+ tag counter)
 scanner ──(3) POST /api/v1/verify { code, hardware: { kind: 'SECURE_NFC', response } }
-server  ──(4) SecureNFCAuthenticator.evaluate(): check MAC/signature, monotonic counter, UID binding, challenge freshness
+server  ──(4) SecureNFCAuthenticator.evaluate() (future class): check MAC/signature, monotonic counter, UID binding, challenge freshness
 ```
 
 The counter and freshness checks defeat replay. The non-extractable key defeats cloning.

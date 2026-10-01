@@ -126,6 +126,7 @@ if [[ -z "$(env_get KEY_ENCRYPTION_KEY)" && "$KEYS_EXISTS" == true ]]; then
   die "KEY_ENCRYPTION_KEY is empty but the keys volume exists: restore the escrowed value into .env"
 fi
 gen POSTGRES_PASSWORD "$(openssl rand -hex 24)" false
+gen POSTGRES_APP_PASSWORD "$(openssl rand -hex 24)" false # applied to the role by every deploy
 gen COOKIE_SECRET "$(b64url 48)" true
 gen IP_HASH_PEPPER "$(b64url 48)" true
 gen KEY_ENCRYPTION_KEY "$(b64url 32)" true

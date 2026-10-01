@@ -621,7 +621,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 - **Written by:** `VerificationService.verify` only, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token.
 - **Privacy:**
   - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie, `__Host-orbes_device` in production) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
-  - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`). With `GEO_MODE=none` (the default), no location is stored.
+  - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`), or when the server looks the client IP up in a local GeoIP database (`GEO_MODE=mmdb`, `TRUST_PROXY` required in production; the IP itself is never stored). `region` is filled only in `cloudflare` mode. With `GEO_MODE=none` (the default), no location is stored.
   - No raw user-agent string is stored here, only the family.
   - Retention: no automatic purge is implemented (§10).
 
@@ -656,7 +656,7 @@ The internal decision record for each scan event. Never exposed publicly; visibl
 | `signature_valid` | `boolean` | NOT NULL | — | Ed25519 signature valid under the named key. |
 | `genome_check` | `text` | NOT NULL | — | `CHECK (genome_check IN ('MATCH','MISMATCH','NOT_PROVIDED','INCONCLUSIVE'))` |
 | `state` | `text` | NOT NULL | — | `CHECK` in the 9 verification states. |
-| `reasons` | `text[]` | NOT NULL | `'{}'` | Machine reasons, e.g. `MALFORMED:CRC`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a scan that is suspicious from its history alone). |
+| `reasons` | `text[]` | NOT NULL | `'{}'` | Machine reasons, e.g. `MALFORMED:CRC`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a scan that is suspicious from its history alone). |
 | `risk_score` | `int` | NOT NULL | — | `CHECK (BETWEEN 0 AND 100)`. Internal. |
 | `authenticators` | `jsonb` | NOT NULL | `'{}'` | Written as an object: `{ "policy", "assurance", "results": [{ "kind", "status", "detail"? }] }`, or `{ "policy": null, "results": [] }` when the policy was not evaluated. The default is the empty object (migration `0003_authentication_events_default`; `0001` declared `'[]'`), so every row holds the same JSON type. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
@@ -928,15 +928,16 @@ After the schema is current, `createContext()` also:
 | Sessions | Deletes sessions whose `expires_at` has passed. |
 | Transfers | Marks overdue PENDING transfers EXPIRED and recomputes the product's `ownership_state`. |
 | Scan tokens | Deletes scan tokens that expired more than 24 hours ago. |
+| Scan history | Only when `SCAN_RETENTION_DAYS` is set: deletes `scan_events` whose `occurred_at` is older than the period, together with the `scan_tokens` and `authentication_events` that reference them (deleted first: both foreign keys are `ON DELETE RESTRICT`). Batches of 1 000 scan events, one short transaction each, at most 50 batches per pass, oldest first (`src/server/services/scan-retention.ts`). |
 
-Only `sessions` and `scan_tokens` rows are ever deleted by the application. Every other table grows monotonically.
+Rows deleted by the application: `sessions`, `scan_tokens`, and, with a retention period, old `scan_events` and their `authentication_events`. Every other table grows monotonically.
 
-**No automatic retention limit is implemented for `scan_events`, `authentication_events` or `anomalies`.** The threat model leaves the retention period to be set with legal counsel. Points to consider when defining one:
+**Retention period.** `SCAN_RETENTION_DAYS` (whole days, 30–3650) is unset by default: scan history is then kept indefinitely, and production logs a `risky configuration` warning at every start. The period itself is a legal decision, to agree with counsel. Points to consider:
 
 - the stored scan data is pseudonymous (HMACs of IP, device and session; coarse location; browser family), but pseudonymous data is still personal data in many jurisdictions;
-- anomaly scoring only reads the recent history of a code (the longest of the configured windows and the decay period: 30 days with the default settings), so older scans are not needed for scoring;
-- `scan_tokens.scan_event_id` and `authentication_events.scan_event_id` reference `scan_events` with `ON DELETE RESTRICT`: a purge must delete dependent rows first;
-- `audit_logs` cannot be purged by the application and must not be edited, since that breaks the hash chain;
+- anomaly scoring only reads the recent history of a code (the longest of the configured windows and the decay period: 30 days with the default settings), so older scans are not needed for scoring. The configuration refuses a period shorter than that look-back (`scanLookbackDays` in `config.ts`);
+- `anomalies` rows are not purged: they are case records reviewed by staff, keyed to the product, and keep their own first/last-seen times; `audit_logs` cannot be purged by the application and must not be edited, since that breaks the hash chain;
+- the product page's scan count and the dashboard's scan statistics count only the scans still stored;
 - rotating `IP_HASH_PEPPER` makes new pseudonyms unlinkable to old ones (which also resets device and IP diversity counting).
 
 ---
