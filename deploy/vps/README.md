@@ -42,7 +42,7 @@ scripts/setup.sh --domain verify.theorbes.com --acme-email ops@theorbes.com --ad
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <first admin>
 docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <code>
 #   remove BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from .env, then:
-docker compose up -d
+scripts/deploy.sh                        # applies .env after validating it
 ```
 
 Day to day (as `orbes`, in this directory):

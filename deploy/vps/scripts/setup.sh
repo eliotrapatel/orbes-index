@@ -214,7 +214,7 @@ Next steps (docs/DEPLOYMENT.md §15):
   1. TOTP for the first admin, from the shell (recommended):
        docker compose exec app node --import tsx scripts/admin.ts totp-setup --email $(env_get BOOTSTRAP_ADMIN_EMAIL '<admin>')
        docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <admin> --secret <SECRET> --code <code>
-  2. Remove BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from .env, then: docker compose up -d
+  2. Remove BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from .env, then: scripts/deploy.sh
   3. First backup + restore drill: scripts/backup.sh, then §15.9.
   4. External uptime check on https://$DOMAIN/api/v1/health.
 EOF
