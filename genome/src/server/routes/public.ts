@@ -42,14 +42,19 @@ export const publicRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, li
   app.get('/api/v1/health', async (_request, reply) => {
     // Liveness plus a cheap database round trip; never says WHY it is down (that goes to the log).
     let ok = true;
+    let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
         sql`SELECT 1`.execute(ctx.db),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('database ping timed out')), HEALTH_DB_TIMEOUT_MS).unref()),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('database ping timed out')), HEALTH_DB_TIMEOUT_MS);
+        }),
       ]);
     } catch (e) {
       ok = false;
       ctx.log.error({ err: { message: (e as Error)?.message } }, 'health check: database unavailable');
+    } finally {
+      clearTimeout(timer);
     }
     reply.code(ok ? 200 : 503);
     return { ok, version: APP_VERSION };

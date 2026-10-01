@@ -259,6 +259,17 @@ export const artifactQuery = z.object({
   dpi: queryNumber,
 });
 
+/** Multi-up PDF print sheet (extension of the contract's artifact route; 200 codes fit in the 16 KB body). */
+export const printSheetBody = body({
+  codeIds: z.array(uuid).min(1, 'Select at least one code').max(200, 'At most 200 codes per sheet'),
+  widthMm: z.number().finite().optional(),
+  theme: z.enum(['black', 'inverted', 'ivory']).optional(),
+  decor: z.boolean().optional(),
+  label: z.boolean().optional(),
+  page: z.enum(['A4', 'A3', 'LETTER']).optional(),
+  cropMarks: z.boolean().optional(),
+});
+
 export const createRevocationBody = body({
   targetType: z.enum(REVOCATION_TARGET_TYPES),
   targetId: z.string().trim().min(1, 'Required').max(64, 'At most 64 characters'),

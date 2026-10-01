@@ -101,6 +101,9 @@ describe('account API', () => {
   it('logout without a session is a harmless no-op (same-origin still required)', async () => {
     expect((await h.client().post('/api/v1/account/logout')).statusCode).toBe(200);
     expect((await h.client({ origin: 'https://evil.example' }).post('/api/v1/account/logout')).statusCode).toBe(403);
+    // Body-less routes accept an empty JSON body (clients that always send the header).
+    const res = await h.client().request('POST', '/api/v1/account/logout', { body: '', headers: { 'content-type': 'application/json' } });
+    expect(res.statusCode).toBe(200);
   });
 
   it('lists the caller’s products (empty for a new account)', async () => {

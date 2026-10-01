@@ -37,18 +37,19 @@ export function rgbaToGray(rgba: Uint8Array | Uint8ClampedArray, width: number, 
   return { width, height, data };
 }
 
-/** True when `img` is a structurally valid, non-empty GrayImage. */
-export function isUsableImage(img: unknown): img is GrayImage {
-  if (img === null || typeof img !== 'object') return false;
-  const { width, height, data } = img as Partial<GrayImage>;
-  return (
-    Number.isInteger(width) &&
-    Number.isInteger(height) &&
-    (width as number) > 0 &&
-    (height as number) > 0 &&
-    data instanceof Uint8Array &&
-    data.length >= (width as number) * (height as number)
-  );
+/**
+ * The image as a GrayImage over exactly width × height bytes, or null when
+ * it is not a structurally valid, non-empty luma image. Clamped byte arrays
+ * (canvas data) are viewed in place, never copied.
+ */
+export function asGrayImage(img: unknown): GrayImage | null {
+  if (img === null || typeof img !== 'object') return null;
+  const { width, height, data } = img as { width?: unknown; height?: unknown; data?: unknown };
+  if (typeof width !== 'number' || typeof height !== 'number') return null;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null;
+  if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray) || data.length < width * height) return null;
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, width * height);
+  return { width, height, data: bytes };
 }
 
 /** Photographic negative (light ink on a dark substrate becomes dark on light). */

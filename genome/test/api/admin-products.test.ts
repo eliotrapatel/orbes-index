@@ -239,6 +239,23 @@ describe('admin products, codes and records', () => {
       for (const r of renders) expect(r.ip_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
     });
 
+    it('renders a multi-up print sheet (OPERATOR, CSRF-protected)', async () => {
+      const a = await issueViaApi();
+      const b = await issueViaApi();
+      const sheet = await operator.post('/api/admin/codes/print-sheet', { codeIds: [a.code.id, b.code.id], page: 'A4', widthMm: 20 });
+      expect(sheet.statusCode, sheet.body.slice(0, 200)).toBe(200);
+      expect(sheet.headers['content-type']).toBe('application/pdf');
+      expect(sheet.headers['content-disposition']).toMatch(/^attachment; filename=".+\.pdf"$/);
+      expect(sheet.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+      expect((await operator.post('/api/admin/codes/print-sheet', { codeIds: [] })).statusCode).toBe(400);
+      expect((await operator.post('/api/admin/codes/print-sheet', { codeIds: [a.code.id], page: 'A9' })).statusCode).toBe(400);
+      expect((await auditor.post('/api/admin/codes/print-sheet', { codeIds: [a.code.id] })).statusCode).toBe(403);
+      expect((await operator.post('/api/admin/codes/print-sheet', { codeIds: [a.code.id] }, { noCsrf: true })).statusCode).toBe(403);
+      const audit = await h.ctx.db.selectFrom('audit_logs').select(['action', 'ip_hash']).where('action', '=', 'code.render_sheet').execute();
+      expect(audit).toHaveLength(1);
+      expect(audit[0].ip_hash).toBeTruthy();
+    });
+
     it('revokes a code (ADMIN) and lists codes and genomes without payloads', async () => {
       const p = await issueViaApi();
       expect((await operator.post(`/api/admin/codes/${p.code.id}/revoke`, { reason: 'x' })).statusCode).toBe(403);
@@ -310,5 +327,18 @@ describe('admin products, codes and records', () => {
       expect(d.recentEvents.length).toBeGreaterThan(0);
       expect(d.recentEvents.length).toBeLessThanOrEqual(10);
     });
+  });
+
+  it('audited every admin action of this suite with the admin id and hashed IP', async () => {
+    const rows = await h.ctx.db.selectFrom('audit_logs').select(['action', 'actor_id', 'ip_hash']).where('actor_type', '=', 'admin').execute();
+    expect(rows.length).toBeGreaterThan(20);
+    for (const r of rows) {
+      expect(r.actor_id, r.action).toMatch(/^[0-9a-f-]{36}$/);
+      expect(r.ip_hash, r.action).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    }
+    const actions = new Set(rows.map((r) => r.action));
+    for (const a of ['product.issue', 'product.transition', 'product.reinstate', 'code.reissue', 'code.revoke', 'code.render', 'warranty.activate', 'warranty.void', 'service.open', 'service.complete', 'ownership.confirm', 'anomaly.update', 'admin.login']) {
+      expect(actions.has(a), a).toBe(true);
+    }
   });
 });

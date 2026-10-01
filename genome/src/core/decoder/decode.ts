@@ -56,9 +56,10 @@ import { binarize } from './binarize.js';
 import { findSealHits, measureSeal, mergeClusters, type SealCandidate, type SealCluster } from './finder.js';
 import { readGenome } from './genome-reader.js';
 import { applyH, homographyFromPoints, jacobianH, multiplyH, type Homography } from './homography.js';
-import { downscaleImage, invertImage, isUsableImage, type GrayImage } from './image.js';
+import { asGrayImage, downscaleImage, invertImage, type GrayImage } from './image.js';
 import { integralImage, type IntegralImage } from './integral.js';
-import { findMoons, invert2, moonLevels, refineCentroid, type Mat2, type MoonSet } from './moons.js';
+import { inkBlobs } from './components.js';
+import { findMoonQuads, findMoons, invert2, moonLevels, refineCentroid, type Mat2, type MoonSet } from './moons.js';
 import { alignmentScore, refineControlPoints, refineOffsetField } from './refine.js';
 import { CELL_COUNT, classifyCells, quietZoneScore, sampleCells, type CellClassification } from './sampler.js';
 
@@ -188,13 +189,18 @@ class Detection {
   readonly integral: IntegralImage;
   /** Full-resolution pixels per detection pixel. */
   readonly factor: number;
+  /** Binarisation windows (px): 1/8 and 1/16 of the short side. */
+  readonly windows: number[];
   private negative: { image: GrayImage; integral: IntegralImage; frame: GrayImage } | null = null;
+  private readonly binaries = new Map<string, Uint8Array>();
 
   constructor(readonly frame: GrayImage) {
     const pixels = frame.width * frame.height;
     this.factor = pixels > MAX_DETECTION_PIXELS ? Math.ceil(Math.sqrt(pixels / MAX_DETECTION_PIXELS)) : 1;
     this.image = this.factor > 1 ? downscaleImage(frame, this.factor) : frame;
     this.integral = integralImage(this.image);
+    const side = Math.min(this.image.width, this.image.height);
+    this.windows = [...new Set([Math.max(8, Math.round(side / 8)), Math.max(6, Math.round(side / 16))])];
   }
 
   /** Detection image, its table and the full frame, as dark-ink images of the given polarity. */
@@ -205,6 +211,17 @@ class Detection {
       this.negative = { image, integral: integralImage(image), frame: this.factor > 1 ? invertImage(this.frame) : image };
     }
     return this.negative;
+  }
+
+  /** Binarisation of the detection image (cached: the passes share them). */
+  binary(window: number, inverted: boolean): Uint8Array {
+    const key = `${window}/${inverted}`;
+    let bin = this.binaries.get(key);
+    if (!bin) {
+      bin = binarize(this.image, this.integral, window, inverted);
+      this.binaries.set(key, bin);
+    }
+    return bin;
   }
 }
 
@@ -221,30 +238,16 @@ interface SealHit {
  * best first, so a frame whose code is found early never pays for the
  * later passes.
  */
-function* sealCandidates(det: Detection, max: number, tryInverted: boolean): Generator<SealHit> {
+function* sealCandidates(det: Detection, max: number, polarities: readonly boolean[]): Generator<SealHit> {
   const { image } = det;
-  const side = Math.min(image.width, image.height);
-  const windows = [Math.max(8, Math.round(side / 8))];
-  const polarities = tryInverted ? [false, true] : [false];
-  const binaries: { bin: Uint8Array; inverted: boolean }[] = [];
   const passes: { inverted: boolean; scan: () => SealCluster[][] }[] = [];
-  for (const w of windows) {
+  for (const w of det.windows) {
     for (const inverted of polarities) {
-      passes.push({
-        inverted,
-        scan: () => {
-          const bin = binarize(image, det.integral, w, inverted);
-          binaries.push({ bin, inverted });
-          return [findSealHits(bin, image.width, image.height, 'rows')];
-        },
-      });
+      passes.push({ inverted, scan: () => [findSealHits(det.binary(w, inverted), image.width, image.height, 'rows')] });
     }
   }
   for (const inverted of polarities) {
-    passes.push({
-      inverted,
-      scan: () => binaries.filter((b) => b.inverted === inverted).map(({ bin }) => findSealHits(bin, image.width, image.height, 'columns')),
-    });
+    passes.push({ inverted, scan: () => det.windows.map((w) => findSealHits(det.binary(w, inverted), image.width, image.height, 'columns')) });
   }
   const seen: SealHit[] = [];
   const near = (x: number, y: number, inverted: boolean) =>
@@ -288,14 +291,6 @@ function scale(p: Point, f: number): Point {
 const MIN_QUIET_SCORE = 0.7;
 
 /**
- * Initial homography from seal + moons. Moon centroids are first re-measured
- * at full resolution with their own local scale (the seal's affine frame is
- * only exact at the centre; under perspective a moon's window would
- * otherwise clip it or catch the polaris halo). With four moons the full fit
- * and each leave-one-out fit compete on cell contrast, so one damaged moon
- * cannot spoil the frame.
- */
-/**
  * Homography from the seal centre and the moons (frame-0 code points ↔ image
  * points). With three moons the centre is collinear with the opposite pair,
  * which leaves one degree of freedom open, so the seal itself supplies four
@@ -336,54 +331,70 @@ function fitFrame(center: Point, sealAffine: Mat2, pairs: readonly [Point, Point
   return homographyFromPoints(code, image);
 }
 
+/** Seal centre and moon correspondences (frame-0 code point ↔ image point) of a candidate. */
+interface Anchors {
+  center: Point;
+  sealAffine: Mat2;
+  pairs: [Point, Point][];
+}
+
+/** Alignment through `h`, with every moon (found or predicted) as a refinable control point. */
+function alignmentFrom(img: GrayImage, center: Point, h: Homography): Alignment {
+  const values = sampleCells(img, h, true);
+  return {
+    homography: h,
+    codePoints: [{ x: 0, y: 0 }, ...CODE01_MOONS],
+    imagePoints: [center, ...CODE01_MOONS.map((c) => applyH(h, c.x, c.y))],
+    values,
+    cls: classifyCells(values),
+    shift: null,
+  };
+}
+
 /**
- * Initial homography from seal + moons. Moon centroids are first re-measured
- * at full resolution with their own local scale (the seal's affine frame is
- * only exact at the centre; under perspective a moon's window would
- * otherwise clip it or catch the polaris halo). With four moons the full fit
- * and each leave-one-out fit compete on cell contrast, so one damaged moon
- * cannot spoil the frame.
+ * Anchors at full resolution. Moon centroids are re-measured with their own
+ * local scale from a first fit: the seal's affine frame is only exact at the
+ * centre, so under perspective a moon's window would otherwise clip it or
+ * catch the polaris halo.
  */
-function initialAlignment(img: GrayImage, seal: SealCandidate, moons: MoonSet, factor: number): Alignment | null {
-  const center = scale(seal.center, factor);
-  const sealAffine = seal.affine.map((v) => v * factor) as Mat2;
-  let pairs: [Point, Point][] = [];
+function anchorsOf(img: GrayImage, center: Point, sealAffine: Mat2, moons: MoonSet, factor: number): Anchors | null {
+  const pairs: [Point, Point][] = [];
   moons.slots.forEach((m, k) => {
     if (m) pairs.push([CODE01_MOONS[k], scale(m, factor)]);
   });
   const rough = fitFrame(center, sealAffine, pairs);
   if (!rough) return null;
-  pairs = pairs.map(([c, p]) => {
-    const local = jacobianH(rough, c.x, c.y);
-    const { ink, paper } = moonLevels(img, local, p);
-    return [c, refineCentroid(img, local, p, ink, paper)];
-  });
+  return {
+    center,
+    sealAffine,
+    pairs: pairs.map(([c, p]) => {
+      const local = jacobianH(rough, c.x, c.y);
+      const { ink, paper } = moonLevels(img, local, p);
+      return [c, refineCentroid(img, local, p, ink, paper)];
+    }),
+  };
+}
 
-  const subsets: [Point, Point][][] = [pairs];
-  if (pairs.length === 4) for (let skip = 0; skip < 4; skip++) subsets.push(pairs.filter((_, i) => i !== skip));
-  let best: Alignment | null = null;
-  let bestScore = -Infinity;
-  for (const subset of subsets) {
-    const h = fitFrame(center, sealAffine, subset);
+/**
+ * With four moons, the fits leaving one moon out compete with the full fit
+ * on cell contrast (thresholds of the full fit), so one damaged moon (a
+ * smudge, a partial occlusion) cannot spoil the frame. Null when the full
+ * fit stays best.
+ */
+function leaveOneOut(img: GrayImage, anchors: Anchors, full: Alignment): Alignment | null {
+  if (anchors.pairs.length !== 4) return null;
+  let best: Homography | null = null;
+  let bestScore = alignmentScore(sampleCells(img, full.homography, false), full.cls);
+  for (let skip = 0; skip < 4; skip++) {
+    const h = fitFrame(anchors.center, anchors.sealAffine, anchors.pairs.filter((_, i) => i !== skip));
     if (!h) continue;
-    const values = sampleCells(img, h, false);
-    const cls = classifyCells(values);
-    const score = alignmentScore(values, cls);
+    const score = alignmentScore(sampleCells(img, h, false), full.cls);
     if (score > bestScore) {
       bestScore = score;
-      // Refinement moves every control point, so a moon left out by the
-      // winning subset re-enters at its predicted position.
-      best = {
-        homography: h,
-        codePoints: [{ x: 0, y: 0 }, ...CODE01_MOONS],
-        imagePoints: [center, ...CODE01_MOONS.map((c) => applyH(h, c.x, c.y))],
-        values,
-        cls,
-        shift: null,
-      };
+      best = h;
     }
   }
-  return best;
+  return best ? alignmentFrom(img, anchors.center, best) : null;
 }
 
 function refineAlignment(img: GrayImage, a: Alignment, unitPx: number): Alignment {
@@ -504,25 +515,37 @@ function decodeCells(cls: CellClassification, moons: MoonSet, mirrored: boolean,
 
 // ── Orchestration ──────────────────────────────────────────────────────────
 
-function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, factor: number, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
-  const initial = initialAlignment(img, seal, moons, factor);
-  if (!initial) {
+/**
+ * Full decode from located anchors: alignment, sampling, format and ECC, with
+ * progressively more expensive alignment stages, then the result assembly.
+ * `unitPx` is the expected pixels per u near the centre.
+ */
+function decodeAnchors(img: GrayImage, anchors: Anchors | null, unitPx: number, moons: MoonSet, opts: Required<DecodeOptions>, inverted: boolean, failure: Failure, started: number): DecodeResult | null {
+  const fit = anchors && fitFrame(anchors.center, anchors.sealAffine, anchors.pairs);
+  if (!anchors || !fit) {
     failure.note('NO_MOONS', 'degenerate moon configuration');
     return null;
   }
-  if (quietZoneScore(img, initial.homography, initial.cls) < MIN_QUIET_SCORE) {
+  let alignment = alignmentFrom(img, anchors.center, fit);
+  if (quietZoneScore(img, alignment.homography, alignment.cls) < MIN_QUIET_SCORE) {
     failure.note('NO_MOONS', 'no code structure around the seal');
     return null;
   }
-  const unitPx = seal.unit * factor;
   let T = now(); const lap = (l: string) => { const n = now(); (globalThis as any).DBG?.(l + ' ' + (n - T).toFixed(1)); T = n; };
-  // Cheapest first: a sharp frontal capture decodes straight from the moon fit.
-  let alignment: Alignment = { ...initial, values: sampleCells(img, initial.homography, true) };
-  alignment.cls = classifyCells(alignment.values);
+  // Cheapest first: most captures decode straight from the anchor fit; each
+  // further stage costs more and only runs when the previous one failed.
   let read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
   lap('initial ' + !!read);
   if (!read) {
-    alignment = refineAlignment(img, initial, unitPx);
+    const robust = leaveOneOut(img, anchors, alignment);
+    if (robust) {
+      alignment = robust;
+      read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
+      lap('leave-one-out ' + !!read);
+    }
+  }
+  if (!read) {
+    alignment = refineAlignment(img, alignment, unitPx);
     read = decodeCells(alignment.cls, moons, opts.tryMirrored, failure);
     lap('refine ' + !!read);
   }
@@ -574,10 +597,42 @@ function decodeCandidate(img: GrayImage, seal: SealCandidate, moons: MoonSet, fa
   };
 }
 
+/** Moon quadruples examined per polarity by the seal-less fallback. */
+const MAX_MOON_QUADS = 3;
+
+/**
+ * Seal-less fallback: the four moons alone locate the code (their diagonals
+ * cross at its centre in any view). Runs only when every seal candidate
+ * failed, e.g. a seal under a glare stripe or crossed by a scratch.
+ */
+function decodeFromMoons(det: Detection, opts: Required<DecodeOptions>, polarities: readonly boolean[], failure: Failure, started: number): DecodeResult | null {
+  const { image } = det;
+  for (const inverted of polarities) {
+    // A moon (r = 1.75 u) of at least 2 px radius, at most a third of the short side across.
+    const side = Math.min(image.width, image.height);
+    const blobs = inkBlobs(det.binary(det.windows[0], inverted), image.width, image.height, 12, (side * side) / 36);
+    const view = det.view(inverted);
+    for (const quad of findMoonQuads(view.image, blobs, MAX_MOON_QUADS)) {
+      const center = scale(quad.center, det.factor);
+      const moonFit = homographyFromPoints(
+        [{ x: 0, y: 0 }, ...CODE01_MOONS],
+        [center, ...quad.moons.slots.map((m) => scale(m as Point, det.factor))],
+      );
+      if (!moonFit) continue;
+      const local = jacobianH(moonFit, 0, 0);
+      const anchors = anchorsOf(view.frame, center, local, quad.moons, det.factor);
+      const result = decodeAnchors(view.frame, anchors, Math.sqrt(Math.abs(local[0] * local[3] - local[1] * local[2])), quad.moons, opts, inverted, failure, started);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
 function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: Failure, started: number): DecodeResult | null {
   let T = now();
   const det = new Detection(frame);
-  for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, opts.tryInverted)) {
+  const polarities = opts.tryInverted ? [false, true] : [false];
+  for (const { seal, inverted } of sealCandidates(det, opts.maxSealCandidates, polarities)) {
     (globalThis as any).DBG?.('seal ' + seal.unit.toFixed(2) + '@' + seal.score.toFixed(2) + (inverted ? ' inv' : '') + ' t=' + (now() - T).toFixed(1));
     const view = det.view(inverted);
     const moons = findMoons(view.image, view.integral, seal);
@@ -585,10 +640,14 @@ function decodeFrame(frame: GrayImage, opts: Required<DecodeOptions>, failure: F
       failure.note('NO_MOONS', `seal at (${(seal.center.x * det.factor).toFixed(1)}, ${(seal.center.y * det.factor).toFixed(1)}) without moons`);
       continue;
     }
-    const result = decodeCandidate(view.frame, seal, moons, det.factor, opts, inverted, failure, started);
+    const center = scale(seal.center, det.factor);
+    const sealAffine = seal.affine.map((v) => v * det.factor) as Mat2;
+    const anchors = anchorsOf(view.frame, center, sealAffine, moons, det.factor);
+    const result = decodeAnchors(view.frame, anchors, seal.unit * det.factor, moons, opts, inverted, failure, started);
     if (result) return result;
   }
-  return null;
+  (globalThis as any).DBG?.('fallback t=' + (now() - T).toFixed(1));
+  return decodeFromMoons(det, opts, polarities, failure, started);
 }
 
 /** Decode the most prominent ORBES CODE-01 in a luma frame. Never throws. */
@@ -596,7 +655,8 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
   const started = now();
   const failure = new Failure();
   try {
-    if (!isUsableImage(img) || img.width < MIN_SIDE || img.height < MIN_SIDE) {
+    const frame = asGrayImage(img);
+    if (!frame || frame.width < MIN_SIDE || frame.height < MIN_SIDE) {
       return { ok: false, reason: 'NO_SEAL', detail: 'image too small or malformed', elapsedMs: now() - started };
     }
     const options: Required<DecodeOptions> = {
@@ -605,7 +665,6 @@ export function decodeOrbesCode(img: GrayImage, opts: DecodeOptions = {}): Decod
       readGenome: opts.readGenome ?? true,
       maxSealCandidates: Number.isFinite(opts.maxSealCandidates) ? Math.max(1, Math.min(16, Math.floor(opts.maxSealCandidates as number))) : 4,
     };
-    const frame: GrayImage = img.data.length === img.width * img.height ? img : { ...img, data: img.data.subarray(0, img.width * img.height) };
     const result = decodeFrame(frame, options, failure, started);
     if (result) return result;
   } catch (e) {

@@ -18,7 +18,7 @@
  * budget (put a shared store or the edge in front for a global limit).
  */
 import rateLimit from '@fastify/rate-limit';
-import type { FastifyInstance, onRequestAsyncHookHandler } from 'fastify';
+import type { FastifyInstance, FastifyRequest, onRequestAsyncHookHandler } from 'fastify';
 import type { AppConfig } from '../config.js';
 import { tooManyRequests } from '../errors.js';
 import { rateLimitKeyOf } from './client.js';
@@ -27,6 +27,8 @@ export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api'] as const;
 export type RateGroup = (typeof RATE_GROUPS)[number];
 
 const WINDOW_MS = 60_000;
+/** Clients tracked per group (LRU). Larger than the plugin default so a wide botnet cannot evict counters cheaply. */
+const TRACKED_CLIENTS = 50_000;
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -55,11 +57,9 @@ export async function registerRateLimits(app: FastifyInstance, config: Pick<AppC
   const limits = groupLimits(config);
   const hooks = {} as Record<RateGroup, onRequestAsyncHookHandler>;
   for (const group of RATE_GROUPS) {
-    const check = app.createRateLimit({
-      max: limits[group],
-      timeWindow: WINDOW_MS,
-      keyGenerator: (req) => rateLimitKeyOf(config.ipHashPepper, req),
-    });
+    // `cache` sizes this group's LRU store (read by the store's child(); absent from the typings, hence not inline).
+    const options = { max: limits[group], timeWindow: WINDOW_MS, cache: TRACKED_CLIENTS, keyGenerator: (req: FastifyRequest) => rateLimitKeyOf(config.ipHashPepper, req) };
+    const check = app.createRateLimit(options);
     hooks[group] = async (request, reply) => {
       const r = await check(request);
       if (r.isAllowed) return;

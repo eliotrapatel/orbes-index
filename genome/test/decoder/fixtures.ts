@@ -4,13 +4,13 @@
  * seeded camera capture helper. Shared by the decoder tests and the scan
  * matrix script so both measure the same thing.
  */
-import { encodeOrbesCode, renderOrbesCodeSvg, type OrbesCodeModel } from '../../src/core/code/encoder.js';
+import { ORBES_CODE_STYLES, encodeOrbesCode, renderOrbesCodeSvg, type OrbesCodeModel } from '../../src/core/code/encoder.js';
 import { CODE01_SIZE } from '../../src/core/code/profile.js';
 import { computeGenome } from '../../src/core/genome/genome.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { encodePayload, frameCodeData } from '../../src/core/payload.js';
 import type { CaptureParams } from '../support/camera-sim.js';
-import { simulateCapture } from '../support/camera-sim.js';
+import { captureGeometry, simulateCapture } from '../support/camera-sim.js';
 import { Prng } from '../support/prng.js';
 import { svgToGray, type GrayImage } from '../support/raster.js';
 
@@ -45,22 +45,20 @@ export function makeCode(seed: number, opts: { mask?: number; decor?: boolean } 
   return { seed, data, payloadBytes, signature, genomeGlyphs, model };
 }
 
+/** Brand presentations (encoder ORBES_CODE_STYLES). */
+export type CodeStyle = keyof typeof ORBES_CODE_STYLES;
+
 const sourceCache = new Map<string, GrayImage>();
 
 /**
  * The artifact rasterised at `pxPerU` (whole 50 u square, quiet zone
  * included). Cached: tests photograph the same source many times.
  */
-export function renderCode(code: CodeFixture, pxPerU: number, style: 'classic' | 'inverted' | 'ivory' = 'classic'): GrayImage {
+export function renderCode(code: CodeFixture, pxPerU: number, style: CodeStyle = 'classic'): GrayImage {
   const key = `${code.seed}/${code.model.mask}/${pxPerU}/${style}/${code.model.primitives.length}`;
   const cached = sourceCache.get(key);
   if (cached) return cached;
-  const colours = {
-    classic: { ink: '#0A0A0A', paper: '#FFFFFF' },
-    inverted: { ink: '#FFFFFF', paper: '#0A0A0A' },
-    ivory: { ink: '#111111', paper: '#F6F2EA' },
-  }[style];
-  const img = svgToGray(renderOrbesCodeSvg(code.model, colours), { widthPx: Math.round(CODE01_SIZE * pxPerU) });
+  const img = svgToGray(renderOrbesCodeSvg(code.model, ORBES_CODE_STYLES[style]), { widthPx: Math.round(CODE01_SIZE * pxPerU) });
   if (sourceCache.size > 64) sourceCache.clear();
   sourceCache.set(key, img);
   return img;
@@ -73,7 +71,25 @@ export const SOURCE_PX_PER_U = 16;
  * Photograph `code` with the camera simulator; `pxPerU` sets the apparent
  * size (frame pixels per code unit, face-on).
  */
-export function capture(code: CodeFixture, pxPerU: number, params: CaptureParams, seed: number): GrayImage {
-  const source = renderCode(code, Math.max(SOURCE_PX_PER_U, Math.ceil(pxPerU * 1.5)));
+export function capture(code: CodeFixture, pxPerU: number, params: CaptureParams, seed: number, style: CodeStyle = 'classic'): GrayImage {
+  const source = renderCode(code, Math.max(SOURCE_PX_PER_U, Math.ceil(pxPerU * 1.5)), style);
   return simulateCapture(source, { ...params, codeWidthPx: pxPerU * CODE01_SIZE }, seed);
+}
+
+/**
+ * Ground truth for a capture made with `capture`: code-plane point (u, y
+ * down, origin at the seal centre) → frame pixel, through the simulator's
+ * full forward model.
+ */
+export function captureTruth(pxPerU: number, params: CaptureParams): (x: number, y: number) => { x: number; y: number } {
+  const sourcePxPerU = Math.max(SOURCE_PX_PER_U, Math.ceil(pxPerU * 1.5));
+  const half = CODE01_SIZE / 2;
+  const source = { width: Math.round(CODE01_SIZE * sourcePxPerU), height: Math.round(CODE01_SIZE * sourcePxPerU) };
+  const geo = captureGeometry(source, { ...params, codeWidthPx: pxPerU * CODE01_SIZE });
+  const s = source.width / CODE01_SIZE;
+  return (x, y) => {
+    const p = geo.project((x + half) * s, (y + half) * s);
+    if (!p) throw new Error(`code point (${x}, ${y}) is not visible`);
+    return p;
+  };
 }

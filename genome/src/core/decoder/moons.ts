@@ -25,6 +25,7 @@
 import { CODE01 } from '../code/profile.js';
 import type { Point } from '../geometry.js';
 import type { SealCandidate } from './finder.js';
+import type { Blob } from './components.js';
 import { sampleBilinear, type GrayImage } from './image.js';
 import { boxMean, type IntegralImage } from './integral.js';
 
@@ -151,9 +152,10 @@ export function haloDarkness(img: GrayImage, affine: Mat2, p: Point): number {
  * `affine`), which must be consistent (a disc, not an arc or a bar) and of
  * moon size give or take perspective, and a ring just outside the edge that
  * is mostly substrate (an isolated disc, not a blob inside the data orbits).
- * Returns a quality factor in (0, 1], or 0 when the blob is not a moon.
+ * Returns a quality factor in (0, 1] and the mean edge radius (u of
+ * `affine`), or null when the blob is not a moon.
  */
-function discShape(img: GrayImage, affine: Mat2, c: Point, mid: number): number {
+function discShape(img: GrayImage, affine: Mat2, c: Point, mid: number): { quality: number; radius: number } | null {
   const RAYS = 16;
   const STEP = 0.1;
   const LIMIT = 2 * MOON_R;
@@ -181,12 +183,12 @@ function discShape(img: GrayImage, affine: Mat2, c: Point, mid: number): number 
   const mean = radii.reduce((s, r) => s + r, 0) / RAYS;
   const sd = Math.sqrt(radii.reduce((s, r) => s + (r - mean) ** 2, 0) / RAYS);
   const cv = sd / mean;
-  if (mean < 0.55 * MOON_R || mean > 1.7 * MOON_R || cv > 0.3) return 0;
+  if (mean < 0.55 * MOON_R || mean > 1.7 * MOON_R || cv > 0.3) return null;
   let light = 0;
   for (const [dx, dy] of dirs) if (sampleBilinear(img, c.x + 1.3 * mean * dx, c.y + 1.3 * mean * dy) > mid) light++;
   const isolation = light / RAYS;
-  if (isolation < 0.6) return 0;
-  return (1 - cv) * isolation;
+  if (isolation < 0.6) return null;
+  return { quality: (1 - cv) * isolation, radius: mean };
 }
 
 interface Peak extends MoonDetection {
@@ -265,14 +267,20 @@ function moonPeaks(img: GrayImage, ii: IntegralImage, seal: SealCandidate): Peak
   for (const p of raw.slice(0, MAX_PEAKS)) {
     const { ink, paper } = moonLevels(img, affine, p);
     if (!(paper - ink > 0.25 * contrast)) continue;
-    const c = refineCentroid(img, affine, p, ink, paper);
-    const shape = discShape(img, affine, c, (ink + paper) / 2);
+    const first = refineCentroid(img, affine, p, ink, paper);
+    const shape = discShape(img, affine, first, (ink + paper) / 2);
     if (!shape) continue;
+    // Perspective makes this moon larger or smaller than the seal's scale
+    // predicts: re-centre with a window fitted to its measured size, so the
+    // window holds the whole disc and none of the polaris halo.
+    const k = shape.radius / MOON_R;
+    const local: Mat2 = [affine[0] * k, affine[1] * k, affine[2] * k, affine[3] * k];
+    const c = refineCentroid(img, local, first, ink, paper);
     const dx = c.x - seal.center.x;
     const dy = c.y - seal.center.y;
     const q = { x: inv[0] * dx + inv[1] * dy, y: inv[2] * dx + inv[3] * dy };
     const a = Math.atan2(q.x, -q.y);
-    peaks.push({ x: c.x, y: c.y, response: p.v * shape, halo: haloDarkness(img, affine, c), q, r: Math.hypot(q.x, q.y), a: a < 0 ? a + 2 * Math.PI : a });
+    peaks.push({ x: c.x, y: c.y, response: p.v * shape.quality, halo: haloDarkness(img, local, c), q, r: Math.hypot(q.x, q.y), a: a < 0 ? a + 2 * Math.PI : a });
   }
   return peaks;
 }
@@ -361,4 +369,100 @@ export function findMoons(img: GrayImage, ii: IntegralImage, seal: SealCandidate
     }
   }
   return best;
+}
+
+// ── Moon-first search (seal unreadable) ────────────────────────────────────
+
+export interface MoonQuad {
+  /** Intersection of the moon diagonals: the code centre in any view. */
+  center: Point;
+  moons: MoonSet;
+}
+
+/** Fill ratio range of a filled disc's binarised image (blur and pixelation included). */
+const DISC_FILL: [number, number] = [0.7, 1.25];
+/** Moon diagonal length (55 u) over the moon radius (1.75 u) is 31.4; tilt and perspective spread it. */
+const DIAGONAL_IN_RADII: [number, number] = [12, 50];
+/** Largest size ratio between moons of one code (perspective). */
+const MOON_SIZE_RATIO = 1.8;
+/** Disc-like blobs kept for pairing, largest first. */
+const MAX_DISCS = 32;
+
+/** Intersection parameters (t along p0→p1, s along q0→q1) of two segments, or null if parallel. */
+function crossing(p0: Point, p1: Point, q0: Point, q1: Point): [number, number] | null {
+  const rx = p1.x - p0.x;
+  const ry = p1.y - p0.y;
+  const sx = q1.x - q0.x;
+  const sy = q1.y - q0.y;
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const qpx = q0.x - p0.x;
+  const qpy = q0.y - p0.y;
+  return [(qpx * sy - qpy * sx) / den, (qpx * ry - qpy * rx) / den];
+}
+
+/**
+ * Quadruples of disc-like blobs that can be the four moons: similar sizes,
+ * and two "diagonals" crossing each other near their middles (the code
+ * centre), at a length consistent with the moon size. Best first.
+ */
+export function findMoonQuads(img: GrayImage, blobs: readonly Blob[], max: number): MoonQuad[] {
+  const discs = blobs
+    .filter((b) => b.a >= 2 && b.b / b.a >= 0.35 && b.fill >= DISC_FILL[0] && b.fill <= DISC_FILL[1])
+    .sort((p, q) => q.area - p.area)
+    .slice(0, MAX_DISCS);
+  const size = discs.map((b) => Math.sqrt(b.a * b.b));
+  const diagonals: { i: number; j: number; len: number }[] = [];
+  for (let i = 0; i < discs.length; i++) {
+    for (let j = i + 1; j < discs.length; j++) {
+      if (Math.max(size[i], size[j]) > MOON_SIZE_RATIO * Math.min(size[i], size[j])) continue;
+      const len = Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y);
+      const inRadii = len / ((size[i] + size[j]) / 2);
+      if (inRadii >= DIAGONAL_IN_RADII[0] && inRadii <= DIAGONAL_IN_RADII[1]) diagonals.push({ i, j, len });
+    }
+  }
+  const quads: { center: Point; four: Blob[]; score: number }[] = [];
+  for (let s = 0; s < diagonals.length; s++) {
+    const d1 = diagonals[s];
+    for (let t = s + 1; t < diagonals.length; t++) {
+      const d2 = diagonals[t];
+      if (d1.i === d2.i || d1.i === d2.j || d1.j === d2.i || d1.j === d2.j) continue;
+      if (d1.len > 2 * d2.len || d2.len > 2 * d1.len) continue;
+      const cut = crossing(discs[d1.i], discs[d1.j], discs[d2.i], discs[d2.j]);
+      if (!cut || cut[0] < 0.3 || cut[0] > 0.7 || cut[1] < 0.3 || cut[1] > 0.7) continue;
+      const sizes = [size[d1.i], size[d1.j], size[d2.i], size[d2.j]];
+      if (Math.max(...sizes) > MOON_SIZE_RATIO * Math.min(...sizes)) continue;
+      const four = [discs[d1.i], discs[d1.j], discs[d2.i], discs[d2.j]];
+      const a = discs[d1.i];
+      const b = discs[d1.j];
+      const center = { x: a.x + cut[0] * (b.x - a.x), y: a.y + cut[0] * (b.y - a.y) };
+      const score = 2 - Math.abs(cut[0] - 0.5) - Math.abs(cut[1] - 0.5) - four.reduce((acc, f) => acc + Math.abs(1 - f.fill), 0) / 4;
+      quads.push({ center, four, score });
+    }
+  }
+  // Halo hints are only measured for the quadruples actually returned.
+  return quads
+    .sort((p, q) => q.score - p.score)
+    .slice(0, max)
+    .map(({ center, four }) => ({ center, moons: moonSetAround(img, center, four) }));
+}
+
+/** The four moon blobs as a MoonSet: clockwise around the centre, halo hint from each blob's own ellipse. */
+function moonSetAround(img: GrayImage, center: Point, blobs: Blob[]): MoonSet {
+  const angle = (b: Blob) => {
+    const a = Math.atan2(b.x - center.x, -(b.y - center.y));
+    return a < 0 ? a + 2 * Math.PI : a;
+  };
+  const slots = [...blobs]
+    .sort((p, q) => angle(p) - angle(q))
+    .map((b): MoonDetection => {
+      // Moon-local affine (u → px) from the blob ellipse: axes a, b along theta.
+      const c = Math.cos(b.theta);
+      const s = Math.sin(b.theta);
+      const ka = b.a / MOON_R;
+      const kb = b.b / MOON_R;
+      const affine: Mat2 = [ka * c * c + kb * s * s, (ka - kb) * c * s, (ka - kb) * c * s, ka * s * s + kb * c * c];
+      return { x: b.x, y: b.y, response: 1, halo: haloDarkness(img, affine, b) };
+    });
+  return { slots, score: 4 };
 }

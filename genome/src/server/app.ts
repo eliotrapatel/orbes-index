@@ -64,6 +64,15 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   // JSON is the only body format the API speaks. Dropping text/plain also means a
   // cross-site "simple" POST can never reach a handler with a parsed body.
   app.removeContentTypeParser('text/plain');
+  // Same secure parser (prototype/constructor poisoning → 400), but an EMPTY JSON body
+  // reads as "no body", so clients that always send the header can call body-less routes.
+  const json = app.getDefaultJsonParser('error', 'error');
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, payload, done) => {
+    const text = typeof payload === 'string' ? payload : payload.toString('utf8');
+    if (text.trim() === '') return done(null, undefined);
+    json(request, text, done);
+  });
   installErrorHandlers(app);
 
   await app.register(cookie, { secret: config.cookieSecret, hook: 'onRequest' });

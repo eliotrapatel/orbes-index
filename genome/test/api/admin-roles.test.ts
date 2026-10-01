@@ -39,6 +39,7 @@ const PROBES: Probe[] = [
   { group: 'ownership', method: 'POST', url: `/api/admin/products/${PID}/ownership/confirm`, body: INVALID, min: 'OPERATOR' },
   { group: 'codes', method: 'GET', url: `/api/admin/codes/${UUID}/artifact.svg`, min: 'OPERATOR' },
   { group: 'codes', method: 'POST', url: `/api/admin/codes/${UUID}/revoke`, body: INVALID, min: 'ADMIN' },
+  { group: 'codes', method: 'POST', url: '/api/admin/codes/print-sheet', body: INVALID, min: 'OPERATOR' },
   { group: 'genomes', method: 'GET', url: '/api/admin/genomes', min: 'AUDITOR' },
   { group: 'codes', method: 'GET', url: '/api/admin/codes', min: 'AUDITOR' },
   { group: 'scans', method: 'GET', url: '/api/admin/scans', min: 'AUDITOR' },

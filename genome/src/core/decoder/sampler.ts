@@ -7,12 +7,14 @@
  * that averages sensor noise and JPEG ringing without reaching the gaps.
  *
  * Classification is local: each cell is compared with a threshold computed
- * by 2-means over its neighbourhood (±2 rings, ±4 u of arc, ≈ 40 cells). The
+ * by 2-means over its neighbourhood (±2 rings, ±4 u of arc, ≈ 36 cells). The
  * mask keeps every such neighbourhood near half ink, so the two clusters
  * exist and the threshold follows illumination gradients, vignetting and
- * substrate tone. A neighbourhood whose two clusters are barely apart
- * (glare, a uniform occluder) yields low confidence for its cells, which the
- * Reed-Solomon stage then treats as erasures instead of guessing.
+ * substrate tone. Confidence is low where the neighbourhood's two clusters
+ * are barely apart, or where a cell's immediate neighbours are all alike (a
+ * blown-out highlight or a smudge inside otherwise readable surroundings);
+ * the Reed-Solomon stage then treats those cells' bytes as erasures instead
+ * of guessing.
  *
  * Isomorphic: no Node.js or DOM dependencies.
  */
@@ -42,17 +44,15 @@ export const CELL_GEOMETRY = (() => {
   return { x, y, theta, ring };
 })();
 
-/** Neighbourhood (flat indices) of each cell used for its local threshold. */
-const NEIGHBOURS: Int16Array[] = (() => {
-  const RING_REACH = 2;
-  const ARC_REACH = 4;
+/** Cells within `ringReach` rings and `arcReach` u of arc of each cell (flat indices, itself included). */
+function neighbourhoods(ringReach: number, arcReach: number): Int16Array[] {
   const out: Int16Array[] = [];
   for (let i = 0; i < CELL_COUNT; i++) {
     const list: number[] = [];
     const ri = CELL_GEOMETRY.ring[i];
-    for (let k = Math.max(0, ri - RING_REACH); k <= Math.min(CODE01_RINGS.length - 1, ri + RING_REACH); k++) {
+    for (let k = Math.max(0, ri - ringReach); k <= Math.min(CODE01_RINGS.length - 1, ri + ringReach); k++) {
       const spec = CODE01_RINGS[k];
-      const span = ARC_REACH / spec.radius;
+      const span = arcReach / spec.radius;
       for (let c = 0; c < spec.cells; c++) {
         const j = spec.offset + c;
         let d = Math.abs(CELL_GEOMETRY.theta[j] - CELL_GEOMETRY.theta[i]);
@@ -63,7 +63,17 @@ const NEIGHBOURS: Int16Array[] = (() => {
     out.push(Int16Array.from(list));
   }
   return out;
-})();
+}
+
+/** Threshold neighbourhood: ±2 rings, ±4 u of arc (≈ 36 cells, 22 at the innermost and outermost rings). */
+const NEIGHBOURS = neighbourhoods(2, 4);
+/**
+ * Immediate neighbourhood (±1 ring, ±1.6 u, ≈ 9 cells). The mask makes it
+ * all-ink or all-paper with probability ≈ 2⁻⁸, so a collapsed spread here
+ * means the cells are unreadable (a blown-out highlight, a smudge) even when
+ * the wider threshold neighbourhood still has contrast.
+ */
+const IMMEDIATE = neighbourhoods(1, 1.6);
 
 const FOOTPRINT = 0.2;
 /** Sub-samples per cell with the footprint (3 × 3) and without (centre only). */
@@ -132,19 +142,18 @@ export interface CellClassification {
   globalContrast: number;
 }
 
-/** 2-means split of `values` restricted to `idx`: [threshold, low mean, high mean]. */
+/**
+ * 2-means split of `values` restricted to `idx`: [threshold, low mean, high
+ * mean]. Starts from the plain mean, which the mask's ink balance makes a
+ * good first threshold, so three Lloyd iterations settle it.
+ */
 function twoMeans(values: Float64Array, idx: Int16Array): [number, number, number] {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (let k = 0; k < idx.length; k++) {
-    const v = values[idx[k]];
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
-  }
-  let t = (lo + hi) / 2;
-  let mLo = lo;
-  let mHi = hi;
-  for (let iter = 0; iter < 6; iter++) {
+  let t = 0;
+  for (let k = 0; k < idx.length; k++) t += values[idx[k]];
+  t /= idx.length;
+  let mLo = t;
+  let mHi = t;
+  for (let iter = 0; iter < 3; iter++) {
     let sl = 0;
     let nl = 0;
     let sh = 0;
@@ -162,18 +171,10 @@ function twoMeans(values: Float64Array, idx: Int16Array): [number, number, numbe
     if (nl === 0 || nh === 0) break;
     mLo = sl / nl;
     mHi = sh / nh;
-    const next = (mLo + mHi) / 2;
-    if (Math.abs(next - t) < 0.25) {
-      t = next;
-      break;
-    }
-    t = next;
+    t = (mLo + mHi) / 2;
   }
   return [t, mLo, mHi];
 }
-
-/** Saturated samples: nothing can be read under a blown-out highlight. */
-const SATURATED = 250;
 
 export function classifyCells(values: Float64Array): CellClassification {
   const threshold = new Float64Array(CELL_COUNT);
@@ -194,7 +195,14 @@ export function classifyCells(values: Float64Array): CellClassification {
     // where the neighbourhood itself has collapsed (glare, occluder, shadow).
     const margin = Math.min(1, Math.abs(v - threshold[i]) / (local / 2));
     const health = Math.min(1, contrast[i] / (0.5 * globalContrast));
-    confidence[i] = v >= SATURATED ? 0 : margin * health;
+    let lo = v;
+    let hi = v;
+    for (const j of IMMEDIATE[i]) {
+      if (values[j] < lo) lo = values[j];
+      if (values[j] > hi) hi = values[j];
+    }
+    const spread = Math.min(1, (hi - lo) / (0.5 * globalContrast));
+    confidence[i] = margin * health * spread;
   }
   return { bits, confidence, threshold, contrast, globalContrast };
 }

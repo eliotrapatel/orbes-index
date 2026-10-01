@@ -8,7 +8,7 @@
  * on this origin.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { artifactParams, artifactQuery, codeParams, pageOf, parse, requiredReasonBody } from '../../http/schemas.js';
+import { artifactParams, artifactQuery, codeParams, pageOf, parse, printSheetBody, requiredReasonBody } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import { toCodeRecord, toGenomeRecord } from '../../services/issuance.js';
 import { makePage, pageOffset } from '../../types.js';
@@ -27,7 +27,8 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   const { db } = ctx;
   const { issuance } = ctx.services;
 
-  app.get('/api/admin/codes/:codeId/artifact.:format', { config: { guard: { minRole: 'OPERATOR' } } }, async (request, reply) => {
+  // No automatic HEAD route: a HEAD would render and audit a download nobody receives.
+  app.get('/api/admin/codes/:codeId/artifact.:format', { exposeHeadRoute: false, config: { guard: { minRole: 'OPERATOR' } } }, async (request, reply) => {
     const { codeId, format } = parse(artifactParams, request.params);
     const q = parse(artifactQuery, request.query);
     const artifact = await issuance.renderCode(
@@ -47,6 +48,17 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     reply.header('cache-control', 'no-store');
     if (format === 'svg') reply.header('content-security-policy', SVG_CSP);
     const body = artifact.body;
+    return reply.send(typeof body === 'string' ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+  });
+
+  // Batch production: one PDF with many labeled codes and crop marks. POST because it carries a list (CSRF-protected, audited).
+  app.post('/api/admin/codes/print-sheet', async (request, reply) => {
+    const { codeIds, ...options } = parse(printSheetBody, request.body);
+    const sheet = await issuance.renderPrintSheet(codeIds, options, adminActor(request));
+    reply.header('content-type', sheet.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(sheet.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    const body = sheet.body;
     return reply.send(typeof body === 'string' ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength));
   });
 

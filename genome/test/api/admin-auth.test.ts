@@ -89,6 +89,18 @@ describe('admin authentication', () => {
     expect(replay.statusCode).toBe(401);
   });
 
+  it('an AUDITOR (read-only) can still manage its own session and second factor', async () => {
+    const creds = await createAdmin(h.ctx, 'AUDITOR');
+    const c = h.client();
+    await c.post('/api/admin/auth/login', { email: creds.email, password: creds.password });
+    const setup = await c.post('/api/admin/auth/totp/setup');
+    expect(setup.statusCode).toBe(200);
+    const { secret } = safeJson(setup) as { secret: string };
+    expect((await c.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), h.clock.now().getTime()) })).statusCode).toBe(200);
+    expect((await c.post('/api/admin/auth/totp/setup')).statusCode).toBe(409); // already enrolled
+    expect((await c.post('/api/admin/auth/logout')).statusCode).toBe(200);
+  });
+
   it('login is same-origin only (cross-site login CSRF)', async () => {
     const creds = await createAdmin(h.ctx, 'AUDITOR');
     const evil = await h.client({ origin: 'https://evil.example' }).post('/api/admin/auth/login', { email: creds.email, password: creds.password });

@@ -193,6 +193,12 @@ describe('public API', () => {
       expect(text.statusCode).toBe(415);
       const form = await c.request('POST', '/api/v1/verify', { body: 'code=abc', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(form.statusCode).toBe(415);
+      // An empty JSON body is "no body": still a validation error where a body is required.
+      const empty = await c.request('POST', '/api/v1/verify', { body: '', headers: { 'content-type': 'application/json' } });
+      expect(empty.statusCode).toBe(400);
+      expect(errorOf(empty).code).toBe('VALIDATION_FAILED');
+      const charset = await c.request('POST', '/api/v1/verify', { body: '{"code":"AAAA"}', headers: { 'content-type': 'application/json; charset=utf-8' } });
+      expect(charset.statusCode).toBe(200);
     });
 
     it('rejects prototype-poisoning payloads', async () => {
