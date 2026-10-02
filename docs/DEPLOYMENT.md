@@ -56,7 +56,7 @@ One image (`genome/Dockerfile`) contains everything the service needs:
 | `/verify`, `/verify/*` | Mobile scanner (`dist/web/verify`) | Needs HTTPS: browsers only open the camera in a secure context. |
 | `/admin`, `/admin/*` | Admin console (`dist/web/admin`) | Restrict at the edge (§14). |
 | `/assets/*` | Content-hashed bundles, CSS, favicons, the display font (WOFF2, preloaded by both shells) | `Cache-Control: public, max-age=31536000, immutable`. |
-| `/api/v1/*` | Public and account API | `Cache-Control: no-store`, except `/api/v1/keys` (5 min) and `/api/v1/categories` (1 min). |
+| `/api/v1/*` | Public and account API | `Cache-Control: no-store`, except `/api/v1/keys` and `/api/v1/client-services` (5 min) and `/api/v1/categories` (1 min). |
 | `/api/admin/*` | Admin API | Cookie sessions, CSRF, TOTP enforced in production. |
 | `/.well-known/orbes-keys.json` | Public signing keys (same document as `/api/v1/keys`) | CORS `*`, `max-age=300`. |
 | `/` | `302` → `/verify` | Only meaningful on a dedicated hostname. |
@@ -251,6 +251,16 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 | Variable | Default | Rules |
 |---|---|---|
 | `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events and scan tokens (DATABASE §10). Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
+
+**ORBES Client Services** (public contact, supplied by the brand; served by `GET /api/v1/client-services`, API §8.4)
+
+| Variable | Default | Rules |
+|---|---|---|
+| `CLIENT_SERVICES_EMAIL` | unset | A plain mailbox, ≤ 254 characters: letters, digits and `. _ + -`, an `@` and a dotted domain (nothing a `mailto:` link would read as syntax: no `? & # % / :` or spaces). The verification app's **CONTACT ORBES CLIENT SERVICES** button opens an email to it, prefilled with the scan reference and the result. |
+| `CLIENT_SERVICES_PHONE` | unset | International format: `+`, then 7–15 digits with single spaces, dots or hyphens between them (e.g. `+33 1 23 45 67 89`; no `(0)`). Shown as a `tel:` link. |
+| `CLIENT_SERVICES_HOURS` | unset | One line of plain text, ≤ 120 characters (e.g. `Monday to Saturday, 10:00–19:00 (Paris)`). Refused unless an email or a phone is set. |
+
+Each is optional. While neither an email nor a phone is set, the verification app shows no contact at all (the help sentence asking the customer to quote the reference stays). The contact appears on every caution and void result and in the WARRANTY tab of a warranty that no longer applies. Values are public once served; `redactConfig` still logs only `[set]`. Browsers may keep the details for 5 minutes (`Cache-Control: public, max-age=300`). On the VPS (`deploy/vps/.env`), quote a value that contains ` #`.
 
 **Anomaly thresholds** (internal, never exposed by the API). Any other `ANOMALY_*` name is rejected.
 

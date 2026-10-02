@@ -331,6 +331,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/v1/keys` | — | — | api | 8.2 |
 | GET | `/.well-known/orbes-keys.json` | — | — | api | 8.2 |
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
+| GET | `/api/v1/client-services` | — | — | api | 8.4 |
 | POST | `/api/v1/verify` | — (account cookie optional) | — | verify | 9 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
@@ -390,7 +391,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -450,6 +451,31 @@ Active categories. `Cache-Control: public, max-age=60`. The body is an array (no
 ```
 
 `index` is the immutable 5-bit category index packed into product identities (1–31); `code` is the letter used in canonical product ids.
+
+### 8.4 `GET /api/v1/client-services`
+
+How ORBES Client Services is reached, as the brand configured it (`CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE`, `CLIENT_SERVICES_HOURS`; [DEPLOYMENT §3.1](DEPLOYMENT.md#31-variables)). Public, no session, rate group `api`. `Cache-Control: public, max-age=300`, so a change of the details reaches browsers within 5 minutes of a restart.
+
+```json
+{ "email": "clientservices@theorbes.com", "phone": "+33 1 23 45 67 89", "hours": "Monday to Saturday, 10:00–19:00 (Paris)" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `email` | string, optional | A plain mailbox (letters, digits and `. _ + -`), safe to put in a `mailto:` link as it is. |
+| `phone` | string, optional | International format as configured: `+`, then 7–15 digits with single spaces, dots or hyphens between them. |
+| `hours` | string, optional | One line of plain text, at most 120 characters. Only ever served beside an email or a phone. |
+
+Each field is present only when configured. With nothing configured the body is `{}` (200), and the verification app shows no contact at all.
+
+**What the verification app does with it.** The app reads it once, in parallel with its first verification (a failed read gives `{}` and is tried again with the next). Wherever the copy sends the customer to ORBES Client Services, it then shows, under the one sentence that asks for it:
+
+- on every caution and void result (UNUSUAL ACTIVITY DETECTED, UNREADABLE CODE, REVOKED, UNKNOWN ORBES CODE, INVALID SIGNATURE), under the help line, and in the WARRANTY tab of an authentic result whose warranty is `VOID` (NO LONGER VALID):
+  - the button **CONTACT ORBES CLIENT SERVICES** when an email is set: a `mailto:` link whose subject is `ORBES — REF {ref} — {title}` (the short scan reference of the result's foot, then the state title; the reference is left out when the scan id gives none) and whose body leaves two empty lines for the customer, then `REFERENCE: {ref}`, `RESULT: {title}`, `WARRANTY: NO LONGER VALID` (warranty tab only) and `VERIFIED: {date and time as shown}`, CRLF-separated and percent-encoded (RFC 6068);
+  - the phone as a `tel:` link (digits only) when a phone is set, read in the reading face;
+  - the hours beneath, when set.
+
+The app checks the email and phone against the same rules as the server before building any link; anything else is dropped. Authentic results otherwise show no contact. Nothing is sent to the server when the customer uses it: the email goes from the customer's own mail application.
 
 ---
 
