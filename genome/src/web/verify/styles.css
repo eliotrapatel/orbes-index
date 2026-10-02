@@ -319,13 +319,15 @@ h1[tabindex="-1"]:focus {
   font-size: var(--fs-label);
 }
 
+/* Centred on the header by its own box: no margin, so the 44 px tap zone of
+   the text link stays centred on the word. */
 .scan__close {
   position: absolute;
   right: calc(46px + var(--safe-right));
   top: 50%;
+  margin: 0;
   transform: translateY(-50%);
   color: var(--white);
-  opacity: 0.8;
 }
 
 .scan__bottom {
@@ -359,34 +361,72 @@ h1[tabindex="-1"]:focus {
   animation: brand-fade var(--t-med) var(--ease) both;
 }
 
+/* Wraps only should LIGHT, the zoom and the photo ever not fit on one line;
+   the 8 px between lines keeps two rows of tap zones apart. */
 .scan__controls {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 26px;
+  gap: 8px 26px;
   margin-top: 18px;
 }
 
+/* LIGHT, the zoom and UPLOAD A PHOTO: 10 px, and a tap zone of at least
+   44 × 44 px (BRAND-DESIGN-SYSTEM §3.8). The zone is transparent padding,
+   given back by an equal negative margin, so the row takes the 36 px it took
+   before; the pressed rule (::after) sits 4 px inside the zone, where the
+   border of the 36 px control was. */
 .scan__control {
   appearance: none;
   -webkit-appearance: none;
-  min-height: 36px;
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  margin-block: -4px;
   padding: 0 4px;
   border: 0;
-  border-bottom: 1px solid transparent;
   background: none;
   color: var(--white);
-  font-size: var(--fs-nano);
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
   text-transform: uppercase;
   opacity: 0.72;
   cursor: pointer;
-  transition: opacity var(--t-med) var(--ease), border-color var(--t-med) var(--ease);
+  transition: opacity var(--t-med) var(--ease);
+}
+
+.scan__control::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease);
 }
 
 .scan__control[aria-pressed="true"] {
   opacity: 1;
-  border-bottom-color: currentColor;
+}
+
+.scan__control[aria-pressed="true"]::after {
+  opacity: 1;
+}
+
+/* The zoom reads two characters (1×, 2×): 11 px more of transparent padding
+   on each side, given back by the margin, widen its tap zone past 44 px while
+   the label and its rule keep their width. */
+.scan__control.scan__zoom {
+  margin-inline: -11px;
+  padding-inline: 15px;
+}
+
+.scan__control.scan__zoom::after {
+  left: 11px;
+  right: 11px;
 }
 
 .scan__control[hidden] {
@@ -653,12 +693,13 @@ h1[tabindex="-1"]:focus {
   margin: 0 auto;
 }
 
+/* The fingerprint the customer may compare or quote: 10 px, never the 8 px of decoration. */
 .genome__meta {
   display: flex;
   justify-content: center;
   gap: 10px;
   margin-top: 20px;
-  font-size: var(--fs-nano);
+  font-size: var(--fs-micro);
 }
 
 .result__lines {
@@ -697,20 +738,30 @@ h1[tabindex="-1"]:focus {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   border-bottom: 1px solid var(--hairline);
 }
 
+/* 10 px. The tracking (--tab-track, 0.16 em) and the gap around the dots
+   (7 px) tighten so the four tabs keep the width they had at 9 px and fit a
+   360 px phone. The tap zone is 44 px high, and widened by --tab-pad of
+   transparent padding on each side, given back by an equal negative margin:
+   CARE reaches 44 px, the zones stop at the dots, and the underline (::after)
+   still spans the word alone, 15 px under it as before. */
 .tabs__tab {
+  --tab-pad: 7px;
+  --tab-track: 0.16em;
   appearance: none;
   -webkit-appearance: none;
   position: relative;
-  padding: 14px 0 15px;
+  min-height: 44px;
+  margin-inline: calc(-1 * var(--tab-pad));
+  padding: 17px var(--tab-pad) 15px;
   border: 0;
   background: none;
   color: var(--ink-soft);
-  font-size: var(--fs-caption);
-  letter-spacing: var(--track-micro);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tab-track);
   text-transform: uppercase;
   cursor: pointer;
   transition: color var(--t-med) var(--ease);
@@ -719,8 +770,8 @@ h1[tabindex="-1"]:focus {
 .tabs__tab::after {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0.24em;
+  left: var(--tab-pad);
+  right: calc(var(--tab-pad) + var(--tab-track));
   bottom: -1px;
   height: 1px;
   background: var(--ink);
@@ -845,24 +896,46 @@ h1[tabindex="-1"]:focus {
   margin-top: 26px;
 }
 
+/* SIGN IN · CREATE ACCOUNT: 10 px (the gap between letters stays 2.2 px) and
+   a 44 px tap zone of transparent padding, given back by an equal negative
+   margin so the switch keeps its height. The rule under the chosen option
+   (::after) stays 8 px under the word, where the border of the 27 px option
+   was. */
 .auth__option {
   appearance: none;
   -webkit-appearance: none;
-  padding: 8px 0;
+  position: relative;
+  min-height: 44px;
+  margin-block: -8px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid transparent;
   background: none;
   color: var(--ink-soft);
-  font-size: var(--fs-overline);
-  letter-spacing: 0.26em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
   text-transform: uppercase;
   cursor: pointer;
-  transition: color var(--t-med) var(--ease), border-color var(--t-med) var(--ease);
+  transition: color var(--t-med) var(--ease);
+}
+
+.auth__option::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7px;
+  height: 1px;
+  background: var(--ink);
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease);
 }
 
 .auth__option[aria-pressed="true"] {
   color: var(--ink);
-  border-bottom-color: var(--ink);
+}
+
+.auth__option[aria-pressed="true"]::after {
+  opacity: 1;
 }
 
 .form {
@@ -1003,7 +1076,11 @@ h1[tabindex="-1"]:focus {
     gap: 6px;
   }
   .tabs__tab {
-    letter-spacing: 0.16em;
+    --tab-pad: 6px;
+    --tab-track: 0.12em;
+  }
+  .scan__bottom {
+    padding: 0 24px;
   }
   .btn {
     min-width: 0;

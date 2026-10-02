@@ -148,7 +148,7 @@ export class OwnershipPanel {
     }
     out.push(this.text('Register this piece in your name to keep its warranty, service history and ownership together.'));
     const until = timeOf(m.expiresAt);
-    if (until) out.push(h('p', { class: 'ownership__meta nano soft', text: `REGISTRATION OPEN UNTIL ${until}` }));
+    if (until) out.push(h('p', { class: 'ownership__meta micro soft', text: `REGISTRATION OPEN UNTIL ${until}` }));
     if (s.status !== 'signed-in') {
       out.push(...this.authBlock('Sign in or create an ORBES account to continue.'));
       return out;
@@ -170,9 +170,9 @@ export class OwnershipPanel {
         h(
           'div',
           { class: 'transfer-code' },
-          h('p', { class: 'nano soft', text: 'TRANSFER CODE' }),
+          h('p', { class: 'transfer-code__label micro soft', text: 'TRANSFER CODE' }),
           h('p', { class: 'transfer-code__value', text: offer.transferCode }),
-          h('p', { class: 'nano soft', text: `VALID UNTIL ${formatDate(offer.expiresAt)}` }),
+          h('p', { class: 'transfer-code__label micro soft', text: `VALID UNTIL ${formatDate(offer.expiresAt)}` }),
         ),
         this.text('Give this code only to the new owner. The transfer completes when they enter it in their ORBES account.'),
         this.errorLine(),
@@ -233,7 +233,7 @@ export class OwnershipPanel {
     return h(
       'div',
       { class: 'ownership__account' },
-      h('p', { class: 'nano soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
+      h('p', { class: 'ownership__who micro soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
       this.textButton('SIGN OUT', () => this.signOut()),
     );
   }
@@ -247,7 +247,7 @@ export class OwnershipPanel {
   private authBlock(lead: string): HTMLElement[] {
     if (this.deps.session.state.status === 'unknown' && !this.sessionUnavailable) {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
-      return [h('p', { class: 'ownership__meta nano soft', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
+      return [h('p', { class: 'ownership__meta micro soft', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
     const tab = this.state.authTab;
     const switcher = h(

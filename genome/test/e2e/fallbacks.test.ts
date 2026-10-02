@@ -10,7 +10,9 @@
  *     real issued code → AUTHENTIC with its product id, timed;
  *   - an INVALID code (one flipped signature bit) uploaded → INVALID SIGNATURE;
  *   - a camera showing a blank tag (no code): no false recognition, the scan
- *     guidance appears, CLOSE releases the camera.
+ *     guidance appears, the scanner controls keep the floors of
+ *     BRAND-DESIGN-SYSTEM §3.8 (10 px, 44 × 44 px tap zones), CLOSE releases
+ *     the camera.
  *
  * Chromium runs without --use-fake-ui-for-media-stream here so permissions
  * can be refused: --deny-permission-prompts declines every prompt, a context
@@ -23,6 +25,7 @@ import type { Browser, ConsoleMessage, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { writeJpeg } from '../support/image-io.js';
+import { tapZoneFloors } from '../support/tap-zones.js';
 import { writeY4m } from '../support/y4m.js';
 import {
   CHROMIUM_PATH,
@@ -222,7 +225,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
     }
   }, 60_000);
 
-  it('camera on a blank tag: keeps scanning without a false read, guides the visitor, CLOSE releases the camera', async () => {
+  it('camera on a blank tag: keeps scanning without a false read, guides the visitor, keeps the floors, CLOSE releases the camera', async () => {
     const { page, problems, close } = await openVerify(browser, srv, { reducedMotion: 'no-preference', permissions: ['camera'] });
     try {
       const before = await srv.ctx.db.selectFrom('scan_events').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
@@ -234,6 +237,32 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       // for a distance or the zoom.
       await textOf(page.locator('.scan__hint'), 'Place the whole code inside the orbit');
       await page.screenshot({ path: join(E2E_OUT_DIR, 'camera-searching.png') });
+
+      // 10 px type and 44 × 44 px tap zones that never overlap (BRAND-DESIGN-SYSTEM §3.8), with LIGHT
+      // and the zoom shown as a camera that offers them shows them (zoomed in: 1×, pressed), then put
+      // back as they were.
+      const controlStates = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLButtonElement>('.scan__control')].map((b) => {
+          const was = { hidden: b.hidden, text: b.textContent ?? '', pressed: b.getAttribute('aria-pressed') };
+          b.hidden = false;
+          if (b.classList.contains('scan__zoom') && was.hidden) {
+            b.textContent = '1×';
+            b.setAttribute('aria-pressed', 'true');
+          }
+          return was;
+        }),
+      );
+      const floors = await tapZoneFloors(page);
+      expect(floors.problems).toEqual([]);
+      expect(floors.checked).toEqual(['CLOSE', 'LIGHT', expect.stringMatching(/^\d(\.\d)?×$/), 'UPLOAD A PHOTO']);
+      await page.evaluate((states) => {
+        document.querySelectorAll<HTMLButtonElement>('.scan__control').forEach((b, i) => {
+          b.hidden = states[i].hidden;
+          b.textContent = states[i].text;
+          if (states[i].pressed === null) b.removeAttribute('aria-pressed');
+          else b.setAttribute('aria-pressed', states[i].pressed);
+        });
+      }, controlStates);
 
       const timeline = await readTimeline(page);
       // ≥ 6 s of frames, at most one every 120 ms and only while the worker is idle (≈ 3–8 per second here).

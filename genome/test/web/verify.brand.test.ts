@@ -1,9 +1,11 @@
 /**
  * Verify app against the authentication design system (docs/BRAND-DESIGN-SYSTEM.md
  * §3 and §8): ink token for the scanner ground, a legible customer reference,
- * the SEAL proportions of the favicon, type set from brand.css tokens, and the
- * shipped display face (Gravesend Sans) on titles and labels of both apps,
- * never on what is read.
+ * the SEAL proportions of the favicon, type set from brand.css tokens, the
+ * floors of what is acted on (10 px type, 44 px tap zones; measured in a real
+ * page by the E2E suites, test/support/tap-zones.ts), and the shipped display
+ * face (Gravesend Sans) on titles and labels of both apps, never on what is
+ * read.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -118,6 +120,58 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
   });
 });
 
+describe('verify app: floors of 10 px for what is acted on and 44 px for what is tapped (BRAND-DESIGN-SYSTEM §3.8)', () => {
+  const all = [...rules(brand), ...rules(styles)];
+  const px = (v: string) => Number.parseFloat(resolve(v));
+  /** Every rule that styles `cls` itself, alone or compound, in a descendant selector or a media query (not its ::after rule). */
+  const about = (cls: string) => {
+    const re = new RegExp(`${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
+    return all.filter((r) => r.selectors.some((s) => re.test(s) && !s.includes('::')));
+  };
+  // Whatever the app offers to tap shows a pointer: that is how a control is found.
+  const interactive = [...new Set(all.filter((r) => r.decls.cursor === 'pointer').flatMap((r) => r.selectors))].sort();
+
+  it('finds every control of the app by its pointer', () => {
+    expect(interactive).toEqual(['.auth__option', '.btn', '.scan__control', '.tabs__tab', '.textlink']);
+  });
+
+  it('sets no interactive selector under 10 px of type nor under a 44 px minimum height', () => {
+    for (const sel of [...interactive, '.field__input']) {
+      const base = all.find((r) => r.selectors.includes(sel));
+      expect(base?.decls['font-size'], sel).toBeDefined();
+      expect(base?.decls['min-height'], sel).toBeDefined();
+      // No variant, state, descendant or media rule takes either below its floor.
+      for (const r of about(sel)) {
+        const where = `${sel} (${r.selectors.join(', ')})`;
+        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(10);
+        for (const p of ['min-height', 'height', 'max-height']) if (r.decls[p]) expect(px(r.decls[p]), where).toBeGreaterThanOrEqual(44);
+      }
+    }
+    // The zoom shows two characters: its zone is at least as wide as it is high.
+    expect(px(rule(styles, '.scan__control')['min-width'])).toBeGreaterThanOrEqual(44);
+  });
+
+  it('draws text links at 80 % ink at rest (11 : 1 on white), no longer 62 %', () => {
+    expect(Number(rule(brand, '.textlink').opacity)).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('sets the field labels and the lines that carry a fact at 10 px, leaving 8 px to decoration', () => {
+    expect(px(rule(brand, '.field__label')['font-size'])).toBeGreaterThanOrEqual(10);
+    expect(px(rule(styles, '.genome__meta')['font-size'])).toBeGreaterThanOrEqual(10);
+    // The views set these lines with the 10 px .micro class: the closing time of registration, the
+    // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
+    const views = ['views/ownership.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
+    const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
+    for (const line of ['ownership__meta', 'transfer-code__label', 'ownership__who', 'genome__meta']) {
+      const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
+      expect(set.length, line).toBeGreaterThan(0);
+      for (const c of set) expect(c.split(' '), c).toContain('micro');
+    }
+    // The 8 px .nano class is left to the landing foot (© ORBES · GENOME CODE · PARIS).
+    expect(classes.filter((c) => c.split(' ').includes('nano'))).toEqual(['landing__meta nano']);
+  });
+});
+
 /** Every innermost rule of a stylesheet (inside @media too): its selectors and declarations. */
 function rules(css: string): { selectors: string[]; decls: Record<string, string> }[] {
   const out: { selectors: string[]; decls: Record<string, string> }[] = [];
@@ -183,7 +237,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.dialog__eyebrow', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__email'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__title', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {

@@ -169,6 +169,8 @@ a {
   line-height: 1.8;
 }
 
+/* 8 px is for decoration only: never text that is acted on, nor a fact the
+   visitor has to read (BRAND-DESIGN-SYSTEM §3.8). */
 .nano {
   font-size: var(--fs-nano);
   letter-spacing: 0.3em;
@@ -456,33 +458,41 @@ a {
   min-width: 0;
 }
 
-/* Text link styled as tracked micro-type with a hairline that draws on focus/hover. */
+/* Text link styled as tracked micro-type with a hairline that draws on focus/hover.
+   The floors of BRAND-DESIGN-SYSTEM §3.8: 10 px type (the micro step, tracked
+   so the gap between letters stays about what it was at 8 px) and a tap zone
+   44 px high. The zone is transparent padding, and an equal negative margin
+   gives the room back, so the link takes the place it took before and its
+   hairline keeps its distance to the word. At rest the ink is at 80 %
+   (11 : 1 on white). */
 .textlink {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
   display: inline-block;
-  padding: 10px 2px;
+  min-height: 44px;
+  margin-block: -4px;
+  padding: 14px 2px;
   border: 0;
   background: none;
   color: inherit;
-  font-size: var(--fs-nano);
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
   text-transform: uppercase;
   text-decoration: none;
   line-height: 1.6;
   cursor: pointer;
-  opacity: 0.62;
+  opacity: 0.8;
   transition: opacity var(--t-med) var(--ease);
 }
 
 .textlink::after {
   content: "";
   position: absolute;
-  left: 0.3em;
+  left: var(--track-micro);
   right: 0;
-  bottom: 6px;
+  bottom: 10px;
   height: 1px;
   background: currentColor;
   transform: scaleX(0);
@@ -515,11 +525,12 @@ a {
   text-align: left;
 }
 
+/* 10 px, the floor of text that is acted on (§3.8): the label names what to type. */
 .field__label {
   display: block;
   margin-bottom: 6px;
-  font-size: var(--fs-nano);
-  letter-spacing: 0.3em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
   text-transform: uppercase;
   color: var(--ink-soft);
 }

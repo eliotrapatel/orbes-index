@@ -4,8 +4,10 @@
  * phone viewport. Covers the photo upload path, the camera path (Chromium's
  * fake capture device fed with a simulated phone clip of a real issued
  * code), first registration with a claim code through the OWNERSHIP tab, and
- * the problem screens. Mobile screenshots of the landing and result screens
- * are written to genome/out/ for design review.
+ * the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * are measured: 10 px type and 44 × 44 px tap zones for every button, link
+ * and tab. Mobile screenshots of the landing and result screens are written
+ * to genome/out/ for design review.
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
@@ -17,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
@@ -53,6 +56,13 @@ async function figuresInDisplayFace(page: Page): Promise<string[]> {
       .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim())
       .filter((t) => /[01]/.test(t)),
   );
+}
+
+/** The floors of BRAND-DESIGN-SYSTEM §3.8 on the current screen, which shows at least `controls`. */
+async function keepsFloors(page: Page, controls: string[]): Promise<void> {
+  const { checked, problems } = await tapZoneFloors(page);
+  expect(problems).toEqual([]);
+  expect(checked).toEqual(expect.arrayContaining(controls));
 }
 
 /**
@@ -152,6 +162,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
     await page.waitForTimeout(2_400);
     await page.screenshot({ path: join(OUT_DIR, 'verify-landing.png') });
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO']);
 
     await uploadPhoto(page, writeCodePng(srv.workDir, 'plain.png', plain));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
@@ -173,6 +184,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(box!.width).toBeCloseTo(Math.min(0.64 * MOBILE_VIEWPORT.width, 260), 0);
     expect(box!.height).toBeCloseTo(box!.width, 0);
     expect(box!.x + box!.width / 2).toBeCloseTo(MOBILE_VIEWPORT.width / 2, 0);
+    // The fingerprint beneath, a fact the customer may compare: 10 px, not the 8 px of decoration.
+    expect(await page.locator('.genome__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
     const orbit = genomeLayout(plain.genome, 'orbit');
     expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(41);
     await textsOf(page.getByRole('tab'), ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
@@ -186,6 +199,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     await page.waitForTimeout(2_000);
     await page.screenshot({ path: join(OUT_DIR, 'verify-result.png'), fullPage: true });
+    // The four tabs at 10 px keep the width they had at 9 px: 44 px zones on this phone and on the
+    // smallest in use (320 px, where they tighten), without scrolling sideways.
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.setViewportSize({ width: 320, height: 640 });
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.setViewportSize(MOBILE_VIEWPORT);
 
     // Keyboard: arrows move between tabs and show their panels.
     await page.getByRole('tab', { name: 'PRODUCT' }).focus();
@@ -211,8 +230,13 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Registration opens straight on the OWNERSHIP tab.
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(page.locator('.ownership__status'), 'REGISTRATION OPEN');
+    // The closing time of the window is a fact to read: 10 px, as the field labels.
+    await textOf(page.locator('.ownership__meta'), /^REGISTRATION OPEN UNTIL \d\d:\d\d$/);
+    expect(await page.locator('.ownership__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
 
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
     await page.getByLabel('EMAIL').fill('client@example.com');
     await page.getByLabel('PASSWORD').fill('too short');
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
@@ -225,6 +249,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Signed in (session cookie + CSRF token): the claim form appears.
     await visible(page.getByLabel('CLAIM CODE'));
     await textOf(page.locator('.ownership__email'), 'client@example.com');
+    await keepsFloors(page, ['REGISTER THIS PIECE', 'SIGN OUT']);
     await page.getByLabel('CLAIM CODE').fill('ZZZZ-ZZZZ-ZZZZ');
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
     await visible(page.getByRole('alert'));
@@ -240,6 +265,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await page.getByRole('button', { name: 'CREATE TRANSFER CODE' }).click();
     await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(await page.locator('.transfer-code__label').evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize))).toEqual(['10px', '10px']);
+    await keepsFloors(page, ['CANCEL TRANSFER', 'SIGN OUT']);
     await page.getByRole('button', { name: 'CANCEL TRANSFER' }).click();
     await textOf(page.locator('.form__notice'), 'The transfer has been cancelled.');
 
@@ -268,6 +295,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('NO ORBES CODE FOUND');
     await visible(page.getByRole('button', { name: 'UPLOAD A PHOTO' }));
     await page.getByRole('button', { name: 'SCAN AGAIN' }).waitFor();
+    await keepsFloors(page, ['UPLOAD A PHOTO', 'SCAN AGAIN']);
     expect(problems).toEqual([]);
   }, 120_000);
 

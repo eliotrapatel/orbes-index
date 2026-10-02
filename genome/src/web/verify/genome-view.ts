@@ -65,6 +65,6 @@ export function genomeBlock(m: GenomeModel): HTMLElement {
     h('h2', { class: 'genome__label micro', id: 'genome-label', text: 'GENOME' }),
     h('p', { class: 'genome__id', text: m.id }),
     figure ? h('div', { class: 'genome__glyphs' }, figure) : null,
-    h('p', { class: 'genome__meta nano soft' }, h('span', { text: m.fingerprint }), h('span', { class: 'sep', attrs: { 'aria-hidden': 'true' }, text: '·' }), h('span', { text: m.version })),
+    h('p', { class: 'genome__meta micro soft' }, h('span', { text: m.fingerprint }), h('span', { class: 'sep', attrs: { 'aria-hidden': 'true' }, text: '·' }), h('span', { text: m.version })),
   );
 }
