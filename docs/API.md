@@ -1240,12 +1240,12 @@ OPERATOR. In one transaction: allocates the serial, creates the product (ISSUED)
 |---|---|---|---|
 | `categoryCode` | string | yes | One letter (case-insensitive). The category must exist and be active. |
 | `modelId` | uuid | yes | Must exist and belong to that category. |
-| `material` | string | yes | 1–200 characters, no control characters. |
+| `material` | string | yes | 1–200 characters, no control character (C0, DEL, C1) and no U+FFFD, the replacement character a wrong decoding leaves for a lost letter. |
 | `year` | integer | no | 2000–2099; default the current UTC year. |
 | `collectionId` | uuid | no | Must exist. Without it, the model's collection applies in admin and owner views. |
 | `sku` | string | no | ≤ 64 characters: letters, digits, space, `.`, `_`, `-`, `/`, starting with a letter or digit. Default: model SKU prefix + slug of the variant (e.g. `MNL-RG-SIZE-52`). |
-| `variant` | string | no | 1–100 characters |
-| `productionBatch` | string | no | 1–100 characters |
+| `variant` | string | no | 1–100 characters, as `material` (no control character, no U+FFFD) |
+| `productionBatch` | string | no | 1–100 characters, as `material` |
 | `productionDate` | date | no | `YYYY-MM-DD`, a real date, not after tomorrow (UTC). |
 | `serial` | integer | no | 1–999 999. Default: next free serial for (year, category). |
 | `withClaimSecret` | boolean | no | Generate a claim code for proof of ownership at first registration. |
@@ -1508,16 +1508,16 @@ Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 NO_OWNER`, `409 A
 
 ### 14.11 `POST /api/admin/products/batch` — issue a batch (extension of the contract)
 
-OPERATOR. Up to **50 pieces that share a template**, one result per piece. Each piece is issued exactly as by §14.2 (`IssuanceService.issueProduct`): its own serial, product, GENOME-01, code signed with the ACTIVE key, warranty row and `product.issue` audit entry, **in its own transaction**, in the order given. Why 50: requests are limited to 16 KB (§1.2) and each claim code costs one scrypt; the console sends a larger batch as several requests, one after the other (*In the console*, below).
+OPERATOR. Up to **50 pieces that share a template**, one result per piece. Each piece is issued exactly as by §14.2 (`IssuanceService.issueProduct`): its own serial, product, GENOME-01, code signed with the ACTIVE key, warranty row and `product.issue` audit entry, **in its own transaction**. **The pieces that name their `serial` are signed first**, then those whose serial is allocated (the highest + 1), each group in the order given: an allocated serial so never takes a serial that a later piece of the batch names (`[{}, {}, { "serial": 14 }]` with 12 the highest: 14, then 15 and 16). Why 50: requests are limited to 16 KB (§1.2) and each claim code costs one scrypt; the console sends a larger batch as several requests, one after the other (*In the console*, below).
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
 | `template` | object | yes | What every piece shares: the fields of §14.2 except `variant`, `sku` and `serial`, with the same rules (`categoryCode`, `modelId`, `material` required; `collectionId`, `productionBatch`, `productionDate`, `year`, `authPolicy`, `withClaimSecret` optional; `""` and `null` count as absent). Unknown fields → `400`. |
 | `items` | object[] | yes | 1–50 pieces, each `{ variant?, sku?, serial? }` with the rules of §14.2 (`{}` is a piece with an allocated serial and the model's SKU). Unknown fields → `400`. |
 
-**Before anything is signed**, the whole request is refused and nothing is issued when: the body breaks a shape or a bound (`400`, the message names the piece, e.g. `items.2.sku: …`); the template or a piece breaks an issuance rule (`400`, e.g. `template: Material contains invalid characters.`, `items.1: Variant contains invalid characters.`); two pieces name the same `serial` (`400`, `items.2.serial: the same serial as items.0.`); or the template's category, model or collection is wrong (`404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `400` for a model of another category or a production date after tomorrow).
+**Before anything is signed**, the whole request is refused and nothing is issued when: the body breaks a shape or a bound (`400`, the message names the piece, e.g. `items.2.sku: …`); the template or a piece breaks an issuance rule (`400`, e.g. `template: Material contains invalid characters.`, `items.1: Variant contains invalid characters.`); two pieces name the same `serial` (`400`, `items.2.serial: the same serial as items.0.`); a named serial leaves no serial for the pieces allocated after it, since they come above it (`400`, `items.0.serial: serial 999999 leaves no serial for the 2 pieces allocated after it. Sign it apart, or name their serials.`); or the template's category, model or collection is wrong (`404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `400` for a model of another category or a production date after tomorrow).
 
-**Then piece by piece.** A piece refused at signing time (its explicit serial taken meanwhile, a concurrent change, the serials of its year and category exhausted) fails **alone**: the other pieces are issued. A piece already signed is **never undone**. A failure that is not the piece's own (`503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, an unexpected error) stops the batch there: the pieces after it are `SKIPPED`, never attempted.
+**Then piece by piece.** A piece refused at signing time (its explicit serial taken meanwhile, a concurrent change, the serials of its year and category exhausted) fails **alone**: the other pieces are issued. A piece already signed is **never undone**. A failure that is not the piece's own (`503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, an unexpected error) stops the batch there: the pieces not yet attempted are `SKIPPED`.
 
 **One batch at a time per admin**: each claim code is one scrypt on the server's small worker pool, which customers' sign-ins and claim-code registrations share (as for certificate cards, §15.7). A second batch sent by the same admin before the first is done answers `429 RATE_LIMITED` (*A batch is already being signed. Wait for it to finish, then try again.*), with nothing signed. The route also draws on the `admin` rate-limit group.
 
@@ -1537,7 +1537,7 @@ Example request:
 }
 ```
 
-**200** (`Cache-Control: no-store`), **even when pieces failed**: read each result. One per piece, in the order sent; `index` is the piece's position in `items` (from 0).
+**200** (`Cache-Control: no-store`), **even when pieces failed**: read each result. One per piece, in the order of `items` whatever the order of signing; `index` is the piece's position in `items` (from 0).
 
 ```json
 {
@@ -1560,7 +1560,7 @@ If the answer is lost (a network failure, a timeout), the server may have issued
 
 Audited: `product.issue` for every piece issued (as §14.2), then `product.issue_batch` with `{ count, issued, failed, skipped, productIds, failures: [{ index, code }], category, modelId, productionBatch, claimSecret }` (`target_id` null). **No claim code in either.** The batch's entry is written after its pieces; if it cannot be written, the failure is logged and the results are still returned, since the pieces are already signed and audited and their claim codes exist nowhere else.
 
-**In the console** (Generator → BATCH, `#/generator?mode=batch`): the template, then *Pieces from* a CSV file or a quantity. The CSV holds one row per piece, its first line naming the columns `variant`, `sku` and `serial` (each optional, any order, case-insensitive; no other column); comma or semicolon, a byte-order mark and CRLF are accepted, blank lines skipped, at most 1 000 pieces and 1 MB. The browser checks the file and every piece with the single form's rules before anything is signed, each problem with its line (*Line 4 · SKU: …*), then shows the plan (*120 pieces · 3 requests of up to 50*) and the first ten rows. **SIGN 120 PRODUCTS** sends the requests one after the other (at most 50 pieces and 15 000 bytes each) and stops at the first request that fails; the result gives every piece its outcome: ISSUED, NOT SIGNED, NOT ATTEMPTED, NOT SENT (an earlier request failed), or NO ANSWER (look in Products before signing again). While the batch's claim codes are on screen, the page offers the **certificate cards** (§15.7, in requests of 50: cards, A4 sheets or the print shop's CSV) and a **results file** (CSV: line, piece, status, productId, sku, variant, serial, codeId, claimCode, message), and *"I have recorded them — hide"*; until one is saved or the codes are hidden, closing the tab (`beforeunload`), navigating in the console or signing out asks first. The codes are held in the page's memory only, as for one product.
+**In the console** (Generator → BATCH, `#/generator?mode=batch`): the template, then *Pieces from* a CSV file or a quantity. The CSV holds one row per piece, its first line naming the columns `variant`, `sku` and `serial` (each optional, any order, case-insensitive; no other column); comma or semicolon (the one the first line that is not blank uses most), a byte-order mark and CRLF are accepted, blank lines skipped, at most 1 000 pieces and 1 MB. A first line that names one column holds no delimiter: each line is then one value, so `7,5 ML` stays one variant. The file is read as UTF-8; a file that is not UTF-8 is read as Windows-1252, the encoding of Excel's plain *CSV* (in France *CSV (séparateur : point-virgule)*), and the console says so above the preview, where its accents can be checked. A value that still holds U+FFFD (a letter lost before the file reached the console) is refused on its line. The browser checks the file and every piece with the single form's rules before anything is signed (control characters as the server counts them, C1 included), each problem with its line (*Line 4 · SKU: …*), then shows the plan (*120 pieces · 3 requests of up to 50*) and the first ten rows; a named serial that would leave the allocated pieces none is refused there too. **SIGN 120 PRODUCTS** sends the pieces that name their serial first, as the server signs a request, so an allocated serial never takes one a later request names, in requests one after the other (at most 50 pieces and 15 000 bytes each), and stops at the first request that fails; the result gives every piece its outcome, in the file's order: ISSUED, NOT SIGNED, NOT ATTEMPTED, NOT SENT (an earlier request failed), or NO ANSWER (look in Products before signing again). While the batch's claim codes are on screen, the page offers the **certificate cards** (§15.7, in requests of 50: cards, A4 sheets or the print shop's CSV) and a **results file** (CSV: line, piece, status, productId, sku, variant, serial, codeId, claimCode, message), and *"I have recorded them — hide"*; until one is saved or the codes are hidden, closing the tab (`beforeunload`), navigating in the console or signing out asks first. The codes are held in the page's memory only, as for one product. **A session that ends** (`401`) while the batch is being signed or its codes are on screen does not take the page: the console says the session has ended and keeps it, the pieces already signed and their codes included (a request refused for the session is NOT SIGNED: *the session ended before this request*); the results file, made in the browser, can still be saved, and leaving the page (which asks first) signs in again.
 
 Errors (the whole request; nothing signed): `400 VALIDATION_FAILED`, `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `413 PAYLOAD_TOO_LARGE`, `429 RATE_LIMITED` (a batch of the same admin still in progress, or the `admin` group's limit).
 
@@ -1619,7 +1619,7 @@ File name: `ORBES-<productId>-I<issue>-<theme>-<widthMm>mm[-label][-<dpi>dpi][-K
 
 **K-only black: limitations.** The file carries no ICC profile or output intent (it is not PDF/X): ask the print shop to print it as is, without colour conversion. K 100 % alone is a dense dark grey rather than a deep black on uncoated stock (no rich black, by design). The decor tones become halftone screens, which may look dotted at small sizes; they are decorative and never read by the decoder. Overprint is not set. Ivory has no K-only rendition (its paper colour is not neutral): print the ivory colourway on ivory stock in K-only `classic` instead.
 
-Errors: `400 VALIDATION_FAILED` (format, query values, size limits), `403 FORBIDDEN` (AUDITOR), `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE`, `409 PRODUCT_NOT_PRINTABLE`, `409 CODE_INTEGRITY`.
+Errors: `400 VALIDATION_FAILED` (format, query values, size limits), `403 FORBIDDEN` (AUDITOR), `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE` (*Only the active code of a product can be rendered: issue 1 of O26-J-00184 is SUPERSEDED.*), `409 PRODUCT_NOT_PRINTABLE` (*Codes of O26-J-00184 cannot be printed in its current state (STOLEN).*), `409 CODE_INTEGRITY`. Each refusal names the piece, so a print sheet (§15.3) says which code to leave out.
 
 ### 15.3 `POST /api/admin/codes/print-sheet` (extension of the contract)
 
@@ -1640,7 +1640,7 @@ OPERATOR. One PDF with many labelled codes, crop marks, a 10 mm scale bar and a 
 
 **Layout.** Codes are placed in the order of `codeIds` (duplicates removed, first occurrence kept), row by row from the top-left corner of each page, in a grid centred horizontally inside 12 mm margins with 8 mm gutters, above a 10 mm footer. The grid comes from `planPrintSheet` (`genome/src/server/render/artifact.ts`) and the core's `layoutSheet` (`genome/src/core/render/sheet-layout.ts`); the manifest (§15.8) and the console's preview use the same functions, so the three always agree. With the console's default (30 mm, labelled), an A4 page holds 30 codes (5 × 6): a batch of 120 prints on 4 pages.
 
-In the console, the codes list (CODES) lets an OPERATOR select ACTIVE codes, page after page (the selection is kept while the filters stay the same), or every printable code of the filters at once (*Select the 120 codes of this batch*, §15.9). Before rendering it shows the layout (*30 per A4 · 4 pages*). Over 200 codes, it requests the sheet in parts of 200 and saves each as `…-part-<n>-of-<total>.pdf`; *Download manifest* saves the matching CSV parts. Printing a batch from its filtered list takes two clicks: select the batch, download the sheet.
+In the console, the codes list (CODES) lets an OPERATOR select printable codes (`printable`, §15.5), page after page (the selection is kept while the filters stay the same), or every printable code of the filters at once (*Select the 120 codes of this batch*, §15.9). Before rendering it shows the layout (*30 per A4 · 4 pages*). Over 200 codes, it requests the sheet in parts of 200 and saves each as `…-part-<n>-of-<total>.pdf`; *Download manifest* saves the matching CSV parts. Printing a batch from its filtered list takes two clicks: select the batch, download the sheet.
 
 Errors: `400 VALIDATION_FAILED` (including "The artifact is too large for this page size."), `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE`, `409 PRODUCT_NOT_PRINTABLE`, `409 CODE_INTEGRITY`.
 
@@ -1665,7 +1665,9 @@ AUDITOR. Paginated list of codes, newest first (`createdAt`); read view (no `dat
 | `issuedTo` | `YYYY-MM-DD`. Codes issued on or before this UTC day (the whole day is included). Not before `issuedFrom`. |
 | `page`, `pageSize` | §6 |
 
-The batch and the issue days are indexed (migration `0007_print_batch_indexes`). Errors: `400 VALIDATION_FAILED` (a malformed value, `issuedFrom` after `issuedTo`).
+Days run from 0001-01-01 to 9999-12-31 (PostgreSQL has no year 0000; `issuedTo=9999-12-31` holds every code). Each item is the code object with **`printable`** (boolean): the code is ACTIVE and its product may still be printed (not RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN), so a print sheet accepts it (§15.3, the codes §15.9 selects); the console offers a sheet's tick box for those only.
+
+The batch and the issue days are indexed (migration `0007_print_batch_indexes`). Errors: `400 VALIDATION_FAILED` (a malformed value, a year 0000, `issuedFrom` after `issuedTo`).
 
 ```
 GET /api/admin/codes?productionBatch=B-2026-09-A&status=ACTIVE&issuedFrom=2026-09-01&issuedTo=2026-09-30
@@ -1773,7 +1775,7 @@ AUDITOR. Paginated scan events with their authentication record, newest first.
 |---|---|
 | `productId` | Canonical id or uuid. An unknown product gives an empty page. |
 | `state` | One of the 9 verification states. |
-| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone or a bound before `0001-01-01` (UTC). The console opens an anomaly's window (§16.9) and its triggering scan (the second it was made in, the scan marked) this way. |
+| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone or a bound outside `0001-01-01` to `9999-12-31` (UTC): `9999-12-31T23:00:00-05:00` is already year 10000. The console opens an anomaly's window (§16.9) and its triggering scan (the second it was made in, the scan marked) this way. |
 
 An empty value (`?state=&from=`) means the filter is not given, as a filter form sends it.
 
@@ -1830,7 +1832,7 @@ AUDITOR. Paginated, the most severe first.
 | `productId` | Canonical id (any case) or uuid (extension). An unknown product gives an empty page. |
 | `sort` | `severity` (default): CRITICAL, HIGH, MEDIUM, LOW, then the highest `riskScore` within a severity. `risk`: the highest `riskScore` first, then the most severe. `lastSeen`: the most recently seen first (the order before 2026-10-02). Ties end on the most recently seen, then the id, so pages never overlap (extension). |
 
-An empty value (`?type=&sort=`) means the filter is not given. The console keeps every filter and the order in the view's URL (`#/anomalies?productId=O26-J-00003&type=IMPOSSIBLE_TRAVEL&sort=risk`); a product page's TRIAGE link opens the list filtered by that product.
+An empty value (`?type=&sort=`) means the filter is not given. The console keeps every filter and the order in the view's URL (`#/anomalies?productId=O26-J-00003&type=IMPOSSIBLE_TRAVEL&sort=risk`); a product page's TRIAGE link opens the list filtered by that product. Its Product field takes a full id or a uuid only: anything else is said on the field (*Enter a full product id (O26-J-00184).*) and the URL does not change. Filters the server refuses (a URL typed by hand) keep the filter form on screen with the refusal and *Clear filters*, instead of a failed page. The decision dialog (§16.5) wears the destructive marks, the oxblood rule and a danger confirm, while its boxes revoke the code or flag the piece COUNTERFEIT; while its steps run, Confirm stays disabled whatever is typed, and a second submission is ignored.
 
 ```json
 {
@@ -1903,7 +1905,7 @@ AUDITOR. What waits for triage:
 }
 ```
 
-`open` counts the **OPEN** findings by severity (an ACKNOWLEDGED finding has been seen; the dashboard's `anomalies.open`, §13.1, counts both). `attention` is `open.HIGH + open.CRITICAL`: the console shows it as a badge on the ANOMALIES link (`99+` beyond 99, nothing at 0) and prefixes it to the tab title, `(3) Dashboard — ORBES Genome Console`. The console asks on every navigation and every 60 s while its tab is visible; a hidden tab stops asking and asks again when it is shown. `types` is every type the server records (§16.4), for the list's Type filter.
+`open` counts the **OPEN** findings by severity (an ACKNOWLEDGED finding has been seen; the dashboard's `anomalies.open`, §13.1, counts both). `attention` is `open.HIGH + open.CRITICAL`: the console shows it as a badge on the ANOMALIES link (`99+` beyond 99, nothing at 0) and prefixes it to the tab title, `(3) Dashboard — ORBES Genome Console`. The console asks on every navigation and every 60 s while its tab is visible; a hidden tab stops asking and asks again when it is shown; the Anomalies view, which reads the summary itself, gives the badge its count instead. These are background requests: a `401` never signs the admin out or replaces the page on screen (a batch's claim codes, a single product's), it only stops the refresh; the admin's next action meets the ended session. `types` is every type the server records (§16.4), for the list's Type filter.
 
 ### 16.9 `GET /api/admin/anomalies/:id/context` (extension of the contract)
 
