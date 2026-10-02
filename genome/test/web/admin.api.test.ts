@@ -232,4 +232,40 @@ describe('AdminApi', () => {
     await expect(api.logout()).rejects.toMatchObject({ code: 'NETWORK' });
     expect(api.csrfToken).toBeNull();
   });
+
+  it('searches owners by email or REF, reads a sheet, locks, unlocks and exports an account', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { items: [], page: 1, pageSize: 50, total: 0 }),
+      json(200, { items: [], page: 1, pageSize: 50, total: 0, scans: [] }),
+      json(200, { owner: { id } }),
+      json(200, { status: 'LOCKED', sessionsRevoked: 1, transfersCancelled: 0 }),
+      json(200, { status: 'ACTIVE' }),
+      new Response('{"format":"orbes.account-export"}', {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': 'attachment; filename="orbes-account-11111111-2026-10-02.json"' },
+      }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.owners({ email: 'jane@example.com', page: 2 });
+    await api.owners({ ref: '1A2B3C4D' });
+    await api.owner(id);
+    await api.lockOwner(id);
+    await api.unlockOwner(id);
+    const d = await api.exportOwner(id);
+    expect(calls.slice(1).map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      'GET /api/admin/owners?email=jane%40example.com&page=2',
+      'GET /api/admin/owners?ref=1A2B3C4D',
+      `GET /api/admin/owners/${id}`,
+      `POST /api/admin/owners/${id}/lock`,
+      `POST /api/admin/owners/${id}/unlock`,
+      `GET /api/admin/owners/${id}/export`,
+    ]);
+    expect(header(calls[4], 'x-csrf-token')).toBe('tok-1');
+    expect(header(calls[5], 'x-csrf-token')).toBe('tok-1');
+    expect(d.filename).toBe('orbes-account-11111111-2026-10-02.json');
+    expect(await d.blob.text()).toBe('{"format":"orbes.account-export"}');
+  });
 });

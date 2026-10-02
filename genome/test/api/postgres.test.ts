@@ -118,6 +118,19 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     expect(detail.ownership.owners).toHaveLength(2);
     const dash = safeJson(await op.get('/api/admin/dashboard')) as any;
     expect(typeof dash.scans.last24h).toBe('number');
+    // The owner's sheet on pg (A-06): exact email, the REF under the owner's first scan (a uuid range), the sheet, the export.
+    const byEmail = safeJson(await op.get('/api/admin/owners?email=OWNER%40example.com')) as any;
+    expect(byEmail.items).toHaveLength(1);
+    const ownerId = byEmail.items[0].id;
+    const byRef = safeJson(await op.get(`/api/admin/owners?ref=${scan.scanId.slice(0, 8)}`)) as any;
+    expect(byRef.scans.map((s: any) => s.scanId)).toContain(scan.scanId);
+    expect(byRef.items.map((o: any) => o.id)).toContain(ownerId);
+    const sheet = safeJson(await op.get(`/api/admin/owners/${ownerId}`)) as any;
+    expect(sheet.pieces).toEqual([expect.objectContaining({ productId: p.product.productId, endedReason: 'TRANSFERRED_OUT' })]);
+    expect(sheet.scans.length).toBeGreaterThanOrEqual(2);
+    const exported = await op.get(`/api/admin/owners/${ownerId}/export`);
+    expect(exported.statusCode).toBe(200);
+    expect((safeJson(exported) as any).account.email).toBe('owner@example.com');
     expect((safeJson(await op.get('/api/admin/audit/verify')) as any).ok).toBe(true);
   });
 });

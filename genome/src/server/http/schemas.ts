@@ -354,8 +354,19 @@ export const anomalyListQuery = z.object({
 
 export const anomalyParams = z.object({ id: uuid });
 
-/** A customer account (`accounts.id`): the owners list and its recovery code (§16.2, §16.10). */
+/** A customer account (`accounts.id`): its sheet, recovery code, lock and export (§16.10–16.13). */
 export const ownerParams = z.object({ id: uuid });
+
+/**
+ * The owners list (§16.2): every account, or one exact email (normalised by the service, as at sign-in), or the
+ * REF printed under a result (`REF 1A2B3C4D`, any case, or a whole scan id; parsed by the service). One or none.
+ */
+export const ownerListQuery = z
+  .object({
+    email: z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().min(3, 'Enter the whole email address').max(254, 'At most 254 characters').optional()),
+    ref: z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().min(1, 'Required').max(64, 'At most 64 characters').optional()),
+  })
+  .refine((q) => q.email === undefined || q.ref === undefined, { message: 'Search by email or by REF, not both', path: ['ref'] });
 
 export const anomalyPatchBody = body({
   status: z.enum(ANOMALY_STATUSES),

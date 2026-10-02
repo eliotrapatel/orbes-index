@@ -25,6 +25,7 @@ import {
   type ArtifactForm,
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
+import { ownerSearch } from '../../src/web/admin/model/owners.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
 import {
@@ -85,6 +86,13 @@ describe('permissions', () => {
     // The Cases queue: an AUDITOR reads it, an OPERATOR closes a case (PATCH /api/admin/reports/:id).
     expect(can('AUDITOR', 'closeCase')).toBe(false);
     expect(can('OPERATOR', 'closeCase')).toBe(true);
+    // Owners (A-06): an AUDITOR reads emails masked; locking and exporting an account are an ADMIN's.
+    expect(can('AUDITOR', 'readClientEmails')).toBe(false);
+    expect(can('OPERATOR', 'readClientEmails')).toBe(true);
+    expect(can('OPERATOR', 'lockAccount')).toBe(false);
+    expect(can('OPERATOR', 'exportAccount')).toBe(false);
+    expect(can('ADMIN', 'lockAccount')).toBe(true);
+    expect(can('ADMIN', 'exportAccount')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
   });
@@ -103,6 +111,23 @@ describe('tones', () => {
     // An open case waits for staff, as an open anomaly does; a closed one recedes.
     expect(toneOf('case', 'OPEN')).toBe(toneOf('anomaly', 'OPEN'));
     expect(toneOf('case', 'CLOSED')).toBe('muted');
+    // A locked account needs attention; every account status has its tone.
+    expect(toneOf('account', 'ACTIVE')).toBe('solid');
+    expect(toneOf('account', 'LOCKED')).toBe('alert');
+    expect(toneOf('account', 'DELETED')).toBe('muted');
+    for (const st of serverSchema.ACCOUNT_STATUSES) expect(toneOf('account', st)).not.toBe('critical');
+  });
+});
+
+describe('owners search (A-06)', () => {
+  it('reads an email, or the REF under a result, from one field', () => {
+    expect(ownerSearch('')).toBeNull();
+    expect(ownerSearch('   ')).toBeNull();
+    expect(ownerSearch(undefined)).toBeNull();
+    expect(ownerSearch(' Jane@Example.com ')).toEqual({ kind: 'email', email: 'Jane@Example.com' });
+    for (const ref of ['1a2b3c4d', '1A2B3C4D', 'REF 1A2B3C4D', 'ref:1a2b3c4d']) expect(ownerSearch(ref), ref).toEqual({ kind: 'ref', ref: '1A2B3C4D' });
+    expect(ownerSearch('1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d')).toEqual({ kind: 'ref', ref: '1A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D' });
+    for (const bad of ['jane', '1A2B3C4', 'O26-J-00184', 'REF']) expect(ownerSearch(bad)?.kind, bad).toBe('invalid');
   });
 });
 

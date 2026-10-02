@@ -1,7 +1,8 @@
 /**
  * What each admin role may do, mirroring the server guard (contract §3:
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
- * reinstatement, categories, console users and recovery codes). The server is the authority; the console
+ * reinstatement, categories, console users and a customer's recovery code,
+ * lock and export). The server is the authority; the console
  * only hides controls a role cannot use, so nobody is offered a button that
  * will answer 403.
  */
@@ -12,6 +13,8 @@ export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ AU
 export const CAPABILITY_MIN_ROLE = Object.freeze({
   read: 'AUDITOR',
   verifyAudit: 'AUDITOR',
+  /** Customers' emails in clear (the server masks them for an AUDITOR: j***@example.com). */
+  readClientEmails: 'OPERATOR',
   issue: 'OPERATOR',
   transition: 'OPERATOR',
   reissueCode: 'OPERATOR',
@@ -35,6 +38,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageAdmins: 'ADMIN',
   /** A one-time recovery code for a client who forgot the password (after an identity check). */
   issueRecoveryCode: 'ADMIN',
+  /** Lock a client's account (sessions end, pending transfers cancelled) and unlock it. */
+  lockAccount: 'ADMIN',
+  /** Everything held about a client's account, for a request under the right of access. */
+  exportAccount: 'ADMIN',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;

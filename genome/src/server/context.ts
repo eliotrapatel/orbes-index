@@ -31,6 +31,7 @@ import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
+import { OwnerService } from './services/owners.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
@@ -56,6 +57,8 @@ export interface AppServices {
   reports: ScanReportService;
   /** Assisted recovery of a customer account: one-time codes issued by ORBES Client Services. */
   recovery: AccountRecoveryService;
+  /** The console's customer sheet: search by email or REF, lock and unlock, the right-of-access export. */
+  owners: OwnerService;
 }
 
 export interface AppContext {
@@ -132,6 +135,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const reports = new ScanReportService({ db, audit, clock, log });
     const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock });
+    const owners = new OwnerService({ db, audit, sessions, ownership, clock });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
 
@@ -148,6 +152,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       certificates,
       reports,
       recovery,
+      owners,
       ...overrides.services,
     };
 

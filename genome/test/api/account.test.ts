@@ -309,7 +309,8 @@ describe('password change and assisted recovery (C-04)', () => {
 
       const list = safeJson(await (await adminClient(h, 'AUDITOR')).get('/api/admin/owners?pageSize=200')) as { items: Record<string, unknown>[] };
       const owner = list.items.find((o) => o.id === id)!;
-      expect(owner).toMatchObject({ email, status: 'ACTIVE', recoveryCodeExpiresAt: issued.expiresAt, transfersPausedUntil: null });
+      // An AUDITOR reads the email masked (A-06).
+      expect(owner).toMatchObject({ email: `o***@example.com`, status: 'ACTIVE', recoveryCodeExpiresAt: issued.expiresAt, transfersPausedUntil: null });
       expect(JSON.stringify(list)).not.toContain(issued.recoveryCode);
 
       // Used: no open code any more, and transfers are paused.

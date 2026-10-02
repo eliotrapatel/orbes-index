@@ -160,6 +160,12 @@ export function deriveTotpEncryptionKey(config: Pick<AppConfig, 'keys' | 'cookie
 const invalidCredentials = () => new DomainError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
 
 /**
+ * A customer account LOCKED by ORBES Client Services (A-06, POST /api/admin/owners/:id/lock): refused after a
+ * correct password (login) or recovery code (§10.8), and by a transfer begun before the lock took effect.
+ */
+export const customerAccountLocked = () => new DomainError('ACCOUNT_LOCKED', 403, 'This account is locked. ORBES Client Services can assist you.');
+
+/**
  * The normalised password of a login attempt, or undefined when it cannot match any stored hash
  * (not a string, empty, or over the scrypt input limit). Such attempts are refused BEFORE the
  * account lookup and still pay one scrypt (burnTime): verifySecret refuses them instantly, so a
@@ -252,7 +258,7 @@ export class AuthService {
       await this.recordAccountFailure(account.id, meta);
       throw invalidCredentials();
     }
-    if (account.status === 'LOCKED') throw new DomainError('ACCOUNT_LOCKED', 403, 'This account is locked. Please contact client services.');
+    if (account.status === 'LOCKED') throw customerAccountLocked();
     if (account.status !== 'ACTIVE') throw invalidCredentials();
 
     const rehash = needsRehash(account.password_hash) ? await hashSecret(password) : undefined;

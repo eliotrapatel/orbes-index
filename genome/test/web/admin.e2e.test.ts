@@ -10,8 +10,10 @@
  * → warranty activation and code re-issue → key rotation → audit chain
  * verification → sign out. Also: a customer's report followed from the
  * Cases queue to its scan, anomaly and piece, then closed; a one-time
- * recovery code issued from an owner's row (C-04); TOTP enrolment +
- * two-step sign-in, and the read-only AUDITOR console. No CSP violation or page error is tolerated.
+ * recovery code issued from an owner's row (C-04); a client found by email
+ * and by REF, the owner's sheet, its lock, unlock and export (A-06); TOTP
+ * enrolment + two-step sign-in, and the read-only AUDITOR console (emails
+ * masked). No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -560,6 +562,86 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('[data-testid=owner-status]').textContent()).not.toMatch(/Recovery code open/);
   }, STEP_TIMEOUT);
 
+  it('finds a client by email and by the REF under a result, opens the sheet, locks and unlocks the account, and exports its data', async () => {
+    const email = 'sheet.client@example.com';
+    const password = 'correct horse battery staple';
+    const client = await ctx.services.auth.registerAccount({ email, password, displayName: 'Ada Client', country: 'FR' }, {});
+    // A piece registered to the client from a scan made while signed in: its REF is the scan id's first block.
+    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: '58' }, SYSTEM_ACTOR);
+    await ctx.services.warranty.activate(piece.product.productId, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS — RUE SAINT-HONORÉ', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await ctx.services.verification.verify({ code: piece.code.data }, { accountId: client.account.id, deviceHash: hex('device-sheet'), geo: { country: 'FR' } });
+    await ctx.services.ownership.registerFirst(client.account.id, { registrationToken: scan.registration!.token }, { type: 'account', id: client.account.id });
+    const ref = scan.scanId.slice(0, 8).toUpperCase();
+    const rows = page.locator('table.table tbody tr');
+    const search = async (q: string) => {
+      await page.fill('[data-testid=owner-search] input[name=q]', q);
+      await page.press('[data-testid=owner-search] input[name=q]', 'Enter');
+    };
+
+    // By exact email, in any case: one account, which opens its sheet.
+    await go(page, '#/owners', 'Owners');
+    await search(email.toUpperCase());
+    await expect.poll(() => rows.count()).toBe(1);
+    expect(await page.locator('[data-testid=narrowed]').textContent()).toContain(`Search: ${email.toUpperCase()}`);
+    await rows.first().locator('[data-testid=owner-link]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(email);
+    expect(await page.locator('#account').textContent()).toMatch(/ACTIVE.*Ada Client.*FR/);
+    expect(await page.locator('#pieces').textContent()).toContain(piece.product.productId);
+    expect(await page.locator('#transfers .empty__text').textContent()).toBe('No transfer in progress.');
+    expect(await page.locator('#scans').textContent()).toContain(ref);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'owner-sheet', { full: true });
+
+    // Lock: the dialog says what it does; the sheet then reads LOCKED and offers the unlock; the client cannot sign in.
+    await page.click('[data-testid=lock-account]');
+    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Every session of the account ends now.*cannot sign in or use a recovery code/);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Account locked.")');
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/LOCKED/);
+    expect(await page.locator('[data-testid=lock-account]').count()).toBe(0);
+    expect(await page.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
+    await expect(ctx.services.auth.login({ email, password }, {})).rejects.toMatchObject({ code: 'ACCOUNT_LOCKED', httpStatus: 403 });
+    await page.click('[data-testid=unlock-account]');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Account unlocked.")');
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/ACTIVE/);
+    expect((await ctx.services.auth.login({ email, password }, {})).account.id).toBe(client.account.id);
+
+    // The right-of-access export: a JSON file of what the registry holds about the account.
+    const [exported] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=export-account]')]);
+    expect(exported.suggestedFilename()).toMatch(new RegExp(`^orbes-account-${client.account.id.slice(0, 8)}-\\d{4}-\\d{2}-\\d{2}\\.json$`));
+    const data = JSON.parse(readFileSync((await exported.path())!, 'utf8'));
+    expect(data).toMatchObject({ format: 'orbes.account-export', account: { id: client.account.id, email, status: 'ACTIVE' } });
+    expect(data.pieces.map((x: { productId: string }) => x.productId)).toEqual([piece.product.productId]);
+    expect(data.activity.map((x: { action: string }) => x.action)).toEqual(expect.arrayContaining(['account.register', 'account.lock', 'account.unlock']));
+
+    // By the REF the client reads from under a result: the scan, its piece, who scanned it and the piece's owner.
+    await go(page, '#/owners', 'Owners');
+    await search(`REF ${ref}`);
+    const reference = page.locator('#reference');
+    await expect.poll(() => reference.locator('tbody tr').count()).toBe(1);
+    expect(await reference.locator('.panel__note').textContent()).toContain(`REF ${ref}`);
+    expect(await reference.locator('tbody tr').first().textContent()).toMatch(new RegExp(`REF ${ref}.*AUTHENTIC FIRST REGISTRATION.*${piece.product.productId}.*${email}.*${email}`));
+    await expect.poll(() => page.locator('#accounts tbody tr').count()).toBe(1);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'owners-reference');
+    await reference.locator('[data-testid=ref-scan]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await expect.poll(() => rows.count()).toBe(1);
+
+    // A search that is neither an email nor a REF is said on the field.
+    await go(page, '#/owners', 'Owners');
+    await search('ada');
+    await expect.poll(() => page.locator('[data-testid=owner-search] .cfield__hint').textContent()).toBe('Enter an exact email, or a REF of 8 characters (0–9, A–F).');
+    expect(await page.locator('[data-testid=owner-search] .cfield__hint').isVisible()).toBe(true);
+    expect(await page.locator('.empty__text').textContent()).toBe('Nothing searched.');
+
+    // The product page leads to the owner's sheet.
+    await go(page, `#/products/${piece.product.productId}`, piece.product.productId);
+    await page.click('[data-testid=current-owner]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(email);
+  }, STEP_TIMEOUT);
+
   it('rotates the signing key with a typed confirmation', async () => {
     await go(page, '#/keys', 'Signing keys');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
@@ -696,10 +778,18 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
     await go(p, '#/keys', 'Signing keys');
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
-    // Owners read, without the recovery code reserved to an ADMIN.
+    // Owners read with every email masked, without the recovery code reserved to an ADMIN (A-06).
     await go(p, '#/owners', 'Owners');
-    await expect.poll(() => p.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => p.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     expect(await p.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
+    for (const shown of await p.locator('[data-testid=owner-link]').allTextContents()) expect(shown).toMatch(/^[^@*]\*\*\*@[^@]+$/);
+    expect(await p.locator('.page-head__lead').textContent()).toContain('Emails are masked for your role.');
+    // The sheet reads, masked, without the lock, the export or the recovery code.
+    await p.locator('table.table tbody tr', { hasText: 's***@example.com' }).locator('[data-testid=owner-link]').click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('s***@example.com');
+    expect(await p.locator('#pieces tbody tr').count()).toBe(1);
+    for (const action of ['lock-account', 'unlock-account', 'export-account', 'issue-recovery-code']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    for (const email of ['sheet.client@example.com', 'lost.password@example.com']) expect(await p.content()).not.toContain(email);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
     await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);

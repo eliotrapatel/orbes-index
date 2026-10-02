@@ -115,9 +115,9 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 
 | Role | May |
 |---|---|
-| AUDITOR | Read every admin resource. Manage its own session and second factor. |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). |
-| ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), and a customer's one-time recovery code (§16.10). |
+| AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2). Manage its own session and second factor. |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
 
@@ -208,11 +208,13 @@ Authentication and authorisation:
 | `CSRF_FAILED` | 403 | Origin or CSRF token check failed (§2.2). |
 | `MFA_REQUIRED` | 403 | MFA enforced and the admin session has not passed TOTP (§2.4). |
 | `FORBIDDEN` | 403 | Role too low; or a non-owner asking for a service history (also for an unknown product id, so ids cannot be enumerated); or an OPERATOR revoking or retiring a product; or an account that is not active. |
-| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account with status LOCKED (after a correct password, or a correct recovery code, §10.8). 429: admin locked for 15 minutes after 10 consecutive failures. |
+| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a transfer begun just before the lock (§11.2). 429: admin locked for 15 minutes after 10 consecutive failures. |
 | `CURRENT_PASSWORD_INVALID` | 400 | (§10.7) The current password of a password change is wrong, or the account is throttled (§10.2). A 400, never a 401: the apps end the session on any 401. |
 | `RECOVERY_CODE_INVALID` | 400 | (§10.8) Unknown email, wrong, malformed, expired, used or replaced recovery code, or too many failures for the account within the hour. One answer for all. |
-| `ACCOUNT_NOT_FOUND` | 404 | (§16.10) No customer account with this id. |
-| `ACCOUNT_NOT_ACTIVE` | 409 | (§16.10) A recovery code is issued only for an ACTIVE account. |
+| `ACCOUNT_NOT_FOUND` | 404 | (§16.10–16.13) No customer account with this id. |
+| `ACCOUNT_NOT_ACTIVE` | 409 | (§16.10, §16.12) A recovery code is issued, and a lock applied, only for an ACTIVE account. |
+| `ACCOUNT_ALREADY_LOCKED` | 409 | (§16.12) The account is already locked. |
+| `ACCOUNT_NOT_LOCKED` | 409 | (§16.12) Unlocking an account that is not locked. |
 | `EMAIL_TAKEN` | 409 | An account (or admin) with this email exists (case-insensitive). |
 | `TOTP_CODE_INVALID` | 400 | The code sent to enable TOTP does not match the secret. |
 | `TOTP_ALREADY_ENABLED` | 409 | TOTP is already enrolled for this admin. |
@@ -392,7 +394,11 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/genomes` | AUDITOR | — | admin | 15.6 |
 | GET | `/api/admin/scans` | AUDITOR | — | admin | 16.1 |
 | GET | `/api/admin/owners` | AUDITOR | — | admin | 16.2 |
+| GET | `/api/admin/owners/:id` | AUDITOR | — | admin | 16.11 |
 | POST | `/api/admin/owners/:id/recovery-code` | **ADMIN** | yes | admin | 16.10 |
+| POST | `/api/admin/owners/:id/lock` | **ADMIN** | yes | admin | 16.12 |
+| POST | `/api/admin/owners/:id/unlock` | **ADMIN** | yes | admin | 16.12 |
+| GET | `/api/admin/owners/:id/export` | **ADMIN** | — | admin | 16.13 |
 | GET | `/api/admin/warranties` | AUDITOR | — | admin | 16.3 |
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
 | PATCH | `/api/admin/anomalies/:id` | OPERATOR | yes | admin | 16.5 |
@@ -409,7 +415,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `/api/admin/owners/:id/recovery-code`, `/api/admin/reports`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
 
 ---
 
@@ -911,6 +917,8 @@ Body `{ "email": string (3–254), "password": string (1–1024) }`. Session-les
 
 Errors: `400 VALIDATION_FAILED`, `401 INVALID_CREDENTIALS` (identical for unknown emails and wrong passwords), `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
 
+**Locked account.** An account LOCKED by ORBES Client Services (§16.12) answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*) once the password is right, and no session is opened; a wrong password still answers `401 INVALID_CREDENTIALS`, so the lock is never revealed to someone who does not hold the password.
+
 **Per-account throttle.** After 10 wrong passwords for one account within 15 minutes (counted from the first failure of the window), further logins to that account are refused for the rest of the window **without checking the password**, with the same `401 INVALID_CREDENTIALS` and the same response time as a wrong password: the answer reveals neither the throttle nor whether the account exists. A successful login resets the counter; failures spread over more than 15 minutes start a new window. This complements the per-IP `auth` budget (§3), which a distributed guesser can spread across addresses.
 
 ### 10.3 `POST /api/v1/account/logout`
@@ -1094,7 +1102,9 @@ The offer expires after 7 days. While it is pending, verifications show `ownersh
 
 For 72 hours after an assisted recovery of the account's password (§10.8), new transfers out of it are refused with `409 TRANSFERS_PAUSED`, whose message gives the end of the pause (*… transfers from this account are paused until 5 October 2026, 09:00 UTC. ORBES Client Services can assist you.*).
 
-Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSFER_ALREADY_PENDING`, `409 TRANSFER_NOT_ALLOWED`, `409 TRANSFERS_PAUSED`.
+A lock by ORBES Client Services (§16.12) ends the account's sessions and cancels its pending transfers; a transfer request that was already on its way when the lock took effect is refused with `403 ACCOUNT_LOCKED` (the account row is re-read under its lock).
+
+Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSFER_ALREADY_PENDING`, `409 TRANSFER_NOT_ALLOWED`, `409 TRANSFERS_PAUSED`.
 
 ### 11.3 `POST /api/v1/ownership/transfers/accept`
 
@@ -1468,7 +1478,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
 ```
 
 - `codes[].verification` re-verifies each stored code live (payload fields against the row, payload hash, Ed25519 signature, key trust). It is `{ "valid": true, "keyStatus" }` or `{ "valid": false, "reason", "keyStatus" }` with `reason` one of `UNKNOWN_KEY`, `PAYLOAD_INVALID`, `PAYLOAD_MISMATCH`, `PAYLOAD_HASH_MISMATCH`, `SIGNATURE_INVALID`, `KEY_REVOKED`. A row tampered with in the database shows up here as invalid. Read views never include `data`.
-- `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email and display name; `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
+- `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email (masked for an AUDITOR, §16.2) and display name; each account opens its sheet in the console (§16.11); `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
 - `anomalies` lists up to 100 anomalies of the product (shape in §16.4); `services` the service records (§14.8).
 - `lifecycle.allowed` lists the statuses `transitions` accepts now; `returnTo` is where a return, recovery or reinstatement would lead; `canReinstate` is true for a REVOKED product whose previous status is known.
 
@@ -1794,7 +1804,33 @@ Item:
 
 ### 16.2 `GET /api/admin/owners`
 
-AUDITOR. Paginated customer accounts, newest first: `{ "id", "email", "displayName", "country", "status", "createdAt", "products" (currently owned), "productsEver", "transfersPausedUntil", "recoveryCodeExpiresAt" }`. `transfersPausedUntil` is the end of the 72-hour transfer pause after an assisted recovery (§10.8) while it lasts, else `null`; `recoveryCodeExpiresAt` the expiry of the open recovery code (§16.10) while it can still be used, else `null`. The code itself is never listed. The routes of the owners live in `routes/admin/owners.ts`.
+AUDITOR. Paginated customer accounts, newest first: `{ "id", "email", "displayName", "country", "status", "createdAt", "products" (currently owned), "productsEver", "transfersPausedUntil", "recoveryCodeExpiresAt" }`. `status` is `ACTIVE`, `LOCKED` (§16.12) or `DELETED`. `transfersPausedUntil` is the end of the 72-hour transfer pause after an assisted recovery (§10.8) while it lasts, else `null`; `recoveryCodeExpiresAt` the expiry of the open recovery code (§16.10) while it can still be used, else `null`. The code itself is never listed. The routes of the owners live in `routes/admin/owners.ts`, their service in `services/owners.ts` (A-06).
+
+**Emails.** OPERATOR and ADMIN read customers' emails in clear. An **AUDITOR reads them masked**: the first character of the local part, `***`, then the domain (`jane@example.com` → `j***@example.com`), here, in the searches below, on the owner's sheet (§16.11) and in a product's ownership history (§14.3).
+
+**Search** (one of the two, or neither; both → `400 VALIDATION_FAILED`):
+
+| Query | Rules |
+|---|---|
+| `email` | One account by its **exact** email, trimmed and in any case, as at sign-in (§10.2): 0 or 1 item. A partial address answers `400 VALIDATION_FAILED` (*Enter the whole email address of the account.*): there is no prefix or substring search. |
+| `ref` | The REF the verify app prints under every result (`REF 1A2B3C4D`: the first 8 hexadecimal characters of the scan's id), with or without the word REF, in any case, or a whole scan id. Anything else → `400 VALIDATION_FAILED`. |
+
+A `ref` search adds `scans`: the verification events the REF names (at most 20, newest first; 8 characters are 32 bits, so more than one is rare), each with the piece, the account signed in when it scanned (`scannedBy`, or `null`) and the piece's current owner (`ownerId`, or `null`). `items` are then those accounts:
+
+```json
+{
+  "items": [ { "id": "6d1c…", "email": "ada@example.com", "status": "ACTIVE", "…": "…" } ],
+  "page": 1, "pageSize": 50, "total": 1,
+  "scans": [
+    { "scanId": "1a2b3c4d-…", "reference": "1A2B3C4D", "occurredAt": "2026-10-02T09:15:21.929Z", "eventType": "VERIFY",
+      "state": "SUSPICIOUS_ACTIVITY", "productId": "O26-J-00184", "scannedBy": null, "ownerId": "6d1c…" }
+  ]
+}
+```
+
+Query strings never reach a log: the app logs paths only, and Caddy's access log drops the query ([DEPLOYMENT](DEPLOYMENT.md), logging).
+
+In the console: Owners has one search field, *Email or REF* (an `@` makes it an email); a REF lists its scans under *Reference*, each linked to its verification event, its piece, who scanned it and the owner of the piece, then the *Accounts*. Each account opens its sheet (§16.11).
 
 ### 16.3 `GET /api/admin/warranties`
 
@@ -1915,7 +1951,72 @@ OPERATOR. Closes a case. Body `{ "status": "CLOSED", "note": string }`: the note
 
 Errors: `400 VALIDATION_FAILED` (malformed id, a body with fields), `403 FORBIDDEN` (AUDITOR, OPERATOR), `403 CSRF_FAILED`, `404 ACCOUNT_NOT_FOUND`, `409 ACCOUNT_NOT_ACTIVE`.
 
-In the console: *Recovery code* on the account's row of Owners (ADMIN only), a dialog that says what the code does, then the code once on an ivory panel with COPY and *Given to the client — hide*; the row then reads *Recovery code open until …*, and after the recovery *Transfers paused until …*.
+In the console: *Recovery code* on the account's row of Owners and on the owner's sheet (§16.11; ADMIN only), a dialog that says what the code does, then the code once on an ivory panel with COPY and *Given to the client — hide*; the row then reads *Recovery code open until …*, and after the recovery *Transfers paused until …*. The A-06 brief named this route `/:id/recovery` and its public field `code`; there is one recovery mechanism, so they keep the names of C-04 (`/:id/recovery-code`, `recoveryCode`).
+
+### 16.11 `GET /api/admin/owners/:id` (extension of the contract)
+
+AUDITOR. The owner's sheet for ORBES Client Services (A-06): what they need while a customer is on the line. `:id` is the account id (uuid).
+
+```json
+{
+  "owner": { "id": "6d1c…", "email": "ada@example.com", "displayName": "Ada", "country": "FR", "status": "ACTIVE", "createdAt": "…",
+             "products": 1, "productsEver": 2, "transfersPausedUntil": null, "recoveryCodeExpiresAt": null },
+  "pieces": [
+    { "productId": "O26-J-00184", "model": "MONOLITHE", "type": "RING", "material": "925 STERLING SILVER", "variant": "54",
+      "status": "OWNED", "ownershipState": "TRANSFER_PENDING", "acquiredVia": "FIRST_REGISTRATION", "verified": true,
+      "since": "…", "until": null, "endedReason": null },
+    { "productId": "O26-J-00102", "…": "…", "until": "2026-09-30T10:00:00.000Z", "endedReason": "TRANSFERRED_OUT" }
+  ],
+  "transfers": [ { "id": "…", "productId": "O26-J-00184", "createdAt": "…", "expiresAt": "…" } ],
+  "scans": [ { "id": "…", "reference": "1A2B3C4D", "occurredAt": "…", "eventType": "VERIFY", "state": "AUTHENTIC_OWNERSHIP_VERIFIED", "productId": "O26-J-00184", "country": "FR" } ]
+}
+```
+
+- `owner`: the shape of §16.2 (email masked for an AUDITOR).
+- `pieces`: every ownership period of the account (`ownership`), the pieces owned now first (`until: null`), then those owned before; newest first within each.
+- `transfers`: the transfers the account offered that are still pending and unexpired.
+- `scans`: its **20 latest** scans made while signed in (`scan_events.account_id`), newest first, each with its REF.
+
+Errors: `400 VALIDATION_FAILED` (malformed id), `404 ACCOUNT_NOT_FOUND`.
+
+In the console: `#/owners/:id`, reached from Owners, from a REF search and from a product's ownership (§14.3). It shows the account (status, email, name, country, since, id), *Pieces*, *Transfers in progress* and *Latest verifications* (each linked to its verification event and its piece), and, for an ADMIN, *Recovery code*, *Lock account* or *Unlock account*, and *Export data*. An AUDITOR reads it masked, without the actions.
+
+### 16.12 `POST /api/admin/owners/:id/lock` and `POST /api/admin/owners/:id/unlock` (extension of the contract)
+
+**ADMIN**. No body (or `{}`).
+
+**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request. In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`). Until it is unlocked the customer cannot sign in or use a recovery code (`403 ACCOUNT_LOCKED`, *This account is locked. ORBES Client Services can assist you.*, §10.2, §10.8), and a transfer request already on its way is refused (§11.2). The pieces stay registered to the account; its scans keep showing them as registered. An open recovery code stays open (§10.8), and a new one cannot be issued while it is locked (`409 ACCOUNT_NOT_ACTIVE`).
+
+**200** `{ "status": "LOCKED", "sessionsRevoked": 2, "transfersCancelled": 1 }`. Audited `account.lock` with the account as target and `{ sessionsRevoked, transfersCancelled }`; never the email.
+
+**Unlock** a LOCKED account: the status becomes `ACTIVE` again and the customer signs in as before. Transfers cancelled by the lock stay cancelled. **200** `{ "status": "ACTIVE" }`. Audited `account.unlock`.
+
+Errors: `400 VALIDATION_FAILED` (malformed id, a body with fields), `403 FORBIDDEN` (AUDITOR, OPERATOR), `403 CSRF_FAILED`, `404 ACCOUNT_NOT_FOUND`, `409 ACCOUNT_ALREADY_LOCKED`, `409 ACCOUNT_NOT_ACTIVE` (a deleted account), `409 ACCOUNT_NOT_LOCKED`.
+
+In the console: *Lock account* and *Unlock account* on the owner's sheet, each behind a dialog that says what it does; the sheet then reads *LOCKED*.
+
+### 16.13 `GET /api/admin/owners/:id/export` (extension of the contract)
+
+**ADMIN** (a `GET`, but it hands over a customer's personal data). Everything the registry holds about one account, readable, for a request under the **right of access** (GDPR art. 15), after the same identity check as a recovery code (SECURITY-MODEL §3.6). A `Cache-Control: no-store` JSON attachment, `orbes-account-<first 8 characters of the id>-<YYYY-MM-DD>.json`:
+
+| Field | Content |
+|---|---|
+| `format`, `version`, `exportedAt` | `"orbes.account-export"`, `1`, the time of the export. |
+| `account` | `id`, `email` (in clear), `displayName`, `country`, `status`, `createdAt`, `updatedAt`, `transfersPausedUntil`. |
+| `pieces` | Every ownership period, as on the sheet (§16.11). |
+| `transfers` | Every transfer offered by the account (`direction: "OUT"`) or accepted by it (`"IN"`), with its status (a pending one past its expiry reads `EXPIRED`), creation, expiry and completion. |
+| `scans` | Every scan made while signed in, oldest first: `reference` (the REF), time, event, result, piece, `country`, `region`, `lat`/`lon` (rounded to 0.1°, §4), and the customer's `report` on it (§8.5: `channel`, `place`, `note`, `createdAt`) or `null`. |
+| `sessions` | The account's sessions still stored: `createdAt`, `lastSeenAt`, `expiresAt`, `userAgent`. |
+| `recoveryCodes` | The recovery codes issued (§16.10): `createdAt`, `expiresAt`, `usedAt`, `revokedAt`. |
+| `activity` | The audit entries about the account, oldest first: `occurredAt`, `action` (`account.register`, `account.login`, `account.password_change`, `account.recover`, `account.lock`, …) and `by` (`account`, `admin` or `system`); never the staff member's identity. |
+| `truncated` | The lists cut at 50 000 entries (`scans`, `activity`); empty when the export is complete. |
+| `notIncluded` | What the registry holds but cannot give back readably: the password and recovery codes (one-way scrypt hashes), and the IP and device pseudonyms of scans and sessions (keyed one-way hashes; no IP address or device cookie is stored). |
+
+Audited `account.export` with the account as target and the number of entries of each list; never the content or the email.
+
+Errors: `400 VALIDATION_FAILED`, `403 FORBIDDEN` (AUDITOR, OPERATOR), `404 ACCOUNT_NOT_FOUND`.
+
+In the console: *Export data* on the owner's sheet saves the file.
 
 ---
 

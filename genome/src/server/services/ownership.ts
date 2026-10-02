@@ -37,6 +37,7 @@ import type { AcquiredVia, OwnershipRow, OwnershipState, OwnershipTransferRow, P
 import { DomainError, forbidden, notFound, tooManyRequests, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
+import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { consumeScanToken, inspectScanToken, type ScanTokenFailure } from './scan-tokens.js';
@@ -314,7 +315,9 @@ export class OwnershipService {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const account = await tx.selectFrom('accounts').select('transfers_frozen_until').where('id', '=', accountId).forShare().executeTakeFirst();
+      const account = await tx.selectFrom('accounts').select(['status', 'transfers_frozen_until']).where('id', '=', accountId).forShare().executeTakeFirst();
+      // Locked by ORBES Client Services while this request was on its way (the lock ends the sessions, A-06).
+      if (account?.status === 'LOCKED') throw customerAccountLocked();
       if (account?.transfers_frozen_until && account.transfers_frozen_until.getTime() > now.getTime()) throw transfersPaused(account.transfers_frozen_until);
       const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);

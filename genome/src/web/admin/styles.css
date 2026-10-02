@@ -872,6 +872,11 @@ a.bar__label:hover {
   display: none;
 }
 
+/* A search the console cannot read (Owners: neither an email nor a REF) says why under its field. */
+.filters .cfield.is-invalid .cfield__hint {
+  display: block;
+}
+
 /* A list narrowed to one record by a link from another view, and the way back. */
 .filters__narrowed {
   display: inline-flex;

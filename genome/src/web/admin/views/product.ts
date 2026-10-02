@@ -438,12 +438,21 @@ function ownershipPanel(d: ProductDetail): HTMLElement {
     [
       defList([
         { label: 'State', value: statusMark(humanize(d.product.ownershipState), toneOf('ownership', d.product.ownershipState)) },
-        { label: 'Current owner', value: cur ? mono(cur.accountId, shortHash(cur.accountId, 8, 4)) : 'NONE', note: cur ? `${cur.verified ? 'VERIFIED' : 'UNVERIFIED'} · ${humanize(cur.acquiredVia)} · SINCE ${formatDate(cur.since)}` : undefined },
+        {
+          label: 'Current owner',
+          value: cur ? h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: cur.accountId }), 'data-testid': 'current-owner' } }, mono(cur.accountId, shortHash(cur.accountId, 8, 4))) : 'NONE',
+          note: cur ? `${cur.verified ? 'VERIFIED' : 'UNVERIFIED'} · ${humanize(cur.acquiredVia)} · SINCE ${formatDate(cur.since)}` : undefined,
+        },
         { label: 'Transfer', value: cur?.transferPending ? statusMark('PENDING', 'outline') : 'NONE' },
       ]),
       table(
         [
-          { label: 'Owner', cell: (o) => h('span', null, o.email, o.displayName ? h('span', { class: 'cell-sub' }, o.displayName) : null), kind: ['wide'] },
+          // The owner's sheet (A-06); the email is masked for an AUDITOR by the server.
+          {
+            label: 'Owner',
+            cell: (o) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: o.accountId }) } }, o.email), o.displayName ? h('span', { class: 'cell-sub' }, o.displayName) : null),
+            kind: ['wide'],
+          },
           { label: 'Acquired', cell: (o) => humanize(o.acquiredVia) },
           { label: 'Verified', cell: (o) => (o.verified ? 'YES' : 'NO') },
           { label: 'From', cell: (o) => formatDate(o.startedAt), kind: ['nowrap'] },

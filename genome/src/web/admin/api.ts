@@ -35,7 +35,9 @@ import type {
   KeyJson,
   LifecycleSnapshot,
   Model,
-  OwnerRecord,
+  OwnerList,
+  OwnerLock,
+  OwnerSheet,
   Paged,
   RecoveryCode,
   ProductDetail,
@@ -427,8 +429,30 @@ export class AdminApi {
     return this.get('/api/admin/scans', q);
   }
 
-  owners(page = 1, pageSize = 50): Promise<Paged<OwnerRecord>> {
-    return this.get('/api/admin/owners', { page, pageSize });
+  /** Customer accounts; `email` finds one exact address, `ref` the accounts behind the REF under a result (with its scans). */
+  owners(q: { email?: string; ref?: string; page?: number; pageSize?: number } = {}): Promise<OwnerList> {
+    return this.get('/api/admin/owners', q);
+  }
+
+  /** The owner's sheet: pieces, transfers in progress, latest scans. */
+  owner(accountId: string): Promise<OwnerSheet> {
+    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}`);
+  }
+
+  /** ADMIN: lock the account (its sessions end, its pending transfers are cancelled). */
+  lockOwner(accountId: string): Promise<OwnerLock> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/lock`);
+  }
+
+  /** ADMIN: unlock the account. */
+  unlockOwner(accountId: string): Promise<{ status: 'ACTIVE' }> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/unlock`);
+  }
+
+  /** ADMIN: everything held about the account (right of access), as a JSON file. */
+  async exportOwner(accountId: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/owners/${encodeURIComponent(accountId)}/export`, { raw: true });
+    return toDownload(res, 'orbes-account.json');
   }
 
   /** ADMIN: a one-time recovery code for a client who forgot the password (after an identity check). Shown once. */

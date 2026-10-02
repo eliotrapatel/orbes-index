@@ -27,6 +27,7 @@ import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { loginView } from './views/login.js';
+import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
 import { productView, resetProductViewState } from './views/product.js';
 import { productsView } from './views/products.js';
@@ -83,6 +84,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
+  owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },

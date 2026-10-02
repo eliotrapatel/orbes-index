@@ -441,6 +441,7 @@ export interface ScanRecord {
 
 export interface OwnerRecord {
   id: string;
+  /** In clear for OPERATOR and ADMIN, masked (`j***@example.com`) for an AUDITOR. */
   email: string;
   displayName: string | null;
   country: string | null;
@@ -452,6 +453,56 @@ export interface OwnerRecord {
   transfersPausedUntil: Iso | null;
   /** The expiry of the open recovery code, while it can still be used. */
   recoveryCodeExpiresAt: Iso | null;
+}
+
+/** A scan found by the REF printed under a result, with the accounts it leads to. */
+export interface ReferenceMatch {
+  scanId: string;
+  reference: string;
+  occurredAt: Iso;
+  eventType: string;
+  state: string;
+  productId: string | null;
+  /** The account signed in when it scanned, if any. */
+  scannedBy: string | null;
+  /** The piece's current owner, if any. */
+  ownerId: string | null;
+}
+
+/** GET /api/admin/owners: `scans` only for a search by REF. */
+export interface OwnerList extends Paged<OwnerRecord> {
+  scans?: ReferenceMatch[];
+}
+
+export interface OwnedPiece {
+  productId: string;
+  model: string;
+  type: string;
+  material: string;
+  variant: string | null;
+  status: ProductStatus;
+  ownershipState: OwnershipState;
+  acquiredVia: string;
+  verified: boolean;
+  since: Iso;
+  /** Null while the account owns it. */
+  until: Iso | null;
+  endedReason: string | null;
+}
+
+/** GET /api/admin/owners/:id: the owner's sheet. */
+export interface OwnerSheet {
+  owner: OwnerRecord;
+  pieces: OwnedPiece[];
+  transfers: { id: string; productId: string; createdAt: Iso; expiresAt: Iso }[];
+  scans: { id: string; reference: string; occurredAt: Iso; eventType: string; state: string; productId: string | null; country: string | null }[];
+}
+
+/** POST /api/admin/owners/:id/lock. */
+export interface OwnerLock {
+  status: 'LOCKED';
+  sessionsRevoked: number;
+  transfersCancelled: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */

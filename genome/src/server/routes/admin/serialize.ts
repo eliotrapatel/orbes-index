@@ -5,11 +5,32 @@
  * the scannable code `data` is only included where an OPERATOR is producing
  * codes (issuance, re-issue): anyone holding it can print a code that
  * verifies, so read-only roles get the fingerprints, not the payload.
+ * Likewise a customer's email reads in clear from OPERATOR up and masked
+ * (`j***@example.com`) for an AUDITOR (A-06, SECURITY-MODEL §3.6).
  */
+import type { FastifyRequest } from 'fastify';
 import { toBase64Url } from '../../../core/bytes.js';
+import { hasRole, requireAdmin } from '../../http/sessions.js';
 import type { KeyRecord } from '../../keys/key-service.js';
 import type { AdminProfile } from '../../services/auth.js';
 import type { CodeRecord, GenomeRecord, ProductRecord } from '../../services/issuance.js';
+
+/** `jane@example.com` → `j***@example.com`: the first character of the local part, then the domain. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return '***';
+  return `${[...email.slice(0, at)][0]}***${email.slice(at)}`;
+}
+
+/** Whether the caller reads customers' emails in clear: OPERATOR and ADMIN do, an AUDITOR does not. */
+export function readsClientEmails(request: FastifyRequest): boolean {
+  return hasRole(requireAdmin(request).admin.role, 'OPERATOR');
+}
+
+/** A customer's email as the caller may read it (see `readsClientEmails`). */
+export function clientEmail(email: string, inClear: boolean): string {
+  return inClear ? email : maskEmail(email);
+}
 
 export function adminJson(a: AdminProfile) {
   return { id: a.id, email: a.email, role: a.role, totpEnabled: a.totpEnabled };

@@ -1,7 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
  * mutates, ADMIN for keys, revocations, reinstatement, categories, console
- * users and a customer's recovery code.
+ * users and a customer's recovery code, lock and export.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -48,6 +48,12 @@ const PROBES: Probe[] = [
   { group: 'scans', method: 'GET', url: '/api/admin/scans', min: 'AUDITOR' },
   { group: 'owners', method: 'GET', url: '/api/admin/owners', min: 'AUDITOR' },
   { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/recovery-code`, body: INVALID, min: 'ADMIN' },
+  { group: 'owners', method: 'GET', url: '/api/admin/owners?email=client%40example.com', min: 'AUDITOR' },
+  { group: 'owners', method: 'GET', url: '/api/admin/owners?ref=1A2B3C4D', min: 'AUDITOR' },
+  { group: 'owners', method: 'GET', url: `/api/admin/owners/${UUID}`, min: 'AUDITOR' },
+  { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/lock`, body: INVALID, min: 'ADMIN' },
+  { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/unlock`, body: INVALID, min: 'ADMIN' },
+  { group: 'owners', method: 'GET', url: `/api/admin/owners/${UUID}/export`, min: 'ADMIN' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'PATCH', url: `/api/admin/anomalies/${UUID}`, body: INVALID, min: 'OPERATOR' },

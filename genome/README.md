@@ -34,7 +34,8 @@ genome/
     keys/                KeyProvider (local AES-GCM files | memory), KeyService (rotation, revocation)
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
-                         scan tokens, scan reports (Cases), scan-history retention
+                         scan tokens, scan reports (Cases), scan-history retention,
+                         account recovery and the owner's sheet (Client Services)
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/

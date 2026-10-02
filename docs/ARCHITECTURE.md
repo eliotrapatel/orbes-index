@@ -106,7 +106,8 @@ genome/
     keys/                KeyProvider (local AES-GCM files | memory; KMS/HSM-ready interface), KeyService
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
-                         certificate cards, scan tokens, scan reports (Cases), scan-history retention
+                         certificate cards, scan tokens, scan reports (Cases), scan-history retention,
+                         account recovery and the owner's sheet (Client Services)
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin

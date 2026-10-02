@@ -34,6 +34,8 @@ const ANOMALY_STATUS: Record<string, Tone> = { OPEN: 'alert', ACKNOWLEDGED: 'out
 const WARRANTY: Record<string, Tone> = { NOT_STARTED: 'outline', ACTIVE: 'solid', EXPIRED: 'muted', VOID: 'alert' };
 const OWNERSHIP: Record<string, Tone> = { UNREGISTERED: 'outline', REGISTERED: 'solid', OWNED: 'solid', TRANSFER_PENDING: 'outline' };
 const SERVICE: Record<string, Tone> = { OPEN: 'outline', COMPLETED: 'muted', CANCELLED: 'muted' };
+/** A client's account: a LOCKED one cannot sign in until ORBES Client Services unlocks it. */
+const ACCOUNT: Record<string, Tone> = { ACTIVE: 'solid', LOCKED: 'alert', DELETED: 'muted' };
 /** A case of the Cases queue: an open one waits for staff, as an open anomaly does. */
 const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
@@ -49,7 +51,7 @@ const VERIFICATION: Record<string, Tone> = {
   PENDING: 'outline',
 };
 
-export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case';
+export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -62,6 +64,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   service: SERVICE,
   verification: VERIFICATION,
   case: CASE,
+  account: ACCOUNT,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

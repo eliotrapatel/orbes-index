@@ -4,7 +4,7 @@
  * One guard covers the whole scope (http/sessions.ts): an admin session is
  * required everywhere except login; reads need AUDITOR, mutations OPERATOR
  * unless a route asks for ADMIN (keys, revocations, reinstatement,
- * categories, console users, a customer's recovery code); every mutation needs the CSRF token and a same-origin
+ * categories, console users, a customer's recovery code, lock and export); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor.

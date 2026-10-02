@@ -41,7 +41,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import { conflict, DomainError, forbidden, notFound } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
-import { checkPasswordPolicy, normalizeEmail, type ClientMeta } from './auth.js';
+import { checkPasswordPolicy, customerAccountLocked, normalizeEmail, type ClientMeta } from './auth.js';
 import { formatGrouped, normalizeCrockford, randomCrockford } from './claim-codes.js';
 import type { OwnershipService } from './ownership.js';
 import type { SessionService } from './sessions.js';
@@ -90,8 +90,6 @@ export const recoveryCodeInvalid = () =>
     400,
     'This email and recovery code do not match, or the code has expired or was already used. Check them, or ask ORBES Client Services for a new code.',
   );
-
-const accountLocked = () => new DomainError('ACCOUNT_LOCKED', 403, 'This account is locked. ORBES Client Services can assist you.');
 
 function accountActor(id: string, meta: ClientMeta): Actor {
   return meta.ipHash ? { type: 'account', id, ipHash: meta.ipHash } : { type: 'account', id };
@@ -232,7 +230,7 @@ export class AccountRecoveryService {
       const now = this.clock();
       const fresh = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', account.id).forUpdate().executeTakeFirstOrThrow();
       // Locked by staff: refused like a login with the right password; the code stays for when it is unlocked.
-      if (fresh.status === 'LOCKED') throw accountLocked();
+      if (fresh.status === 'LOCKED') throw customerAccountLocked();
       if (fresh.status !== 'ACTIVE') throw recoveryCodeInvalid();
       // Used by a concurrent attempt, or replaced by a newer code, since it was checked.
       const used = await tx

@@ -247,10 +247,10 @@ The service API: `transition(productId, to, { reason }, actor)`, `history(produc
 | Method | Behaviour |
 |---|---|
 | `registerFirst(accountId, { registrationToken, claimCode? }, actor)` | The token is single-use, unexpired and bound to the product. If the product has a claim secret, the claim code must match (constant-time scrypt compare; 5 failed attempts per product per hour, then 429). The product must have no current owner. Creates an `ownership` row (`FIRST_REGISTRATION`, `verified` = claim code matched). Product status becomes `OWNED` if verified, otherwise `REGISTERED`, and `ownership_state` is updated. |
-| `initiateTransfer(accountId, productId, actor)` | The caller must be the current owner and no transfer may be pending. Returns `{ transferCode: 'XXXX-XXXX-XXXX', expiresAt }` (7 days). Only the hash of the code is stored. Refused with `409 TRANSFERS_PAUSED` while the account's `transfers_frozen_until` is in the future (72 hours after an assisted recovery). |
+| `initiateTransfer(accountId, productId, actor)` | The caller must be the current owner and no transfer may be pending. Returns `{ transferCode: 'XXXX-XXXX-XXXX', expiresAt }` (7 days). Only the hash of the code is stored. Refused with `409 TRANSFERS_PAUSED` while the account's `transfers_frozen_until` is in the future (72 hours after an assisted recovery), and with `403 ACCOUNT_LOCKED` for an account locked by Client Services. |
 | `acceptTransfer(accountId, transferCode, actor)` | The recipient cannot be the current owner. Ends the old ownership (`TRANSFERRED_OUT`) and starts the new one (`TRANSFER`, `verified` = previous verified). Product status becomes `TRANSFERRED`. |
 | `cancelTransfer(accountId, productId, actor)` | Cancels the pending transfer. |
-| `cancelPendingTransfersFrom(tx, accountId, actor, reason)` | Inside the caller's transaction (the assisted recovery, which holds the account row): cancels every pending transfer offered by the account, audited `ownership.transfer.cancel` with the reason. |
+| `cancelPendingTransfersFrom(tx, accountId, actor, reason)` | Inside the caller's transaction (the assisted recovery or a lock, which hold the account row): cancels every pending transfer offered by the account, audited `ownership.transfer.cancel` with the reason. |
 | `confirmOwnership(productId, actor /* admin */)` | `REGISTERED` becomes `OWNED` (proof reviewed by client services). |
 | `reportIncident(accountId, productId, 'LOST' \| 'STOLEN', actor)` | Owner only. Moves the product to `LOST` or `STOLEN`. |
 | `listForAccount(accountId)` / `history(productId)` (admin) | — |
@@ -347,7 +347,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 
 ### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR)
 
-AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users and a customer's recovery code.
+AUDITOR is read-only and reads customers' emails masked (`j***@example.com`). Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users and a customer's recovery code, lock and export.
 
 | Method | Path | Description |
 |---|---|---|
@@ -378,8 +378,11 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/genomes?page` | — |
 | GET | `/api/admin/codes?page` | — |
 | GET | `/api/admin/scans?productId&state&scanId&page` | Scan and authentication events, each with the customer's `report` (or null). |
-| GET | `/api/admin/owners?page` | Accounts with product counts, the end of a transfer pause and the expiry of an open recovery code (`routes/admin/owners.ts`). |
+| GET | `/api/admin/owners?email&ref&page` | Accounts with product counts, the end of a transfer pause and the expiry of an open recovery code (`routes/admin/owners.ts`, `services/owners.ts`). Extension: `email` finds one exact address; `ref` (the REF under a result) adds `scans`, each with its piece, `scannedBy` and the piece's `ownerId`, and lists those accounts. |
+| GET | `/api/admin/owners/:id` | Extension, AUDITOR: the owner's sheet: pieces (every ownership period), transfers in progress, 20 latest scans. |
 | POST | `/api/admin/owners/:id/recovery-code` | Extension, ADMIN: a one-time recovery code (12 Crockford characters, 30 min, scrypt hash only, one open per account), shown once, after an identity check by ORBES Client Services. Audited `account.recovery_code.issue`, never with the code. |
+| POST | `/api/admin/owners/:id/lock`, `/api/admin/owners/:id/unlock` | Extension, ADMIN: LOCKED (every session ends, pending transfers cancelled, sign-in and recovery refused with `403 ACCOUNT_LOCKED`) or ACTIVE again. Audited `account.lock` / `account.unlock`. |
+| GET | `/api/admin/owners/:id/export` | Extension, ADMIN: everything held about the account (right of access), a `no-store` JSON attachment. Audited `account.export` with counts. |
 | GET | `/api/admin/warranties?status&page` | — |
 | GET | `/api/admin/anomalies?status&severity&id&page` | Each with `reports` (count, open, latest) on the scans that took part in it. |
 | PATCH | `/api/admin/anomalies/:id` | Body `{ status, note }`. |

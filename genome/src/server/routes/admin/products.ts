@@ -40,7 +40,7 @@ import { requireProduct } from '../../services/lifecycle.js';
 import type { AppContext } from '../../context.js';
 import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
-import { codeJson, genomeJson, issuedCodeJson, productJson } from './serialize.js';
+import { clientEmail, codeJson, genomeJson, issuedCodeJson, productJson, readsClientEmails } from './serialize.js';
 
 /** Transitions that end a product's public validity: ADMIN only (contract §3: revocation is ADMIN's). */
 export const ADMIN_ONLY_TARGETS: ReadonlySet<string> = new Set(['REVOKED', 'RETIRED']);
@@ -114,6 +114,16 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   const { db } = ctx;
   const { issuance, lifecycle, warranty, ownership, anomaly } = ctx.services;
 
+  /** The current owner, every ownership period and transfer; owners' emails masked for an AUDITOR (A-06). */
+  const ownershipJson = async (productId: string, inClear: boolean) => {
+    const history = await ownership.history(productId);
+    return {
+      current: await ownership.currentOwner(productId),
+      owners: history.owners.map((o) => ({ ...o, email: clientEmail(o.email, inClear) })),
+      transfers: history.transfers,
+    };
+  };
+
   // ── Read ─────────────────────────────────────────────────────────────────
 
   app.get('/api/admin/products', async (request) => {
@@ -163,7 +173,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       genomes,
       codes,
       scans: { count: Number(scans.n), lastAt: scans.last ?? null },
-      ownership: { current: await ownership.currentOwner(product.id), ...(await ownership.history(product.id)) },
+      ownership: await ownershipJson(product.id, readsClientEmails(request)),
       warranty: await warranty.get(product.id),
       services: await warranty.services(product.id),
       anomalies: (await anomaly.list({ productId: product.id }, { page: 1, pageSize: 100 })).items,
