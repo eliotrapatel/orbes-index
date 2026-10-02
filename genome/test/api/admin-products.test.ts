@@ -303,6 +303,30 @@ describe('admin products, codes and records', () => {
       expect(summary.details).toMatchObject({ issued: 2, failed: 1, failures: [{ index: 1, code: 'SERIAL_TAKEN' }] });
     });
 
+    it('refuses a whole batch of a model or a category no longer offered (A-10: 409), nothing signed; active again, it issues', async () => {
+      const total = async () => (safeJson(await auditor.get('/api/admin/products?pageSize=1')) as any).total as number;
+      const summaries = async () => (await h.ctx.db.selectFrom('audit_logs').select('id').where('action', '=', 'product.issue_batch').execute()).length;
+      const before = [await total(), await summaries()];
+      const send = () => operator.post('/api/admin/products/batch', { template: template({ productionBatch: 'B-2026-10-RETIRED' }), items: [{}, {}] });
+
+      expect((await operator.patch(`/api/admin/models/${modelId}`, { active: false })).statusCode).toBe(200);
+      const model = await send();
+      expect(model.statusCode).toBe(409);
+      expect(errorOf(model).code).toBe('MODEL_INACTIVE');
+      expect((await operator.patch(`/api/admin/models/${modelId}`, { active: true })).statusCode).toBe(200);
+
+      expect((await admin.post('/api/admin/categories/J/active', { active: false })).statusCode).toBe(200);
+      const category = await send();
+      expect(category.statusCode).toBe(409);
+      expect(errorOf(category).code).toBe('CATEGORY_INACTIVE');
+      expect((await admin.post('/api/admin/categories/J/active', { active: true })).statusCode).toBe(200);
+      expect([await total(), await summaries()]).toEqual(before);
+
+      const again = await send();
+      expect(again.statusCode, again.body).toBe(200);
+      expect(safeJson(again)).toMatchObject({ issued: 2, failed: 0, skipped: 0 });
+    });
+
     it('signs one batch at a time per admin: a second one sent meanwhile answers 429', async () => {
       const [a, b] = await Promise.all([
         operator.post('/api/admin/products/batch', { template: template({ productionBatch: 'B-2026-10-TWICE' }), items: [{}, {}] }),
