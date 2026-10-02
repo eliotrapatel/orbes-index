@@ -147,6 +147,50 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.scan__control')['min-width'])).toBeGreaterThanOrEqual(44);
   });
 
+  it('lets no class the views put on a button or a link take it under either floor', () => {
+    // Every class written on an h('button') or h('a') of the verify views (the control classes and those beside
+    // them: .scan__zoom, .scan__close, .landing__upload, .contact__phone…), so a rule that names the element by
+    // its modifier alone is held to the same floors.
+    const sources = readdirSync(join(WEB, 'verify/views')).map((f) => readFileSync(join(WEB, 'verify/views', f), 'utf8'));
+    const classes = [
+      ...new Set(sources.flatMap((src) => [...src.matchAll(/h\(\s*'(?:button|a)',\s*\{\s*class:\s*'([^']+)'/g)].flatMap((m) => m[1].split(/\s+/)))),
+    ].sort();
+    expect(classes).toEqual(
+      expect.arrayContaining(['auth__option', 'btn', 'btn--block', 'contact__email', 'contact__phone', 'landing__scan', 'landing__upload', 'scan__close', 'scan__control', 'scan__zoom', 'tabs__tab', 'textlink']),
+    );
+    for (const cls of classes) {
+      for (const r of about(`.${cls}`)) {
+        const where = `.${cls} (${r.selectors.join(', ')})`;
+        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(10);
+        for (const p of ['min-height', 'height', 'max-height']) if (r.decls[p]) expect(px(r.decls[p]), where).toBeGreaterThanOrEqual(44);
+      }
+    }
+  });
+
+  it('draws the keyboard focus ring where it was before the tap zones grew, never around the transparent padding', () => {
+    // Each control whose zone is transparent padding drops the page's outline and draws its ring with ::before,
+    // inset to its former box (plus the outline offset it had), so the ring stays clear of the tab dots and of the
+    // switch beside a sign-in option.
+    const RINGS: Record<string, string> = {
+      '.textlink': '0 -4px',
+      '.scan__control': '0 -4px',
+      '.scan__control.scan__zoom': '0 7px',
+      '.tabs__tab': '1px calc(var(--tab-pad) - 2px) -2px',
+      '.auth__option': '4px -4px',
+    };
+    for (const [sel, inset] of Object.entries(RINGS)) {
+      const ring = all.filter((r) => r.selectors.includes(`${sel}:focus-visible::before`));
+      expect(ring.at(-1)?.decls.inset, sel).toBe(inset);
+    }
+    for (const sel of ['.textlink', '.scan__control', '.tabs__tab', '.auth__option']) {
+      expect(all.some((r) => r.selectors.includes(`${sel}:focus-visible`) && r.decls.outline === 'none'), sel).toBe(true);
+      const ring = all.find((r) => r.selectors.includes(`${sel}:focus-visible::before`))!;
+      expect(ring.decls, sel).toMatchObject({ content: '""', position: 'absolute', outline: '1px solid currentColor', 'pointer-events': 'none' });
+      // No rule gives the control itself an outline offset any more (it would draw around the zone).
+      expect(about(sel).filter((r) => r.selectors.some((s) => s.includes(':focus-visible')) && r.decls['outline-offset'] !== undefined), sel).toEqual([]);
+    }
+  });
+
   it('keeps the hairline button for the primary action: the contact of ORBES Client Services is a text link', () => {
     // A result draws one .btn of its own, the foot's SCAN AGAIN or SCAN ANOTHER; the contact, under
     // the help line or in the WARRANTY tab, is a secondary action beside it (§3.8, §4.2).

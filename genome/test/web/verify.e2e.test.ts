@@ -77,6 +77,27 @@ async function linesOf(loc: Locator): Promise<number> {
   });
 }
 
+/**
+ * The box the keyboard focus ring of a control draws: its ::before (outline included), which
+ * the controls with a transparent tap zone use instead of an outline around the zone.
+ */
+async function focusRingOf(loc: Locator): Promise<{ focusVisible: boolean; left: number; right: number; top: number; bottom: number } | null> {
+  return loc.evaluate((el) => {
+    const b = getComputedStyle(el, '::before');
+    if (b.position !== 'absolute' || b.outlineStyle === 'none') return null;
+    const r = el.getBoundingClientRect();
+    const w = Number.parseFloat(b.outlineWidth) || 0;
+    const px = (v: string) => Number.parseFloat(v);
+    return {
+      focusVisible: el.matches(':focus-visible'),
+      left: r.left + px(b.left) - w,
+      right: r.right - px(b.right) + w,
+      top: r.top + px(b.top) - w,
+      bottom: r.bottom - px(b.bottom) + w,
+    };
+  });
+}
+
 /** The phone widths in use, narrowest last: Android (360), iPhone SE, 8 and mini (375), the smallest (320). */
 const PHONE_WIDTHS = [360, 375, 320] as const;
 
@@ -248,6 +269,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.keyboard.press('ArrowRight');
     await attrOf(page.getByRole('tab', { name: 'WARRANTY' }), 'aria-selected', 'true');
     await textOf(page.getByRole('tabpanel'), /NOT YET STARTED/);
+    // Its focus ring keeps to the word, as before the tap zones grew: clear of the dots on either side.
+    const ring = (await focusRingOf(page.getByRole('tab', { name: 'WARRANTY' })))!;
+    expect(ring.focusVisible).toBe(true);
+    const dots = await page.locator('.tabs__dot').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
+    expect(ring.left).toBeGreaterThan(dots[0].right + 1);
+    expect(ring.right).toBeLessThan(dots[1].left - 1);
     await page.keyboard.press('End');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(page.locator('.ownership__status'), 'NOT YET REGISTERED');
@@ -274,19 +301,27 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
-    await page.getByLabel('EMAIL').fill('client@example.com');
+    // An ordinary address, longer than the line has room for beside SIGN OUT on a small phone.
+    const email = 'marie-claire.dupont@example.com';
+    await page.getByLabel('EMAIL').fill(email);
     await page.getByLabel('PASSWORD').fill('too short');
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
     await textOf(page.getByRole('alert'), /at least 12 characters/);
     // The typed email survives a failed attempt.
-    await valueOf(page.getByLabel('EMAIL'), 'client@example.com');
+    await valueOf(page.getByLabel('EMAIL'), email);
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
 
     // Signed in (session cookie + CSRF token): the claim form appears.
     await visible(page.getByLabel('CLAIM CODE'));
-    await textOf(page.locator('.ownership__email'), 'client@example.com');
+    await textOf(page.locator('.ownership__email'), email);
     await keepsFloors(page, ['REGISTER THIS PIECE', 'SIGN OUT']);
+    // At every phone width SIGN OUT keeps its one line (the floors check each label's lines): the account line wraps instead.
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['REGISTER THIS PIECE', 'SIGN OUT']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
     await page.getByLabel('CLAIM CODE').fill('ZZZZ-ZZZZ-ZZZZ');
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
     await visible(page.getByRole('alert'));
@@ -304,6 +339,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect(await page.locator('.transfer-code__label').evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize))).toEqual(['10px', '10px']);
     await keepsFloors(page, ['CANCEL TRANSFER', 'SIGN OUT']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['CANCEL TRANSFER', 'SIGN OUT']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
     await page.getByRole('button', { name: 'CANCEL TRANSFER' }).click();
     await textOf(page.locator('.form__notice'), 'The transfer has been cancelled.');
 

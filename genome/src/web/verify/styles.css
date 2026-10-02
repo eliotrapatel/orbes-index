@@ -423,6 +423,20 @@ h1[tabindex="-1"]:focus {
   opacity: 1;
 }
 
+/* Focus ring (brand.css, the text link): 4 px outside the former 36 px box,
+   which is the zone's height and the control's width plus 4 px. */
+.scan__control:focus-visible {
+  outline: none;
+}
+
+.scan__control:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
+}
+
 /* The zoom reads two characters (1×, 2×): 11 px more of transparent padding
    on each side, given back by the margin, widen its tap zone past 44 px while
    the label and its rule keep their width. */
@@ -434,6 +448,10 @@ h1[tabindex="-1"]:focus {
 .scan__control.scan__zoom::after {
   left: 11px;
   right: 11px;
+}
+
+.scan__control.scan__zoom:focus-visible::before {
+  inset: 0 7px;
 }
 
 .scan__control[hidden] {
@@ -845,8 +863,19 @@ h1[tabindex="-1"]:focus {
   transform: scaleX(1);
 }
 
+/* Focus ring: 2 px around the former box (14 px above the word, 15 px under
+   it, nothing at the sides), so it stays clear of the dots, as before the
+   zone grew. */
 .tabs__tab:focus-visible {
-  outline-offset: 2px;
+  outline: none;
+}
+
+.tabs__tab:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 1px calc(var(--tab-pad) - 2px) -2px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
 }
 
 .tabs__dot {
@@ -996,6 +1025,19 @@ h1[tabindex="-1"]:focus {
   opacity: 1;
 }
 
+/* Focus ring: 4 px outside the former 28 px option, not around the zone. */
+.auth__option:focus-visible {
+  outline: none;
+}
+
+.auth__option:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 4px -4px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
+}
+
 .form {
   display: grid;
   gap: 22px;
@@ -1052,6 +1094,18 @@ h1[tabindex="-1"]:focus {
   margin-top: 36px;
   padding-top: 8px;
   border-top: 1px solid var(--hairline);
+}
+
+/* SIGN OUT keeps its one line at any width: the account line gives way
+   instead, and a long email wraps inside it rather than squeezing the link. */
+.ownership__account .textlink {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ownership__who {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ownership__email {

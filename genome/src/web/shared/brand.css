@@ -475,9 +475,9 @@ a {
    The floors of BRAND-DESIGN-SYSTEM §3.8: 10 px type (the micro step, tracked
    so the gap between letters stays about what it was at 8 px) and a tap zone
    44 px high. The zone is transparent padding, and an equal negative margin
-   gives the room back, so the link takes the place it took before and its
-   hairline keeps its distance to the word. At rest the ink is at 80 %
-   (11 : 1 on white). */
+   gives the room back, so the zone itself adds no space: the link grows only
+   by the taller line of its 10 px type (about 3 px), and its hairline keeps
+   its distance to the word. At rest the ink is at 80 % (11 : 1 on white). */
 .textlink {
   appearance: none;
   -webkit-appearance: none;
@@ -516,6 +516,22 @@ a {
 .textlink:active,
 .textlink:focus-visible {
   opacity: 1;
+}
+
+/* The keyboard focus ring of a control whose tap zone is transparent padding
+   is drawn where it was before the zone grew (BRAND-DESIGN-SYSTEM §3.8): by
+   ::before, 4 px outside the control's former box, never around the zone.
+   For a text link that is the zone's height, 4 px wider than the word. */
+.textlink:focus-visible {
+  outline: none;
+}
+
+.textlink:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
 }
 
 .textlink:active::after,
