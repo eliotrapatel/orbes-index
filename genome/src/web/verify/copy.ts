@@ -213,6 +213,26 @@ export const CONTACT = Object.freeze({
 });
 
 /**
+ * The question under the contact of ORBES Client Services on every result that was not authentic
+ * (C-02, API §8.5): where the piece was seen or bought, kept with the scan's reference for ORBES
+ * Client Services and its Cases queue. Optional, never an accusation (§4.5: no "fake", no
+ * "counterfeit"). The customer's words are personal data: the note's hint asks for no contact details.
+ */
+export const REPORT = Object.freeze({
+  title: 'WHERE DID YOU SEE OR BUY THIS PIECE?',
+  lead: 'Optional. Your answer stays with this reference, for ORBES Client Services.',
+  channels: Object.freeze({ BOUTIQUE: 'BOUTIQUE', ONLINE: 'ONLINE', PRIVATE: 'PRIVATE SALE', OTHER: 'OTHER' }),
+  place: 'PLACE (OPTIONAL)',
+  placeHint: 'The name of the boutique, the website or the city.',
+  note: 'NOTE (OPTIONAL)',
+  noteHint: 'Please leave out your name and contact details.',
+  send: 'SEND ANSWER',
+  sent: 'THANK YOU',
+  /** After sending: the reference the answer is kept with. */
+  kept: (reference: string) => (reference ? `Your answer is kept with reference ${reference}.` : 'Your answer is kept with this scan.'),
+});
+
+/**
  * A 429 when a piece is registered with its claim code: too many claim codes tried for this piece
  * (by anyone, within the hour, SECURITY-MODEL §3.8), or too many requests from this connection.
  * Either way the wait can be up to an hour, longer than the scan's registration window, so the

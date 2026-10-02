@@ -55,7 +55,7 @@ export interface AppConfig {
   /** ADMIN_REQUIRE_MFA: admin sessions must have passed TOTP outside the auth routes (default: production only). */
   adminRequireMfa: boolean;
   /**
-   * SCAN_RETENTION_DAYS: scan history (scan_events with their authentication_events and scan_tokens)
+   * SCAN_RETENTION_DAYS: scan history (scan_events with their authentication_events, scan_tokens and scan_reports)
    * older than this many days is purged by housekeeping. null (unset, the default) keeps it indefinitely;
    * production then logs a warning. Never shorter than the anomaly look-back (scanLookbackDays).
    */

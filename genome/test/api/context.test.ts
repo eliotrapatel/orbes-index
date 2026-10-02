@@ -29,7 +29,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'issuance', 'lifecycle', 'ownership', 'verification', 'warranty'].sort(),
+        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'issuance', 'lifecycle', 'ownership', 'reports', 'verification', 'warranty'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);
@@ -101,6 +101,8 @@ describe('housekeeping', () => {
   });
 
   it('purges scan history older than SCAN_RETENTION_DAYS, dependants first, and keeps everything when unset', async () => {
+    // Each seeded scan carries an authentication event; the 120-day and the 1-day ones also carry a customer's
+    // report (scan_reports, C-02), the old one closed by an admin: a report goes with its scan, open or closed.
     const t = await createTestDb();
     const clock = createManualClock('2026-05-01T00:00:00.000Z');
     const day = 86_400_000;
@@ -120,16 +122,40 @@ describe('housekeeping', () => {
     const counts = async () => ({
       scans: (await t.db.selectFrom('scan_events').select('id').execute()).length,
       auth: (await t.db.selectFrom('authentication_events').select('id').execute()).length,
+      reports: (await t.db.selectFrom('scan_reports').select('id').execute()).length,
     });
     try {
-      for (const daysAgo of [400, 120, 31, 29, 1]) await seed(daysAgo);
+      const ids: Record<number, string> = {};
+      for (const daysAgo of [400, 120, 31, 29, 1]) ids[daysAgo] = await seed(daysAgo);
+      const admin = await t.db
+        .insertInto('admin_users')
+        .values({ email: 'cases@orbes.test', email_normalized: 'cases@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await t.db
+        .insertInto('scan_reports')
+        .values([
+          {
+            scan_event_id: ids[120],
+            channel: 'ONLINE',
+            place: 'a marketplace',
+            note: 'Seller in Lyon.',
+            created_at: at(120),
+            status: 'CLOSED',
+            handled_by: admin.id,
+            handled_at: at(119),
+            resolution_note: 'Listing reported.',
+          },
+          { scan_event_id: ids[1], channel: 'BOUTIQUE', place: 'Rue de Rivoli', created_at: at(1) },
+        ])
+        .execute();
 
       // Unset (the default): nothing is purged.
       const keepAll = await createContext(testConfig(), { db: t.db, clock: clock.now });
       const hk0 = startHousekeeping(keepAll, { intervalMs: 3_600_000 });
       expect((await hk0.runOnce()).scanHistory).toBe(0);
       await hk0.stop();
-      expect(await counts()).toEqual({ scans: 5, auth: 5 });
+      expect(await counts()).toEqual({ scans: 5, auth: 5, reports: 2 });
 
       const log = captureLog();
       const ctx = await createContext(testConfig({ scanRetentionDays: 30 }), { db: t.db, clock: clock.now, log });
@@ -137,7 +163,9 @@ describe('housekeeping', () => {
       try {
         const r = await hk.runOnce();
         expect(r.scanHistory).toBe(3);
-        expect(await counts()).toEqual({ scans: 2, auth: 2 });
+        // The 120-day scan went with its (closed) report; the recent report stays with its scan.
+        expect(await counts()).toEqual({ scans: 2, auth: 2, reports: 1 });
+        expect(await t.db.selectFrom('scan_reports').select('scan_event_id').execute()).toEqual([{ scan_event_id: ids[1] }]);
         const left = await t.db.selectFrom('scan_events').select('occurred_at').orderBy('occurred_at').execute();
         expect(left.map((x) => new Date(x.occurred_at).getTime())).toEqual([at(29).getTime(), at(1).getTime()]);
         expect(log.lines.some((l) => l.level === 'info' && (l.o as { scanHistory?: number }).scanHistory === 3)).toBe(true);
@@ -145,7 +173,7 @@ describe('housekeeping', () => {
         // Thirty days later the remaining two age out as well.
         clock.advance(30 * day);
         expect((await hk.runOnce()).scanHistory).toBe(2);
-        expect(await counts()).toEqual({ scans: 0, auth: 0 });
+        expect(await counts()).toEqual({ scans: 0, auth: 0, reports: 0 });
       } finally {
         await hk.stop();
         await ctx.close();

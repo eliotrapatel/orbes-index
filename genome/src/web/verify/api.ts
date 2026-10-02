@@ -13,7 +13,7 @@
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
  */
-import type { ClientServices, OwnershipConfirmation, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
+import type { ClientServices, OwnershipConfirmation, ReportInput, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -92,6 +92,17 @@ export class ApiClient {
   /** How ORBES Client Services is reached (`{}` when nothing is configured); the browser may keep it 5 minutes. */
   clientServices(): Promise<ClientServices> {
     return this.request<ClientServices>('GET', '/api/v1/client-services', undefined, { cache: 'default', timeoutMs: CONTACT_TIMEOUT_MS });
+  }
+
+  /**
+   * Where the customer saw or bought the piece of a result that was not authentic, attached to its scan
+   * (no session needed: the server checks the origin). Empty optional fields are left out.
+   */
+  async report(input: ReportInput): Promise<void> {
+    const body: Record<string, string> = { scanId: input.scanId, channel: input.channel };
+    if (input.where && input.where.trim()) body.where = input.where.trim();
+    if (input.note && input.note.trim()) body.note = input.note.trim();
+    await this.request('POST', '/api/v1/reports', body);
   }
 
   // ── Account ──────────────────────────────────────────────────────────────

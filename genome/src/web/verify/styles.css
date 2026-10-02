@@ -57,8 +57,10 @@ body[data-screen="scan"] .corners {
   to { opacity: 1; transform: none; }
 }
 
-/* Headings receive focus programmatically on screen changes (for screen readers); no ring for that. */
-h1[tabindex="-1"]:focus {
+/* Headings receive focus programmatically on screen changes (for screen readers), as does the thanks
+   that replaces a sent report; no ring for that. */
+h1[tabindex="-1"]:focus,
+.report__status[tabindex="-1"]:focus {
   outline: none;
 }
 
@@ -595,6 +597,7 @@ h1[tabindex="-1"]:focus {
 .view--result > :nth-child(3) { animation-delay: 0.45s; }
 .view--result > :nth-child(4) { animation-delay: 0.6s; }
 .view--result > :nth-child(5) { animation-delay: 0.75s; }
+.view--result > :nth-child(6) { animation-delay: 0.9s; }
 
 .view--result.is-leaving > * {
   animation: none;
@@ -804,6 +807,77 @@ h1[tabindex="-1"]:focus {
   margin: 12px auto 0;
   text-align: center;
   text-wrap: balance;
+}
+
+/* WHERE DID YOU SEE OR BUY THIS PIECE? Under the contact of every result
+   that was not authentic (C-02, API §8.5): a hairline, the question (a
+   status line, as DO YOU HOLD THE CERTIFICATE CARD?) and one sentence,
+   centred, then the four answers two by two, pressed like the sign-in
+   switch (18 px between the rows, so their 44 px zones never meet). Once one
+   is chosen, the place, the note and SEND ANSWER, a text link: the hairline
+   button stays the foot's SCAN AGAIN (BRAND-DESIGN-SYSTEM §3.8). It comes
+   after the certificate-card section when there is one. */
+.report {
+  margin-top: 50px;
+  border-top: 1px solid var(--hairline);
+  text-align: center;
+}
+
+.report__title {
+  margin-top: 36px;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: 1.7;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.report__lead {
+  max-width: 32ch;
+  margin: 12px auto 0;
+  text-wrap: balance;
+}
+
+.report__channels {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  justify-content: center;
+  gap: 18px 28px;
+  margin-top: 26px;
+}
+
+/* OTHER is barely 44 px wide in 10 px type: its zone keeps the floor. */
+.report__channel {
+  min-width: 44px;
+}
+
+.report__form {
+  margin-top: 30px;
+  text-align: left;
+}
+
+.report__form[hidden] {
+  display: none;
+}
+
+.report__note {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.report__actions {
+  display: flex;
+  justify-content: center;
+}
+
+.report__status {
+  margin-top: 26px;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  text-transform: uppercase;
 }
 
 /* Tabs */
@@ -1171,6 +1245,8 @@ h1[tabindex="-1"]:focus {
 .section-label,
 .ownership__status,
 .result__card-title,
+.report__title,
+.report__status,
 .auth__option {
   font-family: var(--font-display);
 }

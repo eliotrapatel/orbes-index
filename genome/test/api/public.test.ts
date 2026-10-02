@@ -265,6 +265,110 @@ describe('public API', () => {
     });
   });
 
+  describe('POST /api/v1/reports', () => {
+    /** A scan the customer may report on: an undecodable code reads UNREADABLE CODE (MALFORMED_CODE). */
+    const unreadableScan = async (c = h.client()) => (safeJson(await c.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string; state: string }).scanId;
+    const auditOf = (scanId: string) => h.ctx.db.selectFrom('audit_logs').selectAll().where('target_id', '=', scanId).orderBy('id').execute();
+
+    it('attaches the report to a scan that was not authentic (201), audited with the scan id alone, once per scan', async () => {
+      const c = h.client();
+      const scanId = await unreadableScan(c);
+      const res = await c.post('/api/v1/reports', { scanId, channel: 'ONLINE', where: '  a marketplace listing  ', note: 'Listed at a third of the boutique price.' });
+      expect(res.statusCode).toBe(201);
+      expect(safeJson(res)).toEqual({ ok: true });
+      expect(res.headers['cache-control']).toBe('no-store');
+      const row = await h.ctx.db.selectFrom('scan_reports').selectAll().where('scan_event_id', '=', scanId).executeTakeFirstOrThrow();
+      expect(row).toMatchObject({ channel: 'ONLINE', place: 'a marketplace listing', note: 'Listed at a third of the boutique price.', status: 'OPEN', handled_by: null });
+      expect(row.created_at).toEqual(h.clock.now());
+
+      // The audit names the scan and nothing the customer wrote (the log is permanent; the report is purged with the scan).
+      const audit = await auditOf(scanId);
+      expect(audit.map((a) => [a.action, a.target_type, a.actor_type, a.actor_id, a.details])).toEqual([['scan.report', 'scan', 'system', 'public', {}]]);
+      expect(audit[0].ip_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(JSON.stringify(audit)).not.toMatch(/marketplace|third of the boutique/);
+
+      // One report per scan.
+      const again = await c.post('/api/v1/reports', { scanId, channel: 'OTHER' });
+      expect(again.statusCode).toBe(409);
+      expect(errorOf(again)).toEqual({ code: 'REPORT_ALREADY_SENT', message: 'A report has already been sent for this reference.' });
+      expect(await h.ctx.db.selectFrom('scan_reports').select('id').where('scan_event_id', '=', scanId).execute()).toHaveLength(1);
+      // Optional fields may be left out, or sent empty.
+      const bare = await c.post('/api/v1/reports', { scanId: await unreadableScan(c), channel: 'PRIVATE', where: '', note: null });
+      expect(bare.statusCode).toBe(201);
+    });
+
+    it('refuses an authentic scan, a scan 24 hours old and an unknown scan alike: 409 REPORT_NOT_ALLOWED', async () => {
+      const notAllowed = async (scanId: string) => {
+        const res = await h.client().post('/api/v1/reports', { scanId, channel: 'BOUTIQUE' });
+        expect(res.statusCode, scanId).toBe(409);
+        expect(errorOf(res).code).toBe('REPORT_NOT_ALLOWED');
+        expect(errorOf(res).message).toMatch(/within 24 hours of a result that was not authentic/);
+      };
+      // Authentic: nothing to report.
+      const p = await issue(h.ctx, catalog);
+      const authentic = safeJson(await h.client().post('/api/v1/verify', { code: p.code.data })) as { scanId: string; state: string };
+      expect(authentic.state).toBe('AUTHENTIC');
+      await notAllowed(authentic.scanId);
+      // 24 hours after the scan the window has closed; a minute before, it is still open.
+      const at = (msAgo: number) =>
+        h.ctx.db
+          .insertInto('scan_events')
+          .values({ occurred_at: new Date(h.clock.now().getTime() - msAgo), event_type: 'VERIFY', result_state: 'UNKNOWN' })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+      await notAllowed((await at(24 * 3_600_000)).id);
+      expect((await h.client().post('/api/v1/reports', { scanId: (await at(24 * 3_600_000 - 60_000)).id, channel: 'BOUTIQUE' })).statusCode).toBe(201);
+      // Not a customer's verification, and no scan at all.
+      const test = await h.ctx.db.insertInto('scan_events').values({ event_type: 'ADMIN_TEST', result_state: 'UNKNOWN' }).returning('id').executeTakeFirstOrThrow();
+      await notAllowed(test.id);
+      await notAllowed('00000000-0000-4000-8000-000000000000');
+      expect(await h.ctx.db.selectFrom('scan_reports').select('id').where('scan_event_id', '=', authentic.scanId).execute()).toEqual([]);
+    });
+
+    it('validates the body (400) and refuses a cross-site request (403)', async () => {
+      const scanId = await unreadableScan();
+      for (const body of [
+        { scanId, channel: 'MARKET' },
+        { scanId, channel: 'ONLINE', where: 'x'.repeat(201) },
+        { scanId, channel: 'ONLINE', note: 'x'.repeat(501) },
+        { scanId, channel: 'ONLINE', note: 'bell\u0007' },
+        { scanId: 'not-a-uuid', channel: 'ONLINE' },
+        { channel: 'ONLINE' },
+        { scanId, channel: 'ONLINE', email: 'me@example.com' },
+      ]) {
+        const res = await h.client().post('/api/v1/reports', body);
+        expect(res.statusCode, JSON.stringify(body).slice(0, 80)).toBe(400);
+        expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+      }
+      for (const origin of ['https://evil.example', null]) {
+        const res = await h.client({ origin }).post('/api/v1/reports', { scanId, channel: 'ONLINE' });
+        expect(res.statusCode, String(origin)).toBe(403);
+        expect(errorOf(res).code).toBe('CSRF_FAILED');
+      }
+      expect(await h.ctx.db.selectFrom('scan_reports').select('id').where('scan_event_id', '=', scanId).execute()).toEqual([]);
+    });
+
+    it('records a signed-in customer as the reporting account, and draws on the verify budget', async () => {
+      const { client } = await accountClient(h);
+      const scanId = await unreadableScan(client);
+      expect((await client.post('/api/v1/reports', { scanId, channel: 'BOUTIQUE', where: 'Rue de Rivoli' })).statusCode).toBe(201);
+      const account = await h.ctx.db.selectFrom('scan_events').select('account_id').where('id', '=', scanId).executeTakeFirstOrThrow();
+      expect(account.account_id).not.toBeNull();
+      expect((await auditOf(scanId)).map((a) => [a.action, a.actor_type, a.actor_id])).toEqual([['scan.report', 'account', account.account_id]]);
+
+      const budgets = await createHarness({ config: { rateLimits: { verifyPerMinute: 9_001, authPerMinute: 9_002, adminPerMinute: 9_003, apiPerMinute: 9_004 } } });
+      try {
+        const c = budgets.client();
+        const scan = safeJson(await c.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string };
+        const res = await c.post('/api/v1/reports', { scanId: scan.scanId, channel: 'OTHER' });
+        expect(res.statusCode).toBe(201);
+        expect(res.headers['x-ratelimit-limit']).toBe('9001');
+      } finally {
+        await budgets.close();
+      }
+    });
+  });
+
   it('answers unknown routes with a 404 error body', async () => {
     const res = await h.client().get('/api/v1/nope');
     expect(res.statusCode).toBe(404);

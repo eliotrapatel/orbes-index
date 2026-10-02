@@ -305,6 +305,14 @@ export function filterBar(...children: Child[]): HTMLElement {
   return h('div', { class: 'filters' }, ...children);
 }
 
+/**
+ * In a filter bar: the list is narrowed to one record by a link from another view (a case's scan or
+ * anomaly, a scan's or a finding's cases), with the way back to the whole list.
+ */
+export function narrowedTo(text: string, allHref: string): HTMLElement {
+  return h('span', { class: 'filters__narrowed', attrs: { 'data-testid': 'narrowed' } }, micro(text), linkButton('Show all', allHref, 'ghost'));
+}
+
 /** Copy text to the clipboard with a short confirmation on the button. */
 export function copyButton(value: string, label = 'Copy'): HTMLButtonElement {
   const b = button(label, { kind: 'ghost' });

@@ -7,7 +7,8 @@
  * same registration from an UNUSUAL ACTIVITY result (a burst of scans of
  * copies, then the holder of the certificate card), the contact of ORBES
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
- * applies), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
+ * the scan, and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -548,6 +549,78 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       expect(await linesOf(email), `${width} px`).toBe(1);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('asks WHERE DID YOU SEE OR BUY THIS PIECE? under the contact of an INVALID SIGNATURE result, and attaches the answer to its scan', async () => {
+    const issued = await srv.issue();
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[20] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'forged-report.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    const scan = await srv.ctx.db.selectFrom('scan_events').select(['id', 'result_state']).orderBy('occurred_at', 'desc').executeTakeFirstOrThrow();
+    expect(scan.result_state).toBe('INVALID_SIGNATURE');
+    const ref = scan.id.split('-')[0].toUpperCase();
+
+    // Under the help line and its contact; the question a status line in the display face, 11 px.
+    const section = page.getByRole('region', { name: 'WHERE DID YOU SEE OR BUY THIS PIECE?' });
+    await visible(section);
+    expect(await page.locator('.result__help + .report').count()).toBe(1);
+    const title = section.getByRole('heading', { level: 2 });
+    expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe('11px');
+    expect(await title.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    await textOf(section.locator('.report__lead'), 'Optional. Your answer stays with this reference, for ORBES Client Services.');
+    // Four answers and nothing to type until one is chosen; SCAN AGAIN stays the one hairline button.
+    await textsOf(section.getByRole('button'), ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
+    expect(await section.locator('form').isHidden()).toBe(true);
+    await countOf(page.locator('.btn:visible'), 1);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // ONLINE: pressed, then the place, the note and SEND ANSWER (a text link).
+    const online = section.getByRole('button', { name: 'ONLINE' });
+    await online.click();
+    await attrOf(online, 'aria-pressed', 'true');
+    await attrOf(section.getByRole('button', { name: 'BOUTIQUE' }), 'aria-pressed', 'false');
+    await visible(section.getByLabel('PLACE (OPTIONAL)'));
+    await section.getByLabel('PLACE (OPTIONAL)').fill('a marketplace listing');
+    await section.getByLabel('NOTE (OPTIONAL)').fill('Offered at a third of the boutique price.');
+    await textOf(section.locator('#report-note-hint'), 'Please leave out your name and contact details.');
+    const send = section.getByRole('button', { name: 'SEND ANSWER' });
+    await attrOf(send, 'class', 'textlink report__send');
+    await countOf(page.locator('.btn:visible'), 1);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SEND ANSWER', 'SCAN AGAIN']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-report.png'), fullPage: true });
+
+    // A refusal from the server is shown as it comes, and nothing typed is lost.
+    await page.route('**/api/v1/reports', (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'REPORT_NOT_ALLOWED', message: 'A report can be sent only within 24 hours of a result that was not authentic. Please scan the piece again.' } }),
+      }),
+    );
+    await send.click();
+    await textOf(section.getByRole('alert'), 'A report can be sent only within 24 hours of a result that was not authentic. Please scan the piece again.');
+    await valueOf(section.getByLabel('PLACE (OPTIONAL)'), 'a marketplace listing');
+    await page.unroute('**/api/v1/reports');
+
+    // Sent: the thanks, with the reference of the result's foot; the case waits in the console's queue.
+    await send.click();
+    await textOf(section.getByRole('status'), 'THANK YOU');
+    await textOf(section.locator('.report__lead'), `Your answer is kept with reference ${ref}.`);
+    await countOf(section.getByRole('button'), 0);
+    await textOf(page.locator('.result__meta'), new RegExp(`REF ${ref}$`));
+    const row = await srv.ctx.db.selectFrom('scan_reports').selectAll().where('scan_event_id', '=', scan.id).executeTakeFirstOrThrow();
+    expect(row).toMatchObject({ channel: 'ONLINE', place: 'a marketplace listing', note: 'Offered at a third of the boutique price.', status: 'OPEN' });
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
     expect(problems).toEqual([]);
   }, 120_000);
 

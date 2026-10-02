@@ -88,6 +88,8 @@ describe('schema', () => {
       ['anomalies', 'status', S.ANOMALY_STATUSES],
       ['revocations', 'target_type', S.REVOCATION_TARGET_TYPES],
       ['audit_logs', 'actor_type', ACTOR_TYPES],
+      ['scan_reports', 'channel', S.REPORT_CHANNELS],
+      ['scan_reports', 'status', S.REPORT_STATUSES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -387,6 +389,57 @@ describe('schema', () => {
         .values({ scan_event_id: scan.id, signature_valid: false, genome_check: 'MATCH', state: 'FAKE' as S.VerificationState, risk_score: 0 })
         .execute(),
     ).rejects.toSatisfy((e) => isCheckViolation(e));
+  });
+
+  it('scan_reports: one report per scan, bounded free text, a closed case names who closed it and when', async () => {
+    const scan = await t.db.insertInto('scan_events').values({ event_type: 'VERIFY', result_state: 'INVALID_SIGNATURE' }).returning('id').executeTakeFirstOrThrow();
+    const report = await t.db
+      .insertInto('scan_reports')
+      .values({ scan_event_id: scan.id, channel: 'ONLINE', place: 'a marketplace', note: 'Listed at a third of the price.' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(report).toMatchObject({ status: 'OPEN', handled_by: null, handled_at: null, resolution_note: null });
+    await expect(t.db.insertInto('scan_reports').values({ scan_event_id: scan.id, channel: 'OTHER' }).execute()).rejects.toSatisfy((e) =>
+      isUniqueViolation(e, 'scan_reports_scan_event_id_key'),
+    );
+    const other = await t.db.insertInto('scan_events').values({ event_type: 'VERIFY', result_state: 'UNKNOWN' }).returning('id').executeTakeFirstOrThrow();
+    for (const bad of [
+      { channel: 'MARKET' as S.ReportChannel },
+      { channel: 'ONLINE' as const, place: '' },
+      { channel: 'ONLINE' as const, place: 'x'.repeat(201) },
+      { channel: 'ONLINE' as const, note: 'x'.repeat(501) },
+    ]) {
+      await expect(t.db.insertInto('scan_reports').values({ scan_event_id: other.id, ...bad }).execute(), JSON.stringify(bad).slice(0, 60)).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    // The report needs a scan; the scan cannot go while its report is there (the purge deletes reports first).
+    await expect(t.db.insertInto('scan_reports').values({ scan_event_id: '00000000-0000-4000-8000-000000000000', channel: 'OTHER' }).execute()).rejects.toSatisfy((e) =>
+      isForeignKeyViolation(e),
+    );
+    await expect(t.db.deleteFrom('scan_events').where('id', '=', scan.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+
+    // CLOSED ⇔ handled: who and when, and nothing of the kind on an OPEN case.
+    const admin = await t.db
+      .insertInto('admin_users')
+      .values({ email: 'cases@orbes.test', email_normalized: 'cases@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await expect(t.db.updateTable('scan_reports').set({ status: 'CLOSED' }).where('id', '=', report.id).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'scan_reports_handled_consistent'),
+    );
+    await expect(t.db.updateTable('scan_reports').set({ handled_by: admin.id }).where('id', '=', report.id).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'scan_reports_handled_consistent'),
+    );
+    await expect(
+      t.db.updateTable('scan_reports').set({ status: 'CLOSED', handled_by: admin.id, handled_at: new Date(report.created_at.getTime() - 1000) }).where('id', '=', report.id).execute(),
+    ).rejects.toSatisfy((e) => isCheckViolation(e));
+    const closed = await t.db
+      .updateTable('scan_reports')
+      .set({ status: 'CLOSED', handled_by: admin.id, handled_at: new Date(report.created_at.getTime() + 1000), resolution_note: 'Seller reported to the platform.' })
+      .where('id', '=', report.id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(closed).toMatchObject({ status: 'CLOSED', handled_by: admin.id, resolution_note: 'Seller reported to the platform.' });
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
 
   it('audit_logs is append-only at the database level', async () => {

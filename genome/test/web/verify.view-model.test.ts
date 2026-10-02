@@ -11,6 +11,7 @@ import {
   HINTS,
   PROBLEMS,
   problemForApiError,
+  REPORT,
   STATUS,
   type ProblemKind,
 } from '../../src/web/verify/copy.js';
@@ -414,6 +415,43 @@ describe('verify view-model: ORBES Client Services contact', () => {
   it('names ORBES Client Services in full, never the forbidden "Contact support" (BRAND §4.5)', () => {
     expect(CONTACT.action).toBe('CONTACT ORBES CLIENT SERVICES');
     expect(Object.values(CONTACT).join(' ')).not.toMatch(/support|product/i);
+  });
+});
+
+describe('verify view-model: WHERE DID YOU SEE OR BUY THIS PIECE?', () => {
+  const NEGATIVE: VerificationState[] = ['SUSPICIOUS_ACTIVITY', 'MALFORMED_CODE', 'REVOKED', 'UNKNOWN', 'INVALID_SIGNATURE'];
+  const CS = { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89' };
+
+  it('is offered on every result that was not authentic, attached to its scan and its reference, configured contact or not', () => {
+    for (const state of NEGATIVE) {
+      for (const clientServices of [undefined, {}, CS]) {
+        const vm = resultViewModel(outcome(state, { scanId: '4515B884-1C2D-4E5F-8A9B-0C1D2E3F4A5B' }), clientServices ? { clientServices } : {});
+        expect(vm.report, state).toEqual({ scanId: '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b', reference: '4515B884' });
+      }
+    }
+    // Also beside the certificate-card section of an UNUSUAL ACTIVITY result that carries a registration token.
+    const card = resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration: { token: 'tok', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true } }));
+    expect(card.ownership.kind).toBe('register');
+    expect(card.report?.reference).toBe('4515B884');
+  });
+
+  it('is never offered on an authentic result, nor without a scan id to attach it to', () => {
+    for (const state of ['AUTHENTIC', 'AUTHENTIC_FIRST_REGISTRATION', 'AUTHENTIC_REGISTERED', 'AUTHENTIC_OWNERSHIP_VERIFIED'] as const) {
+      expect(resultViewModel(outcome(state), { clientServices: CS }).report, state).toBeUndefined();
+    }
+    // Even the owner told about unusual activity elsewhere: the result is authentic.
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY' })).report).toBeUndefined();
+    for (const scanId of ['', 'not-a-scan-id', '4515b884']) expect(resultViewModel(outcome('UNKNOWN', { scanId })).report, scanId).toBeUndefined();
+  });
+
+  it('asks without accusing, and asks for no contact details (BRAND §4.5)', () => {
+    expect(REPORT.title).toBe('WHERE DID YOU SEE OR BUY THIS PIECE?');
+    expect(Object.values(REPORT.channels)).toEqual(['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
+    const all = [REPORT.title, REPORT.lead, REPORT.place, REPORT.placeHint, REPORT.note, REPORT.noteHint, REPORT.send, REPORT.sent, REPORT.kept('4515B884')].join(' ');
+    expect(all).not.toMatch(/fake|counterfeit|fraud|stolen|support|product/i);
+    expect(REPORT.noteHint).toMatch(/leave out your name and contact details/);
+    expect(REPORT.kept('4515B884')).toBe('Your answer is kept with reference 4515B884.');
+    expect(REPORT.kept('')).toBe('Your answer is kept with this scan.');
   });
 });
 

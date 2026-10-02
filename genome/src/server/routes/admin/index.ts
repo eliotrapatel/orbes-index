@@ -23,6 +23,7 @@ import { adminDashboardRoutes } from './dashboard.js';
 import { adminKeyRoutes } from './keys.js';
 import { adminProductRoutes } from './products.js';
 import { adminRecordRoutes } from './records.js';
+import { adminReportRoutes } from './reports.js';
 import { adminRevocationRoutes } from './revocations.js';
 
 export interface AdminRouteDeps extends RouteDeps {
@@ -41,6 +42,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminCodeRoutes, deps);
   await app.register(adminCertificateRoutes, deps);
   await app.register(adminRecordRoutes, deps);
+  await app.register(adminReportRoutes, deps);
   await app.register(adminRevocationRoutes, deps);
   await app.register(adminKeyRoutes, deps);
   await app.register(adminAuditRoutes, deps);

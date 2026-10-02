@@ -122,6 +122,24 @@ describe('AdminApi', () => {
     expect(JSON.parse(String(calls[2].init.body))).toEqual({ status: 'RESOLVED', note: 'checked' });
   });
 
+  it('reads the Cases queue with its filters and closes a case with a note (PATCH, CSRF)', async () => {
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { items: [], page: 1, pageSize: 50, total: 0 }), json(200, { id: 'c' }), json(200, { items: [] }), json(200, { items: [] }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.cases({ status: 'OPEN', anomalyId: '11111111-1111-4111-8111-111111111111', scanId: '', page: 2 });
+    await api.closeCase('22222222-2222-4222-8222-222222222222', 'Listing reported.');
+    await api.scans({ scanId: '33333333-3333-4333-8333-333333333333' });
+    await api.anomalies({ id: '44444444-4444-4444-8444-444444444444' });
+    expect(calls[1].url).toBe('/api/admin/reports?status=OPEN&anomalyId=11111111-1111-4111-8111-111111111111&page=2');
+    expect(calls[1].init.method).toBe('GET');
+    expect(calls[2].url).toBe('/api/admin/reports/22222222-2222-4222-8222-222222222222');
+    expect(calls[2].init.method).toBe('PATCH');
+    expect(header(calls[2], 'x-csrf-token')).toBe('tok-1');
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ status: 'CLOSED', note: 'Listing reported.' });
+    expect(calls[3].url).toBe('/api/admin/scans?scanId=33333333-3333-4333-8333-333333333333');
+    expect(calls[4].url).toBe('/api/admin/anomalies?id=44444444-4444-4444-8444-444444444444');
+  });
+
   it('downloads artifacts as blobs with a safe file name, dpi only for PNG', async () => {
     const { fetch, calls } = fakeFetch(
       new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"' } }),

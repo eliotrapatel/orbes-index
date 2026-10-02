@@ -17,8 +17,10 @@
  * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
  * (an email prefilled with the reference and the result), its phone and
  * hours; UNUSUAL ACTIVITY adds, when the server offers it, the section DO
- * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code). A
- * warranty that no longer applies offers the same contact in its tab.
+ * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code); then
+ * WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the
+ * scan. A warranty that no longer applies offers the same contact in its
+ * tab.
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
@@ -29,6 +31,7 @@ import type { ResultViewModel, TabId } from '../view-model.js';
 import { contactBlock, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
+import { reportSection, type ReportDeps } from './report.js';
 import { tabsView } from './tabs.js';
 
 export interface ResultHandlers {
@@ -36,6 +39,8 @@ export interface ResultHandlers {
   /** Verify the same code again (after an ownership change). */
   onRefresh?(): void;
   ownership: Omit<OwnershipDeps, 'onRescan'>;
+  /** Sends the answer to WHERE DID YOU SEE OR BUY THIS PIECE? (results that were not authentic). */
+  report?: ReportDeps;
 }
 
 export interface ResultView {
@@ -120,6 +125,9 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         ),
       );
     }
+    // Under the contact (and under the certificate-card section when there is one, which follows the help
+    // line): where the piece was seen or bought, attached to this scan. Optional.
+    if (vm.report && handlers.report) sections.push(reportSection(vm.report, handlers.report));
   }
 
   const foot = h(

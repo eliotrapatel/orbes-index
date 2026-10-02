@@ -322,6 +322,7 @@ class App {
         onScanAgain: () => void this.startScan(),
         onRefresh: () => void this.retryVerify(input),
         ownership: { api: this.api, session: this.session },
+        report: { api: this.api },
       });
       if (await this.swap(view.root, 'result')) this.result = view;
       else view.dispose();

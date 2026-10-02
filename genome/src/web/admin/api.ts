@@ -21,6 +21,7 @@ import type {
   ArtifactFormat,
   ArtifactTheme,
   AuditEntry,
+  CaseRecord,
   Category,
   ChainVerification,
   CodeJson,
@@ -421,7 +422,7 @@ export class AdminApi {
 
   // ── Registries ───────────────────────────────────────────────────────────
 
-  scans(q: { productId?: string; state?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ScanRecord>> {
+  scans(q: { productId?: string; state?: string; scanId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ScanRecord>> {
     return this.get('/api/admin/scans', q);
   }
 
@@ -433,8 +434,17 @@ export class AdminApi {
     return this.get('/api/admin/warranties', q);
   }
 
-  anomalies(q: { status?: string; severity?: string; page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
+  anomalies(q: { id?: string; status?: string; severity?: string; page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
     return this.get('/api/admin/anomalies', q);
+  }
+
+  /** The Cases queue: customers' reports on scans that were not authentic. */
+  cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {
+    return this.get('/api/admin/reports', q);
+  }
+
+  closeCase(id: string, note: string): Promise<CaseRecord> {
+    return this.patch(`/api/admin/reports/${encodeURIComponent(id)}`, { status: 'CLOSED', note });
   }
 
   updateAnomaly(id: string, status: AnomalyStatus, note?: string): Promise<AnomalyRecord> {

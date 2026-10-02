@@ -250,7 +250,7 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 | Variable | Default | Rules |
 |---|---|---|
-| `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events and scan tokens (DATABASE §10). Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
+| `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events, scan tokens and customers' reports on them (DATABASE §10). Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
 
 **ORBES Client Services** (public contact, supplied by the brand; served by `GET /api/v1/client-services`, API §8.4)
 

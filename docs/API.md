@@ -34,7 +34,7 @@ Related documents: [DATABASE](DATABASE.md) · [CRYPTOGRAPHY](CRYPTOGRAPHY.md) ·
 13. [Admin: dashboard and catalogue](#13-admin-dashboard-and-catalogue)
 14. [Admin: products and lifecycle](#14-admin-products-and-lifecycle)
 15. [Admin: codes and artifacts](#15-admin-codes-and-artifacts)
-16. [Admin: registries, anomalies and revocations](#16-admin-registries-anomalies-and-revocations)
+16. [Admin: registries, anomalies, revocations and cases](#16-admin-registries-anomalies-revocations-and-cases)
 17. [Admin: keys and audit log](#17-admin-keys-and-audit-log)
 18. [Static web applications](#18-static-web-applications)
 19. [Integration guide for resellers and third parties](#19-integration-guide-for-resellers-and-third-parties)
@@ -137,7 +137,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 | Group | Routes | Budget per minute (variable, default) |
 |---|---|---|
-| `verify` | `POST /api/v1/verify` | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
+| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports` | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
 | `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/admin/auth/login`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
 | `api` | Every other `/api/v1/…` route, and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
@@ -303,6 +303,15 @@ Keys, signing and anomalies:
 | `ANOMALY_NOT_FOUND` | 404 | No anomaly with this id. |
 | `ANOMALY_ALREADY_OPEN` | 409 | Reopening would create a second open anomaly of the same type for the product. |
 
+Reports and cases:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `REPORT_NOT_ALLOWED` | 409 | (§8.5) The scan is unknown, was authentic, is not a customer's verification, or is 24 hours old or older. One answer for all. |
+| `REPORT_ALREADY_SENT` | 409 | (§8.5) This scan already carries a report. |
+| `REPORT_NOT_FOUND` | 404 | (§16.9) No case with this id. |
+| `REPORT_ALREADY_CLOSED` | 409 | (§16.9) The case is already closed. |
+
 Defined in services but not reachable through the current HTTP routes: `ACCOUNT_NOT_FOUND` (404, internal edge case).
 
 ---
@@ -333,6 +342,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
 | POST | `/api/v1/verify` | — (account cookie optional) | — | verify | 9 |
+| POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
 | POST | `/api/v1/account/logout` | Account (optional) | yes | api | 10.3 |
@@ -380,6 +390,8 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/warranties` | AUDITOR | — | admin | 16.3 |
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
 | PATCH | `/api/admin/anomalies/:id` | OPERATOR | yes | admin | 16.5 |
+| GET | `/api/admin/reports` | AUDITOR | — | admin | 16.8 |
+| PATCH | `/api/admin/reports/:id` | OPERATOR | yes | admin | 16.9 |
 | GET | `/api/admin/revocations` | AUDITOR | — | admin | 16.6 |
 | POST | `/api/admin/revocations` | **ADMIN** | yes | admin | 16.7 |
 | GET | `/api/admin/keys` | AUDITOR | — | admin | 17.1 |
@@ -391,7 +403,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `/api/admin/reports`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -477,6 +489,35 @@ Each field is present only when configured. With nothing configured the body is 
 
 The app checks the email and phone against the same rules as the server before building any link; anything else is dropped. Authentic results otherwise show no contact. Nothing is sent to the server when the customer uses it: the email goes from the customer's own mail application.
 
+### 8.5 `POST /api/v1/reports`
+
+Where the customer saw or bought the piece of a result that was **not authentic**, attached to that scan (C-02). It opens a case in the console's Cases queue (§16.8). No session is needed; a signed-in customer is recorded as the reporting account. Rate group `verify` (the same budget as the scan it follows). Unsafe and session-less, so the origin check of §2.2 applies (a cross-site form gets `403 CSRF_FAILED`); no CSRF token.
+
+```json
+{ "scanId": "5a864af8-0d6b-4c1e-9f2a-3b7c1d2e4f5a", "channel": "ONLINE", "where": "a marketplace listing", "note": "Offered at a third of the boutique price." }
+```
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `scanId` | uuid | yes | The `scanId` of the verification (§9.2). |
+| `channel` | string | yes | `BOUTIQUE`, `ONLINE`, `PRIVATE` (a private sale) or `OTHER`. |
+| `where` | string | no | ≤ 200 characters after trimming: the boutique, the website, the city. `""` or `null` = not given. |
+| `note` | string | no | ≤ 500 characters after trimming. `""` or `null` = not given. |
+
+Control characters (other than tab and line breaks) and unknown fields are refused (`400 VALIDATION_FAILED`).
+
+**201** `{ "ok": true }`. The report is accepted only for a scan that:
+
+- is a customer's verification (`event_type` VERIFY) whose result was **not authentic**: `SUSPICIOUS_ACTIVITY`, `REVOKED`, `UNKNOWN`, `INVALID_SIGNATURE` or `MALFORMED_CODE`;
+- is **less than 24 hours old** (`REPORT_WINDOW_MS`, `services/scan-reports.ts`);
+- carries **no report yet**: one report per scan.
+
+Otherwise `409 REPORT_NOT_ALLOWED` (unknown scans, authentic results and old scans answer alike) or `409 REPORT_ALREADY_SENT`.
+
+The place and the note are the customer's own words: **personal data**. They are stored with the scan (`scan_reports`, [DATABASE §5.22](DATABASE.md#522-scan_reports)), shown only to an admin session, never copied into the audit log, and deleted with the scan by the scan-history purge ([DATABASE §10](DATABASE.md#10-housekeeping-and-retention), SECURITY-MODEL §3.6). The audit entry `scan.report` names the scan alone (`targetType` `scan`, `targetId` the scan id, empty details); its actor is the signed-in account, else `system` `public` with the IP pseudonym.
+
+**What the verification app does with it.** Under the contact of ORBES Client Services (and under the certificate-card section when there is one), every result that was not authentic asks **WHERE DID YOU SEE OR BUY THIS PIECE?**, optional: one sentence, then the four answers BOUTIQUE, ONLINE, PRIVATE SALE and OTHER (pressed like the sign-in switch); once one is chosen, PLACE (OPTIONAL), NOTE (OPTIONAL, its hint asking the customer to leave out their name and contact details) and SEND ANSWER, a text link (the result's hairline button stays SCAN AGAIN). Sent, the section reads THANK YOU and the reference the answer is kept with; a refusal is shown as the server wrote it, and nothing typed is lost (`genome/src/web/verify/views/report.ts`).
+
 ---
 
 ## 9. Verification: `POST /api/v1/verify`
@@ -519,7 +560,7 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | Field | Type | Present |
 |---|---|---|
 | `state` | string | Always. One of the 9 states (§9.3). |
-| `scanId` | uuid | Always. The recorded scan event. |
+| `scanId` | uuid | Always. The recorded scan event; on a result that is not authentic, the customer's report is attached to it (§8.5). |
 | `verifiedAt` | ISO timestamp | Always. |
 | `title` | string | Always. Brand copy (§9.3), upper case. |
 | `message` | string | Always. Brand copy (§9.3). |
@@ -1635,9 +1676,9 @@ Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, 
 
 ---
 
-## 16. Admin: registries, anomalies and revocations
+## 16. Admin: registries, anomalies, revocations and cases
 
-These are the only places where internal verification facts (reasons, risk scores, authenticator results) leave the database, and only to an admin session.
+These are the only places where internal verification facts (reasons, risk scores, authenticator results) leave the database, and only to an admin session. The same holds for customers' reports on their scans (§8.5): the scans, the anomalies and the Cases queue (§16.8) show them.
 
 ### 16.1 `GET /api/admin/scans`
 
@@ -1647,6 +1688,7 @@ AUDITOR. Paginated scan events with their authentication record, newest first.
 |---|---|
 | `productId` | Canonical id or uuid. An unknown product gives an empty page. |
 | `state` | One of the 9 verification states. |
+| `scanId` | One scan (uuid): a case's link to its scan (§16.8). |
 
 Item:
 
@@ -1675,11 +1717,19 @@ Item:
     "reasons": ["MALFORMED:CRC"],
     "riskScore": 0,
     "authenticators": { "policy": null, "results": [] }
+  },
+  "report": {
+    "id": "8f0b2c4e-…",
+    "channel": "ONLINE",
+    "place": "a marketplace listing",
+    "note": "Offered at a third of the boutique price.",
+    "status": "OPEN",
+    "createdAt": "2026-10-01T08:17:02.114Z"
   }
 }
 ```
 
-`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
+`report` is the customer's report on the scan (§8.5) and the state of its case, or `null`. `productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
 
 ### 16.2 `GET /api/admin/owners`
 
@@ -1691,7 +1741,7 @@ AUDITOR. Paginated warranty records (shape of §14.6), newest first. Query `stat
 
 ### 16.4 `GET /api/admin/anomalies`
 
-AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `DISMISSED`) and `severity` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `DISMISSED`), `severity` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and `id` (one anomaly, uuid: a case's link to the anomaly its scan took part in).
 
 ```json
 {
@@ -1710,11 +1760,12 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
   "lastSeenAt": "2026-10-01T08:15:21.929Z",
   "resolvedBy": null,
   "resolvedAt": null,
-  "resolutionNote": null
+  "resolutionNote": null,
+  "reports": { "count": 1, "open": 1, "latest": { "id": "8f0b2c4e-…", "channel": "ONLINE", "place": "a marketplace listing", "note": "…", "status": "OPEN", "createdAt": "…" } }
 }
 ```
 
-Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
@@ -1748,6 +1799,43 @@ AUDITOR. Paginated revocation register, newest first:
 - KEY → key revocation without a compromise time (codes recorded before now stay trusted). Use §17.4 to set a compromise time.
 
 **201** — the new revocation row (shape of §16.6). Errors: `400 VALIDATION_FAILED`, plus the errors of the dispatched operation (`404 CODE_NOT_FOUND`, `409 CODE_ALREADY_REVOKED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSITION_NOT_ALLOWED`, `404 KEY_NOT_FOUND`, `409 KEY_ALREADY_REVOKED`, …).
+
+### 16.8 `GET /api/admin/reports` (extension of the contract)
+
+AUDITOR. The **Cases** queue: customers' reports on scans that were not authentic (§8.5), one case per scan, each with its scan, the anomaly the scan took part in and its piece. Paginated; open cases first, then the newest.
+
+| Query | Rules |
+|---|---|
+| `status` | `OPEN` or `CLOSED`. |
+| `scanId` | The case of one scan (uuid): a scan's link to its case. |
+| `anomalyId` | The cases of the scans that took part in one anomaly (uuid). |
+
+```json
+{
+  "id": "8f0b2c4e-…",
+  "scanId": "5a864af8-0d6b-4c1e-9f2a-3b7c1d2e4f5a",
+  "channel": "ONLINE",
+  "place": "a marketplace listing",
+  "note": "Offered at a third of the boutique price.",
+  "status": "OPEN",
+  "createdAt": "2026-10-01T08:17:02.114Z",
+  "handledBy": null,
+  "handledAt": null,
+  "resolutionNote": null,
+  "scan": { "occurredAt": "2026-10-01T08:15:21.929Z", "state": "SUSPICIOUS_ACTIVITY", "productId": "O26-J-00005", "country": "IT", "region": null },
+  "anomaly": { "id": "1dd3573b-…", "type": "LOST_STOLEN_SCAN", "severity": "HIGH", "status": "OPEN" }
+}
+```
+
+- `scan.productId` is the canonical id of the piece, `null` when the signed identity is not registered (or the code could not be read).
+- **The anomaly of a case.** A scan took part in an anomaly when the anomaly was recorded by it (`details.scanEventId`) or when the scan is of the same piece (its product; for an identity that is not registered, its packed identity) and was made between the anomaly's first and last sighting. A case names one: the most severe of those its scan recorded, else of those it was seen during (then the highest risk score, then the latest seen); `null` when there is none. The same rule gives an anomaly's `reports` (§16.4) and the `anomalyId` filter.
+- `handledBy` is `{ "id", "email" }` of the admin who closed the case.
+
+### 16.9 `PATCH /api/admin/reports/:id` (extension of the contract)
+
+OPERATOR. Closes a case. Body `{ "status": "CLOSED", "note": string }`: the note (1–2 000 characters after trimming) says what was done for the customer, or why nothing was; it stays with the case.
+
+**200** — the closed case (shape of §16.8), with `handledBy`, `handledAt` and `resolutionNote`. Errors: `400 VALIDATION_FAILED` (no note, another status, unknown fields), `404 REPORT_NOT_FOUND`, `409 REPORT_ALREADY_CLOSED`. Audited `scan.report.close`, targeting the scan like `scan.report` (so the audit log reads a case's two entries together), with `{ "reportId" }` in the details and neither the customer's words nor the note. A case is not reopened; it is deleted with its scan by the scan-history purge, open or closed.
 
 ---
 

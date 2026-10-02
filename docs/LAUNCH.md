@@ -165,6 +165,7 @@ docker compose ps                                                # caddy, app, p
 | When | What |
 |---|---|
 | Continuously | An uptime monitor (UptimeRobot, Better Stack…) on `https://verify.theorbes.com/api/v1/health` |
+| Daily | Admin → *Cases*: customers' answers to WHERE DID YOU SEE OR BUY THIS PIECE? on results that were not authentic. Follow each from its scan, anomaly and piece, then close it with a note (OPERATOR). Their words are personal data and go with the scan. |
 | Weekly | Admin → *Anomalies*: review OPEN items. Nothing is ever revoked automatically. |
 | Each update | `git pull && scripts/deploy.sh`. It takes a backup first and rolls back automatically on failure. |
 | Monthly | Check `/var/backups/orbes` and the off-site bucket; look at disk usage (`df -h`). |

@@ -21,6 +21,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   service: 'OPERATOR',
   confirmOwnership: 'OPERATOR',
   triageAnomaly: 'OPERATOR',
+  /** Close a case of the Cases queue, with a note (a customer's report on a scan). */
+  closeCase: 'OPERATOR',
   createCatalog: 'OPERATOR',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',

@@ -81,6 +81,21 @@ export interface ClientServices {
   hours?: string;
 }
 
+/** Where the customer saw or bought the piece of a result that was not authentic (POST /api/v1/reports). */
+export type ReportChannel = 'BOUTIQUE' | 'ONLINE' | 'PRIVATE' | 'OTHER';
+
+export const REPORT_CHANNELS: readonly ReportChannel[] = ['BOUTIQUE', 'ONLINE', 'PRIVATE', 'OTHER'];
+
+/** POST /api/v1/reports: attached to the scan, within 24 hours of it. */
+export interface ReportInput {
+  scanId: string;
+  channel: ReportChannel;
+  /** The boutique, the website, the city (≤ 200 characters). */
+  where?: string;
+  /** ≤ 500 characters. */
+  note?: string;
+}
+
 export interface AccountInfo {
   email: string;
   displayName: string | null;

@@ -34,6 +34,8 @@ const ANOMALY_STATUS: Record<string, Tone> = { OPEN: 'alert', ACKNOWLEDGED: 'out
 const WARRANTY: Record<string, Tone> = { NOT_STARTED: 'outline', ACTIVE: 'solid', EXPIRED: 'muted', VOID: 'alert' };
 const OWNERSHIP: Record<string, Tone> = { UNREGISTERED: 'outline', REGISTERED: 'solid', OWNED: 'solid', TRANSFER_PENDING: 'outline' };
 const SERVICE: Record<string, Tone> = { OPEN: 'outline', COMPLETED: 'muted', CANCELLED: 'muted' };
+/** A case of the Cases queue: an open one waits for staff, as an open anomaly does. */
+const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
   AUTHENTIC: 'solid',
   AUTHENTIC_FIRST_REGISTRATION: 'solid',
@@ -47,7 +49,7 @@ const VERIFICATION: Record<string, Tone> = {
   PENDING: 'outline',
 };
 
-export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification';
+export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -59,6 +61,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   ownership: OWNERSHIP,
   service: SERVICE,
   verification: VERIFICATION,
+  case: CASE,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

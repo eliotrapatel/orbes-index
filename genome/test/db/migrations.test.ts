@@ -6,7 +6,7 @@ import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../..
 const EXPECTED_TABLES = [
   'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
   'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_transfers', 'product_status_history',
-  'products', 'revocations', 'scan_events', 'scan_tokens', 'service_records', 'sessions', 'warranties',
+  'products', 'revocations', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records', 'sessions', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -75,6 +75,38 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX .* ON public\.ownership .*\(product_id\) WHERE \(ended_at IS NULL\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.ownership_transfers .*\(product_id\) WHERE \(status = 'PENDING'::text\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.anomalies .*\(product_id, type\) WHERE \(status = ANY/)).toBe(true);
+    // 0004: one report per scan, the admin who closed a case, the Cases queue.
+    expect(has(/UNIQUE INDEX scan_reports_scan_event_id_key ON public\.scan_reports USING btree \(scan_event_id\)/)).toBe(true);
+    expect(has(/INDEX scan_reports_handled_by_idx ON public\.scan_reports USING btree \(handled_by\)/)).toBe(true);
+    expect(has(/INDEX scan_reports_status_created_idx ON public\.scan_reports USING btree \(status, created_at\)/)).toBe(true);
+  });
+
+  it('0004 down restores the schema of 0003 exactly, and up again re-creates scan_reports', async () => {
+    const snapshot = async () =>
+      (
+        await sql<{ object: string }>`
+          SELECT 'table ' || table_name || ' ' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS object
+            FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE 'kysely_%'
+          UNION ALL SELECT 'index ' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename NOT LIKE 'kysely_%'
+          UNION ALL SELECT 'constraint ' || conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid)
+            FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+          UNION ALL SELECT 'trigger ' || tgrelid::regclass::text || ' ' || tgname FROM pg_trigger WHERE NOT tgisinternal
+          ORDER BY 1`.execute(t.db)
+      ).rows.map((r) => r.object);
+    // Later migrations (0005…) are rolled back first, then 0004 alone.
+    const latest = await snapshot();
+    let withReports: string[] | undefined;
+    for (let i = 0; i < Object.keys(MIGRATIONS).length && !withReports; i++) {
+      const state = await snapshot();
+      if ((await migrateDown(t.db)).reverted[0] === '0004_scan_reports') withReports = state;
+    }
+    expect(withReports?.some((o) => o.startsWith('table scan_reports '))).toBe(true);
+    const before = await snapshot();
+    expect(before.filter((o) => o.includes('scan_reports'))).toEqual([]);
+    // Only scan_reports went: everything else is as 0004 found it.
+    expect(withReports!.filter((o) => !o.includes('scan_reports'))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied[0]).toBe('0004_scan_reports');
+    expect(await snapshot()).toEqual(latest);
   });
 
   it('roll back cleanly and re-apply', async () => {

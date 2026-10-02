@@ -8,8 +8,9 @@
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
- * verification → sign out. Also: TOTP enrolment + two-step sign-in, and the
- * read-only AUDITOR console. No CSP violation or page error is tolerated.
+ * verification → sign out. Also: a customer's report followed from the
+ * Cases queue to its scan, anomaly and piece, then closed; TOTP enrolment +
+ * two-step sign-in, and the read-only AUDITOR console. No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -75,8 +76,9 @@ async function figuresInDisplayFace(page: Page): Promise<string[]> {
 /**
  * A registry with some history, so the dashboard and lists show real
  * shapes: products across statuses, scans from several countries, an
- * impossible-travel finding, a lost product scanned, and a validly signed
- * code for an identity that was never registered (CRITICAL).
+ * impossible-travel finding, a lost product scanned (and reported by the
+ * stranger who scanned it), and a validly signed code for an identity that
+ * was never registered (CRITICAL).
  */
 async function seedRegistry(ctx: AppContext, modelId: string): Promise<IssueResult[]> {
   const { issuance, lifecycle, warranty, verification } = ctx.services;
@@ -99,7 +101,12 @@ async function seedRegistry(ctx: AppContext, modelId: string): Promise<IssueResu
   for (let i = 0; i < 6; i++) await scan(i, `device-${i}`, i % 2 ? 'FR' : 'GB');
   await scan(0, 'device-0', 'FR');
   await scan(0, 'device-travel', 'JP'); // FR → JP within seconds
-  await scan(4, 'device-lost', 'IT'); // a LOST product is scanned
+  const lost = await scan(4, 'device-lost', 'IT'); // a LOST product is scanned
+  // ...and the stranger who scanned it says where they saw it: a case in the Cases queue (C-02).
+  await ctx.services.reports.submit(
+    { scanId: lost.scanId, channel: 'ONLINE', place: 'a marketplace listing', note: 'Offered at a third of the boutique price.' },
+    { type: 'system', id: 'public' },
+  );
 
   const signer = await ctx.keys.activeSigner();
   const category = (await ctx.categories.getByCode('J'))!;
@@ -463,6 +470,61 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
   }, STEP_TIMEOUT);
 
+  it('follows a customer\'s report from the Cases queue to its scan, its anomaly and its piece, then closes it with a note', async () => {
+    const rows = page.locator('table.table tbody tr');
+    await go(page, '#/cases', 'Cases');
+    // Cases sits in the Activity group of the menu, after Anomalies.
+    expect(await page.locator('.side__group', { hasText: 'Activity' }).locator('.side__link').allTextContents()).toEqual(['Verification events', 'Anomalies', 'Cases']);
+    await expect.poll(() => rows.count()).toBe(1);
+    expect(await rows.first().locator('[data-testid=case-where]').textContent()).toBe('ONLINE · a marketplace listing');
+    expect(await rows.first().textContent()).toContain('Offered at a third of the boutique price.');
+    // The stranger's scan (from Italy, seconds after one in Great Britain) took part in the LOST_STOLEN_SCAN and
+    // IMPOSSIBLE_TRAVEL findings, both HIGH: the case names the one with the higher risk.
+    const finding = (await rows.first().locator('[data-testid=case-anomaly]').textContent()) ?? '';
+    expect(['IMPOSSIBLE TRAVEL', 'LOST STOLEN SCAN']).toContain(finding);
+    expect(await rows.first().textContent()).toMatch(new RegExp(`SUSPICIOUS ACTIVITY.*${finding}.*HIGH.*O26-J-00005.*OPEN`));
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'cases');
+
+    // Its scan: Verification events narrowed to that one, which leads back to its case.
+    await rows.first().locator('[data-testid=case-scan]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await expect.poll(() => rows.count()).toBe(1);
+    expect(await page.locator('[data-testid=narrowed]').textContent()).toMatch(/One verification event/i);
+    expect(await page.locator('[data-testid=scan-report]').textContent()).toBe('ONLINE');
+    expect(await rows.first().textContent()).toMatch(/a marketplace listing.*Offered at a third of the boutique price\..*OPEN/);
+    await page.locator('[data-testid=scan-report]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
+    await expect.poll(() => rows.count()).toBe(1);
+
+    // Its anomaly: the finding the scan took part in, with the case counted.
+    await rows.first().locator('[data-testid=case-anomaly]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Anomalies');
+    await expect.poll(() => rows.count()).toBe(1);
+    expect(await rows.first().textContent()).toContain(finding);
+    expect(await page.locator('[data-testid=anomaly-reports]').textContent()).toBe('1 case');
+    await page.locator('[data-testid=narrowed]').getByText('Show all').click();
+    await expect.poll(() => rows.count()).toBeGreaterThan(1);
+
+    // Its piece.
+    await go(page, '#/cases', 'Cases');
+    await rows.first().locator('[data-testid=case-piece]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('O26-J-00005');
+
+    // Closing needs a note; then the case reads CLOSED, by whom and why, and leaves the OPEN filter.
+    await go(page, '#/cases', 'Cases');
+    await page.click('[data-testid=close-case]');
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('.dialog__error').textContent()).toBe('Complete the required fields.');
+    await page.fill('dialog textarea[name=note]', 'Listing reported to the platform.');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Case closed.")');
+    await expect.poll(() => rows.first().textContent()).toMatch(/CLOSED.*console@orbes\.test.*Listing reported to the platform\./);
+    expect(await page.locator('[data-testid=close-case]').count()).toBe(0);
+    await go(page, '#/cases?status=OPEN', 'Cases');
+    await expect.poll(() => page.locator('.empty__text').textContent()).toBe('No case matches these filters.');
+  }, STEP_TIMEOUT);
+
   it('rotates the signing key with a typed confirmation', async () => {
     await go(page, '#/keys', 'Signing keys');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
@@ -599,6 +661,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
     await go(p, '#/keys', 'Signing keys');
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
+    // The Cases queue reads, without the action that closes a case.
+    await go(p, '#/cases', 'Cases');
+    await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
+    expect(await p.locator('[data-testid=close-case]').count()).toBe(0);
     await go(p, '#/audit', 'Audit log');
     await p.click('[data-testid=audit-verify]');
     await p.waitForSelector('[data-testid=chain-result][data-ok=true]');

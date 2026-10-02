@@ -4,7 +4,9 @@
  *
  * These are the only places internal verification facts (reasons, risk
  * scores, authenticator results) leave the database, and only to an
- * authenticated admin session.
+ * authenticated admin session. A scan carries the customer's report on it
+ * (C-02: channel, place, note and the state of its case), and an anomaly the
+ * reports on the scans that took part in it (the Cases queue: reports.ts).
  */
 import { sql } from 'kysely';
 import type { FastifyPluginAsync } from 'fastify';
@@ -16,7 +18,7 @@ import type { AdminRouteDeps } from './index.js';
 
 export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { db } = ctx;
-  const { warranty, anomaly } = ctx.services;
+  const { warranty, anomaly, reports } = ctx.services;
 
   app.get('/api/admin/scans', async (request) => {
     const f = parse(scanListQuery, request.query);
@@ -24,13 +26,15 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
     let q = db
       .selectFrom('scan_events as s')
       .leftJoin('authentication_events as a', 'a.scan_event_id', 's.id')
-      .leftJoin('products as p', 'p.id', 's.product_id');
+      .leftJoin('products as p', 'p.id', 's.product_id')
+      .leftJoin('scan_reports as r', 'r.scan_event_id', 's.id');
     if (f.productId !== undefined) {
       const product = await findProduct(db, f.productId);
       if (!product) return makePage([], 0, page);
       q = q.where('s.product_id', '=', product.id);
     }
     if (f.state !== undefined) q = q.where('s.result_state', '=', f.state);
+    if (f.scanId !== undefined) q = q.where('s.id', '=', f.scanId);
     const total = await q.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await q
       .select([
@@ -57,6 +61,12 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
         'a.reasons',
         'a.risk_score',
         'a.authenticators',
+        'r.id as report_id',
+        'r.channel as report_channel',
+        'r.place as report_place',
+        'r.note as report_note',
+        'r.status as report_status',
+        'r.created_at as report_created_at',
       ])
       .orderBy('s.occurred_at', 'desc')
       .orderBy('s.id')
@@ -89,6 +99,17 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
               reasons: r.reasons,
               riskScore: r.risk_score,
               authenticators: r.authenticators,
+            }
+          : null,
+        // The customer's report on this scan, and the state of its case.
+        report: r.report_id
+          ? {
+              id: r.report_id,
+              channel: r.report_channel,
+              place: r.report_place,
+              note: r.report_note,
+              status: r.report_status,
+              createdAt: r.report_created_at,
             }
           : null,
       })),
@@ -142,7 +163,13 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
 
   app.get('/api/admin/anomalies', async (request) => {
     const f = parse(anomalyListQuery, request.query);
-    return anomaly.list({ ...(f.status ? { status: f.status } : {}), ...(f.severity ? { severity: f.severity } : {}) }, pageOf(request.query));
+    const list = await anomaly.list(
+      { ...(f.id ? { id: f.id } : {}), ...(f.status ? { status: f.status } : {}), ...(f.severity ? { severity: f.severity } : {}) },
+      pageOf(request.query),
+    );
+    // What customers said about the scans that took part in each finding (count, open cases, the latest).
+    const byAnomaly = await reports.forAnomalies(list.items.map((a) => a.id));
+    return { ...list, items: list.items.map((a) => ({ ...a, reports: byAnomaly.get(a.id) ?? null })) };
   });
 
   app.patch('/api/admin/anomalies/:id', async (request) => {

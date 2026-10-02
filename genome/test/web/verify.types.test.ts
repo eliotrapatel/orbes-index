@@ -5,9 +5,9 @@
  * browser's type, and the runtime checks compare the state lists.
  */
 import { describe, expect, it } from 'vitest';
-import { VERIFICATION_STATES as SERVER_STATES } from '../../src/server/db/schema.js';
+import { REPORT_CHANNELS as SERVER_CHANNELS, VERIFICATION_STATES as SERVER_STATES } from '../../src/server/db/schema.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
-import { VERIFICATION_STATES, type VerifyInput, type VerifyOutcome } from '../../src/web/verify/types.js';
+import { REPORT_CHANNELS, VERIFICATION_STATES, type VerifyInput, type VerifyOutcome } from '../../src/web/verify/types.js';
 
 // Compile-time: every server outcome is a valid web outcome, every web request a valid server input.
 export const outcomeFits = (o: ServerVerifyOutcome): VerifyOutcome => o;
@@ -16,6 +16,10 @@ export const inputFits = (i: VerifyInput): ServerVerifyInput => i;
 describe('verify wire types', () => {
   it('know the same verification states as the server', () => {
     expect([...VERIFICATION_STATES].sort()).toEqual([...SERVER_STATES].sort());
+  });
+
+  it('know the same report channels as the server (POST /api/v1/reports)', () => {
+    expect([...REPORT_CHANNELS]).toEqual([...SERVER_CHANNELS]);
   });
 
   it('are structurally compatible (checked by tsc)', () => {

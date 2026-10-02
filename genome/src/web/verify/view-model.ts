@@ -5,8 +5,10 @@
  * title and message; this module only arranges them: which sections appear,
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
- * registration token, the certificate-card section), and where ORBES Client
- * Services is offered, with its prefilled email. It never infers
+ * registration token, the certificate-card section), where ORBES Client
+ * Services is offered, with its prefilled email, and whether the customer
+ * may say where the piece was seen or bought (a result that was not
+ * authentic). It never infers
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
@@ -54,6 +56,16 @@ export interface ContactModel {
   hours?: string;
 }
 
+/**
+ * WHERE DID YOU SEE OR BUY THIS PIECE? Offered under the contact of every result that was not authentic,
+ * attached to its scan (POST /api/v1/reports; the server takes one report per scan, within 24 hours).
+ */
+export interface ReportModel {
+  scanId: string;
+  /** The short reference of the result's foot, which the answer is kept with. */
+  reference: string;
+}
+
 export interface GenomeModel {
   id: string;
   version: string;
@@ -89,6 +101,8 @@ export interface ResultViewModel {
   reference: string;
   /** How to reach ORBES Client Services, where the result asks for it (and Client Services is configured). */
   contact?: ContactModel;
+  /** Where the piece was seen or bought: results that were not authentic only. */
+  report?: ReportModel;
 }
 
 const AUTHENTIC: ReadonlySet<VerificationState> = new Set([
@@ -291,8 +305,12 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     const contact = contactModel(opts.clientServices, vm, placement, opts.offsetMinutes ?? 0);
     if (contact) vm.contact = contact;
   }
+  // The customer may say where the piece was seen or bought, attached to this scan: results that were not authentic.
+  if (!authentic && SCAN_ID.test(outcome.scanId ?? '')) vm.report = { scanId: outcome.scanId.toLowerCase(), reference: vm.reference };
   return vm;
 }
+
+const SCAN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The same rules as the server's CLIENT_SERVICES_* (config.ts), checked again before anything becomes a link. */
 const MAILBOX = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;

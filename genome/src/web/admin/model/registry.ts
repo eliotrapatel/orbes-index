@@ -1,10 +1,10 @@
 /**
- * Small pure rules for the registry views: anomaly triage moves, key
- * actions, typed confirmation phrases, revocation targets and the audit
- * chain verdict.
+ * Small pure rules for the registry views: anomaly triage moves, the words
+ * of a case, key actions, typed confirmation phrases, revocation targets and
+ * the audit chain verdict.
  */
 import { formatCount, shortHash } from '../format.js';
-import type { AnomalyStatus, ChainVerification, KeyJson, RevocationTargetType } from '../types.js';
+import type { AnomalyStatus, ChainVerification, KeyJson, ReportChannel, RevocationTargetType } from '../types.js';
 import type { Tone } from './tone.js';
 
 // ── Anomalies ──────────────────────────────────────────────────────────────
@@ -37,6 +37,27 @@ export function triageMoves(status: AnomalyStatus): TriageMove[] {
     default:
       return [];
   }
+}
+
+// ── Cases ──────────────────────────────────────────────────────────────────
+
+const CHANNEL_LABELS: Readonly<Record<ReportChannel, string>> = Object.freeze({ BOUTIQUE: 'BOUTIQUE', ONLINE: 'ONLINE', PRIVATE: 'PRIVATE SALE', OTHER: 'OTHER' });
+
+/** Where a customer saw or bought the piece, as the verify app asked it (PRIVATE reads PRIVATE SALE). */
+export function channelLabel(channel: string | null | undefined): string {
+  if (!channel) return '—';
+  return CHANNEL_LABELS[channel as ReportChannel] ?? channel.replace(/_/g, ' ').toUpperCase();
+}
+
+/** `ONLINE · a marketplace listing`: the channel, then the place when the customer gave one. */
+export function reportWhere(r: { channel: string; place: string | null }): string {
+  return r.place ? `${channelLabel(r.channel)} · ${r.place}` : channelLabel(r.channel);
+}
+
+/** The short reference the customer reads under the result (`REF 1F3079F7`): the scan id's first block. */
+export function scanReference(scanId: string | null | undefined): string {
+  const head = (scanId ?? '').split('-')[0] ?? '';
+  return /^[0-9a-f]{8}$/i.test(head) ? head.toUpperCase() : '—';
 }
 
 // ── Keys ───────────────────────────────────────────────────────────────────

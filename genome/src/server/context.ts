@@ -30,6 +30,7 @@ import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
+import { ScanReportService } from './services/scan-reports.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
@@ -50,6 +51,8 @@ export interface AppServices {
   catalog: CatalogService;
   /** Certificate cards carrying claim codes (PDF, A4 sheet, CSV for print shops). */
   certificates: CertificateService;
+  /** Customers' reports on scans that were not authentic, and the console's Cases queue. */
+  reports: ScanReportService;
 }
 
 export interface AppContext {
@@ -124,6 +127,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const catalog = new CatalogService({ db, audit, categories, clock });
     const certificates = new CertificateService({ db, audit, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
+    const reports = new ScanReportService({ db, audit, clock, log });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
 
@@ -138,6 +142,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       authenticators,
       catalog,
       certificates,
+      reports,
       ...overrides.services,
     };
 

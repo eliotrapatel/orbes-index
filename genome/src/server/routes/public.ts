@@ -1,6 +1,7 @@
 /**
  * Public routes (contract §3): health, public keys, categories, Client
- * Services contact, verify.
+ * Services contact, verify, and the report a customer may attach to a scan
+ * that was not authentic.
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, sets the `orbes_device` cookie, and passes
@@ -8,16 +9,21 @@
  * agent family) to the verification service. The response is the service's
  * public outcome as is: it is built from an allow-list there and never
  * carries risk scores, thresholds or raw statuses.
+ *
+ * /reports needs no session either, but it writes: a cross-site form must
+ * not reach it (same-origin check, as for registration and login), and it
+ * draws on the `verify` budget, like the scan it follows.
  */
 import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { parse, verifyBody } from '../http/schemas.js';
-import { loadAccount } from '../http/sessions.js';
+import { parse, reportBody, verifyBody } from '../http/schemas.js';
+import { assertSameOrigin, loadAccount } from '../http/sessions.js';
+import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
 
 export interface RouteDeps {
@@ -101,5 +107,20 @@ export const publicRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, li
       meta.sessionHash = pseudonymize(ctx.config.ipHashPepper, 'session', viewer.session.id);
     }
     return ctx.services.verification.verify(input, meta);
+  });
+
+  // Where the customer saw or bought the piece of a scan that was not authentic (§8.5): one report per
+  // scan, within 24 hours; it opens a case in the console's Cases queue.
+  const sameOrigin = async (request: FastifyRequest) => assertSameOrigin(ctx.config, request);
+  app.post('/api/v1/reports', { config: { rateGroup: 'verify' }, onRequest: sameOrigin }, async (request, reply) => {
+    const input = parse(reportBody, request.body);
+    const viewer = await loadAccount(ctx, request);
+    // A signed-in customer reports as their account; anyone else as the public visitor of /verify.
+    const actor: Actor = viewer
+      ? { type: 'account', id: viewer.account.id, ipHash: request.orbes.ipHash }
+      : { type: 'system', id: 'public', ipHash: request.orbes.ipHash };
+    await ctx.services.reports.submit({ scanId: input.scanId, channel: input.channel, place: input.where ?? null, note: input.note ?? null }, actor);
+    reply.code(201);
+    return { ok: true };
   });
 };

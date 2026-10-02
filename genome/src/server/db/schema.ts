@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0004) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -81,6 +81,14 @@ export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
 
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
+
+/** Where the customer saw or bought the piece of a reported scan (scan_reports.channel, migration 0004). */
+export const REPORT_CHANNELS = ['BOUTIQUE', 'ONLINE', 'PRIVATE', 'OTHER'] as const;
+export type ReportChannel = (typeof REPORT_CHANNELS)[number];
+
+/** A case of the console's Cases queue (scan_reports.status). */
+export const REPORT_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
 // ── Column helpers ─────────────────────────────────────────────────────────
 
@@ -371,6 +379,23 @@ export interface AnomaliesTable {
   resolution_note: string | null;
 }
 
+/**
+ * A customer's report on a scan that was not authentic (migration 0004): where the piece was seen
+ * or bought, and the case staff follow up. One per scan; purged with the scan.
+ */
+export interface ScanReportsTable {
+  id: Generated<string>;
+  scan_event_id: string;
+  channel: ReportChannel;
+  place: string | null;                // ≤ 200 characters, free text (personal data)
+  note: string | null;                 // ≤ 500 characters, free text (personal data)
+  created_at: TimestampDefault;
+  status: WithDefault<ReportStatus>;
+  handled_by: string | null;           // admin_users.id, set when CLOSED
+  handled_at: TimestampNullable;
+  resolution_note: string | null;      // ≤ 2 000 characters
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -448,6 +473,7 @@ export interface Database {
   scan_events: ScanEventsTable;
   authentication_events: AuthenticationEventsTable;
   anomalies: AnomaliesTable;
+  scan_reports: ScanReportsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -500,6 +526,8 @@ export type NewAuthenticationEvent = Insertable<AuthenticationEventsTable>;
 export type AnomalyRow = Selectable<AnomaliesTable>;
 export type NewAnomaly = Insertable<AnomaliesTable>;
 export type AnomalyUpdate = Updateable<AnomaliesTable>;
+export type ScanReportRow = Selectable<ScanReportsTable>;
+export type NewScanReport = Insertable<ScanReportsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

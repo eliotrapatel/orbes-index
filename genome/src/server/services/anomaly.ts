@@ -100,6 +100,8 @@ export interface AnomalyRecord {
 }
 
 export interface AnomalyFilters {
+  /** One anomaly (anomalies.id). */
+  id?: string;
   status?: AnomalyStatus;
   severity?: AnomalySeverity;
   type?: string;
@@ -277,7 +279,9 @@ export class AnomalyService {
     if (filters.status !== undefined && !ANOMALY_STATUSES.includes(filters.status)) throw validationError('Unknown anomaly status.');
     if (filters.severity !== undefined && !ANOMALY_SEVERITIES.includes(filters.severity)) throw validationError('Unknown anomaly severity.');
     if (filters.type !== undefined && !TYPE_RE.test(filters.type)) throw validationError('Unknown anomaly type.');
+    if (filters.id !== undefined && !UUID_RE.test(filters.id)) throw validationError('Unknown anomaly.');
     let q = this.db.selectFrom('anomalies as a').leftJoin('products as p', 'p.id', 'a.product_id');
+    if (filters.id) q = q.where('a.id', '=', filters.id.toLowerCase());
     if (filters.status) q = q.where('a.status', '=', filters.status);
     if (filters.severity) q = q.where('a.severity', '=', filters.severity);
     if (filters.type) q = q.where('a.type', '=', filters.type);

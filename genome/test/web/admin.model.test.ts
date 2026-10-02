@@ -27,7 +27,18 @@ import {
 } from '../../src/web/admin/model/generator.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
-import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMatches, revocationTargetError, triageMoves } from '../../src/web/admin/model/registry.js';
+import {
+  chainVerdict,
+  channelLabel,
+  compromiseTime,
+  confirmationPhrase,
+  keyActions,
+  phraseMatches,
+  reportWhere,
+  revocationTargetError,
+  scanReference,
+  triageMoves,
+} from '../../src/web/admin/model/registry.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import * as web from '../../src/web/admin/types.js';
 import type { DashboardData, Model, ProductDetail } from '../../src/web/admin/types.js';
@@ -45,6 +56,8 @@ describe('admin enums mirror the server', () => {
       'ANOMALY_SEVERITIES',
       'ANOMALY_STATUSES',
       'REVOCATION_TARGET_TYPES',
+      'REPORT_CHANNELS',
+      'REPORT_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -69,6 +82,9 @@ describe('permissions', () => {
     expect(can('OPERATOR', 'manageKeys')).toBe(false);
     expect(can('OPERATOR', 'revokeProduct')).toBe(false);
     expect(can('ADMIN', 'manageKeys')).toBe(true);
+    // The Cases queue: an AUDITOR reads it, an OPERATOR closes a case (PATCH /api/admin/reports/:id).
+    expect(can('AUDITOR', 'closeCase')).toBe(false);
+    expect(can('OPERATOR', 'closeCase')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
   });
@@ -84,6 +100,24 @@ describe('tones', () => {
     expect(toneOf('code', 'SUPERSEDED')).toBe('muted');
     expect(toneOf('product', 'SOMETHING_NEW')).toBe('outline');
     expect(toneOf('product', null)).toBe('muted');
+    // An open case waits for staff, as an open anomaly does; a closed one recedes.
+    expect(toneOf('case', 'OPEN')).toBe(toneOf('anomaly', 'OPEN'));
+    expect(toneOf('case', 'CLOSED')).toBe('muted');
+  });
+});
+
+describe('cases', () => {
+  it('says where the customer saw or bought the piece as the verify app asked it, then the place', () => {
+    expect(['BOUTIQUE', 'ONLINE', 'PRIVATE', 'OTHER'].map(channelLabel)).toEqual(['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
+    expect(channelLabel(null)).toBe('—');
+    expect(reportWhere({ channel: 'ONLINE', place: 'a marketplace listing' })).toBe('ONLINE · a marketplace listing');
+    expect(reportWhere({ channel: 'PRIVATE', place: null })).toBe('PRIVATE SALE');
+  });
+
+  it('names a scan by the reference the customer reads under the result', () => {
+    expect(scanReference('1f3079f7-1c2d-4e5f-8a9b-0c1d2e3f4a5b')).toBe('1F3079F7');
+    expect(scanReference('nope')).toBe('—');
+    expect(scanReference(null)).toBe('—');
   });
 });
 

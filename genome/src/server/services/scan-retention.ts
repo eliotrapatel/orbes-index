@@ -2,12 +2,14 @@
  * Scan-history retention (SCAN_RETENTION_DAYS, DATABASE §10).
  *
  * Deletes scan events older than the retention cut-off together with the
- * rows that reference them (`scan_tokens.scan_event_id` and
- * `authentication_events.scan_event_id`, both ON DELETE RESTRICT, so the
- * dependants go first), in batches: each batch is one short transaction over
- * the oldest `batchSize` events, and one pass stops after `maxBatches`, so a
- * first purge of a large backlog never holds long locks; the next pass
- * continues.
+ * rows that reference them (`scan_reports.scan_event_id`,
+ * `scan_tokens.scan_event_id` and `authentication_events.scan_event_id`,
+ * all ON DELETE RESTRICT, so the dependants go first), in batches: each
+ * batch is one short transaction over the oldest `batchSize` events, and
+ * one pass stops after `maxBatches`, so a first purge of a large backlog
+ * never holds long locks; the next pass continues. A customer's report on a scan (its place and note are personal
+ * data) goes with the scan, open or closed: the case lives as long as the
+ * scan it is attached to.
  *
  * Not touched: `anomalies` (case records reviewed by staff, keyed to the
  * product, not to individual scans), `audit_logs` (append-only hash chain)
@@ -34,6 +36,7 @@ export async function purgeScanHistory(db: Db, before: Date, opts: PurgeScanHist
         await trx.selectFrom('scan_events').select('id').where('occurred_at', '<', before).orderBy('occurred_at').limit(batchSize).execute()
       ).map((r) => r.id);
       if (ids.length === 0) return 0;
+      await trx.deleteFrom('scan_reports').where('scan_event_id', 'in', ids).execute();
       await trx.deleteFrom('scan_tokens').where('scan_event_id', 'in', ids).execute();
       await trx.deleteFrom('authentication_events').where('scan_event_id', 'in', ids).execute();
       const r = await trx.deleteFrom('scan_events').where('id', 'in', ids).executeTakeFirst();

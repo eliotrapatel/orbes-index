@@ -119,6 +119,24 @@ describe('ApiClient', () => {
     expect(f.calls[1].headers['x-csrf-token']).toBe('t1');
   });
 
+  it('sends a report on a scan as same-origin JSON, without a CSRF header, empty optional fields left out', async () => {
+    const f = fakeFetch([() => json(201, { ok: true }), () => json(201, { ok: true }), () => json(409, { error: { code: 'REPORT_ALREADY_SENT', message: 'A report has already been sent for this reference.' } })]);
+    const api = new ApiClient({ fetch: f.impl });
+    const scanId = '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
+    await api.report({ scanId, channel: 'ONLINE', where: '  a marketplace  ', note: 'Listed at a third of the price.' });
+    expect(f.calls[0]).toMatchObject({
+      url: '/api/v1/reports',
+      method: 'POST',
+      credentials: 'same-origin',
+      body: { scanId, channel: 'ONLINE', where: 'a marketplace', note: 'Listed at a third of the price.' },
+    });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    await api.report({ scanId, channel: 'OTHER', where: '   ', note: '' });
+    expect(f.calls[1].body).toEqual({ scanId, channel: 'OTHER' });
+    // The server's refusal, as it is written for customers.
+    await expect(api.report({ scanId, channel: 'OTHER' })).rejects.toMatchObject({ status: 409, code: 'REPORT_ALREADY_SENT', message: 'A report has already been sent for this reference.' });
+  });
+
   it('omits an empty claim code and display name', async () => {
     const f = fakeFetch([() => json(201, SESSION('t')), () => json(201, { productId: 'p', verified: false, since: 's' })]);
     const api = new ApiClient({ fetch: f.impl });

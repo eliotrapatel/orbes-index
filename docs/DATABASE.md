@@ -42,6 +42,7 @@ The database is the **registry** of the ORBES GENOME CODE system. It records:
 - customer accounts, staff (admin) users and their login sessions;
 - ownership, ownership transfers, warranties and service records;
 - every verification request (scan) and its authentication decision;
+- customers' reports on scans that were not authentic (where they saw or bought the piece), and the cases staff follow up;
 - anomaly findings and revocations;
 - an append-only, hash-chained audit log of every mutation.
 
@@ -168,6 +169,8 @@ erDiagram
   PRODUCTS |o--o{ AUTHENTICATION_EVENTS : "product_id"
   CRYPTOGRAPHIC_KEYS |o..o{ AUTHENTICATION_EVENTS : "key_id (no FK)"
   SCAN_EVENTS ||--o{ SCAN_TOKENS : "scan_event_id"
+  SCAN_EVENTS ||--o| SCAN_REPORTS : "scan_event_id (unique)"
+  ADMIN_USERS |o--o{ SCAN_REPORTS : "handled_by"
   PRODUCTS ||--o{ SCAN_TOKENS : "product_id"
 
   PRODUCTS ||--o{ OWNERSHIP : "product_id"
@@ -623,7 +626,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
   - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie, `__Host-orbes_device` in production) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
   - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`), or when the server looks the client IP up in a local GeoIP database (`GEO_MODE=mmdb`, `TRUST_PROXY` required in production; the IP itself is never stored). `region` is filled only in `cloudflare` mode. With `GEO_MODE=none` (the default), no location is stored.
   - No raw user-agent string is stored here, only the family.
-  - Retention: no automatic purge is implemented (§10).
+  - Retention: kept indefinitely unless `SCAN_RETENTION_DAYS` is set; then housekeeping deletes old scan events with everything attached to them, a customer's report (§5.22) included (§10).
 
 ### 5.17 `scan_tokens`
 
@@ -719,8 +722,8 @@ Append-only, hash-chained log of every mutation.
 | `actor_type` | `text` | NOT NULL | — | `CHECK (actor_type IN ('admin','account','system'))` |
 | `actor_id` | `text` | NULL | — | Admin or account uuid; a label such as `bootstrap` for some system actions. |
 | `action` | `text` | NOT NULL | — | `CHECK (length(action) BETWEEN 1 AND 200)`. Dotted lower-case verb, e.g. `product.issue`. |
-| `target_type` | `text` | NULL | — | e.g. `product`, `code`, `key`, `category`, `collection`, `model`, `account`, `admin`, `anomaly`. |
-| `target_id` | `text` | NULL | — | Products are referenced by canonical id; codes, accounts, admins and anomalies by uuid; keys by key id; categories by letter. |
+| `target_type` | `text` | NULL | — | e.g. `product`, `code`, `key`, `category`, `collection`, `model`, `account`, `admin`, `anomaly`, `scan`. |
+| `target_id` | `text` | NULL | — | Products are referenced by canonical id; codes, accounts, admins, anomalies and scans by uuid; keys by key id; categories by letter. |
 | `details` | `jsonb` | NOT NULL | `'{}'` | JSON object, ≤ 64 KiB. Never secrets, raw IPs, private keys or customer PII. |
 | `ip_hash` | `text` | NULL | — | HMAC pseudonym of the actor's IP (§5.16). |
 | `prev_hash` | `bytea` | NOT NULL | — | `CHECK (octet_length = 32)`. Hash of the previous entry; 32 zero bytes for the first entry. |
@@ -731,9 +734,32 @@ Hash chain: `hash = SHA-256(prev_hash ‖ UTF-8(canonicalJSON(entry)))`, where `
 - **Indexes:** primary key; unique `hash`; `audit_logs_prev_hash_key`: unique `(prev_hash)` (each entry can be the predecessor of only one entry, so a forked chain fails at insert time); `audit_logs_occurred_at_idx`; `audit_logs_target_idx (target_type, target_id)`.
 - **Triggers:** `audit_logs_append_only` (BEFORE UPDATE OR DELETE, row level) and `audit_logs_no_truncate` (BEFORE TRUNCATE, statement level), both raising `OR001` with "audit_logs is append-only".
 - **Written by:** `AuditService.record` only, under the `AUDIT_CHAIN` advisory lock, normally inside the transaction of the change it describes. `verifyChain()` (`GET /api/admin/audit/verify`) recomputes every hash and link; `head()` returns the newest id and hash for external anchoring. The chain detects edits and deletions inside the log, not the removal of the newest entries; anchor the head outside the database (§11).
-- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`. Verifications themselves are recorded in `scan_events`, not in the audit log.
+- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`, `scan.report`, `scan.report.close`. Verifications themselves are recorded in `scan_events`, not in the audit log. `scan.report` and `scan.report.close` both target the scan (§5.22) and never carry the customer's words or the resolution note.
 - `ownership.claim_failed` entries double as the counter for the claim-code attempt limit (5 failures per product per rolling hour), so the limit holds across server instances and restarts.
 - **Retention:** permanent. The application cannot delete entries.
+
+### 5.22 `scan_reports`
+
+A customer's report on a scan that was not authentic: where they saw or bought the piece (C-02; [API §8.5](API.md#85-post-apiv1reports)), and the **case** staff follow up in the console's Cases queue ([API §16.8](API.md#168-get-apiadminreports-extension-of-the-contract)). Migration `0004_scan_reports`.
+
+| Column | Type | Null | Default | Constraints / notes |
+|---|---|---|---|---|
+| `id` | `uuid` | NOT NULL | `gen_random_uuid()` | PK. The case id. |
+| `scan_event_id` | `uuid` | NOT NULL | — | UNIQUE, FK → `scan_events.id`: one report per scan. |
+| `channel` | `text` | NOT NULL | — | `CHECK (channel IN ('BOUTIQUE','ONLINE','PRIVATE','OTHER'))` (`REPORT_CHANNELS`). |
+| `place` | `text` | NULL | — | `CHECK (char_length BETWEEN 1 AND 200)`. Free text from the customer (the API field `where`): **personal data**. |
+| `note` | `text` | NULL | — | `CHECK (char_length BETWEEN 1 AND 500)`. Free text from the customer: **personal data**. |
+| `created_at` | `timestamptz` | NOT NULL | `now()` | Set from the service clock. |
+| `status` | `text` | NOT NULL | `'OPEN'` | `CHECK (status IN ('OPEN','CLOSED'))` (`REPORT_STATUSES`). |
+| `handled_by` | `uuid` | NULL | — | FK → `admin_users.id`: the admin who closed the case. |
+| `handled_at` | `timestamptz` | NULL | — | `CHECK (handled_at IS NULL OR handled_at >= created_at)`. |
+| `resolution_note` | `text` | NULL | — | `CHECK (char_length BETWEEN 1 AND 2000)`. What was done, or why nothing was. |
+
+- **`scan_reports_handled_consistent`:** an OPEN case has no `handled_by`, `handled_at` or `resolution_note`; a CLOSED case has `handled_by` and `handled_at`.
+- **Indexes:** primary key; `scan_reports_scan_event_id_key` (unique `scan_event_id`, which leads with the foreign key); `scan_reports_handled_by_idx (handled_by)`; `scan_reports_status_created_idx (status, created_at)` (the queue).
+- **Written by:** `ScanReportService.submit` (`POST /api/v1/reports`: a VERIFY scan whose result was not authentic, less than 24 hours old, no report yet; audit `scan.report`) and `ScanReportService.close` (`PATCH /api/admin/reports/:id`, OPERATOR: OPEN → CLOSED with a note; audit `scan.report.close`). `purgeScanHistory` deletes it with its scan (§10).
+- **Read by:** the Cases queue (`GET /api/admin/reports`), the scans list (`report`) and the anomalies list (`reports`): an admin session only, never a public response.
+- **Privacy:** `place` and `note` are the customer's own words. They live exactly as long as the scan they are attached to, open or closed, and are never copied into `audit_logs` (permanent), whose entries name the scan alone. The resolution note stays with the case for the same reason. The verify app asks the customer to leave out their name and contact details (SECURITY-MODEL §3.6).
 
 ---
 
@@ -887,7 +913,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 
 ### 9.1 Layout
 
-- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), and any later entry of `MIGRATIONS`.
+- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), `0004_scan_reports` (customers' reports on scans and the Cases queue, §5.22; its down step drops the table and nothing else), and any later entry of `MIGRATIONS`.
 - A migration is a list of SQL strings executed one by one: PGlite runs queries through the extended protocol, which refuses multi-statement strings.
 - Value lists for `CHECK` constraints are literal in the migration, so a migration never changes when application constants evolve; a test asserts they still match `schema.ts`.
 - Rules: append new migrations to `MIGRATIONS`; never edit an applied migration.
@@ -928,13 +954,13 @@ After the schema is current, `createContext()` also:
 | Sessions | Deletes sessions whose `expires_at` has passed. |
 | Transfers | Marks overdue PENDING transfers EXPIRED and recomputes the product's `ownership_state`. |
 | Scan tokens | Deletes scan tokens that expired more than 24 hours ago. |
-| Scan history | Only when `SCAN_RETENTION_DAYS` is set: deletes `scan_events` whose `occurred_at` is older than the period, together with the `scan_tokens` and `authentication_events` that reference them (deleted first: both foreign keys are `ON DELETE RESTRICT`). Batches of 1 000 scan events, one short transaction each, at most 50 batches per pass, oldest first (`src/server/services/scan-retention.ts`). |
+| Scan history | Only when `SCAN_RETENTION_DAYS` is set: deletes `scan_events` whose `occurred_at` is older than the period, together with the `scan_reports` (a customer's report, open or closed), `scan_tokens` and `authentication_events` that reference them (deleted first: the foreign keys are `ON DELETE RESTRICT`). Batches of 1 000 scan events, one short transaction each, at most 50 batches per pass, oldest first (`src/server/services/scan-retention.ts`). |
 
-Rows deleted by the application: `sessions`, `scan_tokens`, and, with a retention period, old `scan_events` and their `authentication_events`. Every other table grows monotonically.
+Rows deleted by the application: `sessions`, `scan_tokens`, and, with a retention period, old `scan_events` with their `authentication_events` and `scan_reports`. Every other table grows monotonically.
 
 **Retention period.** `SCAN_RETENTION_DAYS` (whole days, 30–3650) is unset by default: scan history is then kept indefinitely, and production logs a `risky configuration` warning at every start. The period itself is a legal decision, to agree with counsel. Points to consider:
 
-- the stored scan data is pseudonymous (HMACs of IP, device and session; coarse location; browser family), but pseudonymous data is still personal data in many jurisdictions;
+- the stored scan data is pseudonymous (HMACs of IP, device and session; coarse location; browser family), but pseudonymous data is still personal data in many jurisdictions; a customer's report (§5.22) adds their own words, which may name a person or a place, and goes with its scan;
 - anomaly scoring only reads the recent history of a code (the longest of the configured windows and the decay period: 30 days with the default settings), so older scans are not needed for scoring. The configuration refuses a period shorter than that look-back (`scanLookbackDays` in `config.ts`);
 - `anomalies` rows are not purged: they are case records reviewed by staff, keyed to the product, and keep their own first/last-seen times; `audit_logs` cannot be purged by the application and must not be edited, since that breaks the hash chain;
 - the product page's scan count and the dashboard's scan statistics count only the scans still stored;

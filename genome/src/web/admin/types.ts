@@ -43,6 +43,14 @@ export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
 
+/** Where the customer saw or bought the piece of a reported scan (scan_reports.channel). */
+export const REPORT_CHANNELS = ['BOUTIQUE', 'ONLINE', 'PRIVATE', 'OTHER'] as const;
+export type ReportChannel = (typeof REPORT_CHANNELS)[number];
+
+/** A case of the Cases queue (scan_reports.status). */
+export const REPORT_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -352,6 +360,34 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Iso | null;
   resolutionNote: string | null;
+  /** In GET /api/admin/anomalies: what customers said about the scans that took part in it (null: nobody). */
+  reports?: AnomalyReports | null;
+}
+
+/** A customer's report on a scan, as the scans and anomalies lists show it. */
+export interface ReportSummary {
+  id: string;
+  channel: ReportChannel;
+  place: string | null;
+  note: string | null;
+  status: ReportStatus;
+  createdAt: Iso;
+}
+
+export interface AnomalyReports {
+  count: number;
+  open: number;
+  latest: ReportSummary;
+}
+
+/** A case of the Cases queue: the report, its scan, the anomaly the scan took part in, its piece. */
+export interface CaseRecord extends ReportSummary {
+  scanId: string;
+  handledBy: { id: string; email: string } | null;
+  handledAt: Iso | null;
+  resolutionNote: string | null;
+  scan: { occurredAt: Iso; state: string; productId: string | null; country: string | null; region: string | null };
+  anomaly: { id: string; type: string; severity: AnomalySeverity; status: AnomalyStatus } | null;
 }
 
 export interface ProductDetail {
@@ -399,6 +435,8 @@ export interface ScanRecord {
     riskScore: number;
     authenticators: unknown;
   } | null;
+  /** The customer's report on this scan and the state of its case (null: none). */
+  report: ReportSummary | null;
 }
 
 export interface OwnerRecord {

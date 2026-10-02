@@ -49,6 +49,8 @@ const PROBES: Probe[] = [
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'PATCH', url: `/api/admin/anomalies/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'reports', method: 'GET', url: '/api/admin/reports', min: 'AUDITOR' },
+  { group: 'reports', method: 'PATCH', url: `/api/admin/reports/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'revocations', method: 'GET', url: '/api/admin/revocations', min: 'AUDITOR' },
   { group: 'revocations', method: 'POST', url: '/api/admin/revocations', body: INVALID, min: 'ADMIN' },
   { group: 'keys', method: 'GET', url: '/api/admin/keys', min: 'AUDITOR' },
@@ -73,7 +75,7 @@ describe('admin role enforcement', () => {
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins']) {
+    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'reports', 'revocations', 'keys', 'audit', 'admins']) {
       expect(groups.has(g)).toBe(true);
     }
   });

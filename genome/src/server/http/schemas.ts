@@ -14,6 +14,8 @@ import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
   PRODUCT_STATUSES,
+  REPORT_CHANNELS,
+  REPORT_STATUSES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
   VERIFICATION_STATES,
@@ -136,6 +138,17 @@ export const verifyBody = body({
     .optional(),
 });
 export type VerifyBody = z.infer<typeof verifyBody>;
+
+/**
+ * POST /api/v1/reports (§8.5): where the customer saw or bought the piece of a scan that was not
+ * authentic. `where` and `note` are optional free text ('' and null mean "not given").
+ */
+export const reportBody = body({
+  scanId: uuid,
+  channel: z.enum(REPORT_CHANNELS),
+  where: optionalText(200),
+  note: optionalText(500),
+});
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
@@ -315,11 +328,15 @@ export const createRevocationBody = body({
 export const scanListQuery = z.object({
   productId: productRef.optional(),
   state: z.enum(VERIFICATION_STATES).optional(),
+  /** One scan (a case's link to its scan). */
+  scanId: uuid.optional(),
 });
 
 export const anomalyListQuery = z.object({
   status: z.enum(ANOMALY_STATUSES).optional(),
   severity: z.enum(ANOMALY_SEVERITIES).optional(),
+  /** One anomaly (a case's link to the anomaly its scan took part in). */
+  id: uuid.optional(),
 });
 
 export const anomalyParams = z.object({ id: uuid });
@@ -327,6 +344,21 @@ export const anomalyParams = z.object({ id: uuid });
 export const anomalyPatchBody = body({
   status: z.enum(ANOMALY_STATUSES),
   note: z.preprocess((v) => (v === '' ? null : v), z.string().max(2000, 'At most 2000 characters').nullable().optional()),
+});
+
+/** The Cases queue (§16.8): OPEN or CLOSED, one scan's case, or the cases of an anomaly's scans. */
+export const reportListQuery = z.object({
+  status: z.enum(REPORT_STATUSES).optional(),
+  scanId: uuid.optional(),
+  anomalyId: uuid.optional(),
+});
+
+export const reportParams = z.object({ id: uuid });
+
+/** Closing a case needs a note: what was done for the customer, or why nothing was. */
+export const reportPatchBody = body({
+  status: z.literal('CLOSED'),
+  note: text(2000),
 });
 
 export const warrantyListQuery = z.object({

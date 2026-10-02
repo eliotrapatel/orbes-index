@@ -766,6 +766,13 @@ a.bar__label:hover {
   overflow-wrap: break-word;
 }
 
+/* A customer's report in the scans and anomalies lists: the channel (a link to the case), then the
+   place and the note, which wrap within a column that keeps room for them. */
+.cell-report {
+  display: block;
+  min-width: 180px;
+}
+
 .cell-details.mono {
   font-size: var(--fs-mono-sm);
 }
@@ -863,6 +870,14 @@ a.bar__label:hover {
 
 .filters .cfield__hint {
   display: none;
+}
+
+/* A list narrowed to one record by a link from another view, and the way back. */
+.filters__narrowed {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */

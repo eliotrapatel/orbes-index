@@ -94,6 +94,8 @@ describe('admin hash router', () => {
     expect(parseHash('#/products/O26-J-00184')).toMatchObject({ name: 'product', params: { productId: 'O26-J-00184' } });
     expect(parseHash('#/products/O26-J-00184/')).toMatchObject({ name: 'product' });
     expect(parseHash('#/nope')).toMatchObject({ name: 'not-found' });
+    expect(parseHash('#/cases?status=OPEN')).toMatchObject({ name: 'cases', query: { status: 'OPEN' } });
+    expect(href('cases', {}, { anomalyId: 'a1', status: '' })).toBe('#/cases?anomalyId=a1');
     expect(parseHash('#/products/%E0%A4%A')).toMatchObject({ name: 'not-found' }); // malformed escape
     expect(parseHash('products')).toMatchObject({ name: 'products' });
   });

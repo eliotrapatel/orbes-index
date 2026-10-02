@@ -18,6 +18,7 @@ import { failure, loading } from './ui/components.js';
 import { notifyError } from './ui/toast.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
+import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
 import { codesView } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
@@ -51,7 +52,14 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'catalogue', label: 'Catalogue' },
     ],
   },
-  { group: 'Activity', items: [{ route: 'scans', label: 'Verification events' }, { route: 'anomalies', label: 'Anomalies' }] },
+  {
+    group: 'Activity',
+    items: [
+      { route: 'scans', label: 'Verification events' },
+      { route: 'anomalies', label: 'Anomalies' },
+      { route: 'cases', label: 'Cases' },
+    ],
+  },
   { group: 'Clients', items: [{ route: 'owners', label: 'Owners' }, { route: 'warranties', label: 'Warranties' }] },
   {
     group: 'Security',
@@ -73,6 +81,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   catalogue: { view: catalogueView, title: 'Catalogue', nav: 'catalogue' },
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
+  cases: { view: casesView, title: 'Cases', nav: 'cases' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
