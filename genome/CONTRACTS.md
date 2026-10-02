@@ -168,6 +168,15 @@ export function primitiveToPathData(p: Primitive): string; // used by the PDF re
 
 Deterministic output (fixed decimal precision, stable attribute order), so snapshot tests work.
 
+The same directory holds the brand monogram, `src/core/render/monogram.ts` (BRAND-DESIGN-SYSTEM §3.9), not re-exported by `src/core/index.ts`: the web apps and the certificate card import it by path.
+
+```ts
+export const MONOGRAM_PATHS: readonly string[];          // the master's five outlines, verbatim (500 × 500 artboard)
+export const MONOGRAM_BOUNDS: { x: number; y: number; w: number; h: number }; // ink box, 414.42 × 316.54
+export function monogramHeight(width: number): number;
+export function monogramPathData(place: { x: number; y: number; width: number }): string[]; // absolute M/L/C/Z, 3 decimals
+```
+
 ## 7. Encoder — `src/core/code/encoder.ts`
 
 ```ts

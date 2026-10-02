@@ -8,7 +8,8 @@ Every value in this document is read from the code. Where a rule is a brand reco
 | Layer | File |
 |---|---|
 | House style of theorbes.com (the reference) | `index.html` (root; never modified) |
-| Web tokens and primitives | `genome/src/web/shared/brand.css`, `corners.ts`, `dom.ts`, `fonts/gravesend-sans-500.woff2` (display face) |
+| Web tokens and primitives | `genome/src/web/shared/brand.css`, `corners.ts`, `dom.ts`, `monogram.ts`, `fonts/gravesend-sans-500.woff2` (display face) |
+| Brand monogram | `docs/assets/brand/orbes-monogram.svg` (the brand's master), `genome/src/core/render/monogram.ts` (its outlines, verbatim), `genome/scripts/favicons.ts` (tab icons) |
 | Verification app | `genome/src/web/verify/**` (copy in `copy.ts`) |
 | Console | `genome/src/web/admin/**` |
 | Public result copy | `genome/src/server/services/copy.ts` |
@@ -71,7 +72,7 @@ The chromatic (nacre) gradients and games of theorbes.com (`index.html`, `body.c
 
 | Mark | Role | Varies | Machine role | Where it lives |
 |---|---|---|---|---|
-| **ORBES SEAL** | Universal. Says "this is ORBES". | Never: identical on every product. | Finder pattern (rotation-invariant 1 : 1 : 4 : 1 : 1 run), centre and affine fit. Machine-critical. | Centre of every ORBES CODE; centre of the GENOME orbit layout; echoed by the favicons and the result marks. |
+| **ORBES SEAL** | Universal. Says "this is ORBES". | Never: identical on every product. | Finder pattern (rotation-invariant 1 : 1 : 4 : 1 : 1 run), centre and affine fit. Machine-critical. | Centre of every ORBES CODE; centre of the GENOME orbit layout; echoed by the result marks. |
 | **ORBES GENOME** | Per product. Says "this is *this* piece". | Always: eight glyphs from GENOME-01, a public bijection of the product identity. Two products never share one. | Optional cross-check only; never machine-critical. | Inner orbit of the code; verification result; product page; certificates. |
 | **ORBES CODE** | The carrier. Holds the identity, signed by ORBES. | Per code issue (data orbits). | Everything: finder, anchors, format, Reed-Solomon codeword. | Printed, foiled or engraved artifact. |
 
@@ -92,7 +93,7 @@ Along any line through the centre the pattern reads dark : light : dark : light 
 
 - **In the code:** always at the exact centre, at this size.
 - **In the GENOME orbit layout:** the same core and orbit, centred (`render.ts`, `orbitLayout`).
-- **On screen:** the favicons draw a seal-like figure (see [§8](#8-deviations-to-resolve), item 7), and the AUTHENTIC result mark is a hairline echo of it, not the seal itself (§3.5).
+- **On screen:** the AUTHENTIC result mark is a hairline echo of it, not the seal itself (§3.5). The tab icons drew a seal until 2026-10-02; they now draw the monogram (§3.9, [§8](#8-deviations-to-resolve) item 7).
 
 ### 2.3 ORBES GENOME — construction
 
@@ -368,7 +369,7 @@ There is no spacing scale token: spacing is set per component in pixels, on gene
 
 | Element | Value |
 |---|---|
-| Landing | content centred; padding 88 px top and bottom (+ safe areas), 32 px sides |
+| Landing | content centred; padding 88 px top and bottom (+ safe areas), 32 px sides; monogram → wordmark 24 px · wordmark → AUTHENTICATION 18 px |
 | Resting orbit | `min(76vw, 40vh, 320px)`, drawn 15 % beyond the emblem box |
 | Live reticle | aperture `min(66vw, 40vh, 340px)`; reticle drawn at 1.3× |
 | Result column | max 560 px, centred; padding 60 / 32 / 64 px (+ safe areas); 22 px sides under 350 px |
@@ -399,7 +400,7 @@ There is no spacing scale token: spacing is set per component in pixels, on gene
 
 ### 3.5 Iconography
 
-There are no icons in the pictographic sense. Every mark is built from the orbit.
+There are no icons in the pictographic sense. Every mark is built from the orbit. The brand's emblem, the monogram, is not an icon: it has its own rules (§3.9).
 
 | Mark | Construction | Meaning |
 |---|---|---|
@@ -413,7 +414,7 @@ There are no icons in the pictographic sense. Every mark is built from the orbit
 | **Empty state** | 9 px `--metal` circle | "Nothing to show." |
 | **History timeline** | 7 px circles on a 1 px line; the latest filled | Status history |
 | **Separators** | `·` in `--metal` | Between tabs and options |
-| **Favicons** | Both in the SEAL proportions (core r 5.35, ring 8.025–10.7: core 2 : gap 1 : ring 1). `/verify`: ring and core on a white disc. `/admin`: ring and core with four corner moons on an ivory square | Browser tabs |
+| **Favicons** | Both the monogram (§3.9) in ink `#0A0A0A`, its ink box 26 of 32 units wide and centred, written by `genome/scripts/favicons.ts`. `/verify`: on a white disc (r 15), legible on a dark tab bar. `/admin`: on an ivory square with four corner moons (r 2), so the console's tab is told apart from the public app's | Browser tabs |
 
 ### 3.6 Motion
 
@@ -430,7 +431,7 @@ One curve, three durations (`brand.css`):
 |---|---|
 | Screen enters | `view-in`: fade and rise 10 px, 1.1 s, `--ease` |
 | Screen leaves | opacity to 0 in 0.28 s (`LEAVE_MS = 280`) |
-| Landing | orbit fades in over 2.4 s after 0.4 s; wordmark rises over 1.8 s after 0.15 s; actions over 1.6 s after 0.6 s; meta fades over 1 s after 1.2 s |
+| Landing | orbit fades in over 2.4 s after 0.4 s; the monogram and the wordmark rise together over 1.8 s after 0.15 s; actions over 1.6 s after 0.6 s; meta fades over 1 s after 1.2 s |
 | Scanner | view fades in 0.6 s; video fades in 1.2 s; the arc turns linearly every 3.6 s |
 | Code found | the video freezes; the veil deepens 50 % → 78 % (1.4 s); the ring goes to full opacity and 2 px; the moons scale to 1.35 (1.4 s); a 12 ms vibration; ORBES CODE FOUND holds 420 ms (`LOCK_PAUSE_MS`) |
 | Verifying | the moon orbits once per 2.4 s on `cubic-bezier(0.45, 0.05, 0.55, 0.95)`; the screen stays at least 650 ms (`MIN_VERIFYING_MS`) so a fast answer never flickers |
@@ -457,6 +458,30 @@ The verification app carries theorbes.com's film grain: a fixed SVG `feTurbulenc
 - **Focus**: a 1 px `currentColor` outline 4 px outside the element, keyboard only (`:focus-visible`); headings that receive focus programmatically on screen changes show none.
 - **Console buttons** (`.cbtn`): 38 px, 8 px tracked caps, square; *primary* is the hairline button (outlined in ink, filled only on hover or keyboard focus), *secondary* outlined, *ghost* an underlined word, *danger* outlined in oxblood.
 - **Type**: buttons, text links and field labels speak in the display face; what is typed into a field reads in `--font` (§3.1).
+
+### 3.9 The monogram
+
+The brand's emblem: an O, wider than tall, that holds the R, the B, the E and the S of ORBES, in high-contrast capitals with hairline serifs. The brand supplied it as vector outlines on 2026-10-02: [`assets/brand/orbes-monogram.svg`](assets/brand/orbes-monogram.svg), kept as delivered, five filled paths on a 500 × 500 artboard, one colour, no text.
+
+<p align="center"><img src="assets/brand/orbes-monogram.svg" width="180" alt="The ORBES monogram: an oval O holding the capitals R, B, E and S"></p>
+
+**The word is typed, the monogram is the emblem.** That is the brand's decision. The word ORBES stays text: in Gravesend Sans on screen (`.wordmark`, one spec, §3.1), so it reads, scales and is named like any word; in the stroked lettering of `label-font.ts` on print. The monogram sits beside it, never in its place. It is drawn from the master's paths only, never retraced, retouched, recoloured, outlined from a font or set as a glyph.
+
+| Where | Size | Drawn by |
+|---|---|---|
+| Tab icons, `/verify` and `/admin` | 26 of 32 units (§3.5) | `genome/scripts/favicons.ts`, which writes both `favicon.svg` |
+| `/verify` landing | `clamp(64px, 19.5vw, 84px)` wide (76 px on a 390 px phone), centred over the wordmark, 24 px above it, inside the resting orbit | `landingView`, `.landing__monogram` |
+| Console sign-in | 72 px wide, centred over the wordmark, 26 px above it | `loginView`, `.login__monogram` |
+| Console sidebar | 44 px wide, over the wordmark and left-aligned with it, 18 px above it | `.side__monogram` |
+| Certificate card | 14.4 × 11 mm, flat K 100 fill, against the right margin, from the cap line of ORBES down to the identity's baseline (§7) | `layoutCertificateCard` |
+
+It is not on the result page or the scanner, where the small word stays alone, nor on the print label under a code, the vocabulary specimen or theorbes.com ([§8](#8-deviations-to-resolve), item 1).
+
+- **One source.** `genome/src/core/render/monogram.ts` carries the five outlines verbatim (`test/web/monogram.test.ts` compares them with the master file). The web apps draw them as inline SVG filled with `currentColor` (`genome/src/web/shared/monogram.ts`); the card's PDF draws them as absolute path data (`monogramPathData`), checked to cover the master's pixels; the tab icons place them with one transform.
+- **Placed by its ink, not its artboard.** The ink box is the outer edge of the O, 414.42 × 316.54 units: the height is 0.764 of the width. The artboard's empty margins are dropped, so the clear space is set where the emblem is placed: at least a quarter of its height on every side (the card's 3 mm to the next mark is 0.27 of its 11 mm).
+- **One colour.** The ink of its context: `currentColor` on screen, `--ink` on white and on the console's ivory; K 100 on the card. Never tinted, never a gradient (§2.10).
+- **Accessibility.** Standing alone, `monogramSvg()` is an image named ORBES (`role="img"`, `aria-label="ORBES"`). Beside the typed word, which is how every screen uses it, it is decorative (`aria-hidden`): the word already says ORBES, and screen readers would otherwise say it twice. The landing heading still reads ORBES AUTHENTICATION from its words.
+- **Minimum size: its hairlines.** The finest strokes, the E's arms and serifs, are 2.21 units: 0.53 % of the width. On screen it is never under 44 px wide (the sidebar), where they are a quarter of a CSS pixel and the O, the stems and the bowls carry the form; the tab icon, 16 to 32 px, is the one exception, read as a shape. On the card they print at 0.077 mm, under the 0.1 mm floor of the lettering (0.22 pt): offset on coated card usually holds positive hairlines of that weight, a digital press may lose or thicken them, so the brand's print proof of the card decides (§8, item 20). Never print it narrower than 14 mm without a physical proof.
 
 ---
 
@@ -579,12 +604,12 @@ Every screen after the landing shares one history entry, so the back button (or 
 
 <table>
 <tr>
-<td width="33%"><img src="assets/ui/verify-01-landing.png" width="250" alt="Verify landing: ORBES wordmark inside a faint orbit, SCAN ORBES CODE button, UPLOAD A PHOTO link"></td>
+<td width="33%"><img src="assets/ui/verify-01-landing.png" width="250" alt="Verify landing: the monogram over the ORBES wordmark inside a faint orbit, SCAN ORBES CODE button, UPLOAD A PHOTO link"></td>
 <td width="33%"><img src="assets/ui/verify-02-scanning.png" width="250" alt="Scanner: camera view of a code on a desk, white orbit reticle with four moons, SCANNING…"></td>
 <td width="33%"><img src="assets/ui/verify-03-locked.png" width="250" alt="Scanner locked on the code: frozen frame, darker veil, closed orbit, VERIFYING…"></td>
 </tr>
 <tr>
-<td valign="top"><b>1 · Landing.</b> The wordmark sits inside the resting orbit as the core sits inside the seal. One hairline button, one discreet link, © ORBES and PARIS at the foot (GENOME CODE joins them from 560 px).</td>
+<td valign="top"><b>1 · Landing.</b> The monogram over the wordmark sits inside the resting orbit as the core sits inside the seal (§3.9). One hairline button, one discreet link, © ORBES and PARIS at the foot (GENOME CODE joins them from 560 px).</td>
 <td valign="top"><b>2 · Scanning.</b> Full-bleed camera, a flat 50 % veil outside the orbit, the live reticle with its travelling arc and four moons (polaris top left). One status line, one guide sentence, LIGHT and the zoom control only when the camera offers them (the camera opens at about 2× zoom; the control returns to 1×).</td>
 <td valign="top"><b>3 · Code found.</b> The frame freezes, the veil deepens to 78 %, the orbit closes (2 px, moons ×1.35) and the phone ticks. ORBES CODE FOUND for 420 ms, then VERIFYING… while the server answers.</td>
 </tr>
@@ -691,7 +716,7 @@ All specimens are generated, never drawn by hand: the code samples by `genome/sc
 
 <table>
 <tr>
-<td align="center"><img src="assets/certificate-card-specimen.svg" width="340" alt="ORBES certificate card specimen as delivered: identity, GENOME row, model, material, three steps, claim code under a grey scratch-off panel, PROOF mention"><br><code>certificate-card-specimen.svg</code><br>as delivered · claim code under the panel</td>
+<td align="center"><img src="assets/certificate-card-specimen.svg" width="340" alt="ORBES certificate card specimen as delivered: ORBES and CERTIFICATE with the PROOF mention, the monogram at the top right, identity, GENOME row, model, material, three steps, claim code under a grey scratch-off panel"><br><code>certificate-card-specimen.svg</code><br>as delivered · claim code under the panel</td>
 <td align="center"><img src="assets/certificate-card-specimen-revealed.svg" width="340" alt="The same certificate card with the scratch-off panel removed, showing the claim code 7KQ2-M4TD-9XWH"><br><code>certificate-card-specimen-revealed.svg</code><br>panel scratched off</td>
 </tr>
 </table>
@@ -703,12 +728,13 @@ The production file of the same card is [`assets/certificate-card-specimen.pdf`]
 | Element | Rule |
 |---|---|
 | Format | 85 × 55 mm white card, no bleed; nothing within 4.5 mm of the trim. Print runs: A4 sheets of ten (2 × 5, abutting, 11 mm top and bottom margins), cut on shared edges, cut marks outside the grid only, a caption and a 10 mm scale bar. |
-| Lettering | The print label's stroked geometric capitals (`label-font.ts`), no font, K 100 %, strokes never under 0.1 mm. ORBES at 2.2 mm cap height and 0.9 tracking; the identity at 3.0 mm; values at 1.3 mm, shrunk to 1.0 mm then cut with "..." when too long; labels and steps at 1.0–1.2 mm. Free text loses its accents (the lettering has none). |
+| Lettering | The print label's stroked geometric capitals (`label-font.ts`), no font, K 100 %, strokes never under 0.1 mm. ORBES at 2.2 mm cap height and 0.9 tracking, CERTIFICATE under it at 1.2 mm with the PROOF mention after it on the same line; the identity at 3.0 mm; values at 1.3 mm, shrunk to 1.0 mm then cut with "..." when too long; labels and steps at 1.0–1.2 mm. Free text loses its accents (the lettering has none). |
+| Monogram | The brand's monogram (§3.9) as a flat K 100 fill of its five master outlines: 14.4 × 11 mm against the right margin, from the cap line of ORBES (6.4 mm) down to the identity's baseline (17.4 mm), at least 3 mm from the next mark. Its finest hairlines print at 0.077 mm, under the lettering's floor: the print proof decides (§3.9). |
 | GENOME | The row presentation of the identity's eight glyphs at 2.6 mm (above the 2.1 mm floor of §2.6), its first glyph aligned with the text, the fingerprint beside it. |
 | Claim code | `XXXX-XXXX-XXXX` at 1.75 mm cap height (down to 1.4 mm for the widest codes), centred in the panel. In the file only as paths, never as text. |
 | Scratch-off panel | 32 × 6.8 mm, 1 mm corner radius, spot colour **ORBES SCRATCH-OFF** (its own plate; viewers show it as K 35 %), set to overprint so the code beneath stays whole on the black plate. |
 | Copy | CERTIFICATE · MODEL · MATERIAL · GENOME · *1 OPEN THEORBES.COM/VERIFY · 2 SCAN THE ORBES CODE · 3 REGISTER WITH THE CLAIM CODE* · CLAIM CODE · *VERIFY ONLY AT THEORBES.COM/VERIFY*. |
-| Never | The ORBES CODE (a photograph of the card must not verify), a QR code, the claim code on the piece itself (§2.10). The monogram is not on the card yet (§8, item 1). |
+| Never | The ORBES CODE (a photograph of the card must not verify), a QR code, the claim code on the piece itself (§2.10). |
 
 The card's words are those of the [packaging kit](launch/PACKAGING-KIT.md), §2, which also proposes the fixed verso (how to use the claim code, the second-hand sentence). The kit's test checks its three steps against `CERTIFICATE_COPY`, so card and packaging say the same thing.
 
@@ -720,13 +746,13 @@ Physical test kit: [`assets/test-sheets/orbes-code-test-sheets.pdf`](assets/test
 
 Places where the implementation departs from this system or from itself. None affects decoding or security.
 
-1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`), in Gravesend Sans since 2026-10-02 (§3.1, item 18); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four. **Partly resolved (console, 2026-10-01):** the sidebar wordmark is the shared `.wordmark` (`--track-wordmark`, 0.62 em) at 15 px, no longer a copy of its values. Still open, **outside this software prototype**: one vector wordmark for the specimen, the print label and theorbes.com needs the brand's master vector artwork (a design deliverable; only the raster PNG in `index.html` exists), and theorbes.com's `index.html` is not modified by this system. When the artwork exists, it replaces the stroked lettering of `LABEL_LAYOUT` and the specimen's typeset title.
+1. **One word, one emblem.** **Resolved for the screens (`/verify` and the console, 2026-10-02):** the brand supplied its master vector artwork, which is a monogram (§3.9), and decided: the word ORBES is typed, the monogram is the emblem beside it. The screens now have one rendering of the word, the shared `.wordmark` in Gravesend Sans (§3.1, item 18; the console sidebar uses the same spec at 15 px since 2026-10-01), and one emblem, drawn from the master's paths on the tab icons, the `/verify` landing and the console's sign-in and sidebar. The certificate card carries the same emblem, as a flat fill, beside its lettered ORBES (§7). This is the brand's decision in place of the first recommendation, one vector *wordmark* replacing the typed spans and the print label's lettering: the file supplied is a monogram, not a wordmark, so the five `.wordmark` spans stay text, and the planned test that no ORBES is typed any more became a test that the monogram is where the brand put it (`test/web/verify.brand.test.ts`, `test/web/admin.brand.test.ts`, `test/web/monogram.test.ts`, `test/render/certificate.test.ts`). **Still open, said rather than changed by this system:** the print label under a code keeps its stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts`, `LABEL_LAYOUT`, `brandText`), so the print samples and the test kit are unchanged; the vocabulary specimen keeps its title typeset in Helvetica at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); theorbes.com keeps its raster logo (a geometric sans, base64 PNG in `index.html`, which this system does not modify). Each awaits the brand's choice: the monogram beside the word, Gravesend lettering outlined to paths, or as they are. Was: four renderings of the word (the raster logo, Helvetica Neue tracked at 0.62 em in the apps, Helvetica 300 in the specimen, stroked lettering on the print label) and no master vector artwork.
 2. **Ink.** theorbes.com uses `#000000`; the apps use `--ink: #0A0A0A`. ~~The scanner ground is pure `#000` (`genome/src/web/verify/styles.css`, `body[data-screen="scan"]`, `.view--scan`).~~ **Resolved (verify app, 2026-10-01):** the scanner ground and veil use `var(--ink)` (guarded by `genome/test/web/verify.brand.test.ts`). **Resolved (GENOME on ivory, 2026-10-01):** the GENOME on the ivory plates is drawn in the ivory colourway's ink `ORBES_CODE_STYLES.ivory.ink` (`#111111`, now in `genome/src/core/code/styles.ts`) by `genomeFigureMarkup` (`genome/src/web/admin/ui/figures.ts`) and `genomeRowMarkup` (`genome/src/web/verify/genome-view.ts`), exactly as the ivory code prints it (checked by `test/web/admin.brand.test.ts` and `test/web/verify.brand.test.ts`). Was: the same GENOME on screen was drawn in `#0A0A0A` (console) or `currentColor` = `--ink` (verify). theorbes.com's `#000000` stays as it is (`index.html` is not part of this system).
 3. **`--metal` used for text that must be read.** **Resolved (console, 2026-10-01):** every readable text of `genome/src/web/admin/styles.css` that was `--metal` (`.side__group-title`, `.login__foot`, `.bar--zero` labels, `.cinput::placeholder`, the sidebar and sign-in place lines, the hidden claim code) is now `--ink-soft` (6.7 : 1 on white, 6.0 : 1 on ivory); no rule sets text colour to `--metal` any more, and the `brand.css` comment states 6.7 : 1 (checked by `test/web/admin.brand.test.ts`). Was: `--metal` used, against its own comment ("never used for text that must be read", 2.8 : 1, 2.5 : 1 on ivory): console navigation group titles `.side__group-title`, the sign-in foot "Internal use only · All actions are recorded" `.login__foot`, zero-value bar labels `.bar--zero`, and input placeholders `.cinput::placeholder` (`genome/src/web/admin/styles.css`). The `--ink-soft` comment also states 6.4 : 1; the measured ratio is 6.7 : 1 (`brand.css`).
 4. ~~**The reference customers are asked to quote is 7 px.**~~ **Resolved (verify app, 2026-10-01):** `.result__meta` is now 10 px (`--fs-micro`), `--ink-soft`, tabular, without the 8 px `.nano` class. Was: Non-authentic results say "Please quote the reference below", but `REF …` is set at 7 px, `--ink-soft` (`.result__meta`, `genome/src/web/verify/styles.css`). It should be at least 10 px.
 5. ~~**Repeated sentence for owners.**~~ **Resolved (verify app, 2026-10-01):** the client notice is only added when the server message does not already mention the unusual activity, so the sentence appears once. Was: When the owner's piece has unusual activity elsewhere, the server message already says "Unusual activity has been recorded for it; ORBES Client Services can assist you." (`genome/src/server/services/copy.ts`, `UNUSUAL_ACTIVITY_OWNER_COPY`) and the client adds a notice with the same sentence (`genome/src/web/verify/view-model.ts`, line 190). One of the two should go.
 6. ~~**A forged genome version invites a rescan.**~~ **Resolved (verification, 2026-10-01):** the signature is verified before the genome-version support check, so an edited genome version answers INVALID SIGNATURE ([counterfeit simulation](reports/counterfeit-simulation.md), 4a now PASS); only a validly signed but unsupported version answers UNKNOWN ORBES CODE. Was: an unsupported genome version answered MALFORMED_CODE, "This code could not be read. Please scan it again…", for a code that was read perfectly.
-7. **Favicons do not follow the SEAL proportions.** **Resolved (verify app, 2026-10-01):** `genome/src/web/verify/favicon.svg` is now core r 5.35, gap to 8.025, ring 8.025–10.7 (core 2 : gap 1 : ring 1). **Resolved (console, 2026-10-01):** `genome/src/web/admin/favicon.svg` uses the same seal (core r 5.35, ring 8.025–10.7) with four corner moons on ivory. Was: `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`.
+7. **Favicons do not follow the SEAL proportions.** **Resolved (verify app, 2026-10-01):** `genome/src/web/verify/favicon.svg` is now core r 5.35, gap to 8.025, ring 8.025–10.7 (core 2 : gap 1 : ring 1). **Resolved (console, 2026-10-01):** `genome/src/web/admin/favicon.svg` uses the same seal (core r 5.35, ring 8.025–10.7) with four corner moons on ivory. Was: `genome/src/web/verify/favicon.svg` (core r 4.2, ring 8.3–10.7) and `genome/src/web/admin/favicon.svg` (core r 5, ring 8.5–10.5) differ from each other and from the SEAL (core 2 : gap 1 : ring 1, i.e. core r 5.35 for a ring to 10.7). Derive both from `CODE01.seal`. **Superseded (both apps, 2026-10-02):** the tab icons now draw the brand's monogram, on the same white disc and ivory square (§3.5, §3.9), written by `genome/scripts/favicons.ts`; the SEAL proportions no longer apply to them.
 8. **Token drift.** **Resolved (verify app, 2026-10-01):** `--track-display` (landing meta) and `--fs-lead` (problem title) are now used; every size and tracking in `genome/src/web/verify/styles.css` that equals a token uses it (8, 10, 11, 12, 15 px; 0.22, 0.28, 0.32 em). **Resolved (console, 2026-10-01):** every font size and tracking in `genome/src/web/admin/styles.css` that equals a token now uses it (8, 10, 11, 12, 13 px; 0.22, 0.28, 0.32, 0.62 em). **Resolved (both apps, 2026-10-01):** the remaining component sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 14, 17, 18, 19, 22, 26, 46 px) are named tokens in `brand.css` (§3.1), with unchanged values, and no stylesheet sets a literal pixel font size any more (`test/web/verify.brand.test.ts`). Was: the off-scale sizes of both apps had no token. Was: `--track-display` and `--fs-lead` are defined and unused; 25 distinct tracking values and 21 pixel font sizes (7, 8.5, 9, 10.5, 11.5, 12.5, 17, 19 px…) are hard-coded in `genome/src/web/verify/styles.css` and `genome/src/web/admin/styles.css`.
 9. **Two primary buttons.** **Resolved (console, 2026-10-01):** `.cbtn--primary` is the single hairline button (transparent, 1 px ink border, ink text; fills with ink on hover and `:focus-visible`), and artifact downloads are secondary buttons. Was: `brand.css` defines "the single hairline button" (outlined, fills on hover); the console's `.cbtn--primary` is filled ink and inverts on hover (`genome/src/web/admin/styles.css`). Defensible for a dense tool, but it should be a stated exception.
 10. **Status comment.** **Resolved (2026-10-01):** the comment now reads "rotated square (diamond) and a bold label", as `.status--alert` draws it. Was: `genome/src/web/admin/model/tone.ts` describes *alert* as an "inverted label"; the CSS draws a rotated square and a bold label (`.status--alert`).

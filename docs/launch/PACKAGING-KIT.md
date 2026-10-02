@@ -88,7 +88,7 @@ The recto is the card of BRAND §7, not a second template: the console offers DO
 
 Le recto est la carte de BRAND §7, pas un second gabarit : la console propose DOWNLOAD CERTIFICATE CARD tant que le claim code est affiché, et `POST /api/admin/certificates` donne les planches A4 de dix cartes et le CSV de l'imprimeur. Le serveur vérifie chaque claim code contre son empreinte avant de le dessiner. Ce kit ne fixe que les mots de la carte.
 
-![Certificate card specimen: identity, GENOME row, model, material, three steps, claim code under the scratch-off panel, PROOF mention](../assets/certificate-card-specimen.svg)
+![Certificate card specimen: ORBES and CERTIFICATE with the PROOF mention, the monogram, identity, GENOME row, model, material, three steps, claim code under the scratch-off panel](../assets/certificate-card-specimen.svg)
 
 Its copy, in English like `/verify`, word for word as `CERTIFICATE_COPY` draws it:
 

@@ -70,7 +70,7 @@ font-family: "Gravesend Sans", "Helvetica Neue", HelveticaNeue, Helvetica, Arial
 | `#chromatic-btn`, `#snake-btn`, `#trade-rules-btn`, `#trade-night-switch`, `#trade-signal-label`, `#trade-close` | Gravesend Sans |
 | `#countdown`, `#snake-score`, `#game-hud`, and any element that shows figures | unchanged (Helvetica Neue) |
 | `html, body` and running text | unchanged (Helvetica Neue) |
-| The ORBES logo (raster image) | unchanged: the master vector artwork is BRAND §8 item 1 |
+| The ORBES logo (raster image) | unchanged: whether the site takes the monogram the apps use (BRAND §3.9) is the brand's choice, BRAND §8 item 1 |
 
 Figures stay in Helvetica Neue for the reason the apps keep them there: Gravesend's figure one is drawn as its capital I, and it has no tabular figures (BRAND §3.1).
 

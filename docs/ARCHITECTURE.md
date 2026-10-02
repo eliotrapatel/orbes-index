@@ -95,7 +95,7 @@ genome/
     code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
     decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
     verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
-    render/              shared vector primitives → SVG paths
+    render/              shared vector primitives → SVG paths; the brand monogram's outlines
   src/server/          Fastify service (Node only)
     config.ts            environment → AppConfig (zod; fail fast; production hardening)
     context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping
@@ -115,7 +115,7 @@ genome/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
     admin/               admin console: catalogue, generator, keys, anomalies, audit
-    shared/              brand CSS and DOM helpers
+    shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
 docs/                  specifications (this folder)

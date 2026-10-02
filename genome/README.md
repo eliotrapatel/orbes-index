@@ -24,7 +24,7 @@ genome/
     code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
     decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
     verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
-    render/              shared vector primitives → SVG paths
+    render/              shared vector primitives → SVG paths; the brand monogram's outlines
   src/server/          Fastify service (Node only)
     config.ts            environment → AppConfig (zod; fail fast; production hardening)
     context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping
@@ -41,7 +41,7 @@ genome/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
     admin/               admin console: catalogue, generator, keys, anomalies, audit
-    shared/              brand CSS and DOM helpers
+    shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
     support/             camera simulator, PRNG, raster/PNG/JPEG/Y4M helpers, test database
@@ -172,6 +172,7 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | `npx tsx scripts/payload-encodings.ts` | Payload size in the fixed layout vs deterministic CBOR and JSON → the table of CRYPTOGRAPHY §3.1 (`--json` for raw figures). |
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
 | `npx tsx scripts/certificate-specimen.ts` | Certificate card specimen of BRAND §7 (`docs/assets/certificate-card-specimen*.svg` and the production PDF). Re-run after any change to the card; `test/render/certificate.test.ts` fails on stale files. |
+| `npx tsx scripts/favicons.ts` | The tab icons of both apps (`src/web/verify/favicon.svg`, `src/web/admin/favicon.svg`), drawn from the brand monogram (BRAND §3.9). Re-run after any change to them; `test/web/monogram.test.ts` fails on stale files. |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.
 
