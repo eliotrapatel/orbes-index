@@ -122,6 +122,12 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       .executeTakeFirstOrThrow();
     await db.insertInto('categories').values({ id: 20, code: 'S', name: 'Sale parity' }).execute();
     const model = await db.insertInto('models').values({ category_id: 20, name: 'MONOLITHE', type: 'RING', sku_prefix: 'SALE' }).returning('id').executeTakeFirstOrThrow();
+    await db
+      .insertInto('cryptographic_keys')
+      .values({ key_id: 9, kid: 'sale-parity', public_key: new Uint8Array(32).fill(9), status: 'RETIRED', provider: 'memory', provider_ref: 'mem:9' })
+      .execute();
+    // A piece with its genome and its code in force: the activation checks again, under the row lock, that the
+    // scanned code is still the piece's ACTIVE code (WarrantyService.assertStillForSale).
     const piece = async (serial: number) => {
       const p = await db
         .insertInto('products')
@@ -129,28 +135,46 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
         .returning(['id', 'product_id'])
         .executeTakeFirstOrThrow();
       await db.insertInto('product_status_history').values({ product_id: p.id, from_status: null, to_status: 'ISSUED', actor_type: 'system' }).execute();
-      return p;
+      const genome = await db
+        .insertInto('genomes')
+        .values({ product_id: p.id, genome_version: 1, genome_id: p.product_id, value: serial, glyphs: [1, 2, 3, 4, 5, 6, 7, serial], pattern: 'sale parity', fingerprint: `G1-5A1E-${serial.toString(16).toUpperCase().padStart(4, '0')}` })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const code = await db
+        .insertInto('codes')
+        .values({ product_id: p.id, genome_id: genome.id, key_id: 9, code_version: 1, issue: 1, issued_day: 1000, nonce: randomBytes(4), payload: randomBytes(13), signature: randomBytes(64), payload_hash: randomBytes(32) })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return { ...p, codeId: code.id };
     };
-    const token = async (productId: string) => {
-      const scan = await db.insertInto('scan_events').values({ event_type: 'ADMIN_TEST', admin_id: seller.id, product_id: productId, result_state: 'AUTHENTIC' }).returning('id').executeTakeFirstOrThrow();
-      return (await createScanToken(db, { productId, scanEventId: scan.id, purpose: 'SALE_ACTIVATION', ttlMs: 600_000 })).token;
+    // The seller's staff scan of the piece's code, and the sale token it earned.
+    const token = async (p: { id: string; codeId: string }) => {
+      const scan = await db
+        .insertInto('scan_events')
+        .values({ event_type: 'ADMIN_TEST', admin_id: seller.id, product_id: p.id, code_id: p.codeId, result_state: 'AUTHENTIC' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return (await createScanToken(db, { productId: p.id, scanEventId: scan.id, purpose: 'SALE_ACTIVATION', ttlMs: 600_000 })).token;
     };
     const actor = { type: 'admin' as const, id: seller.id };
+    // What refused each activation, in the failure message: a domain code, or a PostgreSQL error (40P01, 40001).
+    const refusals = (rs: PromiseSettledResult<unknown>[]) =>
+      rs.map((r) => (r.status === 'rejected' ? `${(r.reason as { code?: string }).code ?? ''} ${(r.reason as Error).message}` : 'activated')).join('; ');
 
     // Two sellers' scans of one piece: one warranty start; the losing token is rolled back, not used.
     const a = await piece(1);
-    const tokens = [await token(a.id), await token(a.id)];
+    const tokens = [await token(a), await token(a)];
     const results = await Promise.allSettled(tokens.map((t) => sale.activate({ token: t, retailerId: shop.id }, actor)));
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'fulfilled'), refusals(results)).toHaveLength(1);
     expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['WARRANTY_ALREADY_ACTIVATED']);
     const used = await db.selectFrom('scan_tokens').select('used_at').where('product_id', '=', a.id).execute();
     expect(used.filter((r) => r.used_at !== null)).toHaveLength(1);
 
     // One token sent twice at once: used once.
     const b = await piece(2);
-    const t = await token(b.id);
+    const t = await token(b);
     const twice = await Promise.allSettled([t, t].map((x) => sale.activate({ token: x, retailerId: shop.id }, actor)));
-    expect(twice.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(twice.filter((r) => r.status === 'fulfilled'), refusals(twice)).toHaveLength(1);
     expect(twice.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['SALE_TOKEN_USED']);
     expect(await db.selectFrom('product_status_history').select('to_status').where('product_id', '=', b.id).where('to_status', '=', 'ACTIVATED').execute()).toHaveLength(1);
     expect((await audit.verifyChain()).ok).toBe(true);

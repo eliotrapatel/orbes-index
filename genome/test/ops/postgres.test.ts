@@ -75,7 +75,9 @@ describe.skipIf(!adminUrl)('operator CLIs on PostgreSQL', () => {
     const seed = await run(runDbCli, ['seed', '--json']);
     expect(seed.code, seed.io.text()).toBe(0);
     const result = JSON.parse(seed.io.stdout[seed.io.stdout.length - 1]);
-    expect(result).toMatchObject({ seeded: true, products: 41, keyId: 1, anomalies: { open: 2 } });
+    // Open, as on PGlite (test/integration/demo-seed.test.ts): the impossible travel, the stolen pendant's scan and
+    // the unsold piece a stranger scanned in Lyon (S-07); the boutique's own scan of its stock is dismissed.
+    expect(result).toMatchObject({ seeded: true, products: 41, keyId: 1, anomalies: { open: 3 } });
 
     // A local key survives the CLI: it stays ACTIVE and the server can keep issuing with it.
     const keys = JSON.parse((await run(runKeysCli, ['list', '--json'])).io.stdout[0]).keys;
