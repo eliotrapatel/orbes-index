@@ -1,7 +1,9 @@
 /**
  * The sale mode (A-08, `/admin#/sale`): a seller scans the seal of the piece
  * being sold with a phone, sees the piece, picks the point of sale and
- * starts the warranty in one gesture. RETAIL and every higher role.
+ * starts the warranty in one gesture. RETAIL, OPERATOR and ADMIN: starting
+ * a warranty is a mutation, so not the read-only AUDITOR, who ranks above
+ * RETAIL (`roles` in the guard rather than `minRole`).
  *
  * - `POST /api/admin/sale/lookup` takes what the console's decoder read (the
  *   body of /api/v1/verify), records ONE ADMIN_TEST scan naming the console
@@ -14,9 +16,10 @@
  *   today at the chosen point of sale (`admin` rate group).
  *
  * Both are ordinary admin mutations: session, CSRF, temporary password, MFA,
- * then the role (`minRole: 'RETAIL'`).
+ * then the role (`roles: SALE_ROLES`).
  */
 import type { FastifyPluginAsync } from 'fastify';
+import type { AdminRole } from '../../db/schema.js';
 import { userAgentFamily, userAgentOf } from '../../http/client.js';
 import { parse, saleActivateBody, saleLookupBody } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
@@ -24,7 +27,10 @@ import type { SaleLookup, SaleRefusal } from '../../services/sale.js';
 import type { ScanMeta } from '../../services/verification.js';
 import type { AdminRouteDeps } from './index.js';
 
-const RETAIL = { guard: { minRole: 'RETAIL' as const } };
+/** Who may sell (A-08): the seller, and every role that may mutate the registry. Never the read-only AUDITOR. */
+export const SALE_ROLES: readonly AdminRole[] = Object.freeze(['RETAIL', 'OPERATOR', 'ADMIN'] as const);
+
+const SELLERS = { guard: { roles: SALE_ROLES } };
 
 /** What the console says when a piece cannot be sold (the codes are listed in API §16.18). */
 export const SALE_REFUSAL_MESSAGES: Readonly<Record<SaleRefusal, string>> = Object.freeze({
@@ -74,7 +80,7 @@ export function saleLookupJson(r: SaleLookup) {
 export const adminSaleRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { sale } = ctx.services;
 
-  app.post('/api/admin/sale/lookup', { config: { ...RETAIL, rateGroup: 'verify' } }, async (request) => {
+  app.post('/api/admin/sale/lookup', { config: { ...SELLERS, rateGroup: 'verify' } }, async (request) => {
     const input = parse(saleLookupBody, request.body);
     const meta: ScanMeta = { ipHash: request.orbes.ipHash, geo: ctx.geo.resolve(request) };
     const family = userAgentFamily(userAgentOf(request));
@@ -82,7 +88,7 @@ export const adminSaleRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     return saleLookupJson(await sale.lookup(input, adminActor(request), meta));
   });
 
-  app.post('/api/admin/sale/activate', { config: RETAIL }, async (request) => {
+  app.post('/api/admin/sale/activate', { config: SELLERS }, async (request) => {
     const b = parse(saleActivateBody, request.body);
     const r = await sale.activate({ token: b.token, retailerId: b.retailerId }, adminActor(request));
     return { warranty: r.warranty, statusChange: r.statusChange, scanId: r.scanId };

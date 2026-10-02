@@ -27,7 +27,10 @@
  *            no code is open, or once it has expired, guesses nothing: it is
  *            recorded for staff but not counted, so whoever merely knows the
  *            email cannot spend the budget of the next code; a new code
- *            starts with the whole budget. Then,
+ *            starts with the whole budget. Its scrypt runs after the
+ *            attempt's transaction has committed (as a throttled attempt's
+ *            does), so such attempts hold neither the account's row lock nor
+ *            a pool connection while they hash. Then,
  *            in one transaction: the new password, every session of the
  *            account revoked, its pending transfers cancelled, new transfers
  *            paused for 72 hours (`accounts.transfers_frozen_until`, 409
@@ -242,14 +245,16 @@ export class AccountRecoveryService {
         .where('revoked_at', 'is', null)
         .executeTakeFirst();
       if (!open || open.expires_at.getTime() <= now.getTime()) {
-        // Nothing to guess: recorded for staff, same cost as a check, but not counted in the limit, so that someone
-        // who merely knows the email cannot spend the budget of the next code Client Services issues.
-        await this.burnTime(code);
+        // Nothing to guess: recorded for staff, but not counted in the limit, so that someone who merely knows the
+        // email cannot spend the budget of the next code Client Services issues. Its scrypt (the same cost as a
+        // check) runs once this transaction has committed: these attempts have no per-account limit, and a burst of
+        // them must not hold the account's row lock (which sign-in and transfers take too) nor a pool connection
+        // (shared with /verify) while it hashes.
         await this.audit.record(
           { actor: accountActor(account.id, meta), action: RECOVERY_FAILED_ACTION, targetType: 'account', targetId: account.id, details: { reason: open ? 'EXPIRED' : 'NO_OPEN_CODE' } },
           tx,
         );
-        return { kind: 'failed' as const };
+        return { kind: 'unchecked' as const };
       }
       // Only guesses at this code count: a code freshly issued starts with the whole budget.
       const failures = await countCodeFailures(tx, account.id, open.id, now);
@@ -268,6 +273,11 @@ export class AccountRecoveryService {
       );
       return { kind: 'failed' as const };
     });
+    if (attempt.kind === 'unchecked') {
+      // Outside the transaction, as for the throttled attempt below: same cost and answer as a wrong code.
+      await this.burnTime(code);
+      throw recoveryCodeInvalid();
+    }
     if (attempt.kind === 'throttled') {
       // The code is not even looked at; same cost and answer as a wrong one.
       await this.burnTime(code);

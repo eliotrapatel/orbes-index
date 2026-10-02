@@ -184,13 +184,36 @@ export class WarrantyService {
   }
 
   /**
+   * The sale mode's facts, again under the product's row lock (SaleService.activate): no client account holds the
+   * piece (409 ALREADY_REGISTERED: it has been sold), it is not in a service (409 WARRANTY_ACTIVATION_NOT_ALLOWED:
+   * at the workshop, not at the counter), and the code the seller scanned is still its ACTIVE code (the same 409: a
+   * code revoked meanwhile, ORBES reviews the piece first). The console's warranty dialog (OPERATOR) is not bound by
+   * them: it may start the warranty of a registered piece, deliberately.
+   */
+  private async assertStillForSale(tx: Db, product: { id: string; status: ProductStatus }, saleScanId: string): Promise<void> {
+    const owner = await tx.selectFrom('ownership').select('id').where('product_id', '=', product.id).where('ended_at', 'is', null).executeTakeFirst();
+    if (owner) throw new DomainError('ALREADY_REGISTERED', 409, 'This piece is registered to a client: it has been sold. Contact ORBES.');
+    const notForSale = (detail: string) =>
+      new DomainError('WARRANTY_ACTIVATION_NOT_ALLOWED', 409, 'The status of this piece does not allow a sale. Contact ORBES.', { detail });
+    if (product.status === 'SERVICED') throw notForSale('in a service');
+    const scan = await tx
+      .selectFrom('scan_events as s')
+      .leftJoin('codes as c', 'c.id', 's.code_id')
+      .select(['s.code_id', 'c.status as code_status', 'c.product_id as code_product'])
+      .where('s.id', '=', saleScanId)
+      .executeTakeFirst();
+    if (!scan?.code_id || scan.code_product !== product.id || scan.code_status !== 'ACTIVE') throw notForSale('the scanned code is no longer the active code of the piece');
+  }
+
+  /**
    * Retailer/admin activation: start the warranty on the purchase date for
    * the category's warranty months. An ISSUED product moves to ACTIVATED; a
    * product in a pre-sale service (ISSUED → SERVICED) is refused until the
    * service is closed (409 WARRANTY_ACTIVATION_NOT_ALLOWED).
    * `opts.tx` runs it inside the caller's transaction (the sale mode uses up
    * its scan token in the same one); `opts.saleScanId`, the staff scan that
-   * token came from, is recorded in the audit entry.
+   * token came from, is recorded in the audit entry, and the sale's facts
+   * are checked again (assertStillForSale).
    */
   async activate(
     productId: string,
@@ -229,6 +252,9 @@ export class WarrantyService {
           detail: 'pre-sale service: complete or cancel the service first',
         });
       }
+      // The sale mode (A-08): the token was minted on facts of the scan (no client holds the piece, not in a service,
+      // its code in force) that may have changed during its 10 minutes; checked again under the row lock.
+      if (opts.saleScanId !== undefined) await this.assertStillForSale(tx, product, opts.saleScanId);
 
       const months = await this.categoryMonths(tx, product.category_id);
       const endDate = addMonthsClamped(purchaseDate, months);

@@ -190,13 +190,18 @@ describe('verify view-model: ownership modes', () => {
     expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true, underReview: false });
   });
 
-  it('FIRST_REGISTRATION without a token is a staff scan (S-07): nothing to register, and the tab says why', () => {
-    const vm = resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION'));
+  it('FIRST_REGISTRATION of a staff scan (S-07, `staffScan`): nothing to register, and the tab says why', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { staffScan: true }));
     expect(vm.ownership).toEqual({ kind: 'staff' });
     // Not the registration's tab: the result opens on PRODUCT as for any piece the viewer cannot register.
     expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+    // The flag decides, not the absence of a token: a staff scan never registers, a customer's scan without a token cannot.
+    expect(
+      resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { staffScan: true, registration: { token: 'tok', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: false } })).ownership,
+    ).toEqual({ kind: 'staff' });
+    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION')).ownership).toEqual({ kind: 'unregistered' });
     expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: '', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: false } })).ownership).toEqual({
-      kind: 'staff',
+      kind: 'unregistered',
     });
   });
 
@@ -501,6 +506,16 @@ describe('verify view-model: WHERE DID YOU SEE OR BUY THIS PIECE?', () => {
     // Even the owner told about unusual activity elsewhere: the result is authentic.
     expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { notice: 'UNUSUAL_ACTIVITY' })).report).toBeUndefined();
     for (const scanId of ['', 'not-a-scan-id', '4515b884']) expect(resultViewModel(outcome('UNKNOWN', { scanId })).report, scanId).toBeUndefined();
+  });
+
+  it('is never offered on a staff scan (S-07): a browser signed in to the console scans as staff, and a staff scan takes no report', () => {
+    for (const state of NEGATIVE) {
+      const vm = resultViewModel(outcome(state, { scanId: '4515B884-1C2D-4E5F-8A9B-0C1D2E3F4A5B', staffScan: true }), { clientServices: CS });
+      expect(vm.report, state).toBeUndefined();
+      // The rest of the result is the customer's: the reference and Client Services stay.
+      expect(vm.reference, state).toBe('4515B884');
+      expect(vm.contact?.placement, state).toBe('help');
+    }
   });
 
   it('asks without accusing, and asks for no contact details (BRAND §4.5)', () => {

@@ -4,6 +4,7 @@
  * last complete day by default, staff scans and today's scans left out, and
  * the same figures after the scan history is purged.
  */
+import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHousekeeping } from '../../src/server/context.js';
 import type { NewScanEvent } from '../../src/server/db/schema.js';
@@ -127,5 +128,33 @@ describe('GET /api/admin/analytics', () => {
     expect(await h.ctx.db.selectFrom('scan_events').select('id').where('occurred_at', '<', new Date('2026-09-01T00:00:00.000Z')).execute()).toEqual([]);
     expect(await get(year)).toEqual(before);
     expect((await get('/api/admin/analytics?days=90')).countries.map((c: any) => c.country)).toContain('JP');
+  });
+
+  it('counts the complete days not counted yet before it reads, and says how far the counts go when that fails', async () => {
+    // Yesterday's scans have not met a housekeeping pass (a pass that failed, or none since a restart).
+    await scans('2026-10-02T15:00:00.000Z', 2, { country: 'IT' });
+    h.clock.set('2026-10-03T00:20:00.000Z');
+    const reader = await adminClient(h, 'AUDITOR');
+    const read = async (url: string): Promise<any> => {
+      const res = await reader.get(url);
+      expect(res.statusCode, res.body.slice(0, 200)).toBe(200);
+      return safeJson(res);
+    };
+    // The count fails: the report still answers, and says the statistics stop on 1 October.
+    await sql`CREATE FUNCTION refuse_stats() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'stats unavailable'; END $$`.execute(h.ctx.db);
+    await sql`CREATE TRIGGER refuse_stats BEFORE INSERT ON scan_daily_stats FOR EACH ROW EXECUTE FUNCTION refuse_stats()`.execute(h.ctx.db);
+    try {
+      const stale = await read('/api/admin/analytics?days=3');
+      expect(stale).toMatchObject({ from: '2026-09-30', to: '2026-10-02', through: '2026-10-01' });
+      expect(stale.daily.at(-1)).toMatchObject({ day: '2026-10-02', total: 0 });
+    } finally {
+      await sql`DROP TRIGGER refuse_stats ON scan_daily_stats`.execute(h.ctx.db);
+      await sql`DROP FUNCTION refuse_stats()`.execute(h.ctx.db);
+    }
+    // Then the route counts 2 October itself, before the next pass.
+    const fresh = await read('/api/admin/analytics?days=3');
+    expect(fresh).toMatchObject({ to: '2026-10-02', through: '2026-10-02' });
+    // 2 October: today's four scans of the setup and the two above.
+    expect(fresh.daily.at(-1)).toMatchObject({ day: '2026-10-02', total: 6 });
   });
 });

@@ -104,9 +104,17 @@ export function analyticsKpis(d: AnalyticsData): Kpi[] {
   ];
 }
 
-/** `Complete days 04 JUL 2026 – 01 OCT 2026 (UTC) …`: what the figures cover and what they leave out. */
+/**
+ * `Complete days 04 JUL 2026 – 01 OCT 2026 (UTC) …`: what the figures cover and what they leave out. When the
+ * statistics are counted only up to an earlier day (`through`: a housekeeping pass failed, or has not run since
+ * midnight), it says so first: the days after it read 0 because they are not counted yet, not for want of scans.
+ */
 export function analyticsLead(d: AnalyticsData): string {
-  return `Complete days from ${formatDate(d.from)} to ${formatDate(d.to)}, in UTC. Today's scans are counted after midnight UTC; staff scans never are. The counts stay after the scan history is purged.`;
+  const behind =
+    d.through < d.to
+      ? `Counted through ${formatDate(d.through)} only: the days after it are not counted yet and read 0. `
+      : '';
+  return `${behind}Complete days from ${formatDate(d.from)} to ${formatDate(d.to)}, in UTC. Today's scans are counted after midnight UTC; staff scans never are. The counts stay after the scan history is purged.`;
 }
 
 // ── Curves ─────────────────────────────────────────────────────────────────

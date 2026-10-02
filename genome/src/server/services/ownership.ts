@@ -280,6 +280,10 @@ export class OwnershipService {
 
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      // The account again, under a share lock and before the product (lock order account → product): a lock by ORBES
+      // Client Services that committed during the checks above (the claim code's scrypt included) refuses this
+      // registration rather than giving a piece to a LOCKED account.
+      await this.readActiveAccount(tx, accountId);
       const p = await requireProduct(tx, product.id, { forUpdate: true });
       // The claim secret could have been replaced (code re-issue) between the check and the lock.
       if (p.claim_secret_hash !== product.claim_secret_hash) {
@@ -391,6 +395,9 @@ export class OwnershipService {
 
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      // The recipient's account again, under a share lock and before the product (as registerFirst): a lock that
+      // committed since the check above refuses the acceptance.
+      await this.readActiveAccount(tx, accountId);
       const p = await requireProduct(tx, found.product_id, { forUpdate: true });
       const t = await tx.selectFrom('ownership_transfers').selectAll().where('id', '=', found.id).forUpdate().executeTakeFirstOrThrow();
       if (t.status !== 'PENDING') throw transferClosedError(t.status);
@@ -795,6 +802,12 @@ export class OwnershipService {
 
   private async requireActiveAccount(db: Db, accountId: string): Promise<void> {
     const a = await db.selectFrom('accounts').select('status').where('id', '=', accountId).executeTakeFirst();
+    if (!a || a.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
+  }
+
+  /** In the write transaction: LOCKED answers 403 ACCOUNT_LOCKED (readActingAccount), any other non-ACTIVE state 403 FORBIDDEN. */
+  private async readActiveAccount(tx: Db, accountId: string): Promise<void> {
+    const a = await readActingAccount(tx, accountId);
     if (!a || a.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
   }
 }

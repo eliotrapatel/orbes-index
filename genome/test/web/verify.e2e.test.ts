@@ -392,11 +392,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Under SIGN IN: FORGOTTEN PASSWORD?, a text link, which leads to ORBES Client Services.
     await visible(panel.getByLabel('PASSWORD', { exact: true }));
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?']);
-    await page.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }).click();
+    // From the keyboard (Enter), where a focus ring would show if the heading had one.
+    await page.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }).focus();
+    await page.keyboard.press('Enter');
     await textOf(panel.locator('#recover-title'), 'FORGOTTEN PASSWORD');
-    // A section under the status of the piece, where the sign-in form was; keyboard focus moves to it.
+    // A section under the status of the piece, where the sign-in form was; keyboard focus moves to it, without a
+    // ring: a heading focused on a screen change shows none (BRAND §3.8).
     await textOf(panel.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('recover-title');
+    expect(await panel.locator('#recover-title').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
     await textOf(panel, /After checking your identity, they give you a one-time recovery code, valid for 30 minutes\./);
     const contact = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
     await visible(contact);
@@ -494,6 +498,24 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const scan = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id', 'device_hash']).where('product_id', '=', issued.product.id).executeTakeFirstOrThrow();
     expect(scan).toEqual({ event_type: 'ADMIN_TEST', admin_id: seller.id, device_hash: null });
     expect(await srv.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', issued.product.id).execute()).toEqual([]);
+
+    // A code ORBES did not sign, from the same browser: a staff scan takes no report, so WHERE DID YOU SEE OR BUY
+    // THIS PIECE? is not offered (the server would refuse it, and scanning again would only make another staff scan).
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[30] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'staff-forged.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await visible(page.locator('.result__help'));
+    await countOf(page.getByRole('region', { name: 'WHERE DID YOU SEE OR BUY THIS PIECE?' }), 0);
+    await countOf(page.locator('.report'), 0);
+    const forgedScans = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'result_state']).where('admin_id', '=', seller.id).orderBy('result_state').execute();
+    expect(forgedScans).toEqual([
+      { event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC_FIRST_REGISTRATION' },
+      { event_type: 'ADMIN_TEST', result_state: 'INVALID_SIGNATURE' },
+    ]);
     expect(problems).toEqual([]);
   }, 120_000);
 

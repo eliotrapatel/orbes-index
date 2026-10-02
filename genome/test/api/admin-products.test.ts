@@ -459,6 +459,17 @@ describe('admin products, codes and records', () => {
       expect(d.activeKey).toMatchObject({ keyId: 1 });
       expect(d.recentEvents.length).toBeGreaterThan(0);
       expect(d.recentEvents.length).toBeLessThanOrEqual(10);
+
+      // Staff scans (the sale mode, a browser signed in to the console) are not clients' scans: the counters leave
+      // them out, as the daily statistics do; the recent scans list them, with their type.
+      h.clock.advance(1_000);
+      const staff = safeJson(await operator.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string };
+      const after = safeJson(await auditor.get('/api/admin/dashboard')) as any;
+      expect(after.scans).toEqual(d.scans);
+      expect(after.recentEvents[0]).toMatchObject({ scanId: staff.scanId, eventType: 'ADMIN_TEST' });
+      await h.client().post('/api/v1/verify', { code: 'abc+/=def' });
+      const public1 = safeJson(await auditor.get('/api/admin/dashboard')) as any;
+      expect(public1.scans).toEqual({ last24h: d.scans.last24h + 1, last7d: d.scans.last7d + 1 });
     });
   });
 

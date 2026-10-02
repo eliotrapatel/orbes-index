@@ -56,7 +56,7 @@ scripts/backup.sh                        # on-demand encrypted backup (nightly v
 systemctl list-timers 'orbes-*'          # next backup / GeoIP refresh
 ```
 
-Changing `.env` (e.g. `ADMIN_ALLOWED_IPS="203.0.113.7/32 198.51.100.0/24"`, space-separated, no commas): apply it with `scripts/deploy.sh`, which validates the Caddy configuration before touching anything. A bare `docker compose up -d` skips that check, and an invalid value stops Caddy, i.e. the whole site.
+Changing `.env` (e.g. `ADMIN_ALLOWED_IPS="203.0.113.7/32 198.51.100.0/24"`, space-separated, no commas; the boutiques' networks too when sellers use the sale mode, DEPLOYMENT §15): apply it with `scripts/deploy.sh`, which validates the Caddy configuration before touching anything. A bare `docker compose up -d` skips that check, and an invalid value stops Caddy, i.e. the whole site.
 
 ## Local trial of the whole stack
 

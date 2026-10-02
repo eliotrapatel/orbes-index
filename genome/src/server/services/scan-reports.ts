@@ -55,17 +55,34 @@ export const REPORTABLE_STATES: readonly VerificationState[] = Object.freeze([
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Least severe first, as `array_position` read it. */
+const ANOMALY_SEVERITY_ORDER: readonly string[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 /**
- * Scan `s` (scan_events) took part in anomaly `a` (anomalies): recorded by it, or a scan of the same
- * piece made between the anomaly's first and last sighting.
+ * Scan `s` (scan_events) took part in anomaly `a` (anomalies) of its piece: recorded by it, or made between the
+ * anomaly's first and last sighting. A finding is always recorded with the product of the scan that raised it, so
+ * `a.product_id = s.product_id` holds for both, and the join runs on anomalies_product_id_idx.
  */
-export const SCAN_IN_ANOMALY = sql<boolean>`(
-  a.details->>'scanEventId' = s.id::text
-  OR (s.occurred_at BETWEEN a.first_seen_at AND a.last_seen_at
-      AND (a.product_id = s.product_id
-           OR (a.product_id IS NULL AND s.product_id IS NULL AND a.details->'packedIdentity' = to_jsonb(s.packed_identity)))))`;
+const SCAN_IN_PRODUCT_ANOMALY = sql<boolean>`(
+  a.product_id = s.product_id
+  AND (a.details->>'scanEventId' = s.id::text OR s.occurred_at BETWEEN a.first_seen_at AND a.last_seen_at))`;
+
+/**
+ * The same for a scan of no registered piece (VALID_SIGNATURE_UNREGISTERED): an anomaly without a product, recorded by
+ * the scan or of the same signed identity (`details.packedIdentity`) during its sightings. `product_id IS NULL` is
+ * served by the same index.
+ */
+const SCAN_IN_UNREGISTERED_ANOMALY = sql<boolean>`(
+  a.product_id IS NULL AND s.product_id IS NULL
+  AND (a.details->>'scanEventId' = s.id::text
+       OR (s.occurred_at BETWEEN a.first_seen_at AND a.last_seen_at AND a.details->'packedIdentity' = to_jsonb(s.packed_identity))))`;
+
+/**
+ * Scan `s` took part in anomaly `a`: recorded by it, or a scan of the same piece (or, without one, of the same signed
+ * identity) made between the anomaly's first and last sighting.
+ */
+export const SCAN_IN_ANOMALY = sql<boolean>`(${SCAN_IN_PRODUCT_ANOMALY} OR ${SCAN_IN_UNREGISTERED_ANOMALY})`;
 
 export interface ReportInput {
   /** scan_events.id, the `scanId` of the verification. */
@@ -128,6 +145,16 @@ export interface ScanReportServiceDeps {
 
 const notAllowed = () =>
   conflict('REPORT_NOT_ALLOWED', 'A report can be sent only within 24 hours of a result that was not authentic. Please scan the piece again.');
+/**
+ * A staff scan (S-07: the browser carried a console session, so the scan is ADMIN_TEST) takes no report: a customer's
+ * words belong to a customer's scan. Scanning again would only record another staff scan, so the answer says why.
+ * Only the browser that scanned holds the scan's random id, so this tells no one else anything.
+ */
+const staffScanNotAllowed = () =>
+  conflict(
+    'REPORT_NOT_ALLOWED',
+    'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and takes no report. Sign out of the console, or use another browser, to report as a customer.',
+  );
 
 export class ScanReportService {
   private readonly db: Db;
@@ -144,8 +171,9 @@ export class ScanReportService {
 
   /**
    * Attach a report to a scan (POST /api/v1/reports). Unknown scans, authentic results, scans of
-   * another kind and scans 24 hours old or older answer alike (409 REPORT_NOT_ALLOWED); a second
-   * report on the same scan answers 409 REPORT_ALREADY_SENT.
+   * another kind and scans 24 hours old or older answer alike (409 REPORT_NOT_ALLOWED); a staff scan
+   * (ADMIN_TEST) answers the same code with a message that says why; a second report on the same scan
+   * answers 409 REPORT_ALREADY_SENT.
    */
   async submit(input: ReportInput, actor: Actor): Promise<{ createdAt: Date }> {
     const scanId = typeof input?.scanId === 'string' && UUID_RE.test(input.scanId) ? input.scanId.toLowerCase() : null;
@@ -158,6 +186,7 @@ export class ScanReportService {
       await inTransaction(this.db, async (tx) => {
         const scan = await tx.selectFrom('scan_events').select(['id', 'occurred_at', 'event_type', 'result_state']).where('id', '=', scanId).executeTakeFirst();
         const age = scan ? now.getTime() - scan.occurred_at.getTime() : Number.POSITIVE_INFINITY;
+        if (scan?.event_type === 'ADMIN_TEST') throw staffScanNotAllowed();
         if (!scan || scan.event_type !== 'VERIFY' || !REPORTABLE_STATES.includes(scan.result_state as VerificationState) || age >= REPORT_WINDOW_MS) {
           throw notAllowed();
         }
@@ -303,18 +332,36 @@ export class ScanReportService {
   private async anomaliesOf(scanIds: readonly string[]): Promise<Map<string, NonNullable<ScanReportRecord['anomaly']>>> {
     const out = new Map<string, NonNullable<ScanReportRecord['anomaly']>>();
     if (scanIds.length === 0) return out;
-    const rows = await this.db
-      .selectFrom('scan_events as s')
-      .innerJoin('anomalies as a', (join) => join.on(SCAN_IN_ANOMALY))
-      .select(['s.id as scan_id', 'a.id', 'a.type', 'a.severity', 'a.status'])
-      .where('s.id', 'in', [...new Set(scanIds)])
-      .orderBy('s.id')
-      .orderBy(sql`COALESCE(a.details->>'scanEventId' = s.id::text, false)`, 'desc')
-      .orderBy(sql`array_position(ARRAY['LOW','MEDIUM','HIGH','CRITICAL']::text[], a.severity)`, 'desc')
-      .orderBy('a.risk_score', 'desc')
-      .orderBy('a.last_seen_at', 'desc')
-      .orderBy('a.id')
-      .execute();
+    const ids = [...new Set(scanIds)];
+    // Two joins, each on an index (the scan's primary key, then anomalies' product_id), rather than one OR that no
+    // index serves: the anomalies table is never purged, so a page of cases must not read all of it.
+    const branch = (on: typeof SCAN_IN_ANOMALY) =>
+      this.db
+        .selectFrom('scan_events as s')
+        .innerJoin('anomalies as a', (join) => join.on(on))
+        .select([
+          's.id as scan_id',
+          'a.id',
+          'a.type',
+          'a.severity',
+          'a.status',
+          'a.risk_score',
+          'a.last_seen_at',
+          sql<boolean>`COALESCE(a.details->>'scanEventId' = s.id::text, false)`.as('recorded'),
+        ])
+        .where('s.id', 'in', ids);
+    const rows = [...(await branch(SCAN_IN_PRODUCT_ANOMALY).execute()), ...(await branch(SCAN_IN_UNREGISTERED_ANOMALY).execute())];
+    // Per scan: the anomaly it recorded first, then the most severe, the highest risk, the latest seen.
+    const rank = (v: string) => ANOMALY_SEVERITY_ORDER.indexOf(v);
+    rows.sort(
+      (x, y) =>
+        (x.scan_id < y.scan_id ? -1 : x.scan_id > y.scan_id ? 1 : 0) ||
+        Number(y.recorded) - Number(x.recorded) ||
+        rank(y.severity) - rank(x.severity) ||
+        y.risk_score - x.risk_score ||
+        y.last_seen_at.getTime() - x.last_seen_at.getTime() ||
+        (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
+    );
     for (const r of rows) if (!out.has(r.scan_id)) out.set(r.scan_id, { id: r.id, type: r.type, severity: r.severity, status: r.status });
     return out;
   }

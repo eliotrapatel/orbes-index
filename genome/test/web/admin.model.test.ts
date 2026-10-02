@@ -71,7 +71,10 @@ import {
   hasCodeFilters,
   isSheetSelectable,
   printSheetPreview,
+  pruneSheetSelection,
   PRINT_SHEET_LIMITS,
+  SHEET_CODE_REFUSALS,
+  sheetRefusalText,
   sheetChunks,
   sheetPartFilename,
   type PrintSheetForm,
@@ -109,7 +112,7 @@ import { ownerSearch } from '../../src/web/admin/model/owners.js';
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
-import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, saleVerdict } from '../../src/web/admin/model/sale.js';
+import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
@@ -237,7 +240,10 @@ describe('permissions', () => {
   it('puts RETAIL under AUDITOR: the sale mode only (A-08)', () => {
     const caps = Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[];
     expect(caps.filter((c) => can('RETAIL', c))).toEqual(['sell']);
-    for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) expect(can(role, 'sell'), role).toBe(true);
+    // The sale mode starts warranties: the seller, OPERATOR and ADMIN sell; the read-only AUDITOR does not (as the server).
+    for (const role of ['OPERATOR', 'ADMIN'] as const) expect(can(role, 'sell'), role).toBe(true);
+    expect(can('AUDITOR', 'sell')).toBe(false);
+    expect(caps.filter((c) => can('AUDITOR', c) && !can('OPERATOR', c))).toEqual([]);
     expect(can('OPERATOR', 'manageRetailers')).toBe(false);
     expect(can('ADMIN', 'manageRetailers')).toBe(true);
     expect(saleOnly('RETAIL')).toBe(true);
@@ -305,6 +311,10 @@ describe('sale mode view model (A-08)', () => {
     expect(minutesLeft('2026-10-02T09:00:00.000Z', now)).toBe(0);
     expect(minutesLeft('garbage', now)).toBe(0);
     expect(CLIENT_REGISTRATION).toBe('Register your piece with its card at theorbes.com/verify.');
+    // The card's claim code registers the piece in the client's name; it proves the card is in hand, never ownership
+    // (BRAND §4.1, §4.6, the words of §4.4).
+    expect(SALE_CARD_NOTE).toBe('Hand over the certificate card: with the claim code under its scratch-off panel, they register the piece in their name.');
+    expect(SALE_CARD_NOTE).not.toMatch(/prove|theirs|owner|guarantee/i);
   });
 });
 
@@ -765,6 +775,34 @@ describe('generator view model', () => {
     // The ACTIVE code of a LOST, STOLEN, RETIRED, REVOKED or flagged piece: the list says it does not print.
     expect(isSheetSelectable({ status: 'ACTIVE', printable: false })).toBe(false);
     expect(isSheetSelectable({ status: 'ACTIVE', printable: true })).toBe(true);
+  });
+
+  it('drops from the selection a code revoked (or a piece made unprintable) after it was picked, as soon as the view knows it', () => {
+    const selection = () => new Set(['a', 'b', 'c', 'd']);
+    // The page shows b revoked since, and c whose piece was reported stolen: neither has a box left to untick.
+    let s = selection();
+    const page = [
+      { id: 'a', status: 'ACTIVE' as const, printable: true },
+      { id: 'b', status: 'REVOKED' as const, printable: false },
+      { id: 'c', status: 'ACTIVE' as const, printable: false },
+      { id: 'x', status: 'SUPERSEDED' as const, printable: false },
+    ];
+    expect(pruneSheetSelection(s, page, null)).toEqual(['b', 'c']);
+    expect([...s]).toEqual(['a', 'd']);
+    // The complete batch of the filters lists every printable code: d, on another page, is no longer in it.
+    s = selection();
+    expect(pruneSheetSelection(s, [], { ids: ['a', 'b', 'c'], truncated: false })).toEqual(['d']);
+    expect([...s]).toEqual(['a', 'b', 'c']);
+    // A truncated batch proves nothing about the codes it leaves out; nothing to drop, nothing dropped.
+    s = selection();
+    expect(pruneSheetSelection(s, [], { ids: ['a'], truncated: true })).toEqual([]);
+    expect(pruneSheetSelection(s, page.slice(0, 1), null)).toEqual([]);
+    expect(s.size).toBe(4);
+    // A refused part names the piece; the panel says how to leave it out.
+    expect(SHEET_CODE_REFUSALS).toEqual(['CODE_NOT_ACTIVE', 'PRODUCT_NOT_PRINTABLE', 'CODE_INTEGRITY']);
+    expect(sheetRefusalText('Only the active code of a product can be rendered: issue 1 of O26-J-00184 is REVOKED.')).toBe(
+      'Only the active code of a product can be rendered: issue 1 of O26-J-00184 is REVOKED. Leave it out: it leaves the selection as soon as the list shows it (filter by its production batch), or clear the selection.',
+    );
   });
 
   it('previews the layout before rendering ("35 per A4 · 4 pages") with the grid the server prints', () => {
@@ -1360,6 +1398,34 @@ describe('anomaly triage view model', () => {
     expect(decisionPhrase({ status: 'RESOLVED', [MARK_FIELDS.STOLEN]: 'true' }, offer)).toBeNull();
   });
 
+  it('keeps a mark or a revocation already done in the decision when it is retried after a partial failure', () => {
+    const moves = triageMoves('OPEN');
+    const offer = decisionOffer(context(), 'ADMIN', moves);
+    // First attempt: the mark is set, the revocation fails (a 503, say).
+    const first = { status: 'RESOLVED', note: 'Seized in Lyon', [MARK_FIELDS.COUNTERFEIT_FLAGGED]: 'true', [REVOKE_FIELD]: 'true' };
+    const done = new Set(decisionSteps(first, offer).slice(0, 1).map((s) => s.key));
+    expect([...done]).toEqual(['mark:COUNTERFEIT_FLAGGED']);
+    // The retry with both boxes unticked and Dismiss: refused, the piece is already marked and that resolves the finding.
+    const retry = { status: 'DISMISSED', note: 'A false alarm after all' };
+    expect(decisionError(retry, offer, moves, done)).toBe('The piece was already marked or its code revoked by this decision: it resolves the finding. Choose Resolve.');
+    // Without the earlier attempt the same values would be a plain dismissal.
+    expect(decisionError(retry, offer, moves)).toBeNull();
+    // A second, different mark is still one too many.
+    expect(decisionError({ status: 'RESOLVED', note: 'x', [MARK_FIELDS.STOLEN]: 'true' }, offer, moves, done)).toMatch(/not both/);
+    // Resolving: the done mark stays a step (skipped when run), so the summary names it, ticked or not.
+    const resolved = decisionSteps({ status: 'RESOLVED', note: 'Seized in Lyon' }, offer, done);
+    expect(resolved.map((s) => s.key)).toEqual(['mark:COUNTERFEIT_FLAGGED', 'status:RESOLVED']);
+    expect(decisionSummary(resolved)).toBe('Finding RESOLVED · piece COUNTERFEIT FLAGGED.');
+    // Nothing done needs confirming again: the retry is not destructive unless it still revokes.
+    expect(decisionDanger({ status: 'RESOLVED', note: 'x', [MARK_FIELDS.COUNTERFEIT_FLAGGED]: 'true' }, offer, done)).toBe(false);
+    expect(decisionDanger({ status: 'RESOLVED', note: 'x', [REVOKE_FIELD]: 'true' }, offer, done)).toBe(true);
+    // Once the revocation is done too, its typed phrase is no longer asked.
+    const both = new Set([...done, `revoke:${CODE}`]);
+    expect(decisionPhrase({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, offer, done)).toBe(confirmationPhrase('revoke-code', 1));
+    expect(decisionPhrase({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, offer, both)).toBeNull();
+    expect(decisionSummary(decisionSteps({ status: 'RESOLVED', note: 'x' }, offer, both))).toBe('Finding RESOLVED · piece COUNTERFEIT FLAGGED · code revoked.');
+  });
+
   it('marks the dialog destructive when it revokes the code or flags the piece COUNTERFEIT, as the product page does', () => {
     const offer = decisionOffer(context(), 'ADMIN', triageMoves('OPEN'));
     expect(decisionDanger({ status: 'RESOLVED' }, offer)).toBe(false);
@@ -1562,6 +1628,12 @@ describe('analytics view model', () => {
     expect(analyticsLead(d)).toBe(
       "Complete days from 28 SEP 2026 to 01 OCT 2026, in UTC. Today's scans are counted after midnight UTC; staff scans never are. The counts stay after the scan history is purged.",
     );
+    // Counted only up to an earlier day (a housekeeping pass failed): the days after it are said to be uncounted, not empty.
+    expect(analyticsLead({ ...d, through: '2026-09-29' })).toBe(
+      "Counted through 29 SEP 2026 only: the days after it are not counted yet and read 0. Complete days from 28 SEP 2026 to 01 OCT 2026, in UTC. Today's scans are counted after midnight UTC; staff scans never are. The counts stay after the scan history is purged.",
+    );
+    // A window that ends before the last counted day is whole.
+    expect(analyticsLead({ ...d, through: '2026-10-05' })).not.toMatch(/Counted through/);
   });
 
   it('draws the curve against a 1, 2 or 5 ceiling, in fractions of the plot', () => {

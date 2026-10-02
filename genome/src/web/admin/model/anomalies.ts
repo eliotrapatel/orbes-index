@@ -148,26 +148,50 @@ export type DecisionStep =
 
 const ticked = (v: Readonly<Record<string, string>>, name: string) => v[name] === 'true';
 
-function chosenMarks(v: Readonly<Record<string, string>>, offer: DecisionOffer): Mark[] {
-  return offer.marks.filter((m) => ticked(v, MARK_FIELDS[m]));
+/** The keys of the steps already done in this dialog (a retry after a partial failure): they cannot be undone. */
+export type DoneSteps = ReadonlySet<string>;
+
+const NONE: DoneSteps = new Set();
+const markKey = (m: Mark) => `mark:${m}`;
+const revokeKey = (codeId: string) => `revoke:${codeId}`;
+
+/** The marks ticked now, and those already set by an earlier attempt of the same dialog, whatever the boxes say since. */
+function chosenMarks(v: Readonly<Record<string, string>>, offer: DecisionOffer, done: DoneSteps): Mark[] {
+  return offer.marks.filter((m) => ticked(v, MARK_FIELDS[m]) || done.has(markKey(m)));
 }
 
-/** The decision's steps in the order they run: mark the piece, revoke its code, then record the decision. */
-export function decisionSteps(v: Readonly<Record<string, string>>, offer: DecisionOffer): DecisionStep[] {
-  const steps: DecisionStep[] = chosenMarks(v, offer).map((to) => ({ key: `mark:${to}`, kind: 'mark', to, label: `Mark the piece ${humanize(to)}` }));
-  if (offer.revoke && ticked(v, REVOKE_FIELD)) steps.push({ key: `revoke:${offer.revoke.codeId}`, kind: 'revoke', codeId: offer.revoke.codeId, label: 'Revoke the code' });
+function revoking(v: Readonly<Record<string, string>>, offer: DecisionOffer, done: DoneSteps): boolean {
+  return !!offer.revoke && (ticked(v, REVOKE_FIELD) || done.has(revokeKey(offer.revoke.codeId)));
+}
+
+/**
+ * The decision's steps in the order they run: mark the piece, revoke its code, then record the decision. A mark
+ * or a revocation already done by an earlier attempt (`done`) stays among them, ticked or not: what was done to
+ * the piece is part of this decision, and the retry skips it.
+ */
+export function decisionSteps(v: Readonly<Record<string, string>>, offer: DecisionOffer, done: DoneSteps = NONE): DecisionStep[] {
+  const steps: DecisionStep[] = chosenMarks(v, offer, done).map((to) => ({ key: markKey(to), kind: 'mark', to, label: `Mark the piece ${humanize(to)}` }));
+  if (offer.revoke && revoking(v, offer, done)) steps.push({ key: revokeKey(offer.revoke.codeId), kind: 'revoke', codeId: offer.revoke.codeId, label: 'Revoke the code' });
   const to = v.status as AnomalyStatus;
   if (to) steps.push({ key: `status:${to}`, kind: 'status', to, label: `Record the finding ${humanize(to)}` });
   return steps;
 }
 
-/** The dialog's check: a closing move needs a note; acting on the piece resolves the finding; one mark at a time. */
-export function decisionError(v: Readonly<Record<string, string>>, offer: DecisionOffer, moves: readonly TriageMove[]): string | null {
+/**
+ * The dialog's check: a closing move needs a note; acting on the piece resolves the finding; one mark at a time.
+ * A mark or a revocation already done by an earlier attempt counts as acting: the retry can only resolve.
+ */
+export function decisionError(v: Readonly<Record<string, string>>, offer: DecisionOffer, moves: readonly TriageMove[], done: DoneSteps = NONE): string | null {
   if (moves.find((m) => m.to === v.status)?.noteRequired && !v.note?.trim()) return 'Explain the decision in the note.';
-  const marks = chosenMarks(v, offer);
+  const marks = chosenMarks(v, offer, done);
   if (marks.length > 1) return 'Mark the piece counterfeit flagged or stolen, not both.';
-  const acting = marks.length > 0 || (!!offer.revoke && ticked(v, REVOKE_FIELD));
-  if (acting && v.status !== 'RESOLVED') return 'Marking the piece or revoking its code resolves the finding: choose Resolve.';
+  const acting = marks.length > 0 || revoking(v, offer, done);
+  if (acting && v.status !== 'RESOLVED') {
+    const already = offer.marks.some((m) => done.has(markKey(m))) || (!!offer.revoke && done.has(revokeKey(offer.revoke.codeId)));
+    return already
+      ? 'The piece was already marked or its code revoked by this decision: it resolves the finding. Choose Resolve.'
+      : 'Marking the piece or revoking its code resolves the finding: choose Resolve.';
+  }
   return null;
 }
 
@@ -176,13 +200,16 @@ export function decisionError(v: Readonly<Record<string, string>>, offer: Decisi
  * code, or marks the piece COUNTERFEIT FLAGGED (a STOLEN mark is not, there or here). The dialog then
  * wears the oxblood rule and a danger confirm (BRAND §6).
  */
-export function decisionDanger(v: Readonly<Record<string, string>>, offer: DecisionOffer): boolean {
-  return decisionSteps(v, offer).some((s) => s.kind === 'revoke' || (s.kind === 'mark' && s.to === 'COUNTERFEIT_FLAGGED'));
+export function decisionDanger(v: Readonly<Record<string, string>>, offer: DecisionOffer, done: DoneSteps = NONE): boolean {
+  return decisionSteps(v, offer, done).some((s) => !done.has(s.key) && (s.kind === 'revoke' || (s.kind === 'mark' && s.to === 'COUNTERFEIT_FLAGGED')));
 }
 
-/** The typed confirmation a ticked code revocation needs (`REVOKE ISSUE 1`), as on the product page; null otherwise. */
-export function decisionPhrase(v: Readonly<Record<string, string>>, offer: DecisionOffer): string | null {
-  return offer.revoke && ticked(v, REVOKE_FIELD) ? confirmationPhrase('revoke-code', offer.revoke.issue) : null;
+/**
+ * The typed confirmation a ticked code revocation needs (`REVOKE ISSUE 1`), as on the product page; null otherwise,
+ * and once an earlier attempt of this dialog has revoked it (nothing irreversible is left to confirm).
+ */
+export function decisionPhrase(v: Readonly<Record<string, string>>, offer: DecisionOffer, done: DoneSteps = NONE): string | null {
+  return offer.revoke && ticked(v, REVOKE_FIELD) && !done.has(revokeKey(offer.revoke.codeId)) ? confirmationPhrase('revoke-code', offer.revoke.issue) : null;
 }
 
 /**

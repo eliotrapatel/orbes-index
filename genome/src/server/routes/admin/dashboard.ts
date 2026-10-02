@@ -2,6 +2,12 @@
  * GET /api/admin/dashboard — the console's landing counts: products by
  * status, scans in the last 24 h / 7 d, open anomalies by severity, the
  * active signing key and the most recent scans.
+ *
+ * The two scan counters are the clients' scans: staff scans (ADMIN_TEST, the
+ * sale mode and a browser signed in to the console, S-07) are left out, as
+ * the daily statistics (A-09) and the anomaly rules leave them out, so a busy
+ * counter never reads as public interest. The recent scans list them, each
+ * with its event type.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { ANOMALY_SEVERITIES, PRODUCT_STATUSES, type AnomalySeverity, type ProductStatus } from '../../db/schema.js';
@@ -30,6 +36,7 @@ export const adminDashboardRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
       .selectFrom('scan_events')
       .select((eb) => [eb.fn.countAll<number>().filterWhere('occurred_at', '>=', dayAgo).as('day'), eb.fn.countAll<number>().as('week')])
       .where('occurred_at', '>=', weekAgo)
+      .where('event_type', '!=', 'ADMIN_TEST')
       .executeTakeFirstOrThrow();
 
     const anomalyRows = await db

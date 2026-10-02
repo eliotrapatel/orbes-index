@@ -427,12 +427,18 @@ export class AuthService {
       // in-flight attempt evaluated and a correct one still logs in past the lockout.
       const fresh = await tx
         .selectFrom('admin_users')
-        .select(['locked_until', 'disabled_at'])
+        .select(['locked_until', 'disabled_at', 'password_hash', 'password_change_required'])
         .where('id', '=', admin.id)
         .forUpdate()
         .executeTakeFirst();
       if (!fresh || fresh.disabled_at !== null) throw invalidCredentials();
       if (fresh.locked_until !== null && fresh.locked_until.getTime() > this.clock().getTime()) throw accountLocked();
+      // A password change (A-02: the admin's own, or the forced replacement of a temporary password) that committed
+      // during the scrypt check above has ended every other session: the password checked there no longer opens one,
+      // nor is it written back by a rehash. A concurrent login's rehash of this same password still matches (rare:
+      // checked again, under the lock), as for customers (login).
+      const unchanged = fresh.password_hash === admin.password_hash;
+      if (!unchanged && !(await verifySecret(password, fresh.password_hash))) throw invalidCredentials();
       let q = tx
         .updateTable('admin_users')
         .set({
@@ -440,7 +446,7 @@ export class AuthService {
           locked_until: null,
           updated_at: now,
           ...(totpUpdate ? { totp_secret_enc: totpUpdate.to } : {}),
-          ...(rehash ? { password_hash: rehash } : {}),
+          ...(rehash && unchanged ? { password_hash: rehash } : {}),
         })
         .where('id', '=', admin.id);
       // Compare-and-swap: of two concurrent logins with the same code, only one advances the counter.
@@ -455,7 +461,14 @@ export class AuthService {
         { actor: adminActor(admin.id, meta), action: 'admin.login', targetType: 'admin', targetId: admin.id, details: { mfa: totpUpdate !== undefined } },
         tx,
       );
-      return { admin: adminProfile({ ...admin, totp_secret_enc: totpUpdate?.to ?? admin.totp_secret_enc }), session };
+      return {
+        admin: adminProfile({
+          ...admin,
+          password_change_required: fresh.password_change_required,
+          totp_secret_enc: totpUpdate?.to ?? admin.totp_secret_enc,
+        }),
+        session,
+      };
     });
   }
 

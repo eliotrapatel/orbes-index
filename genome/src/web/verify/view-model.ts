@@ -42,7 +42,7 @@ export type OwnershipMode =
   | { kind: 'unregistered' }
   /**
    * Open for its first registration, but this scan earned no token: the browser is signed in to the
-   * ORBES console, so the server recorded a staff scan (S-07, API §9.2), never a buyer's.
+   * ORBES console, so the server recorded a staff scan (S-07, API §9.2: `staffScan`), never a buyer's.
    */
   | { kind: 'staff' };
 
@@ -68,6 +68,7 @@ export interface ContactModel {
 /**
  * WHERE DID YOU SEE OR BUY THIS PIECE? Offered under the contact of every result that was not authentic,
  * attached to its scan (POST /api/v1/reports; the server takes one report per scan, within 24 hours).
+ * Never on a staff scan (`staffScan`: this browser is signed in to the console), which takes no report.
  */
 export interface ReportModel {
   scanId: string;
@@ -330,8 +331,12 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     const recovery = recoveryContactModel(opts.clientServices, vm.reference);
     if (recovery) vm.recoveryContact = recovery;
   }
-  // The customer may say where the piece was seen or bought, attached to this scan: results that were not authentic.
-  if (!authentic && SCAN_ID.test(outcome.scanId ?? '')) vm.report = { scanId: outcome.scanId.toLowerCase(), reference: vm.reference };
+  // The customer may say where the piece was seen or bought, attached to this scan: results that were not authentic,
+  // scanned as a customer. A staff scan (a browser signed in to the console, S-07) takes no report: the server would
+  // refuse it, and scanning again in this browser would only make another staff scan.
+  if (!authentic && outcome.staffScan !== true && SCAN_ID.test(outcome.scanId ?? '')) {
+    vm.report = { scanId: outcome.scanId.toLowerCase(), reference: vm.reference };
+  }
   return vm;
 }
 
@@ -407,11 +412,13 @@ function ownershipMode(o: VerifyOutcome): OwnershipMode {
     return { kind: 'unregistered' };
   }
   if (o.state === 'AUTHENTIC_FIRST_REGISTRATION') {
+    // A browser signed in to the console: the server recorded a staff scan and issued no token.
+    if (o.staffScan === true) return { kind: 'staff' };
     if (reg?.token) {
       return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
     }
-    // The server sends this state without a token only to a browser signed in to the console.
-    return { kind: 'staff' };
+    // No token otherwise: nothing to register with.
+    return { kind: 'unregistered' };
   }
   const own = o.ownership;
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };

@@ -72,24 +72,44 @@ export function lastCompleteDay(now: Date): string {
   return utcDay(new Date(Math.floor(settled / DAY_MS) * DAY_MS - DAY_MS));
 }
 
+/** The end of the last complete day: scans before it may be counted. */
+function countableUntil(now: Date): Date {
+  return new Date(Date.parse(`${lastCompleteDay(now)}T00:00:00.000Z`) + DAY_MS);
+}
+
+/** The scans a pass counts: of a complete day, after the last day already counted, of a counted type and state. */
+const UNCOUNTED = (until: Date) => sql`
+  s.occurred_at < ${until}
+  AND s.occurred_at >= COALESCE((SELECT (max(d.day) + 1)::timestamp AT TIME ZONE 'UTC' FROM scan_daily_stats d), '-infinity'::timestamptz)
+  AND s.event_type IN (${sql.join([...SCAN_STAT_EVENT_TYPES])})
+  AND s.result_state IN (${sql.join([...VERIFICATION_STATES])})`;
+
 /**
  * Count the scans of every complete UTC day not counted yet into scan_daily_stats (see the module
  * comment). Returns the number of rows written: 0 when every complete day is already counted.
  */
 export async function aggregateScanStats(db: Db, now: Date): Promise<number> {
   // Scans before the end of the last complete day, after the last day already counted.
-  const until = new Date(Date.parse(`${lastCompleteDay(now)}T00:00:00.000Z`) + DAY_MS);
   const r = await sql`
     INSERT INTO scan_daily_stats (day, country, result_state, event_type, n)
     SELECT (s.occurred_at AT TIME ZONE 'UTC')::date, COALESCE(s.country, ${UNKNOWN_COUNTRY}), s.result_state, s.event_type, count(*)::int
     FROM scan_events s
-    WHERE s.occurred_at < ${until}
-      AND s.occurred_at >= COALESCE((SELECT (max(d.day) + 1)::timestamp AT TIME ZONE 'UTC' FROM scan_daily_stats d), '-infinity'::timestamptz)
-      AND s.event_type IN (${sql.join([...SCAN_STAT_EVENT_TYPES])})
-      AND s.result_state IN (${sql.join([...VERIFICATION_STATES])})
+    WHERE ${UNCOUNTED(countableUntil(now))}
     GROUP BY 1, 2, 3, 4
     ON CONFLICT (day, country, result_state, event_type) DO UPDATE SET n = EXCLUDED.n`.execute(db);
   return Number(r.numAffectedRows ?? 0n);
+}
+
+/**
+ * The last UTC day the statistics really cover: the last complete day when every scan of the complete days
+ * is counted, else the day before the first scan no pass has counted yet (a pass that failed, or none since
+ * midnight: the days after it would read as days without scans). A pass counts every complete day after the
+ * last one counted in one statement, so the days before that scan are whole. Read on scan_events_occurred_at_idx.
+ */
+export async function countedThrough(db: Db, now: Date): Promise<string> {
+  const r = await sql<{ first: Date | null }>`SELECT min(s.occurred_at) AS first FROM scan_events s WHERE ${UNCOUNTED(countableUntil(now))}`.execute(db);
+  const first = r.rows[0]?.first;
+  return first ? addDays(utcDay(new Date(first)), -1) : lastCompleteDay(now);
 }
 
 // ── Report ─────────────────────────────────────────────────────────────────
@@ -139,7 +159,11 @@ export interface ScanStatsReport {
   from: string;
   to: string;
   days: number;
-  /** The last day the statistics cover (yesterday, UTC): today's scans are counted after midnight UTC. */
+  /**
+   * The last day the statistics cover (countedThrough): yesterday (UTC) once its scans are counted, today's being
+   * counted after midnight UTC; earlier while a day's scans wait for a housekeeping pass. Days after it read 0
+   * because they are not counted yet, not because nobody scanned.
+   */
   through: string;
   total: number;
   byState: Counts<VerificationState>;
@@ -156,7 +180,7 @@ export interface ScanStatsReport {
 export async function scanStatsReport(db: Db, window: { from: string; to: string }, now: Date): Promise<ScanStatsReport> {
   const { from, to } = window;
   const inWindow = db.selectFrom('scan_daily_stats').where('day', '>=', from).where('day', '<=', to);
-  const [byDayState, byCountryState, byType] = await Promise.all([
+  const [byDayState, byCountryState, byType, through] = await Promise.all([
     inWindow
       .select(['day', 'result_state', sql<number>`sum(n)::int`.as('n')])
       .groupBy(['day', 'result_state'])
@@ -169,6 +193,7 @@ export async function scanStatsReport(db: Db, window: { from: string; to: string
       .select(['event_type', sql<number>`sum(n)::int`.as('n')])
       .groupBy('event_type')
       .execute(),
+    countedThrough(db, now),
   ]);
 
   const days = daySpan(from, to);
@@ -215,7 +240,7 @@ export async function scanStatsReport(db: Db, window: { from: string; to: string
     from,
     to,
     days,
-    through: lastCompleteDay(now),
+    through,
     total: Object.values(byState).reduce((a, b) => a + b, 0),
     byState,
     byEventType,

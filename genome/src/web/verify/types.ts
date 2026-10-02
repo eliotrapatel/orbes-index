@@ -72,6 +72,8 @@ export interface VerifyOutcome {
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
+  /** A staff scan (S-07): this browser is signed in to the ORBES console. No report, no registration. */
+  staffScan?: true;
 }
 
 /** GET /api/v1/client-services: how ORBES Client Services is reached; `{}` when nothing is configured. */

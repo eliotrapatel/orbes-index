@@ -356,6 +356,47 @@ describe('sale mode (A-08)', () => {
     expect(await h.ctx.db.selectFrom('scan_tokens').select('purpose').where('product_id', '=', held.product.id).where('purpose', '=', 'SALE_ACTIVATION').execute()).toEqual([]);
   });
 
+  it('checks again at the activation what the token was minted on: a client who registered, a service opened or a code revoked during the 10 minutes refuse the sale', async () => {
+    const forSale = async () => {
+      const p = await issue(h.ctx, catalog);
+      // Delivered without a warranty (a transition): registrable by whoever holds it, and still for sale.
+      await h.ctx.services.lifecycle.transition(p.product.productId, 'ACTIVATED', { reason: 'delivered' }, SYSTEM_ACTOR);
+      const r = await lookup(seller, scanOf(p));
+      expect(r.sale?.token, p.product.productId).toBeDefined();
+      return { p, token: r.sale!.token };
+    };
+    const refused = async (token: string, code: string) => {
+      const res = await seller.post('/api/admin/sale/activate', { token, retailerId: shop.id });
+      expect(res.statusCode, res.body).toBe(409);
+      expect(errorOf(res).code).toBe(code);
+      return errorOf(res).message;
+    };
+
+    // A client verifies and registers the piece after the seller's scan, before the seller's gesture: sold already.
+    const held = await forSale();
+    const reg = body<{ registration?: { token: string } }>(await h.client().post('/api/v1/verify', { code: held.p.code.data })).registration!.token;
+    const { client: buyer } = await accountClient(h);
+    expect((await buyer.post('/api/v1/ownership/register', { registrationToken: reg })).statusCode).toBe(201);
+    expect(await refused(held.token, 'ALREADY_REGISTERED')).toBe('This piece is registered to a client: it has been sold. Contact ORBES.');
+    expect(await h.ctx.services.warranty.get(held.p.product.productId)).toMatchObject({ startDate: null });
+
+    // A service opened meanwhile: at the workshop, not at the counter.
+    const serviced = await forSale();
+    await h.ctx.services.warranty.openService(serviced.p.product.productId, { type: 'INSPECTION' }, SYSTEM_ACTOR);
+    expect(await refused(serviced.token, 'WARRANTY_ACTIVATION_NOT_ALLOWED')).toBe('The status of this piece does not allow a sale. Contact ORBES.');
+
+    // The scanned code revoked meanwhile: ORBES reviews the piece before it is sold.
+    const revoked = await forSale();
+    await h.ctx.services.issuance.revokeCode(revoked.p.code.id, 'suspected copy', SYSTEM_ACTOR);
+    await refused(revoked.token, 'WARRANTY_ACTIVATION_NOT_ALLOWED');
+
+    // None of them started a warranty or used the token's scan for anything; the console (OPERATOR) still can, deliberately.
+    for (const x of [held, serviced, revoked]) expect((await h.ctx.services.warranty.get(x.p.product.productId))?.startDate ?? null).toBeNull();
+    expect((await h.ctx.audit.list({ action: 'warranty.activate', targetId: held.p.product.productId })).total).toBe(0);
+    const operator = await adminClient(h, 'OPERATOR');
+    expect((await operator.post(`/api/admin/products/${held.p.product.productId}/warranty/activate`, { retailerId: shop.id })).statusCode).toBe(200);
+  });
+
   it('points of sale: ADMIN creates, renames and deactivates; every role down to RETAIL reads the list', async () => {
     const dup = await boss.post('/api/admin/retailers', { name: 'orbes paris — saint-honoré', city: 'PARIS' });
     expect(dup.statusCode).toBe(409);

@@ -235,6 +235,25 @@ describe('admin codes: filters, batch ids and the print-sheet manifest', () => {
       expect(errorOf(lost).message).toBe(`Codes of ${a[2].product.productId} cannot be printed in its current state (LOST).`);
       const revoked = await operator.post('/api/admin/codes/print-sheet', { codeIds: [a[1].code.id] });
       expect(errorOf(revoked).message).toBe(`Only the active code of a product can be rendered: issue 1 of ${a[1].product.productId} is REVOKED.`);
+
+      // A stored code that fails its integrity check (a tampered row) is refused alike by both, and named too; what
+      // failed stays in the server log.
+      await sql`ALTER TABLE codes DISABLE TRIGGER codes_immutable_identity`.execute(h.ctx.db);
+      try {
+        await h.ctx.db.updateTable('codes').set({ issue: 9 }).where('id', '=', unbatched.code.id).execute();
+        const body = { codeIds: [a0Reissued, unbatched.code.id] };
+        const s = await operator.post('/api/admin/codes/print-sheet', body);
+        const m = await operator.post('/api/admin/codes/print-sheet/manifest', body);
+        for (const res of [s, m]) {
+          expect(res.statusCode).toBe(409);
+          expect(errorOf(res)).toEqual({ code: 'CODE_INTEGRITY', message: `Issue 9 of ${unbatched.product.productId} failed its integrity check and cannot be rendered.` });
+          expect(res.body).not.toMatch(/mismatch|detail/);
+        }
+      } finally {
+        await h.ctx.db.updateTable('codes').set({ issue: 1 }).where('id', '=', unbatched.code.id).execute();
+        await sql`ALTER TABLE codes ENABLE TRIGGER codes_immutable_identity`.execute(h.ctx.db);
+      }
+      expect((await operator.post('/api/admin/codes/print-sheet', { codeIds: [unbatched.code.id] })).statusCode).toBe(200);
     });
 
     it('needs OPERATOR and the CSRF token', async () => {

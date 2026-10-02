@@ -302,11 +302,11 @@ describe('public API', () => {
     });
 
     it('refuses an authentic scan, a scan 24 hours old and an unknown scan alike: 409 REPORT_NOT_ALLOWED', async () => {
-      const notAllowed = async (scanId: string) => {
+      const notAllowed = async (scanId: string, message: RegExp = /within 24 hours of a result that was not authentic/) => {
         const res = await h.client().post('/api/v1/reports', { scanId, channel: 'BOUTIQUE' });
         expect(res.statusCode, scanId).toBe(409);
         expect(errorOf(res).code).toBe('REPORT_NOT_ALLOWED');
-        expect(errorOf(res).message).toMatch(/within 24 hours of a result that was not authentic/);
+        expect(errorOf(res).message).toMatch(message);
       };
       // Authentic: nothing to report.
       const p = await issue(h.ctx, catalog);
@@ -322,9 +322,9 @@ describe('public API', () => {
           .executeTakeFirstOrThrow();
       await notAllowed((await at(24 * 3_600_000)).id);
       expect((await h.client().post('/api/v1/reports', { scanId: (await at(24 * 3_600_000 - 60_000)).id, channel: 'BOUTIQUE' })).statusCode).toBe(201);
-      // Not a customer's verification, and no scan at all.
+      // Not a customer's verification (a staff scan: the same code, a message that says why), and no scan at all.
       const test = await h.ctx.db.insertInto('scan_events').values({ event_type: 'ADMIN_TEST', result_state: 'UNKNOWN' }).returning('id').executeTakeFirstOrThrow();
-      await notAllowed(test.id);
+      await notAllowed(test.id, /signed in to the ORBES console, so this scan was recorded as a staff test/);
       await notAllowed('00000000-0000-4000-8000-000000000000');
       expect(await h.ctx.db.selectFrom('scan_reports').select('id').where('scan_event_id', '=', authentic.scanId).execute()).toEqual([]);
     });

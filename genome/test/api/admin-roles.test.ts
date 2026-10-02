@@ -6,7 +6,9 @@
  * points of sale (A-08) and a customer's recovery code, lock and export;
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
- * password and second factor, nothing else.
+ * password and second factor, nothing else. The sale mode names its roles
+ * (RETAIL, OPERATOR, ADMIN): it starts warranties, so the read-only AUDITOR,
+ * though above RETAIL, does not sell.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -17,7 +19,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AdminRole } from '../../src/server/db/schema.js';
 import { adminClient, createHarness, errorOf, type Client, type Harness } from './support.js';
 
-type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; min: AdminRole; group: string };
+/** `min`: the rank the route needs; `roles`, when given, the exact roles it lets in instead (the sale mode). */
+type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; min: AdminRole; roles?: readonly AdminRole[]; group: string };
+const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
+const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
 const RANK: Record<AdminRole, number> = { RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 };
 const PID = 'O26-J-00001';
@@ -101,8 +106,8 @@ const PROBES: Probe[] = [
   { group: 'retailers', method: 'GET', url: '/api/admin/retailers?active=true', min: 'RETAIL' },
   { group: 'retailers', method: 'POST', url: '/api/admin/retailers', body: INVALID, min: 'ADMIN' },
   { group: 'retailers', method: 'PATCH', url: `/api/admin/retailers/${UUID}`, body: INVALID, min: 'ADMIN' },
-  { group: 'sale', method: 'POST', url: '/api/admin/sale/lookup', body: INVALID, min: 'RETAIL' },
-  { group: 'sale', method: 'POST', url: '/api/admin/sale/activate', body: INVALID, min: 'RETAIL' },
+  { group: 'sale', method: 'POST', url: '/api/admin/sale/lookup', body: INVALID, min: 'RETAIL', roles: SELLERS },
+  { group: 'sale', method: 'POST', url: '/api/admin/sale/activate', body: INVALID, min: 'RETAIL', roles: SELLERS },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -152,11 +157,11 @@ describe('admin role enforcement', () => {
   });
 
   for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) {
-    it(`${role}: allowed exactly where its rank reaches`, async () => {
+    it(`${role}: allowed exactly where its rank reaches (or where the route names it)`, async () => {
       for (const p of PROBES) {
         const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
         const label = `${role} ${p.method} ${p.url} → ${res.statusCode} ${res.body.slice(0, 120)}`;
-        if (RANK[role] >= RANK[p.min]) {
+        if (allows(p, role)) {
           expect([200, 201, 400, 404], label).toContain(res.statusCode);
           if (res.statusCode === 400) expect(errorOf(res).code, label).toBe('VALIDATION_FAILED');
         } else {
@@ -232,6 +237,17 @@ describe('admin role enforcement', () => {
     expect((await retail.post('/api/admin/auth/logout')).statusCode).toBe(200);
     expect((await retail.get('/api/admin/auth/me')).statusCode).toBe(401);
     clients.RETAIL = await adminClient(h, 'RETAIL');
+  });
+
+  it('AUDITOR (A-08) reads the points of sale but never sells: the sale mode starts warranties, a mutation', async () => {
+    for (const url of ['/api/admin/sale/lookup', '/api/admin/sale/activate']) {
+      const res = await clients.AUDITOR.post(url, INVALID);
+      expect(res.statusCode, url).toBe(403);
+      expect(errorOf(res).code, url).toBe('FORBIDDEN');
+      // RETAIL, OPERATOR and ADMIN pass the guard (then validation refuses the body).
+      for (const role of SELLERS) expect((await clients[role].post(url, INVALID)).statusCode, `${role} ${url}`).toBe(400);
+    }
+    expect((await clients.AUDITOR.get('/api/admin/retailers')).statusCode).toBe(200);
   });
 
   it('OPERATOR may transition products but not revoke them', async () => {

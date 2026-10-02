@@ -946,6 +946,7 @@ The service is stateless apart from a few per-process pieces. Sessions, scan tok
   - An older image refuses to apply migrations to a database that holds migrations it does not know (Kysely "corrupted migrations"). Roll back with `MIGRATE_ON_START=false`.
   - That only works if the new migration is backward compatible with the old code (additive changes).
   - Otherwise, restore the pre-upgrade backup or PITR timestamp (§10). Everything written since the upgrade is lost: prefer a forward fix when you can.
+  - A down step may also stop accounts that the older schema cannot represent ([DATABASE §9.1](DATABASE.md#91-layout)): rolling back past `0008` disables the sellers' (RETAIL) accounts, and past `0006` the staff accounts that have not yet replaced their temporary password (the forced change would be lost). Before such a rollback, look at the Team page for TEMPORARY PASSWORD rows; afterwards, create new accounts for those members rather than re-enabling these.
 - **Never** run `migrateDown` or `db reset-demo` against production. They drop the schema, and both refuse production anyway.
 
 ### 12.3 Dependencies and base image
@@ -1179,7 +1180,7 @@ docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <f
 docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <current code>
 ```
 
-Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env` (**space**-separated; a comma makes the configuration invalid), then `scripts/deploy.sh`: `/admin*` and `/api/admin*` answer 403 elsewhere. `deploy.sh` validates the Caddy configuration with the new values before changing anything; a bare `docker compose up -d caddy` does not, and an invalid value stops Caddy, which takes the whole site down.
+Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env` (**space**-separated; a comma makes the configuration invalid), then `scripts/deploy.sh`: `/admin*` and `/api/admin*` answer 403 elsewhere. The sale mode (A-08) runs on the boutiques' phones, which open `/admin` too: with the allowlist on, add every boutique's fixed IP or CIDR, or leave it off while counter phones use mobile data or a shop Wi-Fi whose address changes, or the sale mode answers 403 at the counter (LAUNCH §4, §7). `deploy.sh` validates the Caddy configuration with the new values before changing anything; a bare `docker compose up -d caddy` does not, and an invalid value stops Caddy, which takes the whole site down.
 
 ### 15.6 GeoIP database (anomaly scoring without Cloudflare)
 

@@ -20,6 +20,7 @@ import {
   type ArtifactFormat,
   type ArtifactTheme,
   type CodeFilters,
+  type CodeIds,
   type CodeJson,
   type IssueBatchItem,
   type IssueBatchResponse,
@@ -247,6 +248,35 @@ export interface PrintSheetForm extends ArtifactForm {
  */
 export function isSheetSelectable(code: Pick<CodeJson, 'status' | 'printable'>): boolean {
   return code.status === 'ACTIVE' && code.printable !== false;
+}
+
+/**
+ * Drop from the print-sheet selection the codes that can no longer be printed, as soon as the codes view
+ * knows it: a code of the page shown that is no longer selectable (revoked since it was picked, its piece
+ * lost, stolen, retired…: it has no box left to untick), and, when the batch of the filters is complete
+ * (`/codes/ids`, not truncated: every printable code of the filters the selection was made under), a
+ * selected id it no longer lists. Otherwise every part holding such a code would be refused
+ * (CODE_NOT_ACTIVE, PRODUCT_NOT_PRINTABLE) and only *Clear selection* would get out of it. Returns the
+ * ids dropped, in selection order.
+ */
+export function pruneSheetSelection(
+  selected: Set<string>,
+  page: readonly Pick<CodeJson, 'id' | 'status' | 'printable'>[],
+  batch: Pick<CodeIds, 'ids' | 'truncated'> | null,
+): string[] {
+  const gone = new Set(page.filter((c) => !isSheetSelectable(c)).map((c) => c.id));
+  const printable = batch && !batch.truncated ? new Set(batch.ids) : null;
+  const dropped = [...selected].filter((id) => gone.has(id) || (printable !== null && !printable.has(id)));
+  for (const id of dropped) selected.delete(id);
+  return dropped;
+}
+
+/** The refusals of a print sheet (or its manifest) that name one code of the selection that cannot be printed. */
+export const SHEET_CODE_REFUSALS: readonly string[] = Object.freeze(['CODE_NOT_ACTIVE', 'PRODUCT_NOT_PRINTABLE', 'CODE_INTEGRITY']);
+
+/** What the print-sheet panel says under such a refusal: the server names the piece; this says how to leave it out. */
+export function sheetRefusalText(message: string): string {
+  return `${message} Leave it out: it leaves the selection as soon as the list shows it (filter by its production batch), or clear the selection.`;
 }
 
 export function buildPrintSheetOptions(

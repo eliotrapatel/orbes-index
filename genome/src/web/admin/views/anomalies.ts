@@ -271,6 +271,18 @@ function detailPanel(ctx: ViewContext, c: AnomalyContext, onTriage: (() => void)
           : h('span', { class: 'soft' }, 'Not recorded'),
         ...(trigger ? { note: scanWhere(trigger) } : {}),
       },
+      // What customers said about the finding's scans (C-02): its cases, as the list's Reports column shows them.
+      {
+        label: 'Cases',
+        value: a.reports
+          ? h(
+              'a',
+              { class: 'idlink', attrs: { href: href('cases', {}, { anomalyId: a.id }), 'data-testid': 'finding-cases' } },
+              `${formatCount(a.reports.count)} ${a.reports.count === 1 ? 'case' : 'cases'}`,
+            )
+          : h('span', { class: 'soft' }, 'No customer report'),
+        ...(a.reports ? { note: `${formatCount(a.reports.open)} open · latest ${reportWhere(a.reports.latest)}` } : {}),
+      },
     ],
     'deflist--cols',
   );
@@ -298,6 +310,16 @@ function scanItem(s: AnomalyScan): HTMLElement {
       ' ',
       mono(s.id, shortHash(s.id, 8, 4)),
     ),
+    // The customer reported on this scan (C-02): where they saw or bought the piece, and the state of its case.
+    s.report
+      ? h(
+          'span',
+          { class: 'timeline__reason', data: { testid: 'timeline-report' } },
+          'Customer report: ',
+          h('a', { class: 'idlink', attrs: { href: href('cases', {}, { scanId: s.id }) } }, reportWhere(s.report)),
+          ` · ${humanize(s.report.status)}`,
+        )
+      : null,
   );
 }
 
@@ -341,12 +363,14 @@ async function decision(ctx: ViewContext, a: AnomalyRecord, known: AnomalyContex
     eyebrow: `${a.severity} · ${a.productId ?? 'Unregistered identity'} · ${humanize(a.status)}`,
     body: [h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'), report],
     fields,
-    phrase: (v) => decisionPhrase(v, offer),
-    danger: (v) => decisionDanger(v, offer),
-    validate: (v) => decisionError(v, offer, moves),
+    phrase: (v) => decisionPhrase(v, offer, done),
+    danger: (v) => decisionDanger(v, offer, done),
+    // A mark or a revocation done by an earlier attempt stays part of the decision (its box is locked, ticked): the
+    // retry can only resolve the finding, and its summary names what was done.
+    validate: (v) => decisionError(v, offer, moves, done),
     confirmLabel: 'Record decision',
     submit: async (v) => {
-      last = decisionSteps(v, offer);
+      last = decisionSteps(v, offer, done);
       await runSteps(ctx, a, offer, last, v.note?.trim() || undefined, done, report);
     },
   });
@@ -358,6 +382,14 @@ async function decision(ctx: ViewContext, a: AnomalyRecord, known: AnomalyContex
     notify(`Partly recorded: ${decisionSummary(last.filter((s) => done.has(s.key)))}`);
     ctx.reload();
   }
+}
+
+/** Tick and lock the dialog's box of a step that is done. */
+function lockBox(inDialog: HTMLElement, name: string): void {
+  const box = inDialog.closest('form, dialog')?.querySelector<HTMLInputElement>(`input[type=checkbox][name="${name}"]`);
+  if (!box) return;
+  box.checked = true;
+  box.disabled = true;
 }
 
 /** Run the steps in order, skipping those already done; report each one; stop at the first failure. */
@@ -382,6 +414,8 @@ async function runSteps(ctx: ViewContext, a: AnomalyRecord, offer: DecisionOffer
       else await ctx.api.updateAnomaly(a.id, s.to, note);
       done.add(s.key);
       state.set(s.key, 'done');
+      // What was done to the piece cannot be undone from here: its box stays ticked and is locked.
+      if (s.kind !== 'status') lockBox(report, s.kind === 'mark' ? MARK_FIELDS[s.to] : REVOKE_FIELD);
       paint();
     } catch (e) {
       state.set(s.key, 'failed');

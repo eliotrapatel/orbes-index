@@ -1027,7 +1027,8 @@ export class IssuanceService {
 
     const fail = (detail: string): never => {
       this.log.error({ codeId, detail }, 'stored code failed its integrity check; refusing to render');
-      throw new DomainError('CODE_INTEGRITY', 409, 'This code failed its integrity check and cannot be rendered.', { detail });
+      // Named as the two refusals above name theirs (the diagnostic `detail` stays in the log).
+      throw new DomainError('CODE_INTEGRITY', 409, `Issue ${row.issue} of ${row.canonical_id} failed its integrity check and cannot be rendered.`, { detail });
     };
     let payload: CodePayloadV1;
     try {

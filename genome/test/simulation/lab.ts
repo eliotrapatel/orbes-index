@@ -140,7 +140,8 @@ export function tally(states: readonly string[]): string {
 
 // ── Redaction ──────────────────────────────────────────────────────────────
 
-const BASE_KEYS = ['state', 'scanId', 'verifiedAt', 'title', 'message'];
+// `staffScan` (true) comes only to a browser that sent a console session (S-07): it says the scan was a staff test.
+const BASE_KEYS = ['state', 'scanId', 'verifiedAt', 'title', 'message', 'staffScan'];
 const VERIFICATION_KEYS = ['verification', ...['signature', 'keyId', 'codeVersion', 'genomeVersion', 'issuedAt', 'issue', 'assurance', 'hardwareProofRequired'].map((k) => `verification.${k}`)];
 const GENOME_KEYS = ['genome', ...['id', 'version', 'fingerprint', 'glyphs', 'ids'].map((k) => `genome.${k}`)];
 const PRODUCT_KEYS = [

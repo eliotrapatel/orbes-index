@@ -24,8 +24,10 @@
  *                 keys/revocations/reinstatement/categories/console users (403).
  *                 RETAIL ranks under AUDITOR, so the default rule refuses it
  *                 everywhere: only the routes that declare `minRole: 'RETAIL'`
- *                 (the sale mode, the list of points of sale and the admin's own
- *                 session, password and second factor) let it through.
+ *                 (the list of points of sale and the admin's own session,
+ *                 password and second factor) or name it in `roles` (the sale
+ *                 mode: RETAIL, OPERATOR and ADMIN, never the read-only
+ *                 AUDITOR) let it through.
  *
  * The checks run in `onRequest`, before the body is even parsed, so
  * unauthenticated traffic costs as little as possible.
@@ -69,6 +71,11 @@ export interface RouteGuard {
   /** Admin routes: minimum role. Default AUDITOR for GET/HEAD, OPERATOR otherwise. */
   minRole?: AdminRole;
   /**
+   * Admin routes: exactly these roles, in place of `minRole`. The sale mode (A-08) is RETAIL's and every role that
+   * mutates (OPERATOR, ADMIN), but not the read-only AUDITOR, who ranks above RETAIL.
+   */
+  roles?: readonly AdminRole[];
+  /**
    * Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes).
    * 'until-enrolled': only while the admin has no second factor (the own password change: the
    * temporary password is replaced before enrolment; once enrolled, the change needs the factor).
@@ -109,6 +116,9 @@ export const csrfFailed = (detail: string) =>
 
 const insufficientRole = (role: AdminRole, min: AdminRole) =>
   new DomainError('FORBIDDEN', 403, 'Your role does not allow this action.', { detail: `role ${role} < ${min}` });
+
+const roleNotListed = (role: AdminRole, roles: readonly AdminRole[]) =>
+  new DomainError('FORBIDDEN', 403, 'Your role does not allow this action.', { detail: `role ${role} not in ${roles.join(', ')}` });
 
 const mfaRequired = () =>
   new DomainError('MFA_REQUIRED', 403, 'Two-factor authentication is required. Enable it and sign in again.');
@@ -258,6 +268,11 @@ export function sessionGuard(ctx: AppContext, opts: SessionGuardOptions): onRequ
       if (admin.passwordChangeRequired && !g.passwordChangeExempt) throw passwordChangeRequired();
       const mfaExempt = g.mfaExempt === true || (g.mfaExempt === 'until-enrolled' && !admin.totpEnabled);
       if (opts.requireMfa && !mfaExempt && !session.mfaPassed) throw mfaRequired();
+      if (g.roles) {
+        // A role unknown to ROLE_RANK is in no list either.
+        if (!(admin.role in ROLE_RANK) || !g.roles.includes(admin.role)) throw roleNotListed(admin.role, g.roles);
+        return;
+      }
       const min = g.minRole ?? (unsafe ? 'OPERATOR' : 'AUDITOR');
       if (!hasRole(admin.role, min)) throw insufficientRole(admin.role, min);
     }

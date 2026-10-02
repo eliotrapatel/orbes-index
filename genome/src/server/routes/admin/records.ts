@@ -146,7 +146,10 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
     const c = await anomaly.context(id);
     // The product's lifecycle, so the console offers only the marks its status allows.
     const product = c.anomaly.productUuid ? { productId: c.anomaly.productId, lifecycle: await lifecycle.snapshot(c.anomaly.productUuid) } : null;
-    return { ...c, product };
+    // What customers said about the finding's scans, as the list carries it: a finding opened by its id (a case's link)
+    // may not be on the list's current page.
+    const byAnomaly = await reports.forAnomalies([c.anomaly.id]);
+    return { ...c, anomaly: { ...c.anomaly, reports: byAnomaly.get(c.anomaly.id) ?? null }, product };
   });
 
   app.patch('/api/admin/anomalies/:id', async (request) => {

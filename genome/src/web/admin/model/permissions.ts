@@ -5,6 +5,8 @@
  * points of sale and a customer's recovery code, lock and export). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
+ * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
+ * ADMIN; the read-only AUDITOR, though above RETAIL, does not sell.
  * The server is the authority; the console only hides controls a role
  * cannot use, so nobody is offered a button that will answer 403.
  */
@@ -14,7 +16,7 @@ import type { AdminRole } from '../types.js';
 export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
 
 export const CAPABILITY_MIN_ROLE = Object.freeze({
-  /** The sale mode (#/sale): scan the piece, choose the point of sale, start the warranty. */
+  /** The sale mode (#/sale): scan the piece, choose the point of sale, start the warranty. Exactly CAPABILITY_ROLES.sell. */
   sell: 'RETAIL',
   read: 'AUDITOR',
   verifyAudit: 'AUDITOR',
@@ -57,12 +59,22 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;
 
+/**
+ * Capabilities held by exactly these roles rather than by a rank and above (the server's `roles` guard). The sale
+ * mode starts warranties: the seller's, and every role that mutates, but not the read-only AUDITOR.
+ */
+export const CAPABILITY_ROLES: Readonly<Partial<Record<Capability, readonly AdminRole[]>>> = Object.freeze({
+  sell: Object.freeze(['RETAIL', 'OPERATOR', 'ADMIN'] as const),
+});
+
 export function hasRole(role: AdminRole | null | undefined, min: AdminRole): boolean {
   if (!role) return false;
   return (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
 }
 
 export function can(role: AdminRole | null | undefined, cap: Capability): boolean {
+  const exact = CAPABILITY_ROLES[cap];
+  if (exact) return !!role && role in ROLE_RANK && exact.includes(role);
   return hasRole(role, CAPABILITY_MIN_ROLE[cap]);
 }
 

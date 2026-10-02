@@ -121,6 +121,12 @@ export interface VerifyOutcome {
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
+  /**
+   * Present (true) only on a staff scan: the request carried a console session (S-07), so the scan was
+   * recorded as ADMIN_TEST. /verify then offers no report form (a staff scan takes none) and no
+   * registration. Only that browser, which holds the console cookie, ever sees it.
+   */
+  staffScan?: true;
 }
 
 /** What a staff scan (VerificationService.staffScan, the sale mode) learns: registry facts, never a risk score. */
@@ -420,10 +426,10 @@ export class VerificationService {
           checks: { signatureValid: true, registered: true },
         });
 
-        return this.finish(trx, w, scanId, now, started, registration);
+        return this.finish(trx, w, scanId, now, started, registration, staff);
       }
 
-      return this.finish(trx, w, scanId, now, started, undefined);
+      return this.finish(trx, w, scanId, now, started, undefined, staff);
     });
     return result;
   }
@@ -704,6 +710,7 @@ export class VerificationService {
     now: Date,
     started: number,
     registration: VerifyOutcome['registration'],
+    staff: boolean,
   ): Promise<VerifyOutcome> {
     const state: VerificationState = w.state ?? 'AUTHENTIC';
     await this.recordAuthentication(trx, w, scanId, state, now);
@@ -724,7 +731,7 @@ export class VerificationService {
         'validly signed code with an unsupported genome version: this server is outdated',
       );
     }
-    return this.outcome(state, w, scanId, now, registration);
+    return this.outcome(state, w, scanId, now, registration, staff);
   }
 
   /** The public body, from an allow-list of fields per state. */
@@ -734,9 +741,11 @@ export class VerificationService {
     scanId: string,
     now: Date,
     registration: VerifyOutcome['registration'],
+    staff: boolean,
   ): VerifyOutcome {
     const copy = copyFor(state, w.notice);
     const out: VerifyOutcome = { state, scanId, verifiedAt: now.toISOString(), title: copy.title, message: copy.message };
+    if (staff) out.staffScan = true;
     if (w.notice && state === 'AUTHENTIC_OWNERSHIP_VERIFIED') out.notice = w.notice;
 
     const reg = w.reg;

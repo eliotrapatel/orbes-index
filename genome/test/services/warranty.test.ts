@@ -219,10 +219,11 @@ describe('WarrantyService', () => {
       const retailers = new RetailerService({ db: t.db, audit, clock: clock.now });
       const shop = await retailers.create({ name: 'ORBES Paris', city: 'Paris', country: 'fr' }, admin);
       const p = await product();
-      const { warranty: w } = await warranty.activate(p.productId, { purchaseDate: '2026-06-01', retailerId: shop.id }, admin, { saleScanId: 'scan-1' });
+      const { warranty: w } = await warranty.activate(p.productId, { purchaseDate: '2026-06-01', retailerId: shop.id }, admin);
       expect(w).toMatchObject({ retailer: 'ORBES Paris', retailerId: shop.id, country: 'FR', status: 'ACTIVE' });
+      // (The sale mode's activation, with its scan, is in test/api/admin-sale.test.ts.)
       const entry = (await audit.list({ action: 'warranty.activate', targetId: p.productId })).items[0];
-      expect(entry.details).toMatchObject({ retailer: 'ORBES Paris', retailerId: shop.id, country: 'FR', saleScanId: 'scan-1' });
+      expect(entry.details).toMatchObject({ retailer: 'ORBES Paris', retailerId: shop.id, country: 'FR' });
       // A given country wins; a rename shows everywhere the point of sale is named.
       const q = await product();
       expect((await warranty.activate(q.productId, { retailerId: shop.id, country: 'MC' }, admin)).warranty.country).toBe('MC');

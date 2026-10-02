@@ -619,6 +619,23 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('[data-testid=anomaly-reports]').textContent()).toBe('1 case');
     // The latest answer as the scans list shows it: where, and the customer's note.
     expect(await page.locator('[data-testid=anomaly-report-note]').textContent()).toBe('Offered at a third of the boutique price.');
+    // The finding's detail says it too: its cases, and the reported scan marked in the window's timeline, each
+    // leading back to the queue.
+    await rows.first().locator('[data-testid=anomaly-details]').click();
+    await page.waitForSelector('#finding');
+    expect(await page.locator('[data-testid=finding-cases]').textContent()).toBe('1 case');
+    await expect.poll(() => page.locator('#finding [data-testid=timeline-report]').count()).toBe(1);
+    expect(await page.locator('#finding [data-testid=timeline-report]').textContent()).toBe('Customer report: ONLINE · a marketplace listing · OPEN');
+    await page.locator('[data-testid=finding-cases]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
+    await expect.poll(() => rows.count()).toBe(1);
+    await page.goBack();
+    await page.waitForSelector('#finding');
+    await page.locator('#finding [data-testid=timeline-report] a').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
+    await expect.poll(() => rows.count()).toBe(1);
+    await page.goBack();
+    await page.waitForSelector('#finding');
     await page.locator('[data-testid=narrowed]').getByText('Show all').click();
     await expect.poll(() => rows.count()).toBeGreaterThan(1);
 
@@ -888,6 +905,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     ]);
     expect((await ctx.services.lifecycle.snapshot(piece.product.id)).status).toBe('COUNTERFEIT_FLAGGED');
     expect((await anomaly.get(travel.id)).status).toBe('OPEN');
+    // The mark is part of the decision now: its box stays ticked and locked, so the retry can only resolve.
+    const markBox = page.locator('dialog input[name=markCounterfeit]');
+    expect([await markBox.isChecked(), await markBox.isDisabled()]).toEqual([true, true]);
+    expect(await page.locator('dialog input[name=revokeCode]').isDisabled()).toBe(false);
 
     // Confirming again runs the rest only: the piece is not marked twice.
     await page.unroute(revokeUrl);
@@ -1652,6 +1673,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, auditor.email, auditor.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     expect(await p.locator('.side__link', { hasText: 'Generator' }).count()).toBe(0);
+    // Reads the points of sale, never sells (A-08): the sale mode starts warranties, which an AUDITOR cannot.
+    expect(await p.locator('.side__link', { hasText: 'Points of sale' }).count()).toBe(1);
+    expect(await p.locator('.side__link', { hasText: 'Sale mode' }).count()).toBe(0);
+    await go(p, '#/sale', 'Sale mode');
+    await p.waitForSelector('[data-testid=sale-not-offered]');
+    expect(await p.locator('[data-testid=sale-scan]').count()).toBe(0);
     await go(p, `#/products/${issuedProductId}`, issuedProductId);
     expect(await p.locator('#actions').count()).toBe(0);
     expect(await p.locator('#artifacts').count()).toBe(0);

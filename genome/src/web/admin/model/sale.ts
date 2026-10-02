@@ -12,6 +12,13 @@ import { toneOf, type Tone } from './tone.js';
 /** What the seller tells the client once the warranty has started (the closing instruction of the sale). */
 export const CLIENT_REGISTRATION = 'Register your piece with its card at theorbes.com/verify.';
 
+/**
+ * The seller's own note under TELL THE CLIENT. The claim code proves that its holder has the card, not who owns the
+ * piece (BRAND §4.1, §4.6; registration is not a title of ownership): it lets the client register the piece in their
+ * name, the words of BRAND §4.4.
+ */
+export const SALE_CARD_NOTE = 'Hand over the certificate card: with the claim code under its scratch-off panel, they register the piece in their name.';
+
 /** The browser storage key of the point of sale this phone sells from. */
 export const RETAILER_STORAGE_KEY = 'orbes.sale.retailer';
 

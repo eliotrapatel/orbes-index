@@ -24,6 +24,8 @@ import {
   type CodeStatus,
   type JsonObject,
   type ProductStatus,
+  type ReportChannel,
+  type ReportStatus,
   type ScanEventType,
 } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
@@ -187,6 +189,8 @@ export interface AnomalyContextScan {
   riskScore: number | null;
   /** The scan named by the finding's `details.scanEventId`: the one that last raised it. */
   trigger: boolean;
+  /** The customer's report on this scan (C-02) and the state of its case; null when none. */
+  report: { id: string; channel: ReportChannel; place: string | null; status: ReportStatus } | null;
 }
 
 /** GET /api/admin/anomalies/:id/context (the route adds the product's lifecycle). */
@@ -474,7 +478,23 @@ export class AnomalyService {
     const columns = (q: NonNullable<ReturnType<typeof scope>>) =>
       q
         .leftJoin('authentication_events as ae', 'ae.scan_event_id', 's.id')
-        .select(['s.id', 's.occurred_at', 's.event_type', 's.result_state', 's.country', 's.region', 's.device_hash', 's.user_agent_family', 'ae.risk_score']);
+        // What the customer said about the scan, if anything (one report per scan, C-02).
+        .leftJoin('scan_reports as sr', 'sr.scan_event_id', 's.id')
+        .select([
+          's.id',
+          's.occurred_at',
+          's.event_type',
+          's.result_state',
+          's.country',
+          's.region',
+          's.device_hash',
+          's.user_agent_family',
+          'ae.risk_score',
+          'sr.id as report_id',
+          'sr.channel as report_channel',
+          'sr.place as report_place',
+          'sr.status as report_status',
+        ]);
     type Row = Awaited<ReturnType<ReturnType<typeof columns>['execute']>>[number];
     const toScan = (r: Row): AnomalyContextScan => ({
       id: r.id,
@@ -487,6 +507,7 @@ export class AnomalyService {
       userAgentFamily: r.user_agent_family,
       riskScore: r.risk_score ?? null,
       trigger: r.id === triggerId,
+      report: r.report_id && r.report_channel && r.report_status ? { id: r.report_id, channel: r.report_channel, place: r.report_place, status: r.report_status } : null,
     });
 
     let scans: AnomalyContext['scans'] = { total: 0, truncated: false, items: [] };

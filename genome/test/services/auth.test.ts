@@ -1,4 +1,7 @@
+import { randomBytes, scryptSync } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { toBase64Url } from '../../src/core/bytes.js';
+import { verifySecret } from '../../src/server/crypto/scrypt.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import {
@@ -89,6 +92,25 @@ describe('AuthService', () => {
 
   let n = 0;
   const email = (prefix = 'user') => `${prefix}.${++n}@Example.com`;
+
+  /** Run `during` (committed) just before the next transaction of the services begins its body. */
+  async function interleaved<T>(during: () => Promise<unknown>, request: () => Promise<T>): Promise<T> {
+    const begin = t.db.transaction.bind(t.db);
+    const spy = vi.spyOn(t.db, 'transaction').mockImplementationOnce(() => {
+      const builder = begin();
+      return {
+        execute: async <R>(fn: Parameters<typeof builder.execute<R>>[0]) => {
+          await during();
+          return builder.execute(fn);
+        },
+      } as unknown as ReturnType<typeof begin>;
+    });
+    try {
+      return await request();
+    } finally {
+      spy.mockRestore();
+    }
+  }
 
   describe('accounts', () => {
     it('registers, hashes with scrypt N=2^15 r=8 p=1 and logs in', async () => {
@@ -422,6 +444,33 @@ describe('AuthService', () => {
         } finally {
           vi.restoreAllMocks();
         }
+      });
+
+      it('opens no session for a sign-in with the old password that was under way when a password change committed, nor writes its rehash back', async () => {
+        const a = await newAdmin();
+        const kept = await auth.adminLogin({ email: a.addr, password: PASSWORD }, {});
+        // The stored hash uses older parameters, so the sign-in also computes a rehash of the old password.
+        const salt = randomBytes(16);
+        const weak = `scrypt$14$8$1$${toBase64Url(salt)}$${toBase64Url(scryptSync(PASSWORD, salt, 32, { N: 2 ** 14, r: 8, p: 1 }))}`;
+        await t.db.updateTable('admin_users').set({ password_hash: weak }).where('id', '=', a.id).execute();
+        const NEW = 'another long passphrase';
+        const before = await sessionsOf(a.id);
+        await expectDomainError(
+          interleaved(
+            () => auth.changePassword({ type: 'admin', id: a.id }, { currentPassword: PASSWORD, newPassword: NEW }, system, { keepToken: kept.session.token }),
+            () => auth.adminLogin({ email: a.addr, password: PASSWORD }, {}),
+          ),
+          'INVALID_CREDENTIALS',
+          401,
+        );
+        expect(await sessionsOf(a.id)).toBe(before); // only the session the change kept
+        expect(await auth.authenticateAdmin(kept.session.token)).not.toBeNull();
+        const row = await t.db.selectFrom('admin_users').select('password_hash').where('id', '=', a.id).executeTakeFirstOrThrow();
+        expect(await verifySecret(NEW, row.password_hash)).toBe(true);
+        expect(await verifySecret(PASSWORD, row.password_hash)).toBe(false);
+        await expectDomainError(auth.adminLogin({ email: a.addr, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+        expect((await auth.adminLogin({ email: a.addr, password: NEW }, {})).admin.id).toBe(a.id);
+        expect((await audit.list({ action: 'admin.login', targetId: a.id })).total).toBe(2);
       });
 
       it('changes roles (audited), never on one\'s own account', async () => {

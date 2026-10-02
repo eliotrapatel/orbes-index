@@ -22,11 +22,15 @@ import type { DecodeReply } from '../../verify/protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from '../../verify/scanner.js';
 import { ApiError } from '../api.js';
 import { formatDate, humanize } from '../format.js';
-import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, RETAILER_STORAGE_KEY, retailerOptions, saleVerdict } from '../model/sale.js';
+import { CLIENT_REGISTRATION, minutesLeft, SALE_CARD_NOTE, pieceLines, preselectedRetailer, RETAILER_STORAGE_KEY, retailerOptions, saleVerdict } from '../model/sale.js';
+import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import type { Retailer, SaleLookup } from '../types.js';
 import { button, defList, field, loading, pageHeader, select, statusMark } from '../ui/components.js';
 import type { ViewContext } from './context.js';
+
+/** Refusals of an activation that hold whatever point of sale is chosen (API §16.18). */
+const SALE_FINAL_REFUSALS: readonly string[] = ['ALREADY_REGISTERED', 'WARRANTY_ALREADY_ACTIVATED', 'WARRANTY_VOID', 'WARRANTY_ACTIVATION_NOT_ALLOWED'];
 
 /** The open sale screen, so main.ts can stop its camera when the console moves elsewhere or signs out. */
 let current: SaleFlow | null = null;
@@ -41,6 +45,14 @@ export function disposeSaleView(): void {
 }
 
 export async function saleView(ctx: ViewContext): Promise<HTMLElement> {
+  // The read-only AUDITOR reaches #/sale only by its address (no link): starting a warranty is not its to do.
+  if (!can(ctx.session.admin.role, 'sell')) {
+    return h(
+      'div',
+      { class: 'view view--sale', data: { testid: 'sale-not-offered' } },
+      pageHeader({ eyebrow: 'Boutique', title: 'Sale mode', lead: 'Selling starts a warranty: the sale mode is for RETAIL, OPERATOR and ADMIN accounts. Your role reads the registry.' }),
+    );
+  }
   const asked = screens;
   const retailers = (await ctx.api.retailers({ activeOnly: true })).items;
   // The console moved on (or opened the sale mode again) while the list was on its way: this screen is
@@ -248,7 +260,7 @@ class SaleFlow {
             { class: 'sale__client' },
             h('p', { class: 'sale__label' }, 'Tell the client'),
             h('p', { class: 'sale__client-text', data: { testid: 'sale-client-note' } }, CLIENT_REGISTRATION),
-            h('p', { class: 'sale__note' }, 'Hand over the certificate card: its claim code proves the piece is theirs when they register it.'),
+            h('p', { class: 'sale__note' }, SALE_CARD_NOTE),
           ),
         ),
         h('div', { class: 'sale__actions' }, next),
@@ -396,8 +408,10 @@ class SaleFlow {
       btn.textContent = label;
       if (e instanceof ApiError && e.status === 401) return;
       error.textContent = e instanceof ApiError ? e.message : 'The warranty could not be started. Try again.';
-      // A scan that can no longer be used: the way forward is a new one, whatever point of sale is chosen next.
-      if (e instanceof ApiError && /^SALE_TOKEN_/.test(e.code)) {
+      // A scan that can no longer be used, or a piece that can no longer be sold (registered by a client, sold or
+      // voided meanwhile, in a service, its code revoked): no other point of sale changes that, so ACTIVATE WARRANTY
+      // stays off; the way forward is a new scan.
+      if (e instanceof ApiError && (/^SALE_TOKEN_/.test(e.code) || SALE_FINAL_REFUSALS.includes(e.code))) {
         btn.disabled = true;
         btn.setAttribute('data-dead', '');
       }

@@ -192,7 +192,8 @@ The decision procedure is normative. Each step that ends the procedure records t
   genome?: { id: string /* product id */; version: 'GENOME-01'; fingerprint; glyphs: number[]; ids: string[] }, // AUTHENTIC*, SUSPICIOUS, REVOKED
   warranty?: { status: 'NOT_STARTED' | 'ACTIVE' | 'EXPIRED' | 'VOID'; startDate?: string; endDate?: string },  // AUTHENTIC* only
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean },                             // AUTHENTIC* only
-  registration?: { token: string; expiresAt: string; claimCodeRequired: boolean } }                          // FIRST_REGISTRATION; SUSPICIOUS only per step 10's exception (claimCodeRequired: true)
+  registration?: { token: string; expiresAt: string; claimCodeRequired: boolean },                          // FIRST_REGISTRATION; SUSPICIOUS only per step 10's exception (claimCodeRequired: true); never on a staff scan
+  staffScan?: true }                                                                                          // a console session made it a staff scan (ADMIN_TEST, S-07): no registration, no report (extension)
 ```
 
 ### 2.5 AnomalyService (`anomaly.ts`)
@@ -354,7 +355,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 
 ### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR > RETAIL)
 
-AUDITOR reads, with customers' emails masked (`j***@example.com`). Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users, points of sale and a customer's recovery code, lock and export. RETAIL (A-08, a seller) is refused everywhere but the sale mode, the list of points of sale and its own session, password and second factor (extension).
+AUDITOR reads, with customers' emails masked (`j***@example.com`). Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users, points of sale and a customer's recovery code, lock and export. RETAIL (A-08, a seller) is refused everywhere but the sale mode, the list of points of sale and its own session, password and second factor (extension). The sale mode names its roles, RETAIL, OPERATOR and ADMIN: an AUDITOR, though ranked above RETAIL, does not sell.
 
 | Method | Path | Description |
 |---|---|---|
@@ -425,8 +426,8 @@ AUDITOR reads, with customers' emails masked (`j***@example.com`). Mutations req
 | POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). The Team routes refuse one's own account (`409 SELF_ACTION`) and never leave the console without an active ADMIN (`409 LAST_ADMIN`). |
 | GET | `/api/admin/retailers?active` | RETAIL and up. The register of points of sale (extension, A-08). |
 | POST, PATCH | `/api/admin/retailers`, `/api/admin/retailers/:id` | ADMIN. Create, rename, move, deactivate a point of sale; never deleted (extension). |
-| POST | `/api/admin/sale/lookup` | RETAIL and up. Body: the decoded code as for `/api/v1/verify`. One ADMIN_TEST scan naming the console user, no anomaly evaluation; returns the piece and, when it can be sold, a 10-minute single-use sale token (extension). |
-| POST | `/api/admin/sale/activate` | RETAIL and up. Body `{ token, retailerId }`. Uses the token of the caller's own scan and starts the warranty today at that point of sale (extension). |
+| POST | `/api/admin/sale/lookup` | RETAIL, OPERATOR, ADMIN (not AUDITOR). Body: the decoded code as for `/api/v1/verify`. One ADMIN_TEST scan naming the console user, no anomaly evaluation; returns the piece and, when it can be sold, a 10-minute single-use sale token (extension). |
+| POST | `/api/admin/sale/activate` | RETAIL, OPERATOR, ADMIN (not AUDITOR). Body `{ token, retailerId }`. Uses the token of the caller's own scan and starts the warranty today at that point of sale (extension). |
 
 Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, pageSize, total }`.
 

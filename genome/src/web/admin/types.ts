@@ -482,7 +482,7 @@ export interface AnomalyRecord {
   resolutionNote: string | null;
   /** The console user whose triage decision is the latest (acknowledged, resolved, dismissed or reopened). */
   actorEmail: string | null;
-  /** In GET /api/admin/anomalies: what customers said about the scans that took part in it (null: nobody). */
+  /** In GET /api/admin/anomalies and …/:id/context: what customers said about the scans that took part in it (null: nobody). */
   reports?: AnomalyReports | null;
 }
 
@@ -545,6 +545,8 @@ export interface AnomalyScan {
   riskScore: number | null;
   /** The scan that last raised the finding (details.scanEventId). */
   trigger: boolean;
+  /** The customer's report on this scan and the state of its case (null: none). */
+  report: { id: string; channel: ReportChannel; place: string | null; status: ReportStatus } | null;
 }
 
 /** GET /api/admin/anomalies/:id/context: the scans around one finding. */

@@ -92,6 +92,13 @@ describe('OwnerService', () => {
 
   /** A piece owned by `owner` (first registration from a scan token). */
   async function ownedBy(owner: { id: string; actor: Actor }): Promise<string> {
+    const { productId, token } = await forSale(owner);
+    await ownership.registerFirst(owner.id, { registrationToken: token }, owner.actor);
+    return productId;
+  }
+
+  /** A piece sold and not registered yet, and the registration token of `scanner`'s scan of it. */
+  async function forSale(scanner: { id: string }): Promise<{ productId: string; token: string }> {
     const s = ++serial;
     const productId = `O26-J-${String(s).padStart(5, '0')}`;
     const row = await t.db
@@ -103,12 +110,11 @@ describe('OwnerService', () => {
     await lifecycle.transition(productId, 'ACTIVATED', {}, admin);
     const scan = await t.db
       .insertInto('scan_events')
-      .values({ product_id: row.id, event_type: 'VERIFY', result_state: 'AUTHENTIC_FIRST_REGISTRATION', occurred_at: clock.now(), account_id: owner.id })
+      .values({ product_id: row.id, event_type: 'VERIFY', result_state: 'AUTHENTIC_FIRST_REGISTRATION', occurred_at: clock.now(), account_id: scanner.id })
       .returning('id')
       .executeTakeFirstOrThrow();
     const { token } = await createScanToken(t.db, { productId: row.id, scanEventId: scan.id, now: clock.now() });
-    await ownership.registerFirst(owner.id, { registrationToken: token }, owner.actor);
-    return productId;
+    return { productId, token };
   }
 
   const status = async (id: string) => (await t.db.selectFrom('accounts').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status;
@@ -208,6 +214,46 @@ describe('OwnerService', () => {
     await owners.unlock(c.id, admin);
     await expectDomainError(auth.login({ email, password: 'the taker’s new passphrase' }), 'INVALID_CREDENTIALS', 401);
     expect((await auth.login({ email, password: PASSWORD })).account.id).toBe(c.id);
+  });
+
+  it('refuses a registration whose checks were under way when the lock committed: no piece reaches a LOCKED account', async () => {
+    const c = await customer();
+    const { productId, token } = await forSale(c);
+    // The lock commits after registerFirst has checked the token, the account and the piece, before it writes.
+    await expectDomainError(
+      interleaved(
+        () => owners.lock(c.id, admin),
+        () => ownership.registerFirst(c.id, { registrationToken: token }, c.actor),
+      ),
+      'ACCOUNT_LOCKED',
+      403,
+    );
+    expect((await owners.sheet(c.id)).pieces).toEqual([]);
+    const product = await t.db.selectFrom('products').select('id').where('product_id', '=', productId).executeTakeFirstOrThrow();
+    expect(await t.db.selectFrom('ownership').select('id').where('product_id', '=', product.id).execute()).toEqual([]);
+    // Nothing was spent: after the unlock, the same token registers the piece.
+    await owners.unlock(c.id, admin);
+    expect((await ownership.registerFirst(c.id, { registrationToken: token }, c.actor)).productId).toBe(productId);
+  });
+
+  it('refuses a transfer acceptance that was under way when the lock of the recipient committed', async () => {
+    const seller = await customer();
+    const piece = await ownedBy(seller);
+    const { transferCode } = await ownership.initiateTransfer(seller.id, piece, seller.actor);
+    const buyer = await customer();
+    await expectDomainError(
+      interleaved(
+        () => owners.lock(buyer.id, admin),
+        () => ownership.acceptTransfer(buyer.id, transferCode, buyer.actor),
+      ),
+      'ACCOUNT_LOCKED',
+      403,
+    );
+    // The piece stays with its owner, the transfer still pending; after the unlock the buyer accepts it.
+    expect((await owners.sheet(seller.id)).pieces.map((p) => [p.productId, p.until])).toEqual([[piece, null]]);
+    expect((await owners.sheet(buyer.id)).pieces).toEqual([]);
+    await owners.unlock(buyer.id, admin);
+    expect((await ownership.acceptTransfer(buyer.id, transferCode, buyer.actor)).productId).toBe(piece);
   });
 
   it('refuses a LOST or STOLEN declaration that was on its way when the lock took effect', async () => {

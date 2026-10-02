@@ -26,9 +26,12 @@ import {
   hasCodeFilters,
   isSheetSelectable,
   printSheetPreview,
+  pruneSheetSelection,
   PRINT_SHEET_LIMITS,
+  SHEET_CODE_REFUSALS,
   sheetChunks,
   sheetPartFilename,
+  sheetRefusalText,
   THEME_OPTIONS,
   type PrintSheetForm,
 } from '../model/generator.js';
@@ -36,7 +39,7 @@ import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { productHref } from '../router.js';
 import { CODE_STATUSES, type CodeFilters, type CodeIds, type CodeJson, type Model } from '../types.js';
-import type { Download, PrintSheetOptions } from '../api.js';
+import { ApiError, type Download, type PrintSheetOptions } from '../api.js';
 import {
   busy,
   button,
@@ -84,6 +87,9 @@ export async function codesView(ctx: ViewContext): Promise<HTMLElement> {
     canPrint && hasCodeFilters(filters) ? ctx.api.codeIds(filters) : Promise.resolve(null),
   ]);
 
+  // Codes picked earlier that can no longer be printed (revoked since, their piece lost, stolen, retired…).
+  const dropped = canPrint ? pruneSheetSelection(selected, list.items, batch) : [];
+
   const boxes: HTMLInputElement[] = [];
   const listeners: (() => void)[] = [];
   const changed = () => {
@@ -130,7 +136,7 @@ export async function codesView(ctx: ViewContext): Promise<HTMLElement> {
     { class: 'view view--codes' },
     pageHeader({ eyebrow: 'Registry', title: 'Codes', lead: 'Signed CODE-01 artifacts. A product may hold several issues; only one is ACTIVE.' }),
     filterForm(ctx, filters, models.items),
-    canPrint ? printSheetPanel(ctx, filters, batch, selected, changed, listeners) : null,
+    canPrint ? printSheetPanel(ctx, filters, batch, selected, changed, listeners, dropped.length) : null,
     table(columns, list.items, { empty: filtered ? 'No code matches these filters.' : 'No code yet.', onRow: (c) => productHref(c.productId), caption: 'Codes' }),
     pager(list, (p) => ctx.setQuery({ page: p })),
   );
@@ -183,6 +189,7 @@ function printSheetPanel(
   selected: Set<string>,
   changed: () => void,
   listeners: (() => void)[],
+  dropped: number,
 ): HTMLElement {
   const width = input('sheetWidthMm', { type: 'number', value: String(SHEET_WIDTH_MM), min: ARTIFACT_LIMITS.minWidthMm, max: 100, step: '0.5', inputmode: 'decimal' });
   const theme = select('sheetTheme', [...THEME_OPTIONS], 'classic');
@@ -251,7 +258,11 @@ function printSheetPanel(
           saveDownload({ ...d, filename: sheetPartFilename(d.filename, i + 1, parts.length) });
         } catch (e) {
           notifyError(e, failure);
-          if (parts.length > 1) error.textContent = `Part ${i + 1} of ${parts.length} could not be produced${i > 0 ? '; the parts before it were saved' : ''}.`;
+          const lines: string[] = [];
+          if (parts.length > 1) lines.push(`Part ${i + 1} of ${parts.length} could not be produced${i > 0 ? '; the parts before it were saved' : ''}.`);
+          // A code of the selection that can no longer be printed: the server names its piece.
+          if (e instanceof ApiError && SHEET_CODE_REFUSALS.includes(e.code)) lines.push(sheetRefusalText(e.message));
+          error.textContent = lines.join(' ');
           return;
         }
       }
@@ -264,9 +275,18 @@ function printSheetPanel(
 
   renderAdvice();
   renderSelection();
+  const droppedNote =
+    dropped > 0
+      ? h(
+          'p',
+          { class: 'sheet__batch-note', attrs: { role: 'status' }, data: { testid: 'sheet-dropped' } },
+          `${formatCount(dropped)} code${dropped === 1 ? '' : 's'} left the selection: no longer printable (revoked, or the piece can no longer be printed).`,
+        )
+      : null;
   return section(
     'Print sheet',
     [
+      droppedNote,
       batchRow(filters, batch, selected, changed),
       h(
         'div',

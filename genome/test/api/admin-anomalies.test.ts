@@ -306,6 +306,16 @@ describe('actionable anomalies', () => {
       expect(c.trigger.id).toBe(second.scanId);
       expect(c.countries.map((x: any) => x.country)).toEqual(['CN', 'HK']);
       expect(c.devices).toBe(2);
+
+      // A customer's report on the first scan (UNKNOWN): its case names the finding of the identity, found through
+      // the anomalies without a product (C-02), and the finding's detail carries the case and marks the scan.
+      expect((await h.client().post('/api/v1/reports', { scanId: first.scanId, channel: 'ONLINE', where: 'a resale site' })).statusCode).toBe(201);
+      const cases = await get(`/api/admin/reports?scanId=${first.scanId}`);
+      expect(cases.items[0].anomaly).toMatchObject({ id: finding.id, type: 'VALID_SIGNATURE_UNREGISTERED' });
+      expect((await get(`/api/admin/reports?anomalyId=${finding.id}`)).items.map((x: any) => x.scanId)).toEqual([first.scanId]);
+      const after = await get(`/api/admin/anomalies/${finding.id}/context`);
+      expect(after.anomaly.reports).toMatchObject({ count: 1, open: 1, latest: { channel: 'ONLINE', place: 'a resale site' } });
+      expect(after.scans.items.map((s: any) => s.report?.channel ?? null)).toEqual(['ONLINE', null]);
     });
 
     it('answers 404 for an unknown finding and 400 for a malformed id', async () => {

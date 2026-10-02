@@ -210,7 +210,7 @@ describe('migrations', () => {
     expect(MIGRATIONS['0009_scan_daily_stats']).toBe(m0009);
   });
 
-  it('0006 adds admin_users.password_change_required (NOT NULL, false by default) and its down step drops it', async () => {
+  it('0006 adds admin_users.password_change_required (NOT NULL, false by default); its down step disables the accounts on a temporary password, then drops it', async () => {
     const column = async (db: Kysely<any> = t.db) =>
       (
         await sql<{ data_type: string; is_nullable: string; column_default: string | null }>`
@@ -223,16 +223,42 @@ describe('migrations', () => {
       INSERT INTO admin_users (email_normalized, email, password_hash, role)
       VALUES ('old@orbes.test', 'old@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING password_change_required`.execute(t.db);
     expect(row.rows[0].password_change_required).toBe(false);
+    // A staff account still on its temporary password, signed in, and one disabled earlier: without the column, the
+    // first would use its full role with a password an ADMIN was shown, for good.
+    const staff = (
+      await sql<{ id: string }>`
+        INSERT INTO admin_users (email_normalized, email, password_hash, role, password_change_required)
+        VALUES ('temp@orbes.test', 'temp@orbes.test', 'scrypt$x', 'OPERATOR', true) RETURNING id`.execute(t.db)
+    ).rows[0];
+    const earlier = new Date('2026-09-01T00:00:00.000Z');
+    await sql`
+      INSERT INTO admin_users (email_normalized, email, password_hash, role, password_change_required, disabled_at)
+      VALUES ('gone@orbes.test', 'gone@orbes.test', 'scrypt$x', 'AUDITOR', true, ${earlier})`.execute(t.db);
+    await sql`INSERT INTO sessions (id_hash, subject_type, subject_id, csrf_token, expires_at) VALUES (decode(repeat('cd', 32), 'hex'), 'admin', ${staff.id}, 'c', now() + interval '1 hour')`.execute(t.db);
+    const state = async (db: Kysely<any>) =>
+      (
+        await sql<{ email_normalized: string; disabled_at: Date | null }>`
+          SELECT email_normalized, disabled_at FROM admin_users WHERE email_normalized IN ('old@orbes.test', 'temp@orbes.test', 'gone@orbes.test') ORDER BY email_normalized`.execute(db)
+      ).rows;
     // Down then up, run directly: later migrations of other features do not touch this column.
     const m = MIGRATIONS['0006_admin_password_change_required']!;
     expect(m.down).toBeTypeOf('function');
     await t.db.transaction().execute(async (tx) => {
       await m.down!(tx);
       expect(await column(tx)).toEqual([]);
+      const after = await state(tx);
+      expect(after.map((r) => [r.email_normalized, r.disabled_at !== null])).toEqual([
+        ['gone@orbes.test', true],
+        ['old@orbes.test', false],
+        ['temp@orbes.test', true],
+      ]);
+      // An earlier date is kept.
+      expect(after[0].disabled_at?.getTime()).toBe(earlier.getTime());
+      expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM sessions WHERE subject_id = ${staff.id}`.execute(tx)).rows[0].n).toBe(0);
       await m.up(tx);
     });
     expect(await column()).toEqual([{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }]);
-    await sql`DELETE FROM admin_users WHERE email_normalized = 'old@orbes.test'`.execute(t.db);
+    await sql`DELETE FROM admin_users WHERE email_normalized IN ('old@orbes.test', 'temp@orbes.test', 'gone@orbes.test')`.execute(t.db);
   });
 
   it('0008 adds RETAIL, the points of sale, warranties.retailer_id, scan_events.admin_id and SALE_ACTIVATION; its down step restores 0006', async () => {

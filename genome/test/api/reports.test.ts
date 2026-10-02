@@ -127,6 +127,22 @@ describe('Cases: GET /api/admin/reports and PATCH /api/admin/reports/:id', () =>
     // A finding no customer reported on carries none.
     const all = safeJson(await auditor.get('/api/admin/anomalies')) as { items: { id: string; reports: unknown }[] };
     expect(all.items.filter((a) => a.id !== anomalyId).every((a) => a.reports === null)).toBe(true);
+
+    // The finding's detail (opened by its id, from a case, whatever page of the list holds it) carries the same
+    // reports, and each scan of its window the customer's report on it.
+    const context = safeJson(await auditor.get(`/api/admin/anomalies/${anomalyId}/context`)) as {
+      anomaly: { id: string; reports: unknown };
+      scans: { items: { id: string; report: { id: string; channel: string; place: string | null; status: string } | null }[] };
+    };
+    expect(context.anomaly).toMatchObject({ id: anomalyId, reports: { count: 2, open: 2, latest: { channel: 'PRIVATE', place: 'Lyon' } } });
+    expect(context.scans.items.map((s) => [s.id, s.report?.channel ?? null, s.report?.place ?? null, s.report?.status ?? null])).toEqual([
+      [scans.first, 'ONLINE', 'a marketplace listing', 'OPEN'],
+      [scans.second, 'PRIVATE', 'Lyon', 'OPEN'],
+    ]);
+    // The customer's note stays on the case and the scans list: the window lists where, not what was said.
+    expect(JSON.stringify(context.scans)).not.toContain('Offered at a third of the price.');
+    const other = all.items.find((a) => a.id !== anomalyId);
+    if (other) expect((safeJson(await auditor.get(`/api/admin/anomalies/${other.id}/context`)) as { anomaly: { reports: unknown } }).anomaly.reports).toBeNull();
   });
 
   it('closes a case with a note (OPERATOR), audited scan.report.close without the customer\'s words, once', async () => {
@@ -177,14 +193,21 @@ describe('Cases: GET /api/admin/reports and PATCH /api/admin/reports/:id', () =>
   });
 
   it('takes no report on a staff scan (S-07): a browser signed in to the console scans as staff, not as a customer', async () => {
-    const staff = safeJson(await operator.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string; state: string };
+    const staff = safeJson(await operator.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string; state: string; staffScan?: boolean };
     expect(staff.state).toBe('MALFORMED_CODE');
+    // The outcome says so (the caller holds the console cookie), so /verify offers no report form.
+    expect(staff.staffScan).toBe(true);
     const row = await h.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id']).where('id', '=', staff.scanId).executeTakeFirstOrThrow();
     expect(row.event_type).toBe('ADMIN_TEST');
     expect(row.admin_id).not.toBeNull();
     const res = await report(staff.scanId, { channel: 'OTHER', note: 'A stock check.' });
     expect(res.statusCode).toBe(409);
-    expect(errorOf(res).code).toBe('REPORT_NOT_ALLOWED');
+    // The same code, with a message that says why: scanning again in this browser would only make another staff scan.
+    expect(errorOf(res)).toMatchObject({ code: 'REPORT_NOT_ALLOWED', message: expect.stringContaining('signed in to the ORBES console') });
     expect((await cases(auditor, `?scanId=${staff.scanId}`)).total).toBe(0);
+    // A customer's scan of the same code carries no such flag, and takes a report.
+    const customer = (await verify('abc+/=def')) as { scanId: string; staffScan?: boolean };
+    expect(customer.staffScan).toBeUndefined();
+    expect((await report(customer.scanId, { channel: 'OTHER' })).statusCode).toBe(201);
   });
 });

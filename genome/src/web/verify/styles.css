@@ -58,8 +58,10 @@ body[data-screen="scan"] .corners {
 }
 
 /* Headings receive focus programmatically on screen changes (for screen readers), as does the thanks
-   that replaces a sent report; no ring for that. */
+   that replaces a sent report; no ring for that (BRAND §3.8). The section labels a panel opens with
+   (FORGOTTEN PASSWORD, C-04) are such headings too. */
 h1[tabindex="-1"]:focus,
+.section-label[tabindex="-1"]:focus,
 .report__status[tabindex="-1"]:focus {
   outline: none;
 }

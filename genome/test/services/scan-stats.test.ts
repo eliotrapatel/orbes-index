@@ -18,6 +18,7 @@ import {
   aggregateScanStats,
   ANALYTICS_MAX_DAYS,
   analyticsWindow,
+  countedThrough,
   daySpan,
   lastCompleteDay,
   scanStatsReport,
@@ -175,6 +176,42 @@ describe('aggregateScanStats', () => {
     expect(narrow.total).toBe(1);
     expect(narrow.countries.map((c) => c.country)).toEqual(['CN']);
     expect(SIGNAL_STATES).toEqual(['INVALID_SIGNATURE', 'UNKNOWN', 'MALFORMED_CODE', 'SUSPICIOUS_ACTIVITY']);
+  });
+});
+
+describe('countedThrough', () => {
+  it('says the last day really counted: yesterday once counted, else the day before the first scan still waiting', async () => {
+    const t = await createTestDb();
+    try {
+      const db = t.db;
+      const now = new Date('2026-06-10T09:00:00.000Z');
+      // Nothing scanned yet: every complete day is covered.
+      expect(await countedThrough(db, now)).toBe('2026-06-09');
+      await scan(db, '2026-06-02T10:00:00.000Z');
+      await aggregateScanStats(db, new Date('2026-06-03T09:00:00.000Z'));
+      // Scans of 5 and 8 June wait for a pass (one failed, say): the statistics stop on 4 June, and the empty days
+      // after it are not counted, not empty.
+      await scan(db, '2026-06-05T10:00:00.000Z');
+      await scan(db, '2026-06-08T10:00:00.000Z', { country: 'IT' });
+      // A staff scan and today's scans never hold it back.
+      await scan(db, '2026-06-04T10:00:00.000Z', { event_type: 'ADMIN_TEST' });
+      await scan(db, '2026-06-10T08:00:00.000Z');
+      expect(await countedThrough(db, now)).toBe('2026-06-04');
+      const report = await scanStatsReport(db, { from: '2026-06-01', to: '2026-06-09' }, now);
+      expect(report).toMatchObject({ through: '2026-06-04', total: 1 });
+      // The next pass counts them all: yesterday again.
+      expect(await aggregateScanStats(db, now)).toBe(2);
+      expect(await countedThrough(db, now)).toBe('2026-06-09');
+      expect((await scanStatsReport(db, { from: '2026-06-01', to: '2026-06-09' }, now)).through).toBe('2026-06-09');
+      // Ten minutes into a day, yesterday is complete and waits for its pass: covered through the day before.
+      await scan(db, '2026-06-10T23:00:00.000Z');
+      expect(await countedThrough(db, new Date('2026-06-11T00:05:00.000Z'))).toBe('2026-06-09');
+      expect(await countedThrough(db, new Date('2026-06-11T00:10:00.000Z'))).toBe('2026-06-09');
+      await aggregateScanStats(db, new Date('2026-06-11T00:10:00.000Z'));
+      expect(await countedThrough(db, new Date('2026-06-11T00:10:00.000Z'))).toBe('2026-06-10');
+    } finally {
+      await t.close();
+    }
   });
 });
 

@@ -8,6 +8,7 @@
  * sign-in with the old password that was under way when a recovery
  * committed is refused.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { verifySecret } from '../../src/server/crypto/scrypt.js';
@@ -314,6 +315,46 @@ describe('AccountRecoveryService', () => {
       await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
       expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
       expect(await audit.list({ action: 'account.recover_throttled', targetId: c.id })).toMatchObject({ items: [] });
+    });
+
+    it('hashes an attempt without an open code (none, or expired) only once its transaction has committed: no row lock or connection held meanwhile', async () => {
+      const c = await customer();
+      // Mark the body of every transaction of the service, and record, for every scrypt of an attempt (the throwaway
+      // hash of burnTime), whether it runs inside the body of the attempt's own transaction.
+      const inTx = new AsyncLocalStorage<true>();
+      const begin = t.db.transaction.bind(t.db);
+      const spy = vi.spyOn(t.db, 'transaction').mockImplementation(() => {
+        const builder = begin();
+        return {
+          execute: <R>(fn: Parameters<typeof builder.execute<R>>[0]) => builder.execute((trx) => inTx.run(true, () => fn(trx))),
+        } as unknown as ReturnType<typeof begin>;
+      });
+      const burns: boolean[] = [];
+      const internals = recovery as unknown as { burnTime: (code: string | undefined) => Promise<void> };
+      const burnTime = internals.burnTime.bind(recovery);
+      const burn = vi.spyOn(internals, 'burnTime').mockImplementation(async (code) => {
+        burns.push(inTx.getStore() === true);
+        await burnTime(code);
+      });
+      try {
+        // A burst naming one known email while no code is open (the account's usual state), then once a code expired.
+        const burst = await Promise.allSettled(
+          Array.from({ length: 6 }, (_, i) => recovery.recover({ email: c.email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i}`, newPassword: NEW_PASSWORD })),
+        );
+        expect(burst.every((r) => r.status === 'rejected' && (r.reason as DomainError).code === 'RECOVERY_CODE_INVALID')).toBe(true);
+        await recovery.issue(c.id, admin);
+        clock.advance(RECOVERY_CODE_TTL_MS);
+        await expectDomainError(recovery.recover({ email: c.email, recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+        // Each paid its scrypt, outside every transaction; each was recorded, with its reason.
+        expect(burns).toEqual(Array.from({ length: 7 }, () => false));
+        const reasons = (await audit.list({ action: 'account.recover_failed', targetId: c.id }, { page: 1, pageSize: 50 })).items.map((e) => e.details.reason);
+        expect(reasons.sort()).toEqual(['EXPIRED', ...Array.from({ length: 6 }, () => 'NO_OPEN_CODE')]);
+      } finally {
+        burn.mockRestore();
+        spy.mockRestore();
+      }
+      // Meanwhile, and afterwards, the customer still signs in.
+      expect((await auth.login({ email: c.email, password: PASSWORD }, {})).account.id).toBe(c.id);
     });
 
     it('throttles one code after its wrong guesses; a new code starts afresh, and the console says until when', async () => {
