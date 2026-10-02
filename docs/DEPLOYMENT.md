@@ -256,7 +256,7 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 | Variable | Default | Rules |
 |---|---|---|
-| `CLIENT_SERVICES_EMAIL` | unset | A plain mailbox, ≤ 254 characters: letters, digits and `. _ + -`, an `@` and a dotted domain (nothing a `mailto:` link would read as syntax: no `? & # % / :` or spaces). The verification app's **CONTACT ORBES CLIENT SERVICES** button opens an email to it, prefilled with the scan reference and the result. |
+| `CLIENT_SERVICES_EMAIL` | unset | A plain mailbox, ≤ 254 characters: letters, digits and `. _ + -`, an `@` and a dotted domain (nothing a `mailto:` link would read as syntax: no `? & # % / :` or spaces). The verification app's **CONTACT ORBES CLIENT SERVICES** link opens an email to it, prefilled with the scan reference and the result. |
 | `CLIENT_SERVICES_PHONE` | unset | International format: `+`, then 7–15 digits with single spaces, dots or hyphens between them (e.g. `+33 1 23 45 67 89`; no `(0)`). Shown as a `tel:` link. |
 | `CLIENT_SERVICES_HOURS` | unset | One line of plain text, ≤ 120 characters (e.g. `Monday to Saturday, 10:00–19:00 (Paris)`). Refused unless an email or a phone is set. |
 
