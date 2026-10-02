@@ -36,6 +36,15 @@ face (BRAND-DESIGN-SYSTEM §3.1).
   responsible for holding a web (webfont) licence that covers its use on
   the domains that serve it. The repository carries the file only to build
   these apps; it is not licensed for any other use.
+- Repository: the file is committed to this source repository
+  (github.com/eliotrapatel/orbes-index), so every clone holds it. Many
+  commercial font licences forbid keeping font files in a source repository,
+  a public one above all. **To confirm with the owner:** the licence must
+  allow it at the repository's visibility. If it does not, keep the
+  repository private, or remove the file from it (and from its history) and
+  fetch it at build time from a private store. Other sites cannot load the
+  font from ours (`Cross-Origin-Resource-Policy: same-origin`, no CORS
+  header), so this is a question of licence scope, not of hotlinking.
 - Changes: a subset of the supplied OpenType (CFF) file, converted to WOFF2
   with fontTools: Basic Latin and the punctuation the interfaces use, kerning
   kept, other OpenType features removed. The copyright and designer names

@@ -37,6 +37,8 @@ Add a `headers` entry beside the existing `redirects`:
 ]
 ```
 
+**In the same commit, update `genome/test/ops/vps-stack.test.ts`.** Its `vercel.json` test asserts that the file holds the two `/verify` redirects and nothing else (`Object.keys(vercel)` equal to `['redirects']`), so CI fails on the entry above alone. Change that test to accept exactly `['redirects', 'headers']`, with `headers` equal to the one entry above (the `/fonts/(.*)` source and its single `Cache-Control` header), keep its redirect assertions unchanged, and update the comment at the top of the file that says `vercel.json` holds only the redirects.
+
 ### 3.3 `index.html`
 
 In `<head>`, before the `<style>` element:
@@ -66,21 +68,30 @@ font-family: "Gravesend Sans", "Helvetica Neue", HelveticaNeue, Helvetica, Arial
 
 | Elements (selectors in `index.html`) | Proposed face |
 |---|---|
-| `.top-text p`, `.bottom-text p`, `.reveal span`, `#text-rewrite`, `.meta span`, `#ghost-text`, `#cryptic-msg` | Gravesend Sans |
+| `.top-text p`, `.bottom-text p`, `.reveal span`, `#text-rewrite`, `.meta span`, `#cryptic-msg` | Gravesend Sans |
 | `#chromatic-btn`, `#snake-btn`, `#trade-rules-btn`, `#trade-night-switch`, `#trade-signal-label`, `#trade-close` | Gravesend Sans |
-| `#countdown`, `#snake-score`, `#game-hud`, and any element that shows figures | unchanged (Helvetica Neue) |
+| `#ghost-text` (it reads *PARIS, 2026*) and `#reveal-countdown` (inside `.reveal span`: within 30 days of the reveal date its script writes *REVEAL IN {d}D {hh}H {mm}M*), set back to the system stack by their own rule after the display one, since `.reveal span` would otherwise reach the countdown | unchanged (Helvetica Neue) |
+| `#countdown`, `#snake-score`, `#game-hud`, and any other element that shows figures | unchanged (Helvetica Neue) |
 | `html, body` and running text | unchanged (Helvetica Neue) |
 | The ORBES logo (raster image) | unchanged: whether the site takes the monogram the apps use (BRAND §3.9) is the brand's choice, BRAND §8 item 1 |
 
-Figures stay in Helvetica Neue for the reason the apps keep them there: Gravesend's figure one is drawn as its capital I, and it has no tabular figures (BRAND §3.1).
+Figures stay in Helvetica Neue for the reason the apps keep them there: Gravesend's figure one is drawn as its capital I, and it has no tabular figures (BRAND §3.1). For the countdown, the rule that keeps it in Helvetica Neue:
+
+```css
+#ghost-text,
+#reveal-countdown {
+  font-family: "Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif;
+}
+```
 
 ## 4. Checks after deploying
 
 - The page shows the labels in Gravesend Sans on an Android phone and on Windows, not only on Apple devices.
 - The browser's network panel lists **one** request for `gravesend-sans-500.v1.woff2`, answered `200` with `Cache-Control: public, max-age=31536000, immutable` and `Content-Type: font/woff2`. Two requests mean the preload and the CSS name different URLs or the `crossorigin` attribute is missing.
 - No text disappears while the page loads (`font-display: swap`).
-- Every countdown, score and other figure still reads in Helvetica Neue.
+- Every countdown, score and other figure still reads in Helvetica Neue: *PARIS, 2026* and the reveal countdown included.
+- CI is green on the branch, `genome/test/ops/vps-stack.test.ts` included (§3.2).
 
 ## 5. Undo
 
-Remove the `<link rel="preload">`, the `@font-face` block and the display stacks from `index.html`, and the `headers` entry from `vercel.json`; the `fonts/` file can stay or go. The site is then exactly as before.
+Remove the `<link rel="preload">`, the `@font-face` block and the display stacks from `index.html`, and the `headers` entry from `vercel.json`, and put `genome/test/ops/vps-stack.test.ts` back to accepting only `['redirects']` in the same commit; the `fonts/` file can stay or go. The site is then exactly as before.
