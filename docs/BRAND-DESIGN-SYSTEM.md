@@ -561,6 +561,7 @@ Hints never say "move closer": phones that cannot focus close (iPhone Pro, about
 | Owned by someone else | REGISTERED TO ITS OWNER | This piece is registered to an ORBES account. · If its owner has given you a transfer code, enter it to register this piece in your name. |
 | Not delivered yet | NOT YET REGISTERED | Registration opens once this piece has been delivered by an ORBES boutique or an authorised retailer. |
 | Transfer offered | TRANSFER CODE · VALID UNTIL … | Give this code only to the new owner. The transfer completes when they enter it in their ORBES account. |
+| Unusual activity, registration offered to the card holder | DO YOU HOLD THE CERTIFICATE CARD? · REGISTRATION OPEN | If this piece was delivered to you with its ORBES certificate card, you may register it in your name with the claim code printed under the scratch-off panel. · While its activity is reviewed, this piece can be registered only with the claim code of its certificate card. |
 | Claim code field hint | — | Printed on the ORBES certificate card delivered with your piece. |
 
 Warranty statuses read NOT YET STARTED, ACTIVE, EXPIRED or NO LONGER VALID, each with one sentence ("This piece is covered by the ORBES warranty until 25 September 2028."). Dates inside sentences are written in full; dates in rows are `25 SEP 2028`.
@@ -661,7 +662,7 @@ Tabs follow the ARIA tablist pattern (arrow keys, Home, End, roving tab index); 
 </tr>
 <tr>
 <td valign="top"><b>Verifying (photo path).</b> READING PHOTO… then VERIFYING…, one moon orbiting a 22 % ring around a core.</td>
-<td valign="top"><b>Unusual activity</b> (O26-J-00193, reported stolen, scanned by a stranger). Caution mark, 18 px title on two lines, the GENOME, a request to contact Client Services with the reference. No tabs, no product facts.</td>
+<td valign="top"><b>Unusual activity</b> (O26-J-00193, reported stolen, scanned by a stranger). Caution mark, 18 px title on two lines, the GENOME, a request to contact Client Services with the reference. No tabs, no product facts. When the server still offers registration (the history alone made the scan unusual, the piece has no owner and its certificate card carries a claim code), a hairline and <b>DO YOU HOLD THE CERTIFICATE CARD?</b> follow the help line (11 px, label tracking, display face), with one sentence and the OWNERSHIP panel: sign-in, then the claim code, required.</td>
 <td valign="top"><b>Invalid signature</b> (a demo code with one signature bit flipped). Void mark, nothing about the product, the same calm help sentence; the short page sits at the optical centre.</td>
 </tr>
 </table>

@@ -737,7 +737,7 @@ The responses below were captured from a development instance (in-memory databas
 }
 ```
 
-When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genome` is present but `verification` is absent. When it results from the scan history alone on an unregistered product shipped with a claim code (step 10's exception), the body also carries `registration` with `"claimCodeRequired": true`.
+When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genome` is present but `verification` is absent. When it results from the scan history alone on an unregistered product shipped with a claim code (step 10's exception), the body also carries `registration` with `"claimCodeRequired": true`. The verification app shows it under the help line as **DO YOU HOLD THE CERTIFICATE CARD?**: sign-in or account creation, then the CLAIM CODE field, which is required (§11.1); still no product lines, tabs or other product data. After registering, *VIEW AS OWNER* verifies again and the owner sees `AUTHENTIC_OWNERSHIP_VERIFIED`, with the `UNUSUAL_ACTIVITY` notice and its sentence while the scan history still scores above the threshold (step 9).
 
 **`REVOKED`** — the original code of a product whose code was re-issued (status SUPERSEDED); revoked codes and revoked, retired or counterfeit-flagged products answer the same way:
 
@@ -929,7 +929,7 @@ All require an account session and the CSRF rules. Responses describe the owners
 
 ### 11.1 `POST /api/v1/ownership/register`
 
-First registration of a product, authorised by the `registration.token` from an `AUTHENTIC_FIRST_REGISTRATION` verification (valid 15 minutes, single use, bound to that product) and, when `claimCodeRequired` was true, the claim code supplied with the product. Rate group `auth`.
+First registration of a product, authorised by the `registration.token` from an `AUTHENTIC_FIRST_REGISTRATION` verification, or from a `SUSPICIOUS_ACTIVITY` one that carries it (§9.4 step 10's exception, where `claimCodeRequired` is always true), valid 15 minutes, single use, bound to that product, and, when `claimCodeRequired` was true, the claim code supplied with the product. Rate group `auth`.
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
