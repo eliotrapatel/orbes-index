@@ -1284,7 +1284,8 @@ describe('anomaly triage view model', () => {
     expect(typeOptions(types)).toEqual([
       { value: '', label: 'All types' },
       { value: 'IMPOSSIBLE_TRAVEL', label: 'IMPOSSIBLE TRAVEL' },
-      { value: 'UNSOLD_PIECE_SCAN', label: 'UNSOLD PIECE SCAN' },
+      // S-07: the console's name of the type, not its code read aloud.
+      { value: 'UNSOLD_PIECE_SCAN', label: 'UNSOLD PIECE SCANNED' },
     ]);
     expect(typeOptions(types, 'OLD_TYPE').map((o) => o.value)).toEqual(['', 'IMPOSSIBLE_TRAVEL', 'UNSOLD_PIECE_SCAN', 'OLD_TYPE']);
   });

@@ -247,7 +247,12 @@ function detailPanel(ctx: ViewContext, c: AnomalyContext, onTriage: (() => void)
   const trigger = c.trigger;
   const facts = defList(
     [
-      { label: 'Finding', value: h('span', null, statusMark(a.severity, toneOf('severity', a.severity)), ` ${humanize(a.type)}`), note: `${humanize(a.status)} · risk ${a.riskScore} · seen ${formatCount(a.occurrences)}×` },
+      {
+        label: 'Finding',
+        value: h('span', null, statusMark(a.severity, toneOf('severity', a.severity)), ` ${anomalyName(a.type)}`),
+        // Who took the latest decision (A-02), as under the list's status.
+        note: `${humanize(a.status)}${a.actorEmail ? ` by ${a.actorEmail}` : ''} · risk ${a.riskScore} · seen ${formatCount(a.occurrences)}×`,
+      },
       { label: 'Details', value: h('span', { class: 'cell-details' }, summarizeDetails(a.details, 400) || '—') },
       {
         label: 'Product',
@@ -332,7 +337,7 @@ async function decision(ctx: ViewContext, a: AnomalyRecord, known: AnomalyContex
   ];
 
   const r = await openDialog({
-    title: humanize(a.type),
+    title: anomalyName(a.type),
     eyebrow: `${a.severity} · ${a.productId ?? 'Unregistered identity'} · ${humanize(a.status)}`,
     body: [h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'), report],
     fields,

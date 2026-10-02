@@ -175,4 +175,16 @@ describe('Cases: GET /api/admin/reports and PATCH /api/admin/reports/:id', () =>
     expect(refused.statusCode).toBe(403);
     expect(errorOf(refused).code).toBe('FORBIDDEN');
   });
+
+  it('takes no report on a staff scan (S-07): a browser signed in to the console scans as staff, not as a customer', async () => {
+    const staff = safeJson(await operator.post('/api/v1/verify', { code: 'abc+/=def' })) as { scanId: string; state: string };
+    expect(staff.state).toBe('MALFORMED_CODE');
+    const row = await h.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id']).where('id', '=', staff.scanId).executeTakeFirstOrThrow();
+    expect(row.event_type).toBe('ADMIN_TEST');
+    expect(row.admin_id).not.toBeNull();
+    const res = await report(staff.scanId, { channel: 'OTHER', note: 'A stock check.' });
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res).code).toBe('REPORT_NOT_ALLOWED');
+    expect((await cases(auditor, `?scanId=${staff.scanId}`)).total).toBe(0);
+  });
 });

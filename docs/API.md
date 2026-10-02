@@ -2077,7 +2077,7 @@ AUDITOR. Paginated, the most severe first.
 |---|---|
 | `status` | `OPEN`, `ACKNOWLEDGED`, `RESOLVED` or `DISMISSED`. |
 | `severity` | `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. |
-| `type` | One of the types below (extension). The list is `ANOMALY_TYPES`, derived from the weights table of `anomaly-rules.ts`: a type added there is accepted here, listed by §16.14 and offered by the console's Type filter without further change. Anything else, lower case included, is `400 VALIDATION_FAILED`. |
+| `type` | One of the types below (extension). The list is `ANOMALY_TYPES`, derived from the weights table of `anomaly-rules.ts`: a type added there is accepted here, listed by §16.14 and offered by the console's Type filter without further change, under its console name (`UNSOLD_PIECE_SCAN` reads UNSOLD PIECE SCANNED there, in the list, the detail, the decision dialog and the Cases queue). Anything else, lower case included, is `400 VALIDATION_FAILED`. |
 | `productId` | Canonical id (any case) or uuid (extension). An unknown product gives an empty page. |
 | `sort` | `severity` (default): CRITICAL, HIGH, MEDIUM, LOW, then the highest `riskScore` within a severity. `risk`: the highest `riskScore` first, then the most severe. `lastSeen`: the most recently seen first (the order before 2026-10-02). Ties end on the most recently seen, then the id, so pages never overlap (extension). |
 | `id` | One anomaly (uuid): a case's link to the anomaly its scan took part in (§16.8; extension). |

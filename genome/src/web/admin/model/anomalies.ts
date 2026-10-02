@@ -6,7 +6,7 @@
  * finding, each reason citing the finding). Pure: unit-tested without a
  * browser; the server is the authority on every rule.
  */
-import { formatCount, humanize } from '../format.js';
+import { anomalyName, formatCount, humanize } from '../format.js';
 import { href } from '../router.js';
 import type { AdminRole, AnomalyContext, AnomalyFilters, AnomalyRecord, AnomalyScan, AnomalyStatus, ProductStatus } from '../types.js';
 import { can } from './permissions.js';
@@ -56,10 +56,13 @@ export function sortValue(sort: string | undefined): string {
   return !sort || sort === 'severity' ? '' : sort;
 }
 
-/** The Type select: every type the server can record (its summary), plus the one in the URL if the server no longer lists it. */
+/**
+ * The Type select: every type the server can record (its summary), plus the one in the URL if the server no longer
+ * lists it, each under its console name (UNSOLD_PIECE_SCAN reads UNSOLD PIECE SCANNED, S-07).
+ */
 export function typeOptions(types: readonly string[], current?: string): { value: string; label: string }[] {
   const all = current && !types.includes(current) ? [...types, current] : [...types];
-  return [{ value: '', label: 'All types' }, ...all.map((t) => ({ value: t, label: humanize(t) }))];
+  return [{ value: '', label: 'All types' }, ...all.map((t) => ({ value: t, label: anomalyName(t) }))];
 }
 
 // ── Badge and title ────────────────────────────────────────────────────────
@@ -187,7 +190,7 @@ export function decisionPhrase(v: Readonly<Record<string, string>>, offer: Decis
  * the code's revocation and the audit log lead back to it. Cut to the route's limit.
  */
 export function decisionReason(a: Pick<AnomalyRecord, 'id' | 'type'>, note: string | undefined, max: number): string {
-  const head = `Anomaly ${a.id} (${humanize(a.type)})`;
+  const head = `Anomaly ${a.id} (${anomalyName(a.type)})`;
   const n = note?.trim();
   const full = n ? `${head}: ${n}` : head;
   return full.length > max ? `${full.slice(0, max - 1)}…` : full;

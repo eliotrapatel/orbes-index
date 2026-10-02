@@ -313,4 +313,39 @@ describe('actionable anomalies', () => {
       expect(errorOf(await auditor.get('/api/admin/anomalies/nope/context')).code).toBe('VALIDATION_FAILED');
     });
   });
+
+  describe('a finding of an unsold piece through the triage (S-07 with A-02, A-04 and C-02)', () => {
+    it('filters by its type, names who triaged it in the list and in its detail, and leaves staff scans out of its window', async () => {
+      const p = await issue(h.ctx, catalog); // ISSUED: not sold yet
+      const scan = await h.ctx.services.verification.verify({ code: p.code.data }, { deviceHash: hex('unsold-stranger'), geo: { country: 'IT' } });
+      expect(scan.state).toBe('AUTHENTIC');
+      // A staff scan of the same piece in the same window (the sale mode, a console browser): never in its scans.
+      await insertScan(p, new Date(h.clock.now().getTime() + MIN), { eventType: 'ADMIN_TEST', country: 'FR' });
+
+      expect(ANOMALY_TYPES).toContain('UNSOLD_PIECE_SCAN');
+      expect((await get('/api/admin/anomalies/summary')).types).toContain('UNSOLD_PIECE_SCAN');
+      const listed = await get(`/api/admin/anomalies?type=UNSOLD_PIECE_SCAN&productId=${p.product.productId}`);
+      expect(listed.items).toHaveLength(1);
+      const finding = listed.items[0];
+      expect(finding).toMatchObject({
+        type: 'UNSOLD_PIECE_SCAN',
+        severity: 'MEDIUM',
+        riskScore: 0,
+        status: 'OPEN',
+        actorEmail: null,
+        reports: null,
+        details: { country: 'IT', productStatus: 'ISSUED', scanEventId: scan.scanId },
+      });
+
+      const me = safeJson(await operator.get('/api/admin/auth/me')) as { admin: { email: string } };
+      const res = await operator.patch(`/api/admin/anomalies/${finding.id}`, { status: 'ACKNOWLEDGED' });
+      expect(res.statusCode, res.body).toBe(200);
+      expect((await get(`/api/admin/anomalies?type=UNSOLD_PIECE_SCAN&productId=${p.product.productId}&sort=risk`)).items[0].actorEmail).toBe(me.admin.email);
+      const c = await get(`/api/admin/anomalies/${finding.id}/context`);
+      expect(c.anomaly).toMatchObject({ id: finding.id, status: 'ACKNOWLEDGED', actorEmail: me.admin.email });
+      expect(c.trigger.id).toBe(scan.scanId);
+      expect(c.scans.items.map((x: any) => x.id)).toEqual([scan.scanId]);
+      expect(c.countries).toEqual([{ country: 'IT', scans: 1 }]);
+    });
+  });
 });
