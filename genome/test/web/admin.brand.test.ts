@@ -127,6 +127,27 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(Object.keys(rule(brand, '.monogram')).filter((p) => p === 'fill' || p === 'color')).toEqual([]);
   });
 
+  it('draws the Analytics curves as hairlines, CSP-safe, oxblood only for INVALID SIGNATURE (BRAND §6)', () => {
+    const charts = readFileSync(join(WEB, 'admin/ui/charts.ts'), 'utf8');
+    const view = readFileSync(join(WEB, 'admin/views/analytics.ts'), 'utf8');
+    // Built element by element, never from markup; what moves is placed through the CSSOM.
+    for (const src of [charts, view]) {
+      expect(src).not.toMatch(/innerHTML|insertAdjacentHTML|setAttribute\(\s*['"]style/);
+    }
+    expect(charts).toMatch(/style\.setProperty\('--x'/);
+    expect(charts).toMatch(/style\.setProperty\('--y'/);
+    expect(rule(styles, '.trend__line,\n.spark__line')).toMatchObject({ fill: 'none', stroke: 'var(--ink)', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' });
+    expect(rule(styles, '.trend__grid,\n.trend__base,\n.spark__base')).toMatchObject({ stroke: 'var(--hairline)', 'stroke-width': '1' });
+    expect(rule(styles, '.spark--critical .spark__line').stroke).toBe('var(--critical)');
+    expect(rule(styles, '.spark--muted .spark__line').stroke).toBe('var(--metal)');
+    // The axis labels and the cursor's readout are values: Helvetica Neue, never --metal.
+    expect(rule(styles, '.trend__ylabel').color).toBe('var(--ink-soft)');
+    expect(rule(styles, '.trend__tick').color).toBe('var(--ink-soft)');
+    // LAST 30 DAYS: the tab in the display face, its figures in Helvetica Neue.
+    expect(styles).toMatch(/\.range__tab,\n\.gen__notes-title,/);
+    expect(rule(styles, '.cbtn__figure,\n.range__figure')['font-family']).toBe('var(--font)');
+  });
+
   it('sets type from brand.css tokens wherever a token has the same value', () => {
     const bySize: Record<string, string> = {};
     const byTrack: Record<string, string> = {};

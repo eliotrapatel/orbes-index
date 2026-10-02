@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as serverSchema from '../../src/server/db/schema.js';
 import { ANOMALY_SORTS as SERVER_ANOMALY_SORTS } from '../../src/server/services/anomaly.js';
+import { ANALYTICS_MAX_DAYS, SIGNAL_STATES as SERVER_SIGNAL_STATES } from '../../src/server/services/scan-stats.js';
 import { ROLE_RANK as SERVER_ROLE_RANK } from '../../src/server/http/sessions.js';
 import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS, MAX_SHEET_ITEMS, planPrintSheet } from '../../src/server/render/artifact.js';
 import { SHEET_PAGES } from '../../src/server/render/print-sheet.js';
@@ -12,6 +13,25 @@ import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 import { issueBatchBody } from '../../src/server/http/schemas.js';
 import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
 import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
+import {
+  ANALYTICS_RANGES,
+  analyticsKpis,
+  analyticsLead,
+  analyticsRange,
+  axisLevels,
+  countryBars,
+  countryLabel,
+  countryName,
+  curve,
+  dayReadout,
+  dayTicks,
+  nearestDay,
+  niceMax,
+  signalBars,
+  signalCountries,
+  stateRows,
+  svgPoints,
+} from '../../src/web/admin/model/analytics.js';
 import {
   anomalyFiltersFrom,
   badgeText,
@@ -83,7 +103,7 @@ import { primaryCode, productActions, productAttributes, productSheet } from '..
 import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMatches, revocationTargetError, triageMoves } from '../../src/web/admin/model/registry.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import * as web from '../../src/web/admin/types.js';
-import type { AnomalyContext, DashboardData, Model, ProductDetail } from '../../src/web/admin/types.js';
+import type { AnalyticsData, AnomalyContext, DashboardData, Model, ProductDetail, VerificationState } from '../../src/web/admin/types.js';
 import { ATTENTION_INTERVAL_MS, startAttentionPoll, type VisibilitySource } from '../../src/web/admin/ui/attention.js';
 
 describe('admin enums mirror the server', () => {
@@ -104,6 +124,8 @@ describe('admin enums mirror the server', () => {
     }
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
+    expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);
+    expect([...web.SIGNAL_STATES]).toEqual([...SERVER_SIGNAL_STATES]);
   });
 
   it('uses the server role ranks and artifact limits', () => {
@@ -1075,5 +1097,148 @@ describe('anomaly badge refresh', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(shown).toEqual([2]);
     poll.stop();
+  });
+});
+
+// ── Analytics (A-09) ───────────────────────────────────────────────────────
+
+function analyticsData(): AnalyticsData {
+  const zero = () => Object.fromEntries(web.VERIFICATION_STATES.map((st) => [st, 0])) as Record<VerificationState, number>;
+  const days = ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01'];
+  const daily = days.map((day) => ({ day, total: 0, byState: zero() }));
+  daily[1].byState.AUTHENTIC = 6;
+  daily[1].byState.INVALID_SIGNATURE = 2;
+  daily[1].total = 8;
+  daily[3].byState.AUTHENTIC = 3;
+  daily[3].byState.SUSPICIOUS_ACTIVITY = 1;
+  daily[3].byState.UNKNOWN = 1;
+  daily[3].total = 5;
+  const byState = zero();
+  for (const d of daily) for (const st of web.VERIFICATION_STATES) byState[st] += d.byState[st];
+  const country = (code: string, states: Partial<Record<VerificationState, number>>) => {
+    const b = { ...zero(), ...states };
+    const total = Object.values(b).reduce((a, n) => a + n, 0);
+    const signals = web.SIGNAL_STATES.reduce((a, st) => a + b[st], 0);
+    return { country: code, total, signals, byState: b };
+  };
+  return {
+    from: days[0],
+    to: days[3],
+    days: 4,
+    through: days[3],
+    total: 13,
+    byState,
+    byEventType: { VERIFY: 13, REGISTER: 0, TRANSFER: 0 },
+    signals: { INVALID_SIGNATURE: 2, UNKNOWN: 1, MALFORMED_CODE: 0, SUSPICIOUS_ACTIVITY: 1, total: 4 },
+    daily,
+    countries: [country('FR', { AUTHENTIC: 7, SUSPICIOUS_ACTIVITY: 1 }), country('CN', { INVALID_SIGNATURE: 2 }), country('GB', { AUTHENTIC: 2 }), country('ZZ', { UNKNOWN: 1 })],
+  };
+}
+
+describe('analytics view model', () => {
+  it('offers 30 and 90 days, 90 by default, within the server bound', () => {
+    expect([...ANALYTICS_RANGES]).toEqual([30, 90]);
+    expect(Math.max(...ANALYTICS_RANGES)).toBeLessThanOrEqual(ANALYTICS_MAX_DAYS);
+    expect(analyticsRange({ days: '30' })).toBe(30);
+    expect(analyticsRange({ days: '90' })).toBe(90);
+    for (const days of [undefined, '', '7', '366', 'abc']) expect(analyticsRange({ days }), String(days)).toBe(90);
+  });
+
+  it('names countries in English, the unknown location as such', () => {
+    expect(countryName('FR')).toBe('France');
+    expect(countryName('ZZ')).toBe('Unknown');
+    expect(countryLabel('JP')).toBe('JP · Japan');
+    expect(countryLabel('ZZ')).toBe('Unknown location');
+  });
+
+  it('states the four figures; an invalid signature turns the signals red', () => {
+    const d = analyticsData();
+    expect(analyticsKpis(d).map((k) => [k.label, k.value, k.note, k.tone])).toEqual([
+      ['Scans', '13', 'IN 4 DAYS', 'solid'],
+      ['Authentic', '9', '69% OF SCANS', 'solid'],
+      ['Counterfeit signals', '4', '2 INVALID SIGNATURES', 'critical'],
+      ['Countries', '3', 'MOST SCANS: FRANCE', 'solid'],
+    ]);
+    const quiet = { ...d, signals: { ...d.signals, INVALID_SIGNATURE: 0, total: 2 }, countries: d.countries.filter((c) => c.country !== 'CN') };
+    expect(analyticsKpis(quiet)[2]).toMatchObject({ note: 'IN 2 COUNTRIES', tone: 'solid' });
+    expect(analyticsKpis({ ...quiet, signals: { ...quiet.signals, UNKNOWN: 0, SUSPICIOUS_ACTIVITY: 0, total: 0 }, countries: [] })[2]).toMatchObject({ value: '0', note: 'NONE' });
+    expect(analyticsLead(d)).toBe(
+      "Complete days from 28 SEP 2026 to 01 OCT 2026, in UTC. Today's scans are counted after midnight UTC; staff scans never are. The counts stay after the scan history is purged.",
+    );
+  });
+
+  it('draws the curve against a 1, 2 or 5 ceiling, in fractions of the plot', () => {
+    expect([0, 1, 3, 7, 10, 11, 260].map(niceMax)).toEqual([1, 1, 5, 10, 10, 20, 500]);
+    // The half is labelled only when it is a whole number of scans.
+    expect(axisLevels(10)).toEqual([
+      { value: 10, y: 1 },
+      { value: 5, y: 0.5 },
+      { value: 0, y: 0 },
+    ]);
+    expect(axisLevels(5).map((l) => l.value)).toEqual([5, 0]);
+    expect(axisLevels(1).map((l) => l.value)).toEqual([1, 0]);
+    expect(axisLevels(2).map((l) => l.value)).toEqual([2, 1, 0]);
+    const points = curve([0, 5, 10], 10);
+    expect(points).toEqual([
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.5 },
+      { x: 1, y: 1 },
+    ]);
+    expect(svgPoints(points, 1000, 200)).toBe('0,200 500,100 1000,0');
+    expect(curve([3], 5)).toEqual([{ x: 0.5, y: 0.6 }]);
+    expect(svgPoints(curve([1, 2, 0], 3), 1000, 40)).toBe('0,26.67 500,13.33 1000,40');
+  });
+
+  it('labels five days along the axis, the first and the last among them, and reads the nearest day', () => {
+    const ninety = Array.from({ length: 90 }, (_, i) => new Date(Date.UTC(2026, 6, 4) + i * 86_400_000).toISOString().slice(0, 10));
+    const ticks = dayTicks(ninety);
+    expect(ticks.map((t) => t.label)).toEqual(['04 JUL', '26 JUL', '18 AUG', '09 SEP', '01 OCT']);
+    expect(ticks[0]).toMatchObject({ index: 0, x: 0 });
+    expect(ticks.at(-1)).toMatchObject({ index: 89, x: 1 });
+    expect(dayTicks(ninety.slice(0, 3)).map((t) => t.index)).toEqual([0, 1, 2]);
+    expect(dayTicks(['2026-10-01'])).toEqual([{ index: 0, x: 0.5, label: '01 OCT' }]);
+    expect(dayTicks([])).toEqual([]);
+    expect([nearestDay(0, 90), nearestDay(0.5, 90), nearestDay(1, 90), nearestDay(-1, 90), nearestDay(2, 90), nearestDay(0.7, 1)]).toEqual([0, 45, 89, 0, 89, 0]);
+  });
+
+  it('reads a day: its count first, then each state seen that day', () => {
+    const d = analyticsData();
+    expect(dayReadout(d, 1)).toEqual({
+      day: '29 SEP 2026',
+      total: '8 SCANS',
+      lines: [
+        { label: 'AUTHENTIC', value: '6', tone: 'solid' },
+        { label: 'INVALID SIGNATURE', value: '2', tone: 'critical' },
+      ],
+    });
+    expect(dayReadout(d, 0)).toEqual({ day: '28 SEP 2026', total: '0 SCANS', lines: [] });
+    expect(dayReadout(d, 9).total).toBe('—');
+  });
+
+  it('gives every state its row: curve, total, share, busiest day and a link to its scans', () => {
+    const rows = stateRows(analyticsData());
+    expect(rows.map((r) => r.state)).toEqual([...web.VERIFICATION_STATES]);
+    const invalid = rows.find((r) => r.state === 'INVALID_SIGNATURE')!;
+    expect(invalid).toMatchObject({ label: 'INVALID SIGNATURE', tone: 'critical', total: 2, share: '15%', values: [0, 2, 0, 0], peak: '2 ON 29 SEP 2026' });
+    expect(invalid.link).toBe('#/scans?state=INVALID_SIGNATURE&from=2026-09-28&to=2026-10-01');
+    expect(rows.find((r) => r.state === 'REVOKED')).toMatchObject({ total: 0, share: '0%', peak: '' });
+    expect(rows.find((r) => r.state === 'MALFORMED_CODE')!.tone).toBe('muted');
+  });
+
+  it('ranks the countries by scans, and the countries of the signals by signals, red where a signature failed', () => {
+    const d = analyticsData();
+    expect(countryBars(d).map((b) => [b.label, b.value, b.fraction, b.share, b.tone])).toEqual([
+      ['FR · France', 8, 1, '62%', 'solid'],
+      ['CN · China', 2, 0.25, '15%', 'solid'],
+      ['GB · United Kingdom', 2, 0.25, '15%', 'solid'],
+      ['Unknown location', 1, 0.125, '8%', 'solid'],
+    ]);
+    expect(countryBars(d, 2)).toHaveLength(2);
+    expect(signalCountries(d).map((c) => c.country)).toEqual(['CN', 'FR', 'ZZ']);
+    expect(signalBars(d).map((b) => [b.key, b.value, b.fraction, b.share, b.tone])).toEqual([
+      ['CN', 2, 1, '50%', 'critical'],
+      ['FR', 1, 0.5, '25%', 'solid'],
+      ['ZZ', 1, 0.5, '25%', 'solid'],
+    ]);
   });
 });

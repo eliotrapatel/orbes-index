@@ -384,6 +384,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
 | GET | `/api/admin/anomalies/summary` | AUDITOR | — | admin | 16.8 |
 | GET | `/api/admin/anomalies/:id/context` | AUDITOR | — | admin | 16.9 |
+| GET | `/api/admin/analytics` | AUDITOR | — | admin | 16.10 |
 | PATCH | `/api/admin/anomalies/:id` | OPERATOR | yes | admin | 16.5 |
 | GET | `/api/admin/revocations` | AUDITOR | — | admin | 16.6 |
 | POST | `/api/admin/revocations` | **ADMIN** | yes | admin | 16.7 |
@@ -396,7 +397,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId` and `sort` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId` and `sort` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1118,7 +1119,7 @@ AUDITOR. Landing counts.
 }
 ```
 
-`anomalies.open` counts OPEN and ACKNOWLEDGED anomalies. `activeKey` is `null` when no key is ACTIVE. `recentEvents` holds the 10 most recent scans.
+`anomalies.open` counts OPEN and ACKNOWLEDGED anomalies. `activeKey` is `null` when no key is ACTIVE. `recentEvents` holds the 10 most recent scans. `scans` counts the stored scan history, live; the trends by day, result and country, which survive a purge, are those of §16.10.
 
 ### 13.2 Categories
 
@@ -1935,6 +1936,52 @@ AUDITOR. The scans around one finding, for the console's detail panel (`#/anomal
 - `code` is the code the finding names (null for none); `product` its canonical id and lifecycle snapshot (§14.3), null without a product. The console offers only the marks `lifecycle.allowed` holds and revokes only an ACTIVE code (§16.5).
 
 Errors: `400 VALIDATION_FAILED` (an id that is not a uuid), `404 ANOMALY_NOT_FOUND`.
+
+### 16.10 `GET /api/admin/analytics` (extension of the contract)
+
+AUDITOR. The daily scan statistics of a window of complete UTC days, for the console's Analytics view (`#/analytics`, the last 30 or 90 days): where the pieces are scanned, with which result, and where the counterfeit signals appear.
+
+| Query | Meaning |
+|---|---|
+| `from`, `to` | UTC days (`YYYY-MM-DD`), both included. `to` defaults to the last complete day (`through` below). |
+| `days` | Without `from`: the window is the `days` days (1–366, default 30) that end on `to`. Refused together with `from`. |
+
+The window is at most **366 days**. Every figure comes from `scan_daily_stats` ([DATABASE §5.22](DATABASE.md#522-scan_daily_stats) and [§10](DATABASE.md#10-housekeeping-and-retention)), never from the scan history:
+
+- **complete days only:** housekeeping counts a UTC day once it is over and ten minutes old, so yesterday's scans are in the figures from 00:10 UTC (within the next pass, every 10 minutes); today's are not yet;
+- **staff scans never:** `ADMIN_TEST` scans are not counted;
+- **the same after a purge:** the counts are written before the scan history is purged (`SCAN_RETENTION_DAYS`) and are never rewritten, so a window reads the same before and after;
+- **anonymous:** counts by day, country, state and event type, nothing about a scan, a piece, an account or a device.
+
+```json
+{
+  "from": "2026-09-02", "to": "2026-10-01", "days": 30, "through": "2026-10-01",
+  "total": 6,
+  "byState": { "AUTHENTIC": 2, "AUTHENTIC_FIRST_REGISTRATION": 0, "AUTHENTIC_REGISTERED": 0, "AUTHENTIC_OWNERSHIP_VERIFIED": 1,
+               "SUSPICIOUS_ACTIVITY": 1, "REVOKED": 0, "UNKNOWN": 1, "INVALID_SIGNATURE": 1, "MALFORMED_CODE": 0 },
+  "byEventType": { "VERIFY": 6, "REGISTER": 0, "TRANSFER": 0 },
+  "signals": { "INVALID_SIGNATURE": 1, "UNKNOWN": 1, "MALFORMED_CODE": 0, "SUSPICIOUS_ACTIVITY": 1, "total": 3 },
+  "daily": [
+    { "day": "2026-09-02", "total": 0, "byState": { "AUTHENTIC": 0, "…": 0 } },
+    { "day": "2026-10-01", "total": 4, "byState": { "AUTHENTIC": 2, "UNKNOWN": 1, "INVALID_SIGNATURE": 1, "…": 0 } }
+  ],
+  "countries": [
+    { "country": "FR", "total": 2, "signals": 0, "byState": { "AUTHENTIC": 2, "…": 0 } },
+    { "country": "CN", "total": 1, "signals": 1, "byState": { "INVALID_SIGNATURE": 1, "…": 0 } },
+    { "country": "ZZ", "total": 1, "signals": 1, "byState": { "UNKNOWN": 1, "…": 0 } }
+  ]
+}
+```
+
+- `through` is the last day the statistics cover: yesterday, or the day before in the first ten minutes after midnight UTC.
+- `byState` and every `byState` below it carry the nine states of §9.3, zeros included; `byEventType` the three counted types.
+- `signals` sums the four states that signal a code ORBES did not issue, or did not issue for this scan: `INVALID_SIGNATURE`, `UNKNOWN`, `MALFORMED_CODE` and `SUSPICIOUS_ACTIVITY`. A signal is a reason to look, not a verdict: a damaged print reads as MALFORMED CODE.
+- `daily` holds one entry per day of the window, oldest first, days without scans included.
+- `countries` holds every country with scans in the window, most scans first, then by code; `ZZ` is a scan whose location is unknown (`GEO_MODE=none`, or no country for its address). `signals` counts that country's scans in the four states.
+
+The console shows four figures (scans, authentic, counterfeit signals, countries), every scan per day as one curve whose cursor reads a day (pointer, or the arrow keys once the curve has focus), one small curve per state scaled to its busiest day and linked to its scans in Verification events (§16.1, while the history keeps them), the ten countries with the most scans and the ten with the most signals as hairline bars (oxblood where a signature did not verify), the signals by country and state, and the days with scans as a table. No map: the CSP admits no external tiles, and the volume does not call for one.
+
+Errors: `400 VALIDATION_FAILED` (a day that is not `YYYY-MM-DD` or does not exist, `days` outside 1–366 or not a whole number, `from` with `days`, `from` after `to`, a window over 366 days).
 
 ---
 

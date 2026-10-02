@@ -16,6 +16,7 @@ export const ROUTES = [
   { name: 'genomes', path: '/genomes' },
   { name: 'codes', path: '/codes' },
   { name: 'scans', path: '/scans' },
+  { name: 'analytics', path: '/analytics' },
   { name: 'owners', path: '/owners' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },

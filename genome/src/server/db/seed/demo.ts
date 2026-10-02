@@ -17,6 +17,9 @@
  * piece waiting for its first registration). All steps of all products are
  * merged and run in chronological order on a clock the caller hands over, so
  * the audit log, status histories and scan events read like real history.
+ * At the end, the complete days are counted in the daily scan statistics, as
+ * housekeeping does every night (services/scan-stats.ts): the console's
+ * Analytics view opens on the demo's history.
  *
  * Highlights
  *   O26-J-00184  MONOLITHE RING · 925 STERLING SILVER · created 2026, sold
@@ -33,6 +36,7 @@ import { randomBytes } from 'node:crypto';
 import type { AppContext } from '../../context.js';
 import { pseudonymize } from '../../http/client.js';
 import { REGISTRABLE_STATUSES } from '../../services/ownership.js';
+import { aggregateScanStats } from '../../services/scan-stats.js';
 import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
 import { noopLogger, type Actor, type Logger } from '../../types.js';
@@ -920,7 +924,9 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     }
   }
   opts.clock.set(now);
-  log.info({}, 'demo seed: timeline complete');
+  // What housekeeping would have done day after day: the complete days counted in the daily statistics.
+  const statsRows = await aggregateScanStats(ctx.db, now);
+  log.info({ statsRows }, 'demo seed: timeline complete');
 
   return summarise(world, key.keyId, steps.length, now, generated);
 }

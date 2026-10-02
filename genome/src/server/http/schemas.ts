@@ -21,6 +21,7 @@ import {
 } from '../db/schema.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -424,6 +425,31 @@ export const anomalyPatchBody = body({
   status: z.enum(ANOMALY_STATUSES),
   note: z.preprocess((v) => (v === '' ? null : v), z.string().max(2000, 'At most 2000 characters').nullable().optional()),
 });
+
+/**
+ * The window of the daily scan statistics (GET /api/admin/analytics): the UTC days `from` to `to`, both
+ * included, at most ANALYTICS_MAX_DAYS (366). Without `from`, the window is the `days` days (default 30)
+ * that end on `to`; `to` defaults to the last complete day (scan-stats.ts `analyticsWindow`). `from` and
+ * `days` are exclusive.
+ */
+export const analyticsQuery = z
+  .object({
+    from: queryOptional(isoDate),
+    to: queryOptional(isoDate),
+    days: queryOptional(
+      z.preprocess(
+        (v) => (typeof v === 'string' && /^\s*\d{1,4}\s*$/.test(v) ? Number(v) : v),
+        z.number().int('Must be a whole number of days').min(1, 'At least 1 day').max(ANALYTICS_MAX_DAYS, `At most ${ANALYTICS_MAX_DAYS} days`),
+      ),
+    ),
+  })
+  .refine((q) => q.from === undefined || q.days === undefined, { message: 'Give either from or days, not both', path: ['days'] })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'from must not be after to', path: ['to'] })
+  .refine((q) => !q.from || !q.to || daySpan(q.from, q.to) <= ANALYTICS_MAX_DAYS, {
+    message: `The window is at most ${ANALYTICS_MAX_DAYS} days`,
+    path: ['to'],
+  });
+export type AnalyticsQuery = z.infer<typeof analyticsQuery>;
 
 export const warrantyListQuery = z.object({
   status: z.enum(['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID']).optional(),

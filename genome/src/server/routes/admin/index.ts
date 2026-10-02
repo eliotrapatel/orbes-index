@@ -14,6 +14,7 @@ import { rateLimitHook } from '../../http/rate-limit.js';
 import { sessionGuard } from '../../http/sessions.js';
 import type { RouteDeps } from '../public.js';
 import { adminUserRoutes } from './admins.js';
+import { adminAnalyticsRoutes } from './analytics.js';
 import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
 import { adminCatalogRoutes } from './catalog.js';
@@ -36,6 +37,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
 
   await app.register(adminAuthRoutes, deps);
   await app.register(adminDashboardRoutes, deps);
+  await app.register(adminAnalyticsRoutes, deps);
   await app.register(adminCatalogRoutes, deps);
   await app.register(adminProductRoutes, deps);
   await app.register(adminCodeRoutes, deps);

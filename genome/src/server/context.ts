@@ -31,6 +31,7 @@ import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { purgeScanHistory } from './services/scan-retention.js';
+import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
 import { VerificationService } from './services/verification.js';
@@ -183,15 +184,20 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanHistory: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; scanHistory: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
 
 /**
- * Purges expired sessions and scan tokens, expires stale transfers and, when
+ * Purges expired sessions and scan tokens, expires stale transfers, counts
+ * the scans of every complete UTC day into scan_daily_stats and, when
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
  * period, every `intervalMs` (default 10 min).
+ *
+ * The daily statistics always run before the purge, and a pass whose
+ * statistics failed purges nothing: no scan leaves the history before it is
+ * counted (DATABASE §10).
  */
 export function startHousekeeping(
   ctx: AppContext,
@@ -203,24 +209,29 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanHistory: 0 };
-    const job = async (name: keyof typeof result, fn: () => Promise<number>) => {
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, scanHistory: 0 };
+    /** Runs one job; false when it failed (logged). */
+    const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
         result[name] = await fn();
+        return true;
       } catch (e) {
         ctx.log.error({ job: name, err: { message: (e as Error)?.message } }, 'housekeeping job failed');
+        return false;
       }
     };
     await job('sessions', () => ctx.sessions.purgeExpired());
     await job('transfers', () => ctx.services.ownership.expireStaleTransfers());
     await job('scanTokens', () => purgeScanTokens(ctx.db, new Date(ctx.clock().getTime() - graceMs)));
+    // Count the complete days first: the purge below must never take a scan that is not counted yet.
+    const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
     const retentionDays = ctx.config.scanRetentionDays;
-    if (retentionDays !== null && retentionDays !== undefined) {
+    if (counted && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );
     }
-    if (result.sessions + result.transfers + result.scanTokens + result.scanHistory > 0) ctx.log.info(result, 'housekeeping');
+    if (Object.values(result).some((n) => n > 0)) ctx.log.info(result, 'housekeeping');
     return result;
   };
 

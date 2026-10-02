@@ -63,6 +63,10 @@ export type ScanTokenPurpose = (typeof SCAN_TOKEN_PURPOSES)[number];
 export const SCAN_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER', 'ADMIN_TEST'] as const;
 export type ScanEventType = (typeof SCAN_EVENT_TYPES)[number];
 
+/** The scans counted in scan_daily_stats (migration 0009): every event type but the staff's ADMIN_TEST. */
+export const SCAN_STAT_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER'] as const;
+export type ScanStatEventType = (typeof SCAN_STAT_EVENT_TYPES)[number];
+
 export const GENOME_CHECKS = ['MATCH', 'MISMATCH', 'NOT_PROVIDED', 'INCONCLUSIVE'] as const;
 export type GenomeCheck = (typeof GENOME_CHECKS)[number];
 
@@ -339,6 +343,18 @@ export interface ScanEventsTable {
   latency_ms: number | null;
 }
 
+/**
+ * Daily scan statistics (migration 0009): the scans of one complete UTC day by country, state and
+ * event type. Anonymous, written by housekeeping (services/scan-stats.ts), kept after the scan history is purged.
+ */
+export interface ScanDailyStatsTable {
+  day: string;                         // date 'YYYY-MM-DD' (UTC)
+  country: string;                     // char(2), 'ZZ' when unknown
+  result_state: VerificationState;
+  event_type: ScanStatEventType;
+  n: number;                           // integer >= 0
+}
+
 export interface AuthenticationEventsTable {
   id: Generated<string>;
   scan_event_id: string;
@@ -446,6 +462,7 @@ export interface Database {
   service_records: ServiceRecordsTable;
   scan_tokens: ScanTokensTable;
   scan_events: ScanEventsTable;
+  scan_daily_stats: ScanDailyStatsTable;
   authentication_events: AuthenticationEventsTable;
   anomalies: AnomaliesTable;
   revocations: RevocationsTable;
@@ -495,6 +512,7 @@ export type ScanTokenRow = Selectable<ScanTokensTable>;
 export type NewScanToken = Insertable<ScanTokensTable>;
 export type ScanEventRow = Selectable<ScanEventsTable>;
 export type NewScanEvent = Insertable<ScanEventsTable>;
+export type ScanDailyStatsRow = Selectable<ScanDailyStatsTable>;
 export type AuthenticationEventRow = Selectable<AuthenticationEventsTable>;
 export type NewAuthenticationEvent = Insertable<AuthenticationEventsTable>;
 export type AnomalyRow = Selectable<AnomaliesTable>;

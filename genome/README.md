@@ -34,13 +34,13 @@ genome/
     keys/                KeyProvider (local AES-GCM files | memory), KeyService (rotation, revocation)
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
-                         scan tokens, scan-history retention
+                         scan tokens, scan-history retention, daily scan statistics
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
-    admin/               admin console: catalogue, generator, keys, anomalies, audit
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)

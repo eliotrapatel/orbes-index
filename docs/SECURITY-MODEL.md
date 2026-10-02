@@ -82,6 +82,7 @@ None of these layers proves that the scanned object is the original physical ite
 - Geography is coarse: a country, plus lat/lon rounded to 0.1°, when the trusted edge provides them (`GEO_MODE=cloudflare` or `headers`) or, with `GEO_MODE=mmdb`, from a local GeoIP database lookup of the client IP on the server (`src/server/geo/mmdb.ts`; the IP is looked up in memory and never stored, and no region is derived).
 - Codes contain no personal data.
 - Retention: with `SCAN_RETENTION_DAYS` set, housekeeping deletes scan events older than the period, with their authentication events and scan tokens (DATABASE §10). The period is a legal decision; it cannot be shorter than the anomaly look-back (30 days by default), and production warns at every start while it is unset (scan history is then kept indefinitely).
+- Daily statistics: before any purge, housekeeping counts every complete UTC day into `scan_daily_stats` (day, country, verification state, event type and a count; DATABASE §5.22). The table holds nothing about a scan: no pseudonym, code, piece, account or coordinate, and staff scans are not counted. It is what the console's Analytics view reads (AUDITOR, API §16.10), so a short retention period keeps the trends.
 
 ### 3.7 Audit and integrity monitoring
 - `audit_logs` is append-only: a trigger rejects UPDATE and DELETE.

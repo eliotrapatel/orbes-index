@@ -106,7 +106,7 @@ genome/
     keys/                KeyProvider (local AES-GCM files | memory; KMS/HSM-ready interface), KeyService
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
-                         certificate cards, scan tokens, scan-history retention
+                         certificate cards, scan tokens, scan-history retention, daily scan statistics
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin
@@ -114,7 +114,7 @@ genome/
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
-    admin/               admin console: catalogue, generator, keys, anomalies, audit
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)

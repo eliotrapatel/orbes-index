@@ -19,6 +19,7 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
+import { addDays, aggregateScanStats, utcDay } from '../../src/server/services/scan-stats.js';
 import { Client, PASSWORD, safeJson } from './support.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -151,6 +152,31 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     expect(lotBody.items[1].error.code).toBe('SERIAL_TAKEN');
     expect(lotBody.items[0].claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-2')) as any).total).toBe(2);
+
+    // ── Daily scan statistics on pg: concurrent passes count each scan once, the route reads them ──
+    const statsDay = addDays(utcDay(new Date()), -2);
+    const at = new Date(`${statsDay}T12:00:00.000Z`);
+    await ctx.db
+      .insertInto('scan_events')
+      .values([
+        ...Array.from({ length: 3 }, () => ({ occurred_at: at, event_type: 'VERIFY' as const, result_state: 'AUTHENTIC', country: 'BR' })),
+        { occurred_at: at, event_type: 'VERIFY', result_state: 'INVALID_SIGNATURE', country: 'BR' },
+        { occurred_at: at, event_type: 'VERIFY', result_state: 'MALFORMED_CODE', country: null },
+        { occurred_at: at, event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC', country: 'BR' },
+      ])
+      .execute();
+    await Promise.all(Array.from({ length: 4 }, () => aggregateScanStats(ctx.db, new Date())));
+    expect(await ctx.db.selectFrom('scan_daily_stats').select(['day', 'country', 'result_state', 'event_type', 'n']).orderBy('country').orderBy('result_state').execute()).toEqual([
+      { day: statsDay, country: 'BR', result_state: 'AUTHENTIC', event_type: 'VERIFY', n: 3 },
+      { day: statsDay, country: 'BR', result_state: 'INVALID_SIGNATURE', event_type: 'VERIFY', n: 1 },
+      { day: statsDay, country: 'ZZ', result_state: 'MALFORMED_CODE', event_type: 'VERIFY', n: 1 },
+    ]);
+    const stats = safeJson(await op.get('/api/admin/analytics?days=7')) as any;
+    expect(stats).toMatchObject({ days: 7, total: 5, signals: { INVALID_SIGNATURE: 1, MALFORMED_CODE: 1, total: 2 } });
+    expect(stats.countries.map((c: any) => [c.country, c.total, c.signals])).toEqual([
+      ['BR', 4, 1],
+      ['ZZ', 1, 1],
+    ]);
 
     const detail = safeJson(await op.get(`/api/admin/products/${p.product.productId}`)) as any;
     expect(detail.codes[0].verification.valid).toBe(true);

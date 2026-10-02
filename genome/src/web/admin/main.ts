@@ -28,6 +28,7 @@ import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
 import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
 import { notifyError } from './ui/toast.js';
+import { analyticsView } from './views/analytics.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { catalogueView } from './views/catalogue.js';
@@ -63,7 +64,14 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'catalogue', label: 'Catalogue' },
     ],
   },
-  { group: 'Activity', items: [{ route: 'scans', label: 'Verification events' }, { route: 'anomalies', label: 'Anomalies' }] },
+  {
+    group: 'Activity',
+    items: [
+      { route: 'scans', label: 'Verification events' },
+      { route: 'anomalies', label: 'Anomalies' },
+      { route: 'analytics', label: 'Analytics' },
+    ],
+  },
   { group: 'Clients', items: [{ route: 'owners', label: 'Owners' }, { route: 'warranties', label: 'Warranties' }] },
   {
     group: 'Security',
@@ -84,6 +92,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   codes: { view: codesView, title: 'Codes', nav: 'codes' },
   catalogue: { view: catalogueView, title: 'Catalogue', nav: 'catalogue' },
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
+  analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },

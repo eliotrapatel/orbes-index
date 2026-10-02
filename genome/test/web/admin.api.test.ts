@@ -122,6 +122,18 @@ describe('AdminApi', () => {
     expect(JSON.parse(String(calls[2].init.body))).toEqual({ status: 'RESOLVED', note: 'checked' });
   });
 
+  it('reads the daily scan statistics of a window with a GET (no CSRF token)', async () => {
+    const { fetch, calls } = fakeFetch(json(200, { days: 90 }), json(200, { days: 2 }));
+    const api = new AdminApi({ fetch });
+    await api.analytics({ days: 90 });
+    await api.analytics({ from: '2026-09-30', to: '2026-10-01' });
+    expect(calls.map((c) => [c.init.method, c.url])).toEqual([
+      ['GET', '/api/admin/analytics?days=90'],
+      ['GET', '/api/admin/analytics?from=2026-09-30&to=2026-10-01'],
+    ]);
+    expect(header(calls[0], 'x-csrf-token')).toBeUndefined();
+  });
+
   it('downloads artifacts as blobs with a safe file name, dpi only for PNG', async () => {
     const { fetch, calls } = fakeFetch(
       new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"' } }),

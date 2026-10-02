@@ -34,6 +34,14 @@ export const VERIFICATION_STATES = [
 ] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
 
+/** The scans the daily statistics count (server: SCAN_STAT_EVENT_TYPES): staff scans (ADMIN_TEST) never. */
+export const SCAN_STAT_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER'] as const;
+export type ScanStatEventType = (typeof SCAN_STAT_EVENT_TYPES)[number];
+
+/** Counterfeit signals: the states of a code ORBES did not issue, or not for this scan (server: services/scan-stats.ts). */
+export const SIGNAL_STATES = ['INVALID_SIGNATURE', 'UNKNOWN', 'MALFORMED_CODE', 'SUSPICIOUS_ACTIVITY'] as const;
+export type SignalState = (typeof SIGNAL_STATES)[number];
+
 export const ANOMALY_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 export type AnomalySeverity = (typeof ANOMALY_SEVERITIES)[number];
 
@@ -115,6 +123,33 @@ export interface DashboardData {
     productId: string | null;
     country: string | null;
   }[];
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+
+/** GET /api/admin/analytics: the daily scan statistics of a window of complete UTC days (API §16.10). */
+export interface AnalyticsData {
+  /** `YYYY-MM-DD`, both included. */
+  from: string;
+  to: string;
+  days: number;
+  /** The last day the statistics cover (yesterday, UTC). */
+  through: string;
+  total: number;
+  byState: Record<VerificationState, number>;
+  byEventType: Record<ScanStatEventType, number>;
+  signals: Record<SignalState, number> & { total: number };
+  /** Every day of the window, oldest first. */
+  daily: { day: string; total: number; byState: Record<VerificationState, number> }[];
+  /** Countries with scans, most first; `ZZ` when the location is unknown. */
+  countries: AnalyticsCountry[];
+}
+
+export interface AnalyticsCountry {
+  country: string;
+  total: number;
+  signals: number;
+  byState: Record<VerificationState, number>;
 }
 
 // ── Catalogue ──────────────────────────────────────────────────────────────

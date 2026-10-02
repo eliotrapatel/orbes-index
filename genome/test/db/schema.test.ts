@@ -82,6 +82,8 @@ describe('schema', () => {
       ['service_records', 'status', S.SERVICE_STATUSES],
       ['scan_tokens', 'purpose', S.SCAN_TOKEN_PURPOSES],
       ['scan_events', 'event_type', S.SCAN_EVENT_TYPES],
+      ['scan_daily_stats', 'event_type', S.SCAN_STAT_EVENT_TYPES],
+      ['scan_daily_stats', 'result_state', S.VERIFICATION_STATES],
       ['authentication_events', 'genome_check', S.GENOME_CHECKS],
       ['authentication_events', 'state', S.VERIFICATION_STATES],
       ['anomalies', 'severity', S.ANOMALY_SEVERITIES],

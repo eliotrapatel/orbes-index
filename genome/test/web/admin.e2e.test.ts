@@ -10,7 +10,8 @@
  * → warranty activation and code re-issue → key rotation → audit chain
  * verification → a batch of 120 products from a CSV (preview, requests of
  * 50, results piece by piece, the page held until the claim codes are saved,
- * certificate cards) and a quantity → sign out. Also: anomaly triage (the badge and the tab title,
+ * certificate cards) and a quantity → sign out. Also: the Analytics view (90 and 30 days, its cursor, the
+ * countries of the counterfeit signals), anomaly triage (the badge and the tab title,
  * the filters, a finding's scans, one dialog that marks the piece, revokes its
  * code and resolves the finding), TOTP enrolment + two-step sign-in, and the
  * read-only AUDITOR console. No CSP violation or page error is tolerated.
@@ -38,6 +39,7 @@ import { base32Decode, totp } from '../../src/server/crypto/totp.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { svgToGray } from '../support/raster.js';
@@ -629,6 +631,86 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.waitForSelector('[data-testid=chain-result][data-ok=true]');
     expect(await page.locator('[data-testid=chain-result]').textContent()).toMatch(/CHAIN INTACT.*entries re-hashed/);
     await shot(page, 'audit');
+  }, STEP_TIMEOUT);
+
+  it('reads the scans of 90 days by result and the countries of the counterfeit signals on one page (Analytics)', async () => {
+    // A history the daily statistics count: complete days, several countries, staff scans left out.
+    const midnight = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    const at = (daysAgo: number) => new Date(midnight - daysAgo * 86_400_000 + 12 * 3_600_000);
+    const history: [number, string | null, string, number, ('VERIFY' | 'ADMIN_TEST')?][] = [
+      [3, 'FR', 'AUTHENTIC', 5],
+      [3, 'GB', 'AUTHENTIC_OWNERSHIP_VERIFIED', 2],
+      [3, 'CN', 'INVALID_SIGNATURE', 2],
+      [3, null, 'UNKNOWN', 1],
+      [3, 'FR', 'AUTHENTIC', 4, 'ADMIN_TEST'],
+      [20, 'IT', 'SUSPICIOUS_ACTIVITY', 1],
+      [20, 'FR', 'AUTHENTIC', 3],
+      [60, 'JP', 'MALFORMED_CODE', 1],
+      [60, 'US', 'AUTHENTIC', 2],
+      [120, 'BR', 'AUTHENTIC', 7],
+    ];
+    for (const [daysAgo, country, state, n, type] of history) {
+      for (let i = 0; i < n; i++) {
+        await ctx.db.insertInto('scan_events').values({ occurred_at: at(daysAgo), event_type: type ?? 'VERIFY', country, result_state: state }).execute();
+      }
+    }
+    await aggregateScanStats(ctx.db, new Date());
+
+    await page.click('.side__link[data-route=analytics]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Analytics');
+    expect(await page.locator('.side__link.is-active').textContent()).toBe('Analytics');
+    // Ninety days by default: four figures, the curve of every day, one curve per state.
+    expect(await page.locator('[data-testid=range-90]').getAttribute('aria-current')).toBe('page');
+    const kpis = page.locator('.view--analytics .kpi');
+    expect(await kpis.locator('.kpi__value').allTextContents()).toEqual(['17', '12', '5', '6']);
+    expect(await kpis.nth(2).getAttribute('class')).toContain('kpi--critical');
+    const trend = page.locator('[data-testid=analytics-trend]');
+    expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(90);
+    expect(await page.locator('.trend__tick').count()).toBe(5);
+    const states = page.locator('[data-testid=analytics-states] .srow');
+    expect(await states.count()).toBe(9);
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] svg.spark').getAttribute('class')).toBe('spark spark--critical');
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] .srow__value').textContent()).toBe('2');
+    expect(await page.locator('.srow.srow--zero').count()).toBe(3);
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] a.srow__label').getAttribute('href')).toMatch(/^#\/scans\?state=INVALID_SIGNATURE&from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}$/);
+    // The countries: France first (its staff scans not counted); the signals, China first, in oxblood (its signatures did not verify).
+    const countries = page.locator('.panel--countries .bar');
+    expect(await countries.first().locator('.bar__label').textContent()).toBe('FR · France');
+    expect(await countries.first().locator('.bar__value').textContent()).toBe('8');
+    expect(await countries.count()).toBe(7);
+    const signals = page.locator('.panel--signals');
+    expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'JP · Japan', 'Unknown location']);
+    expect(await signals.locator('.bar').first().locator('.bar__fill').getAttribute('class')).toContain('bar__fill--critical');
+    const breakdown = page.locator('.panel--signal-table table.table tbody tr');
+    expect(await breakdown.count()).toBe(4);
+    expect(await breakdown.first().locator('td').allTextContents()).toEqual(['CN · China', '2', '0', '0', '0', '2', '2']);
+    expect(await breakdown.nth(1).locator('td').allTextContents()).toEqual(['IT · Italy', '0', '0', '0', '1', '1', '1']);
+    // The cursor reads a day from the keyboard: three days ago, its ten scans, state by state.
+    await trend.focus();
+    await page.keyboard.press('End');
+    const back = daySpan(utcDay(at(3)), lastCompleteDay(new Date())) - 1;
+    for (let i = 0; i < back; i++) await page.keyboard.press('ArrowLeft');
+    const tip = page.locator('[data-testid=analytics-tip]');
+    await expect.poll(() => tip.isVisible()).toBe(true);
+    expect(await tip.locator('.trend__tip-total').textContent()).toBe('10 SCANS');
+    expect(await tip.locator('.trend__tip-line').allTextContents()).toEqual(['AUTHENTIC5', 'AUTHENTIC OWNERSHIP VERIFIED2', 'UNKNOWN1', 'INVALID SIGNATURE2']);
+    expect(await trend.getAttribute('aria-valuetext')).toContain('10 SCANS');
+    // And from the pointer, over the last day.
+    const box = (await trend.boundingBox())!;
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
+    await expect.poll(() => tip.locator('.trend__tip-total').textContent()).toBe('0 SCANS');
+    expect(await page.locator('table.table caption', { hasText: 'Scans per day' }).count()).toBe(1);
+    // Counts and dates read in Helvetica Neue, as everywhere in the console.
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'analytics', { full: true });
+
+    // Thirty days: Japan and the United States fall out of the window.
+    await page.click('[data-testid=range-30]');
+    await expect.poll(() => kpis.first().locator('.kpi__value').textContent()).toBe('14');
+    expect(await page.evaluate(() => location.hash)).toBe('#/analytics?days=30');
+    expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(30);
+    expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'Unknown location']);
+    expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
   it('prints a production batch of 120 codes in two clicks: the layout before, the manifest after', async () => {

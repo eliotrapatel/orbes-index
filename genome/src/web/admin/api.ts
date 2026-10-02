@@ -16,6 +16,7 @@ import type {
   AdminProfile,
   AdminSession,
   AdminUser,
+  AnalyticsData,
   AnomalyContext,
   AnomalyFilters,
   AnomalyRecord,
@@ -298,6 +299,11 @@ export class AdminApi {
 
   dashboard(): Promise<DashboardData> {
     return this.get('/api/admin/dashboard');
+  }
+
+  /** Daily scan statistics: the `days` complete days to yesterday (UTC), or the days `from` to `to` (at most 366). */
+  analytics(q: { days?: number; from?: string; to?: string } = {}): Promise<AnalyticsData> {
+    return this.get('/api/admin/analytics', q);
   }
 
   categories(): Promise<Items<Category>> {
