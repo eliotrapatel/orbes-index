@@ -111,7 +111,7 @@ docker compose ps                                                # caddy, app, p
 ## 7. Catalogue and first products (admin console)
 
 1. **Catalogue:** create the categories (e.g. J Jewelry, L Leather Goods, W Watches, F Fragrance, A Accessories). Category letters and indices are permanent. Then create collections and models (e.g. MONOLITHE · RING · 925 STERLING SILVER).
-2. **Generator:** issue a product, choosing category, model, material, batch and production date. Tick "claim code" if the certificate card will carry a scratch-off claim code.
+2. **Generator:** issue a product, choosing category, model, material, batch and production date. Tick "claim code" if the certificate card will carry a scratch-off claim code. For a production run, use **BATCH**: the same template, then a quantity or the workshop's CSV (one row per piece: `variant`, `sku`, `serial`, each optional), checked line by line and previewed before *SIGN 120 PRODUCTS*. Save the certificate cards or the results file before leaving the result: the claim codes are shown once (API §14.11).
 3. **Download the artifact:**
    - **PDF** for print, **SVG** for engraving or foil vendors, **PNG** for previews.
    - Recommended minimum size: **30 mm**, or **20 mm** for small tags if customers can zoom.

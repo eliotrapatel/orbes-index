@@ -1694,6 +1694,143 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* The generator's two modes, SINGLE PIECE · BATCH: links in the page head, the
+   current one underlined, as the verification app's tabs (BRAND §3.1, §6). */
+.gen__modes {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.gen__mode {
+  position: relative;
+  padding: 10px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink-soft);
+  transition: color var(--t-med) var(--ease);
+}
+
+.gen__mode::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0.24em;
+  bottom: 2px;
+  height: 1px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--t-med) var(--ease);
+}
+
+.gen__mode:hover,
+.gen__mode:focus-visible,
+.gen__mode[aria-current="page"] {
+  color: var(--ink);
+}
+
+.gen__mode[aria-current="page"]::after {
+  transform: scaleX(1);
+}
+
+/* The separator between the modes: a 3 px disc in --metal, decoration only (BRAND §3.5). */
+.gen__modes-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--metal);
+}
+
+/* Batch: the CSV of the pieces, what is wrong with it, and its first rows before signing. */
+.cinput--file {
+  height: auto;
+  padding: 10px 0 12px;
+  font-size: var(--fs-line);
+  cursor: pointer;
+}
+
+.cinput--file::file-selector-button {
+  margin-right: 16px;
+  padding: 9px 16px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.cinput--file::file-selector-button:hover {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.batch__problems {
+  list-style: none;
+}
+
+.batch__problem {
+  padding: 8px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.batch__preview {
+  margin-top: 18px;
+}
+
+.batch__more {
+  margin-top: 10px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+/* Batch result: the claim codes' panel holds no code itself (they are in the table, piece by
+   piece): its label, note and what was saved on the left, its tools stacked on the right. */
+.claim--batch {
+  grid-template-rows: auto auto 1fr;
+  align-items: start;
+}
+
+.claim--batch .claim__label {
+  grid-column: 1;
+}
+
+.claim--batch .claim__note {
+  max-width: 640px;
+  margin-top: 14px;
+  line-height: 1.7;
+}
+
+.claim--batch .claim__tools {
+  grid-row: 1 / span 3;
+  align-items: stretch;
+  width: 260px;
+}
+
+.claim--batch .claim__tools .cfield {
+  margin-bottom: 6px;
+}
+
+.batch__saved {
+  grid-column: 1;
+  min-height: 16px;
+  margin-top: 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
 /* ── Enrolment ─────────────────────────────────────────────────────────── */
 
 .enrol__secret {
@@ -2098,6 +2235,7 @@ a.bar__label:hover {
 .actions__title,
 .artifact__downloads-label,
 .gen__identity-label,
+.gen__mode,
 .gen__notes-title,
 .claim__label,
 .loading__text,

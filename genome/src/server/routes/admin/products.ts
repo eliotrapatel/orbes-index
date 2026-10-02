@@ -1,6 +1,7 @@
 /**
- * Products: list, issue (the generator), full detail, lifecycle moves, code
- * re-issue, warranty and service records, ownership confirmation.
+ * Products: list, issue (the generator: one product, or a batch of up to 50
+ * sharing a template), full detail, lifecycle moves, code re-issue, warranty
+ * and service records, ownership confirmation.
  *
  * Roles: reads AUDITOR; mutations OPERATOR; revoking (a transition to
  * REVOKED) and reinstating ADMIN. The services own the business rules and
@@ -22,6 +23,7 @@ import { isKeyTrustedAt } from '../../keys/key-service.js';
 import {
   completeServiceBody,
   emptyBody,
+  issueBatchBody,
   openServiceBody,
   optionalReasonBody,
   pageOf,
@@ -40,7 +42,7 @@ import { requireProduct } from '../../services/lifecycle.js';
 import type { AppContext } from '../../context.js';
 import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
-import { codeJson, genomeJson, issuedCodeJson, productJson } from './serialize.js';
+import { codeJson, genomeJson, issueBatchLineJson, issuedCodeJson, productJson } from './serialize.js';
 
 /** Transitions that end a product's public validity: ADMIN only (contract §3: revocation is ADMIN's). */
 export const ADMIN_ONLY_TARGETS: ReadonlySet<string> = new Set(['REVOKED', 'RETIRED']);
@@ -186,6 +188,14 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       // Shown once: only its scrypt hash is stored.
       ...(r.claimCode ? { claimCode: r.claimCode } : {}),
     };
+  });
+
+  // A batch: up to 50 pieces sharing a template, one result per piece. 200 even when pieces failed (read each
+  // result): pieces already signed are never undone, so their one-time claim codes must reach the operator.
+  app.post('/api/admin/products/batch', { config: { guard: { minRole: 'OPERATOR' } } }, async (request) => {
+    const { template, items } = parse(issueBatchBody, request.body);
+    const r = await issuance.issueBatch(template, items, adminActor(request));
+    return { issued: r.issued, failed: r.failed, skipped: r.skipped, items: r.lines.map(issueBatchLineJson) };
   });
 
   // ── Lifecycle ────────────────────────────────────────────────────────────

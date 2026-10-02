@@ -273,6 +273,25 @@ export interface IssueInput {
   authPolicy?: string;
 }
 
+/** POST /api/admin/products/batch: what every piece shares (an issue body without variant, SKU and serial). */
+export type IssueBatchTemplate = Omit<IssueInput, 'variant' | 'sku' | 'serial'>;
+
+/** What changes from one piece of a batch to the next. */
+export type IssueBatchItem = Pick<IssueInput, 'variant' | 'sku' | 'serial'>;
+
+/** One piece of a batch, in the order sent: signed (its claim code shown once), refused, or never attempted. */
+export type IssueBatchLine =
+  | { index: number; status: 'ISSUED'; productId: string; codeId: string; serial: number; sku: string; variant: string | null; claimCode?: string }
+  | { index: number; status: 'FAILED'; error: { code: string; message: string } }
+  | { index: number; status: 'SKIPPED' };
+
+export interface IssueBatchResponse {
+  issued: number;
+  failed: number;
+  skipped: number;
+  items: IssueBatchLine[];
+}
+
 export interface StatusHistoryEntry {
   id: string;
   from: ProductStatus | null;

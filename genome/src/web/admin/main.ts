@@ -12,6 +12,9 @@
  * prefixed to the tab title as `(3)`: asked on every navigation and every
  * minute while the tab is visible (ui/attention.ts), only by a role that
  * sees the link.
+ *
+ * A view may hold its page (ui/leave-guard.ts: a batch's claim codes not yet
+ * saved): navigating away or signing out then asks first.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
 import { monogramSvg } from '../shared/monogram.js';
@@ -23,6 +26,7 @@ import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
 import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
+import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
 import { notifyError } from './ui/toast.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
@@ -231,6 +235,8 @@ function markNav(active: RouteName | null): void {
 function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
+  // Whatever a view held (a batch's claim codes) left with it.
+  releasePage();
   forgetAttention();
   resetProductViewState();
   resetCodesViewState();
@@ -250,6 +256,7 @@ function showLogin(notice?: string): void {
 }
 
 async function logout(): Promise<void> {
+  if (!(await confirmLeave())) return;
   try {
     await api.logout();
   } catch (e) {
@@ -363,7 +370,18 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   }
 }
 
-window.addEventListener('hashchange', () => void route());
+/**
+ * A navigation away from a held page (a batch's claim codes not yet saved) is put back until the
+ * admin chooses: staying keeps the page as it was; leaving releases it and goes where they asked.
+ */
+async function navigated(ev: HashChangeEvent): Promise<void> {
+  if (heldMessage() === null) return route();
+  const target = location.hash;
+  history.replaceState(null, '', ev.oldURL);
+  if (await confirmLeave()) location.hash = target;
+}
+
+window.addEventListener('hashchange', (ev) => void navigated(ev));
 
 async function boot(): Promise<void> {
   mount(app, loading('Orbes'));

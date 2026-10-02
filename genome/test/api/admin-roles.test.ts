@@ -28,6 +28,7 @@ const PROBES: Probe[] = [
   { group: 'collections', method: 'POST', url: '/api/admin/collections', body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: '/api/admin/products', min: 'AUDITOR' },
   { group: 'products', method: 'POST', url: '/api/admin/products', body: INVALID, min: 'OPERATOR' },
+  { group: 'products', method: 'POST', url: '/api/admin/products/batch', body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: `/api/admin/products/${PID}`, min: 'AUDITOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/transitions`, body: INVALID, min: 'OPERATOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/reinstate`, body: INVALID, min: 'ADMIN' },

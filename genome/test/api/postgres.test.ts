@@ -140,6 +140,18 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     expect(manifest.statusCode, manifest.body).toBe(200);
     expect(manifest.body.split('\r\n')[1]).toBe(`"1","1","1","${batched.product.productId}","${batched.product.sku}","Size 52","925 STERLING SILVER","${batched.code.id}"`);
 
+    // ── A batch on pg: a transaction per piece, a serial already taken failing its piece alone ──
+    const lot = await op.post('/api/admin/products/batch', {
+      template: { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', productionBatch: 'B-PG-2', withClaimSecret: true },
+      items: [{ variant: 'Size 50' }, { serial: batched.product.serial }, { variant: 'Size 54' }],
+    });
+    expect(lot.statusCode, lot.body).toBe(200);
+    const lotBody = safeJson(lot) as any;
+    expect(lotBody.items.map((i: any) => i.status)).toEqual(['ISSUED', 'FAILED', 'ISSUED']);
+    expect(lotBody.items[1].error.code).toBe('SERIAL_TAKEN');
+    expect(lotBody.items[0].claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-2')) as any).total).toBe(2);
+
     const detail = safeJson(await op.get(`/api/admin/products/${p.product.productId}`)) as any;
     expect(detail.codes[0].verification.valid).toBe(true);
     expect(detail.scans.count).toBeGreaterThanOrEqual(26);

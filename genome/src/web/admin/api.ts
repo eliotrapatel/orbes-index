@@ -32,6 +32,9 @@ import type {
   Collection,
   DashboardData,
   GenomeJson,
+  IssueBatchItem,
+  IssueBatchResponse,
+  IssueBatchTemplate,
   IssueInput,
   IssueResponse,
   IssuedCodeJson,
@@ -341,6 +344,11 @@ export class AdminApi {
 
   issue(input: IssueInput): Promise<IssueResponse> {
     return this.post('/api/admin/products', input);
+  }
+
+  /** Up to 50 pieces sharing a template, one result each; pieces already signed stay signed whatever happens to the others. */
+  issueBatch(template: IssueBatchTemplate, items: readonly IssueBatchItem[]): Promise<IssueBatchResponse> {
+    return this.post('/api/admin/products/batch', { template, items: [...items] });
   }
 
   transition(productId: string, to: ProductStatus, reason?: string): Promise<{ statusChange: StatusChange; lifecycle: LifecycleSnapshot }> {

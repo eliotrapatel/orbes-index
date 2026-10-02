@@ -12,7 +12,7 @@ import { KeyService, MemoryKeyProvider, type KeyProvider } from '../../src/serve
 import { AuditService } from '../../src/server/services/audit.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
-import { deriveSku, IssuanceService, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
+import { deriveSku, ISSUE_BATCH_ACTION, IssuanceService, MAX_ISSUE_BATCH, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { requireDecoder } from '../render/decoder-support.js';
@@ -578,6 +578,150 @@ describe('IssuanceService.renderCode', () => {
     expect(text).toMatch(/\/Count 1\b/); // 3 unique codes at 60 mm fit on one A4 page
     expect((await w.audit.list({ action: 'code.render_sheet' })).items[0].details).toMatchObject({ codeIds: ids });
     expect((await domainError(w.issuance.renderPrintSheet([]))).code).toBe('VALIDATION_FAILED');
+  });
+});
+
+describe('IssuanceService.issueBatch', () => {
+  let w: World;
+  beforeEach(async () => {
+    w = await world();
+  });
+  afterAll(async () => {
+    await w?.t.close();
+  });
+
+  const template = (w: World, extra: Partial<IssueProductInput> = {}) => ({ categoryCode: 'J', modelId: w.modelId, material: '925 STERLING SILVER', productionBatch: 'B-2026-05-A', ...extra });
+  const products = (w: World) => w.t.db.selectFrom('products').select(['product_id', 'serial', 'variant', 'sku', 'production_batch']).orderBy('serial').execute();
+
+  it('issues the pieces in order, one product each, and records the batch without its claim codes', async () => {
+    const r = await w.issuance.issueBatch(template(w, { withClaimSecret: true }), [{ variant: '52' }, { variant: '54', sku: 'MNL-RG-54-POLI' }, {}], admin);
+    expect(r).toMatchObject({ issued: 3, failed: 0, skipped: 0 });
+    expect(r.lines.map((l) => [l.index, l.status])).toEqual([[0, 'ISSUED'], [1, 'ISSUED'], [2, 'ISSUED']]);
+    const issued = r.lines.map((l) => (l.status === 'ISSUED' ? l.result : null)!);
+    expect(issued.map((x) => x.product.serial)).toEqual([1, 2, 3]);
+    expect(issued.map((x) => x.product.sku)).toEqual(['MNL-RG-52', 'MNL-RG-54-POLI', 'MNL-RG']);
+    expect(issued.every((x) => x.product.productionBatch === 'B-2026-05-A' && x.product.hasClaimSecret)).toBe(true);
+    // Each claim code is the product's own (its hash only is stored).
+    const hashes = await w.t.db.selectFrom('products').select(['product_id', 'claim_secret_hash']).execute();
+    for (const x of issued) {
+      const row = hashes.find((h) => h.product_id === x.product.productId)!;
+      expect(await verifyClaimCode(x.claimCode!, row.claim_secret_hash!)).toBe(true);
+    }
+    expect(new Set(issued.map((x) => x.claimCode)).size).toBe(3);
+
+    const batch = (await w.audit.list({ action: ISSUE_BATCH_ACTION })).items;
+    expect(batch).toHaveLength(1);
+    expect(batch[0]).toMatchObject({ actorType: 'admin', actorId: 'admin-7', targetType: 'product', targetId: null });
+    expect(batch[0].details).toEqual({
+      count: 3,
+      issued: 3,
+      failed: 0,
+      skipped: 0,
+      productIds: issued.map((x) => x.product.productId),
+      failures: [],
+      category: 'J',
+      modelId: w.modelId,
+      productionBatch: 'B-2026-05-A',
+      claimSecret: true,
+    });
+    expect((await w.audit.list({ action: 'product.issue' })).total).toBe(3);
+    const everything = JSON.stringify((await w.audit.list({}, { page: 1, pageSize: 200 })).items);
+    for (const x of issued) expect(everything).not.toContain(x.claimCode!.replace(/-/g, '').slice(0, 8));
+  });
+
+  it('a variant, SKU or serial in the template does not reach the pieces', async () => {
+    const r = await w.issuance.issueBatch({ ...template(w), variant: 'X', sku: 'NOPE', serial: 900 } as never, [{ variant: '50' }, {}], admin);
+    expect(r.issued).toBe(2);
+    expect((await products(w)).map((p) => [p.serial, p.variant, p.sku])).toEqual([
+      [1, '50', 'MNL-RG-50'],
+      [2, null, 'MNL-RG'],
+    ]);
+  });
+
+  it('checks every line, the serials and the template before signing anything', async () => {
+    for (const items of [[], Array.from({ length: MAX_ISSUE_BATCH + 1 }, () => ({}))]) {
+      expect(await domainError(w.issuance.issueBatch(template(w), items, admin))).toMatchObject({ code: 'VALIDATION_FAILED', httpStatus: 400 });
+    }
+    const bad = await domainError(w.issuance.issueBatch(template(w), [{ variant: '50' }, { variant: '52' }, { sku: '-bad' }], admin));
+    expect(bad).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(bad.publicMessage).toMatch(/^items\.2: SKU may contain/);
+    const twice = await domainError(w.issuance.issueBatch(template(w), [{ serial: 12 }, { variant: '52' }, { serial: 12 }], admin));
+    expect(twice.publicMessage).toBe('items.2.serial: the same serial as items.0.');
+    const material = await domainError(w.issuance.issueBatch(template(w, { material: 'a\tb' }), [{}, {}], admin));
+    expect(material.publicMessage).toBe('template: Material contains invalid characters.');
+    expect(await domainError(w.issuance.issueBatch(template(w, { modelId: w.leatherModelId }), [{}], admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(await domainError(w.issuance.issueBatch(template(w, { modelId: '00000000-0000-4000-8000-000000000000' }), [{}], admin))).toMatchObject({ code: 'MODEL_NOT_FOUND' });
+    expect(await domainError(w.issuance.issueBatch(template(w, { productionDate: '2026-06-30' }), [{}], admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(await products(w)).toEqual([]);
+    expect((await w.audit.list({ action: ISSUE_BATCH_ACTION })).total).toBe(0);
+  });
+
+  it('a serial taken meanwhile fails its piece alone: the others are issued', async () => {
+    await w.issuance.issueProduct(ring(w, { serial: 7 }), admin);
+    const r = await w.issuance.issueBatch(template(w), [{ variant: '50' }, { serial: 7 }, { variant: '54' }], admin);
+    expect(r).toMatchObject({ issued: 2, failed: 1, skipped: 0 });
+    expect(r.lines[1]).toEqual({ index: 1, status: 'FAILED', error: { code: 'SERIAL_TAKEN', message: 'This serial number is already used.' } });
+    expect((await products(w)).filter((p) => p.production_batch === 'B-2026-05-A').map((p) => [p.serial, p.variant])).toEqual([
+      [8, '50'],
+      [9, '54'],
+    ]);
+    const batch = (await w.audit.list({ action: ISSUE_BATCH_ACTION })).items[0];
+    expect(batch.details).toMatchObject({ issued: 2, failed: 1, failures: [{ index: 1, code: 'SERIAL_TAKEN' }] });
+  });
+
+  it('a failure that is not the piece\'s own stops the batch: signed pieces stay, the rest is skipped', async () => {
+    let signs = 0;
+    const flaky: KeyProvider = {
+      name: 'memory',
+      generate: (kid) => w.provider.generate(kid),
+      sign: async (ref, message) => {
+        if (++signs > 1) throw new Error('HSM offline');
+        return w.provider.sign(ref, message);
+      },
+    };
+    const keys = new KeyService({ db: w.t.db, provider: flaky, audit: w.audit, clock: w.clock.now });
+    const issuance = new IssuanceService({ db: w.t.db, keys, audit: w.audit, categories: w.categories, clock: w.clock.now });
+    const r = await issuance.issueBatch(template(w, { withClaimSecret: true }), [{ variant: '50' }, { variant: '52' }, { variant: '54' }], admin);
+    expect(r).toMatchObject({ issued: 1, failed: 1, skipped: 1 });
+    expect(r.lines.map((l) => l.status)).toEqual(['ISSUED', 'FAILED', 'SKIPPED']);
+    expect(r.lines[1]).toMatchObject({ error: { code: 'SIGNING_UNAVAILABLE' } });
+    expect((await products(w)).map((p) => p.variant)).toEqual(['50']);
+    expect((await w.audit.list({ action: ISSUE_BATCH_ACTION })).items[0].details).toMatchObject({ issued: 1, failed: 1, skipped: 1 });
+
+    // An unexpected error stops it the same way, with a generic message.
+    const plain = new IssuanceService({ db: w.t.db, keys: w.keys, audit: w.audit, categories: w.categories, clock: w.clock.now });
+    const original = plain.issueProduct.bind(plain);
+    let n = 0;
+    plain.issueProduct = async (input, actor) => {
+      if (++n === 2) throw new TypeError('boom');
+      return original(input, actor);
+    };
+    const u = await plain.issueBatch(template(w), [{}, {}, {}], admin);
+    expect(u.lines.map((l) => l.status)).toEqual(['ISSUED', 'FAILED', 'SKIPPED']);
+    expect(u.lines[1]).toEqual({ index: 1, status: 'FAILED', error: { code: 'INTERNAL_ERROR', message: 'This piece could not be issued.' } });
+  });
+
+  it('returns the signed pieces even when the batch\'s own audit entry cannot be written', async () => {
+    const record = w.audit.record.bind(w.audit);
+    w.audit.record = (async (entry, trx) => {
+      if (entry.action === ISSUE_BATCH_ACTION) throw new Error('audit unavailable');
+      return record(entry, trx);
+    }) as typeof w.audit.record;
+    const r = await w.issuance.issueBatch(template(w, { withClaimSecret: true }), [{}, {}], admin);
+    expect(r.issued).toBe(2);
+    expect(r.lines.every((l) => l.status === 'ISSUED' && typeof l.result.claimCode === 'string')).toBe(true);
+    expect((await w.audit.list({ action: 'product.issue' })).total).toBe(2);
+  });
+
+  it('signs one batch at a time per admin', async () => {
+    const first = w.issuance.issueBatch(template(w, { withClaimSecret: true }), [{}, {}], admin);
+    const second = await domainError(w.issuance.issueBatch(template(w), [{}], admin));
+    expect(second).toMatchObject({ code: 'RATE_LIMITED', httpStatus: 429 });
+    // Another admin is not held back, and the first admin may start again once the first batch is done.
+    const other = await w.issuance.issueBatch(template(w), [{}], { type: 'admin', id: 'admin-8', ipHash: 'iphash' });
+    expect(other.issued).toBe(1);
+    expect((await first).issued).toBe(2);
+    expect((await w.issuance.issueBatch(template(w), [{}], admin)).issued).toBe(1);
   });
 });
 

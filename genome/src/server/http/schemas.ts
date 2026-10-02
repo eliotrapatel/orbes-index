@@ -20,6 +20,7 @@ import {
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
+import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -230,6 +231,48 @@ export const productListQuery = z.object({
     .optional(),
   q: z.string().trim().max(64, 'At most 64 characters').optional(),
   productionBatch,
+});
+
+/** An optional field where '' and null mean "not given" (admin forms send empty fields). */
+const formOptional = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === '' || v === null ? undefined : v), schema.optional());
+
+/**
+ * A batch of pieces to issue (POST /api/admin/products/batch): the fields they share, then 1 to
+ * MAX_ISSUE_BATCH lines of what changes from one piece to the next. The shapes and bounds of
+ * POST /api/admin/products; the issuance service applies its rules to every line before it signs any.
+ */
+export const issueBatchBody = body({
+  template: z.strictObject({
+    categoryCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]$/, 'Must be a single letter A–Z')
+      .transform((s) => s.toUpperCase()),
+    modelId: uuid,
+    collectionId: formOptional(uuid),
+    material: text(200),
+    productionBatch: optionalText(100),
+    productionDate: formOptional(isoDate),
+    year: formOptional(z.number().int('Must be a whole year').min(2000, 'Must be 2000–2099').max(2099, 'Must be 2000–2099')),
+    authPolicy: formOptional(z.string().trim().max(200, 'At most 200 characters')),
+    withClaimSecret: formOptional(z.boolean()),
+  }),
+  items: z
+    .array(
+      z.strictObject({
+        variant: optionalText(100),
+        sku: formOptional(
+          z
+            .string()
+            .trim()
+            .max(64, 'At most 64 characters')
+            .regex(/^[A-Za-z0-9][A-Za-z0-9._\-/ ]*$/, 'Letters, digits, space, dot, underscore, hyphen and slash only'),
+        ),
+        serial: formOptional(z.number().int('Must be a whole number').min(1, 'Must be 1–999999').max(999_999, 'Must be 1–999999')),
+      }),
+    )
+    .min(1, 'Add at least one piece')
+    .max(MAX_ISSUE_BATCH, `At most ${MAX_ISSUE_BATCH} pieces per request`),
 });
 
 export const transitionBody = body({

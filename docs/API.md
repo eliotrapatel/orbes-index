@@ -193,7 +193,7 @@ Transport and framework:
 | `NOT_FOUND` | 404 | Unknown route or method. |
 | `PAYLOAD_TOO_LARGE` | 413 | Body over 16 KB. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Body not sent as `application/json`. |
-| `RATE_LIMITED` | 429 | Rate limit exceeded (§3), or too many claim-code attempts for a product. |
+| `RATE_LIMITED` | 429 | Rate limit exceeded (§3), too many claim-code attempts for a product, or a certificate request or batch of the same admin still in progress (§15.7, §14.11). |
 | `INTERNAL_ERROR` | 500 | Unexpected failure. Details go to the server log only. |
 | `SERVICE_UNAVAILABLE` | 503 | The server is shutting down; retry (another instance will answer). |
 
@@ -359,6 +359,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/admin/models` | OPERATOR | yes | admin | 13.4 |
 | GET | `/api/admin/products` | AUDITOR | — | admin | 14.1 |
 | POST | `/api/admin/products` | OPERATOR | yes | admin | 14.2 |
+| POST | `/api/admin/products/batch` | OPERATOR | yes | admin | 14.11 |
 | GET | `/api/admin/products/:productId` | AUDITOR | — | admin | 14.3 |
 | POST | `/api/admin/products/:productId/transitions` | OPERATOR (**ADMIN** for `to: REVOKED` or `RETIRED`) | yes | admin | 14.4 |
 | POST | `/api/admin/products/:productId/reinstate` | **ADMIN** | yes | admin | 14.5 |
@@ -395,7 +396,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId` and `sort` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId` and `sort` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1325,6 +1326,7 @@ Example request:
 - `code.data` is the base64url of the 79-byte framed data: exactly what a scanner reads and what `POST /api/v1/verify` takes. Anyone holding it can print a code that verifies, so it is returned only to OPERATOR responses that produce codes (issuance and re-issue), never in read views.
 - `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it under the scratch-off panel of the certificate card supplied with the product: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
 - `code.nonce` and `code.payloadHash` are hexadecimal; `issuedDay` counts days since 2024-01-01 UTC.
+- Several pieces that share a template (a production run, a collection in sizes): §14.11 issues up to 50 per request, one result per piece.
 
 Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `404 REFERENCE_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`.
 
@@ -1503,6 +1505,64 @@ OPERATOR. Client services reviewed a proof of purchase: the current owner become
 
 Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 NO_OWNER`, `409 ALREADY_VERIFIED`.
 
+### 14.11 `POST /api/admin/products/batch` — issue a batch (extension of the contract)
+
+OPERATOR. Up to **50 pieces that share a template**, one result per piece. Each piece is issued exactly as by §14.2 (`IssuanceService.issueProduct`): its own serial, product, GENOME-01, code signed with the ACTIVE key, warranty row and `product.issue` audit entry, **in its own transaction**, in the order given. Why 50: requests are limited to 16 KB (§1.2) and each claim code costs one scrypt; the console sends a larger batch as several requests, one after the other (*In the console*, below).
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `template` | object | yes | What every piece shares: the fields of §14.2 except `variant`, `sku` and `serial`, with the same rules (`categoryCode`, `modelId`, `material` required; `collectionId`, `productionBatch`, `productionDate`, `year`, `authPolicy`, `withClaimSecret` optional; `""` and `null` count as absent). Unknown fields → `400`. |
+| `items` | object[] | yes | 1–50 pieces, each `{ variant?, sku?, serial? }` with the rules of §14.2 (`{}` is a piece with an allocated serial and the model's SKU). Unknown fields → `400`. |
+
+**Before anything is signed**, the whole request is refused and nothing is issued when: the body breaks a shape or a bound (`400`, the message names the piece, e.g. `items.2.sku: …`); the template or a piece breaks an issuance rule (`400`, e.g. `template: Material contains invalid characters.`, `items.1: Variant contains invalid characters.`); two pieces name the same `serial` (`400`, `items.2.serial: the same serial as items.0.`); or the template's category, model or collection is wrong (`404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `400` for a model of another category or a production date after tomorrow).
+
+**Then piece by piece.** A piece refused at signing time (its explicit serial taken meanwhile, a concurrent change, the serials of its year and category exhausted) fails **alone**: the other pieces are issued. A piece already signed is **never undone**. A failure that is not the piece's own (`503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, an unexpected error) stops the batch there: the pieces after it are `SKIPPED`, never attempted.
+
+**One batch at a time per admin**: each claim code is one scrypt on the server's small worker pool, which customers' sign-ins and claim-code registrations share (as for certificate cards, §15.7). A second batch sent by the same admin before the first is done answers `429 RATE_LIMITED` (*A batch is already being signed. Wait for it to finish, then try again.*), with nothing signed. The route also draws on the `admin` rate-limit group.
+
+Example request:
+
+```json
+{
+  "template": {
+    "categoryCode": "J",
+    "modelId": "73c68b47-012d-4569-a59a-fd2effa613c1",
+    "material": "925 STERLING SILVER",
+    "productionBatch": "B-2026-10-A",
+    "productionDate": "2026-10-01",
+    "withClaimSecret": true
+  },
+  "items": [{ "variant": "Size 52" }, { "variant": "Size 54", "sku": "MNL-RG-54-POLI" }, { "serial": 7 }]
+}
+```
+
+**200** (`Cache-Control: no-store`), **even when pieces failed**: read each result. One per piece, in the order sent; `index` is the piece's position in `items` (from 0).
+
+```json
+{
+  "issued": 2,
+  "failed": 1,
+  "skipped": 0,
+  "items": [
+    { "index": 0, "status": "ISSUED", "productId": "O26-J-00012", "codeId": "0b8e3c1e-…", "serial": 12, "sku": "MNL-RG-SIZE-52", "variant": "Size 52", "claimCode": "7KQ2-M4TD-9XWH" },
+    { "index": 1, "status": "ISSUED", "productId": "O26-J-00013", "codeId": "5d1f0a77-…", "serial": 13, "sku": "MNL-RG-54-POLI", "variant": "Size 54", "claimCode": "Q3VN-8RJC-2PYE" },
+    { "index": 2, "status": "FAILED", "error": { "code": "SERIAL_TAKEN", "message": "This serial number is already used." } }
+  ]
+}
+```
+
+- `ISSUED`: `productId`, `codeId` (the ACTIVE code, issue 1), `serial`, `sku`, `variant` (`null` when none), and `claimCode` with `withClaimSecret: true`, **returned once** as in §14.2 (only its scrypt hash is stored). No scannable `data`: print the batch's codes from the codes registry (§15.9, §15.3) and its certificate cards with §15.7.
+- `FAILED`: `error` is the public `{ code, message }` the piece would have got from §14.2 (`409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `409 CATEGORY_INACTIVE`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`), or `INTERNAL_ERROR` (*This piece could not be issued.*) for an unexpected failure, logged on the server.
+- `SKIPPED`: never attempted, because the batch stopped at an earlier piece.
+
+If the answer is lost (a network failure, a timeout), the server may have issued some or all of the pieces: find them in Products by their production batch (§14.1) before signing them again. Their claim codes cannot be shown again.
+
+Audited: `product.issue` for every piece issued (as §14.2), then `product.issue_batch` with `{ count, issued, failed, skipped, productIds, failures: [{ index, code }], category, modelId, productionBatch, claimSecret }` (`target_id` null). **No claim code in either.** The batch's entry is written after its pieces; if it cannot be written, the failure is logged and the results are still returned, since the pieces are already signed and audited and their claim codes exist nowhere else.
+
+**In the console** (Generator → BATCH, `#/generator?mode=batch`): the template, then *Pieces from* a CSV file or a quantity. The CSV holds one row per piece, its first line naming the columns `variant`, `sku` and `serial` (each optional, any order, case-insensitive; no other column); comma or semicolon, a byte-order mark and CRLF are accepted, blank lines skipped, at most 1 000 pieces and 1 MB. The browser checks the file and every piece with the single form's rules before anything is signed, each problem with its line (*Line 4 · SKU: …*), then shows the plan (*120 pieces · 3 requests of up to 50*) and the first ten rows. **SIGN 120 PRODUCTS** sends the requests one after the other (at most 50 pieces and 15 000 bytes each) and stops at the first request that fails; the result gives every piece its outcome: ISSUED, NOT SIGNED, NOT ATTEMPTED, NOT SENT (an earlier request failed), or NO ANSWER (look in Products before signing again). While the batch's claim codes are on screen, the page offers the **certificate cards** (§15.7, in requests of 50: cards, A4 sheets or the print shop's CSV) and a **results file** (CSV: line, piece, status, productId, sku, variant, serial, codeId, claimCode, message), and *"I have recorded them — hide"*; until one is saved or the codes are hidden, closing the tab (`beforeunload`), navigating in the console or signing out asks first. The codes are held in the page's memory only, as for one product.
+
+Errors (the whole request; nothing signed): `400 VALIDATION_FAILED`, `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `413 PAYLOAD_TOO_LARGE`, `429 RATE_LIMITED` (a batch of the same admin still in progress, or the `admin` group's limit).
+
 ---
 
 ## 15. Admin: codes and artifacts
@@ -1651,7 +1711,7 @@ Example:
 
 Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus }`; each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). Both carry canonical product ids, also for a product the request named by its uuid; only a product that was not found keeps the reference given. No claim code in either.
 
-In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
+In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code. A batch's result (§14.11) offers the cards of all its pieces, sent in requests of 50, one after the other.
 
 Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`, `429 RATE_LIMITED` (a request of the same admin still in progress, or the `admin` group's limit).
 

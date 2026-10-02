@@ -8,6 +8,10 @@ import { MAX_CODE_IDS } from '../../src/server/routes/admin/codes.js';
 import { ARTIFACT_THEME_NAMES as SERVER_THEME_NAMES } from '../../src/server/render/scene.js';
 import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
 import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
+import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
+import { issueBatchBody } from '../../src/server/http/schemas.js';
+import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
+import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import {
   anomalyFiltersFrom,
   badgeText,
@@ -48,6 +52,23 @@ import {
   sheetChunks,
   sheetPartFilename,
   type PrintSheetForm,
+  BATCH_COLUMNS,
+  batchCertificateItems,
+  batchPlanText,
+  batchProblemText,
+  batchRequests,
+  batchResultRows,
+  batchResultsCsv,
+  batchResultsFilename,
+  batchSummary,
+  buildIssueBatch,
+  CERTIFICATE_LIMITS,
+  ISSUE_BATCH_LIMITS,
+  parseBatchCsv,
+  quantityRows,
+  signBatchLabel,
+  type BatchRow,
+  type BatchTemplateForm,
   buildIssueInput,
   cellPitchNote,
   formatClaimCode,
@@ -582,6 +603,214 @@ describe('generator view model', () => {
     expect(formatClaimCode('ABCD-EFGH-JKMN')).toBe('ABCD-EFGH-JKMN');
     expect(formatClaimCode('abcdefghjkmn')).toBe('ABCD-EFGH-JKMN');
     expect(formatClaimCode('short')).toBe('short');
+  });
+});
+
+// ── Batches ────────────────────────────────────────────────────────────────
+
+describe('batch issuance view model', () => {
+  const T: BatchTemplateForm = {
+    categoryCode: 'J',
+    modelId: '22222222-2222-4222-8222-222222222222',
+    collectionId: '',
+    material: '925 STERLING SILVER',
+    productionBatch: 'B-2026-10-A',
+    productionDate: '2026-10-01',
+    year: '2026',
+    authPolicy: 'PRINTED_CODE',
+    withClaimSecret: true,
+  };
+  const row = (line: number | null, variant = '', sku = '', serial = ''): BatchRow => ({ line, variant, sku, serial });
+
+  it('mirrors the server: 50 pieces per request under its 16 KB body limit, 50 cards per certificate request, the same columns', () => {
+    expect(ISSUE_BATCH_LIMITS.perRequest).toBe(MAX_ISSUE_BATCH);
+    expect(ISSUE_BATCH_LIMITS.maxBodyBytes).toBeLessThan(BODY_LIMIT_BYTES);
+    expect(CERTIFICATE_LIMITS.perRequest).toBe(MAX_CERTIFICATE_ITEMS);
+    expect(Object.keys(issueBatchBody.shape.items.element.shape)).toEqual([...BATCH_COLUMNS]);
+    expect(Object.keys(issueBatchBody.shape.template.shape).sort()).toEqual(Object.keys(T).sort());
+  });
+
+  it('reads a spreadsheet CSV: byte-order mark, semicolons, CRLF, quotes, blank lines, any column order', () => {
+    const csv = '\uFEFFSKU;Variant;serial\r\nMNL-RG-52;"Size 52; polished";\r\n\r\n;"Size ""54""";12\r\nMNL-RG-56;Size 56\r\n';
+    const r = parseBatchCsv(csv);
+    expect(r).toEqual({
+      ok: true,
+      delimiter: ';',
+      columns: ['variant', 'sku', 'serial'],
+      rows: [
+        { line: 2, variant: 'Size 52; polished', sku: 'MNL-RG-52', serial: '' },
+        { line: 4, variant: 'Size "54"', sku: '', serial: '12' },
+        // A row may stop before the last columns.
+        { line: 5, variant: 'Size 56', sku: 'MNL-RG-56', serial: '' },
+      ],
+    });
+    // Commas by default; one column is enough; a quoted line break keeps the line count right.
+    const commas = parseBatchCsv('variant,sku\n"Size\n52",X-1\nSize 54,X-2');
+    expect(commas.ok && commas.rows.map((x) => [x.line, x.variant, x.sku])).toEqual([
+      [2, 'Size\n52', 'X-1'],
+      [4, 'Size 54', 'X-2'],
+    ]);
+    expect(commas.ok && commas.delimiter).toBe(',');
+    const one = parseBatchCsv('variant\n50 ML\n100 ML\n');
+    expect(one.ok && one.rows.map((x) => x.variant)).toEqual(['50 ML', '100 ML']);
+    expect(one.ok && one.columns).toEqual(['variant']);
+  });
+
+  it('names the line of every problem in the file', () => {
+    const problems = (csv: string) => {
+      const r = parseBatchCsv(csv);
+      return r.ok ? [] : r.problems.map(batchProblemText);
+    };
+    expect(problems('')).toEqual(['The file is empty.']);
+    expect(problems('\uFEFF\r\n\r\n')).toEqual(['The file is empty.']);
+    expect(problems('52,MNL-RG-52\n54,MNL-RG-54')).toEqual(['Line 1 · Name the columns on the first line: variant, sku, serial (each optional).']);
+    expect(problems('variant,size\n52,L')).toEqual(['Line 1 · Unknown column "size": the columns are variant, sku, serial.']);
+    expect(problems('variant,Variant\n52,54')).toEqual(['Line 1 · The column "variant" appears twice.']);
+    expect(problems('variant,sku\nSize 52, gold,MNL\nSize 54,MNL\nSize 56,MNL,extra')).toEqual([
+      'Line 2 · 3 values for 2 named columns: quote a value that holds ",".',
+      'Line 4 · 3 values for 2 named columns: quote a value that holds ",".',
+    ]);
+    expect(problems('variant,sku\n52,X\n"54,Y\n56,Z')).toEqual(['Line 3 · A quoted value is never closed.']);
+    expect(problems('variant,sku\n')).toEqual(['The file has no piece under its first line.']);
+    expect(problems(`variant\n${Array.from({ length: 1001 }, (_, i) => String(i)).join('\n')}`)).toEqual(['The file holds 1 001 pieces; a batch holds at most 1 000.']);
+    // An empty trailing column (a spreadsheet's extra delimiter) is ignored while it stays empty.
+    expect(parseBatchCsv('variant;sku;\n52;X;\n').ok).toBe(true);
+  });
+
+  it('checks the template once and every piece with the generator rules, line by line', () => {
+    const ok = buildIssueBatch(T, [row(2, 'Size 52'), row(3, '', 'MNL-RG-X'), row(4, '', '', '12')], NOW);
+    expect(ok).toEqual({
+      ok: true,
+      template: {
+        categoryCode: 'J',
+        modelId: '22222222-2222-4222-8222-222222222222',
+        material: '925 STERLING SILVER',
+        productionBatch: 'B-2026-10-A',
+        productionDate: '2026-10-01',
+        year: 2026,
+        withClaimSecret: true,
+      },
+      items: [{ variant: 'Size 52' }, { sku: 'MNL-RG-X' }, { serial: 12 }],
+      lines: [2, 3, 4],
+    });
+    const bad = buildIssueBatch(T, [row(2, 'a\u0007b'), row(3, '', '-bad'), row(4, '', '', '0'), row(5, '', '', '12'), row(6, '', '', '12')], NOW);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.templateErrors).toEqual({});
+      expect(bad.problems.map(batchProblemText)).toEqual([
+        'Line 2 · Variant: At most 100 characters, no control characters.',
+        'Line 3 · SKU: Letters, digits, space, . _ - / only (64 max).',
+        'Line 4 · Serial must be 1–999 999.',
+        'Line 6 · Serial 12 is already on line 5.',
+      ]);
+    }
+    // The template's errors go on its fields, once, not on every line.
+    const template = buildIssueBatch({ ...T, material: '', productionDate: '2026-02-30' }, [row(2), row(3)], NOW);
+    expect(!template.ok && template).toMatchObject({ templateErrors: { material: expect.any(String), productionDate: expect.any(String) }, problems: [] });
+    expect(buildIssueBatch(T, [], NOW)).toMatchObject({ ok: false, problems: [{ line: null, message: 'Add at least one piece.' }] });
+  });
+
+  it('turns a quantity into identical pieces, and reports a piece error once', () => {
+    expect(quantityRows('3', '50 ML', '')).toEqual({ ok: true, rows: [row(null, '50 ML'), row(null, '50 ML'), row(null, '50 ML')] });
+    for (const q of ['0', '1001', '2.5', 'abc', '']) expect(quantityRows(q, '', '').ok, q).toBe(false);
+    expect(quantityRows('1000', '', '').ok).toBe(true);
+    const bad = quantityRows('120', 'a\u0007b', '');
+    const refused = buildIssueBatch(T, bad.ok ? bad.rows : [], NOW);
+    expect(!refused.ok && refused.problems.map(batchProblemText)).toEqual(['Variant: At most 100 characters, no control characters.']);
+    const good = quantityRows('120', '50 ML', '');
+    const fine = buildIssueBatch(T, good.ok ? good.rows : [], NOW);
+    expect(fine.ok && fine.items.length).toBe(120);
+    expect(fine.ok && fine.items[0]).toEqual({ variant: '50 ML' });
+    expect(fine.ok && fine.lines.every((l) => l === null)).toBe(true);
+  });
+
+  it('sends a batch as requests of at most 50 pieces, every body under the byte budget, in order', () => {
+    const template = { categoryCode: 'J', modelId: T.modelId, material: T.material, productionBatch: 'B-1' };
+    const items = Array.from({ length: 120 }, (_, i) => ({ variant: `Size ${i}` }));
+    const parts = batchRequests(template, items);
+    expect(parts.map((p) => [p.start, p.items.length])).toEqual([
+      [0, 50],
+      [50, 50],
+      [100, 20],
+    ]);
+    expect(parts.flatMap((p) => p.items)).toEqual(items);
+    // Long variants in three-byte characters: the bytes decide before the count does.
+    const heavy = Array.from({ length: 120 }, () => ({ variant: '€'.repeat(100), sku: 'X'.repeat(64) }));
+    const split = batchRequests(template, heavy);
+    expect(split.length).toBe(4); // 3 by the count alone
+    expect(split[0].items.length).toBeLessThan(50);
+    for (const p of split) {
+      const bytes = new TextEncoder().encode(JSON.stringify({ template, items: p.items })).length;
+      expect(bytes).toBeLessThanOrEqual(ISSUE_BATCH_LIMITS.maxBodyBytes);
+      expect(p.items.length).toBeLessThanOrEqual(50);
+    }
+    expect(split.flatMap((p) => p.items)).toEqual(heavy);
+    expect(split.map((p) => p.start)).toEqual(split.map((_, i) => split.slice(0, i).reduce((n, q) => n + q.items.length, 0)));
+    expect(batchRequests(template, [])).toEqual([]);
+    expect(batchPlanText(120, 3)).toBe('120 pieces · 3 requests of up to 50');
+    expect(batchPlanText(1, 1)).toBe('1 piece · one request');
+    expect(batchPlanText(1000, 20)).toBe('1 000 pieces · 20 requests of up to 50');
+    expect(signBatchLabel(120)).toEqual(['Sign ', '120', ' products']);
+    expect(signBatchLabel(1).join('')).toBe('Sign 1 product');
+    expect(signBatchLabel(0).join('')).toBe('Sign the batch');
+  });
+
+  it('gives every piece its outcome, from the answers, a refusal, no answer, or nothing sent', () => {
+    const lines = [2, 3, 4, 5, 6, 7, 8];
+    const items = [{ variant: '50' }, { serial: 7 }, { variant: '54' }, { variant: '56' }, {}, {}, {}];
+    const issued = (index: number, n: number) => ({ index, status: 'ISSUED' as const, productId: `O26-J-0000${n}`, codeId: `c${n}`, serial: n, sku: 'MNL-RG', variant: null, claimCode: `AAAA-BBBB-CCC${n}` });
+    const rows = batchResultRows(lines, items, [
+      {
+        start: 0,
+        count: 3,
+        kind: 'answered',
+        response: { issued: 2, failed: 1, skipped: 0, items: [issued(0, 1), { index: 1, status: 'FAILED', error: { code: 'SERIAL_TAKEN', message: 'This serial number is already used.' } }, issued(2, 2)] },
+      },
+      { start: 3, count: 1, kind: 'answered', response: { issued: 0, failed: 0, skipped: 1, items: [{ index: 0, status: 'SKIPPED' }] } },
+      { start: 4, count: 1, kind: 'unanswered', message: 'No answer.' },
+      { start: 5, count: 1, kind: 'refused', message: 'A batch is already being signed.' },
+    ]);
+    expect(rows.map((r) => [r.piece, r.line, r.status])).toEqual([
+      [1, 2, 'ISSUED'],
+      [2, 3, 'FAILED'],
+      [3, 4, 'ISSUED'],
+      [4, 5, 'SKIPPED'],
+      [5, 6, 'NO_ANSWER'],
+      [6, 7, 'FAILED'],
+      [7, 8, 'NOT_SENT'],
+    ]);
+    expect(rows[0]).toMatchObject({ productId: 'O26-J-00001', codeId: 'c1', serial: 1, sku: 'MNL-RG', variant: null, claimCode: 'AAAA-BBBB-CCC1' });
+    expect(rows[0].message).toBeUndefined();
+    // What was asked for stays on a piece that was not signed.
+    expect(rows[1]).toMatchObject({ serial: 7, message: 'This serial number is already used.' });
+    expect(rows[3]).toMatchObject({ variant: '56', message: 'Not attempted: the batch stopped before this piece.' });
+    expect(rows[5].message).toBe('A batch is already being signed.');
+    expect(rows[6].message).toBe('Not sent: an earlier request failed.');
+
+    const sum = batchSummary(rows);
+    expect(sum).toMatchObject({ pieces: 7, issued: 2, notIssued: 4, noAnswer: 1, claimCodes: 2 });
+    expect(sum.text).toBe('2 of 7 pieces signed · 4 not signed · 1 without an answer: look for them in Products before signing them again.');
+    expect(batchSummary(rows.slice(0, 1)).text).toBe('1 of 1 piece signed.');
+    expect(batchCertificateItems(rows)).toEqual([
+      { productId: 'O26-J-00001', claimCode: 'AAAA-BBBB-CCC1' },
+      { productId: 'O26-J-00002', claimCode: 'AAAA-BBBB-CCC2' },
+    ]);
+  });
+
+  it('writes the results as a CSV a spreadsheet cannot run, named after the production batch', () => {
+    const csv = batchResultsCsv([
+      { piece: 1, line: 2, status: 'ISSUED', productId: 'O26-J-00001', codeId: 'c1', serial: 1, sku: 'MNL-RG-52', variant: '=SUM(A1)', claimCode: 'aaaabbbbcccc' },
+      { piece: 2, line: null, status: 'FAILED', serial: 7, message: 'This serial number is already used.' },
+    ]);
+    expect(csv.split('\r\n')).toEqual([
+      '"line","piece","status","productId","sku","variant","serial","codeId","claimCode","message"',
+      `"2","1","ISSUED","O26-J-00001","MNL-RG-52","'=SUM(A1)","1","c1","AAAA-BBBB-CCCC",""`,
+      '"","2","NOT SIGNED","","","","7","","","This serial number is already used."',
+      '',
+    ]);
+    expect(batchResultsFilename('B-2026-10-A', NOW, 120)).toBe('ORBES-batch-B-2026-10-A-2026-10-01-120-results.csv');
+    expect(batchResultsFilename('Lot été / 2026', NOW, 3)).toBe('ORBES-batch-Lot-t-2026-2026-10-01-3-results.csv');
+    expect(batchResultsFilename(undefined, NOW, 3)).toBe('ORBES-batch-2026-10-01-3-results.csv');
   });
 });
 

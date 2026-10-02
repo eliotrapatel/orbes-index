@@ -3,15 +3,30 @@
  * POST /api/admin/products body) and the artifact options (width, theme,
  * label, dpi, K-only black) for downloads, with the print-size advice; the
  * print sheet (options, layout preview, PDFs of 200) and the codes
- * registry's filters, which select a production batch to print.
+ * registry's filters, which select a production batch to print; a batch
+ * (a template, then a quantity or a CSV of one row per piece, checked line
+ * by line, sent as requests of 50, and its results line by line).
  *
  * The client checks shapes and bounds to give immediate feedback; the
  * server re-validates everything with its own strict schema.
  */
+import { csvDocument } from '../../../core/render/csv.js';
 import { artifactCellMm, layoutSheet } from '../../../core/render/sheet-layout.js';
 import type { ArtifactOptions, PrintSheetOptions } from '../api.js';
 import { formatCount } from '../format.js';
-import { AUTH_POLICY_KINDS, ARTIFACT_THEMES, type ArtifactFormat, type ArtifactTheme, type CodeFilters, type CodeJson, type IssueInput, type Model } from '../types.js';
+import {
+  AUTH_POLICY_KINDS,
+  ARTIFACT_THEMES,
+  type ArtifactFormat,
+  type ArtifactTheme,
+  type CodeFilters,
+  type CodeJson,
+  type IssueBatchItem,
+  type IssueBatchResponse,
+  type IssueBatchTemplate,
+  type IssueInput,
+  type Model,
+} from '../types.js';
 
 export interface IssueForm {
   categoryCode: string;
@@ -339,4 +354,388 @@ export function cellPitchNote(widthMm: number): string {
 export function formatClaimCode(code: string): string {
   const s = code.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
   return s.length === 12 ? `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}` : code;
+}
+
+// ── Batches ────────────────────────────────────────────────────────────────
+
+/**
+ * Bounds of a batch signed from the console. `perRequest` mirrors the
+ * server's MAX_ISSUE_BATCH (pieces per POST /api/admin/products/batch), and
+ * `maxBodyBytes` keeps every request under its 16 KB body limit
+ * (BODY_LIMIT_BYTES) whatever the variants hold: a larger batch is sent as
+ * several requests, one after the other. `maxPieces` and `maxFileBytes`
+ * bound one batch in the console (one CSV of up to 1 000 pieces).
+ */
+export const ISSUE_BATCH_LIMITS = Object.freeze({ perRequest: 50, maxBodyBytes: 15_000, maxPieces: 1000, maxFileBytes: 1_048_576 });
+
+/** Certificate cards per POST /api/admin/certificates (the server's MAX_CERTIFICATE_ITEMS). */
+export const CERTIFICATE_LIMITS = Object.freeze({ perRequest: 50 });
+
+/** The columns a batch CSV may name on its first line, one row per piece: each optional, no other accepted. */
+export const BATCH_COLUMNS = ['variant', 'sku', 'serial'] as const;
+export type BatchColumn = (typeof BATCH_COLUMNS)[number];
+
+/** The template of a batch: the issue form without what changes from piece to piece. */
+export type BatchTemplateForm = Omit<IssueForm, 'variant' | 'sku' | 'serial'>;
+
+/** One piece as read (raw strings), with the line of the file it starts on (null for a quantity). */
+export interface BatchRow {
+  line: number | null;
+  variant: string;
+  sku: string;
+  serial: string;
+}
+
+/** Something to fix before signing, with its line of the file when it has one. */
+export interface BatchProblem {
+  line: number | null;
+  message: string;
+}
+
+export type BatchCsv = { ok: true; rows: BatchRow[]; columns: BatchColumn[]; delimiter: ',' | ';' } | { ok: false; problems: BatchProblem[] };
+
+const count = (s: string, c: string) => s.split(c).length - 1;
+
+/**
+ * The records of a CSV text (RFC 4180: quoted values may hold the
+ * delimiter, quotes doubled, line breaks), each with the line it starts on.
+ */
+function csvRecords(text: string, delimiter: string): { ok: true; records: { line: number; fields: string[] }[] } | { ok: false; problem: BatchProblem } {
+  const records: { line: number; fields: string[] }[] = [];
+  let fields: string[] = [];
+  let field = '';
+  let quoted = false;
+  let fieldStart = true;
+  let line = 1;
+  let recordLine = 1;
+  let quoteLine = 1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else quoted = false;
+        continue;
+      }
+      if (c === '\n' || (c === '\r' && text[i + 1] !== '\n')) line++;
+      field += c;
+      continue;
+    }
+    if (c === '"' && fieldStart) {
+      quoted = true;
+      fieldStart = false;
+      quoteLine = line;
+      continue;
+    }
+    if (c === delimiter) {
+      fields.push(field);
+      field = '';
+      fieldStart = true;
+      continue;
+    }
+    if (c === '\r' || c === '\n') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      fields.push(field);
+      records.push({ line: recordLine, fields });
+      fields = [];
+      field = '';
+      fieldStart = true;
+      line++;
+      recordLine = line;
+      continue;
+    }
+    field += c;
+    fieldStart = false;
+  }
+  if (quoted) return { ok: false, problem: { line: quoteLine, message: 'A quoted value is never closed.' } };
+  if (field !== '' || fields.length > 0) {
+    fields.push(field);
+    records.push({ line: recordLine, fields });
+  }
+  return { ok: true, records };
+}
+
+/**
+ * Read a batch CSV: one row per piece, the first line naming its columns
+ * (variant, sku, serial; any of them, in any order, case-insensitive). A
+ * byte-order mark is dropped, and the delimiter is the comma or, as
+ * spreadsheets write it in France, the semicolon (the one the first line
+ * uses most). Blank lines are skipped; a row may stop short of the last
+ * columns (empty values), never run past them. Every problem names its line.
+ */
+export function parseBatchCsv(input: string): BatchCsv {
+  const text = (input ?? '').replace(/^\uFEFF/, '');
+  const firstLine = text.split(/\r\n|\r|\n/, 1)[0] ?? '';
+  const delimiter = count(firstLine, ';') > count(firstLine, ',') ? ';' : ',';
+  const parsed = csvRecords(text, delimiter);
+  if (!parsed.ok) return { ok: false, problems: [parsed.problem] };
+  const records = parsed.records.filter((r) => r.fields.some((f) => f.trim() !== ''));
+  const header = records[0];
+  if (!header) return { ok: false, problems: [{ line: null, message: 'The file is empty.' }] };
+
+  const names = header.fields.map((f) => f.trim().toLowerCase());
+  const known = new Set<string>(BATCH_COLUMNS);
+  if (!names.some((n) => known.has(n))) {
+    return { ok: false, problems: [{ line: header.line, message: `Name the columns on the first line: ${BATCH_COLUMNS.join(', ')} (each optional).` }] };
+  }
+  const problems: BatchProblem[] = [];
+  names.forEach((n, i) => {
+    if (n === '') return;
+    if (!known.has(n)) problems.push({ line: header.line, message: `Unknown column "${header.fields[i].trim().slice(0, 40)}": the columns are ${BATCH_COLUMNS.join(', ')}.` });
+    else if (names.indexOf(n) !== i) problems.push({ line: header.line, message: `The column "${n}" appears twice.` });
+  });
+  if (problems.length > 0) return { ok: false, problems };
+
+  const rows: BatchRow[] = [];
+  for (const r of records.slice(1)) {
+    const extra = r.fields.slice(names.length).filter((f) => f.trim() !== '');
+    // A value in a column without a name (or past the last one) is most often a comma that was not quoted.
+    const unnamed = names.some((n, i) => n === '' && (r.fields[i] ?? '').trim() !== '');
+    if (extra.length > 0 || unnamed) {
+      problems.push({ line: r.line, message: `${r.fields.length} values for ${names.filter((n) => n !== '').length} named columns: quote a value that holds "${delimiter}".` });
+      continue;
+    }
+    const value = (c: BatchColumn) => {
+      const i = names.indexOf(c);
+      return i < 0 ? '' : (r.fields[i] ?? '');
+    };
+    rows.push({ line: r.line, variant: value('variant'), sku: value('sku'), serial: value('serial') });
+  }
+  if (problems.length > 0) return { ok: false, problems };
+  if (rows.length === 0) return { ok: false, problems: [{ line: null, message: 'The file has no piece under its first line.' }] };
+  if (rows.length > ISSUE_BATCH_LIMITS.maxPieces) {
+    return { ok: false, problems: [{ line: null, message: `The file holds ${formatCount(rows.length)} pieces; a batch holds at most ${formatCount(ISSUE_BATCH_LIMITS.maxPieces)}.` }] };
+  }
+  return { ok: true, rows, columns: BATCH_COLUMNS.filter((c) => names.includes(c)), delimiter };
+}
+
+/** A quantity of identical pieces (the same variant and SKU, serials allocated), or why not. */
+export function quantityRows(quantity: string, variant: string, sku: string): { ok: true; rows: BatchRow[] } | { ok: false; error: string } {
+  const q = (quantity ?? '').trim();
+  const n = Number(q);
+  if (!/^\d+$/.test(q) || n < 1 || n > ISSUE_BATCH_LIMITS.maxPieces) return { ok: false, error: `A quantity of 1 to ${formatCount(ISSUE_BATCH_LIMITS.maxPieces)}.` };
+  return { ok: true, rows: Array.from({ length: n }, () => ({ line: null, variant, sku, serial: '' })) };
+}
+
+const PIECE_FIELDS = { variant: 'Variant', sku: 'SKU', serial: 'Serial' } as const;
+
+export type BatchBuild =
+  | { ok: true; template: IssueBatchTemplate; items: IssueBatchItem[]; lines: (number | null)[] }
+  | { ok: false; templateErrors: FieldErrors; problems: BatchProblem[] };
+
+/**
+ * The template and the pieces of a batch, checked with buildIssueInput (the
+ * generator's own rules): the template's errors go on its fields, a piece's
+ * on its line. Two pieces may not ask for the same serial.
+ */
+export function buildIssueBatch(f: BatchTemplateForm, rows: readonly BatchRow[], now: Date): BatchBuild {
+  const shared = buildIssueInput({ ...f, variant: '', sku: '', serial: '' }, now);
+  const problems: BatchProblem[] = [];
+  const add = (p: BatchProblem) => {
+    if (!problems.some((q) => q.line === p.line && q.message === p.message)) problems.push(p);
+  };
+  if (rows.length === 0) add({ line: null, message: 'Add at least one piece.' });
+  if (rows.length > ISSUE_BATCH_LIMITS.maxPieces) add({ line: null, message: `A batch holds at most ${formatCount(ISSUE_BATCH_LIMITS.maxPieces)} pieces.` });
+  const items: IssueBatchItem[] = [];
+  const serials = new Map<number, number | null>();
+  for (const r of rows) {
+    const built = buildIssueInput({ ...f, variant: r.variant, sku: r.sku, serial: r.serial }, now);
+    if (!built.ok) {
+      // The template's errors are the same on every line: they are reported once, on its fields.
+      for (const [k, label] of Object.entries(PIECE_FIELDS) as [keyof typeof PIECE_FIELDS, string][]) {
+        const msg = built.errors[k];
+        if (msg) add({ line: r.line, message: msg.startsWith(label) ? msg : `${label}: ${msg}` });
+      }
+      continue;
+    }
+    const { variant, sku, serial } = built.value;
+    if (serial !== undefined) {
+      if (serials.has(serial)) {
+        const first = serials.get(serial);
+        add({ line: r.line, message: first === null || first === undefined ? `Serial ${serial} is asked for twice.` : `Serial ${serial} is already on line ${first}.` });
+        continue;
+      }
+      serials.set(serial, r.line);
+    }
+    items.push({ ...(variant ? { variant } : {}), ...(sku ? { sku } : {}), ...(serial !== undefined ? { serial } : {}) });
+  }
+  if (!shared.ok || problems.length > 0) return { ok: false, templateErrors: shared.ok ? {} : shared.errors, problems };
+  return { ok: true, template: shared.value, items, lines: rows.map((r) => r.line) };
+}
+
+/** "Line 4 · SKU: …", or the message alone when it has no line. */
+export function batchProblemText(p: BatchProblem): string {
+  return p.line === null ? p.message : `Line ${p.line} · ${p.message}`;
+}
+
+/**
+ * The requests a batch is signed in, in order: at most `perRequest` pieces
+ * each, and every body (template and pieces, as JSON) at most
+ * `maxBodyBytes` in UTF-8. `start` is the index of a request's first piece.
+ */
+export function batchRequests<T extends IssueBatchItem>(template: IssueBatchTemplate, items: readonly T[], limits: { perRequest: number; maxBodyBytes: number } = ISSUE_BATCH_LIMITS): { start: number; items: T[] }[] {
+  const enc = new TextEncoder();
+  const bytes = (v: unknown) => enc.encode(JSON.stringify(v)).length;
+  const base = bytes({ template, items: [] });
+  const out: { start: number; items: T[] }[] = [];
+  let current: T[] = [];
+  let size = base;
+  items.forEach((item, i) => {
+    const itemBytes = bytes(item);
+    // Each piece after the first adds its JSON and one comma.
+    if (current.length > 0 && (current.length >= limits.perRequest || size + 1 + itemBytes > limits.maxBodyBytes)) {
+      out.push({ start: i - current.length, items: current });
+      current = [];
+      size = base;
+    }
+    size += itemBytes + (current.length > 0 ? 1 : 0);
+    current.push(item);
+  });
+  if (current.length > 0) out.push({ start: items.length - current.length, items: current });
+  return out;
+}
+
+/** The plan shown before signing: "120 pieces · 3 requests of up to 50". */
+export function batchPlanText(pieces: number, requests: number): string {
+  const what = `${formatCount(pieces)} ${pieces === 1 ? 'piece' : 'pieces'}`;
+  if (pieces < 1) return 'No piece yet';
+  return requests > 1 ? `${what} · ${formatCount(requests)} requests of up to ${ISSUE_BATCH_LIMITS.perRequest}` : `${what} · one request`;
+}
+
+/** "Sign 120 products", in three parts: the count reads in the reading face inside the display-face button (BRAND §3.1). */
+export function signBatchLabel(n: number): readonly [string, string, string] {
+  if (n < 1) return ['Sign the batch', '', ''];
+  return ['Sign ', formatCount(n), n === 1 ? ' product' : ' products'];
+}
+
+/**
+ * What became of a piece. ISSUED, FAILED (refused, by itself or with its
+ * request) and SKIPPED (the batch stopped before it) come from the server;
+ * NOT_SENT: an earlier request failed, so the console sent nothing more;
+ * NO_ANSWER: its request got no answer (network, timeout), so the server may
+ * have signed it: look in Products before signing it again.
+ */
+export type BatchOutcome = 'ISSUED' | 'FAILED' | 'SKIPPED' | 'NOT_SENT' | 'NO_ANSWER';
+
+export interface BatchResultRow {
+  /** 1-based position in the batch. */
+  piece: number;
+  /** The CSV line, null for a quantity. */
+  line: number | null;
+  status: BatchOutcome;
+  productId?: string;
+  codeId?: string;
+  serial?: number;
+  sku?: string;
+  variant?: string | null;
+  claimCode?: string;
+  message?: string;
+}
+
+/** How one request of a batch ended. */
+export type BatchPart = { start: number; count: number } & (
+  | { kind: 'answered'; response: IssueBatchResponse }
+  | { kind: 'refused'; message: string }
+  | { kind: 'unanswered'; message: string }
+);
+
+export const BATCH_OUTCOME_LABELS: Readonly<Record<BatchOutcome, string>> = Object.freeze({
+  ISSUED: 'ISSUED',
+  FAILED: 'NOT SIGNED',
+  SKIPPED: 'NOT ATTEMPTED',
+  NOT_SENT: 'NOT SENT',
+  NO_ANSWER: 'NO ANSWER',
+});
+
+/**
+ * One row per piece, in the batch's order, from the requests sent (pieces of no request were not
+ * sent). A piece not signed keeps what was asked for it (variant, SKU, serial); a signed one shows
+ * what the server recorded.
+ */
+export function batchResultRows(lines: readonly (number | null)[], items: readonly IssueBatchItem[], parts: readonly BatchPart[]): BatchResultRow[] {
+  const rows: BatchResultRow[] = lines.map((line, i) => ({
+    piece: i + 1,
+    line,
+    status: 'NOT_SENT',
+    ...(items[i]?.variant !== undefined ? { variant: items[i].variant } : {}),
+    ...(items[i]?.sku !== undefined ? { sku: items[i].sku } : {}),
+    ...(items[i]?.serial !== undefined ? { serial: items[i].serial } : {}),
+    message: 'Not sent: an earlier request failed.',
+  }));
+  for (const part of parts) {
+    for (let k = 0; k < part.count; k++) {
+      const row = rows[part.start + k];
+      if (!row) continue;
+      if (part.kind === 'refused') Object.assign(row, { status: 'FAILED', message: part.message });
+      else if (part.kind === 'unanswered') Object.assign(row, { status: 'NO_ANSWER', message: part.message });
+      else {
+        const l = part.response.items.find((x) => x.index === k);
+        if (!l) Object.assign(row, { status: 'NO_ANSWER', message: 'The server did not report this piece: look for it in Products.' });
+        else if (l.status === 'ISSUED') {
+          const { productId, codeId, serial, sku, variant, claimCode } = l;
+          Object.assign(row, { status: 'ISSUED', productId, codeId, serial, sku, variant, ...(claimCode ? { claimCode } : {}), message: undefined });
+        } else if (l.status === 'FAILED') Object.assign(row, { status: 'FAILED', message: l.error.message });
+        else Object.assign(row, { status: 'SKIPPED', message: 'Not attempted: the batch stopped before this piece.' });
+      }
+    }
+  }
+  return rows;
+}
+
+export interface BatchSummary {
+  pieces: number;
+  issued: number;
+  notIssued: number;
+  noAnswer: number;
+  claimCodes: number;
+  /** The lead of the result: "118 of 120 pieces signed · 2 not signed". */
+  text: string;
+}
+
+export function batchSummary(rows: readonly BatchResultRow[]): BatchSummary {
+  const issued = rows.filter((r) => r.status === 'ISSUED').length;
+  const noAnswer = rows.filter((r) => r.status === 'NO_ANSWER').length;
+  const notIssued = rows.length - issued - noAnswer;
+  const claimCodes = rows.filter((r) => r.claimCode).length;
+  let text = `${formatCount(issued)} of ${formatCount(rows.length)} ${rows.length === 1 ? 'piece' : 'pieces'} signed`;
+  if (notIssued > 0) text += ` · ${formatCount(notIssued)} not signed`;
+  if (noAnswer > 0) text += ` · ${formatCount(noAnswer)} without an answer: look for them in Products before signing them again`;
+  return { pieces: rows.length, issued, notIssued, noAnswer, claimCodes, text: `${text}.` };
+}
+
+/**
+ * The results of a batch as a CSV (one row per piece, the claim codes
+ * included while the console holds them): the operator's record of what was
+ * signed, which serial went to which line, and why a piece was not signed.
+ */
+export function batchResultsCsv(rows: readonly BatchResultRow[]): string {
+  return csvDocument([
+    ['line', 'piece', 'status', 'productId', 'sku', 'variant', 'serial', 'codeId', 'claimCode', 'message'],
+    ...rows.map((r) => [
+      r.line === null ? '' : String(r.line),
+      String(r.piece),
+      BATCH_OUTCOME_LABELS[r.status],
+      r.productId ?? '',
+      r.sku ?? '',
+      r.variant ?? '',
+      r.serial === undefined ? '' : String(r.serial),
+      r.codeId ?? '',
+      r.claimCode ? formatClaimCode(r.claimCode) : '',
+      r.message ?? '',
+    ]),
+  ]);
+}
+
+/** `ORBES-batch-B-2026-10-A-2026-10-02-120-results.csv` (the production batch, when there is one, in file-safe characters). */
+export function batchResultsFilename(productionBatch: string | undefined, now: Date, pieces: number): string {
+  const day = now.toISOString().slice(0, 10);
+  const batch = (productionBatch ?? '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '').slice(0, 60);
+  return `ORBES-batch-${batch ? `${batch}-` : ''}${day}-${pieces}-results.csv`;
+}
+
+/** The certificate cards a batch can print: its signed pieces that hold a claim code, in order. */
+export function batchCertificateItems(rows: readonly BatchResultRow[]): { productId: string; claimCode: string }[] {
+  return rows.flatMap((r) => (r.status === 'ISSUED' && r.productId && r.claimCode ? [{ productId: r.productId, claimCode: r.claimCode }] : []));
 }

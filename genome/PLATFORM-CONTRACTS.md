@@ -359,6 +359,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/collections` | Creates a collection. |
 | GET | `/api/admin/products?status&category&q&productionBatch&page` | Product list (`productionBatch`: exact, extension). |
 | POST | `/api/admin/products` | Issues a product (the generator). |
+| POST | `/api/admin/products/batch` | OPERATOR. Body `{ template, items[1..50]{ variant?, sku?, serial? } }`: one `issueProduct` per piece, in order, each in its own transaction; every line checked before any is signed; one result per piece (`ISSUED` with productId, codeId and the claim code shown once, `FAILED` with its error, `SKIPPED`), a signed piece never undone; audited `product.issue` per piece and `product.issue_batch`, no claim code; one batch at a time per admin (extension). |
 | GET | `/api/admin/products/:productId` | Full detail: product, genome, codes, signature validity (re-verified live), scan count, ownership + history, warranty + services, anomalies, status history, allowed transitions. |
 | POST | `/api/admin/products/:productId/transitions` | Body `{ to, reason }`. |
 | POST | `/api/admin/products/:productId/reinstate` | — |

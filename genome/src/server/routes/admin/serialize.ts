@@ -9,7 +9,7 @@
 import { toBase64Url } from '../../../core/bytes.js';
 import type { KeyRecord } from '../../keys/key-service.js';
 import type { AdminProfile } from '../../services/auth.js';
-import type { CodeRecord, GenomeRecord, ProductRecord } from '../../services/issuance.js';
+import type { CodeRecord, GenomeRecord, IssueBatchLine, ProductRecord } from '../../services/issuance.js';
 
 export function adminJson(a: AdminProfile) {
   return { id: a.id, email: a.email, role: a.role, totpEnabled: a.totpEnabled };
@@ -77,6 +77,29 @@ export function codeJson(c: CodeRecord) {
 /** A freshly produced code, including the base64url data a scanner reads (OPERATOR responses only). */
 export function issuedCodeJson(c: CodeRecord) {
   return { ...codeJson(c), data: c.data };
+}
+
+/**
+ * One piece of a batch (POST /api/admin/products/batch): its identity, code id and claim code (shown
+ * once) when signed; the refusal when not; nothing more when the batch stopped before it.
+ */
+export function issueBatchLineJson(line: IssueBatchLine) {
+  if (line.status === 'ISSUED') {
+    const { product, code, claimCode } = line.result;
+    return {
+      index: line.index,
+      status: line.status,
+      productId: product.productId,
+      codeId: code.id,
+      serial: product.serial,
+      sku: product.sku,
+      variant: product.variant,
+      // Shown once: only its scrypt hash is stored.
+      ...(claimCode ? { claimCode } : {}),
+    };
+  }
+  if (line.status === 'FAILED') return { index: line.index, status: line.status, error: line.error };
+  return { index: line.index, status: line.status };
 }
 
 export function keyJson(k: KeyRecord) {

@@ -8,7 +8,9 @@
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
- * verification → sign out. Also: anomaly triage (the badge and the tab title,
+ * verification → a batch of 120 products from a CSV (preview, requests of
+ * 50, results piece by piece, the page held until the claim codes are saved,
+ * certificate cards) and a quantity → sign out. Also: anomaly triage (the badge and the tab title,
  * the filters, a finding's scans, one dialog that marks the piece, revokes its
  * code and resolves the finding), TOTP enrolment + two-step sign-in, and the
  * read-only AUDITOR console. No CSP violation or page error is tolerated.
@@ -724,6 +726,164 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/codes', 'Codes');
     await page.locator('[data-testid=sheet-select]').first().check();
     await expect.poll(() => count.textContent()).toBe('1 code selected');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('issues 120 products from a CSV in one gesture: the preview, requests of 50, the results piece by piece, the batch in Products', async () => {
+    const batch = 'B-2026-10-CSV';
+    // A spreadsheet's export: byte-order mark, semicolons, CRLF; a size per piece, the SKU of the first ten given.
+    const lines = ['variant;sku', ...Array.from({ length: 120 }, (_, i) => `Size ${44 + (i % 16)};${i < 10 ? `MNL-RG-${44 + i}-P` : ''}`)];
+    const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+    const results = page.locator('[data-testid=batch-results] tbody tr');
+    const unloadPrevented = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+
+    // The two modes, as links in the page head.
+    await go(page, '#/generator', 'Issue a product');
+    expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Single piece');
+    await page.click('[data-testid=mode-batch]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    expect(await page.evaluate(() => location.hash)).toBe('#/generator?mode=batch');
+    expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Batch');
+    expect(await page.locator('.gen__mode').first().evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?,/);
+
+    // The template: what every piece shares.
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    expect(await page.inputValue('input[name=material]')).toBe('925 STERLING SILVER');
+    await page.fill('input[name=productionBatch]', batch);
+    await page.fill('input[name=year]', '2026');
+    expect(await page.isChecked('input[name=withClaimSecret]')).toBe(true);
+
+    // A file with a wrong line is refused, line by line, before anything is signed.
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'wrong.csv', mimeType: 'text/csv', buffer: Buffer.from('variant;sku\nSize 52;-bad\nSize 54;MNL\n') });
+    await expect.poll(() => page.locator('[data-testid=batch-problems] li').allTextContents()).toEqual(['Line 2 · SKU: Letters, digits, space, . _ - / only (64 max).']);
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(() => page.locator('[data-testid=batch-form] .form-error').textContent()).toBe('Fix the pieces listed above.');
+
+    // The production file: its first rows and the plan, before anything is signed.
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'batch.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('120 pieces · 3 requests of up to 50');
+    expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
+    expect(await page.locator('[data-testid=batch-count]').textContent()).toBe('120');
+    const preview = page.locator('[data-testid=batch-preview] tbody tr');
+    expect(await preview.count()).toBe(10);
+    expect(await preview.first().textContent()).toBe('2Size 44MNL-RG-44-PNext');
+    expect(await page.locator('[data-testid=batch-submit]').textContent()).toBe('Sign 120 products');
+    // The count in the button and the plan read in Helvetica Neue (BRAND §3.1).
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'generator-batch', { full: true });
+
+    // One gesture: the browser sends three requests, of 50, 50 and 20 pieces, one after the other.
+    const sent: number[] = [];
+    const onRequest = (r: { url(): string; postData(): string | null }) => {
+      if (r.url().endsWith('/api/admin/products/batch')) sent.push((JSON.parse(r.postData() ?? '{}') as { items: unknown[] }).items.length);
+    };
+    page.on('request', onRequest);
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 120_000 }).toBe('Batch signed');
+    page.off('request', onRequest);
+    expect(sent).toEqual([50, 50, 20]);
+    expect(await page.locator('.page-head__lead').textContent()).toBe(`120 of 120 pieces signed. Production batch ${batch}.`);
+    expect(await results.count()).toBe(120);
+    expect(new Set(await page.locator('[data-testid=batch-results] .status__text').allTextContents())).toEqual(new Set(['ISSUED']));
+    const first = await results.first().locator('td').allTextContents();
+    expect([first[0], first[3], first[4]]).toEqual(['2', 'Size 44', 'MNL-RG-44-P']);
+    expect(first[2]).toMatch(/^O26-J-\d{5}$/);
+    expect(first[6]).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    // A piece without a SKU gets the model's prefix and its variant.
+    expect(await results.nth(10).locator('td').nth(4).textContent()).toBe('MNL-RG-SIZE-54');
+    expect(new Set(await results.locator('td:nth-child(7)').allTextContents()).size).toBe(120);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'generator-batch-result');
+
+    // Until the claim codes are saved, leaving asks first: closing the tab, and the console's own links.
+    expect(await unloadPrevented()).toBe(true);
+    await page.click('.side__link[data-route=products]');
+    await page.waitForSelector('dialog.dialog');
+    expect(await page.locator('dialog.dialog .dialog__title').textContent()).toBe('Leave this page?');
+    expect(await page.locator('dialog.dialog .dialog__text').textContent()).toMatch(/^The 120 claim codes of this batch are on this page and nowhere else\./);
+    await page.click('[data-testid=dialog-cancel]');
+    await page.waitForSelector('dialog.dialog', { state: 'detached' });
+    expect(await page.evaluate(() => location.hash)).toBe('#/generator?mode=batch');
+    expect(await results.count()).toBe(120);
+
+    // The results file, with the claim codes: saved, the page is no longer held.
+    const [resultsFile] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=batch-download-results]')]);
+    expect(resultsFile.suggestedFilename()).toMatch(new RegExp(`^ORBES-batch-${batch}-\\d{4}-\\d{2}-\\d{2}-120-results\\.csv$`));
+    const rows = readFileSync((await resultsFile.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(rows).toHaveLength(121);
+    expect(rows[0]).toBe('"line","piece","status","productId","sku","variant","serial","codeId","claimCode","message"');
+    expect(rows[1]).toBe(`"2","1","ISSUED","${first[2]}","MNL-RG-44-P","Size 44","${first[5]}","${await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select('c.id').where('p.product_id', '=', first[2]).executeTakeFirstOrThrow().then((r) => r.id)}","${first[6]}",""`);
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Results saved, with the claim codes.');
+    expect(await unloadPrevented()).toBe(false);
+
+    // The certificate cards (D-01), A4 sheets in requests of 50: each claim code is checked against its hash by the server.
+    await page.selectOption('select[name=certificateLayout]', 'sheet');
+    const cards: string[] = [];
+    const three = new Promise<void>((resolve) => {
+      page.on('download', (d) => {
+        cards.push(d.suggestedFilename());
+        if (cards.length === 3) resolve();
+      });
+    });
+    await page.click('[data-testid=batch-certificates]');
+    await three;
+    page.removeAllListeners('download');
+    expect(cards).toEqual([
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-1-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-2-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-20-sheet-PROOF-part-3-of-3\.pdf$/),
+    ]);
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Certificate cards saved, in 3 files.');
+
+    // All 120 in Products, under the same production batch.
+    await page.click('a.cbtn:has-text("Open in Products")');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    expect(await page.evaluate(() => location.hash)).toBe(`#/products?productionBatch=${batch}`);
+    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    const stored = await ctx.db.selectFrom('products').select(['variant', 'sku', 'serial', 'claim_secret_hash']).where('production_batch', '=', batch).orderBy('serial').execute();
+    expect(stored).toHaveLength(120);
+    expect(stored[0]).toMatchObject({ variant: 'Size 44', sku: 'MNL-RG-44-P' });
+    expect(stored.every((s) => s.claim_secret_hash !== null)).toBe(true);
+    expect(new Set(stored.map((s) => s.serial)).size).toBe(120);
+    expect(await cspViolations(page)).toEqual([]);
+  }, 240_000);
+
+  it('signs a quantity of identical pieces; hiding the claim codes releases the page', async () => {
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-QTY');
+    await page.selectOption('select[name=source]', 'quantity');
+    expect(await page.isVisible('[data-testid=batch-file]')).toBe(false);
+    await page.fill('input[name=quantity]', '2');
+    await page.fill('input[name=variant]', '50 ML');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('2 pieces · one request');
+    expect(await page.locator('[data-testid=batch-preview] th').first().textContent()).toBe('Piece');
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    expect(await rows.count()).toBe(2);
+    expect(await rows.locator('td:nth-child(4)').allTextContents()).toEqual(['50 ML', '50 ML']);
+    await page.getByRole('button', { name: /I have recorded them/ }).click();
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(['•••• - •••• - ••••', '•••• - •••• - ••••']);
+    expect(await page.locator('[data-testid=batch-certificates]').count()).toBe(0);
+    expect(
+      await page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      }),
+    ).toBe(false);
+    // Nothing held any more: another batch starts without a question.
+    await page.click('[data-testid=batch-again]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    expect(await page.locator('dialog.dialog').count()).toBe(0);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 

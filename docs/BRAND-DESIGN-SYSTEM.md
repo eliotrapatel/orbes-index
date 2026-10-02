@@ -336,6 +336,7 @@ Component sizes between those steps are tokens too, so neither stylesheet sets a
 | Claim code | reading | 30px | 400 | 0.24em |
 | Panel title | display | 11px | 400 | 0.30em |
 | Navigation link | display | 10px | 400 | 0.24em |
+| Generator modes (SINGLE PIECE · BATCH) | display | 10px | 400 | 0.24em; the current one in ink, underlined; a 3 px `--metal` disc between |
 | Status mark text | reading | 10px | 400 (700 for alert, critical) | 0.20em (0.18em bold) |
 | Body, table cells, definition values | reading | 12–13px | 400 | 0.03–0.06em |
 | Eyebrows, column heads, field labels, buttons, crumb | display (crumb: reading) | 8px | 400 | 0.30–0.36em |
@@ -689,7 +690,7 @@ The console is an internal instrument in the house style, not a SaaS dashboard: 
 2. **Monospace only for identifiers and hashes**, with the full value as a tooltip.
 3. **One time zone.** Every date is UTC and says so (`01 OCT 2026 · 10:57 UTC`); the top bar carries an INTERNAL tag and a clock updated every 30 s.
 4. **Irreversible means typed.** Destructive actions open a dialog marked by a 3 px oxblood top rule; the irreversible ones also require a typed phrase (e.g. `REVOKE KEY 3`) before the confirm button activates. Issuance says *"Signing is irreversible: the identity and serial are consumed."*
-5. **Secrets are shown once.** The claim code appears once on an ivory, bracketed panel with COPY, DOWNLOAD CERTIFICATE CARD (the card of §7, checked against the hash by the server) and *"I have recorded it — hide"*, which removes all three; only its scrypt hash is stored. A re-issued code is kept in memory only and forgotten at sign-out.
+5. **Secrets are shown once.** The claim code appears once on an ivory, bracketed panel with COPY, DOWNLOAD CERTIFICATE CARD (the card of §7, checked against the hash by the server) and *"I have recorded it — hide"*, which removes all three; only its scrypt hash is stored. A re-issued code is kept in memory only and forgotten at sign-out. A batch's claim codes are in its results table, under the same ivory panel with the card format, DOWNLOAD CERTIFICATE CARDS, DOWNLOAD RESULTS (CSV) and *"I have recorded them — hide"*; until one is saved or the codes hidden, leaving the page asks first (*Leave this page?*, STAY / LEAVE).
 6. **Roles shape the interface.** Controls a role cannot use are not shown (AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation, reinstatement and categories).
 7. **Everything is recorded, and the console says so.** "Every download is recorded in the audit log"; "Internal use only · All actions are recorded" on the sign-in screen.
 8. **The console may see what the public never does**: risk scores, genome checks, payload hashes, anomaly rules. None of it ever reaches `/verify`.
