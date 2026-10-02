@@ -1,7 +1,10 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
- * mutates, ADMIN for keys, revocations, reinstatement, categories and the
- * console users of the Team page (A-02); every role changes its own password.
+ * mutates, ADMIN for keys, revocations, reinstatement, categories, the
+ * console users of the Team page (A-02) and the points of sale (A-08); every
+ * role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
+ * reaches the sale mode, the list of points of sale and its own session,
+ * password and second factor, nothing else.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -14,7 +17,7 @@ import { adminClient, createHarness, errorOf, type Client, type Harness } from '
 
 type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; min: AdminRole; group: string };
 
-const RANK: Record<AdminRole, number> = { AUDITOR: 1, OPERATOR: 2, ADMIN: 3 };
+const RANK: Record<AdminRole, number> = { RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 };
 const PID = 'O26-J-00001';
 const UUID = randomUUID();
 const INVALID = { definitelyNotAField: true };
@@ -65,7 +68,15 @@ const PROBES: Probe[] = [
   { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/unlock`, body: INVALID, min: 'ADMIN' },
   { group: 'admins', method: 'GET', url: `/api/admin/admins/${UUID}/sessions`, min: 'ADMIN' },
   { group: 'admins', method: 'DELETE', url: `/api/admin/admins/${UUID}/sessions`, min: 'ADMIN' },
-  { group: 'password', method: 'POST', url: '/api/admin/auth/password', body: INVALID, min: 'AUDITOR' },
+  { group: 'auth', method: 'GET', url: '/api/admin/auth/me', min: 'RETAIL' },
+  { group: 'auth', method: 'POST', url: '/api/admin/auth/totp/enable', body: INVALID, min: 'RETAIL' },
+  { group: 'password', method: 'POST', url: '/api/admin/auth/password', body: INVALID, min: 'RETAIL' },
+  { group: 'retailers', method: 'GET', url: '/api/admin/retailers', min: 'RETAIL' },
+  { group: 'retailers', method: 'GET', url: '/api/admin/retailers?active=true', min: 'RETAIL' },
+  { group: 'retailers', method: 'POST', url: '/api/admin/retailers', body: INVALID, min: 'ADMIN' },
+  { group: 'retailers', method: 'PATCH', url: `/api/admin/retailers/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'sale', method: 'POST', url: '/api/admin/sale/lookup', body: INVALID, min: 'RETAIL' },
+  { group: 'sale', method: 'POST', url: '/api/admin/sale/activate', body: INVALID, min: 'RETAIL' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -76,18 +87,18 @@ describe('admin role enforcement', () => {
 
   beforeAll(async () => {
     h = await createHarness();
-    for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) clients[role] = await adminClient(h, role);
+    for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) clients[role] = await adminClient(h, role);
   });
   afterAll(() => h?.close());
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins', 'password']) {
+    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins', 'auth', 'password', 'retailers', 'sale']) {
       expect(groups.has(g)).toBe(true);
     }
   });
 
-  for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) {
+  for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) {
     it(`${role}: allowed exactly where its rank reaches`, async () => {
       for (const p of PROBES) {
         const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
@@ -117,16 +128,57 @@ describe('admin role enforcement', () => {
     expect((await c.get('/api/admin/dashboard')).statusCode).toBe(401);
   });
 
-  it('OPERATOR and AUDITOR get 403 on every Team route (A-02), before validation', async () => {
+  it('OPERATOR, AUDITOR and RETAIL get 403 on every Team route (A-02), before validation', async () => {
     const team = PROBES.filter((p) => p.url.startsWith('/api/admin/admins'));
     expect(team).toHaveLength(9);
-    for (const role of ['OPERATOR', 'AUDITOR'] as const) {
+    for (const role of ['OPERATOR', 'AUDITOR', 'RETAIL'] as const) {
       for (const p of team) {
         const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
         expect(res.statusCode, `${role} ${p.method} ${p.url}`).toBe(403);
         expect(errorOf(res).code).toBe('FORBIDDEN');
       }
     }
+  });
+
+  it('RETAIL (A-08) can neither issue, nor download, nor read owners or scans: only the sale mode, the points of sale and its own account', async () => {
+    const retail = clients.RETAIL;
+    const refused: [string, string, unknown?][] = [
+      ['POST', '/api/admin/products', { categoryCode: 'J', modelId: UUID, material: 'SILVER' }],
+      ['GET', `/api/admin/codes/${UUID}/artifact.svg`],
+      ['GET', `/api/admin/codes/${UUID}/artifact.pdf`],
+      ['POST', '/api/admin/codes/print-sheet', { codeIds: [UUID] }],
+      ['POST', '/api/admin/certificates', { items: [{ productId: PID, claimCode: 'X' }] }],
+      ['GET', '/api/admin/owners'],
+      ['GET', '/api/admin/scans'],
+      ['GET', '/api/admin/products'],
+      ['GET', `/api/admin/products/${PID}`],
+      ['POST', `/api/admin/products/${PID}/warranty/activate`, {}],
+      ['GET', '/api/admin/dashboard'],
+      ['GET', '/api/admin/warranties'],
+      ['GET', '/api/admin/audit'],
+    ];
+    for (const [method, url, body] of refused) {
+      const res = await retail.request(method, url, body !== undefined ? { body } : {});
+      expect(res.statusCode, `${method} ${url}`).toBe(403);
+      expect(errorOf(res).code, `${method} ${url}`).toBe('FORBIDDEN');
+    }
+    const allowed = PROBES.filter((p) => p.min === 'RETAIL').map((p) => `${p.method} ${p.url.split('?')[0]}`);
+    expect([...new Set(allowed)].sort()).toEqual(
+      [
+        'GET /api/admin/auth/me',
+        'GET /api/admin/retailers',
+        'POST /api/admin/auth/password',
+        'POST /api/admin/auth/totp/enable',
+        'POST /api/admin/sale/activate',
+        'POST /api/admin/sale/lookup',
+      ].sort(),
+    );
+    // Its own session: me, a TOTP enrolment started, sign-out.
+    expect((await retail.get('/api/admin/auth/me')).statusCode).toBe(200);
+    expect((await retail.post('/api/admin/auth/totp/setup')).statusCode).toBe(200);
+    expect((await retail.post('/api/admin/auth/logout')).statusCode).toBe(200);
+    expect((await retail.get('/api/admin/auth/me')).statusCode).toBe(401);
+    clients.RETAIL = await adminClient(h, 'RETAIL');
   });
 
   it('OPERATOR may transition products but not revoke them', async () => {

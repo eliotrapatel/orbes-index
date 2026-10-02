@@ -100,8 +100,8 @@ The admin console requires 2-factor authentication in production.
 
    The person stores their password in their own password manager and never pastes it in a conversation; they can replace it from the console at any time (step 4).
 
-6. Staff accounts (workshop, client services, auditors) are created in the console, on the **TEAM** page (Security group of the sidebar, ADMIN only):
-   - **NEW STAFF ACCOUNT**: their email and the role, OPERATOR (issues and maintains pieces) or AUDITOR (reads only);
+6. Staff accounts (workshop, client services, auditors, boutique sellers) are created in the console, on the **TEAM** page (Security group of the sidebar, ADMIN only):
+   - **NEW STAFF ACCOUNT**: their email and the role, OPERATOR (issues and maintains pieces), AUDITOR (reads) or RETAIL (a seller: the sale mode on a phone, nothing else, §7 step 5);
    - the console shows a **temporary password once**: copy it, hand it over in person or over a trusted channel (it is typed exactly as shown, capitals and dashes included), then click *I have handed it over — hide*;
    - at their first sign-in they must choose their own password before anything else, then enrol their authenticator app (the console asks for it in production);
    - check that their row no longer says TEMPORARY PASSWORD.
@@ -139,13 +139,14 @@ docker compose ps                                                # caddy, app, p
    - Recommended minimum size: **30 mm**, or **20 mm** for small tags if customers can zoom.
    - Leave the 2 u quiet zone around the code.
 4. **Claim code:** it is shown **once**. While it is on screen, click **Download certificate card**: the server checks the code against its hash and returns the card (PDF, 85 × 55 mm) with the code under its scratch-off panel. Nobody copies the 12 characters by hand. For a print run, `POST /api/admin/certificates` also gives A4 sheets of ten and a CSV for the print shop's variable-data printing (API §15.7). Ask the shop to lay the scratch-off ink on the **ORBES SCRATCH-OFF** spot plate. Until the brand validates the card layout (BRAND §7), every card says **PROOF**, and so does every file name, the print shop's CSV included: do not print final cards before that, and do not send a file whose name says PROOF for a production run.
+5. **Points of sale and the sale mode** (A-08): on **POINTS OF SALE** (Clients group, ADMIN), add every boutique, department store and the online shop (name, city, two-letter country; the online shop without a country). A warranty's point of sale is then chosen from this list, in the product page's *Activate warranty* and in the sale mode; a closed boutique is deactivated, never deleted. Give each seller a nominative **RETAIL** account (§4 step 6). On the counter phone, the seller opens `https://<origin>/admin`, signs in (password, then the authenticator in production) and lands on **SALE MODE**: choose the point of sale once (the phone remembers it), **SCAN THE PIECE**, check the piece shown (READY TO SELL), **ACTIVATE WARRANTY**, then hand over the certificate card and tell the client the sentence on the screen: *Register your piece with its card at theorbes.com/verify*. Every scan is recorded under the seller's name (Verification events, event ADMIN TEST) and every activation in the audit log with the point of sale.
 
 ## 8. Validate on real phones before the public launch
 
 1. Print `docs/assets/test-sheets/orbes-code-test-sheets.pdf` at **100 % scale** (no "fit to page").
 2. Scan the codes with a few iPhones (including a Pro) and Android phones at 10–25 cm, on each real material you will use: card, leather tag, engraved silver.
 3. Keep the smallest size that reads reliably on every phone. The simulator's estimate is 30 mm without zoom and 20 mm with zoom.
-4. Scan one real issued product end to end. Expect AUTHENTIC — FIRST REGISTRATION after you activate its warranty in the admin; register it with a test customer account; check the ownership tab.
+4. Scan one real issued product end to end. Expect AUTHENTIC — FIRST REGISTRATION after you activate its warranty in the admin (or from the sale mode on a phone with a test RETAIL account: under 20 seconds from SCAN THE PIECE to WARRANTY ACTIVE); register it with a test customer account; check the ownership tab.
 
 ## 9. Switch on `theorbes.com/verify`
 

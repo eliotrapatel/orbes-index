@@ -36,7 +36,7 @@ export interface TeamActions {
 /**
  * What the Team page offers on a row. Nothing on one's own account but the
  * reset of one's own second factor (the server answers 409 SELF_ACTION);
- * the role choice is OPERATOR or AUDITOR (an ADMIN row can be stepped down,
+ * the role choice is OPERATOR, AUDITOR or RETAIL (an ADMIN row can be stepped down,
  * the last active ADMIN excepted: 409 LAST_ADMIN).
  */
 export function teamActions(a: Pick<AdminUser, 'id' | 'disabled' | 'locked' | 'totpEnabled'>, selfId: string): TeamActions {

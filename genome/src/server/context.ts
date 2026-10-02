@@ -30,6 +30,8 @@ import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
+import { RetailerService } from './services/retailers.js';
+import { SaleService } from './services/sale.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
@@ -50,6 +52,10 @@ export interface AppServices {
   catalog: CatalogService;
   /** Certificate cards carrying claim codes (PDF, A4 sheet, CSV for print shops). */
   certificates: CertificateService;
+  /** The register of points of sale (A-08). */
+  retailers: RetailerService;
+  /** The sale mode: staff scan, then warranty activation through a sale token (A-08). */
+  sale: SaleService;
 }
 
 export interface AppContext {
@@ -126,6 +132,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
+    const retailers = new RetailerService({ db, audit, clock });
+    const sale = new SaleService({ db, verification, warranty, clock });
 
     const services: AppServices = {
       issuance,
@@ -138,6 +146,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       authenticators,
       catalog,
       certificates,
+      retailers,
+      sale,
       ...overrides.services,
     };
 

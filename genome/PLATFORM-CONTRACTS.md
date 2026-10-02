@@ -339,15 +339,15 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | POST | `/api/v1/ownership/incidents` | Body `{ productId, type: 'LOST' \| 'STOLEN' }`. |
 | GET | `/api/v1/products/:productId/service-history` | Owner only. |
 
-### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR)
+### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR > RETAIL)
 
-AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories and console users.
+AUDITOR reads. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users and points of sale. RETAIL (A-08, a seller) is refused everywhere but the sale mode, the list of points of sale and its own session, password and second factor (extension).
 
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/admin/auth/login` | Body `{ email, password, totp? }`. |
 | POST | `/api/admin/auth/logout` | — |
-| GET | `/api/admin/auth/me` | — |
+| GET | `/api/admin/auth/me` | Every role, RETAIL included. |
 | POST | `/api/admin/auth/password` | Every role. Body `{ currentPassword, newPassword }`; keeps the session, ends the others; the way out of a temporary password (`403 PASSWORD_CHANGE_REQUIRED` elsewhere) (extension). |
 | GET | `/api/admin/dashboard` | Counts: products by status, scans in the last 24 h / 7 d, open anomalies by severity, active key, recent events. |
 | GET | `/api/admin/categories` | Lists categories. |
@@ -362,7 +362,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/products/:productId/transitions` | Body `{ to, reason }`. |
 | POST | `/api/admin/products/:productId/reinstate` | — |
 | POST | `/api/admin/products/:productId/codes/reissue` | Body `{ reason }`. |
-| POST | `/api/admin/products/:productId/warranty/activate` | Activates the warranty. |
+| POST | `/api/admin/products/:productId/warranty/activate` | Activates the warranty. Body `{ purchaseDate?, retailerId?, retailer?, country? }`: `retailerId` (extension) names a point of sale of the register. |
 | POST | `/api/admin/products/:productId/warranty/void` | Voids the warranty. |
 | POST | `/api/admin/products/:productId/warranty/extend` | Body `{ months }` (1–120). Extends an activated warranty (extension). |
 | POST | `/api/admin/products/:productId/services` | Opens a service record. |
@@ -389,12 +389,16 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/codes/print-sheet` | Multi-up PDF of ACTIVE codes (extension). |
 | POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every card and every file name, the CSV's included, says PROOF until the brand validates the layout; checks stop at the first wrong code, one request in progress per admin (extension). |
 | GET | `/api/admin/admins` | ADMIN. Console users (extension). |
-| POST | `/api/admin/admins` | ADMIN. Body `{ email, role: OPERATOR \| AUDITOR }`. Staff account with a temporary password returned once (extension). |
-| PATCH | `/api/admin/admins/:id/role` | ADMIN. Body `{ role: OPERATOR \| AUDITOR }`; ADMIN is granted from the shell only (extension). |
+| POST | `/api/admin/admins` | ADMIN. Body `{ email, role: OPERATOR \| AUDITOR \| RETAIL }`. Staff account with a temporary password returned once (extension). |
+| PATCH | `/api/admin/admins/:id/role` | ADMIN. Body `{ role: OPERATOR \| AUDITOR \| RETAIL }`; ADMIN is granted from the shell only (extension). |
 | POST | `/api/admin/admins/:id/disable`, `/api/admin/admins/:id/enable` | ADMIN. Disabling ends every session of the account (extension). |
 | POST | `/api/admin/admins/:id/unlock` | ADMIN. Lifts a sign-in lockout (extension). |
 | GET, DELETE | `/api/admin/admins/:id/sessions` | ADMIN. Lists (never a token) and ends an admin's sessions (extension). |
 | POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). The Team routes refuse one's own account (`409 SELF_ACTION`) and never leave the console without an active ADMIN (`409 LAST_ADMIN`). |
+| GET | `/api/admin/retailers?active` | RETAIL and up. The register of points of sale (extension, A-08). |
+| POST, PATCH | `/api/admin/retailers`, `/api/admin/retailers/:id` | ADMIN. Create, rename, move, deactivate a point of sale; never deleted (extension). |
+| POST | `/api/admin/sale/lookup` | RETAIL and up. Body: the decoded code as for `/api/v1/verify`. One ADMIN_TEST scan naming the console user, no anomaly evaluation; returns the piece and, when it can be sold, a 10-minute single-use sale token (extension). |
+| POST | `/api/admin/sale/activate` | RETAIL and up. Body `{ token, retailerId }`. Uses the token of the caller's own scan and starts the warranty today at that point of sale (extension). |
 
 Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, pageSize, total }`.
 

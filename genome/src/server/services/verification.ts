@@ -14,6 +14,10 @@
  * facts (risk score, thresholds, raw product status, reasons, anomaly
  * details) are stored on `authentication_events` / `anomalies` for the admin
  * console and never leave this module in the response.
+ *
+ * `staffScan` (A-08, the console's sale mode) runs the same steps 1–8 for a
+ * console user and records an ADMIN_TEST scan naming that user, without the
+ * history, ownership and anomaly steps and without any public wording.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -107,6 +111,34 @@ export interface VerifyOutcome {
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
+}
+
+/** What a staff scan (VerificationService.staffScan, the sale mode) learns: registry facts, never a risk score. */
+export interface StaffScan {
+  scanId: string;
+  occurredAt: Date;
+  /** The decision of steps 1–8; AUTHENTIC when none of them refused the code. */
+  state: VerificationState;
+  reasons: readonly string[];
+  /** The registered piece of a trusted code (key trusted, product and code found, payload hash equal); null otherwise. */
+  piece: StaffScanPiece | null;
+}
+
+export interface StaffScanPiece {
+  /** products.id */
+  productUuid: string;
+  productId: string;
+  status: ProductStatus;
+  category: { code: string; name: string };
+  collection: string | null;
+  model: string;
+  type: string;
+  variant: string | null;
+  material: string;
+  createdYear: number;
+  warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null; voided: boolean };
+  /** A customer account holds it. */
+  registered: boolean;
 }
 
 export interface VerificationServiceDeps {
@@ -356,6 +388,79 @@ export class VerificationService {
     return result;
   }
 
+  /**
+   * A staff scan: the sale mode's lookup (A-08). The code is judged by steps 1–8 exactly as by
+   * verify() (structure, key, signature, revoked-key trust, genome version, registry, genome
+   * cross-check, code and product status), then ONE scan event is written with the type
+   * ADMIN_TEST and the console user's id, with its authentication event. Nothing else of verify()
+   * runs: no anomaly is evaluated or recorded (ADMIN_TEST scans are outside every history rule),
+   * no registration token is issued, no public wording is built. `then` runs in the same
+   * transaction, so whatever the caller records about this scan (the sale token) commits with it.
+   */
+  async staffScan<T>(input: VerifyInput, opts: { adminId: string; meta?: ScanMeta }, then: (trx: Db, scan: StaffScan) => Promise<T>): Promise<T> {
+    if (typeof opts?.adminId !== 'string' || !UUID_RE.test(opts.adminId)) throw new TypeError('staffScan: adminId must be an admin_users.id uuid');
+    const started = performance.now();
+    const now = this.clock();
+    const genomeReading = cleanGenome(input?.genome);
+    const clientMetrics = cleanClientMetrics(input?.client);
+    const m = cleanMeta(opts.meta);
+
+    const w: Work = { reasons: [], signatureValid: false, trusted: false, genomeCheck: 'NOT_PROVIDED', riskScore: 0, isOwner: false };
+    await this.decide(w, input?.code, genomeReading);
+    // No history, ownership or anomaly step: what steps 1–8 did not refuse is the registry's own piece.
+    const state: VerificationState = w.state ?? 'AUTHENTIC';
+
+    return inTransaction(this.db, async (trx) => {
+      const scan = await trx
+        .insertInto('scan_events')
+        .values({
+          occurred_at: now,
+          code_id: w.trusted && w.reg?.code ? w.reg.code.id : null,
+          product_id: w.reg?.productUuid ?? null,
+          packed_identity: w.payload ? packedOf(w.payload) : null,
+          event_type: 'ADMIN_TEST',
+          admin_id: opts.adminId.toLowerCase(),
+          ip_hash: m.ipHash,
+          country: m.country,
+          region: m.region,
+          lat: m.lat,
+          lon: m.lon,
+          user_agent_family: m.userAgentFamily,
+          client_metrics: clientMetrics ? jsonText(clientMetrics) : null,
+          result_state: state,
+          // The decision's time: nothing after it changes the state.
+          latency_ms: Math.max(0, Math.round(performance.now() - started)),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.recordAuthentication(trx, w, scan.id, state, now);
+      const reg = w.reg;
+      const piece: StaffScanPiece | null =
+        w.trusted && reg
+          ? {
+              productUuid: reg.productUuid,
+              productId: reg.productId,
+              status: reg.status,
+              category: { code: reg.categoryCode, name: reg.categoryName },
+              collection: reg.collection,
+              model: reg.modelName,
+              type: reg.modelType,
+              variant: reg.variant,
+              material: reg.material,
+              createdYear: reg.year,
+              warranty: {
+                status: computeWarrantyStatus(reg.warranty, utcDate(now)),
+                startDate: reg.warranty?.start_date ?? null,
+                endDate: reg.warranty?.end_date ?? null,
+                voided: reg.warranty?.voided_at !== null && reg.warranty?.voided_at !== undefined,
+              },
+              registered: reg.ownerAccountId !== null,
+            }
+          : null;
+      return then(trx, { scanId: scan.id, occurredAt: now, state, reasons: [...w.reasons], piece });
+    });
+  }
+
   // ── Steps 1–8 (read-only) ──────────────────────────────────────────────
 
   private async decide(w: Work, code: unknown, genomeReading: CleanGenome | undefined): Promise<void> {
@@ -521,15 +626,8 @@ export class VerificationService {
 
   // ── Step 12 ──────────────────────────────────────────────────────────────
 
-  private async finish(
-    trx: Db,
-    w: Work,
-    scanId: string,
-    now: Date,
-    started: number,
-    registration: VerifyOutcome['registration'],
-  ): Promise<VerifyOutcome> {
-    const state: VerificationState = w.state ?? 'AUTHENTIC';
+  /** The internal record of a decision (reasons, risk, authenticator results), next to its scan event. */
+  private async recordAuthentication(trx: Db, w: Work, scanId: string, state: VerificationState, now: Date): Promise<void> {
     const serviceRisk = w.serviceFinding ? ANOMALY_WEIGHTS[w.serviceFinding.type].weight : 0;
     await trx
       .insertInto('authentication_events')
@@ -551,6 +649,18 @@ export class VerificationService {
         created_at: now,
       })
       .execute();
+  }
+
+  private async finish(
+    trx: Db,
+    w: Work,
+    scanId: string,
+    now: Date,
+    started: number,
+    registration: VerifyOutcome['registration'],
+  ): Promise<VerifyOutcome> {
+    const state: VerificationState = w.state ?? 'AUTHENTIC';
+    await this.recordAuthentication(trx, w, scanId, state, now);
     const latencyMs = Math.max(0, Math.round(performance.now() - started));
     await trx.updateTable('scan_events').set({ result_state: state, latency_ms: latencyMs }).where('id', '=', scanId).execute();
     if (state === 'SUSPICIOUS_ACTIVITY' || w.notice) {

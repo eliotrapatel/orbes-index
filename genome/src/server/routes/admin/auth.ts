@@ -18,6 +18,10 @@
  * `passwordChangeRequired` is true, every admin route except logout, me and
  * this one answers 403 PASSWORD_CHANGE_REQUIRED (http/sessions.ts). The
  * caller's session is kept; every other session of that admin ends.
+ *
+ * Every route here accepts RETAIL (A-08), the lowest role: a seller signs in,
+ * reads `me`, replaces a temporary password, enrols a second factor and signs
+ * out like any console user.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { userAgentOf } from '../../http/client.js';
@@ -46,7 +50,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post(
     '/api/admin/auth/logout',
-    { config: { guard: { session: 'optional', mfaExempt: true, passwordChangeExempt: true, minRole: 'AUDITOR' } } },
+    { config: { guard: { session: 'optional', mfaExempt: true, passwordChangeExempt: true, minRole: 'RETAIL' } } },
     async (request, reply) => {
       const token = sessionToken(request, ctx.config, 'admin');
       if (token && request.orbes.admin) await auth.logout(token, 'admin', { ipHash: request.orbes.ipHash });
@@ -55,14 +59,14 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     },
   );
 
-  app.get('/api/admin/auth/me', { config: { guard: { mfaExempt: true, passwordChangeExempt: true } } }, async (request) => {
+  app.get('/api/admin/auth/me', { config: { guard: { mfaExempt: true, passwordChangeExempt: true, minRole: 'RETAIL' } } }, async (request) => {
     const { admin, session } = requireAdmin(request);
     return { admin: adminJson(admin), csrfToken: session.csrfToken, mfaPassed: session.mfaPassed, mfaRequired: requireMfa };
   });
 
   app.post(
     '/api/admin/auth/password',
-    { config: { guard: { mfaExempt: true, passwordChangeExempt: true, minRole: 'AUDITOR' }, rateGroup: 'auth' } },
+    { config: { guard: { mfaExempt: true, passwordChangeExempt: true, minRole: 'RETAIL' }, rateGroup: 'auth' } },
     async (request) => {
       const { admin, token } = requireAdmin(request);
       const b = parse(adminPasswordChangeBody, request.body);
@@ -73,7 +77,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post(
     '/api/admin/auth/totp/setup',
-    { config: { guard: { mfaExempt: true, minRole: 'AUDITOR' }, rateGroup: 'auth' } },
+    { config: { guard: { mfaExempt: true, minRole: 'RETAIL' }, rateGroup: 'auth' } },
     async (request) => {
       const { admin } = requireAdmin(request);
       // Nothing is stored yet: the secret only becomes active once a code from it is confirmed.
@@ -83,7 +87,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post(
     '/api/admin/auth/totp/enable',
-    { config: { guard: { mfaExempt: true, minRole: 'AUDITOR' }, rateGroup: 'auth' } },
+    { config: { guard: { mfaExempt: true, minRole: 'RETAIL' }, rateGroup: 'auth' } },
     async (request, reply) => {
       const { admin, token } = requireAdmin(request);
       const b = parse(totpEnableBody, request.body);

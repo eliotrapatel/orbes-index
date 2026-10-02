@@ -22,8 +22,9 @@
  * The audit log is append-only and cannot be erased, so customer PII
  * (emails, names) never goes into it: entries name account ids only.
  *
- * Staff accounts (A-02): an ADMIN creates OPERATOR and AUDITOR accounts from
- * the console with a temporary password shown once and never audited; the
+ * Staff accounts (A-02): an ADMIN creates OPERATOR, AUDITOR and RETAIL (a
+ * seller's sale mode, A-08) accounts from the console with a temporary
+ * password shown once and never audited; the
  * account must choose its own password before anything else
  * (`password_change_required`, 403 PASSWORD_CHANGE_REQUIRED in the guard).
  * ADMIN accounts and the ADMIN role come from the shell only (scripts/admin.ts),
@@ -349,12 +350,12 @@ export class AuthService {
   }
 
   /**
-   * A staff account created by an ADMIN from the console: OPERATOR or AUDITOR, with a temporary
+   * A staff account created by an ADMIN from the console: OPERATOR, AUDITOR or RETAIL, with a temporary
    * password returned once (only its hash is stored; it is never audited or logged) that must be
    * replaced at the first sign-in. ADMIN accounts are created from the shell (createAdmin).
    */
   async createStaff(input: { email: string; role: StaffRole }, actor: Actor): Promise<StaffAccount> {
-    if (!STAFF_ROLES.includes(input?.role)) throw validationError('The console creates OPERATOR and AUDITOR accounts; ADMIN accounts are created from the shell.');
+    if (!STAFF_ROLES.includes(input?.role)) throw validationError('The console creates OPERATOR, AUDITOR and RETAIL accounts; ADMIN accounts are created from the shell.');
     const temporaryPassword = generateTemporaryPassword();
     const row = await this.insertAdmin({ email: input.email, password: temporaryPassword, role: input.role }, actor, true);
     return { admin: adminSummary(row, this.clock()), temporaryPassword };

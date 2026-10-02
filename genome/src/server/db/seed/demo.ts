@@ -1,8 +1,9 @@
 /**
  * Demo dataset: a small, believable ORBES maison: five categories, a
  * catalogue of models, 41 products across the lifecycle, eight customer
- * accounts, warranties, service records, transfers, incidents and scan
- * histories, with anomalies that came out of real anomaly scoring.
+ * accounts, the points of sale where the pieces were sold, warranties,
+ * service records, transfers, incidents and scan histories, with anomalies
+ * that came out of real anomaly scoring.
  *
  * Everything goes through the real services (issuance, warranty, ownership,
  * lifecycle, verification, anomaly): there are no hand-written rows, so
@@ -159,6 +160,16 @@ const BOUTIQUES = {
   ONLINE_ES: { retailer: 'ORBES.COM — ONLINE BOUTIQUE', place: 'MADRID' },
 } as const satisfies Record<string, { retailer: string; place: PlaceKey }>;
 type BoutiqueKey = keyof typeof BOUTIQUES;
+
+/** The register of points of sale (A-08): one per boutique, the online shop once (its country is the buyer's). */
+const POINTS_OF_SALE: readonly { name: string; city: string | null; country: string | null }[] = [
+  { name: BOUTIQUES.PARIS.retailer, city: 'Paris', country: 'FR' },
+  { name: BOUTIQUES.LONDON.retailer, city: 'London', country: 'GB' },
+  { name: BOUTIQUES.MILAN.retailer, city: 'Milan', country: 'IT' },
+  { name: BOUTIQUES.TOKYO.retailer, city: 'Tokyo', country: 'JP' },
+  { name: BOUTIQUES.DUBAI.retailer, city: 'Dubai', country: 'AE' },
+  { name: BOUTIQUES.ONLINE_DE.retailer, city: null, country: null },
+];
 
 const ATELIER = 'ORBES ATELIER — PARIS';
 
@@ -849,6 +860,8 @@ interface World {
   pepper: string;
   password: string;
   catalogue: CatalogueIds;
+  /** Point-of-sale name → retailers.id. */
+  retailers: Map<string, string>;
   products: Map<string, ProductState>;
   accounts: Map<AccountKey, string>;
   /** One-time secrets between two steps: registration tokens and transfer codes. */
@@ -904,6 +917,7 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     pepper: ctx.config.ipHashPepper,
     password,
     catalogue: await loadCatalogueIds(ctx.db),
+    retailers: await ensureRetailers(ctx),
     products: new Map(),
     accounts: new Map(),
     pending: new Map(),
@@ -1163,11 +1177,18 @@ async function issue(w: World, p: ProductDef): Promise<void> {
 
 async function activate(w: World, productId: string, when: When, boutique: BoutiqueKey): Promise<void> {
   const b = BOUTIQUES[boutique];
-  await w.ctx.services.warranty.activate(
-    productId,
-    { purchaseDate: utcDate(at(when)), retailer: b.retailer, country: PLACES[b.place].country },
-    DEMO_SEED_ACTOR,
-  );
+  const retailerId = w.retailers.get(b.retailer);
+  if (!retailerId) throw new DemoSeedError(`no point of sale ${b.retailer}`);
+  await w.ctx.services.warranty.activate(productId, { purchaseDate: utcDate(at(when)), retailerId, country: PLACES[b.place].country }, DEMO_SEED_ACTOR);
+}
+
+/** The register of points of sale, as the console's Points of sale page keeps it (A-08). */
+async function ensureRetailers(ctx: AppContext): Promise<Map<string, string>> {
+  const existing = new Map((await ctx.services.retailers.list()).map((r) => [r.name, r.id]));
+  for (const p of POINTS_OF_SALE) {
+    if (!existing.has(p.name)) existing.set(p.name, (await ctx.services.retailers.create(p, DEMO_SEED_ACTOR)).id);
+  }
+  return existing;
 }
 
 async function scan(w: World, productId: string, who: Who, placeKey: PlaceKey, expect: VerificationState, oldIssue?: number): Promise<VerifyOutcome> {

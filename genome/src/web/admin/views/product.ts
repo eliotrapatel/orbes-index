@@ -13,14 +13,15 @@ import { h } from '../../shared/dom.js';
 import { formatDate, formatDateTime, humanize, isoDay, shortHash, summarizeDetails, versionLabel } from '../format.js';
 import { openAnomalies, productActions, productAttributes, productSheet, type ProductActions } from '../model/product.js';
 import { confirmationPhrase } from '../model/registry.js';
+import { retailerOptions } from '../model/sale.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { SERVICE_TYPES, type IssuedCodeJson, type ProductDetail, type ProductStatus } from '../types.js';
+import { SERVICE_TYPES, type IssuedCodeJson, type ProductDetail, type ProductStatus, type Retailer } from '../types.js';
 import { artifactPanel } from '../ui/artifacts.js';
 import { anomalyStatus, button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { genomeFigure } from '../ui/figures.js';
-import { notify } from '../ui/toast.js';
+import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 /** A code re-issued on this page, kept (in memory only) so its preview survives reloads until dismissed. */
@@ -147,6 +148,47 @@ function done(ctx: ViewContext, message: string): void {
   ctx.reload();
 }
 
+/**
+ * The point of sale comes from the register (A-08), never typed: the active points of sale of
+ * GET /api/admin/retailers, the country defaulting to the chosen one's. The API still takes the
+ * free-text `retailer` of older records; the console no longer sends it.
+ */
+async function activateWarrantyDialog(ctx: ViewContext, pid: string): Promise<void> {
+  let retailers: Retailer[];
+  try {
+    retailers = (await ctx.api.retailers({ activeOnly: true })).items;
+  } catch (e) {
+    notifyError(e, 'The points of sale could not be loaded.');
+    return;
+  }
+  const options = retailerOptions(retailers);
+  const r = await openDialog({
+    title: 'Activate the warranty',
+    eyebrow: pid,
+    fields: [
+      { name: 'purchaseDate', label: 'Purchase date', kind: 'date', value: isoDay(ctx.now()), required: true },
+      {
+        name: 'retailerId',
+        label: 'Point of sale',
+        kind: 'select',
+        options: [{ value: '', label: options.length ? 'None recorded' : 'No point of sale registered' }, ...options],
+        hint: options.length ? 'From the register of points of sale (Clients · Points of sale).' : 'An ADMIN adds them on the Points of sale page.',
+      },
+      { name: 'country', label: 'Country', maxlength: 2, hint: 'Two-letter ISO code, e.g. FR; by default the country of the point of sale.' },
+    ],
+    validate: (v) => (v.country && !/^[A-Za-z]{2}$/.test(v.country.trim()) ? 'Country is a two-letter code.' : null),
+    confirmLabel: 'Activate',
+    submit: async (v) => {
+      await ctx.api.activateWarranty(pid, {
+        purchaseDate: v.purchaseDate,
+        ...(v.retailerId ? { retailerId: v.retailerId } : {}),
+        ...(v.country?.trim() ? { country: v.country.trim().toUpperCase() } : {}),
+      });
+    },
+  });
+  if (r) done(ctx, 'Warranty activated.');
+}
+
 function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HTMLElement | null {
   const api = ctx.api;
   const pid = d.product.productId;
@@ -225,25 +267,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
     a.canActivateWarranty
       ? button('Activate warranty', {
           testId: 'action-warranty',
-          onClick: () =>
-            void openDialog({
-              title: 'Activate the warranty',
-              eyebrow: pid,
-              fields: [
-                { name: 'purchaseDate', label: 'Purchase date', kind: 'date', value: isoDay(ctx.now()), required: true },
-                { name: 'retailer', label: 'Retailer', maxlength: 200 },
-                { name: 'country', label: 'Country', maxlength: 2, hint: 'Two-letter ISO code, e.g. FR.' },
-              ],
-              validate: (v) => (v.country && !/^[A-Za-z]{2}$/.test(v.country.trim()) ? 'Country is a two-letter code.' : null),
-              confirmLabel: 'Activate',
-              submit: async (v) => {
-                await api.activateWarranty(pid, {
-                  purchaseDate: v.purchaseDate,
-                  ...(v.retailer?.trim() ? { retailer: v.retailer.trim() } : {}),
-                  ...(v.country?.trim() ? { country: v.country.trim().toUpperCase() } : {}),
-                });
-              },
-            }).then((r) => r && done(ctx, 'Warranty activated.')),
+          onClick: () => void activateWarrantyDialog(ctx, pid),
         })
       : null,
     a.canExtendWarranty

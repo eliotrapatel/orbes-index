@@ -2,7 +2,8 @@
  * Team (ADMIN, A-02): the console users and what an ADMIN does to them when
  * someone joins, changes post or leaves.
  *
- * - NEW STAFF ACCOUNT: an OPERATOR or AUDITOR with a temporary password,
+ * - NEW STAFF ACCOUNT: an OPERATOR, AUDITOR or RETAIL (a seller, who gets
+ *   the sale mode only, A-08) with a temporary password,
  *   shown once on an ivory, bracketed panel (BRAND §6, secrets are shown
  *   once) with COPY and "I have handed it over — hide". The staff member signs
  *   in with it and must choose their own password before anything else.
@@ -47,7 +48,7 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
       ),
       fields: [
         { name: 'email', label: 'Email', kind: 'email', required: true },
-        { name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: 'OPERATOR', hint: 'OPERATOR issues and maintains pieces; AUDITOR reads only.' },
+        { name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: 'OPERATOR', hint: 'OPERATOR issues and maintains pieces; AUDITOR reads; RETAIL, a seller, gets the sale mode only.' },
       ],
       validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim()) ? null : 'Enter a valid email address.'),
       confirmLabel: 'Create account',
@@ -126,7 +127,7 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
                     ? 'This account stops being an ADMIN at its next request. The last active ADMIN cannot step down; the ADMIN role is given back from the shell only.'
                     : 'The new role applies at the next request of this account. The ADMIN role is given from the shell only.',
                 ),
-                fields: [{ name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: a.role === 'AUDITOR' ? 'AUDITOR' : 'OPERATOR' }],
+                fields: [{ name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: a.role === 'ADMIN' ? 'OPERATOR' : a.role }],
                 confirmLabel: 'Change role',
                 submit: async (v) => {
                   await ctx.api.setAdminRole(a.id, v.role as StaffRole);

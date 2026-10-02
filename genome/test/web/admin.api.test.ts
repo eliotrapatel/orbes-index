@@ -240,6 +240,43 @@ describe('AdminApi', () => {
     expect(sheet.filename).toBe('orbes-certificates.csv');
   });
 
+  it('sells from the sale mode (A-08): the register of points of sale, the lookup and the activation', async () => {
+    const lookup = { scanId: 's1', state: 'AUTHENTIC', piece: null, sale: { token: 'T'.repeat(43), expiresAt: '2026-10-02T10:10:00.000Z' }, refusal: null };
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { items: [] }),
+      json(200, { items: [] }),
+      json(201, { retailer: { id: 'r1' } }),
+      json(200, { retailer: { id: 'r1' } }),
+      json(200, lookup),
+      json(200, { warranty: {}, statusChange: null, scanId: 's1' }),
+      json(200, { warranty: {} }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('seller@orbes.test', 'pw');
+    await api.retailers();
+    await api.retailers({ activeOnly: true });
+    expect(calls[1].url).toBe('/api/admin/retailers');
+    expect(calls[2].url).toBe('/api/admin/retailers?active=true');
+    expect(calls[2].init.method).toBe('GET');
+    await api.createRetailer({ name: 'ORBES Paris', city: 'Paris', country: 'FR' });
+    expect(calls[3]).toMatchObject({ url: '/api/admin/retailers', init: { method: 'POST' } });
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ name: 'ORBES Paris', city: 'Paris', country: 'FR' });
+    await api.updateRetailer('r/1', { active: false });
+    expect(calls[4]).toMatchObject({ url: '/api/admin/retailers/r%2F1', init: { method: 'PATCH' } });
+    expect(JSON.parse(String(calls[4].init.body))).toEqual({ active: false });
+    expect(await api.saleLookup({ code: 'abc', genome: { glyphs: [1, 2, 3, 4, 5, 6, 7, 8] }, client: { source: 'camera' } })).toEqual(lookup);
+    expect(calls[5]).toMatchObject({ url: '/api/admin/sale/lookup', init: { method: 'POST' } });
+    expect(JSON.parse(String(calls[5].init.body))).toEqual({ code: 'abc', genome: { glyphs: [1, 2, 3, 4, 5, 6, 7, 8] }, client: { source: 'camera' } });
+    await api.saleActivate('T'.repeat(43), 'r1');
+    // The token travels in a POST body, never in a URL.
+    expect(calls[6].url).toBe('/api/admin/sale/activate');
+    expect(JSON.parse(String(calls[6].init.body))).toEqual({ token: 'T'.repeat(43), retailerId: 'r1' });
+    for (const c of calls.slice(3, 7)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
+    await api.activateWarranty('O26-J-00184', { purchaseDate: '2026-10-02', retailerId: 'r1' });
+    expect(JSON.parse(String(calls[7].init.body))).toEqual({ purchaseDate: '2026-10-02', retailerId: 'r1' });
+  });
+
   it('times out slow requests', async () => {
     vi.useFakeTimers();
     try {

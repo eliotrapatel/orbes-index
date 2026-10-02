@@ -2,12 +2,12 @@
  * Console users from the shell, through AuthService (audited as
  * `system:cli:admin:<os user>`), against DATABASE_URL:
  *
- *   ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+ *   ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts list [--json]
  *   tsx scripts/admin.ts totp-setup --email <email>              new TOTP secret + otpauth:// URI (nothing stored yet)
  *   tsx scripts/admin.ts totp-enable --email <email> --secret <base32> --code <6 digits>
  *   tsx scripts/admin.ts reset-totp --email <email> --yes        lost device: remove the enrolment, end the sessions
- *   tsx scripts/admin.ts role --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+ *   tsx scripts/admin.ts role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts disable --email <email> --yes           a departure: sign-in refused, every session ends
  *   tsx scripts/admin.ts enable --email <email>
  *
@@ -37,14 +37,14 @@ import { cliActor, cliLogger, consoleIO, errorMessage, EXIT, isMainModule, loadC
 export const ADMIN_USAGE = `Usage: tsx scripts/admin.ts <command> [options]
 
 Commands
-  create --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+  create --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
                                     Create a console user; the password is read from ADMIN_PASSWORD
   list                              List console users (role, second factor, lock state)
   totp-setup --email <email>        Generate a TOTP secret and its otpauth:// URI (nothing is stored)
   totp-enable --email <email> --secret <base32> --code <digits>
                                     Enrol the secret after checking a current code from the app
   reset-totp --email <email> --yes  Remove a lost second factor; that admin's sessions end
-  role --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+  role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
                                     Change a console user's role (the only way to grant ADMIN)
   disable --email <email> --yes     Refuse sign-in to a console user and end their sessions
   enable --email <email>            Allow a disabled console user to sign in again

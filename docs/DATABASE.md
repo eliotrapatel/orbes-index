@@ -176,6 +176,8 @@ erDiagram
   ACCOUNTS ||--o{ OWNERSHIP_TRANSFERS : "from_account_id"
   ACCOUNTS |o--o{ OWNERSHIP_TRANSFERS : "to_account_id"
   PRODUCTS ||--o| WARRANTIES : "product_id (unique)"
+  RETAILERS |o--o{ WARRANTIES : "retailer_id"
+  ADMIN_USERS |o--o{ SCAN_EVENTS : "admin_id (ADMIN_TEST only)"
   PRODUCTS ||--o{ SERVICE_RECORDS : "product_id"
 
   PRODUCTS |o--o{ ANOMALIES : "product_id"
@@ -468,7 +470,7 @@ Staff accounts for the admin console.
 | `email_normalized` | `text` | NOT NULL | — | UNIQUE |
 | `email` | `text` | NOT NULL | — | |
 | `password_hash` | `text` | NOT NULL | — | scrypt, as for accounts. |
-| `role` | `text` | NOT NULL | — | `CHECK (role IN ('ADMIN','OPERATOR','AUDITOR'))` |
+| `role` | `text` | NOT NULL | — | `CHECK (role IN ('ADMIN','OPERATOR','AUDITOR','RETAIL'))`. RETAIL (migration `0008_retail_mode`, A-08): a seller, ranked under AUDITOR, who reaches the sale mode only (API §2.3). |
 | `totp_secret_enc` | `text` | NULL | — | NULL until TOTP is enrolled. Sealed with AES-256-GCM (`v1.<iv>.<ciphertext‖tag>`, base64url) under a key derived by HKDF-SHA-256 from `KEY_ENCRYPTION_KEY` (or from `COOKIE_SECRET` when no key encryption key is configured), with the admin id as associated data. The plaintext holds the base32 secret and the last accepted time step (replay protection). |
 | `failed_logins` | `int` | NOT NULL | `0` | `CHECK (failed_logins >= 0)`. Reset on a successful login. |
 | `locked_until` | `timestamptz` | NULL | — | Set to now + 15 min when `failed_logins` reaches 10, and again on every further failure. |
@@ -479,7 +481,7 @@ Staff accounts for the admin console.
 
 - **Indexes:** primary key; unique `email_normalized`.
 - **Triggers:** `admin_users_touch_updated_at`.
-- **Written by:** `AuthService`: `createAdmin` (the first-run bootstrap from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`, and `scripts/admin.ts create`; any role), `createStaff` (`POST /api/admin/admins`, ADMIN: OPERATOR or AUDITOR with a temporary password, `password_change_required = true`), `adminLogin` and its failure counter, `enableTotp`, `disableTotp`, `changePassword` (`POST /api/admin/auth/password`: new hash, `password_change_required = false`, counter reset; a wrong current password counts as a failure), `setAdminRole`, `setAdminDisabled` and `unlockAdmin` (the Team routes, API §17.9–§17.11, and `scripts/admin.ts role` / `disable` / `enable`). `setAdminRole` and `setAdminDisabled` run under the `ADMIN_ROSTER` advisory lock (§8.3) and refuse to leave no active ADMIN (`LAST_ADMIN`). Audit actions `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.role_change`, `admin.disable`, `admin.enable`, `admin.unlock`, `admin.sessions_revoke`, `admin.totp.enable`, `admin.totp.disable`; a password, temporary or not, never enters the log.
+- **Written by:** `AuthService`: `createAdmin` (the first-run bootstrap from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`, and `scripts/admin.ts create`; any role), `createStaff` (`POST /api/admin/admins`, ADMIN: OPERATOR, AUDITOR or RETAIL with a temporary password, `password_change_required = true`), `adminLogin` and its failure counter, `enableTotp`, `disableTotp`, `changePassword` (`POST /api/admin/auth/password`: new hash, `password_change_required = false`, counter reset; a wrong current password counts as a failure), `setAdminRole`, `setAdminDisabled` and `unlockAdmin` (the Team routes, API §17.9–§17.11, and `scripts/admin.ts role` / `disable` / `enable`). `setAdminRole` and `setAdminDisabled` run under the `ADMIN_ROSTER` advisory lock (§8.3) and refuse to leave no active ADMIN (`LAST_ADMIN`). Audit actions `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.role_change`, `admin.disable`, `admin.enable`, `admin.unlock`, `admin.sessions_revoke`, `admin.totp.enable`, `admin.totp.disable`; a password, temporary or not, never enters the log.
 
 ### 5.11 `sessions`
 
@@ -548,8 +550,9 @@ At most one warranty per product. The row is created at issuance with the catego
 | `id` | `uuid` | NOT NULL | `gen_random_uuid()` | PK |
 | `product_id` | `uuid` | NOT NULL | — | UNIQUE. FK → `products.id` |
 | `purchase_date` | `date` | NULL | — | |
-| `retailer` | `text` | NULL | — | ≤ 200 characters. |
-| `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')` |
+| `retailer` | `text` | NULL | — | ≤ 200 characters. Free text of the activations made before the register (and of API callers that still send it); the console sends `retailer_id` instead. |
+| `retailer_id` | `uuid` | NULL | — | Migration `0008_retail_mode`. FK → `retailers.id` (§5.22): the point of sale chosen from the register. The name shown (`WarrantyRecord.retailer`) is the register's current name when set, the free text otherwise. |
+| `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')`. Defaults to the point of sale's country at activation. |
 | `start_date` | `date` | NULL | — | Equals the purchase date. NULL until activation. |
 | `duration_months` | `int` | NOT NULL | — | `CHECK (BETWEEN 0 AND 1200)`. Copied from `categories.warranty_months`. |
 | `end_date` | `date` | NULL | — | Start + duration in calendar months, clamped to the end of the month (2026-01-31 + 1 month = 2026-02-28). Coverage includes the end date. |
@@ -569,9 +572,9 @@ Table constraint: `CHECK (start_date IS NULL OR end_date IS NULL OR end_date >= 
 | `EXPIRED` | `duration_months = 0`, or `end_date` is before today |
 | `ACTIVE` | otherwise |
 
-- **Indexes:** primary key; unique `product_id`.
+- **Indexes:** primary key; unique `product_id`; `warranties_retailer_id_idx (retailer_id)`.
 - **Triggers:** `warranties_touch_updated_at`.
-- **Written by:** `IssuanceService.issueProduct` (insert); `WarrantyService.activate` (audit `warranty.activate`; an ISSUED product moves to ACTIVATED in the same transaction), `void` (audit `warranty.void`; inserts the row if none exists) and `extend` (audit `warranty.extend`; service only, no HTTP route).
+- **Written by:** `IssuanceService.issueProduct` (insert); `WarrantyService.activate` (the console's product page, and the sale mode's `SaleService.activate` inside the transaction that uses its sale token up; audit `warranty.activate` with `retailer`, `retailerId` and, from the sale mode, `saleScanId`; the point of sale is locked `FOR SHARE` so it cannot be deactivated meanwhile; an ISSUED product moves to ACTIVATED in the same transaction), `void` (audit `warranty.void`; inserts the row if none exists) and `extend` (audit `warranty.extend`; service only, no HTTP route).
 - **Privacy:** `retailer` and `country` describe the point of sale, not the customer.
 
 ### 5.15 `service_records`
@@ -595,7 +598,7 @@ After-sales service operations.
 
 ### 5.16 `scan_events`
 
-One row per processed verification request (`POST /api/v1/verify`), including requests whose code turned out to be malformed or invalid. Requests rejected before processing (request validation errors, oversized or non-JSON bodies, rate limiting) are not recorded.
+One row per processed verification request (`POST /api/v1/verify`), including requests whose code turned out to be malformed or invalid, and per staff scan of the sale mode (`POST /api/admin/sale/lookup`, A-08: `ADMIN_TEST`). Requests rejected before processing (request validation errors, oversized or non-JSON bodies, rate limiting) are not recorded.
 
 | Column | Type | Null | Default | Constraints / notes |
 |---|---|---|---|---|
@@ -604,10 +607,11 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `code_id` | `uuid` | NULL | — | FK → `codes.id`. Set only when the scanned code matched the registry and its key was trusted. |
 | `product_id` | `uuid` | NULL | — | FK → `products.id`. Set when the signature was valid and the signed identity resolved to a product. |
 | `packed_identity` | `bigint` | NULL | — | `CHECK (BETWEEN 0 AND 4294967295)`. Set whenever the payload decoded. |
-| `event_type` | `text` | NOT NULL | — | `CHECK (event_type IN ('VERIFY','REGISTER','TRANSFER','ADMIN_TEST'))`. The current code writes `VERIFY` only; anomaly scoring ignores `ADMIN_TEST`. |
+| `event_type` | `text` | NOT NULL | — | `CHECK (event_type IN ('VERIFY','REGISTER','TRANSFER','ADMIN_TEST'))`. The current code writes `VERIFY` (public scans) and `ADMIN_TEST` (staff scans of the sale mode); anomaly scoring ignores `ADMIN_TEST`. |
 | `device_hash` | `text` | NULL | — | Device pseudonym (see Privacy). |
 | `session_hash` | `text` | NULL | — | Session pseudonym, when the viewer was logged in. |
 | `account_id` | `uuid` | NULL | — | FK → `accounts.id`: the logged-in viewer. |
+| `admin_id` | `uuid` | NULL | — | Migration `0008_retail_mode`. FK → `admin_users.id`: the console user behind a staff scan. `scan_events_admin_id_admin_test CHECK (admin_id IS NULL OR event_type = 'ADMIN_TEST')`. A staff scan carries no device, session or account pseudonym. |
 | `ip_hash` | `text` | NULL | — | IP pseudonym. |
 | `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')`. Only codes with a known centroid; pseudo-codes such as `XX` or `T1` are dropped. |
 | `region` | `text` | NULL | — | ≤ 64 characters (Cloudflare `cf-region` in `cloudflare` geo mode). |
@@ -618,8 +622,8 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `result_state` | `text` | NOT NULL | — | The verification state (see [API §9.3](API.md#93-states-and-public-wording)). No `CHECK`: the row is inserted before the decision completes — with the state already decided by steps 1–8, or the provisional value `'PENDING'` while anomaly scoring and ownership (steps 9–10) still run — and updated to the final state in the same transaction, so `'PENDING'` is never visible after commit. |
 | `latency_ms` | `int` | NULL | — | `CHECK (latency_ms >= 0)`. Server-side processing time. |
 
-- **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_occurred_at_idx (occurred_at)`.
-- **Written by:** `VerificationService.verify` only, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token.
+- **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_admin_id_idx (admin_id)`; `scan_events_occurred_at_idx (occurred_at)`.
+- **Written by:** `VerificationService.verify`, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token; and `VerificationService.staffScan` (the sale mode, A-08: steps 1–8 only, `event_type = 'ADMIN_TEST'` with `admin_id`, its `authentication_events` row with risk 0 and no anomaly, and the sale token minted in the same transaction).
 - **Privacy:**
   - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie, `__Host-orbes_device` in production) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
   - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`), or when the server looks the client IP up in a local GeoIP database (`GEO_MODE=mmdb`, `TRUST_PROXY` required in production; the IP itself is never stored). `region` is filled only in `cloudflare` mode. With `GEO_MODE=none` (the default), no location is stored.
@@ -628,20 +632,20 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 
 ### 5.17 `scan_tokens`
 
-Single-use registration tokens minted by an `AUTHENTIC_FIRST_REGISTRATION` verification. They bind a first registration to a fresh, successful scan of that product.
+Single-use tokens that bind an action to a fresh, successful scan of that product: registration tokens (`FIRST_REGISTRATION`), minted by an `AUTHENTIC_FIRST_REGISTRATION` verification for the first registration; and sale tokens (`SALE_ACTIVATION`, migration `0008_retail_mode`, A-08), minted by a staff scan of the sale mode for the warranty activation. A token of one purpose is refused for the other.
 
 | Column | Type | Null | Default | Constraints / notes |
 |---|---|---|---|---|
 | `id_hash` | `bytea` | NOT NULL | — | PK. `CHECK (octet_length = 32)`. SHA-256 of the 32-byte token (the client receives the token, base64url, 43 characters). |
 | `product_id` | `uuid` | NOT NULL | — | FK → `products.id` |
 | `scan_event_id` | `uuid` | NOT NULL | — | FK → `scan_events.id`: the scan that earned it. |
-| `purpose` | `text` | NOT NULL | — | `CHECK (purpose IN ('FIRST_REGISTRATION'))` |
-| `expires_at` | `timestamptz` | NOT NULL | — | Creation + 15 minutes. |
+| `purpose` | `text` | NOT NULL | — | `CHECK (purpose IN ('FIRST_REGISTRATION','SALE_ACTIVATION'))` |
+| `expires_at` | `timestamptz` | NOT NULL | — | Creation + 15 minutes (registration) or 10 minutes (sale). |
 | `used_at` | `timestamptz` | NULL | — | Set by one conditional UPDATE, so two concurrent registrations cannot both consume it. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 
 - **Indexes:** primary key; `scan_tokens_product_id_idx`; `scan_tokens_scan_event_id_idx`.
-- **Written by:** `createScanToken` (from `VerificationService`), `consumeScanToken` (from `OwnershipService.registerFirst`, inside the registration transaction), `purgeScanTokens` (housekeeping deletes tokens that expired more than 24 hours ago, so "expired" stays distinguishable from "unknown" for a day).
+- **Written by:** `createScanToken` (from `VerificationService`, and from `SaleService.lookup` inside the staff scan's transaction), `consumeScanToken` (from `OwnershipService.registerFirst`, inside the registration transaction, and from `SaleService.activate`, inside the activation transaction, which also checks that the scan's `admin_id` is the caller), `purgeScanTokens` (housekeeping deletes tokens that expired more than 24 hours ago, so "expired" stays distinguishable from "unknown" for a day).
 
 ### 5.18 `authentication_events`
 
@@ -732,9 +736,28 @@ Hash chain: `hash = SHA-256(prev_hash ‖ UTF-8(canonicalJSON(entry)))`, where `
 - **Indexes:** primary key; unique `hash`; `audit_logs_prev_hash_key`: unique `(prev_hash)` (each entry can be the predecessor of only one entry, so a forked chain fails at insert time); `audit_logs_occurred_at_idx`; `audit_logs_target_idx (target_type, target_id)`.
 - **Triggers:** `audit_logs_append_only` (BEFORE UPDATE OR DELETE, row level) and `audit_logs_no_truncate` (BEFORE TRUNCATE, statement level), both raising `OR001` with "audit_logs is append-only".
 - **Written by:** `AuditService.record` only, under the `AUDIT_CHAIN` advisory lock, normally inside the transaction of the change it describes. `verifyChain()` (`GET /api/admin/audit/verify`) recomputes every hash and link; `head()` returns the newest id and hash for external anchoring. The chain detects edits and deletions inside the log, not the removal of the newest entries; anchor the head outside the database (§11).
-- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.role_change`, `admin.disable`, `admin.enable`, `admin.unlock`, `admin.sessions_revoke`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`. Verifications themselves are recorded in `scan_events`, not in the audit log.
+- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.role_change`, `admin.disable`, `admin.enable`, `admin.unlock`, `admin.sessions_revoke`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`, `retailer.create`, `retailer.update`. Verifications themselves are recorded in `scan_events`, not in the audit log.
 - `ownership.claim_failed` entries double as the counter for the claim-code attempt limit (5 failures per product per rolling hour), so the limit holds across server instances and restarts.
 - **Retention:** permanent. The application cannot delete entries.
+
+### 5.22 `retailers`
+
+The register of points of sale (migration `0008_retail_mode`, A-08): boutiques, department stores, the online shop. A warranty names its point of sale by `warranties.retailer_id`, chosen from a list in the console (product page) and in the sale mode of a seller's phone, so one boutique is never spelt three ways.
+
+| Column | Type | Null | Default | Constraints / notes |
+|---|---|---|---|---|
+| `id` | `uuid` | NOT NULL | `gen_random_uuid()` | PK |
+| `name` | `text` | NOT NULL | — | `CHECK (char_length BETWEEN 1 AND 120)`. As the client knows it. |
+| `city` | `text` | NULL | — | `CHECK (NULL or char_length BETWEEN 1 AND 80)`. NULL for the online shop. |
+| `country` | `char(2)` | NULL | — | `CHECK (country ~ '^[A-Z]{2}$')`. The default purchase country of its sales; NULL for the online shop (the country is then the buyer's, given at activation). |
+| `active` | `boolean` | NOT NULL | `true` | An inactive point of sale leaves the lists and refuses new activations (`409 RETAILER_INACTIVE`). |
+| `created_at` | `timestamptz` | NOT NULL | `now()` | |
+| `updated_at` | `timestamptz` | NOT NULL | `now()` | Trigger-maintained. |
+
+- **Indexes:** primary key; `retailers_name_city_unique`: unique `(lower(name), lower(coalesce(city, '')))` (one point of sale per name and city, ignoring case: `409 RETAILER_EXISTS`).
+- **Triggers:** `retailers_touch_updated_at`; `retailers_no_delete` (BEFORE DELETE, `OR001` "retailers are made inactive, never deleted": the warranties of its sales point to it).
+- **Written by:** `RetailerService.create` and `update` (`POST` and `PATCH /api/admin/retailers`, ADMIN; audit `retailer.create`, `retailer.update` with the changed values before and after); the demo seed loads the boutiques of the demo maison. Read by every role down to RETAIL (`GET /api/admin/retailers`).
+- **Privacy:** a point of sale is a business, not a person.
 
 ---
 
@@ -889,7 +912,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 
 ### 9.1 Layout
 
-- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), `0006_admin_password_change_required` (`admin_users.password_change_required`, boolean NOT NULL DEFAULT false: the temporary password of a staff account created from the console; its down step drops the column), and any later entry of `MIGRATIONS`. Numbers follow the order of deployment, not of writing: a migration listed with a gap (0006 before 0004 and 0005 exist in a given tree) belongs to a feature deployed with the others of its batch.
+- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), `0006_admin_password_change_required` (`admin_users.password_change_required`, boolean NOT NULL DEFAULT false: the temporary password of a staff account created from the console; its down step drops the column), `0008_retail_mode` (A-08, the sale mode: the RETAIL role in the `admin_users.role` CHECK, the `retailers` register (§5.22), `warranties.retailer_id`, `scan_events.admin_id` with its ADMIN_TEST-only CHECK, and the `SALE_ACTIVATION` purpose of `scan_tokens`; every new column nullable, so the previous image runs on it. Its down step restores the 0006 schema exactly: it first copies each warranty's point-of-sale name into an empty free-text `retailer`, deletes the outstanding SALE_ACTIVATION tokens and, once nothing references a console user any more, the RETAIL accounts with their sessions: sellers of a mode that no longer exists, never promoted to a role that reads the registry; the audit log keeps them by id), and any later entry of `MIGRATIONS`. Numbers follow the order of deployment, not of writing: a migration listed with a gap (0006 before 0004 and 0005 exist in a given tree) belongs to a feature deployed with the others of its batch.
 - A migration is a list of SQL strings executed one by one: PGlite runs queries through the extended protocol, which refuses multi-statement strings.
 - Value lists for `CHECK` constraints are literal in the migration, so a migration never changes when application constants evolve; a test asserts they still match `schema.ts`.
 - Rules: append new migrations to `MIGRATIONS`; never edit an applied migration.

@@ -3,10 +3,12 @@
  *
  * - list the console users with their role, second factor, lock, disable
  *   and temporary-password state;
- * - create a staff account (OPERATOR or AUDITOR) with a temporary password
- *   returned once and never audited; the first sign-in must replace it;
- * - change a role (OPERATOR or AUDITOR: the ADMIN role, like ADMIN accounts,
- *   comes from the shell, where its second factor is enrolled out of band);
+ * - create a staff account (OPERATOR, AUDITOR or RETAIL, a seller limited to
+ *   the sale mode, A-08) with a temporary password returned once and never
+ *   audited; the first sign-in must replace it;
+ * - change a role (OPERATOR, AUDITOR or RETAIL: the ADMIN role, like ADMIN
+ *   accounts, comes from the shell, where its second factor is enrolled out
+ *   of band);
  * - disable (a departure: every session ends at once) and enable again;
  * - lift a sign-in lockout;
  * - list and end the sessions of an admin;

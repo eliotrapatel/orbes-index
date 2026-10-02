@@ -221,7 +221,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const b = parse(warrantyActivateBody, request.body);
     return warranty.activate(
       productId,
-      { ...(b.purchaseDate ? { purchaseDate: b.purchaseDate } : {}), retailer: b.retailer ?? null, country: b.country ?? null },
+      { ...(b.purchaseDate ? { purchaseDate: b.purchaseDate } : {}), retailer: b.retailer ?? null, retailerId: b.retailerId ?? null, country: b.country ?? null },
       adminActor(request),
     );
   });

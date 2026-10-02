@@ -40,7 +40,7 @@ genome/
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
-    admin/               admin console: catalogue, generator, keys, anomalies, audit
+    admin/               admin console: catalogue, generator, keys, anomalies, audit; the sale mode (decoder worker of verify/)
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)

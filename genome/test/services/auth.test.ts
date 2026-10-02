@@ -324,6 +324,21 @@ describe('AuthService', () => {
         expect(JSON.stringify((await audit.list({}, { page: 1, pageSize: 200 })).items)).not.toContain('my own staff passphrase');
       });
 
+      it('creates RETAIL accounts too (A-08): a seller signs in with the temporary password, replaces it, and can be moved between staff roles', async () => {
+        const { boss, actor } = await byAdmin();
+        const addr = email('seller');
+        const { admin, temporaryPassword } = await auth.createStaff({ email: addr, role: 'RETAIL' }, actor);
+        expect(admin).toMatchObject({ email: addr, role: 'RETAIL', passwordChangeRequired: true });
+        expect((await audit.list({ action: 'admin.create', targetId: admin.id })).items[0]).toMatchObject({ actorId: boss.id, details: { role: 'RETAIL', passwordChangeRequired: true } });
+        const login = await auth.adminLogin({ email: addr, password: temporaryPassword }, {});
+        expect(login.admin).toMatchObject({ role: 'RETAIL', passwordChangeRequired: true });
+        await auth.changePassword({ type: 'admin', id: admin.id }, { currentPassword: temporaryPassword, newPassword: 'a seller passphrase 2026' }, { type: 'admin', id: admin.id }, { keepToken: login.session.token });
+        expect((await auth.authenticateAdmin(login.session.token))?.admin).toMatchObject({ role: 'RETAIL', passwordChangeRequired: false });
+        expect((await auth.setAdminRole(admin.id, 'OPERATOR', actor)).role).toBe('OPERATOR');
+        expect((await auth.setAdminRole(admin.id, 'RETAIL', actor)).role).toBe('RETAIL');
+        expect((await audit.list({ action: 'admin.role_change', targetId: admin.id })).items[0].details).toEqual({ from: 'OPERATOR', to: 'RETAIL' });
+      });
+
       it('refuses a password change while the admin is locked, without looking at the password', async () => {
         const a = await newAdmin();
         for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);

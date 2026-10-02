@@ -6,8 +6,9 @@
  * The role needs CREATEDB: each run creates a throwaway database, migrates
  * it, checks that pg returns the same JS types as PGlite and that audit
  * appends stay linear under true parallelism (pool of 8), as do category
- * allocation and the last-active-ADMIN rule of the Team page (A-02), then
- * drops it.
+ * allocation, the last-active-ADMIN rule of the Team page (A-02) and the
+ * sale mode's activation (A-08: one warranty start per piece, one use per
+ * token), then drops it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
@@ -18,6 +19,12 @@ import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService } from '../../src/server/services/auth.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { SessionService } from '../../src/server/services/sessions.js';
+import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { RetailerService } from '../../src/server/services/retailers.js';
+import { SaleService } from '../../src/server/services/sale.js';
+import { createScanToken } from '../../src/server/services/scan-tokens.js';
+import type { VerificationService } from '../../src/server/services/verification.js';
+import { WarrantyService } from '../../src/server/services/warranty.js';
 import { isGuardViolation } from '../../src/server/db/pg-errors.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -98,6 +105,54 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['LAST_ADMIN']);
     const active = await db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').where('disabled_at', 'is', null).execute();
     expect(active).toHaveLength(1);
+    expect((await audit.verifyChain()).ok).toBe(true);
+  });
+
+  it('starts a warranty once when two phones activate the same piece at the same moment, and uses a sale token once', async () => {
+    const audit = new AuditService({ db });
+    const lifecycle = new LifecycleService({ db, audit });
+    const warranty = new WarrantyService({ db, audit, lifecycle });
+    // activate() never calls the verification service (lookup does).
+    const sale = new SaleService({ db, verification: null as unknown as VerificationService, warranty });
+    const shop = await new RetailerService({ db, audit }).create({ name: 'ORBES Paris', city: 'Paris', country: 'FR' }, { type: 'system' });
+    const seller = await db
+      .insertInto('admin_users')
+      .values({ email: 'seller@parity.test', email_normalized: 'seller@parity.test', password_hash: 'scrypt$x', role: 'RETAIL' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await db.insertInto('categories').values({ id: 20, code: 'S', name: 'Sale parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 20, name: 'MONOLITHE', type: 'RING', sku_prefix: 'SALE' }).returning('id').executeTakeFirstOrThrow();
+    const piece = async (serial: number) => {
+      const p = await db
+        .insertInto('products')
+        .values({ product_id: `O26-S-${String(serial).padStart(5, '0')}`, packed_identity: (26 << 25) | (20 << 20) | serial, year: 2026, category_id: 20, serial, sku: `SALE-${serial}`, model_id: model.id, material: 'SILVER' })
+        .returning(['id', 'product_id'])
+        .executeTakeFirstOrThrow();
+      await db.insertInto('product_status_history').values({ product_id: p.id, from_status: null, to_status: 'ISSUED', actor_type: 'system' }).execute();
+      return p;
+    };
+    const token = async (productId: string) => {
+      const scan = await db.insertInto('scan_events').values({ event_type: 'ADMIN_TEST', admin_id: seller.id, product_id: productId, result_state: 'AUTHENTIC' }).returning('id').executeTakeFirstOrThrow();
+      return (await createScanToken(db, { productId, scanEventId: scan.id, purpose: 'SALE_ACTIVATION', ttlMs: 600_000 })).token;
+    };
+    const actor = { type: 'admin' as const, id: seller.id };
+
+    // Two sellers' scans of one piece: one warranty start; the losing token is rolled back, not used.
+    const a = await piece(1);
+    const tokens = [await token(a.id), await token(a.id)];
+    const results = await Promise.allSettled(tokens.map((t) => sale.activate({ token: t, retailerId: shop.id }, actor)));
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['WARRANTY_ALREADY_ACTIVATED']);
+    const used = await db.selectFrom('scan_tokens').select('used_at').where('product_id', '=', a.id).execute();
+    expect(used.filter((r) => r.used_at !== null)).toHaveLength(1);
+
+    // One token sent twice at once: used once.
+    const b = await piece(2);
+    const t = await token(b.id);
+    const twice = await Promise.allSettled([t, t].map((x) => sale.activate({ token: x, retailerId: shop.id }, actor)));
+    expect(twice.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(twice.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['SALE_TOKEN_USED']);
+    expect(await db.selectFrom('product_status_history').select('to_status').where('product_id', '=', b.id).where('to_status', '=', 'ACTIVATED').execute()).toHaveLength(1);
     expect((await audit.verifyChain()).ok).toBe(true);
   });
 });

@@ -144,6 +144,28 @@ describe('build-web: the display font, preloaded by both shells', () => {
     // One URL for both apps: a visitor of /verify and /admin downloads the font once.
     expect(urls.size).toBe(1);
   });
+
+  it('gives the console its own decoder worker (A-08): the sale mode reads codes, the main bundle carries no decoder', () => {
+    const admin = result.apps.find((a) => a.name === 'admin')!;
+    expect(Object.keys(admin.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css', 'worker.ts']);
+    expect(admin.assets['worker.ts']).toMatch(/^\/assets\/admin-worker-[A-Z0-9]{8}\.js$/);
+    const page = readFileSync(join(result.outDir, 'admin', 'index.html'), 'utf8');
+    expect(page).toContain(`<meta name="orbes-worker" content="${admin.assets['worker.ts']}">`);
+    expect(() => assertCspSafeHtml(page)).not.toThrow();
+    const main = read(admin.assets['main.ts']).toString('utf8');
+    const worker = read(admin.assets['worker.ts']).toString('utf8');
+    // The decoder's own diagnostics travel with it: in the worker, never in the page.
+    for (const marker of ['no code structure around the seal', 'format word unreadable']) {
+      expect(worker, marker).toContain(marker);
+      expect(main, marker).not.toContain(marker);
+    }
+    expect(main).not.toMatch(/decodeCellsToCodeword|rsDecode/);
+    // The same decoder as /verify: the two worker bundles are built from one source.
+    const verifyWorker = read(result.apps.find((a) => a.name === 'verify')!.assets['worker.ts']).toString('utf8');
+    expect(worker.length).toBeGreaterThan(10_000);
+    expect(Math.abs(worker.length - verifyWorker.length)).toBeLessThan(200);
+    for (const js of [main, worker]) expect(js).not.toMatch(/node:crypto|node:fs|from"node:|require\("/);
+  });
 });
 
 describe('build-web: development build', () => {

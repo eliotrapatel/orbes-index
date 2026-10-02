@@ -18,6 +18,10 @@
  *                 passed TOTP before using anything but the auth routes (403);
  *   5. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
  *                 keys/revocations/reinstatement/categories/console users (403).
+ *                 RETAIL ranks under AUDITOR, so the default rule refuses it
+ *                 everywhere: only the routes that declare `minRole: 'RETAIL'`
+ *                 (the sale mode, the list of points of sale and the admin's own
+ *                 session, password and second factor) let it through.
  *
  * The checks run in `onRequest`, before the body is even parsed, so
  * unauthenticated traffic costs as little as possible.
@@ -77,7 +81,8 @@ declare module 'fastify' {
 
 // ── Roles ──────────────────────────────────────────────────────────────────
 
-export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ AUDITOR: 1, OPERATOR: 2, ADMIN: 3 });
+/** RETAIL (A-08) under AUDITOR: a role unknown to this table ranks 0 and is refused everywhere. */
+export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
 
 export function hasRole(role: AdminRole, min: AdminRole): boolean {
   return (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];

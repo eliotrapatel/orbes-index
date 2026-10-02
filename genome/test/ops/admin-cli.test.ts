@@ -35,7 +35,7 @@ async function run(argv: string[], env: NodeJS.ProcessEnv = ENV) {
 
 describe('admin CLI', () => {
   it('prints usage and refuses malformed commands without touching the database', async () => {
-    expect((await run(['--help'])).io.text()).toMatch(/create --email <email> --role <ADMIN\|OPERATOR\|AUDITOR>/);
+    expect((await run(['--help'])).io.text()).toMatch(/create --email <email> --role <ADMIN\|OPERATOR\|AUDITOR\|RETAIL>/);
     expect((await run([])).code).toBe(2);
     expect((await run(['explode'])).code).toBe(2);
     expect((await run(['create', '--email', 'x@orbes.test'])).code).toBe(2); // no role
@@ -117,6 +117,10 @@ describe('admin CLI', () => {
     expect((await run(['role', '--email', 'ops@orbes.test', '--role', 'ADMIN'])).io.text()).toMatch(/ops@orbes\.test is now ADMIN/);
     expect((await run(['role', '--email', 'boss@orbes.test', '--role', 'AUDITOR'])).code).toBe(0);
     expect((await run(['enable', '--email', 'ghost@orbes.test'])).code).toBe(1);
+    // A seller of the sale mode (A-08), from the shell too.
+    expect((await run(['create', '--email', 'seller@orbes.test', '--role', 'RETAIL'], { ...ENV, ADMIN_PASSWORD: PASSWORD })).code).toBe(0);
+    expect((await run(['list'])).io.text()).toMatch(/seller@orbes\.test\s+RETAIL\s+2FA off\s+active/);
+    expect((await run(['role', '--email', 'boss@orbes.test', '--role', 'RETAIL'])).io.text()).toMatch(/boss@orbes\.test is now RETAIL/);
 
     const audit = new AuditService({ db: t.db });
     for (const action of ['admin.role_change', 'admin.disable', 'admin.enable']) {

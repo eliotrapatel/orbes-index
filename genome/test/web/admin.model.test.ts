@@ -25,7 +25,10 @@ import {
   type ArtifactForm,
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
-import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
+import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
+import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, retailerLabel, retailerOptions, saleVerdict } from '../../src/web/admin/model/sale.js';
+import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
+import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
 import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMatches, revocationTargetError, triageMoves } from '../../src/web/admin/model/registry.js';
 import { adminState, deviceLabel, newPasswordProblem, PASSWORD_MIN_LENGTH, teamActions } from '../../src/web/admin/model/team.js';
@@ -52,6 +55,7 @@ describe('admin enums mirror the server', () => {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
+    expect([...web.SALE_REFUSALS]).toEqual([...SERVER_SALE_REFUSALS]);
   });
 
   it('uses the server role ranks and artifact limits', () => {
@@ -112,6 +116,76 @@ describe('permissions', () => {
     expect(can('ADMIN', 'manageKeys')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
+  });
+
+  it('puts RETAIL under AUDITOR: the sale mode only (A-08)', () => {
+    const caps = Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[];
+    expect(caps.filter((c) => can('RETAIL', c))).toEqual(['sell']);
+    for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) expect(can(role, 'sell'), role).toBe(true);
+    expect(can('OPERATOR', 'manageRetailers')).toBe(false);
+    expect(can('ADMIN', 'manageRetailers')).toBe(true);
+    expect(saleOnly('RETAIL')).toBe(true);
+    for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) expect(saleOnly(role), role).toBe(false);
+    expect(saleOnly(null)).toBe(false);
+    // A role this console does not know is refused everywhere, as on the server.
+    expect(can('SELLER' as never, 'sell')).toBe(false);
+  });
+});
+
+describe('sale mode view model (A-08)', () => {
+  const shops: web.Retailer[] = [
+    { id: 'a', name: 'ORBES Paris — Saint-Honoré', city: 'Paris', country: 'FR', active: true, createdAt: '', updatedAt: '' },
+    { id: 'b', name: 'ORBES.COM — Online boutique', city: null, country: 'DE', active: true, createdAt: '', updatedAt: '' },
+    { id: 'c', name: 'Pop-up Cannes', city: 'Cannes', country: 'FR', active: false, createdAt: '', updatedAt: '' },
+  ];
+  const piece: NonNullable<web.SaleLookup['piece']> = {
+    productId: 'O26-J-00184',
+    status: 'ISSUED',
+    category: { code: 'J', name: 'Jewelry' },
+    collection: 'ORBIT',
+    model: 'MONOLITHE',
+    type: 'RING',
+    variant: '52',
+    material: '925 sterling silver',
+    createdYear: 2026,
+    registered: false,
+    warranty: { status: 'NOT_STARTED', startDate: null, endDate: null },
+  };
+
+  it('names a point of sale, lists the active ones and preselects the one this phone used last', () => {
+    expect(retailerLabel(shops[0])).toBe('ORBES Paris — Saint-Honoré · Paris · FR');
+    expect(retailerLabel(shops[1])).toBe('ORBES.COM — Online boutique · DE');
+    expect(retailerOptions(shops).map((o) => o.value)).toEqual(['a', 'b']);
+    expect(preselectedRetailer(shops, 'b')).toBe('b');
+    expect(preselectedRetailer(shops, 'c')).toBe(''); // closed since: chosen again
+    expect(preselectedRetailer(shops, null)).toBe('');
+    expect(preselectedRetailer([shops[0], shops[2]], null)).toBe('a'); // the only active one
+    expect(preselectedRetailer([], 'a')).toBe('');
+  });
+
+  it('says what to do with a looked-up piece', () => {
+    const ready = saleVerdict({ state: 'AUTHENTIC', piece, sale: { token: 't', expiresAt: '2026-10-02T10:10:00.000Z' }, refusal: null });
+    expect(ready).toMatchObject({ label: 'READY TO SELL', tone: 'solid', canActivate: true });
+    const refused = (code: web.SaleRefusal, state: web.VerificationState = 'AUTHENTIC') =>
+      saleVerdict({ state, piece: code === 'NOT_AUTHENTIC' ? null : piece, sale: null, refusal: { code, message: SALE_REFUSAL_MESSAGES[code] } });
+    expect(refused('WARRANTY_ACTIVE')).toMatchObject({ label: 'ALREADY SOLD', canActivate: false, message: SALE_REFUSAL_MESSAGES.WARRANTY_ACTIVE });
+    expect(refused('WARRANTY_VOID')).toMatchObject({ label: 'WARRANTY VOID', tone: 'alert', canActivate: false });
+    expect(refused('NOT_FOR_SALE').label).toBe('NOT FOR SALE');
+    expect(refused('NOT_AUTHENTIC', 'INVALID_SIGNATURE')).toMatchObject({ label: 'INVALID SIGNATURE', tone: 'critical', canActivate: false });
+    expect(refused('NOT_AUTHENTIC', 'SUSPICIOUS_ACTIVITY')).toMatchObject({ label: 'SUSPICIOUS ACTIVITY', tone: 'alert' });
+    // No token, no activation, whatever else the answer says.
+    expect(saleVerdict({ state: 'AUTHENTIC', piece, sale: null, refusal: null }).canActivate).toBe(false);
+    expect(pieceLines(piece)).toEqual(['MONOLITHE · RING · 52', '925 STERLING SILVER · JEWELRY · ORBIT']);
+    expect(pieceLines({ ...piece, variant: null, collection: null })).toEqual(['MONOLITHE · RING', '925 STERLING SILVER · JEWELRY']);
+  });
+
+  it('counts the minutes a scan stays valid and tells the client where to register', () => {
+    const now = new Date('2026-10-02T10:00:00.000Z');
+    expect(minutesLeft(new Date(now.getTime() + SALE_TOKEN_TTL_MS).toISOString(), now)).toBe(10);
+    expect(minutesLeft('2026-10-02T10:00:30.000Z', now)).toBe(1);
+    expect(minutesLeft('2026-10-02T09:00:00.000Z', now)).toBe(0);
+    expect(minutesLeft('garbage', now)).toBe(0);
+    expect(CLIENT_REGISTRATION).toBe('Register your piece with its card at theorbes.com/verify.');
   });
 });
 
@@ -258,6 +332,7 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
       productId: 'O26-J-00184',
       purchaseDate: '2026-09-04',
       retailer: 'ORBES PARIS',
+      retailerId: null,
       country: 'FR',
       startDate: '2026-09-04',
       endDate: '2028-09-04',

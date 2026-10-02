@@ -40,8 +40,11 @@ import type {
   ProductDetail,
   ProductOverview,
   ProductStatus,
+  Retailer,
   RevocationRecord,
   RevocationTargetType,
+  SaleActivation,
+  SaleLookup,
   ScanRecord,
   ServiceRecord,
   ServiceType,
@@ -298,7 +301,7 @@ export class AdminApi {
     return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/totp/reset`);
   }
 
-  /** A staff account (OPERATOR or AUDITOR) with a temporary password, returned once. */
+  /** A staff account (OPERATOR, AUDITOR or RETAIL) with a temporary password, returned once. */
   createStaff(email: string, role: StaffRole): Promise<StaffCreated> {
     return this.post('/api/admin/admins', { email, role });
   }
@@ -391,7 +394,8 @@ export class AdminApi {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/codes/reissue`, { reason });
   }
 
-  activateWarranty(productId: string, input: { purchaseDate?: string; retailer?: string; country?: string }): Promise<{ warranty: WarrantyRecord }> {
+  /** `retailerId`: a point of sale of the register (the console never sends the free-text `retailer` any more). */
+  activateWarranty(productId: string, input: { purchaseDate?: string; retailerId?: string; retailer?: string; country?: string }): Promise<{ warranty: WarrantyRecord }> {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/warranty/activate`, input);
   }
 
@@ -488,6 +492,32 @@ export class AdminApi {
 
   createRevocation(targetType: RevocationTargetType, targetId: string, reason: string): Promise<RevocationRecord> {
     return this.post('/api/admin/revocations', { targetType, targetId, reason });
+  }
+
+  // ── Points of sale and the sale mode (A-08) ──────────────────────────────
+
+  /** The register; `activeOnly` for the lists a sale is chosen from. Every role, RETAIL included. */
+  retailers(opts: { activeOnly?: boolean } = {}): Promise<Items<Retailer>> {
+    return this.get('/api/admin/retailers', opts.activeOnly ? { active: true } : undefined);
+  }
+
+  createRetailer(input: { name: string; city?: string; country?: string }): Promise<{ retailer: Retailer }> {
+    return this.post('/api/admin/retailers', input);
+  }
+
+  /** Rename, move, deactivate or reactivate (a point of sale is never deleted). */
+  updateRetailer(retailerId: string, input: { name?: string; city?: string | null; country?: string | null; active?: boolean }): Promise<{ retailer: Retailer }> {
+    return this.patch(`/api/admin/retailers/${encodeURIComponent(retailerId)}`, input);
+  }
+
+  /** What the decoder read, judged as /api/v1/verify would; a token comes back when the piece can be sold. */
+  saleLookup(input: { code: string; genome?: { glyphs: (number | null)[]; confidence?: number[] }; client?: Record<string, unknown> }): Promise<SaleLookup> {
+    return this.post('/api/admin/sale/lookup', input);
+  }
+
+  /** Start the warranty of the looked-up piece today, at this point of sale. */
+  saleActivate(token: string, retailerId: string): Promise<SaleActivation> {
+    return this.post('/api/admin/sale/activate', { token, retailerId });
   }
 
   // ── Keys ─────────────────────────────────────────────────────────────────

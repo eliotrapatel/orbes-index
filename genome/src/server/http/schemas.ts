@@ -170,7 +170,7 @@ export const adminPasswordChangeBody = body({ currentPassword: password, newPass
 
 // ── Admin: console users (Team page, ADMIN) ────────────────────────────────
 
-const staffRole = z.enum(STAFF_ROLES, { error: 'Must be OPERATOR or AUDITOR (the ADMIN role is granted from the shell)' });
+const staffRole = z.enum(STAFF_ROLES, { error: 'Must be OPERATOR, AUDITOR or RETAIL (the ADMIN role is granted from the shell)' });
 
 export const createStaffBody = body({ email, role: staffRole });
 
@@ -245,9 +245,14 @@ export const optionalReasonBody = optionalBody({
 
 export const requiredReasonBody = body({ reason: text(500) });
 
+/**
+ * `retailerId` (A-08): a point of sale of the register, whose country is the default purchase country.
+ * The free-text `retailer` stays accepted (history, API callers); the console sends `retailerId` only.
+ */
 export const warrantyActivateBody = optionalBody({
   purchaseDate: z.preprocess((v) => (v === '' || v === null ? undefined : v), isoDate.optional()),
   retailer: z.preprocess((v) => (v === '' ? null : v), z.string().max(200, 'At most 200 characters').nullable().optional()),
+  retailerId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
   country: z.preprocess((v) => (v === '' ? null : v), country.nullable().optional()),
 });
 
@@ -267,6 +272,34 @@ export const completeServiceBody = optionalBody({
 });
 
 export const serviceParams = z.object({ id: uuid });
+
+// ── Admin: points of sale and the sale mode (A-08) ──────────────────────────
+
+export const retailerParams = z.object({ id: uuid });
+
+export const retailerListQuery = z.object({ active: queryBool });
+
+export const createRetailerBody = body({
+  name: text(120),
+  city: optionalText(80),
+  country: z.preprocess((v) => (v === '' ? null : v), country.nullable().optional()),
+});
+
+/** Rename, move or (de)activate; at least one field. A point of sale is never deleted. */
+export const updateRetailerBody = body({
+  name: text(120).optional(),
+  city: z.preprocess((v) => (v === '' ? null : v), text(80).nullable().optional()),
+  country: z.preprocess((v) => (v === '' ? null : v), country.nullable().optional()),
+  active: z.boolean().optional(),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Nothing to change');
+
+/** POST /api/admin/sale/lookup: what the sale mode's decoder read, in the shape of a verification (§9.1). */
+export const saleLookupBody = verifyBody;
+
+export const saleActivateBody = body({
+  token: z.string().trim().min(1, 'Required').max(128, 'Invalid sale token').regex(BASE64URL_RE, 'Invalid sale token'),
+  retailerId: uuid,
+});
 
 // ── Admin: codes, artifacts, revocations ───────────────────────────────────
 

@@ -121,6 +121,11 @@ describe('demo seed', () => {
   });
 
   it('records warranties, service records, transfers and scan histories', async () => {
+    // Every warranty started names its point of sale from the register (A-08), never free text.
+    const started = await ctx.db.selectFrom('warranties').select(['retailer', 'retailer_id']).where('start_date', 'is not', null).execute();
+    expect(started.length).toBeGreaterThan(10);
+    expect(started.every((w) => w.retailer_id !== null && w.retailer === null)).toBe(true);
+    expect((await ctx.services.retailers.list()).map((r) => r.name)).toContain('ORBES PARIS — SAINT-HONORÉ');
     const services = await ctx.db.selectFrom('service_records').select(['status']).execute();
     expect(services.filter((s) => s.status === 'OPEN').length).toBeGreaterThanOrEqual(2);
     expect(services.filter((s) => s.status === 'COMPLETED').length).toBeGreaterThanOrEqual(2);
