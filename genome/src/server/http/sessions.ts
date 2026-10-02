@@ -11,10 +11,13 @@
  *   2. CSRF     — unsafe methods need `Origin == PUBLIC_ORIGIN` (or no Origin
  *                 and `Sec-Fetch-Site: same-origin`) and, with a session,
  *                 `x-csrf-token` equal to the session's token (403);
- *   3. MFA      — optionally (production default), admin sessions must have
+ *   3. password — an admin signed in with a temporary password (a staff
+ *                 account created from the console) may only sign out, read
+ *                 `me` and change the password (403 PASSWORD_CHANGE_REQUIRED);
+ *   4. MFA      — optionally (production default), admin sessions must have
  *                 passed TOTP before using anything but the auth routes (403);
- *   4. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
- *                 keys/revocations/reinstatement/categories (403).
+ *   5. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
+ *                 keys/revocations/reinstatement/categories/console users (403).
  *
  * The checks run in `onRequest`, before the body is even parsed, so
  * unauthenticated traffic costs as little as possible.
@@ -59,6 +62,8 @@ export interface RouteGuard {
   minRole?: AdminRole;
   /** Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes). */
   mfaExempt?: boolean;
+  /** Admin routes: reachable while the admin must still replace a temporary password (sign-out, me, the change itself). */
+  passwordChangeExempt?: boolean;
 }
 
 declare module 'fastify' {
@@ -94,6 +99,9 @@ const insufficientRole = (role: AdminRole, min: AdminRole) =>
 
 const mfaRequired = () =>
   new DomainError('MFA_REQUIRED', 403, 'Two-factor authentication is required. Enable it and sign in again.');
+
+const passwordChangeRequired = () =>
+  new DomainError('PASSWORD_CHANGE_REQUIRED', 403, 'Choose a new password before using the console.');
 
 // ── Cookies ────────────────────────────────────────────────────────────────
 
@@ -219,6 +227,8 @@ export function sessionGuard(ctx: AppContext, opts: SessionGuardOptions): onRequ
 
     if (opts.kind === 'admin') {
       const { admin, session } = auth as AdminAuth;
+      // First the temporary password, then the second factor: the TOTP routes are not open before the password is the admin's own.
+      if (admin.passwordChangeRequired && !g.passwordChangeExempt) throw passwordChangeRequired();
       if (opts.requireMfa && !g.mfaExempt && !session.mfaPassed) throw mfaRequired();
       const min = g.minRole ?? (unsafe ? 'OPERATOR' : 'AUDITOR');
       if (!hasRole(admin.role, min)) throw insufficientRole(admin.role, min);

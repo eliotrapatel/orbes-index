@@ -131,6 +131,8 @@ export const ADVISORY_LOCK = Object.freeze({
   KEY_ROTATION: 0x4f52_0004,
   /** AnomalyService.recordFinding for product-less findings (VALID_SIGNATURE_UNREGISTERED), which no unique index can deduplicate. */
   ANOMALY_UNREGISTERED: 0x4f52_0101,
+  /** AuthService role changes and (de)activation of console users: the last active ADMIN check must see every concurrent change. */
+  ADMIN_ROSTER: 0x4f52_0201,
 });
 
 /**

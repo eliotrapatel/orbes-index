@@ -17,7 +17,7 @@ import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { SERVICE_TYPES, type IssuedCodeJson, type ProductDetail, type ProductStatus } from '../types.js';
 import { artifactPanel } from '../ui/artifacts.js';
-import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { anomalyStatus, button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { genomeFigure } from '../ui/figures.js';
 import { notify } from '../ui/toast.js';
@@ -506,7 +506,7 @@ function anomaliesPanel(d: ProductDetail): HTMLElement {
       [
         { label: 'Finding', cell: (x) => humanize(x.type) },
         { label: 'Severity', cell: (x) => statusMark(x.severity, toneOf('severity', x.severity)), kind: ['nowrap'] },
-        { label: 'Status', cell: (x) => statusMark(humanize(x.status), toneOf('anomaly', x.status)), kind: ['nowrap'] },
+        { label: 'Status', cell: (x) => anomalyStatus(x), kind: ['nowrap'] },
         { label: 'Seen', cell: (x) => String(x.occurrences), kind: ['num'] },
         { label: 'Last', cell: (x) => formatDateTime(x.lastSeenAt), kind: ['nowrap'] },
         { label: 'Details', cell: (x) => h('span', { class: 'cell-details' }, summarizeDetails(x.details)), kind: ['wide'] },

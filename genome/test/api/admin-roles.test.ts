@@ -1,6 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
- * mutates, ADMIN for keys, revocations, reinstatement and categories.
+ * mutates, ADMIN for keys, revocations, reinstatement, categories and the
+ * console users of the Team page (A-02); every role changes its own password.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -11,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AdminRole } from '../../src/server/db/schema.js';
 import { adminClient, createHarness, errorOf, type Client, type Harness } from './support.js';
 
-type Probe = { method: 'GET' | 'POST' | 'PATCH'; url: string; body?: unknown; min: AdminRole; group: string };
+type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; min: AdminRole; group: string };
 
 const RANK: Record<AdminRole, number> = { AUDITOR: 1, OPERATOR: 2, ADMIN: 3 };
 const PID = 'O26-J-00001';
@@ -57,6 +58,14 @@ const PROBES: Probe[] = [
   { group: 'keys', method: 'POST', url: '/api/admin/keys/1/revoke', body: INVALID, min: 'ADMIN' },
   { group: 'admins', method: 'GET', url: '/api/admin/admins', min: 'ADMIN' },
   { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/totp/reset`, body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'POST', url: '/api/admin/admins', body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'PATCH', url: `/api/admin/admins/${UUID}/role`, body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/disable`, body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/enable`, body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'POST', url: `/api/admin/admins/${UUID}/unlock`, body: INVALID, min: 'ADMIN' },
+  { group: 'admins', method: 'GET', url: `/api/admin/admins/${UUID}/sessions`, min: 'ADMIN' },
+  { group: 'admins', method: 'DELETE', url: `/api/admin/admins/${UUID}/sessions`, min: 'ADMIN' },
+  { group: 'password', method: 'POST', url: '/api/admin/auth/password', body: INVALID, min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -73,7 +82,7 @@ describe('admin role enforcement', () => {
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins']) {
+    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins', 'password']) {
       expect(groups.has(g)).toBe(true);
     }
   });
@@ -106,6 +115,18 @@ describe('admin role enforcement', () => {
     const c = h.client();
     await c.post('/api/v1/account/register', { email: `cust-${randomUUID().slice(0, 6)}@example.com`, password: 'correct horse battery staple' });
     expect((await c.get('/api/admin/dashboard')).statusCode).toBe(401);
+  });
+
+  it('OPERATOR and AUDITOR get 403 on every Team route (A-02), before validation', async () => {
+    const team = PROBES.filter((p) => p.url.startsWith('/api/admin/admins'));
+    expect(team).toHaveLength(9);
+    for (const role of ['OPERATOR', 'AUDITOR'] as const) {
+      for (const p of team) {
+        const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
+        expect(res.statusCode, `${role} ${p.method} ${p.url}`).toBe(403);
+        expect(errorOf(res).code).toBe('FORBIDDEN');
+      }
+    }
   });
 
   it('OPERATOR may transition products but not revoke them', async () => {

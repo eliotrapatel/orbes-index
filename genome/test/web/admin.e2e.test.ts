@@ -8,7 +8,9 @@
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
- * verification → sign out. Also: TOTP enrolment + two-step sign-in, and the
+ * verification → sign out. Also: TOTP enrolment + two-step sign-in, the
+ * Team page (A-02: a staff account, its temporary password and forced first
+ * change, the own password change, a role change, a departure) and the
  * read-only AUDITOR console. No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
@@ -566,14 +568,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await cspViolations(p)).toEqual([]);
     await p.close();
 
-    // The device is lost: an ADMIN resets the operator's second factor from the security page.
+    // The device is lost: an ADMIN resets the operator's second factor from the Team page.
     const operatorId = (await ctx.services.auth.listAdmins()).find((a) => a.email === operator.email)!.id;
     const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
-    await go(a, '#/security', 'Security');
+    await go(a, '#/team', 'Team');
     const userRow = a.locator('[data-testid=admin-users] tr', { hasText: operator.email });
     await userRow.locator('[data-testid=reset-totp]').click();
     await confirmDialog(a, `RESET 2FA ${operator.email}`);
@@ -581,6 +583,109 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => userRow.textContent()).toContain('NOT ENROLLED');
     expect(await cspViolations(a)).toEqual([]);
     await a.click('[data-testid=sign-out]');
+    await adminContext.close();
+  }, STEP_TIMEOUT);
+
+  it('manages the team: a staff account, its temporary password, its first sign-in, a role change and its departure', async () => {
+    const staffEmail = 'atelier@orbes.test';
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const a = await adminContext.newPage();
+    await watch(a);
+    await signIn(a, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    // The ADMIN's sidebar, its longest: SIGN OUT and CHANGE PASSWORD show on a 900 px screen without scrolling it.
+    for (const id of ['sign-out', 'change-password']) {
+      const box = (await a.locator(`[data-testid=${id}]`).boundingBox())!;
+      expect(box.y + box.height, id).toBeLessThanOrEqual(900);
+      expect(box.x + box.width, id).toBeLessThanOrEqual(248 - 32);
+    }
+    await a.locator('.side__link', { hasText: 'Team' }).click();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
+    expect(await a.locator('.side__link.is-active').textContent()).toBe('Team');
+    // One's own row offers nothing but its own second factor.
+    const selfRow = a.locator('[data-testid=admin-users] tr', { hasText: ADMIN.email });
+    expect(await selfRow.locator('[data-testid=team-disable], [data-testid=team-role]').count()).toBe(0);
+
+    await a.click('[data-testid=team-create]');
+    await a.fill('dialog input[name=email]', staffEmail);
+    await a.selectOption('dialog select[name=role]', 'OPERATOR');
+    await confirmDialog(a);
+    const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
+    expect(temporary).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+    const staffRow = a.locator('[data-testid=admin-users] tr', { hasText: staffEmail });
+    await expect.poll(() => staffRow.textContent()).toContain('TEMPORARY PASSWORD');
+    expect(await figuresInDisplayFace(a)).toEqual([]);
+    await shot(a, 'team');
+    await a.click('[data-testid=temporary-password-hide]');
+    expect(await a.locator('[data-testid=temporary-password]').count()).toBe(0);
+
+    // The staff member's first sign-in: only the new password, whatever the address.
+    const staffContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await staffContext.newPage();
+    await watch(s);
+    await signIn(s, staffEmail, temporary);
+    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('New password');
+    await shot(s, 'password');
+    await go(s, '#/products', 'New password');
+    await s.fill('input[name=currentPassword]', 'not the temporary password');
+    await s.fill('input[name=newPassword]', 'atelier passphrase 2026');
+    await s.fill('input[name=confirmPassword]', 'atelier passphrase 2026');
+    await s.click('[data-testid=password-save]');
+    await expect.poll(() => s.locator('[data-testid=password-form] .form-error').textContent()).toMatch(/current password is not correct/i);
+    expect(await s.isVisible('[data-testid=login-form]')).toBe(false); // a refusal, not a sign-out
+    await s.fill('input[name=currentPassword]', temporary);
+    await s.click('[data-testid=password-save]');
+    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('Dashboard');
+    expect(await s.locator('.side__role').textContent()).toContain('OPERATOR');
+    expect(await s.locator('.side__link', { hasText: 'Team' }).count()).toBe(0);
+
+    // Later, a voluntary change from the foot of the sidebar.
+    await s.click('[data-testid=change-password]');
+    await shot(s, 'password-dialog');
+    await s.fill('dialog input[name=currentPassword]', 'atelier passphrase 2026');
+    await s.fill('dialog input[name=newPassword]', 'atelier passphrase 2027');
+    await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2028');
+    await s.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => s.locator('.dialog__error').textContent()).toMatch(/differ/);
+    await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2027');
+    await confirmDialog(s);
+    await s.waitForSelector('.toast:has-text("Password changed.")');
+
+    // The ADMIN changes the role, then the staff member leaves: their open console is signed out.
+    await a.reload();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
+    await expect.poll(() => staffRow.textContent()).toContain('ACTIVE');
+    await staffRow.locator('[data-testid=team-role]').click();
+    await a.selectOption('dialog select[name=role]', 'AUDITOR');
+    await confirmDialog(a);
+    await expect.poll(() => staffRow.textContent()).toContain('AUDITOR');
+    await staffRow.locator('[data-testid=team-sessions]').click();
+    await expect.poll(() => a.locator('dialog.dialog tbody tr').count()).toBe(1);
+    expect(await a.locator('dialog.dialog tbody tr').textContent()).toMatch(/Chrome · macOS|Chrome · Linux/);
+    await shot(a, 'team-sessions');
+    await a.click('[data-testid=dialog-cancel]');
+    await staffRow.locator('[data-testid=team-disable]').click();
+    expect(await a.locator('dialog.dialog--danger').count()).toBe(1);
+    await confirmDialog(a);
+    await expect.poll(() => staffRow.textContent()).toContain('DISABLED');
+    await s.evaluate(() => (location.hash = '#/products'));
+    await s.waitForSelector('[data-testid=login-form]');
+    await expect.poll(() => s.locator('.login__error').textContent()).toMatch(/session has ended/i);
+
+    // Who did it: the audit log and the anomaly triage name the console user by email.
+    await go(a, '#/audit?action=admin.disable', 'Audit log');
+    await expect.poll(() => a.locator('table.table tbody tr').first().textContent()).toContain(ADMIN.email);
+    expect(await a.locator('table.table tbody tr').first().textContent()).toContain(staffEmail); // the account acted upon
+    await go(a, '#/anomalies?status=OPEN', 'Anomalies');
+    expect(await a.locator('[data-testid=anomaly-actor]').count()).toBe(0); // never triaged
+    await a.locator('[data-testid=triage]').first().click();
+    await a.selectOption('dialog select[name=status]', 'ACKNOWLEDGED');
+    await confirmDialog(a);
+    await go(a, '#/anomalies?status=ACKNOWLEDGED', 'Anomalies');
+    await expect.poll(() => a.locator('[data-testid=anomaly-actor]').first().textContent()).toBe(`by ${ADMIN.email}`);
+    expect(await cspViolations(a)).toEqual([]);
+    expect(await cspViolations(s)).toEqual([]);
+    await staffContext.close();
     await adminContext.close();
   }, STEP_TIMEOUT);
 

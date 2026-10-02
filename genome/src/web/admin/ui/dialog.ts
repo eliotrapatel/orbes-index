@@ -15,7 +15,9 @@ import { button, field, input, select, textarea } from './components.js';
 export interface DialogField {
   name: string;
   label: string;
-  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime';
+  /** 'password' fields are masked and take `autocomplete` ('current-password' or 'new-password'). */
+  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'password' | 'email';
+  autocomplete?: string;
   options?: { value: string; label: string }[];
   required?: boolean;
   hint?: string;
@@ -63,6 +65,10 @@ function controlFor(f: DialogField): HTMLInputElement | HTMLSelectElement | HTML
       return input(f.name, { type: 'date', value: f.value });
     case 'datetime':
       return input(f.name, { type: 'datetime-local', value: f.value, step: 60 });
+    case 'password':
+      return input(f.name, { type: 'password', autocomplete: f.autocomplete ?? 'new-password', maxlength: f.maxlength ?? 1024 });
+    case 'email':
+      return input(f.name, { type: 'email', value: f.value, autocomplete: f.autocomplete ?? 'off', maxlength: f.maxlength ?? 254 });
     default:
       return input(f.name, { value: f.value, maxlength: f.maxlength ?? 500 });
   }

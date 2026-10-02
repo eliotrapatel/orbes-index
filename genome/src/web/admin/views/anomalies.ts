@@ -1,7 +1,8 @@
 /**
  * Anomalies with their triage workflow: OPEN → ACKNOWLEDGED → RESOLVED or
  * DISMISSED, reopen when needed. Closing a finding requires a note so the
- * audit trail explains every decision.
+ * audit trail explains every decision. Under its status, each finding names
+ * the console user who took the latest decision (A-02).
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime, humanize, summarizeDetails } from '../format.js';
@@ -10,7 +11,7 @@ import { triageMoves } from '../model/registry.js';
 import { toneOf } from '../model/tone.js';
 import { productHref } from '../router.js';
 import { ANOMALY_SEVERITIES, ANOMALY_STATUSES, type AnomalyRecord } from '../types.js';
-import { button, field, filterBar, pageHeader, pager, select, statusMark, table } from '../ui/components.js';
+import { anomalyStatus, button, field, filterBar, pageHeader, pager, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { pageParam, type ViewContext } from './context.js';
@@ -69,12 +70,12 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
               null,
               humanize(a.type),
               h('span', { class: 'cell-details' }, summarizeDetails(a.details, 220)),
-              a.resolutionNote ? h('span', { class: 'cell-sub' }, `${a.resolvedBy ? `${a.resolvedBy}: ` : ''}${a.resolutionNote}`) : null,
+              a.resolutionNote ? h('span', { class: 'cell-sub' }, a.resolutionNote) : null,
             ),
           kind: ['wide'],
         },
         { label: 'Product', cell: (a) => (a.productId ? h('a', { class: 'idlink', attrs: { href: productHref(a.productId) } }, a.productId) : h('span', { class: 'soft' }, 'Unregistered')), kind: ['nowrap'] },
-        { label: 'Status', cell: (a) => statusMark(humanize(a.status), toneOf('anomaly', a.status)), kind: ['nowrap'] },
+        { label: 'Status', cell: (a) => anomalyStatus(a), kind: ['nowrap'] },
         { label: 'Risk', cell: (a) => String(a.riskScore), kind: ['num'] },
         { label: 'Seen', cell: (a) => String(a.occurrences), kind: ['num'] },
         { label: 'Last seen', cell: (a) => formatDateTime(a.lastSeenAt), kind: ['nowrap'] },

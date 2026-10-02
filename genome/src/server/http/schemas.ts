@@ -16,6 +16,7 @@ import {
   PRODUCT_STATUSES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
+  STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { pageRequest, type PageRequest } from '../types.js';
@@ -163,6 +164,17 @@ export const totpEnableBody = body({
   secret: z.string().trim().min(16).max(128).regex(/^[A-Za-z2-7=\s]+$/, 'Must be base32'),
   code: z.string().trim().min(6).max(16).regex(/^[0-9 ]+$/, 'Must be digits'),
 });
+
+/** POST /api/admin/auth/password: the signed-in admin's own password (the policy is checked by AuthService). */
+export const adminPasswordChangeBody = body({ currentPassword: password, newPassword: password });
+
+// ── Admin: console users (Team page, ADMIN) ────────────────────────────────
+
+const staffRole = z.enum(STAFF_ROLES, { error: 'Must be OPERATOR or AUDITOR (the ADMIN role is granted from the shell)' });
+
+export const createStaffBody = body({ email, role: staffRole });
+
+export const adminRoleBody = body({ role: staffRole });
 
 // ── Ownership ──────────────────────────────────────────────────────────────
 

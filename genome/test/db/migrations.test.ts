@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sql } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 
@@ -75,6 +75,31 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX .* ON public\.ownership .*\(product_id\) WHERE \(ended_at IS NULL\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.ownership_transfers .*\(product_id\) WHERE \(status = 'PENDING'::text\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.anomalies .*\(product_id, type\) WHERE \(status = ANY/)).toBe(true);
+  });
+
+  it('0006 adds admin_users.password_change_required (NOT NULL, false by default) and its down step drops it', async () => {
+    const column = async (db: Kysely<any> = t.db) =>
+      (
+        await sql<{ data_type: string; is_nullable: string; column_default: string | null }>`
+          SELECT data_type, is_nullable, column_default FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'admin_users' AND column_name = 'password_change_required'`.execute(db)
+      ).rows;
+    expect(await column()).toEqual([{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }]);
+    // A row written by code that does not know the column (the previous image) gets false.
+    const row = await sql<{ password_change_required: boolean }>`
+      INSERT INTO admin_users (email_normalized, email, password_hash, role)
+      VALUES ('old@orbes.test', 'old@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING password_change_required`.execute(t.db);
+    expect(row.rows[0].password_change_required).toBe(false);
+    // Down then up, run directly: later migrations of other features do not touch this column.
+    const m = MIGRATIONS['0006_admin_password_change_required']!;
+    expect(m.down).toBeTypeOf('function');
+    await t.db.transaction().execute(async (tx) => {
+      await m.down!(tx);
+      expect(await column(tx)).toEqual([]);
+      await m.up(tx);
+    });
+    expect(await column()).toEqual([{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }]);
+    await sql`DELETE FROM admin_users WHERE email_normalized = 'old@orbes.test'`.execute(t.db);
   });
 
   it('roll back cleanly and re-apply', async () => {

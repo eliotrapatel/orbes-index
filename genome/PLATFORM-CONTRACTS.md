@@ -81,7 +81,7 @@ Timestamp convention: every row records when it came into being, named after wha
 | `cryptographic_keys` | `key_id smallint PK CHECK 1..255` · `kid text UNIQUE` · `algorithm text CHECK = 'Ed25519'` · `public_key bytea CHECK length 32` · `status text CHECK in ('ACTIVE','RETIRED','REVOKED')` · `provider text` · `provider_ref text` (reference, never a secret) · `created_at` · `activated_at NULL` · `retired_at NULL` · `revoked_at NULL` · `compromised_at NULL` · `revocation_reason text NULL` · partial `UNIQUE INDEX ON (status) WHERE status='ACTIVE'` |
 | `codes` | `id uuid PK` · `product_id FK` · `genome_id uuid FK` → `genomes.id` · `key_id smallint FK` · `code_version smallint` · `issue smallint` · `issued_day int` · `nonce bytea` (4) · `payload bytea` (13) · `signature bytea` (64) · `payload_hash bytea UNIQUE` (sha256) · `status text CHECK in ('ACTIVE','SUPERSEDED','REVOKED')` · `revoked_at NULL` · `revocation_reason NULL` · `UNIQUE(product_id, issue)` · `created_at` |
 | `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `failed_logins int NOT NULL DEFAULT 0 CHECK >= 0` · `failed_logins_since NULL` (login throttle, migration 0002) · `created_at` · `updated_at` |
-| `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `created_at` · `updated_at` |
+| `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `password_change_required boolean DEFAULT false` (0006) · `created_at` · `updated_at` |
 | `sessions` | `id_hash bytea PK` (sha256 of the random token) · `subject_type text CHECK in ('account','admin')` · `subject_id uuid` · `csrf_token text` · `mfa_passed boolean DEFAULT false` · `created_at` · `expires_at` · `last_seen_at` · `ip_hash text NULL` · `user_agent text NULL` |
 | `ownership` | `id uuid PK` · `product_id FK` · `account_id FK` · `acquired_via text CHECK in ('FIRST_REGISTRATION','TRANSFER','RESALE','ADMIN')` · `verified boolean` (claim secret / retailer proof) · `started_at` · `ended_at NULL` · `ended_reason text NULL` · partial `UNIQUE (product_id) WHERE ended_at IS NULL` |
 | `ownership_transfers` | `id uuid PK` · `product_id FK` · `from_account_id FK` · `to_account_id FK NULL` · `token_hash bytea UNIQUE` · `status text CHECK in ('PENDING','ACCEPTED','CANCELLED','EXPIRED')` · `created_at` · `expires_at` · `completed_at NULL` · partial `UNIQUE (product_id) WHERE status='PENDING'` |
@@ -348,6 +348,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/auth/login` | Body `{ email, password, totp? }`. |
 | POST | `/api/admin/auth/logout` | — |
 | GET | `/api/admin/auth/me` | — |
+| POST | `/api/admin/auth/password` | Every role. Body `{ currentPassword, newPassword }`; keeps the session, ends the others; the way out of a temporary password (`403 PASSWORD_CHANGE_REQUIRED` elsewhere) (extension). |
 | GET | `/api/admin/dashboard` | Counts: products by status, scans in the last 24 h / 7 d, open anomalies by severity, active key, recent events. |
 | GET | `/api/admin/categories` | Lists categories. |
 | POST | `/api/admin/categories` | Creates a category. |
@@ -388,7 +389,12 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/codes/print-sheet` | Multi-up PDF of ACTIVE codes (extension). |
 | POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every card and every file name, the CSV's included, says PROOF until the brand validates the layout; checks stop at the first wrong code, one request in progress per admin (extension). |
 | GET | `/api/admin/admins` | ADMIN. Console users (extension). |
-| POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). |
+| POST | `/api/admin/admins` | ADMIN. Body `{ email, role: OPERATOR \| AUDITOR }`. Staff account with a temporary password returned once (extension). |
+| PATCH | `/api/admin/admins/:id/role` | ADMIN. Body `{ role: OPERATOR \| AUDITOR }`; ADMIN is granted from the shell only (extension). |
+| POST | `/api/admin/admins/:id/disable`, `/api/admin/admins/:id/enable` | ADMIN. Disabling ends every session of the account (extension). |
+| POST | `/api/admin/admins/:id/unlock` | ADMIN. Lifts a sign-in lockout (extension). |
+| GET, DELETE | `/api/admin/admins/:id/sessions` | ADMIN. Lists (never a token) and ends an admin's sessions (extension). |
+| POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). The Team routes refuse one's own account (`409 SELF_ACTION`) and never leave the console without an active ADMIN (`409 LAST_ADMIN`). |
 
 Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, pageSize, total }`.
 

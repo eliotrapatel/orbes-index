@@ -25,7 +25,7 @@ function fakeFetch(...responses: (Response | Error)[]): { fetch: FetchLike; call
 
 const header = (c: Call, name: string) => (c.init.headers as Record<string, string>)[name];
 
-const SESSION = { admin: { id: 'a', email: 'admin@orbes.test', role: 'ADMIN', totpEnabled: false }, csrfToken: 'tok-1', mfaPassed: true, mfaRequired: false };
+const SESSION = { admin: { id: 'a', email: 'admin@orbes.test', role: 'ADMIN', totpEnabled: false, passwordChangeRequired: false }, csrfToken: 'tok-1', mfaPassed: true, mfaRequired: false };
 
 describe('AdminApi', () => {
   it('stores the CSRF token from login and sends it on mutations only', async () => {
@@ -149,6 +149,55 @@ describe('AdminApi', () => {
     expect(calls[2].url).toBe('/api/admin/admins');
     expect(calls[3].url).toBe('/api/admin/admins/b%2F1/totp/reset');
     expect(header(calls[3], 'x-csrf-token')).toBe('tok-2');
+  });
+
+  it('manages console users on the Team routes (A-02): methods, paths, bodies and the CSRF token', async () => {
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(201, { admin: { id: 'n' }, temporaryPassword: 'ABCD-EFGH-JKMN-PQRS' }),
+      json(200, { admin: { id: 'n' } }),
+      json(200, { admin: { id: 'n' }, sessionsRevoked: 1 }),
+      json(200, { admin: { id: 'n' }, sessionsRevoked: 0 }),
+      json(200, { admin: { id: 'n' } }),
+      json(200, { items: [] }),
+      json(200, { sessionsRevoked: 2 }),
+      json(200, { ok: true, admin: { id: 'a' } }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    expect((await api.createStaff('new@orbes.test', 'AUDITOR')).temporaryPassword).toBe('ABCD-EFGH-JKMN-PQRS');
+    await api.setAdminRole('n/1', 'OPERATOR');
+    await api.disableAdmin('n');
+    await api.enableAdmin('n');
+    await api.unlockAdmin('n');
+    await api.adminSessions('n');
+    expect(await api.revokeAdminSessions('n')).toEqual({ sessionsRevoked: 2 });
+    await api.changePassword('old passphrase', 'new passphrase 2026');
+    expect(calls.slice(1).map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      'POST /api/admin/admins',
+      'PATCH /api/admin/admins/n%2F1/role',
+      'POST /api/admin/admins/n/disable',
+      'POST /api/admin/admins/n/enable',
+      'POST /api/admin/admins/n/unlock',
+      'GET /api/admin/admins/n/sessions',
+      'DELETE /api/admin/admins/n/sessions',
+      'POST /api/admin/auth/password',
+    ]);
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ email: 'new@orbes.test', role: 'AUDITOR' });
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ role: 'OPERATOR' });
+    expect(calls[7].init.body).toBeUndefined(); // DELETE: no body
+    expect(JSON.parse(String(calls[8].init.body))).toEqual({ currentPassword: 'old passphrase', newPassword: 'new passphrase 2026' });
+    for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token'), c.url).toBe(c.init.method === 'GET' ? undefined : 'tok-1');
+  });
+
+  it('a wrong current password is a refusal, not an expired session', async () => {
+    const onUnauthorized = vi.fn();
+    const { fetch } = fakeFetch(json(200, SESSION), json(400, { error: { code: 'CURRENT_PASSWORD_INVALID', message: 'The current password is not correct.' } }));
+    const api = new AdminApi({ fetch, onUnauthorized });
+    await api.me();
+    await expect(api.changePassword('wrong', 'new passphrase 2026')).rejects.toMatchObject({ status: 400, code: 'CURRENT_PASSWORD_INVALID' });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(api.csrfToken).toBe('tok-1');
   });
 
   it('extends a warranty and downloads a print sheet of several codes (POST, CSRF, blob)', async () => {

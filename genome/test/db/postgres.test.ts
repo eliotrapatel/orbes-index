@@ -5,7 +5,9 @@
  *
  * The role needs CREATEDB: each run creates a throwaway database, migrates
  * it, checks that pg returns the same JS types as PGlite and that audit
- * appends stay linear under true parallelism (pool of 8), then drops it.
+ * appends stay linear under true parallelism (pool of 8), as do category
+ * allocation and the last-active-ADMIN rule of the Team page (A-02), then
+ * drops it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
@@ -13,7 +15,9 @@ import { sql } from 'kysely';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { AuditService } from '../../src/server/services/audit.js';
+import { AuthService } from '../../src/server/services/auth.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
+import { SessionService } from '../../src/server/services/sessions.js';
 import { isGuardViolation } from '../../src/server/db/pg-errors.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -78,6 +82,22 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       'ABCDEF'.split('').map((code, i) => registries[i].create({ code, name: `Cat ${code}` }, { type: 'system' })),
     );
     expect(created.map((c) => c.index).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect((await audit.verifyChain()).ok).toBe(true);
+  });
+
+  it('keeps one active ADMIN when ADMINs disable each other at the same moment from a pool', async () => {
+    const audit = new AuditService({ db });
+    const sessions = new SessionService({ db, ttlHours: { account: 1, admin: 1 } });
+    const auth = new AuthService({ db, audit, sessions, totpKey: new Uint8Array(32).fill(3) });
+    const password = 'a long parity passphrase';
+    const ids: string[] = [];
+    for (const name of ['a', 'b', 'c']) ids.push((await auth.createAdmin({ email: `${name}@parity.test`, password, role: 'ADMIN' }, { type: 'system' })).id);
+    // Each ADMIN disables the next one: without the roster lock all three could commit.
+    const results = await Promise.allSettled(ids.map((id, i) => auth.setAdminDisabled(ids[(i + 1) % ids.length], true, { type: 'admin', id })));
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
+    expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['LAST_ADMIN']);
+    const active = await db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').where('disabled_at', 'is', null).execute();
+    expect(active).toHaveLength(1);
     expect((await audit.verifyChain()).ok).toBe(true);
   });
 });

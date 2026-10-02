@@ -86,6 +86,28 @@ The admin console requires 2-factor authentication in production.
    - edit `.env` and delete the `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` lines;
    - then run `scripts/deploy.sh` to apply the change.
 
+4. Replace the bootstrap password, which was written in `.env`: sign in at `https://<origin>/admin`, click **CHANGE PASSWORD** at the foot of the sidebar, and store the new password in your password manager. Every other session of the account ends.
+
+5. Add a second ADMIN, so that one can act when the other is away (an ADMIN cannot disable, unlock or change its own account, and the last active ADMIN can be neither demoted nor disabled). ADMIN accounts are created from the shell only, with their second factor:
+
+   ```bash
+   read -rs ADMIN_PASSWORD && export ADMIN_PASSWORD   # type their password: nothing shows, nothing enters the shell history
+   docker compose exec -e ADMIN_PASSWORD app node --import tsx scripts/admin.ts create --email <second admin> --role ADMIN
+   unset ADMIN_PASSWORD
+   docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <second admin>
+   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <second admin> --secret <SECRET> --code <6-digit code>
+   ```
+
+   The person stores their password in their own password manager and never pastes it in a conversation; they can replace it from the console at any time (step 4).
+
+6. Staff accounts (workshop, client services, auditors) are created in the console, on the **TEAM** page (Security group of the sidebar, ADMIN only):
+   - **NEW STAFF ACCOUNT**: their email and the role, OPERATOR (issues and maintains pieces) or AUDITOR (reads only);
+   - the console shows a **temporary password once**: copy it, hand it over in person or over a trusted channel, then click *I have handed it over — hide*;
+   - at their first sign-in they must choose their own password before anything else, then enrol their authenticator app (the console asks for it in production);
+   - check that their row no longer says TEMPORARY PASSWORD.
+
+7. When someone leaves: **TEAM**, their row, **DISABLE**. They can no longer sign in and every open session of theirs ends at once; the account and its history stay. The same page changes a role, lifts a lockout (*Unlock*), ends the sessions of a lost laptop (*Sessions*) and resets a lost second factor. Every action is in the audit log, with the email of the ADMIN who did it. Without any ADMIN able to sign in: `scripts/admin.ts disable --email <e> --yes` (and `enable`, `role`).
+
 **Optional:** to restrict `/admin` to your office or home IPs, set `ADMIN_ALLOWED_IPS` in `.env` (space-separated IPs or CIDRs, no commas), then run `scripts/deploy.sh`, which validates the Caddy configuration before applying it.
 
 ## 5. Smoke test

@@ -97,6 +97,8 @@ export interface SessionInfo {
   createdAt: Date;
   expiresAt: Date;
   lastSeenAt: Date;
+  /** The browser's User-Agent at sign-in (control characters stripped, ≤ 256 characters), for "signed-in devices" views. */
+  userAgent: string | null;
 }
 
 /** sha256 of the token bytes, or undefined when `token` is not a well-formed session token. */
@@ -320,6 +322,7 @@ function toInfo(r: SessionRow): SessionInfo {
     createdAt: r.created_at,
     expiresAt: r.expires_at,
     lastSeenAt: r.last_seen_at,
+    userAgent: r.user_agent,
   };
 }
 

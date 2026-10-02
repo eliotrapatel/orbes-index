@@ -15,7 +15,7 @@ describe('admin authentication', () => {
     const res = await c.post('/api/admin/auth/login', { email: creds.email, password: creds.password });
     expect(res.statusCode).toBe(200);
     const body = safeJson(res) as any;
-    expect(body.admin).toEqual({ id: creds.id, email: creds.email, role: 'OPERATOR', totpEnabled: false });
+    expect(body.admin).toEqual({ id: creds.id, email: creds.email, role: 'OPERATOR', totpEnabled: false, passwordChangeRequired: false });
     expect(body.mfaPassed).toBe(false);
     expect(body.csrfToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const cookie = res.cookies.find((x) => x.name === 'orbes_admin')!;

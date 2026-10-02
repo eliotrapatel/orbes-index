@@ -11,10 +11,17 @@
  *
  * The two enrolment routes are not in the contract table: without them TOTP
  * could only be enabled from a shell, and MFA could not be enforced.
+ *
+ * `POST /api/admin/auth/password` (A-02) changes the signed-in admin's own
+ * password, for every role, at any time. It is also the only way out of the
+ * temporary password of a staff account created from the console: while
+ * `passwordChangeRequired` is true, every admin route except logout, me and
+ * this one answers 403 PASSWORD_CHANGE_REQUIRED (http/sessions.ts). The
+ * caller's session is kept; every other session of that admin ends.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { userAgentOf } from '../../http/client.js';
-import { adminLoginBody, parse, totpEnableBody } from '../../http/schemas.js';
+import { adminLoginBody, adminPasswordChangeBody, parse, totpEnableBody } from '../../http/schemas.js';
 import { adminActor, clearSessionCookie, clientMeta, requireAdmin, sessionToken, setSessionCookie } from '../../http/sessions.js';
 import { unauthorized } from '../../errors.js';
 import type { AdminRouteDeps } from './index.js';
@@ -39,7 +46,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post(
     '/api/admin/auth/logout',
-    { config: { guard: { session: 'optional', mfaExempt: true, minRole: 'AUDITOR' } } },
+    { config: { guard: { session: 'optional', mfaExempt: true, passwordChangeExempt: true, minRole: 'AUDITOR' } } },
     async (request, reply) => {
       const token = sessionToken(request, ctx.config, 'admin');
       if (token && request.orbes.admin) await auth.logout(token, 'admin', { ipHash: request.orbes.ipHash });
@@ -48,10 +55,21 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     },
   );
 
-  app.get('/api/admin/auth/me', { config: { guard: { mfaExempt: true } } }, async (request) => {
+  app.get('/api/admin/auth/me', { config: { guard: { mfaExempt: true, passwordChangeExempt: true } } }, async (request) => {
     const { admin, session } = requireAdmin(request);
     return { admin: adminJson(admin), csrfToken: session.csrfToken, mfaPassed: session.mfaPassed, mfaRequired: requireMfa };
   });
+
+  app.post(
+    '/api/admin/auth/password',
+    { config: { guard: { mfaExempt: true, passwordChangeExempt: true, minRole: 'AUDITOR' }, rateGroup: 'auth' } },
+    async (request) => {
+      const { admin, token } = requireAdmin(request);
+      const b = parse(adminPasswordChangeBody, request.body);
+      await auth.changePassword({ type: 'admin', id: admin.id }, { currentPassword: b.currentPassword, newPassword: b.newPassword }, adminActor(request), { keepToken: token });
+      return { ok: true, admin: adminJson(await auth.getAdmin(admin.id)) };
+    },
+  );
 
   app.post(
     '/api/admin/auth/totp/setup',

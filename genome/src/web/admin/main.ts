@@ -4,8 +4,10 @@
  *
  * A tiny hash router over async views. The session lives in the httpOnly
  * `orbes_admin` cookie; this script only holds the profile and the CSRF
- * token returned by GET /api/admin/auth/me. When the server enforces MFA
- * and this admin has not enrolled, the only reachable screen is enrolment.
+ * token returned by GET /api/admin/auth/me. A staff account signed in with
+ * its temporary password sees only the password change (A-02); then, when
+ * the server enforces MFA and this admin has not enrolled, the only
+ * reachable screen is enrolment.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
 import { monogramSvg } from '../shared/monogram.js';
@@ -15,7 +17,7 @@ import { can, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
 import { failure, loading } from './ui/components.js';
-import { notifyError } from './ui/toast.js';
+import { notify, notifyError } from './ui/toast.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { catalogueView } from './views/catalogue.js';
@@ -27,11 +29,13 @@ import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { loginView } from './views/login.js';
 import { ownersView } from './views/owners.js';
+import { openPasswordDialog, passwordView } from './views/password.js';
 import { productView, resetProductViewState } from './views/product.js';
 import { productsView } from './views/products.js';
 import { revocationsView } from './views/revocations.js';
 import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
+import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
 
 interface NavItem {
@@ -59,6 +63,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'revocations', label: 'Revocations' },
       { route: 'keys', label: 'Keys' },
       { route: 'audit', label: 'Audit log' },
+      { route: 'team', label: 'Team', cap: 'manageAdmins' },
     ],
   },
 ];
@@ -78,6 +83,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },
   audit: { view: auditView, title: 'Audit log', nav: 'audit' },
+  team: { view: teamView, title: 'Team', nav: 'team' },
 };
 
 const app = byId('app');
@@ -97,7 +103,7 @@ function goTo(hash: string): void {
   else location.hash = hash;
 }
 
-/** After enrolment the profile changed (2FA): rebuild the shell so the sidebar reflects it. */
+/** After enrolment (2FA) or the forced password change the profile changed: rebuild the shell so the sidebar reflects it. */
 function enrolled(next: string): () => void {
   return () => {
     shell = null;
@@ -124,6 +130,13 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
   );
   const signOut = h('button', { class: 'side__signout', attrs: { type: 'button', 'data-testid': 'sign-out' } }, 'Sign out');
   signOut.addEventListener('click', () => void logout());
+  // Every role, at any time (A-02); the forced change after a temporary password is a screen of its own.
+  const password = h('button', { class: 'side__small', attrs: { type: 'button', 'data-testid': 'change-password' } }, 'Change password');
+  password.addEventListener('click', () => {
+    void openPasswordDialog(api, s).then((changed) => {
+      if (changed) notify('Password changed. Your other sessions have ended.');
+    });
+  });
   const clock = h('span', { class: 'topbar__clock' });
   const tick = () => (clock.textContent = formatDateTime(new Date()));
   tick();
@@ -151,7 +164,8 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         { class: 'side__foot' },
         h('p', { class: 'side__who' }, s.admin.email),
         h('p', { class: 'side__role' }, `${s.admin.role}${s.admin.totpEnabled ? ' · 2FA' : ''}`),
-        h('div', { class: 'side__foot-links' }, h('a', { class: 'side__small', attrs: { href: href('security') } }, 'Security'), signOut),
+        // SECURITY and SIGN OUT on the first line, CHANGE PASSWORD under them: three words do not fit the 184 px of the foot.
+        h('div', { class: 'side__foot-links' }, h('a', { class: 'side__small', attrs: { href: href('security') } }, 'Security'), signOut, password),
         h('p', { class: 'side__place' }, 'Paris'),
       ),
     ),
@@ -248,6 +262,16 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const s = session;
   if (!s) return showLogin();
 
+  // A temporary password (a staff account created on the Team page): its own password comes first.
+  if (s.admin.passwordChangeRequired) {
+    const sh = ensureShell(s);
+    markNav(null);
+    sh.crumb.textContent = 'Account · Password';
+    setTitle('New password');
+    mount(sh.view, passwordView(api, s, enrolled(href('dashboard'))));
+    return;
+  }
+
   // MFA enforced and not passed: an enrolled admin signs in again with the code; others enrol first.
   if (s.mfaRequired && !s.mfaPassed) {
     if (s.admin.totpEnabled) return showLogin('Two-factor authentication is required. Sign in with your code.');
@@ -304,6 +328,10 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     if (e instanceof ApiError && e.status === 401) return; // onUnauthorized already showed the login
     if (e instanceof ApiError && e.code === 'MFA_REQUIRED') {
       s.mfaPassed = false;
+      return void route();
+    }
+    if (e instanceof ApiError && e.code === 'PASSWORD_CHANGE_REQUIRED') {
+      s.admin.passwordChangeRequired = true;
       return void route();
     }
     const message = e instanceof ApiError ? (e.status === 404 ? 'Not found in the registry.' : e.message) : 'The console could not render this page.';

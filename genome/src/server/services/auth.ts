@@ -21,6 +21,16 @@
  *
  * The audit log is append-only and cannot be erased, so customer PII
  * (emails, names) never goes into it: entries name account ids only.
+ *
+ * Staff accounts (A-02): an ADMIN creates OPERATOR and AUDITOR accounts from
+ * the console with a temporary password shown once and never audited; the
+ * account must choose its own password before anything else
+ * (`password_change_required`, 403 PASSWORD_CHANGE_REQUIRED in the guard).
+ * ADMIN accounts and the ADMIN role come from the shell only (scripts/admin.ts),
+ * where the second factor is enrolled out of band (SECURITY-MODEL §3.3). Role
+ * changes, (de)activation, unlocking and ending sessions are audited, refused
+ * on one's own account (409 SELF_ACTION), and never leave the console without
+ * an active ADMIN (409 LAST_ADMIN, serialised by an advisory lock).
  */
 import { sql } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
@@ -28,12 +38,13 @@ import type { AppConfig } from '../config.js';
 import { hashSecret, MAX_SECRET_BYTES, needsRehash, verifySecret } from '../crypto/scrypt.js';
 import { deriveSubkey, openText, seal, SecretboxError } from '../crypto/secretbox.js';
 import { base32Decode, base32Encode, generateTotpSecret, totpUri, verifyTotp } from '../crypto/totp.js';
-import { inTransaction, type Db } from '../db/connection.js';
+import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { ADMIN_ROLES, type AccountRow, type AdminRole, type AdminUserRow, type SessionSubjectType } from '../db/schema.js';
+import { ADMIN_ROLES, STAFF_ROLES, type AccountRow, type AdminRole, type AdminUserRow, type SessionSubjectType, type StaffRole } from '../db/schema.js';
 import { conflict, DomainError, isDomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
+import { randomCrockford } from './claim-codes.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
 
 export const PASSWORD_MIN_LENGTH = 12;
@@ -49,6 +60,8 @@ export const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
  * applies on top.
  */
 export const ACCOUNT_LOGIN_THROTTLE = Object.freeze({ maxFailures: 10, windowMs: 15 * 60 * 1000 });
+/** Temporary passwords of staff accounts: 16 Crockford base32 characters (80 bits), shown once as XXXX-XXXX-XXXX-XXXX. */
+export const TEMPORARY_PASSWORD_LENGTH = 16;
 const TOTP_KEY_INFO = 'orbes/admin-totp/v1';
 const MAX_EMAIL = 254;
 const MAX_DISPLAY_NAME = 80;
@@ -89,6 +102,8 @@ export interface AdminProfile {
   email: string;
   role: AdminRole;
   totpEnabled: boolean;
+  /** Signed in with a temporary password: only sign-out, `me` and the password change are open (403 PASSWORD_CHANGE_REQUIRED). */
+  passwordChangeRequired: boolean;
   createdAt: Date;
 }
 
@@ -96,6 +111,23 @@ export interface AdminSummary extends AdminProfile {
   /** Temporarily locked after repeated failed sign-ins. */
   locked: boolean;
   disabled: boolean;
+}
+
+/** A staff account just created from the console, with its temporary password (returned once, stored only as a hash). */
+export interface StaffAccount {
+  admin: AdminSummary;
+  temporaryPassword: string;
+}
+
+/** One live console session of an admin, as the Team page shows it (never the token, its hash or the CSRF token). */
+export interface AdminSessionSummary {
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  mfaPassed: boolean;
+  userAgent: string | null;
+  /** The session making the request. */
+  current: boolean;
 }
 
 export interface RegisterAccountInput {
@@ -158,6 +190,29 @@ export function deriveTotpEncryptionKey(config: Pick<AppConfig, 'keys' | 'cookie
 }
 
 const invalidCredentials = () => new DomainError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
+/** A 400, not a 401: a 401 ends the session in both web apps, and the caller is signed in (API §5.2). */
+const currentPasswordInvalid = () => new DomainError('CURRENT_PASSWORD_INVALID', 400, 'The current password is not correct.');
+
+/** A temporary password for a new staff account: XXXX-XXXX-XXXX-XXXX in Crockford base32 (80 bits). */
+export function generateTemporaryPassword(): string {
+  for (;;) {
+    const raw = randomCrockford(TEMPORARY_PASSWORD_LENGTH);
+    // The password policy refuses fewer than three distinct characters (odds about 2^-70; retried, never weakened).
+    if (new Set(raw).size >= 3) return raw.match(/.{4}/g)!.join('-');
+  }
+}
+
+/**
+ * Emails of the console users among `ids` (anything that is not an admin id is ignored), for the
+ * read views that name who acted (audit log, anomaly triage). Read at display time: the audit log
+ * itself keeps ids only.
+ */
+export async function adminEmailsById(db: Db, ids: Iterable<string | null | undefined>): Promise<Map<string, string>> {
+  const wanted = [...new Set([...ids].filter((v): v is string => typeof v === 'string' && UUID_RE.test(v)).map((v) => v.toLowerCase()))];
+  if (wanted.length === 0) return new Map();
+  const rows = await db.selectFrom('admin_users').select(['id', 'email']).where('id', 'in', wanted).execute();
+  return new Map(rows.map((r) => [r.id, r.email]));
+}
 
 /**
  * The normalised password of a login attempt, or undefined when it cannot match any stored hash
@@ -288,27 +343,21 @@ export class AuthService {
 
   // ── Admins ───────────────────────────────────────────────────────────────
 
+  /** A console user with the given password (shell and first-run bootstrap; any role). */
   async createAdmin(input: CreateAdminInput, actor: Actor): Promise<AdminProfile> {
-    const email = normalizeEmail(input?.email);
-    if (!email) throw validationError('A valid email address is required.');
-    if (!ADMIN_ROLES.includes(input.role)) throw validationError('Unknown admin role.');
-    const password = checkPasswordPolicy(input.password, email.email);
-    const passwordHash = await hashSecret(password);
-    const now = this.clock();
-    try {
-      return await inTransaction(this.db, async (tx) => {
-        const row = await tx
-          .insertInto('admin_users')
-          .values({ email: email.email, email_normalized: email.normalized, password_hash: passwordHash, role: input.role, created_at: now, updated_at: now })
-          .returningAll()
-          .executeTakeFirstOrThrow();
-        await this.audit.record({ actor, action: 'admin.create', targetType: 'admin', targetId: row.id, details: { role: row.role } }, tx);
-        return adminProfile(row);
-      });
-    } catch (e) {
-      if (isUniqueViolation(e)) throw conflict('EMAIL_TAKEN', 'An admin with this email already exists.');
-      throw e;
-    }
+    return adminProfile(await this.insertAdmin(input, actor, false));
+  }
+
+  /**
+   * A staff account created by an ADMIN from the console: OPERATOR or AUDITOR, with a temporary
+   * password returned once (only its hash is stored; it is never audited or logged) that must be
+   * replaced at the first sign-in. ADMIN accounts are created from the shell (createAdmin).
+   */
+  async createStaff(input: { email: string; role: StaffRole }, actor: Actor): Promise<StaffAccount> {
+    if (!STAFF_ROLES.includes(input?.role)) throw validationError('The console creates OPERATOR and AUDITOR accounts; ADMIN accounts are created from the shell.');
+    const temporaryPassword = generateTemporaryPassword();
+    const row = await this.insertAdmin({ email: input.email, password: temporaryPassword, role: input.role }, actor, true);
+    return { admin: adminSummary(row, this.clock()), temporaryPassword };
   }
 
   /**
@@ -473,12 +522,95 @@ export class AuthService {
   /** Console users, by email (ADMIN view: role, second factor, lock and disable state; never secrets). */
   async listAdmins(): Promise<AdminSummary[]> {
     const rows = await this.db.selectFrom('admin_users').selectAll().orderBy('email_normalized').execute();
-    const now = this.clock().getTime();
-    return rows.map((r) => ({
-      ...adminProfile(r),
-      locked: r.locked_until !== null && r.locked_until.getTime() > now,
-      disabled: r.disabled_at !== null,
+    const now = this.clock();
+    return rows.map((r) => adminSummary(r, now));
+  }
+
+  /**
+   * Change a console user's role. Refused on one's own account (SELF_ACTION) and when it would
+   * leave no active ADMIN (LAST_ADMIN). Takes effect at the next request: the guard reads the role
+   * from the database every time. The console only offers STAFF_ROLES; ADMIN comes from the shell.
+   */
+  async setAdminRole(adminId: string, role: AdminRole, actor: Actor): Promise<AdminSummary> {
+    if (!ADMIN_ROLES.includes(role)) throw validationError('Unknown admin role.');
+    assertNotSelf(adminId, actor);
+    return this.rosterChange(adminId, async (tx, row) => {
+      if (row.role === role) return row;
+      if (role !== 'ADMIN') await assertNotLastAdmin(tx, row);
+      const next = await tx.updateTable('admin_users').set({ role, updated_at: this.clock() }).where('id', '=', row.id).returningAll().executeTakeFirstOrThrow();
+      await this.audit.record({ actor, action: 'admin.role_change', targetType: 'admin', targetId: row.id, details: { from: row.role, to: role } }, tx);
+      return next;
+    });
+  }
+
+  /**
+   * Disable (a departure) or re-enable a console user. Disabling sets `disabled_at` and ends every
+   * session of that user in the same transaction; sign-in is then refused like a wrong password.
+   * Idempotent (no audit entry when nothing changes); SELF_ACTION and LAST_ADMIN as for roles.
+   */
+  async setAdminDisabled(adminId: string, disabled: boolean, actor: Actor): Promise<{ admin: AdminSummary; sessionsRevoked: number }> {
+    assertNotSelf(adminId, actor);
+    let sessionsRevoked = 0;
+    const admin = await this.rosterChange(adminId, async (tx, row) => {
+      if ((row.disabled_at !== null) === disabled) return row;
+      if (disabled) await assertNotLastAdmin(tx, row);
+      const now = this.clock();
+      const next = await tx
+        .updateTable('admin_users')
+        .set({ disabled_at: disabled ? now : null, updated_at: now })
+        .where('id', '=', row.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      if (disabled) sessionsRevoked = await this.sessions.revokeAllForSubject('admin', row.id, {}, tx);
+      await this.audit.record(
+        { actor, action: disabled ? 'admin.disable' : 'admin.enable', targetType: 'admin', targetId: row.id, ...(disabled ? { details: { sessionsRevoked } } : {}) },
+        tx,
+      );
+      return next;
+    });
+    return { admin, sessionsRevoked };
+  }
+
+  /** Lift a sign-in lockout (failed-login counter back to 0) before the 15 minutes run out. Idempotent. */
+  async unlockAdmin(adminId: string, actor: Actor): Promise<AdminSummary> {
+    assertNotSelf(adminId, actor);
+    return inTransaction(this.db, async (tx) => {
+      const row = await this.requireAdmin(tx, adminId, { forUpdate: true });
+      if (row.failed_logins === 0 && row.locked_until === null) return adminSummary(row, this.clock());
+      const next = await tx
+        .updateTable('admin_users')
+        .set({ failed_logins: 0, locked_until: null, updated_at: this.clock() })
+        .where('id', '=', row.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      const locked = row.locked_until !== null && row.locked_until.getTime() > this.clock().getTime();
+      await this.audit.record({ actor, action: 'admin.unlock', targetType: 'admin', targetId: row.id, details: { failedLogins: row.failed_logins, locked } }, tx);
+      return adminSummary(next, this.clock());
+    });
+  }
+
+  /** The live console sessions of an admin, newest first; `currentSessionId` (SessionInfo.id) marks the caller's own. */
+  async listAdminSessions(adminId: string, opts: { currentSessionId?: string } = {}): Promise<AdminSessionSummary[]> {
+    const admin = await this.requireAdmin(this.db, adminId);
+    return (await this.sessions.listForSubject('admin', admin.id)).map((s) => ({
+      createdAt: s.createdAt,
+      lastSeenAt: s.lastSeenAt,
+      expiresAt: s.expiresAt,
+      mfaPassed: s.mfaPassed,
+      userAgent: s.userAgent,
+      current: s.id === opts.currentSessionId,
     }));
+  }
+
+  /** End every session of another admin (a lost laptop, a shared screen). Returns how many ended. */
+  async revokeAdminSessions(adminId: string, actor: Actor): Promise<number> {
+    assertNotSelf(adminId, actor);
+    return inTransaction(this.db, async (tx) => {
+      const admin = await this.requireAdmin(tx, adminId);
+      const sessionsRevoked = await this.sessions.revokeAllForSubject('admin', admin.id, {}, tx);
+      await this.audit.record({ actor, action: 'admin.sessions_revoke', targetType: 'admin', targetId: admin.id, details: { sessionsRevoked } }, tx);
+      return sessionsRevoked;
+    });
   }
 
   /** First start: create the configured ADMIN when no admin exists yet. Idempotent and race-safe. */
@@ -509,6 +641,13 @@ export class AuthService {
   /**
    * Change a password after re-checking the current one. Every other session
    * of the subject is revoked; pass `keepToken` to keep the caller's.
+   *
+   * A wrong current password answers 400 CURRENT_PASSWORD_INVALID (a 401 would
+   * end the caller's session in the web apps). For an admin it also counts as a
+   * failed sign-in (the lockout of adminLogin), and a locked admin is refused
+   * before the password is looked at, so a stolen session cookie cannot be used
+   * to guess the password. An admin's change also clears
+   * `password_change_required` (the temporary password of a staff account).
    */
   async changePassword(
     subject: { type: SessionSubjectType; id: string },
@@ -516,18 +655,39 @@ export class AuthService {
     actor: Actor,
     opts: { keepToken?: string } = {},
   ): Promise<void> {
-    const row = subject.type === 'admin' ? await this.requireAdmin(this.db, subject.id) : await this.requireAccount(this.db, subject.id);
-    if (typeof input?.currentPassword !== 'string' || !(await verifySecret(normalizePassword(input.currentPassword), row.password_hash))) {
-      throw invalidCredentials();
+    const admin = subject.type === 'admin' ? await this.requireAdmin(this.db, subject.id) : undefined;
+    const row = admin ?? (await this.requireAccount(this.db, subject.id));
+    if (admin?.locked_until && admin.locked_until.getTime() > this.clock().getTime()) throw accountLocked();
+    const current = typeof input?.currentPassword === 'string' ? normalizePassword(input.currentPassword) : undefined;
+    if (current === undefined || !(await verifySecret(current, row.password_hash))) {
+      if (admin) await this.recordAdminFailure(admin.id, 'password', { ipHash: actor.ipHash ?? null });
+      throw currentPasswordInvalid();
     }
     const next = checkPasswordPolicy(input.newPassword, row.email);
+    if (next === current) throw validationError('Choose a new password, different from the current one.');
     const hash = await hashSecret(next);
     await inTransaction(this.db, async (tx) => {
-      const values = { password_hash: hash, updated_at: this.clock() };
-      if (subject.type === 'admin') await tx.updateTable('admin_users').set(values).where('id', '=', row.id).execute();
-      else await tx.updateTable('accounts').set(values).where('id', '=', row.id).execute();
-      await this.sessions.revokeAllForSubject(subject.type, row.id, { exceptToken: opts.keepToken }, tx);
-      await this.audit.record({ actor, action: `${subject.type}.password_change`, targetType: subject.type, targetId: row.id }, tx);
+      const now = this.clock();
+      if (admin) {
+        await tx
+          .updateTable('admin_users')
+          .set({ password_hash: hash, password_change_required: false, failed_logins: 0, locked_until: null, updated_at: now })
+          .where('id', '=', admin.id)
+          .execute();
+      } else {
+        await tx.updateTable('accounts').set({ password_hash: hash, updated_at: now }).where('id', '=', row.id).execute();
+      }
+      const sessionsRevoked = await this.sessions.revokeAllForSubject(subject.type, row.id, { exceptToken: opts.keepToken }, tx);
+      await this.audit.record(
+        {
+          actor,
+          action: `${subject.type}.password_change`,
+          targetType: subject.type,
+          targetId: row.id,
+          details: { sessionsRevoked, ...(admin?.password_change_required ? { temporaryReplaced: true } : {}) },
+        },
+        tx,
+      );
     });
   }
 
@@ -617,11 +777,61 @@ export class AuthService {
     return row;
   }
 
-  private async requireAdmin(db: Db, adminId: string): Promise<AdminUserRow> {
+  private async requireAdmin(db: Db, adminId: string, opts: { forUpdate?: boolean } = {}): Promise<AdminUserRow> {
     if (typeof adminId !== 'string' || !UUID_RE.test(adminId)) throw notFound('Admin', 'ADMIN_NOT_FOUND');
-    const row = await db.selectFrom('admin_users').selectAll().where('id', '=', adminId).executeTakeFirst();
+    let q = db.selectFrom('admin_users').selectAll().where('id', '=', adminId);
+    if (opts.forUpdate) q = q.forUpdate();
+    const row = await q.executeTakeFirst();
     if (!row) throw notFound('Admin', 'ADMIN_NOT_FOUND');
     return row;
+  }
+
+  private async insertAdmin(input: CreateAdminInput, actor: Actor, passwordChangeRequired: boolean): Promise<AdminUserRow> {
+    const email = normalizeEmail(input?.email);
+    if (!email) throw validationError('A valid email address is required.');
+    if (!ADMIN_ROLES.includes(input.role)) throw validationError('Unknown admin role.');
+    const password = checkPasswordPolicy(input.password, email.email);
+    const passwordHash = await hashSecret(password);
+    const now = this.clock();
+    try {
+      return await inTransaction(this.db, async (tx) => {
+        const row = await tx
+          .insertInto('admin_users')
+          .values({
+            email: email.email,
+            email_normalized: email.normalized,
+            password_hash: passwordHash,
+            role: input.role,
+            password_change_required: passwordChangeRequired,
+            created_at: now,
+            updated_at: now,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        // Never the password, temporary or not: the audit log is permanent.
+        await this.audit.record(
+          { actor, action: 'admin.create', targetType: 'admin', targetId: row.id, details: { role: row.role, ...(passwordChangeRequired ? { passwordChangeRequired } : {}) } },
+          tx,
+        );
+        return row;
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) throw conflict('EMAIL_TAKEN', 'An admin with this email already exists.');
+      throw e;
+    }
+  }
+
+  /**
+   * One change to the roster of console users (role, disabled state), serialised with every other
+   * such change by an advisory lock so that the last-ADMIN check sees concurrent changes: two
+   * ADMINs disabling each other at the same moment cannot leave the console without one.
+   */
+  private async rosterChange(adminId: string, fn: (tx: Db, row: AdminUserRow) => Promise<AdminUserRow>): Promise<AdminSummary> {
+    return inTransaction(this.db, async (tx) => {
+      await advisoryXactLock(tx, ADVISORY_LOCK.ADMIN_ROSTER);
+      const row = await this.requireAdmin(tx, adminId, { forUpdate: true });
+      return adminSummary(await fn(tx, row), this.clock());
+    });
   }
 }
 
@@ -629,6 +839,26 @@ export class AuthService {
 
 const invalidTotp = () => new DomainError('INVALID_TOTP', 401, 'The authentication code is not valid.');
 const accountLocked = () => new DomainError('ACCOUNT_LOCKED', 429, 'Too many failed attempts. Please try again later.');
+
+/** An admin may not change their own role, disable, unlock or end the sessions of their own account. */
+function assertNotSelf(adminId: string, actor: Actor): void {
+  if (actor?.type === 'admin' && typeof adminId === 'string' && typeof actor.id === 'string' && actor.id.toLowerCase() === adminId.toLowerCase()) {
+    throw conflict('SELF_ACTION', 'You cannot do this to your own account. Ask another ADMIN.');
+  }
+}
+
+/** Refuse a change that would take `row` (an active ADMIN) out of the active ADMINs when it is the last one. Call under ADMIN_ROSTER. */
+async function assertNotLastAdmin(tx: Db, row: AdminUserRow): Promise<void> {
+  if (row.role !== 'ADMIN' || row.disabled_at !== null) return;
+  const others = await tx
+    .selectFrom('admin_users')
+    .select((eb) => eb.fn.countAll<number>().as('n'))
+    .where('role', '=', 'ADMIN')
+    .where('disabled_at', 'is', null)
+    .where('id', '!=', row.id)
+    .executeTakeFirstOrThrow();
+  if (Number(others.n) === 0) throw conflict('LAST_ADMIN', 'This is the last active ADMIN. Create another ADMIN from the shell first.');
+}
 
 function totpAad(adminId: string): string {
   return `${TOTP_KEY_INFO}|${adminId}`;
@@ -647,7 +877,18 @@ function accountProfile(r: AccountRow): AccountProfile {
 }
 
 function adminProfile(r: AdminUserRow): AdminProfile {
-  return { id: r.id, email: r.email, role: r.role, totpEnabled: r.totp_secret_enc !== null, createdAt: r.created_at };
+  return {
+    id: r.id,
+    email: r.email,
+    role: r.role,
+    totpEnabled: r.totp_secret_enc !== null,
+    passwordChangeRequired: r.password_change_required,
+    createdAt: r.created_at,
+  };
+}
+
+function adminSummary(r: AdminUserRow, now: Date): AdminSummary {
+  return { ...adminProfile(r), locked: r.locked_until !== null && r.locked_until.getTime() > now.getTime(), disabled: r.disabled_at !== null };
 }
 
 function cleanDisplayName(v: unknown): string | null {

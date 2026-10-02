@@ -7,6 +7,14 @@
  *   tsx scripts/admin.ts totp-setup --email <email>              new TOTP secret + otpauth:// URI (nothing stored yet)
  *   tsx scripts/admin.ts totp-enable --email <email> --secret <base32> --code <6 digits>
  *   tsx scripts/admin.ts reset-totp --email <email> --yes        lost device: remove the enrolment, end the sessions
+ *   tsx scripts/admin.ts role --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+ *   tsx scripts/admin.ts disable --email <email> --yes           a departure: sign-in refused, every session ends
+ *   tsx scripts/admin.ts enable --email <email>
+ *
+ * The console's Team page (A-02) does the same for staff accounts; these
+ * commands are the fallback when no ADMIN can sign in, and the only way to
+ * grant the ADMIN role (with `create --role ADMIN`). As in the console, the
+ * last active ADMIN can be neither demoted nor disabled.
  *
  * Passwords are read from ADMIN_PASSWORD, never from argv (shell history,
  * process lists). `totp-setup` + `totp-enable` is the recommended first
@@ -36,6 +44,10 @@ Commands
   totp-enable --email <email> --secret <base32> --code <digits>
                                     Enrol the secret after checking a current code from the app
   reset-totp --email <email> --yes  Remove a lost second factor; that admin's sessions end
+  role --email <email> --role <ADMIN|OPERATOR|AUDITOR>
+                                    Change a console user's role (the only way to grant ADMIN)
+  disable --email <email> --yes     Refuse sign-in to a console user and end their sessions
+  enable --email <email>            Allow a disabled console user to sign in again
 
 Options
   --json      Machine-readable output
@@ -55,7 +67,7 @@ const ADMIN_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 } as const;
 
-const COMMANDS = ['create', 'list', 'totp-setup', 'totp-enable', 'reset-totp'] as const;
+const COMMANDS = ['create', 'list', 'totp-setup', 'totp-enable', 'reset-totp', 'role', 'disable', 'enable'] as const;
 type Command = (typeof COMMANDS)[number];
 
 export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<number> {
@@ -84,17 +96,23 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
   if (cmd !== 'list' && email === '') return usage('--email is required');
   let role: AdminRole | undefined;
   let password: string | undefined;
-  if (cmd === 'create') {
+  if (cmd === 'create' || cmd === 'role') {
     if (!ADMIN_ROLES.includes(values.role as AdminRole)) return usage(`--role must be one of ${ADMIN_ROLES.join(', ')}`);
     role = values.role as AdminRole;
+  } else if (values.role !== undefined) {
+    return usage('--role only applies to create and role');
+  }
+  if (cmd === 'create') {
     password = env.ADMIN_PASSWORD;
     if (!password) return usage('set the password in ADMIN_PASSWORD (it is never taken from the command line)');
-  } else if (values.role !== undefined) {
-    return usage('--role only applies to create');
   }
   if (cmd === 'totp-enable' && (typeof values.secret !== 'string' || typeof values.code !== 'string')) return usage('--secret and --code are required');
   if (cmd === 'reset-totp' && values.yes !== true) {
     io.err('admin reset-totp: the second factor is removed and every session of that admin ends; re-run with --yes to confirm.');
+    return EXIT.USAGE;
+  }
+  if (cmd === 'disable' && values.yes !== true) {
+    io.err('admin disable: that admin can no longer sign in and every session of theirs ends; re-run with --yes to confirm.');
     return EXIT.USAGE;
   }
 
@@ -112,7 +130,7 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
         else if (admins.length === 0) io.out('No console users.');
         else {
           for (const a of admins) {
-            const state = a.disabled ? 'disabled' : a.locked ? 'locked' : 'active';
+            const state = a.disabled ? 'disabled' : a.locked ? 'locked' : a.passwordChangeRequired ? 'temporary password' : 'active';
             io.out(`${a.email.padEnd(36)} ${a.role.padEnd(8)} ${a.totpEnabled ? '2FA on ' : '2FA off'}  ${state}  ${a.id}`);
           }
         }
@@ -143,6 +161,18 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
         const secret = (values.secret as string).replace(/[\s=]/g, '').toUpperCase();
         await auth.enableTotp(admin.id, { secret, code: (values.code as string).replace(/\s/g, '') }, actor);
         io.out(json ? JSON.stringify({ enabled: true, adminId: admin.id }) : `Two-factor authentication enabled for ${admin.email}.`);
+        return EXIT.OK;
+      }
+      if (cmd === 'role') {
+        const updated = await auth.setAdminRole(admin.id, role!, actor);
+        io.out(json ? JSON.stringify({ admin: updated }) : `${updated.email} is now ${updated.role}.`);
+        return EXIT.OK;
+      }
+      if (cmd === 'disable' || cmd === 'enable') {
+        const r = await auth.setAdminDisabled(admin.id, cmd === 'disable', actor);
+        if (json) io.out(JSON.stringify(r));
+        else if (cmd === 'disable') io.out(`${r.admin.email} is disabled; ${r.sessionsRevoked} session(s) ended.`);
+        else io.out(`${r.admin.email} can sign in again.`);
         return EXIT.OK;
       }
       // reset-totp

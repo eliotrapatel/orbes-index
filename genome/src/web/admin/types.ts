@@ -25,6 +25,10 @@ export type CodeStatus = (typeof CODE_STATUSES)[number];
 export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
+/** Roles the Team page gives (create, change role); ADMIN is granted from the shell only. */
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR'] as const;
+export type StaffRole = (typeof STAFF_ROLES)[number];
+
 export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
@@ -74,6 +78,8 @@ export interface AdminProfile {
   email: string;
   role: AdminRole;
   totpEnabled: boolean;
+  /** Signed in with a temporary password: the console shows only the password change until it is replaced. */
+  passwordChangeRequired: boolean;
 }
 
 /** GET /api/admin/admins (ADMIN only). */
@@ -81,6 +87,23 @@ export interface AdminUser extends AdminProfile {
   locked: boolean;
   disabled: boolean;
   createdAt: Iso;
+}
+
+/** POST /api/admin/admins: the new staff account and its temporary password, shown once. */
+export interface StaffCreated {
+  admin: AdminUser;
+  temporaryPassword: string;
+}
+
+/** GET /api/admin/admins/:id/sessions (never a token). */
+export interface AdminSessionInfo {
+  createdAt: Iso;
+  lastSeenAt: Iso;
+  expiresAt: Iso;
+  mfaPassed: boolean;
+  userAgent: string | null;
+  /** The session of the ADMIN looking at the list. */
+  current: boolean;
 }
 
 export interface AdminSession {
@@ -352,6 +375,8 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Iso | null;
   resolutionNote: string | null;
+  /** The console user whose triage decision is the latest (acknowledged, resolved, dismissed or reopened). */
+  actorEmail: string | null;
 }
 
 export interface ProductDetail {
@@ -444,9 +469,13 @@ export interface AuditEntry {
   occurredAt: Iso;
   actorType: 'admin' | 'account' | 'system';
   actorId: string | null;
+  /** The console user's email when the actor is an admin (read at display time; the log keeps ids). */
+  actorEmail: string | null;
   action: string;
   targetType: string | null;
   targetId: string | null;
+  /** The console user's email when the target is an admin (the Team page's actions). */
+  targetEmail: string | null;
   details: Record<string, unknown>;
   ipHash: string | null;
   prevHash: string;

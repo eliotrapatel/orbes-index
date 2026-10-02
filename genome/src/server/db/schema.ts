@@ -41,6 +41,13 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
 export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+/**
+ * The roles an ADMIN may give from the console (create a staff account, change a role). ADMIN
+ * itself is granted from the shell only (scripts/admin.ts), where the second factor is enrolled
+ * out of band (SECURITY-MODEL §3.3).
+ */
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR'] as const satisfies readonly AdminRole[];
+export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const SESSION_SUBJECT_TYPES = ['account', 'admin'] as const;
 export type SessionSubjectType = (typeof SESSION_SUBJECT_TYPES)[number];
@@ -241,6 +248,8 @@ export interface AdminUsersTable {
   failed_logins: WithDefault<number>;
   locked_until: TimestampNullable;
   disabled_at: TimestampNullable;
+  /** Migration 0006: a temporary password (set by an ADMIN) must be replaced before the console can be used. */
+  password_change_required: WithDefault<boolean>;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }

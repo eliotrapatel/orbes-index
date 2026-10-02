@@ -24,6 +24,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { makePage, noopLogger, pageOffset, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 import type { AnomalyConfig } from '../config.js';
 import type { AuditService } from './audit.js';
+import { adminEmailsById } from './auth.js';
 import { evaluateRules, horizonMs, type ScanRecord, type ScoredFinding } from './anomaly-rules.js';
 
 export type { AnomalyConfig } from '../config.js';
@@ -97,6 +98,12 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Date | null;
   resolutionNote: string | null;
+  /**
+   * Email of the console user whose decision is the latest on this finding (acknowledged,
+   * resolved, dismissed or reopened it), from the audit log (`anomaly.update`) and `admin_users`
+   * at read time; null while no admin has triaged it.
+   */
+  actorEmail: string | null;
 }
 
 export interface AnomalyFilters {
@@ -294,7 +301,7 @@ export class AnomalyService {
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
-    return makePage(rows.map((r) => toRecord(r, r.canonical_id)), Number(total), page);
+    return makePage(await this.withActors(rows.map((r) => toRecord(r, r.canonical_id))), Number(total), page);
   }
 
   async get(id: string): Promise<AnomalyRecord> {
@@ -307,7 +314,7 @@ export class AnomalyService {
       .where('a.id', '=', id)
       .executeTakeFirst();
     if (!row) throw notFound('Anomaly', 'ANOMALY_NOT_FOUND');
-    return toRecord(row, row.canonical_id);
+    return (await this.withActors([toRecord(row, row.canonical_id)]))[0];
   }
 
   /** Admin triage (PATCH /api/admin/anomalies/:id). RESOLVED / DISMISSED record who and when; OPEN reopens. */
@@ -355,6 +362,31 @@ export class AnomalyService {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
+
+  /**
+   * Who triaged each finding last: the newest `anomaly.update` audit entry by an admin, per
+   * anomaly (served by the audit_logs (target_type, target_id) index), named by its email.
+   */
+  private async withActors(records: AnomalyRecord[]): Promise<AnomalyRecord[]> {
+    if (records.length === 0) return records;
+    const latest = await this.db
+      .selectFrom('audit_logs')
+      .select(['target_id', 'actor_id'])
+      .distinctOn('target_id')
+      .where('target_type', '=', 'anomaly')
+      .where('target_id', 'in', records.map((r) => r.id))
+      .where('action', '=', 'anomaly.update')
+      .where('actor_type', '=', 'admin')
+      .orderBy('target_id')
+      .orderBy('id', 'desc')
+      .execute();
+    const actorOf = new Map(latest.map((r) => [r.target_id, r.actor_id]));
+    const emails = await adminEmailsById(this.db, actorOf.values());
+    return records.map((r) => {
+      const actorId = actorOf.get(r.id);
+      return { ...r, actorEmail: actorId ? (emails.get(actorId.toLowerCase()) ?? null) : null };
+    });
+  }
 
   private async loadHistory(db: Db, codeId: string, scanEventId: string, now: Date) {
     const since = new Date(now.getTime() - horizonMs(this.config));
@@ -423,6 +455,7 @@ function toRecord(r: AnomalyRow, canonicalId: string | null): AnomalyRecord {
     resolvedBy: r.resolved_by,
     resolvedAt: r.resolved_at,
     resolutionNote: r.resolution_note,
+    actorEmail: null,
   };
 }
 

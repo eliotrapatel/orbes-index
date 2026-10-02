@@ -28,7 +28,9 @@ import {
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
 import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMatches, revocationTargetError, triageMoves } from '../../src/web/admin/model/registry.js';
+import { adminState, deviceLabel, newPasswordProblem, PASSWORD_MIN_LENGTH, teamActions } from '../../src/web/admin/model/team.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
+import { PASSWORD_MIN_LENGTH as SERVER_PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
 import * as web from '../../src/web/admin/types.js';
 import type { DashboardData, Model, ProductDetail } from '../../src/web/admin/types.js';
 
@@ -40,6 +42,7 @@ describe('admin enums mirror the server', () => {
       'KEY_STATUSES',
       'CODE_STATUSES',
       'ADMIN_ROLES',
+      'STAFF_ROLES',
       'SERVICE_TYPES',
       'VERIFICATION_STATES',
       'ANOMALY_SEVERITIES',
@@ -56,6 +59,44 @@ describe('admin enums mirror the server', () => {
     for (const k of Object.keys(ARTIFACT_LIMITS) as (keyof typeof ARTIFACT_LIMITS)[]) expect(ARTIFACT_LIMITS[k], k).toBe(SERVER_ARTIFACT_LIMITS[k]);
     expect(ARTIFACT_DEFAULTS).toMatchObject({ widthMm: SERVER_ARTIFACT_DEFAULTS.widthMm, theme: SERVER_ARTIFACT_DEFAULTS.theme, dpi: SERVER_ARTIFACT_DEFAULTS.dpi });
     expect([...web.ARTIFACT_THEMES]).toEqual([...SERVER_THEME_NAMES]);
+  });
+});
+
+describe('Team page and password change (A-02)', () => {
+  const user = { id: 'u', disabled: false, locked: false, passwordChangeRequired: false, totpEnabled: false };
+
+  it('shows one state per console user, the most pressing first', () => {
+    expect(adminState(user)).toEqual({ label: 'ACTIVE', tone: 'solid' });
+    expect(adminState({ ...user, passwordChangeRequired: true })).toEqual({ label: 'TEMPORARY PASSWORD', tone: 'outline' });
+    expect(adminState({ ...user, passwordChangeRequired: true, locked: true })).toEqual({ label: 'LOCKED', tone: 'alert' });
+    expect(adminState({ ...user, locked: true, disabled: true })).toEqual({ label: 'DISABLED', tone: 'muted' });
+  });
+
+  it('offers nothing on one\'s own row but the reset of one\'s own second factor', () => {
+    expect(teamActions(user, 'me')).toEqual({ role: true, disable: true, enable: false, unlock: false, sessions: true, resetTotp: false });
+    expect(teamActions({ ...user, locked: true, totpEnabled: true }, 'me')).toEqual({ role: true, disable: true, enable: false, unlock: true, sessions: true, resetTotp: true });
+    expect(teamActions({ ...user, disabled: true, locked: true }, 'me')).toEqual({ role: true, disable: false, enable: true, unlock: false, sessions: false, resetTotp: false });
+    expect(teamActions({ ...user, id: 'me', locked: true, disabled: true, totpEnabled: true }, 'me')).toEqual({ role: false, disable: false, enable: false, unlock: false, sessions: false, resetTotp: true });
+  });
+
+  it('checks a new password as the server will (length after NFKC, repeated, different)', () => {
+    expect(PASSWORD_MIN_LENGTH).toBe(SERVER_PASSWORD_MIN_LENGTH);
+    expect(newPasswordProblem('old passphrase', 'new passphrase 2026', 'new passphrase 2026')).toBeNull();
+    expect(newPasswordProblem('', 'new passphrase 2026', 'new passphrase 2026')).toMatch(/current/i);
+    expect(newPasswordProblem('old passphrase', 'short pass', 'short pass')).toMatch(/too short/);
+    expect(newPasswordProblem('old passphrase', 'new passphrase 2026', 'new passphrase 2027')).toMatch(/differ/);
+    expect(newPasswordProblem('same passphrase', 'same passphrase', 'same passphrase')).toMatch(/different/);
+    expect(newPasswordProblem('ｓａｍｅ passphrase', 'same passphrase', 'same passphrase')).toMatch(/different/); // NFKC-equal
+    expect(newPasswordProblem('old passphrase', '🔒🔒🔒🔒🔒🔒abcdef', '🔒🔒🔒🔒🔒🔒abcdef')).toBeNull(); // 12 code points
+  });
+
+  it('names a session\'s device in a few words', () => {
+    expect(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36')).toBe('Chrome · macOS');
+    expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')).toBe('Safari · iOS');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0')).toBe('Firefox · Windows');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/129.0 Safari/537.36 Edg/129.0')).toBe('Edge · Windows');
+    expect(deviceLabel('curl/8.4.0')).toBe('curl/8.4.0');
+    expect(deviceLabel(null)).toBe('Unknown device');
   });
 });
 
@@ -255,8 +296,8 @@ describe('product view model (spec §22)', () => {
   it('reports an invalid live signature and open critical anomalies in red', () => {
     const d = detail({
       anomalies: [
-        { id: 'x', productId: 'O26-J-00184', productUuid: null, codeId: null, type: 'CODE_MISMATCH', severity: 'CRITICAL', riskScore: 100, details: {}, status: 'OPEN', occurrences: 1, firstSeenAt: '', lastSeenAt: '', resolvedBy: null, resolvedAt: null, resolutionNote: null },
-        { id: 'y', productId: 'O26-J-00184', productUuid: null, codeId: null, type: 'SCAN_VELOCITY', severity: 'MEDIUM', riskScore: 35, details: {}, status: 'RESOLVED', occurrences: 1, firstSeenAt: '', lastSeenAt: '', resolvedBy: null, resolvedAt: null, resolutionNote: null },
+        { id: 'x', productId: 'O26-J-00184', productUuid: null, codeId: null, type: 'CODE_MISMATCH', severity: 'CRITICAL', riskScore: 100, details: {}, status: 'OPEN', occurrences: 1, firstSeenAt: '', lastSeenAt: '', resolvedBy: null, resolvedAt: null, resolutionNote: null, actorEmail: null },
+        { id: 'y', productId: 'O26-J-00184', productUuid: null, codeId: null, type: 'SCAN_VELOCITY', severity: 'MEDIUM', riskScore: 35, details: {}, status: 'RESOLVED', occurrences: 1, firstSeenAt: '', lastSeenAt: '', resolvedBy: null, resolvedAt: null, resolutionNote: null, actorEmail: null },
       ],
     });
     d.codes[1] = { ...d.codes[1], verification: { valid: false, reason: 'SIGNATURE_INVALID', keyStatus: 'ACTIVE' } };

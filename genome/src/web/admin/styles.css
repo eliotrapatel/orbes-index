@@ -101,13 +101,14 @@ body {
   color: var(--ink-soft);
 }
 
+/* The ADMIN's sidebar, its longest (five groups, fourteen links, a two-line foot), fits a 900 px screen: SIGN OUT stays in view. */
 .side__nav {
   flex: 1;
-  padding: 18px 0 24px;
+  padding: 14px 0 18px;
 }
 
 .side__group {
-  padding: 14px 32px 6px;
+  padding: 10px 32px 6px;
 }
 
 .side__group-title {
@@ -125,7 +126,7 @@ body {
 .side__link {
   position: relative;
   display: block;
-  padding: 7px 0 7px 0;
+  padding: 6px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;
@@ -160,7 +161,7 @@ body {
 }
 
 .side__foot {
-  padding: 22px 32px 26px;
+  padding: 20px 32px 22px;
   border-top: 1px solid var(--hairline);
 }
 
@@ -182,7 +183,8 @@ body {
 
 .side__foot-links {
   display: flex;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 12px 18px;
   margin-top: 14px;
 }
 
@@ -208,7 +210,7 @@ body {
 }
 
 .side__place {
-  margin-top: 22px;
+  margin-top: 18px;
   font-size: var(--fs-nano);
   letter-spacing: 0.4em;
   text-transform: uppercase;
@@ -1633,9 +1635,23 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
-.enrol__form {
+.enrol__form,
+.account-form {
   max-width: 360px;
   margin-top: 14px;
+}
+
+/* ── Team (console users) ──────────────────────────────────────────────── */
+
+.team__secret:not(:empty) {
+  margin-bottom: 40px;
+}
+
+.team__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 /* ── Audit chain verdict ───────────────────────────────────────────────── */

@@ -15,6 +15,7 @@
 import type {
   AdminProfile,
   AdminSession,
+  AdminSessionInfo,
   AdminUser,
   AnomalyRecord,
   AnomalyStatus,
@@ -44,6 +45,8 @@ import type {
   ScanRecord,
   ServiceRecord,
   ServiceType,
+  StaffCreated,
+  StaffRole,
   StatusChange,
   TotpEnrollment,
   WarrantyRecord,
@@ -241,6 +244,10 @@ export class AdminApi {
     return this.request<T>('PATCH', path, { body });
   }
 
+  del<T>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
+  }
+
   // ── Auth ─────────────────────────────────────────────────────────────────
 
   async login(email: string, password: string, totp?: string): Promise<AdminSession> {
@@ -269,6 +276,11 @@ export class AdminApi {
     return this.post('/api/admin/auth/totp/setup');
   }
 
+  /** Change the signed-in admin's own password; this session stays, every other one ends. */
+  changePassword(currentPassword: string, newPassword: string): Promise<{ ok: true; admin: AdminProfile }> {
+    return this.post('/api/admin/auth/password', { currentPassword, newPassword });
+  }
+
   /** Enrol TOTP. The server replaces the session by a new, MFA-passed one: keep its CSRF token. */
   async totpEnable(secret: string, code: string): Promise<{ ok: true; mfaPassed: true; csrfToken: string }> {
     const r = await this.post<{ ok: true; mfaPassed: true; csrfToken: string }>('/api/admin/auth/totp/enable', { secret, code });
@@ -284,6 +296,35 @@ export class AdminApi {
 
   resetAdminTotp(adminId: string): Promise<{ admin: AdminProfile }> {
     return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/totp/reset`);
+  }
+
+  /** A staff account (OPERATOR or AUDITOR) with a temporary password, returned once. */
+  createStaff(email: string, role: StaffRole): Promise<StaffCreated> {
+    return this.post('/api/admin/admins', { email, role });
+  }
+
+  setAdminRole(adminId: string, role: StaffRole): Promise<{ admin: AdminUser }> {
+    return this.patch(`/api/admin/admins/${encodeURIComponent(adminId)}/role`, { role });
+  }
+
+  disableAdmin(adminId: string): Promise<{ admin: AdminUser; sessionsRevoked: number }> {
+    return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/disable`);
+  }
+
+  enableAdmin(adminId: string): Promise<{ admin: AdminUser; sessionsRevoked: number }> {
+    return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/enable`);
+  }
+
+  unlockAdmin(adminId: string): Promise<{ admin: AdminUser }> {
+    return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/unlock`);
+  }
+
+  adminSessions(adminId: string): Promise<Items<AdminSessionInfo>> {
+    return this.get(`/api/admin/admins/${encodeURIComponent(adminId)}/sessions`);
+  }
+
+  revokeAdminSessions(adminId: string): Promise<{ sessionsRevoked: number }> {
+    return this.del(`/api/admin/admins/${encodeURIComponent(adminId)}/sessions`);
   }
 
   // ── Dashboard & catalogue ────────────────────────────────────────────────

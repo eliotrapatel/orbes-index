@@ -35,7 +35,7 @@ Related documents: [DATABASE](DATABASE.md) · [CRYPTOGRAPHY](CRYPTOGRAPHY.md) ·
 14. [Admin: products and lifecycle](#14-admin-products-and-lifecycle)
 15. [Admin: codes and artifacts](#15-admin-codes-and-artifacts)
 16. [Admin: registries, anomalies and revocations](#16-admin-registries-anomalies-and-revocations)
-17. [Admin: keys and audit log](#17-admin-keys-and-audit-log)
+17. [Admin: keys, audit log and console users](#17-admin-keys-audit-log-and-console-users)
 18. [Static web applications](#18-static-web-applications)
 19. [Integration guide for resellers and third parties](#19-integration-guide-for-resellers-and-third-parties)
 
@@ -96,7 +96,8 @@ A production server answers only on an up-to-date database schema: it refuses to
 - Every login issues a new token and deletes the session it replaces (session-fixation defence). So does the admin step-up to MFA: enrolling TOTP (§12.4) replaces the session by a new, MFA-passed one (new token, new CSRF token, same absolute expiry). At most 20 sessions per account or admin are kept; the oldest are deleted.
 - An account cookie is never accepted as an admin session, and vice versa.
 - When a request presents an expired or revoked session cookie, the response clears it.
-- A session stops working as soon as its account is no longer `ACTIVE` or its admin is disabled.
+- A session stops working as soon as its account is no longer `ACTIVE` or its admin is disabled; disabling an admin (§17.10) also deletes its sessions in the same transaction.
+- A password change (§12.5) keeps the session that made it and deletes every other session of that admin.
 
 ### 2.2 CSRF protection
 
@@ -115,19 +116,23 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 
 | Role | May |
 |---|---|
-| AUDITOR | Read every admin resource. Manage its own session and second factor. |
+| AUDITOR | Read every admin resource. Manage its own session, password and second factor. |
 | OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). |
-| ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, and console users (list, TOTP reset). |
+| ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, and console users (the console's Team page, §17.7–§17.13: list, create OPERATOR and AUDITOR accounts, change a role between OPERATOR and AUDITOR, disable and enable, unlock, list and end sessions, reset a lost second factor). |
+
+ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
 
 ### 2.4 Admin MFA
 
-When MFA is enforced, an admin session that has not passed TOTP may use **only** the `/api/admin/auth/*` routes (login, logout, me, TOTP setup and enable); every other admin route answers `403 MFA_REQUIRED`. Enforcement is set by `ADMIN_REQUIRE_MFA` (default `true` in production, `false` otherwise); `ADMIN_REQUIRE_MFA=false` in production is accepted but logged as a warning at every start. A session passes MFA by logging in with a TOTP code, or by enrolling TOTP (§12.4), which replaces it by a new MFA-passed session. The `mfaRequired` and `mfaPassed` fields of the admin login and `me` responses report both facts.
+When MFA is enforced, an admin session that has not passed TOTP may use **only** the `/api/admin/auth/*` routes (login, logout, me, password change, TOTP setup and enable); every other admin route answers `403 MFA_REQUIRED`. Enforcement is set by `ADMIN_REQUIRE_MFA` (default `true` in production, `false` otherwise); `ADMIN_REQUIRE_MFA=false` in production is accepted but logged as a warning at every start. A session passes MFA by logging in with a TOTP code, or by enrolling TOTP (§12.4), which replaces it by a new MFA-passed session. The `mfaRequired` and `mfaPassed` fields of the admin login and `me` responses report both facts.
+
+**Temporary passwords.** A staff account created by an ADMIN (§17.8) signs in with a temporary password; its admin object then says `"passwordChangeRequired": true`. Until it has chosen its own password (§12.5), its session may use only logout, `me` and the password change: every other admin route, the TOTP routes included, answers `403 PASSWORD_CHANGE_REQUIRED`. This check runs before the MFA check, so a new staff member first replaces the password, then enrols a second factor when MFA is enforced.
 
 ### 2.5 Request pipeline
 
-For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON) and validated in the handler.
+For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON) and validated in the handler.
 
 ---
 
@@ -207,13 +212,17 @@ Authentication and authorisation:
 | `INVALID_TOTP` | 401 | Wrong, expired or replayed TOTP code. |
 | `CSRF_FAILED` | 403 | Origin or CSRF token check failed (§2.2). |
 | `MFA_REQUIRED` | 403 | MFA enforced and the admin session has not passed TOTP (§2.4). |
+| `PASSWORD_CHANGE_REQUIRED` | 403 | The admin signed in with a temporary password and must choose its own first (§2.4, §12.5). |
+| `CURRENT_PASSWORD_INVALID` | 400 | (Password change) the current password is wrong. A 400, not a 401: the caller is signed in, and a 401 would end the session in the web apps. For an admin it counts as a failed sign-in (lockout, §12.1). |
 | `FORBIDDEN` | 403 | Role too low; or a non-owner asking for a service history (also for an unknown product id, so ids cannot be enumerated); or an OPERATOR revoking or retiring a product; or an account that is not active. |
 | `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account with status LOCKED (after a correct password). 429: admin locked for 15 minutes after 10 consecutive failures. |
 | `EMAIL_TAKEN` | 409 | An account (or admin) with this email exists (case-insensitive). |
 | `TOTP_CODE_INVALID` | 400 | The code sent to enable TOTP does not match the secret. |
 | `TOTP_ALREADY_ENABLED` | 409 | TOTP is already enrolled for this admin. |
 | `TOTP_NOT_ENABLED` | 409 | (TOTP reset) the admin has no second factor to remove. |
-| `ADMIN_NOT_FOUND` | 404 | (TOTP reset) no admin with this id. |
+| `ADMIN_NOT_FOUND` | 404 | (Console users, §17.7–§17.13) no admin with this id. |
+| `SELF_ACTION` | 409 | (Console users) an ADMIN cannot change the role of, disable, enable, unlock or end the sessions of its own account. |
+| `LAST_ADMIN` | 409 | (Console users, `scripts/admin.ts`) the change would leave no active ADMIN: the last active ADMIN can be neither demoted nor disabled. |
 | `TOTP_UNAVAILABLE` | 503 | The stored TOTP secret cannot be opened (key configuration changed or row tampered). Login fails closed. |
 
 Ownership:
@@ -348,6 +357,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
 | POST | `/api/admin/auth/logout` | AUDITOR (optional) | yes | admin | 12.2 |
 | GET | `/api/admin/auth/me` | AUDITOR | — | admin | 12.3 |
+| POST | `/api/admin/auth/password` | AUDITOR | yes | auth | 12.5 |
 | POST | `/api/admin/auth/totp/setup` | AUDITOR | yes | auth | 12.4 |
 | POST | `/api/admin/auth/totp/enable` | AUDITOR | yes | auth | 12.4 |
 | GET | `/api/admin/dashboard` | AUDITOR | — | admin | 13.1 |
@@ -389,9 +399,16 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/audit` | AUDITOR | — | admin | 17.5 |
 | GET | `/api/admin/audit/verify` | AUDITOR | — | admin | 17.6 |
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
-| POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
+| POST | `/api/admin/admins` | **ADMIN** | yes | admin | 17.8 |
+| PATCH | `/api/admin/admins/:id/role` | **ADMIN** | yes | admin | 17.9 |
+| POST | `/api/admin/admins/:id/disable` | **ADMIN** | yes | admin | 17.10 |
+| POST | `/api/admin/admins/:id/enable` | **ADMIN** | yes | admin | 17.10 |
+| POST | `/api/admin/admins/:id/unlock` | **ADMIN** | yes | admin | 17.11 |
+| GET | `/api/admin/admins/:id/sessions` | **ADMIN** | — | admin | 17.12 |
+| DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
+| POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, and every `/api/admin/admins` route. There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)), changing a customer's password, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1022,9 +1039,9 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 CSRF_
 
 ## 12. Admin: authentication
 
-Admin routes use the `orbes_admin` cookie (`__Host-orbes_admin` in production). Every route in this section is reachable without a TOTP-verified session, even when MFA is enforced.
+Admin routes use the `orbes_admin` cookie (`__Host-orbes_admin` in production). Every route in this section is reachable without a TOTP-verified session, even when MFA is enforced. Logout, `me` and the password change (§12.5) are also open to a session signed in with a temporary password (§2.4); login has no session yet.
 
-The admin object used below is `{ "id": uuid, "email": string, "role": "ADMIN" | "OPERATOR" | "AUDITOR", "totpEnabled": boolean }`.
+The admin object used below is `{ "id": uuid, "email": string, "role": "ADMIN" | "OPERATOR" | "AUDITOR", "totpEnabled": boolean, "passwordChangeRequired": boolean }`. `passwordChangeRequired` is true while a staff account created from the console (§17.8) still has its temporary password.
 
 ### 12.1 `POST /api/admin/auth/login`
 
@@ -1042,7 +1059,7 @@ Session-less (origin rule). Rate group `auth`.
 
 ```json
 {
-  "admin": { "id": "90b8d94a-0460-4db1-b618-38a29ba74eb9", "email": "admin@orbes.example", "role": "ADMIN", "totpEnabled": true },
+  "admin": { "id": "90b8d94a-0460-4db1-b618-38a29ba74eb9", "email": "admin@orbes.example", "role": "ADMIN", "totpEnabled": true, "passwordChangeRequired": false },
   "csrfToken": "Bz6HODVO1RCbUYkv9Bd7gziEOWGaxiMaojVcmTH06KQ",
   "mfaPassed": true,
   "mfaRequired": true
@@ -1085,7 +1102,20 @@ Errors: `409 TOTP_ALREADY_ENABLED`.
 | `secret` | string | 16–128 characters of base32 (`A–Z`, `2–7`, `=`, whitespace); must decode to 16–64 bytes. |
 | `code` | string | 6–16 characters, digits and spaces; a current code for that secret. |
 
-**200** — sets `orbes_admin`: `{ "ok": true, "mfaPassed": true, "csrfToken": string }`. Errors: `400 VALIDATION_FAILED`, `400 TOTP_CODE_INVALID`, `401 UNAUTHORIZED`, `409 TOTP_ALREADY_ENABLED`.
+**200** — sets `orbes_admin`: `{ "ok": true, "mfaPassed": true, "csrfToken": string }`. Errors: `400 VALIDATION_FAILED`, `400 TOTP_CODE_INVALID`, `401 UNAUTHORIZED`, `403 PASSWORD_CHANGE_REQUIRED` (a temporary password is replaced first, §2.4), `409 TOTP_ALREADY_ENABLED`.
+
+### 12.5 `POST /api/admin/auth/password` (extension of the contract)
+
+Every role, at any time: the signed-in admin changes its own password. It is also the way out of a temporary password (§2.4): the console shows nothing else to a staff account until it has chosen its own. Rate group `auth`.
+
+| Field | Type | Rules |
+|---|---|---|
+| `currentPassword` | string | 1–1024 characters; the password the admin signed in with (the temporary one, the first time). |
+| `newPassword` | string | 1–1024 characters, then the password policy: at least 12 characters (code points after NFKC), at most 1024 bytes, not trivial, not the email, different from the current password. |
+
+The current session is kept (same token and CSRF token); **every other session of that admin ends**, in one transaction with the audit entry `admin.password_change` (`details.sessionsRevoked`; `temporaryReplaced: true` when it replaced a temporary password). `passwordChangeRequired` becomes false, and the failed sign-in counter returns to 0. A wrong current password answers `400 CURRENT_PASSWORD_INVALID` (not 401: the caller is signed in) and counts as a failed sign-in: ten lock the admin for 15 minutes (§12.1), and a locked admin is refused (`429 ACCOUNT_LOCKED`) before the password is looked at, so a stolen session cookie cannot be used to guess the password.
+
+**200** `{ "ok": true, "admin": { …admin object…, "passwordChangeRequired": false } }`. Errors: `400 VALIDATION_FAILED` (policy), `400 CURRENT_PASSWORD_INVALID`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `429 ACCOUNT_LOCKED`, `429 RATE_LIMITED`.
 
 ---
 
@@ -1710,9 +1740,12 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
   "lastSeenAt": "2026-10-01T08:15:21.929Z",
   "resolvedBy": null,
   "resolvedAt": null,
-  "resolutionNote": null
+  "resolutionNote": null,
+  "actorEmail": null
 }
 ```
+
+`resolvedBy` (`admin:<id>`) and `resolvedAt` are set when a finding is RESOLVED or DISMISSED. `actorEmail` names the console user whose triage decision (§16.5) is the latest on the finding, whatever it was (acknowledged, resolved, dismissed or reopened): read at display time from the audit log's newest `anomaly.update` entry by an admin and from `admin_users`, null while no admin has triaged it. The same object appears in the product detail (§14.3).
 
 Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
@@ -1751,7 +1784,7 @@ AUDITOR. Paginated revocation register, newest first:
 
 ---
 
-## 17. Admin: keys and audit log
+## 17. Admin: keys, audit log and console users
 
 Private keys never pass through the API: only public keys and registry metadata are returned.
 
@@ -1821,9 +1854,11 @@ AUDITOR. Paginated audit entries, newest first.
   "occurredAt": "2026-10-01T08:15:21.929Z",
   "actorType": "admin",
   "actorId": "90b8d94a-0460-4db1-b618-38a29ba74eb9",
+  "actorEmail": "ops@theorbes.com",
   "action": "warranty.activate",
   "targetType": "product",
   "targetId": "O26-J-00006",
+  "targetEmail": null,
   "details": { "purchaseDate": "2026-03-01", "startDate": "2026-03-01", "endDate": "2028-03-01", "durationMonths": 24, "retailer": "ORBES PARIS", "country": "FR" },
   "ipHash": "_ipKnYv4ukVGRt5d6HoLLPVRTNYiB_f0Atif0lKtMj8",
   "prevHash": "a67a413ea127418798a9ce8bec469bf9a45ce7b55efd2a49f5de11fcc9b581a4",
@@ -1832,6 +1867,8 @@ AUDITOR. Paginated audit entries, newest first.
 ```
 
 `prevHash` and `hash` are hexadecimal. The chain construction is described in [DATABASE §5.21](DATABASE.md#521-audit_logs).
+
+`actorEmail` is the email of the console user when `actorType` is `admin` (null for customers, the system and the CLI), and `targetEmail` the email of the console user when `targetType` is `admin` (the Team page's actions, logins, password changes; null otherwise). Both are read from `admin_users` when the page is served and are not part of the entry, its hash or the chain: the log itself names admins by id, so it never has to change when an email does. Customers stay ids (their emails are personal data, kept out of the audit views).
 
 ### 17.6 `GET /api/admin/audit/verify`
 
@@ -1845,21 +1882,61 @@ On failure, `ok` is `false`, `checked` counts the entries verified before the fa
 
 ### 17.7 `GET /api/admin/admins` (extension of the contract)
 
-**ADMIN**. The console users, by email; never a password hash or TOTP secret.
+**ADMIN**. The console users (the console's Team page), by email; never a password hash or TOTP secret.
 
 ```json
-{ "items": [ { "id": "6a0b…", "email": "ops@theorbes.com", "role": "OPERATOR", "totpEnabled": true, "locked": false, "disabled": false, "createdAt": "2026-09-01T08:00:00.000Z" } ] }
+{ "items": [ { "id": "6a0b…", "email": "ops@theorbes.com", "role": "OPERATOR", "totpEnabled": true, "passwordChangeRequired": false, "locked": false, "disabled": false, "createdAt": "2026-09-01T08:00:00.000Z" } ] }
 ```
 
-`locked`: temporarily locked after 10 failed sign-ins (§12.1).
+`locked`: temporarily locked after 10 failed sign-ins (§12.1). `passwordChangeRequired`: the account still has the temporary password it was created with (§17.8). `disabled`: sign-in refused (§17.10).
 
-### 17.8 `POST /api/admin/admins/:id/totp/reset` (extension of the contract)
+The routes §17.8–§17.13 are the rest of the Team page. All are **ADMIN**, audited by `AuthService` in the transaction of the change with the acting ADMIN as actor, and answer `404 ADMIN_NOT_FOUND` for an unknown id and `400 VALIDATION_FAILED` when `:id` is not a UUID. Their admin object is the list item above. No change may target the caller's own account (`409 SELF_ACTION`; listing one's own sessions and resetting one's own second factor are allowed), and none may leave the console without an active ADMIN (`409 LAST_ADMIN`; role changes and (de)activations are serialised by an advisory lock, so two ADMINs disabling each other at the same moment cannot both succeed).
+
+### 17.8 `POST /api/admin/admins` (extension of the contract)
+
+Creates a staff account. Body `{ "email": string (3–254), "role": "OPERATOR" | "AUDITOR" }`; any other role, `ADMIN` included, is a `400 VALIDATION_FAILED` (ADMIN accounts come from the shell, §2.3).
+
+The server generates a **temporary password**: 16 Crockford base32 characters (80 bits) in four groups, `XXXX-XXXX-XXXX-XXXX`. It is returned **once**, in this response, and stored only as its scrypt hash; it is never logged nor written to the audit log. The account starts with `passwordChangeRequired: true`: at its first sign-in it can do nothing but choose its own password (§2.4, §12.5). Hand the temporary password over in person or over a trusted channel. Audit `admin.create` (`details: { role, passwordChangeRequired: true }`).
+
+**201** `{ "admin": { …, "passwordChangeRequired": true }, "temporaryPassword": "QV7H-JFT0-QK82-V9ER" }`. Errors: `400 VALIDATION_FAILED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `409 EMAIL_TAKEN`.
+
+### 17.9 `PATCH /api/admin/admins/:id/role` (extension of the contract)
+
+Body `{ "role": "OPERATOR" | "AUDITOR" }`. Changes the role of another console user, an ADMIN included (stepping down), except the last active ADMIN (`409 LAST_ADMIN`). The guard reads the role from the database at every request: the change applies at that account's next request, without signing it out. Unchanged role: no-op, no audit entry. Audit `admin.role_change` (`details: { from, to }`).
+
+**200** `{ "admin": … }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`, `409 LAST_ADMIN`.
+
+### 17.10 `POST /api/admin/admins/:id/disable` and `…/enable` (extension of the contract)
+
+No body (or `{}`). **Disable** is the departure of a staff member: it sets `disabled_at` and **deletes every session of that account** in the same transaction (their open console is signed out at its next request), and sign-in is then refused with the same `401 INVALID_CREDENTIALS` as a wrong password. The account, its role and its history stay. **Enable** clears `disabled_at`: the account signs in again with its password, in its current role. Both are idempotent (no audit entry when nothing changes). Audit `admin.disable` (`details.sessionsRevoked`) and `admin.enable`.
+
+**200** `{ "admin": …, "sessionsRevoked": number }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`, `409 LAST_ADMIN` (disable).
+
+### 17.11 `POST /api/admin/admins/:id/unlock` (extension of the contract)
+
+No body (or `{}`). Lifts a sign-in lockout (§12.1) before its 15 minutes run out: the failed sign-in counter returns to 0. Check the `admin.login_failed` entries first: a lockout is often someone guessing. Idempotent. Audit `admin.unlock` (`details: { failedLogins, locked }`).
+
+**200** `{ "admin": … }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`.
+
+### 17.12 `GET` and `DELETE /api/admin/admins/:id/sessions` (extension of the contract)
+
+**GET** lists the live sessions of a console user, newest first, never a token, its hash or a CSRF token:
+
+```json
+{ "items": [ { "createdAt": "2026-10-02T07:12:00.000Z", "lastSeenAt": "2026-10-02T07:40:00.000Z", "expiresAt": "2026-10-02T15:12:00.000Z", "mfaPassed": true, "userAgent": "Mozilla/5.0 (Macintosh; …) Chrome/129.0 Safari/537.36", "current": false } ] }
+```
+
+`current` marks the session making the request (an ADMIN may list its own sessions). **DELETE** (no body) ends every session of another console user, for a lost laptop or a shared screen; the password still works. Audit `admin.sessions_revoke` (`details.sessionsRevoked`).
+
+**200** GET `{ "items": [ … ] }`; DELETE `{ "sessionsRevoked": number }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION` (DELETE).
+
+### 17.13 `POST /api/admin/admins/:id/totp/reset` (extension of the contract)
 
 **ADMIN**. Recovery for a lost authenticator, after an identity check: removes the admin's TOTP enrolment and **ends every session of that admin** (they were opened with the lost device), in one transaction with the audit entry `admin.totp.disable` (`details.sessionsRevoked`; the actor is the resetting ADMIN). The admin then signs in with the password and enrols a new device (§12.4). An ADMIN may reset its own second factor; its current session ends too. No body (or `{}`).
 
 **200** `{ "admin": { …admin object…, "totpEnabled": false } }`. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 ADMIN_NOT_FOUND`, `409 TOTP_NOT_ENABLED`.
 
-The same operations exist on the command line (`scripts/admin.ts list` and `reset-totp`), together with `create`, `totp-setup` and `totp-enable` (see [DEPLOYMENT](DEPLOYMENT.md)).
+The same operations exist on the command line (`scripts/admin.ts list`, `reset-totp`, `role`, `disable` and `enable`), together with `create`, `totp-setup` and `totp-enable` (see [DEPLOYMENT](DEPLOYMENT.md)): the fallback when no ADMIN can sign in, and the only way to create an ADMIN or grant the ADMIN role.
 
 ---
 

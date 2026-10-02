@@ -2,6 +2,8 @@
  * Audit log: the hash-chained record of every change, newest first, with a
  * full re-computation of the chain on demand (each entry's hash covers the
  * previous hash, so any edit, deletion or reordering breaks the chain).
+ * A console user, acting or acted upon, is named by email (read at display
+ * time; the log itself keeps ids), customers and the system by type and id.
  */
 import { h, mount } from '../../shared/dom.js';
 import { formatDateTime, humanize, shortHash, summarizeDetails } from '../format.js';
@@ -53,9 +55,25 @@ export async function auditView(ctx: ViewContext): Promise<HTMLElement> {
       [
         { label: '#', cell: (e) => String(e.id), kind: ['num'] },
         { label: 'When', cell: (e) => formatDateTime(e.occurredAt, { seconds: true }), kind: ['nowrap'] },
-        { label: 'Actor', cell: (e) => h('span', null, e.actorType.toUpperCase(), e.actorId ? h('span', { class: 'cell-sub mono' }, shortHash(e.actorId, 14, 4)) : null), kind: ['nowrap'] },
+        {
+          label: 'Actor',
+          cell: (e) =>
+            e.actorEmail
+              ? h('span', { attrs: { title: e.actorId } }, e.actorEmail, h('span', { class: 'cell-sub' }, e.actorType.toUpperCase()))
+              : h('span', null, e.actorType.toUpperCase(), e.actorId ? h('span', { class: 'cell-sub mono' }, shortHash(e.actorId, 14, 4)) : null),
+          kind: ['nowrap'],
+        },
         { label: 'Action', cell: (e) => mono(e.action), kind: ['nowrap'] },
-        { label: 'Target', cell: (e) => (e.targetType ? h('span', null, humanize(e.targetType), e.targetId ? h('span', { class: 'cell-sub mono' }, shortHash(e.targetId, 14, 4)) : null) : '—'), kind: ['nowrap'] },
+        {
+          label: 'Target',
+          cell: (e) =>
+            e.targetEmail
+              ? h('span', { attrs: { title: e.targetId } }, e.targetEmail, h('span', { class: 'cell-sub' }, humanize(e.targetType)))
+              : e.targetType
+                ? h('span', null, humanize(e.targetType), e.targetId ? h('span', { class: 'cell-sub mono' }, shortHash(e.targetId, 14, 4)) : null)
+                : '—',
+          kind: ['nowrap'],
+        },
         { label: 'Details', cell: (e) => h('span', { class: 'cell-details' }, summarizeDetails(e.details, 160)), kind: ['wide'] },
         { label: 'Hash', cell: (e) => mono(e.hash, shortHash(e.hash, 10, 4)), kind: ['nowrap'] },
       ],

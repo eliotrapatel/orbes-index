@@ -12,7 +12,7 @@ import type { AdminProfile } from '../../services/auth.js';
 import type { CodeRecord, GenomeRecord, ProductRecord } from '../../services/issuance.js';
 
 export function adminJson(a: AdminProfile) {
-  return { id: a.id, email: a.email, role: a.role, totpEnabled: a.totpEnabled };
+  return { id: a.id, email: a.email, role: a.role, totpEnabled: a.totpEnabled, passwordChangeRequired: a.passwordChangeRequired };
 }
 
 export function productJson(p: ProductRecord) {
