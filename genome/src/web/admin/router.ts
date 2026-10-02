@@ -25,7 +25,10 @@ export const ROUTES = [
   { name: 'revocations', path: '/revocations' },
   { name: 'keys', path: '/keys' },
   { name: 'audit', path: '/audit' },
+  { name: 'team', path: '/team' },
   { name: 'catalogue', path: '/catalogue' },
+  { name: 'retailers', path: '/retailers' },
+  { name: 'sale', path: '/sale' },
 ] as const;
 
 export type RouteName = (typeof ROUTES)[number]['name'];

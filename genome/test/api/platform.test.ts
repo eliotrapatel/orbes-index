@@ -152,7 +152,7 @@ describe('admin management routes', () => {
     expect((await op.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), h.clock.now().getTime()) })).statusCode).toBe(200);
 
     const list = safeJson(await admin.get('/api/admin/admins')) as { items: { id: string; email: string; role: string; totpEnabled: boolean; locked: boolean; disabled: boolean }[] };
-    expect(list.items.find((a) => a.id === target.id)).toEqual({ id: target.id, email: target.email, role: 'OPERATOR', totpEnabled: true, locked: false, disabled: false, createdAt: expect.any(String) });
+    expect(list.items.find((a) => a.id === target.id)).toEqual({ id: target.id, email: target.email, role: 'OPERATOR', totpEnabled: true, passwordChangeRequired: false, locked: false, disabled: false, createdAt: expect.any(String) });
 
     const reset = await admin.post(`/api/admin/admins/${target.id}/totp/reset`, {});
     expect(reset.statusCode).toBe(200);

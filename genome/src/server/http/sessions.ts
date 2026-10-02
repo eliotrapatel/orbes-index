@@ -11,10 +11,21 @@
  *   2. CSRF     — unsafe methods need `Origin == PUBLIC_ORIGIN` (or no Origin
  *                 and `Sec-Fetch-Site: same-origin`) and, with a session,
  *                 `x-csrf-token` equal to the session's token (403);
- *   3. MFA      — optionally (production default), admin sessions must have
+ *   3. password — an admin signed in with a temporary password (a staff
+ *                 account created from the console) may only sign out, read
+ *                 `me` and change the password (403 PASSWORD_CHANGE_REQUIRED);
+ *   4. MFA      — optionally (production default), admin sessions must have
  *                 passed TOTP before using anything but the auth routes (403);
- *   4. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
- *                 keys/revocations/reinstatement/categories (403).
+ *                 the own password change is exempt only while the admin has
+ *                 no second factor (`mfaExempt: 'until-enrolled'`), so a
+ *                 password-only session cannot replace the password of an
+ *                 enrolled admin;
+ *   5. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
+ *                 keys/revocations/reinstatement/categories/console users (403).
+ *                 RETAIL ranks under AUDITOR, so the default rule refuses it
+ *                 everywhere: only the routes that declare `minRole: 'RETAIL'`
+ *                 (the sale mode, the list of points of sale and the admin's own
+ *                 session, password and second factor) let it through.
  *
  * The checks run in `onRequest`, before the body is even parsed, so
  * unauthenticated traffic costs as little as possible.
@@ -57,8 +68,14 @@ export interface RouteGuard {
   session?: 'required' | 'optional' | 'none';
   /** Admin routes: minimum role. Default AUDITOR for GET/HEAD, OPERATOR otherwise. */
   minRole?: AdminRole;
-  /** Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes). */
-  mfaExempt?: boolean;
+  /**
+   * Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes).
+   * 'until-enrolled': only while the admin has no second factor (the own password change: the
+   * temporary password is replaced before enrolment; once enrolled, the change needs the factor).
+   */
+  mfaExempt?: boolean | 'until-enrolled';
+  /** Admin routes: reachable while the admin must still replace a temporary password (sign-out, me, the change itself). */
+  passwordChangeExempt?: boolean;
 }
 
 declare module 'fastify' {
@@ -72,7 +89,8 @@ declare module 'fastify' {
 
 // ── Roles ──────────────────────────────────────────────────────────────────
 
-export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ AUDITOR: 1, OPERATOR: 2, ADMIN: 3 });
+/** RETAIL (A-08) under AUDITOR: a role unknown to this table ranks 0 and is refused everywhere. */
+export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
 
 export function hasRole(role: AdminRole, min: AdminRole): boolean {
   return (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
@@ -94,6 +112,9 @@ const insufficientRole = (role: AdminRole, min: AdminRole) =>
 
 const mfaRequired = () =>
   new DomainError('MFA_REQUIRED', 403, 'Two-factor authentication is required. Enable it and sign in again.');
+
+const passwordChangeRequired = () =>
+  new DomainError('PASSWORD_CHANGE_REQUIRED', 403, 'Choose a new password before using the console.');
 
 // ── Cookies ────────────────────────────────────────────────────────────────
 
@@ -154,6 +175,20 @@ export async function loadAdmin(ctx: AppContext, request: FastifyRequest): Promi
   }
   request.orbes.admin = auth;
   return auth;
+}
+
+/**
+ * The console user behind a public request (S-07: a staff scan on /api/v1/verify): the caller's
+ * admin session when the console itself would let it in — alive, of an enabled account with a role
+ * this server knows, its password the member's own, past the second factor when the console
+ * requires one — and null otherwise. The admin cookie is SameSite=Strict: a cross-site request
+ * never carries it, so no other site can make a visitor's scan count as a staff scan.
+ */
+export async function loadStaff(ctx: AppContext, request: FastifyRequest, opts: { requireMfa: boolean }): Promise<AdminAuth | null> {
+  const auth = await loadAdmin(ctx, request);
+  if (!auth || auth.admin.passwordChangeRequired) return null;
+  if (opts.requireMfa && !auth.session.mfaPassed) return null;
+  return hasRole(auth.admin.role, 'RETAIL') ? auth : null;
 }
 
 /** The authenticated account (the guard already ran; throws 401 defensively otherwise). */
@@ -219,7 +254,10 @@ export function sessionGuard(ctx: AppContext, opts: SessionGuardOptions): onRequ
 
     if (opts.kind === 'admin') {
       const { admin, session } = auth as AdminAuth;
-      if (opts.requireMfa && !g.mfaExempt && !session.mfaPassed) throw mfaRequired();
+      // First the temporary password, then the second factor: the TOTP routes are not open before the password is the admin's own.
+      if (admin.passwordChangeRequired && !g.passwordChangeExempt) throw passwordChangeRequired();
+      const mfaExempt = g.mfaExempt === true || (g.mfaExempt === 'until-enrolled' && !admin.totpEnabled);
+      if (opts.requireMfa && !mfaExempt && !session.mfaPassed) throw mfaRequired();
       const min = g.minRole ?? (unsafe ? 'OPERATOR' : 'AUDITOR');
       if (!hasRole(admin.role, min)) throw insufficientRole(admin.role, min);
     }

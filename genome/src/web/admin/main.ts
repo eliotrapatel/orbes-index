@@ -4,8 +4,16 @@
  *
  * A tiny hash router over async views. The session lives in the httpOnly
  * `orbes_admin` cookie; this script only holds the profile and the CSRF
- * token returned by GET /api/admin/auth/me. When the server enforces MFA
- * and this admin has not enrolled, the only reachable screen is enrolment.
+ * token returned by GET /api/admin/auth/me. A staff account signed in with
+ * its temporary password sees only the password change (A-02); then, when
+ * the server enforces MFA and this admin has not enrolled, the only
+ * reachable screen is enrolment.
+ *
+ * Two shells: the console (sidebar, top bar) and the sale shell (A-08), a
+ * phone-first frame with the sale mode alone in it. A seller (RETAIL) only
+ * ever gets the sale shell: the sale mode, its own security page and
+ * password, sign-out; any other address leads back to `#/sale`. The other
+ * roles open the sale mode from the sidebar and return with CONSOLE.
  *
  * While signed in, the Anomalies link carries a badge, the count of OPEN
  * HIGH and CRITICAL findings (GET /api/admin/anomalies/summary), also
@@ -25,7 +33,7 @@ import { monogramSvg } from '../shared/monogram.js';
 import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
 import { badgeText, consoleTitle } from './model/anomalies.js';
-import { can, type Capability } from './model/permissions.js';
+import { can, saleOnly, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
 import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
@@ -46,11 +54,15 @@ import { keysView } from './views/keys.js';
 import { loginView } from './views/login.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
+import { openPasswordDialog, passwordView } from './views/password.js';
 import { productView, resetProductViewState } from './views/product.js';
 import { productsView } from './views/products.js';
+import { retailersView } from './views/retailers.js';
 import { revocationsView } from './views/revocations.js';
+import { disposeSaleView, saleView } from './views/sale.js';
 import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
+import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
 
 interface NavItem {
@@ -79,13 +91,22 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'analytics', label: 'Analytics' },
     ],
   },
-  { group: 'Clients', items: [{ route: 'owners', label: 'Owners' }, { route: 'warranties', label: 'Warranties' }] },
+  {
+    group: 'Clients',
+    items: [
+      { route: 'owners', label: 'Owners' },
+      { route: 'warranties', label: 'Warranties' },
+      { route: 'retailers', label: 'Points of sale' },
+      { route: 'sale', label: 'Sale mode', cap: 'sell' },
+    ],
+  },
   {
     group: 'Security',
     items: [
       { route: 'revocations', label: 'Revocations' },
       { route: 'keys', label: 'Keys' },
       { route: 'audit', label: 'Audit log' },
+      { route: 'team', label: 'Team', cap: 'manageAdmins' },
     ],
   },
 ];
@@ -108,13 +129,30 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },
   audit: { view: auditView, title: 'Audit log', nav: 'audit' },
+  team: { view: teamView, title: 'Team', nav: 'team' },
+  retailers: { view: retailersView, title: 'Points of sale', nav: 'retailers' },
+  sale: { view: saleView, title: 'Sale mode', nav: 'sale' },
 };
 
 const app = byId('app');
 const api = new AdminApi();
 let session: AdminSession | null = null;
 let renderSeq = 0;
-let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement; badge: HTMLElement } | null = null;
+/** The console's sidebar and top bar, or the sale shell of the sale mode (A-08). */
+type ShellKind = 'console' | 'sale';
+/**
+ * `forced`: built for the NEW PASSWORD screen of a temporary password, without CHANGE PASSWORD. The sale shell has
+ * no nav, crumb or badge (`badge`: the count of OPEN HIGH and CRITICAL findings on the Anomalies link).
+ */
+let shell: {
+  kind: ShellKind;
+  root: HTMLElement;
+  view: HTMLElement;
+  nav: HTMLElement | null;
+  crumb: HTMLElement | null;
+  badge: HTMLElement | null;
+  forced: boolean;
+} | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
 let pageTitle = 'Orbes';
 /** OPEN HIGH + CRITICAL findings, as last read (0 when signed out). */
@@ -129,6 +167,11 @@ const SESSION_ENDED = 'Your session has ended. Sign in again.';
 const SESSION_ENDED_HELD =
   'Your session has ended. This page stays open so that you can save what it holds: Download results (CSV) needs no session. Then leave the page to sign in again.';
 
+/** Where a session starts: the sale mode for a seller, the dashboard otherwise. */
+function home(s: AdminSession | null): string {
+  return s && saleOnly(s.admin.role) ? href('sale') : href('dashboard');
+}
+
 function setTitle(t: string): void {
   pageTitle = t;
   document.title = consoleTitle(pageTitle, attention);
@@ -138,7 +181,7 @@ function setTitle(t: string): void {
 function showAttention(count: number): void {
   attention = count;
   const text = badgeText(count);
-  if (shell) {
+  if (shell?.badge) {
     shell.badge.hidden = text === '';
     shell.badge.querySelector('.side__badge-count')!.textContent = text;
   }
@@ -179,7 +222,7 @@ function goTo(hash: string): void {
   else location.hash = hash;
 }
 
-/** After enrolment the profile changed (2FA): rebuild the shell so the sidebar reflects it. */
+/** After enrolment (2FA) or the forced password change the profile changed: rebuild the shell so the sidebar reflects it. */
 function enrolled(next: string): () => void {
   return () => {
     shell = null;
@@ -188,6 +231,56 @@ function enrolled(next: string): () => void {
 }
 
 // ── Shell ──────────────────────────────────────────────────────────────────
+
+/** CHANGE PASSWORD, for every role at any time (A-02), except beside the NEW PASSWORD screen of a temporary password. */
+function passwordButton(s: AdminSession, className: string): HTMLElement | null {
+  // That screen is the change itself, and a change made beside it would leave the console on a form that
+  // asks for the temporary password, which no longer works.
+  if (s.admin.passwordChangeRequired) return null;
+  const password = h('button', { class: className, attrs: { type: 'button', 'data-testid': 'change-password' } }, 'Change password');
+  password.addEventListener('click', () => {
+    void openPasswordDialog(api, s).then((changed) => {
+      if (!changed) return;
+      notify('Password changed. Your other sessions have ended.');
+      // Whatever the screen, a changed password is no longer a temporary one.
+      if (session?.admin.passwordChangeRequired) {
+        session.admin.passwordChangeRequired = false;
+        enrolled(home(session))();
+      }
+    });
+  });
+  return password;
+}
+
+/**
+ * The sale shell (A-08): the word ORBES over the view, as in the sidebar, the account and its links under it;
+ * full width on a phone, a narrow column on a desk. No monogram: like the verification app's scanner, a
+ * scanning screen keeps the small word alone (BRAND §3.9).
+ */
+function buildSaleShell(s: AdminSession): NonNullable<typeof shell> {
+  const signOut = h('button', { class: 'saleshell__link', attrs: { type: 'button', 'data-testid': 'sign-out' } }, 'Sign out');
+  signOut.addEventListener('click', () => void logout());
+  const view = h('main', { class: 'saleshell__view', id: 'view', attrs: { tabindex: '-1' } });
+  const root = h(
+    'div',
+    { class: 'saleshell', data: { testid: 'sale-shell' } },
+    h(
+      'header',
+      { class: 'saleshell__bar' },
+      h('a', { class: 'saleshell__brand', attrs: { href: href('sale') } }, h('span', { class: ['wordmark', 'saleshell__wordmark'] }, 'Orbes'), h('span', { class: 'saleshell__mode' }, 'Genome console')),
+      can(s.admin.role, 'read') ? h('a', { class: 'saleshell__link', attrs: { href: href('dashboard'), 'data-testid': 'to-console' } }, 'Console') : null,
+    ),
+    view,
+    h(
+      'footer',
+      { class: 'saleshell__foot' },
+      h('p', { class: 'saleshell__who' }, s.admin.email),
+      h('p', { class: 'saleshell__role' }, `${s.admin.role}${s.admin.totpEnabled ? ' · 2FA' : ''}`),
+      h('div', { class: 'saleshell__links' }, h('a', { class: 'saleshell__link', attrs: { href: href('security') } }, 'Security'), passwordButton(s, 'saleshell__link'), signOut),
+    ),
+  );
+  return { kind: 'sale', root, view, nav: null, crumb: null, badge: null, forced: s.admin.passwordChangeRequired };
+}
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
   // The count reads in Helvetica Neue inside the display-face link; screen readers hear what it counts.
@@ -217,6 +310,8 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
   );
   const signOut = h('button', { class: 'side__signout', attrs: { type: 'button', 'data-testid': 'sign-out' } }, 'Sign out');
   signOut.addEventListener('click', () => void logout());
+  const forced = s.admin.passwordChangeRequired;
+  const password = passwordButton(s, 'side__small');
   const clock = h('span', { class: 'topbar__clock' });
   const tick = () => (clock.textContent = formatDateTime(new Date()));
   tick();
@@ -244,26 +339,31 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         { class: 'side__foot' },
         h('p', { class: 'side__who' }, s.admin.email),
         h('p', { class: 'side__role' }, `${s.admin.role}${s.admin.totpEnabled ? ' · 2FA' : ''}`),
-        h('div', { class: 'side__foot-links' }, h('a', { class: 'side__small', attrs: { href: href('security') } }, 'Security'), signOut),
+        // SECURITY and SIGN OUT on the first line, CHANGE PASSWORD under them: three words do not fit the 184 px of the foot.
+        h('div', { class: 'side__foot-links' }, h('a', { class: 'side__small', attrs: { href: href('security') } }, 'Security'), signOut, password),
         h('p', { class: 'side__place' }, 'Paris'),
       ),
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { root, view, nav, crumb, badge };
+  return { kind: 'console', root, view, nav, crumb, badge, forced };
 }
 
-function ensureShell(s: AdminSession): NonNullable<typeof shell> {
-  if (!shell || !app.contains(shell.root)) {
-    shell = buildShell(s);
+function ensureShell(s: AdminSession, kind: ShellKind = 'console'): NonNullable<typeof shell> {
+  if (!shell || !app.contains(shell.root) || shell.kind !== kind) {
+    shell = kind === 'sale' ? buildSaleShell(s) : buildShell(s);
     mount(app, shell.root);
     showAttention(attention);
   }
   return shell;
 }
 
+function setCrumb(sh: NonNullable<typeof shell>, text: string): void {
+  if (sh.crumb) sh.crumb.textContent = text;
+}
+
 function markNav(active: RouteName | null): void {
-  if (!shell) return;
+  if (!shell?.nav) return;
   for (const a of Array.from(shell.nav.querySelectorAll<HTMLAnchorElement>('.side__link'))) {
     const on = a.dataset.route === active;
     a.classList.toggle('is-active', on);
@@ -285,6 +385,7 @@ function showLogin(notice?: string): void {
   forgetAttention();
   resetProductViewState();
   resetCodesViewState();
+  disposeSaleView();
   setTitle('Sign in');
   mount(
     app,
@@ -293,7 +394,7 @@ function showLogin(notice?: string): void {
       (s) => {
         session = s;
         const r = parseHash(location.hash);
-        goTo(r.name === 'login' ? href('dashboard') : location.hash || href('dashboard'));
+        goTo(r.name === 'login' ? home(s) : location.hash || home(s));
       },
       notice ? { notice } : {},
     ),
@@ -367,37 +468,61 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
 }
 
 async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
+  // Whatever comes next, the camera of a sale screen being left stops now.
+  disposeSaleView();
   const r = parseHash(location.hash);
   const s = session;
   if (!s) return showLogin(endedWhileHeld ? SESSION_ENDED : undefined);
+  // A seller's console is the sale mode: every screen, its own account's included, is framed by the sale shell.
+  const seller = saleOnly(s.admin.role);
+  const accountShell: ShellKind = seller ? 'sale' : 'console';
+
+  // A temporary password (a staff account created on the Team page): its own password comes first.
+  if (s.admin.passwordChangeRequired) {
+    if (shell && !shell.forced) shell = null; // a 403 PASSWORD_CHANGE_REQUIRED under a full shell: drop its CHANGE PASSWORD
+    // The password comes first: the badge's refresh would only be refused (PASSWORD_CHANGE_REQUIRED) meanwhile.
+    forgetAttention();
+    const sh = ensureShell(s, accountShell);
+    markNav(null);
+    setCrumb(sh, 'Account · Password');
+    setTitle('New password');
+    mount(sh.view, passwordView(api, s, enrolled(home(s))));
+    return;
+  }
 
   // MFA enforced and not passed: an enrolled admin signs in again with the code; others enrol first.
   if (s.mfaRequired && !s.mfaPassed) {
     if (s.admin.totpEnabled) return showLogin('Two-factor authentication is required. Sign in with your code.');
     // Enrolment comes first: the badge's refresh would only be refused (MFA_REQUIRED) meanwhile.
     forgetAttention();
-    const sh = ensureShell(s);
+    const sh = ensureShell(s, accountShell);
     markNav(null);
-    sh.crumb.textContent = 'Account · Security';
+    setCrumb(sh, 'Account · Security');
     setTitle('Security');
-    mount(sh.view, securityView(api, s, enrolled(href('dashboard')), { forced: true }));
+    mount(sh.view, securityView(api, s, enrolled(home(s)), { forced: true }));
     return;
   }
 
   if (r.name === 'login') {
-    goTo(href('dashboard'));
+    goTo(home(s));
+    return;
+  }
+  // Nothing of the registry for a seller (the server refuses it anyway): any other address leads to the sale mode.
+  if (seller && r.name !== 'sale' && r.name !== 'security') {
+    goTo(href('sale'));
     return;
   }
 
-  const sh = ensureShell(s);
+  const sh = ensureShell(s, seller || r.name === 'sale' ? 'sale' : 'console');
   const seq = ++renderSeq;
   const scrollY = opts.keepScroll ? window.scrollY : 0;
-  // Only a role that sees the Anomalies link asks for its count (the Anomalies view reads it itself).
-  if (sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
+  // Only a role that sees the Anomalies link asks for its count (the Anomalies view reads it itself); never a seller,
+  // whose sale shell has no such link.
+  if (sh.nav && sh.badge && sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
 
   if (r.name === 'security') {
     markNav(null);
-    sh.crumb.textContent = 'Account · Security';
+    setCrumb(sh, 'Account · Security');
     setTitle('Security');
     mount(sh.view, securityView(api, s, enrolled(href('security'))));
     return;
@@ -406,14 +531,14 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const entry = r.name === 'not-found' ? undefined : VIEWS[r.name];
   if (!entry) {
     markNav(null);
-    sh.crumb.textContent = 'Not found';
+    setCrumb(sh, 'Not found');
     setTitle('Not found');
     mount(sh.view, failure('This page does not exist.'));
     return;
   }
   markNav(entry.nav);
   const group = NAV.find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
-  sh.crumb.textContent = r.name === 'product' ? `${group} · Products · ${r.params.productId}` : `${group} · ${entry.title}`;
+  setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : `${group} · ${entry.title}`);
   setTitle(r.name === 'product' ? r.params.productId : entry.title);
   if (!opts.keepScroll) mount(sh.view, loading());
 
@@ -431,6 +556,10 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     if (e instanceof ApiError && e.status === 401) return; // onUnauthorized already showed the login
     if (e instanceof ApiError && e.code === 'MFA_REQUIRED') {
       s.mfaPassed = false;
+      return void route();
+    }
+    if (e instanceof ApiError && e.code === 'PASSWORD_CHANGE_REQUIRED') {
+      s.admin.passwordChangeRequired = true;
       return void route();
     }
     const message = e instanceof ApiError ? (e.status === 404 ? 'Not found in the registry.' : e.message) : 'The console could not render this page.';

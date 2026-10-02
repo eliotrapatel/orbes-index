@@ -12,6 +12,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { anomalyListQuery, anomalyParams, anomalyPatchBody, pageOf, parse, scanListQuery, warrantyListQuery } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
+import { adminEmailsById } from '../../services/auth.js';
 import { findProduct } from '../../services/lifecycle.js';
 import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
@@ -47,6 +48,7 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
         's.code_id',
         's.packed_identity',
         's.account_id',
+        's.admin_id',
         's.device_hash',
         's.country',
         's.region',
@@ -75,6 +77,8 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
+    // A staff scan (ADMIN_TEST: the sale mode, or /verify with a console session) names its console user, by email at display time.
+    const staff = await adminEmailsById(db, rows.map((r) => r.admin_id));
     return makePage(
       rows.map((r) => ({
         id: r.id,
@@ -85,6 +89,7 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
         codeId: r.code_id,
         packedIdentity: r.packed_identity,
         accountId: r.account_id,
+        adminEmail: r.admin_id ? (staff.get(r.admin_id) ?? null) : null,
         deviceHash: r.device_hash,
         country: r.country?.trim() ?? null,
         region: r.region,

@@ -38,8 +38,13 @@ export type OwnershipMode =
   | { kind: 'yours'; productId: string; transferPending: boolean }
   /** Someone else owns it; the viewer may hold a transfer code. */
   | { kind: 'registered'; productId: string; transferPending: boolean }
-  /** No owner and registration is not open (e.g. not yet delivered by a retailer). */
-  | { kind: 'unregistered' };
+  /** No owner and registration is not open: the piece has not been delivered by ORBES or an authorised retailer yet. */
+  | { kind: 'unregistered' }
+  /**
+   * Open for its first registration, but this scan earned no token: the browser is signed in to the
+   * ORBES console, so the server recorded a staff scan (S-07, API §9.2), never a buyer's.
+   */
+  | { kind: 'staff' };
 
 /**
  * ORBES Client Services, offered where the result asks the customer to contact it: under the
@@ -401,8 +406,12 @@ function ownershipMode(o: VerifyOutcome): OwnershipMode {
     }
     return { kind: 'unregistered' };
   }
-  if (o.state === 'AUTHENTIC_FIRST_REGISTRATION' && reg?.token) {
-    return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
+  if (o.state === 'AUTHENTIC_FIRST_REGISTRATION') {
+    if (reg?.token) {
+      return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
+    }
+    // The server sends this state without a token only to a browser signed in to the console.
+    return { kind: 'staff' };
   }
   const own = o.ownership;
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };

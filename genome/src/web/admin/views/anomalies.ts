@@ -1,9 +1,10 @@
 /**
  * Anomalies with their triage workflow: OPEN → ACKNOWLEDGED → RESOLVED or
  * DISMISSED, reopen when needed. Closing a finding requires a note so the
- * audit trail explains every decision. A finding shows what customers said
- * about the scans that took part in it (where they saw or bought the
- * piece), and leads to those cases.
+ * audit trail explains every decision. Under its status, each finding names
+ * the console user who took the latest decision (A-02). A finding shows what
+ * customers said about the scans that took part in it (where they saw or
+ * bought the piece), and leads to those cases.
  *
  * Filters, all kept in the view's URL: product, type (every type the server
  * can record), status, severity and the order (most severe first, then the
@@ -30,7 +31,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
-import { formatCount, formatDateTime, humanize, shortHash, summarizeDetails } from '../format.js';
+import { anomalyName, formatCount, formatDateTime, humanize, shortHash, summarizeDetails } from '../format.js';
 import {
   anomalyFiltersFrom,
   countriesLine,
@@ -61,6 +62,7 @@ import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import { ANOMALY_SEVERITIES, ANOMALY_STATUSES, type AnomalyContext, type AnomalyRecord, type AnomalyScan, type Paged } from '../types.js';
 import {
+  anomalyStatus,
   button,
   defList,
   field,
@@ -159,14 +161,14 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
             h(
               'span',
               null,
-              humanize(a.type),
+              anomalyName(a.type),
               h('span', { class: 'cell-details' }, summarizeDetails(a.details, 220)),
-              a.resolutionNote ? h('span', { class: 'cell-sub' }, `${a.resolvedBy ? `${a.resolvedBy}: ` : ''}${a.resolutionNote}`) : null,
+              a.resolutionNote ? h('span', { class: 'cell-sub' }, a.resolutionNote) : null,
             ),
           kind: ['wide'],
         },
         { label: 'Product', cell: (a) => (a.productId ? h('a', { class: 'idlink', attrs: { href: productHref(a.productId) } }, a.productId) : h('span', { class: 'soft' }, 'Unregistered')), kind: ['nowrap'] },
-        { label: 'Status', cell: (a) => statusMark(humanize(a.status), toneOf('anomaly', a.status)), kind: ['nowrap'] },
+        { label: 'Status', cell: (a) => anomalyStatus(a), kind: ['nowrap'] },
         { label: 'Risk', cell: (a) => String(a.riskScore), kind: ['num'] },
         { label: 'Seen', cell: (a) => String(a.occurrences), kind: ['num'] },
         { label: 'Last seen', cell: (a) => formatDateTime(a.lastSeenAt), kind: ['nowrap'] },

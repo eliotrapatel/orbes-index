@@ -1,5 +1,5 @@
 /**
- * Admin API (contract §3, cookie `orbes_admin`; roles ADMIN > OPERATOR > AUDITOR).
+ * Admin API (contract §3, cookie `orbes_admin`; roles ADMIN > OPERATOR > AUDITOR > RETAIL).
  *
  * One guard covers the whole scope (http/sessions.ts): an admin session is
  * required everywhere except login; reads need AUDITOR, mutations OPERATOR
@@ -7,7 +7,9 @@
  * categories, console users, a customer's recovery code, lock and export); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
- * hashed client IP as the actor.
+ * hashed client IP as the actor. RETAIL (A-08, a seller's account) reaches
+ * only the routes that declare it: the sale mode, the list of points of sale
+ * and its own session, password and second factor.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../../http/rate-limit.js';
@@ -26,7 +28,9 @@ import { adminOwnerRoutes } from './owners.js';
 import { adminProductRoutes } from './products.js';
 import { adminRecordRoutes } from './records.js';
 import { adminReportRoutes } from './reports.js';
+import { adminRetailerRoutes } from './retailers.js';
 import { adminRevocationRoutes } from './revocations.js';
+import { adminSaleRoutes } from './sale.js';
 
 export interface AdminRouteDeps extends RouteDeps {
   /** Admin sessions must have passed TOTP (except on the auth routes). */
@@ -51,4 +55,6 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminKeyRoutes, deps);
   await app.register(adminAuditRoutes, deps);
   await app.register(adminUserRoutes, deps);
+  await app.register(adminRetailerRoutes, deps);
+  await app.register(adminSaleRoutes, deps);
 };

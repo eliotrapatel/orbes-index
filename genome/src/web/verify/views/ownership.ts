@@ -26,7 +26,7 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, REQUEST_ERRORS } from '../copy.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, REQUEST_ERRORS, STAFF_SCAN_NOTE } from '../copy.js';
 import { contactBlock, sectionLabel } from './common.js';
 
 export interface OwnershipDeps {
@@ -138,11 +138,11 @@ export class OwnershipPanel {
         case 'registered':
           children.push(...this.registeredBlock(m, s));
           break;
+        case 'staff':
+          children.push(this.status('STAFF SCAN'), this.text(STAFF_SCAN_NOTE));
+          break;
         default:
-          children.push(
-            this.status('NOT YET REGISTERED'),
-            this.text('Registration opens once this piece has been delivered by an ORBES boutique or an authorised retailer.'),
-          );
+          children.push(this.status('NOT YET DELIVERED'), this.text(NOT_DELIVERED_NOTE));
       }
     }
     if (this.state.notice) children.push(h('p', { class: 'form__notice', attrs: { role: 'status' }, text: this.state.notice }));

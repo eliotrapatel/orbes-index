@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import {
@@ -8,6 +8,7 @@ import {
   AuthService,
   checkPasswordPolicy,
   deriveTotpEncryptionKey,
+  generateTemporaryPassword,
   normalizeEmail,
 } from '../../src/server/services/auth.js';
 import { SessionService } from '../../src/server/services/sessions.js';
@@ -198,15 +199,17 @@ describe('AuthService', () => {
       const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
       const other = await auth.login({ email: addr, password: PASSWORD }, {});
       const subject = { type: 'account' as const, id: reg.account.id };
-      // A wrong current password is a 400, never a 401 (the apps sign out on any 401), and changes nothing.
+      // A wrong current password is a 400, never a 401 (the apps sign out on any 401, API §5.2), and changes nothing.
       await expectDomainError(
         auth.changePassword(subject, { currentPassword: 'not my password', newPassword: 'a brand new passphrase' }, { type: 'account', id: reg.account.id }),
         'CURRENT_PASSWORD_INVALID',
         400,
       );
       expect(await auth.authenticateAccount(other.session.token)).not.toBeNull();
-      // A weak new password is refused before the current one is checked.
+      // A weak new password is refused before the current one is checked; the current one again is refused too.
       await expectDomainError(auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'short' }, { type: 'account', id: reg.account.id }), 'VALIDATION_FAILED', 400);
+      await expectDomainError(auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: PASSWORD }, { type: 'account', id: reg.account.id }), 'VALIDATION_FAILED', 400);
+      expect(await auth.authenticateAccount(other.session.token)).not.toBeNull(); // nothing changed yet
       await auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'a brand new passphrase' }, { type: 'account', id: reg.account.id }, { keepToken: reg.session.token });
       expect(await auth.authenticateAccount(other.session.token)).toBeNull();
       expect(await auth.authenticateAccount(reg.session.token)).not.toBeNull();
@@ -313,6 +316,182 @@ describe('AuthService', () => {
       await expectDomainError(auth.adminLogin({ email: a.addr, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
     });
 
+    describe('staff accounts (A-02)', () => {
+      const byAdmin = async () => {
+        const boss = await newAdmin('ADMIN');
+        return { boss, actor: { type: 'admin', id: boss.id, ipHash: 'ip-boss' } as Actor };
+      };
+      const sessionsOf = async (id: string) =>
+        Number((await t.db.selectFrom('sessions').select((eb) => eb.fn.countAll<number>().as('n')).where('subject_id', '=', id).executeTakeFirstOrThrow()).n);
+
+      it('generates temporary passwords of 80 bits in four groups that pass the policy', () => {
+        const seen = new Set<string>();
+        for (let i = 0; i < 200; i++) {
+          const pw = generateTemporaryPassword();
+          expect(pw).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+          expect(checkPasswordPolicy(pw)).toBe(pw);
+          seen.add(pw);
+        }
+        expect(seen.size).toBe(200);
+      });
+
+      it('creates OPERATOR and AUDITOR accounts with a temporary password that is never audited, and must be replaced', async () => {
+        const { boss, actor } = await byAdmin();
+        const addr = email('staff');
+        const { admin, temporaryPassword } = await auth.createStaff({ email: addr, role: 'OPERATOR' }, actor);
+        expect(admin).toMatchObject({ email: addr, role: 'OPERATOR', totpEnabled: false, passwordChangeRequired: true, locked: false, disabled: false });
+        await expectDomainError(auth.createStaff({ email: email('staff'), role: 'ADMIN' as 'OPERATOR' }, actor), 'VALIDATION_FAILED', 400);
+        await expectDomainError(auth.createStaff({ email: addr.toUpperCase(), role: 'AUDITOR' }, actor), 'EMAIL_TAKEN', 409);
+
+        // The temporary password signs in, flagged; nothing in the permanent log holds it.
+        const login = await auth.adminLogin({ email: addr, password: temporaryPassword }, {});
+        expect(login.admin.passwordChangeRequired).toBe(true);
+        expect((await auth.authenticateAdmin(login.session.token))?.admin.passwordChangeRequired).toBe(true);
+        const created = (await audit.list({ action: 'admin.create', targetId: admin.id })).items[0];
+        expect(created).toMatchObject({ actorType: 'admin', actorId: boss.id, details: { role: 'OPERATOR', passwordChangeRequired: true } });
+        const log = JSON.stringify((await audit.list({}, { page: 1, pageSize: 200 })).items);
+        expect(log).not.toContain(temporaryPassword);
+        expect(log).not.toContain(temporaryPassword.replace(/-/g, ''));
+        const row = await t.db.selectFrom('admin_users').selectAll().where('id', '=', admin.id).executeTakeFirstOrThrow();
+        expect(row.password_hash).toMatch(/^scrypt\$/);
+        expect(row.password_change_required).toBe(true);
+
+        // The forced change: same password refused, wrong current password a 400 counted as a failure, then cleared.
+        const subject = { type: 'admin' as const, id: admin.id };
+        const self: Actor = { type: 'admin', id: admin.id, ipHash: 'ip-staff' };
+        await expectDomainError(auth.changePassword(subject, { currentPassword: temporaryPassword, newPassword: temporaryPassword }, self), 'VALIDATION_FAILED', 400);
+        await expectDomainError(auth.changePassword(subject, { currentPassword: 'not the temporary one', newPassword: 'my own staff passphrase' }, self), 'CURRENT_PASSWORD_INVALID', 400);
+        expect((await audit.list({ action: 'admin.login_failed', targetId: admin.id })).items[0]).toMatchObject({ ipHash: 'ip-staff', details: { reason: 'password', failedLogins: 1 } });
+        const other = await auth.adminLogin({ email: addr, password: temporaryPassword }, {});
+        await auth.changePassword(subject, { currentPassword: temporaryPassword, newPassword: 'my own staff passphrase' }, self, { keepToken: login.session.token });
+        expect(await auth.getAdmin(admin.id)).toMatchObject({ passwordChangeRequired: false });
+        expect(await auth.authenticateAdmin(other.session.token)).toBeNull();
+        expect((await auth.authenticateAdmin(login.session.token))?.admin.passwordChangeRequired).toBe(false);
+        expect((await t.db.selectFrom('admin_users').select('failed_logins').where('id', '=', admin.id).executeTakeFirstOrThrow()).failed_logins).toBe(0);
+        expect((await audit.list({ action: 'admin.password_change', targetId: admin.id })).items[0]).toMatchObject({ details: { sessionsRevoked: 1, temporaryReplaced: true } });
+        await expectDomainError(auth.adminLogin({ email: addr, password: temporaryPassword }, {}), 'INVALID_CREDENTIALS', 401);
+        expect((await auth.adminLogin({ email: addr, password: 'my own staff passphrase' }, {})).admin.passwordChangeRequired).toBe(false);
+        expect(JSON.stringify((await audit.list({}, { page: 1, pageSize: 200 })).items)).not.toContain('my own staff passphrase');
+      });
+
+      it('creates RETAIL accounts too (A-08): a seller signs in with the temporary password, replaces it, and can be moved between staff roles', async () => {
+        const { boss, actor } = await byAdmin();
+        const addr = email('seller');
+        const { admin, temporaryPassword } = await auth.createStaff({ email: addr, role: 'RETAIL' }, actor);
+        expect(admin).toMatchObject({ email: addr, role: 'RETAIL', passwordChangeRequired: true });
+        expect((await audit.list({ action: 'admin.create', targetId: admin.id })).items[0]).toMatchObject({ actorId: boss.id, details: { role: 'RETAIL', passwordChangeRequired: true } });
+        const login = await auth.adminLogin({ email: addr, password: temporaryPassword }, {});
+        expect(login.admin).toMatchObject({ role: 'RETAIL', passwordChangeRequired: true });
+        await auth.changePassword({ type: 'admin', id: admin.id }, { currentPassword: temporaryPassword, newPassword: 'a seller passphrase 2026' }, { type: 'admin', id: admin.id }, { keepToken: login.session.token });
+        expect((await auth.authenticateAdmin(login.session.token))?.admin).toMatchObject({ role: 'RETAIL', passwordChangeRequired: false });
+        expect((await auth.setAdminRole(admin.id, 'OPERATOR', actor)).role).toBe('OPERATOR');
+        expect((await auth.setAdminRole(admin.id, 'RETAIL', actor)).role).toBe('RETAIL');
+        expect((await audit.list({ action: 'admin.role_change', targetId: admin.id })).items[0].details).toEqual({ from: 'OPERATOR', to: 'RETAIL' });
+      });
+
+      it('refuses a password change while the admin is locked, without looking at the password', async () => {
+        const a = await newAdmin();
+        for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+        await expectDomainError(auth.changePassword({ type: 'admin', id: a.id }, { currentPassword: PASSWORD, newPassword: 'another long passphrase' }, system), 'ACCOUNT_LOCKED', 429);
+        clock.advance(ADMIN_LOCKOUT_MS);
+      });
+
+      it('checks the lockout and the disabled state again under the row lock, so a guess in flight writes nothing', async () => {
+        const a = await newAdmin();
+        const subject = { type: 'admin' as const, id: a.id };
+        const change = { currentPassword: PASSWORD, newPassword: 'another long passphrase' };
+        const rowOf = () => t.db.selectFrom('admin_users').selectAll().where('id', '=', a.id).executeTakeFirstOrThrow();
+        // The attempt read the admin before the rest of the burst locked it (or an ADMIN disabled it), then hashed.
+        const readBefore = (row: Awaited<ReturnType<typeof rowOf>>) =>
+          vi.spyOn(auth as unknown as { requireAdmin: (...args: unknown[]) => Promise<unknown> }, 'requireAdmin').mockResolvedValueOnce(row);
+        const original = (await rowOf()).password_hash;
+        try {
+          let stale = await rowOf();
+          for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+          readBefore(stale);
+          await expectDomainError(auth.changePassword(subject, change, system), 'ACCOUNT_LOCKED', 429);
+          expect((await rowOf()).password_hash).toBe(original);
+
+          clock.advance(ADMIN_LOCKOUT_MS);
+          stale = await rowOf();
+          await t.db.updateTable('admin_users').set({ disabled_at: clock.now() }).where('id', '=', a.id).execute();
+          readBefore(stale);
+          await expectDomainError(auth.changePassword(subject, change, system), 'UNAUTHORIZED', 401);
+          expect((await rowOf()).password_hash).toBe(original);
+          expect((await audit.list({ action: 'admin.password_change', targetId: a.id })).total).toBe(0);
+        } finally {
+          vi.restoreAllMocks();
+        }
+      });
+
+      it('changes roles (audited), never on one\'s own account', async () => {
+        const { boss, actor } = await byAdmin();
+        const a = await newAdmin('AUDITOR');
+        const r = await auth.setAdminRole(a.id, 'OPERATOR', actor);
+        expect(r).toMatchObject({ id: a.id, role: 'OPERATOR' });
+        expect((await audit.list({ action: 'admin.role_change', targetId: a.id })).items[0]).toMatchObject({ actorId: boss.id, details: { from: 'AUDITOR', to: 'OPERATOR' } });
+        await auth.setAdminRole(a.id, 'OPERATOR', actor); // unchanged: no entry
+        expect((await audit.list({ action: 'admin.role_change', targetId: a.id })).total).toBe(1);
+        await expectDomainError(auth.setAdminRole(boss.id, 'OPERATOR', actor), 'SELF_ACTION', 409);
+        await expectDomainError(auth.setAdminRole(a.id, 'ROOT' as 'ADMIN', actor), 'VALIDATION_FAILED', 400);
+        await expectDomainError(auth.setAdminRole('00000000-0000-4000-8000-000000000000', 'AUDITOR', actor), 'ADMIN_NOT_FOUND', 404);
+      });
+
+      it('a disabled account cannot sign in and its sessions end at once; enabling restores sign-in', async () => {
+        const { boss, actor } = await byAdmin();
+        const a = await newAdmin();
+        const s1 = await auth.adminLogin({ email: a.addr, password: PASSWORD }, {});
+        const s2 = await auth.adminLogin({ email: a.addr, password: PASSWORD }, {});
+        const off = await auth.setAdminDisabled(a.id, true, actor);
+        expect(off).toMatchObject({ admin: { id: a.id, disabled: true }, sessionsRevoked: 2 });
+        expect(await sessionsOf(a.id)).toBe(0); // closed, not just refused
+        expect(await auth.authenticateAdmin(s1.session.token)).toBeNull();
+        expect(await auth.authenticateAdmin(s2.session.token)).toBeNull();
+        await expectDomainError(auth.adminLogin({ email: a.addr, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+        expect((await audit.list({ action: 'admin.disable', targetId: a.id })).items[0]).toMatchObject({ actorId: boss.id, details: { sessionsRevoked: 2 } });
+        expect(await auth.setAdminDisabled(a.id, true, actor)).toMatchObject({ sessionsRevoked: 0 }); // idempotent
+        expect((await audit.list({ action: 'admin.disable', targetId: a.id })).total).toBe(1);
+        await expectDomainError(auth.setAdminDisabled(boss.id, true, actor), 'SELF_ACTION', 409);
+
+        expect((await auth.setAdminDisabled(a.id, false, actor)).admin.disabled).toBe(false);
+        expect((await audit.list({ action: 'admin.enable', targetId: a.id })).total).toBe(1);
+        expect((await auth.adminLogin({ email: a.addr, password: PASSWORD }, {})).admin.id).toBe(a.id);
+      });
+
+      it('unlocks a locked account before the 15 minutes run out (audited)', async () => {
+        const { actor } = await byAdmin();
+        const a = await newAdmin();
+        for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+        expect((await auth.listAdmins()).find((x) => x.id === a.id)?.locked).toBe(true);
+        expect(await auth.unlockAdmin(a.id, actor)).toMatchObject({ id: a.id, locked: false });
+        expect((await audit.list({ action: 'admin.unlock', targetId: a.id })).items[0]).toMatchObject({ details: { failedLogins: ADMIN_LOCKOUT_THRESHOLD, locked: true } });
+        expect((await auth.adminLogin({ email: a.addr, password: PASSWORD }, {})).admin.id).toBe(a.id);
+        await auth.unlockAdmin(a.id, actor); // nothing to lift: no entry
+        expect((await audit.list({ action: 'admin.unlock', targetId: a.id })).total).toBe(1);
+        await expectDomainError(auth.unlockAdmin(actor.id!, actor), 'SELF_ACTION', 409);
+      });
+
+      it('lists an admin\'s sessions without secrets, and ends them (audited)', async () => {
+        const { actor } = await byAdmin();
+        const a = await newAdmin();
+        const first = await auth.adminLogin({ email: a.addr, password: PASSWORD }, { userAgent: 'Mozilla/5.0 (Macintosh)' });
+        clock.advance(1000);
+        await auth.adminLogin({ email: a.addr, password: PASSWORD }, { userAgent: 'Mozilla/5.0 (iPhone)' });
+        const info = await sessions.validate(first.session.token, 'admin');
+        const list = await auth.listAdminSessions(a.id, { currentSessionId: info!.id });
+        expect(list.map((x) => [x.userAgent, x.current])).toEqual([
+          ['Mozilla/5.0 (iPhone)', false],
+          ['Mozilla/5.0 (Macintosh)', true],
+        ]);
+        expect(Object.keys(list[0]).sort()).toEqual(['createdAt', 'current', 'expiresAt', 'lastSeenAt', 'mfaPassed', 'userAgent']);
+        expect(await auth.revokeAdminSessions(a.id, actor)).toBe(2);
+        expect(await auth.listAdminSessions(a.id)).toEqual([]);
+        expect((await audit.list({ action: 'admin.sessions_revoke', targetId: a.id })).items[0]).toMatchObject({ details: { sessionsRevoked: 2 } });
+        await expectDomainError(auth.revokeAdminSessions(actor.id!, actor), 'SELF_ACTION', 409);
+        await expectDomainError(auth.listAdminSessions('nope'), 'ADMIN_NOT_FOUND', 404);
+      });
+    });
+
     describe('TOTP', () => {
       it('enrols in two steps, then requires a fresh code at every login', async () => {
         const a = await newAdmin('ADMIN');
@@ -393,6 +572,46 @@ describe('AuthService', () => {
         expect((await audit.list({ action: 'admin.totp.disable', targetId: a.id })).total).toBe(1);
         await expectDomainError(auth.disableTotp('00000000-0000-4000-8000-000000000000', system), 'ADMIN_NOT_FOUND', 404);
       });
+    });
+  });
+
+  describe('the last active ADMIN (A-02)', () => {
+    it('can be neither demoted nor disabled, by the console or the shell, even by two ADMINs at once', async () => {
+      const fresh = await createTestDb();
+      try {
+        const a = new AuthService({
+          db: fresh.db,
+          audit: new AuditService({ db: fresh.db, clock: clock.now }),
+          sessions: new SessionService({ db: fresh.db, clock: clock.now, ttlHours: { account: 1, admin: 1 } }),
+          clock: clock.now,
+          totpKey: new Uint8Array(32).fill(2),
+        });
+        const shell: Actor = { type: 'system', id: 'cli:admin:test' };
+        const root = await a.createAdmin({ email: 'root@orbes.test', password: PASSWORD, role: 'ADMIN' }, shell);
+        const ops = await a.createAdmin({ email: 'ops@orbes.test', password: PASSWORD, role: 'OPERATOR' }, shell);
+        await expectDomainError(a.setAdminRole(root.id, 'OPERATOR', shell), 'LAST_ADMIN', 409);
+        await expectDomainError(a.setAdminDisabled(root.id, true, shell), 'LAST_ADMIN', 409);
+        // A disabled ADMIN does not count as one.
+        const spare = await a.createAdmin({ email: 'spare@orbes.test', password: PASSWORD, role: 'ADMIN' }, shell);
+        await a.setAdminDisabled(spare.id, true, shell);
+        await expectDomainError(a.setAdminDisabled(root.id, true, shell), 'LAST_ADMIN', 409);
+        // Enabled again, either may go, but not both: two ADMINs disabling each other at the same moment.
+        await a.setAdminDisabled(spare.id, false, shell);
+        const results = await Promise.allSettled([
+          a.setAdminDisabled(spare.id, true, { type: 'admin', id: root.id }),
+          a.setAdminDisabled(root.id, true, { type: 'admin', id: spare.id }),
+        ]);
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+        expect(refused.reason).toMatchObject({ code: 'LAST_ADMIN', httpStatus: 409 });
+        const active = (await a.listAdmins()).filter((x) => x.role === 'ADMIN' && !x.disabled);
+        expect(active).toHaveLength(1);
+        // Promotion from the shell, then the former last ADMIN may be demoted.
+        await a.setAdminRole(ops.id, 'ADMIN', shell);
+        expect((await a.setAdminRole(active[0].id, 'AUDITOR', shell)).role).toBe('AUDITOR');
+      } finally {
+        await fresh.close();
+      }
     });
   });
 

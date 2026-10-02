@@ -1,8 +1,9 @@
 /**
  * scripts/admin.ts: console users from the shell — create an admin (password
  * from ADMIN_PASSWORD, never argv), list, bootstrap TOTP enrolment
- * (totp-setup → totp-enable) and reset a lost second factor. Every change is
- * audited with the CLI actor.
+ * (totp-setup → totp-enable), reset a lost second factor, and the fallback of
+ * the console's Team page (A-02): change a role (the only way to grant
+ * ADMIN), disable and enable. Every change is audited with the CLI actor.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runAdminCli } from '../../scripts/admin.js';
@@ -34,7 +35,7 @@ async function run(argv: string[], env: NodeJS.ProcessEnv = ENV) {
 
 describe('admin CLI', () => {
   it('prints usage and refuses malformed commands without touching the database', async () => {
-    expect((await run(['--help'])).io.text()).toMatch(/create --email <email> --role <ADMIN\|OPERATOR\|AUDITOR>/);
+    expect((await run(['--help'])).io.text()).toMatch(/create --email <email> --role <ADMIN\|OPERATOR\|AUDITOR\|RETAIL>/);
     expect((await run([])).code).toBe(2);
     expect((await run(['explode'])).code).toBe(2);
     expect((await run(['create', '--email', 'x@orbes.test'])).code).toBe(2); // no role
@@ -86,5 +87,44 @@ describe('admin CLI', () => {
     expect((await run(['list'])).io.text()).toMatch(/ops@orbes\.test\s+OPERATOR\s+2FA off/);
     expect((await run(['reset-totp', '--email', 'ops@orbes.test', '--yes'])).code).toBe(1); // not enabled
     expect((await run(['reset-totp', '--email', 'ghost@orbes.test', '--yes'])).code).toBe(1);
+  });
+
+  it('changes roles, disables and enables from the shell, keeping one active ADMIN', async () => {
+    expect((await run(['role', '--email', 'ops@orbes.test'])).code).toBe(2); // no role
+    expect((await run(['role', '--email', 'ops@orbes.test', '--role', 'ROOT'])).code).toBe(2);
+    expect((await run(['disable', '--email', 'ops@orbes.test', '--role', 'ADMIN', '--yes'])).code).toBe(2);
+    const unconfirmed = await run(['disable', '--email', 'ops@orbes.test']);
+    expect(unconfirmed.code).toBe(2);
+    expect(unconfirmed.io.text()).toMatch(/--yes/);
+
+    expect((await run(['create', '--email', 'boss@orbes.test', '--role', 'ADMIN'], { ...ENV, ADMIN_PASSWORD: PASSWORD })).code).toBe(0);
+    // The only active ADMIN can be neither demoted nor disabled.
+    const demote = await run(['role', '--email', 'boss@orbes.test', '--role', 'OPERATOR']);
+    expect(demote.code).toBe(1);
+    expect(demote.io.text()).toMatch(/last active ADMIN/);
+    expect((await run(['disable', '--email', 'boss@orbes.test', '--yes'])).code).toBe(1);
+
+    const disabled = await run(['disable', '--email', 'ops@orbes.test', '--yes', '--json']);
+    expect(disabled.code).toBe(0);
+    expect(JSON.parse(disabled.io.stdout[0])).toMatchObject({ admin: { email: 'ops@orbes.test', disabled: true }, sessionsRevoked: 0 });
+    expect((await run(['list'])).io.text()).toMatch(/ops@orbes\.test\s+OPERATOR\s+2FA off\s+disabled/);
+    const enabled = await run(['enable', '--email', 'ops@orbes.test']);
+    expect(enabled.code).toBe(0);
+    expect(enabled.io.text()).toMatch(/can sign in again/);
+    expect((await run(['list'])).io.text()).toMatch(/ops@orbes\.test\s+OPERATOR\s+2FA off\s+active/);
+
+    // The shell grants ADMIN; then the former only ADMIN may step down.
+    expect((await run(['role', '--email', 'ops@orbes.test', '--role', 'ADMIN'])).io.text()).toMatch(/ops@orbes\.test is now ADMIN/);
+    expect((await run(['role', '--email', 'boss@orbes.test', '--role', 'AUDITOR'])).code).toBe(0);
+    expect((await run(['enable', '--email', 'ghost@orbes.test'])).code).toBe(1);
+    // A seller of the sale mode (A-08), from the shell too.
+    expect((await run(['create', '--email', 'seller@orbes.test', '--role', 'RETAIL'], { ...ENV, ADMIN_PASSWORD: PASSWORD })).code).toBe(0);
+    expect((await run(['list'])).io.text()).toMatch(/seller@orbes\.test\s+RETAIL\s+2FA off\s+active/);
+    expect((await run(['role', '--email', 'boss@orbes.test', '--role', 'RETAIL'])).io.text()).toMatch(/boss@orbes\.test is now RETAIL/);
+
+    const audit = new AuditService({ db: t.db });
+    for (const action of ['admin.role_change', 'admin.disable', 'admin.enable']) {
+      expect((await audit.list({ action })).items[0], action).toMatchObject({ actorType: 'system', actorId: expect.stringMatching(/^cli:admin:/) });
+    }
   });
 });

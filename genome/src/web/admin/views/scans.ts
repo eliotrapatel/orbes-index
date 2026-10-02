@@ -73,7 +73,8 @@ export async function scansView(ctx: ViewContext): Promise<HTMLElement> {
           kind: ['nowrap'],
         },
         { label: 'Product', cell: (r) => (r.productId ? h('a', { class: 'idlink', attrs: { href: productHref(r.productId) } }, r.productId) : h('span', { class: 'soft' }, '—')), kind: ['nowrap'] },
-        { label: 'Event', cell: (r) => humanize(r.eventType), kind: ['nowrap'] },
+        // A staff scan (ADMIN_TEST: the sale mode, or /verify in a browser signed in to the console) names the console user behind it.
+        { label: 'Event', cell: (r) => h('span', null, humanize(r.eventType), r.adminEmail ? h('span', { class: 'cell-sub', data: { testid: 'scan-staff' } }, `by ${r.adminEmail}`) : null), kind: ['nowrap'] },
         {
           label: 'Result',
           cell: (r) =>

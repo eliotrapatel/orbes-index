@@ -22,8 +22,13 @@ export type KeyStatus = (typeof KEY_STATUSES)[number];
 export const CODE_STATUSES = ['ACTIVE', 'SUPERSEDED', 'REVOKED'] as const;
 export type CodeStatus = (typeof CODE_STATUSES)[number];
 
-export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR'] as const;
+/** RETAIL (A-08): a seller's account, under AUDITOR, that sees the sale mode only. */
+export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+/** Roles the Team page gives (create, change role); ADMIN is granted from the shell only. */
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL'] as const;
+export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
@@ -94,6 +99,8 @@ export interface AdminProfile {
   email: string;
   role: AdminRole;
   totpEnabled: boolean;
+  /** Signed in with a temporary password: the console shows only the password change until it is replaced. */
+  passwordChangeRequired: boolean;
 }
 
 /** GET /api/admin/admins (ADMIN only). */
@@ -101,6 +108,23 @@ export interface AdminUser extends AdminProfile {
   locked: boolean;
   disabled: boolean;
   createdAt: Iso;
+}
+
+/** POST /api/admin/admins: the new staff account and its temporary password, shown once. */
+export interface StaffCreated {
+  admin: AdminUser;
+  temporaryPassword: string;
+}
+
+/** GET /api/admin/admins/:id/sessions (never a token). */
+export interface AdminSessionInfo {
+  createdAt: Iso;
+  lastSeenAt: Iso;
+  expiresAt: Iso;
+  mfaPassed: boolean;
+  userAgent: string | null;
+  /** The session of the ADMIN looking at the list. */
+  current: boolean;
 }
 
 export interface AdminSession {
@@ -413,7 +437,10 @@ export interface TransferRecord {
 export interface WarrantyRecord {
   productId: string;
   purchaseDate: string | null;
+  /** The point of sale's name: from the register when `retailerId` is set, else the free text of older records. */
   retailer: string | null;
+  /** The point of sale in the register (A-08), or null. */
+  retailerId: string | null;
   country: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -453,6 +480,8 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Iso | null;
   resolutionNote: string | null;
+  /** The console user whose triage decision is the latest (acknowledged, resolved, dismissed or reopened). */
+  actorEmail: string | null;
   /** In GET /api/admin/anomalies: what customers said about the scans that took part in it (null: nobody). */
   reports?: AnomalyReports | null;
 }
@@ -559,6 +588,8 @@ export interface ScanRecord {
   codeId: string | null;
   packedIdentity: number | null;
   accountId: string | null;
+  /** The console user behind a staff scan (ADMIN_TEST: the sale mode, or /verify in a browser signed in to the console), by email. */
+  adminEmail: string | null;
   deviceHash: string | null;
   country: string | null;
   region: string | null;
@@ -688,13 +719,61 @@ export interface AuditEntry {
   occurredAt: Iso;
   actorType: 'admin' | 'account' | 'system';
   actorId: string | null;
+  /** The console user's email when the actor is an admin (read at display time; the log keeps ids). */
+  actorEmail: string | null;
   action: string;
   targetType: string | null;
   targetId: string | null;
+  /** The console user's email when the target is an admin (the Team page's actions). */
+  targetEmail: string | null;
   details: Record<string, unknown>;
   ipHash: string | null;
   prevHash: string;
   hash: string;
+}
+
+// ── Points of sale and the sale mode (A-08) ────────────────────────────────
+
+/** GET /api/admin/retailers: the register a warranty's point of sale is chosen from. */
+export interface Retailer {
+  id: string;
+  name: string;
+  city: string | null;
+  country: string | null;
+  active: boolean;
+  createdAt: Iso;
+  updatedAt: Iso;
+}
+
+export const SALE_REFUSALS = ['NOT_AUTHENTIC', 'WARRANTY_ACTIVE', 'WARRANTY_VOID', 'ALREADY_REGISTERED', 'NOT_FOR_SALE'] as const;
+export type SaleRefusal = (typeof SALE_REFUSALS)[number];
+
+/** POST /api/admin/sale/lookup: the piece behind a scanned code and, when it can be sold, a 10-minute token. */
+export interface SaleLookup {
+  scanId: string;
+  state: VerificationState;
+  piece: {
+    productId: string;
+    status: ProductStatus;
+    category: { code: string; name: string };
+    collection: string | null;
+    model: string;
+    type: string;
+    variant: string | null;
+    material: string;
+    createdYear: number;
+    registered: boolean;
+    warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null };
+  } | null;
+  sale: { token: string; expiresAt: Iso } | null;
+  refusal: { code: SaleRefusal; message: string } | null;
+}
+
+/** POST /api/admin/sale/activate. */
+export interface SaleActivation {
+  warranty: WarrantyRecord;
+  statusChange: StatusChange | null;
+  scanId: string;
 }
 
 export interface ChainVerification {

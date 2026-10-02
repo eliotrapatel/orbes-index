@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { RetailerService } from '../../src/server/services/retailers.js';
 import {
   addMonthsClamped,
   computeWarrantyStatus,
@@ -178,6 +179,25 @@ describe('WarrantyService', () => {
       }
     });
 
+    it('refuses a piece in a pre-sale service (ISSUED → SERVICED) until the service is closed; an after-sale service is no obstacle', async () => {
+      // Started there, the warranty would run while closing the service brings the piece back to ISSUED, unsold.
+      const pre = await product();
+      const svc = await warranty.openService(pre.productId, { type: 'INSPECTION' }, admin);
+      await expectDomainError(warranty.activate(pre.productId, {}, admin), 'WARRANTY_ACTIVATION_NOT_ALLOWED', 409);
+      expect(await statusOf(pre.id)).toBe('SERVICED');
+      expect(await t.db.selectFrom('warranties').select('id').where('product_id', '=', pre.id).execute()).toEqual([]);
+      await warranty.completeService(svc.id, {}, admin);
+      const sold = await warranty.activate(pre.productId, { purchaseDate: '2026-06-14' }, admin);
+      expect(sold.statusChange).toMatchObject({ from: 'ISSUED', to: 'ACTIVATED' });
+
+      const after = await product({ path: ['ACTIVATED'] });
+      await warranty.openService(after.productId, { type: 'CLEANING' }, admin);
+      const r = await warranty.activate(after.productId, { purchaseDate: '2026-06-14' }, admin);
+      expect(r.statusChange).toBeNull();
+      expect(r.warranty.status).toBe('ACTIVE');
+      expect(await statusOf(after.id)).toBe('SERVICED');
+    });
+
     it('starts the warranty without a status change when the product is already past ISSUED', async () => {
       const p = await product({ path: ['ACTIVATED', 'OWNED'] });
       const r = await warranty.activate(p.productId, { purchaseDate: '2026-06-10' }, admin);
@@ -193,6 +213,37 @@ describe('WarrantyService', () => {
       const { warranty: w } = await warranty.activate(p.productId, { purchaseDate: '2026-06-14' }, admin);
       expect(w.status).toBe('ACTIVE');
       expect(await t.db.selectFrom('warranties').select('id').where('product_id', '=', p.id).execute()).toHaveLength(1);
+    });
+
+    it('names the point of sale from the register (A-08): its name is shown, its country is the default purchase country', async () => {
+      const retailers = new RetailerService({ db: t.db, audit, clock: clock.now });
+      const shop = await retailers.create({ name: 'ORBES Paris', city: 'Paris', country: 'fr' }, admin);
+      const p = await product();
+      const { warranty: w } = await warranty.activate(p.productId, { purchaseDate: '2026-06-01', retailerId: shop.id }, admin, { saleScanId: 'scan-1' });
+      expect(w).toMatchObject({ retailer: 'ORBES Paris', retailerId: shop.id, country: 'FR', status: 'ACTIVE' });
+      const entry = (await audit.list({ action: 'warranty.activate', targetId: p.productId })).items[0];
+      expect(entry.details).toMatchObject({ retailer: 'ORBES Paris', retailerId: shop.id, country: 'FR', saleScanId: 'scan-1' });
+      // A given country wins; a rename shows everywhere the point of sale is named.
+      const q = await product();
+      expect((await warranty.activate(q.productId, { retailerId: shop.id, country: 'MC' }, admin)).warranty.country).toBe('MC');
+      await retailers.update(shop.id, { name: 'ORBES Paris — Saint-Honoré' }, admin);
+      expect((await warranty.get(p.productId))?.retailer).toBe('ORBES Paris — Saint-Honoré');
+      expect((await warranty.list({}, { page: 1, pageSize: 200 })).items.find((x) => x.productId === q.productId)?.retailer).toBe('ORBES Paris — Saint-Honoré');
+      // The old free text stays readable where no point of sale was chosen.
+      const r = await product();
+      expect((await warranty.activate(r.productId, { retailer: 'Atelier Rive Gauche' }, admin)).warranty).toMatchObject({ retailer: 'Atelier Rive Gauche', retailerId: null });
+
+      // An inactive or unknown point of sale is refused, and nothing is written.
+      await retailers.update(shop.id, { active: false }, admin);
+      const s = await product();
+      await expectDomainError(warranty.activate(s.productId, { retailerId: shop.id }, admin), 'RETAILER_INACTIVE', 409);
+      await expectDomainError(warranty.activate(s.productId, { retailerId: '00000000-0000-4000-8000-000000000000' }, admin), 'RETAILER_NOT_FOUND', 404);
+      expect(await warranty.get(s.productId)).toBeNull();
+      expect(await statusOf(s.id)).toBe('ISSUED');
+      // The void and extend results keep the name.
+      await retailers.update(shop.id, { active: true }, admin);
+      expect((await warranty.extend(p.productId, 6, admin)).retailer).toBe('ORBES Paris — Saint-Honoré');
+      expect((await warranty.void(q.productId, 'test', admin)).retailer).toBe('ORBES Paris — Saint-Honoré');
     });
 
     it('validates input', async () => {

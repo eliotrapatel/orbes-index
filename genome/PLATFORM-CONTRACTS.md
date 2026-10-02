@@ -81,7 +81,7 @@ Timestamp convention: every row records when it came into being, named after wha
 | `cryptographic_keys` | `key_id smallint PK CHECK 1..255` · `kid text UNIQUE` · `algorithm text CHECK = 'Ed25519'` · `public_key bytea CHECK length 32` · `status text CHECK in ('ACTIVE','RETIRED','REVOKED')` · `provider text` · `provider_ref text` (reference, never a secret) · `created_at` · `activated_at NULL` · `retired_at NULL` · `revoked_at NULL` · `compromised_at NULL` · `revocation_reason text NULL` · partial `UNIQUE INDEX ON (status) WHERE status='ACTIVE'` |
 | `codes` | `id uuid PK` · `product_id FK` · `genome_id uuid FK` → `genomes.id` · `key_id smallint FK` · `code_version smallint` · `issue smallint` · `issued_day int` · `nonce bytea` (4) · `payload bytea` (13) · `signature bytea` (64) · `payload_hash bytea UNIQUE` (sha256) · `status text CHECK in ('ACTIVE','SUPERSEDED','REVOKED')` · `revoked_at NULL` · `revocation_reason NULL` · `UNIQUE(product_id, issue)` · `created_at` |
 | `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `failed_logins int NOT NULL DEFAULT 0 CHECK >= 0` · `failed_logins_since NULL` (login throttle, migration 0002) · `transfers_frozen_until timestamptz NULL` (72-hour transfer pause after an assisted recovery, migration 0005) · `created_at` · `updated_at` |
-| `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `created_at` · `updated_at` |
+| `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `password_change_required boolean DEFAULT false` (0006) · `created_at` · `updated_at` |
 | `sessions` | `id_hash bytea PK` (sha256 of the random token) · `subject_type text CHECK in ('account','admin')` · `subject_id uuid` · `csrf_token text` · `mfa_passed boolean DEFAULT false` · `created_at` · `expires_at` · `last_seen_at` · `ip_hash text NULL` · `user_agent text NULL` |
 | `ownership` | `id uuid PK` · `product_id FK` · `account_id FK` · `acquired_via text CHECK in ('FIRST_REGISTRATION','TRANSFER','RESALE','ADMIN')` · `verified boolean` (claim secret / retailer proof) · `started_at` · `ended_at NULL` · `ended_reason text NULL` · partial `UNIQUE (product_id) WHERE ended_at IS NULL` |
 | `ownership_transfers` | `id uuid PK` · `product_id FK` · `from_account_id FK` · `to_account_id FK NULL` · `token_hash bytea UNIQUE` · `status text CHECK in ('PENDING','ACCEPTED','CANCELLED','EXPIRED')` · `created_at` · `expires_at` · `completed_at NULL` · partial `UNIQUE (product_id) WHERE status='PENDING'` |
@@ -153,7 +153,8 @@ export type VerificationState = 'AUTHENTIC' | 'AUTHENTIC_FIRST_REGISTRATION' | '
   'AUTHENTIC_OWNERSHIP_VERIFIED' | 'SUSPICIOUS_ACTIVITY' | 'REVOKED' | 'UNKNOWN' | 'INVALID_SIGNATURE' | 'MALFORMED_CODE';
 export interface VerifyInput { code: string /* base64url of the 79-byte framed data */;
   genome?: { glyphs: (number | null)[]; confidence?: number[] }; client?: { rsErrors?: number; rsErasures?: number; moduleSizePx?: number; decodeMs?: number; source?: 'camera' | 'upload' } }
-export interface ScanMeta { deviceHash?: string; sessionHash?: string; accountId?: string; ipHash?: string; geo?: GeoInfo; userAgentFamily?: string }
+export interface ScanMeta { deviceHash?: string; sessionHash?: string; accountId?: string; ipHash?: string; geo?: GeoInfo; userAgentFamily?: string;
+  adminId?: string /* extension (S-07): the console user of the request's console session: a staff scan */ }
 verify(input: VerifyInput, meta: ScanMeta): Promise<VerifyOutcome>;
 ```
 
@@ -167,7 +168,7 @@ The decision procedure is normative. Each step that ends the procedure records t
 6. **Registry.** If the product or code is missing, the result is `UNKNOWN` with a CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED` (reasons `PRODUCT_NOT_REGISTERED` / `CODE_NOT_REGISTERED`). If the code exists but `payload_hash` differs, the result is `SUSPICIOUS_ACTIVITY` with a CRITICAL anomaly `CODE_MISMATCH`.
 7. **Genome cross-check:** recompute the genome from the signed identity and genome version. If at least 6 glyphs were provided with confidence ≥ 0.5 and at least 2 of those mismatch, the result is `SUSPICIOUS_ACTIVITY` with anomaly `GENOME_MISMATCH`. Record `genome_check`.
 8. **Statuses.** Code status `SUPERSEDED` or `REVOKED` gives `REVOKED`. Product status `REVOKED`, `COUNTERFEIT_FLAGGED` or `RETIRED` gives `REVOKED`. Product status `LOST` or `STOLEN` gives `SUSPICIOUS_ACTIVITY`.
-9. **Anomalies.** The scan event is inserted (for every request, steps 1–8 included) with the provisional `result_state` `'PENDING'` when no earlier step decided, and updated to the final state in the same transaction (step 12). For a trusted, registered code, run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY` (reason `RISK_THRESHOLD`). The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'` (reason `RISK_THRESHOLD_OWNER`).
+9. **Anomalies.** The scan event is inserted (for every request, steps 1–8 included) with the provisional `result_state` `'PENDING'` when no earlier step decided, and updated to the final state in the same transaction (step 12). *Extension (S-07):* for a trusted, registered code of a product not sold yet (`ISSUED`, or `SERVICED` in a pre-sale service), a public scan records the service finding `UNSOLD_PIECE_SCAN` (MEDIUM, weight 0, with the country, once per product and UTC day); it never changes the state. For a trusted, registered code, run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY` (reason `RISK_THRESHOLD`). The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'` (reason `RISK_THRESHOLD_OWNER`).
 10. **Ownership**, when the result is not already decided:
     - The viewer is the current owner: `AUTHENTIC_OWNERSHIP_VERIFIED`.
     - Another current owner exists: `AUTHENTIC_REGISTERED`.
@@ -214,7 +215,9 @@ The rules are pure functions over the code's recent scan history, which keeps th
 | `LOST_STOLEN_SCAN` | Scan of a product whose status is `LOST` or `STOLEN` | HIGH / 50 |
 | `POST_REVOCATION_SCAN` | Scan of a revoked or superseded code | MEDIUM / 30 |
 
-The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) are recorded by the verification service.
+The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) are recorded by the verification service, and, as an extension (S-07), `UNSOLD_PIECE_SCAN` (MEDIUM, weight 0, once per product and UTC day: a public scan of a product not sold yet).
+
+- **Staff scans (extension, S-07):** a `verify` request with `ScanMeta.adminId` (the route sets it from a console session the admin guard would accept) is recorded as `ADMIN_TEST` with `admin_id` and without device, session or account pseudonyms. It raises no `UNSOLD_PIECE_SCAN`, takes no part in `evaluate` (called with `observeOnly`: the public history is scored, the staff scan is left out and nothing is recorded) and gets no registration token. ADMIN_TEST scans never enter any rule's history. The service-level findings of steps 6–7 (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`, `GENOME_MISMATCH`) judge the code, not who scanned it: a staff scan still records them, with `staffScan: true` in their details, so a forged but validly signed code checked by Client Services from a signed-in console browser still pages as a possible key compromise.
 
 - **Sources, not cookies (SEC-7):** `SCAN_VELOCITY` and `DEVICE_DIVERSITY` count distinct sources: the IP pseudonym (`ip_hash`) when present, else the device-cookie pseudonym, else the session pseudonym; scans with none share one bucket. A client that drops its cookie on every request (one address) is one source; so is a boutique wifi with many phones. The config names `velocityMinDevices` / `deviceMax` are kept and apply to sources. `IMPOSSIBLE_TRAVEL` and `GEO_DISPERSION` use the geo fields, not sources.
 - **Risk score:** `100 · (1 − Π(1 − wᵢ·decayᵢ/100))`, rounded. `decay` is linear over `decayDays`, from the time of each rule's most recent violation. A same-place burst (`SCAN_VELOCITY` ⊕ `DEVICE_DIVERSITY`) scores 62 ≥ 60.
@@ -327,7 +330,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | GET | `/api/v1/categories` | Returns `[{ code, index, name }]` for active categories. |
 | GET | `/api/v1/client-services` | Extension: `{ email?, phone?, hours? }` from `CLIENT_SERVICES_*`, `{}` when none is set. `Cache-Control: public, max-age=300`. |
 | POST | `/api/v1/reports` | Extension: `{ scanId, channel: 'BOUTIQUE'\|'ONLINE'\|'PRIVATE'\|'OTHER', where? (≤ 200), note? (≤ 500) }` → 201 `{ ok: true }`. Only for a VERIFY scan that was not authentic and is less than 24 h old, one per scan (`409 REPORT_NOT_ALLOWED`, `409 REPORT_ALREADY_SENT`). Rate group `verify`, origin check, audited `scan.report` with the scan id alone. |
-| POST | `/api/v1/verify` | Takes `VerifyInput` (`code`: any string of at most 1024 characters; undecodable codes are recorded as `MALFORMED_CODE`), returns `VerifyOutcome`. Missing, non-string or longer codes and other schema violations → 400, not recorded. Rate-limited. Reads the session cookie optionally to detect the owner. |
+| POST | `/api/v1/verify` | Takes `VerifyInput` (`code`: any string of at most 1024 characters; undecodable codes are recorded as `MALFORMED_CODE`), returns `VerifyOutcome`. Missing, non-string or longer codes and other schema violations → 400, not recorded. Rate-limited. Reads the session cookie optionally to detect the owner, and the admin cookie to tell a staff scan (extension, S-07: ADMIN_TEST, no `UNSOLD_PIECE_SCAN` and no history finding, the findings of steps 6–7 marked `staffScan`, no registration token). |
 
 ### Account routes (cookie `orbes_session`, `__Host-` prefixed in production)
 
@@ -348,15 +351,16 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | POST | `/api/v1/ownership/incidents` | Body `{ productId, type: 'LOST' \| 'STOLEN' }`. |
 | GET | `/api/v1/products/:productId/service-history` | Owner only. |
 
-### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR)
+### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR > RETAIL)
 
-AUDITOR is read-only and reads customers' emails masked (`j***@example.com`). Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users and a customer's recovery code, lock and export.
+AUDITOR reads, with customers' emails masked (`j***@example.com`). Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users, points of sale and a customer's recovery code, lock and export. RETAIL (A-08, a seller) is refused everywhere but the sale mode, the list of points of sale and its own session, password and second factor (extension).
 
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/admin/auth/login` | Body `{ email, password, totp? }`. |
 | POST | `/api/admin/auth/logout` | — |
-| GET | `/api/admin/auth/me` | — |
+| GET | `/api/admin/auth/me` | Every role, RETAIL included. |
+| POST | `/api/admin/auth/password` | Every role. Body `{ currentPassword, newPassword }`; keeps the session, ends the others; the way out of a temporary password (`403 PASSWORD_CHANGE_REQUIRED` elsewhere) (extension). |
 | GET | `/api/admin/dashboard` | Counts: products by status, scans in the last 24 h / 7 d, open anomalies by severity, active key, recent events. |
 | GET | `/api/admin/categories` | Lists categories. |
 | POST | `/api/admin/categories` | Creates a category. |
@@ -374,7 +378,7 @@ AUDITOR is read-only and reads customers' emails masked (`j***@example.com`). Mu
 | POST | `/api/admin/products/:productId/transitions` | Body `{ to, reason }`. |
 | POST | `/api/admin/products/:productId/reinstate` | — |
 | POST | `/api/admin/products/:productId/codes/reissue` | Body `{ reason }`. |
-| POST | `/api/admin/products/:productId/warranty/activate` | Activates the warranty. |
+| POST | `/api/admin/products/:productId/warranty/activate` | Activates the warranty. Body `{ purchaseDate?, retailerId?, retailer?, country? }`: `retailerId` (extension) names a point of sale of the register. |
 | POST | `/api/admin/products/:productId/warranty/void` | Voids the warranty. |
 | POST | `/api/admin/products/:productId/warranty/extend` | Body `{ months }` (1–120). Extends an activated warranty (extension). |
 | POST | `/api/admin/products/:productId/services` | Opens a service record. |
@@ -412,7 +416,16 @@ AUDITOR is read-only and reads customers' emails masked (`j***@example.com`). Mu
 | POST | `/api/admin/codes/print-sheet/manifest` | The sheet's manifest, CSV `page, row, column, productId, sku, variant, material, codeId` in the PDF's order (one plan for both), audited `code.sheet_manifest` (extension). |
 | POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every card and every file name, the CSV's included, says PROOF until the brand validates the layout; checks stop at the first wrong code, one request in progress per admin (extension). |
 | GET | `/api/admin/admins` | ADMIN. Console users (extension). |
-| POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). |
+| POST | `/api/admin/admins` | ADMIN. Body `{ email, role: OPERATOR \| AUDITOR \| RETAIL }`. Staff account with a temporary password returned once (extension). |
+| PATCH | `/api/admin/admins/:id/role` | ADMIN. Body `{ role: OPERATOR \| AUDITOR \| RETAIL }`; ADMIN is granted from the shell only (extension). |
+| POST | `/api/admin/admins/:id/disable`, `/api/admin/admins/:id/enable` | ADMIN. Disabling ends every session of the account (extension). |
+| POST | `/api/admin/admins/:id/unlock` | ADMIN. Lifts a sign-in lockout (extension). |
+| GET, DELETE | `/api/admin/admins/:id/sessions` | ADMIN. Lists (never a token) and ends an admin's sessions (extension). |
+| POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). The Team routes refuse one's own account (`409 SELF_ACTION`) and never leave the console without an active ADMIN (`409 LAST_ADMIN`). |
+| GET | `/api/admin/retailers?active` | RETAIL and up. The register of points of sale (extension, A-08). |
+| POST, PATCH | `/api/admin/retailers`, `/api/admin/retailers/:id` | ADMIN. Create, rename, move, deactivate a point of sale; never deleted (extension). |
+| POST | `/api/admin/sale/lookup` | RETAIL and up. Body: the decoded code as for `/api/v1/verify`. One ADMIN_TEST scan naming the console user, no anomaly evaluation; returns the piece and, when it can be sold, a 10-minute single-use sale token (extension). |
+| POST | `/api/admin/sale/activate` | RETAIL and up. Body `{ token, retailerId }`. Uses the token of the caller's own scan and starts the warranty today at that point of sale (extension). |
 
 Pagination uses `?page=1&pageSize=50` (max 200) and returns `{ items, page, pageSize, total }`.
 

@@ -25,7 +25,7 @@ function fakeFetch(...responses: (Response | Error)[]): { fetch: FetchLike; call
 
 const header = (c: Call, name: string) => (c.init.headers as Record<string, string>)[name];
 
-const SESSION = { admin: { id: 'a', email: 'admin@orbes.test', role: 'ADMIN', totpEnabled: false }, csrfToken: 'tok-1', mfaPassed: true, mfaRequired: false };
+const SESSION = { admin: { id: 'a', email: 'admin@orbes.test', role: 'ADMIN', totpEnabled: false, passwordChangeRequired: false }, csrfToken: 'tok-1', mfaPassed: true, mfaRequired: false };
 
 describe('AdminApi', () => {
   it('stores the CSRF token from login and sends it on mutations only', async () => {
@@ -197,6 +197,55 @@ describe('AdminApi', () => {
     expect(header(calls[3], 'x-csrf-token')).toBe('tok-2');
   });
 
+  it('manages console users on the Team routes (A-02): methods, paths, bodies and the CSRF token', async () => {
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(201, { admin: { id: 'n' }, temporaryPassword: 'ABCD-EFGH-JKMN-PQRS' }),
+      json(200, { admin: { id: 'n' } }),
+      json(200, { admin: { id: 'n' }, sessionsRevoked: 1 }),
+      json(200, { admin: { id: 'n' }, sessionsRevoked: 0 }),
+      json(200, { admin: { id: 'n' } }),
+      json(200, { items: [] }),
+      json(200, { sessionsRevoked: 2 }),
+      json(200, { ok: true, admin: { id: 'a' } }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    expect((await api.createStaff('new@orbes.test', 'AUDITOR')).temporaryPassword).toBe('ABCD-EFGH-JKMN-PQRS');
+    await api.setAdminRole('n/1', 'OPERATOR');
+    await api.disableAdmin('n');
+    await api.enableAdmin('n');
+    await api.unlockAdmin('n');
+    await api.adminSessions('n');
+    expect(await api.revokeAdminSessions('n')).toEqual({ sessionsRevoked: 2 });
+    await api.changePassword('old passphrase', 'new passphrase 2026');
+    expect(calls.slice(1).map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      'POST /api/admin/admins',
+      'PATCH /api/admin/admins/n%2F1/role',
+      'POST /api/admin/admins/n/disable',
+      'POST /api/admin/admins/n/enable',
+      'POST /api/admin/admins/n/unlock',
+      'GET /api/admin/admins/n/sessions',
+      'DELETE /api/admin/admins/n/sessions',
+      'POST /api/admin/auth/password',
+    ]);
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ email: 'new@orbes.test', role: 'AUDITOR' });
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ role: 'OPERATOR' });
+    expect(calls[7].init.body).toBeUndefined(); // DELETE: no body
+    expect(JSON.parse(String(calls[8].init.body))).toEqual({ currentPassword: 'old passphrase', newPassword: 'new passphrase 2026' });
+    for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token'), c.url).toBe(c.init.method === 'GET' ? undefined : 'tok-1');
+  });
+
+  it('a wrong current password is a refusal, not an expired session', async () => {
+    const onUnauthorized = vi.fn();
+    const { fetch } = fakeFetch(json(200, SESSION), json(400, { error: { code: 'CURRENT_PASSWORD_INVALID', message: 'The current password is not correct.' } }));
+    const api = new AdminApi({ fetch, onUnauthorized });
+    await api.me();
+    await expect(api.changePassword('wrong', 'new passphrase 2026')).rejects.toMatchObject({ status: 400, code: 'CURRENT_PASSWORD_INVALID' });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(api.csrfToken).toBe('tok-1');
+  });
+
   it('extends a warranty and downloads a print sheet of several codes (POST, CSRF, blob)', async () => {
     const pdf = new Response(new Uint8Array([37, 80, 68, 70]), {
       status: 200,
@@ -263,6 +312,43 @@ describe('AdminApi', () => {
     const sheet = await api.certificates([{ productId: 'O26-J-00184', claimCode: '7KQ2-M4TD-9XWH' }], { format: 'csv' });
     expect(calls[2].url).not.toContain('7KQ2');
     expect(sheet.filename).toBe('orbes-certificates.csv');
+  });
+
+  it('sells from the sale mode (A-08): the register of points of sale, the lookup and the activation', async () => {
+    const lookup = { scanId: 's1', state: 'AUTHENTIC', piece: null, sale: { token: 'T'.repeat(43), expiresAt: '2026-10-02T10:10:00.000Z' }, refusal: null };
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { items: [] }),
+      json(200, { items: [] }),
+      json(201, { retailer: { id: 'r1' } }),
+      json(200, { retailer: { id: 'r1' } }),
+      json(200, lookup),
+      json(200, { warranty: {}, statusChange: null, scanId: 's1' }),
+      json(200, { warranty: {} }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('seller@orbes.test', 'pw');
+    await api.retailers();
+    await api.retailers({ activeOnly: true });
+    expect(calls[1].url).toBe('/api/admin/retailers');
+    expect(calls[2].url).toBe('/api/admin/retailers?active=true');
+    expect(calls[2].init.method).toBe('GET');
+    await api.createRetailer({ name: 'ORBES Paris', city: 'Paris', country: 'FR' });
+    expect(calls[3]).toMatchObject({ url: '/api/admin/retailers', init: { method: 'POST' } });
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ name: 'ORBES Paris', city: 'Paris', country: 'FR' });
+    await api.updateRetailer('r/1', { active: false });
+    expect(calls[4]).toMatchObject({ url: '/api/admin/retailers/r%2F1', init: { method: 'PATCH' } });
+    expect(JSON.parse(String(calls[4].init.body))).toEqual({ active: false });
+    expect(await api.saleLookup({ code: 'abc', genome: { glyphs: [1, 2, 3, 4, 5, 6, 7, 8] }, client: { source: 'camera' } })).toEqual(lookup);
+    expect(calls[5]).toMatchObject({ url: '/api/admin/sale/lookup', init: { method: 'POST' } });
+    expect(JSON.parse(String(calls[5].init.body))).toEqual({ code: 'abc', genome: { glyphs: [1, 2, 3, 4, 5, 6, 7, 8] }, client: { source: 'camera' } });
+    await api.saleActivate('T'.repeat(43), 'r1');
+    // The token travels in a POST body, never in a URL.
+    expect(calls[6].url).toBe('/api/admin/sale/activate');
+    expect(JSON.parse(String(calls[6].init.body))).toEqual({ token: 'T'.repeat(43), retailerId: 'r1' });
+    for (const c of calls.slice(3, 7)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
+    await api.activateWarranty('O26-J-00184', { purchaseDate: '2026-10-02', retailerId: 'r1' });
+    expect(JSON.parse(String(calls[7].init.body))).toEqual({ purchaseDate: '2026-10-02', retailerId: 'r1' });
   });
 
   it('times out slow requests', async () => {

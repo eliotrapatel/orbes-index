@@ -33,6 +33,8 @@ import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnerService } from './services/owners.js';
 import { ScanReportService } from './services/scan-reports.js';
+import { RetailerService } from './services/retailers.js';
+import { SaleService } from './services/sale.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
@@ -60,6 +62,10 @@ export interface AppServices {
   recovery: AccountRecoveryService;
   /** The console's customer sheet: search by email or REF, lock and unlock, the right-of-access export. */
   owners: OwnerService;
+  /** The register of points of sale (A-08). */
+  retailers: RetailerService;
+  /** The sale mode: staff scan, then warranty activation through a sale token (A-08). */
+  sale: SaleService;
 }
 
 export interface AppContext {
@@ -139,6 +145,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const owners = new OwnerService({ db, audit, sessions, ownership, clock });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
+    const retailers = new RetailerService({ db, audit, clock });
+    const sale = new SaleService({ db, verification, warranty, clock });
 
     const services: AppServices = {
       issuance,
@@ -154,6 +162,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       reports,
       recovery,
       owners,
+      retailers,
+      sale,
       ...overrides.services,
     };
 

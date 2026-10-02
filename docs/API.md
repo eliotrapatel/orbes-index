@@ -35,7 +35,7 @@ Related documents: [DATABASE](DATABASE.md) · [CRYPTOGRAPHY](CRYPTOGRAPHY.md) ·
 14. [Admin: products and lifecycle](#14-admin-products-and-lifecycle)
 15. [Admin: codes and artifacts](#15-admin-codes-and-artifacts)
 16. [Admin: registries, anomalies, revocations and cases](#16-admin-registries-anomalies-revocations-and-cases)
-17. [Admin: keys and audit log](#17-admin-keys-and-audit-log)
+17. [Admin: keys, audit log and console users](#17-admin-keys-audit-log-and-console-users)
 18. [Static web applications](#18-static-web-applications)
 19. [Integration guide for resellers and third parties](#19-integration-guide-for-resellers-and-third-parties)
 
@@ -86,7 +86,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 | Cookie (development, test) | Production name | Set by | Purpose | Attributes |
 |---|---|---|---|---|
 | `orbes_session` | `__Host-orbes_session` | Account registration and login | Customer session | `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` in production, `Expires` = session expiry |
-| `orbes_admin` | `__Host-orbes_admin` | Admin login, TOTP enrolment (new token) | Staff session | same |
+| `orbes_admin` | `__Host-orbes_admin` | Admin login, TOTP enrolment (new token) | Staff session; on `POST /api/v1/verify` it makes the scan a staff scan (§9.7) | same |
 | `orbes_device` | `__Host-orbes_device` | `POST /api/v1/verify` | Pseudonymous device id for anomaly scoring (§4) | `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in production, `Max-Age` 2 years, signed with `COOKIE_SECRET` |
 
 - In production every cookie carries the `__Host-` prefix: browsers then accept it only with `Secure`, `Path=/` and no `Domain`, so a sibling subdomain or a plain-HTTP response can neither plant nor shadow it. An unprefixed `orbes_session` sent to a production server is ignored. The prefix needs HTTPS, hence the plain names in development and test.
@@ -96,7 +96,8 @@ A production server answers only on an up-to-date database schema: it refuses to
 - Every login issues a new token and deletes the session it replaces (session-fixation defence). So does the admin step-up to MFA: enrolling TOTP (§12.4) replaces the session by a new, MFA-passed one (new token, new CSRF token, same absolute expiry). At most 20 sessions per account or admin are kept; the oldest are deleted.
 - An account cookie is never accepted as an admin session, and vice versa.
 - When a request presents an expired or revoked session cookie, the response clears it.
-- A session stops working as soon as its account is no longer `ACTIVE` or its admin is disabled.
+- A session stops working as soon as its account is no longer `ACTIVE` or its admin is disabled; disabling an admin (§17.10) also deletes its sessions in the same transaction.
+- A password change (§12.5) keeps the session that made it and deletes every other session of that admin.
 
 ### 2.2 CSRF protection
 
@@ -111,23 +112,28 @@ The CSRF token is returned by account registration and login (`csrfToken`), `GET
 
 ### 2.3 Admin roles
 
-Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lower role may.
+Roles are ranked **ADMIN > OPERATOR > AUDITOR > RETAIL**; a role may do everything a lower role may.
 
 | Role | May |
 |---|---|
-| AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2). Manage its own session and second factor. |
+| RETAIL | A seller (A-08, migration 0008). The sale mode of a phone (§16.18: look a scanned piece up, start its warranty at a point of sale) and the list of points of sale it chooses from (`GET /api/admin/retailers`, §16.17). Manage its own session, password and second factor. **Nothing else**: no product, code, scan, owner, warranty list or dashboard, no download. |
+| AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2). Manage its own session, password and second factor. Ranked above RETAIL, it may also use the sale mode (the rank model); an activation there is always tied to its own scan of the piece and audited under its name. |
 | OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
-| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
+| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
-The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
+ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
+
+The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. RETAIL ranks under that default, so it is refused everywhere except on the routes that declare it (`minRole: 'RETAIL'`): `/api/admin/sale/lookup` and `/api/admin/sale/activate`, `GET /api/admin/retailers` (read only, a declared deviation: the sale screen lists the points of sale), and its own session (`/api/admin/auth/logout`, `me`, `password`, `totp/setup`, `totp/enable`; login takes no session). A role unknown to the server ranks 0 and is refused everywhere. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
 
 ### 2.4 Admin MFA
 
-When MFA is enforced, an admin session that has not passed TOTP may use **only** the `/api/admin/auth/*` routes (login, logout, me, TOTP setup and enable); every other admin route answers `403 MFA_REQUIRED`. Enforcement is set by `ADMIN_REQUIRE_MFA` (default `true` in production, `false` otherwise); `ADMIN_REQUIRE_MFA=false` in production is accepted but logged as a warning at every start. A session passes MFA by logging in with a TOTP code, or by enrolling TOTP (§12.4), which replaces it by a new MFA-passed session. The `mfaRequired` and `mfaPassed` fields of the admin login and `me` responses report both facts.
+When MFA is enforced, an admin session that has not passed TOTP may use **only** the `/api/admin/auth/*` routes (login, logout, me, password change, TOTP setup and enable); every other admin route answers `403 MFA_REQUIRED`. The password change is open to such a session only while the admin has no second factor (the temporary password is replaced before enrolment): once TOTP is enrolled, it too answers `403 MFA_REQUIRED` to a session that did not pass it, so a session opened with the password alone cannot replace the password of an enrolled admin and end the sessions that passed the factor. Enrolling ends every other session of the admin (§12.4). Enforcement is set by `ADMIN_REQUIRE_MFA` (default `true` in production, `false` otherwise); `ADMIN_REQUIRE_MFA=false` in production is accepted but logged as a warning at every start. A session passes MFA by logging in with a TOTP code, or by enrolling TOTP (§12.4), which replaces it by a new MFA-passed session. The `mfaRequired` and `mfaPassed` fields of the admin login and `me` responses report both facts.
+
+**Temporary passwords.** A staff account created by an ADMIN (§17.8) signs in with a temporary password; its admin object then says `"passwordChangeRequired": true`. Until it has chosen its own password (§12.5), its session may use only logout, `me` and the password change: every other admin route, the TOTP routes included, answers `403 PASSWORD_CHANGE_REQUIRED`. This check runs before the MFA check, so a new staff member first replaces the password, then enrols a second factor when MFA is enforced.
 
 ### 2.5 Request pipeline
 
-For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON) and validated in the handler.
+For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON) and validated in the handler.
 
 ---
 
@@ -137,8 +143,8 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 | Group | Routes | Budget per minute (variable, default) |
 |---|---|---|
-| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports` | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
-| `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/admin/auth/login`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
+| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
+| `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/admin/auth/login`, `POST /api/admin/auth/password`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
 | `api` | Every other `/api/v1/…` route, and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
 
@@ -157,7 +163,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 What the server records about a verification request (see [DATABASE §5.16](DATABASE.md#516-scan_events)):
 
-- `HMAC(IP_HASH_PEPPER, device id)`, `HMAC(IP_HASH_PEPPER, IP)` and, for a logged-in viewer, an HMAC of the session id. Raw IP addresses and device ids are never stored or logged.
+- `HMAC(IP_HASH_PEPPER, device id)`, `HMAC(IP_HASH_PEPPER, IP)` and, for a logged-in viewer, an HMAC of the session id. Raw IP addresses and device ids are never stored or logged. A staff scan (a request that carries a console session, §9.7) keeps only the IP pseudonym and names its console user instead.
 - Country, and latitude/longitude rounded to 0.1° (about 10 km), only when supplied by the edge (`GEO_MODE=cloudflare`, which also gives a `region`) or a trusted proxy (`GEO_MODE=headers` with `TRUST_PROXY`), or looked up by the server in a local GeoIP database from `request.ip` (`GEO_MODE=mmdb`, DB-IP / MaxMind format at `GEO_MMDB_PATH`; no `region`; `TRUST_PROXY` required in production so that `request.ip` is the client's address, not the proxy's). The default `GEO_MODE=none` records no location.
 - A coarse browser family such as `Safari/iOS`, never the full user-agent string.
 - Optional decoder metrics sent by the client.
@@ -207,6 +213,8 @@ Authentication and authorisation:
 | `INVALID_TOTP` | 401 | Wrong, expired or replayed TOTP code. |
 | `CSRF_FAILED` | 403 | Origin or CSRF token check failed (§2.2). |
 | `MFA_REQUIRED` | 403 | MFA enforced and the admin session has not passed TOTP (§2.4). |
+| `PASSWORD_CHANGE_REQUIRED` | 403 | The admin signed in with a temporary password and must choose its own first (§2.4, §12.5). |
+| `CURRENT_PASSWORD_INVALID` | 400 | (Password change) the current password is wrong. A 400, not a 401: the caller is signed in, and a 401 would end the session in the web apps. For an admin it counts as a failed sign-in (lockout, §12.1). |
 | `FORBIDDEN` | 403 | Role too low; or a non-owner asking for a service history (also for an unknown product id, so ids cannot be enumerated); or an OPERATOR revoking or retiring a product; or an account that is not active. |
 | `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a transfer begun just before the lock (§11.2). 429: admin locked for 15 minutes after 10 consecutive failures. |
 | `CURRENT_PASSWORD_INVALID` | 400 | (§10.7) The current password of a password change is wrong, or the account is throttled (§10.2). A 400, never a 401: the apps end the session on any 401. |
@@ -219,8 +227,21 @@ Authentication and authorisation:
 | `TOTP_CODE_INVALID` | 400 | The code sent to enable TOTP does not match the secret. |
 | `TOTP_ALREADY_ENABLED` | 409 | TOTP is already enrolled for this admin. |
 | `TOTP_NOT_ENABLED` | 409 | (TOTP reset) the admin has no second factor to remove. |
-| `ADMIN_NOT_FOUND` | 404 | (TOTP reset) no admin with this id. |
+| `ADMIN_NOT_FOUND` | 404 | (Console users, §17.7–§17.13) no admin with this id. |
+| `SELF_ACTION` | 409 | (Console users) an ADMIN cannot change the role of, disable, enable, unlock or end the sessions of its own account. |
+| `LAST_ADMIN` | 409 | (Console users, `scripts/admin.ts`) the change would leave no active ADMIN: the last active ADMIN can be neither demoted nor disabled. |
 | `TOTP_UNAVAILABLE` | 503 | The stored TOTP secret cannot be opened (key configuration changed or row tampered). Login fails closed. |
+
+Points of sale and the sale mode (§16.17, §16.18):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `RETAILER_NOT_FOUND` | 404 | No point of sale with this id (warranty activation, sale activation, `PATCH /api/admin/retailers/:id`). |
+| `RETAILER_INACTIVE` | 409 | The point of sale was deactivated: no warranty starts there any more. |
+| `RETAILER_EXISTS` | 409 | A point of sale with this name already exists in this city (case-insensitive). |
+| `SALE_TOKEN_INVALID` | 400 | Unknown or malformed sale token, one bound to another purpose (a registration token), or one earned by another console user's scan. |
+| `SALE_TOKEN_USED` | 409 | The sale token was already used: scan the piece again. |
+| `SALE_TOKEN_EXPIRED` | 410 | The sale token expired (10 minutes after the scan). |
 
 Ownership:
 
@@ -289,7 +310,7 @@ Codes, artifacts, warranty and service:
 | `WARRANTY_NOT_STARTED` | 409 | Extending a warranty that has not been activated. |
 | `WARRANTY_VOID` | 409 | The warranty was voided. |
 | `WARRANTY_ALREADY_VOID` | 409 | Voiding an already void warranty. |
-| `WARRANTY_ACTIVATION_NOT_ALLOWED` | 409 | The product's status does not allow activation. |
+| `WARRANTY_ACTIVATION_NOT_ALLOWED` | 409 | The product's status does not allow activation (or it is in a pre-sale service). |
 | `SERVICE_NOT_FOUND` | 404 | No service record with this id. |
 | `SERVICE_NOT_OPEN` | 409 | The service record is already closed. |
 
@@ -338,7 +359,7 @@ Small admin lists (categories, collections, models, keys) are not paginated and 
 
 ## 7. Endpoint index
 
-Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** `orbes_admin` with at least that role. "CSRF" means the rules of §2.2 apply.
+Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR / ADMIN** `orbes_admin` with at least that role (§2.3). "CSRF" means the rules of §2.2 apply.
 
 | Method | Path | Auth | CSRF | Rate group | § |
 |---|---|---|---|---|---|
@@ -347,7 +368,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/.well-known/orbes-keys.json` | — | — | api | 8.2 |
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
-| POST | `/api/v1/verify` | — (account cookie optional) | — | verify | 9 |
+| POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
@@ -364,10 +385,11 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/v1/ownership/transfers/cancel` | Account (sender) | yes | api | 11.4 |
 | POST | `/api/v1/ownership/incidents` | Account (current owner) | yes | api | 11.5 |
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
-| POST | `/api/admin/auth/logout` | AUDITOR (optional) | yes | admin | 12.2 |
-| GET | `/api/admin/auth/me` | AUDITOR | — | admin | 12.3 |
-| POST | `/api/admin/auth/totp/setup` | AUDITOR | yes | auth | 12.4 |
-| POST | `/api/admin/auth/totp/enable` | AUDITOR | yes | auth | 12.4 |
+| POST | `/api/admin/auth/logout` | RETAIL (optional) | yes | admin | 12.2 |
+| GET | `/api/admin/auth/me` | RETAIL | — | admin | 12.3 |
+| POST | `/api/admin/auth/password` | RETAIL | yes | auth | 12.5 |
+| POST | `/api/admin/auth/totp/setup` | RETAIL | yes | auth | 12.4 |
+| POST | `/api/admin/auth/totp/enable` | RETAIL | yes | auth | 12.4 |
 | GET | `/api/admin/dashboard` | AUDITOR | — | admin | 13.1 |
 | GET | `/api/admin/categories` | AUDITOR | — | admin | 13.2 |
 | POST | `/api/admin/categories` | **ADMIN** | yes | admin | 13.2 |
@@ -416,6 +438,11 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | PATCH | `/api/admin/reports/:id` | OPERATOR | yes | admin | 16.9 |
 | GET | `/api/admin/revocations` | AUDITOR | — | admin | 16.6 |
 | POST | `/api/admin/revocations` | **ADMIN** | yes | admin | 16.7 |
+| GET | `/api/admin/retailers` | RETAIL | — | admin | 16.17 |
+| POST | `/api/admin/retailers` | **ADMIN** | yes | admin | 16.17 |
+| PATCH | `/api/admin/retailers/:id` | **ADMIN** | yes | admin | 16.17 |
+| POST | `/api/admin/sale/lookup` | RETAIL | yes | verify | 16.18 |
+| POST | `/api/admin/sale/activate` | RETAIL | yes | admin | 16.18 |
 | GET | `/api/admin/keys` | AUDITOR | — | admin | 17.1 |
 | POST | `/api/admin/keys/rotate` | **ADMIN** | yes | admin | 17.2 |
 | POST | `/api/admin/keys/:keyId/retire` | **ADMIN** | yes | admin | 17.3 |
@@ -423,9 +450,16 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/audit` | AUDITOR | — | admin | 17.5 |
 | GET | `/api/admin/audit/verify` | AUDITOR | — | admin | 17.6 |
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
-| POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
+| POST | `/api/admin/admins` | **ADMIN** | yes | admin | 17.8 |
+| PATCH | `/api/admin/admins/:id/role` | **ADMIN** | yes | admin | 17.9 |
+| POST | `/api/admin/admins/:id/disable` | **ADMIN** | yes | admin | 17.10 |
+| POST | `/api/admin/admins/:id/enable` | **ADMIN** | yes | admin | 17.10 |
+| POST | `/api/admin/admins/:id/unlock` | **ADMIN** | yes | admin | 17.11 |
+| GET | `/api/admin/admins/:id/sessions` | **ADMIN** | — | admin | 17.12 |
+| DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
+| POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -545,7 +579,7 @@ The place and the note are the customer's own words: **personal data**. They are
 
 ## 9. Verification: `POST /api/v1/verify`
 
-Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring.
+Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner. If it carries a console session (`orbes_admin`) the console would let in, the scan is a **staff scan** (§9.7): recorded as `ADMIN_TEST` under that console user, outside `UNSOLD_PIECE_SCAN` and the history rules (the code's own findings of steps 6–7 are still recorded), without a registration token. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring (a staff scan only reads it).
 
 ### 9.1 Request
 
@@ -620,7 +654,7 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `ownership.registered` | boolean | The product has a current owner. |
 | `ownership.you` | boolean | The logged-in viewer is that owner. |
 | `ownership.transferPending` | `true` | Only when registered and an unexpired transfer is pending. |
-| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION`; and `SUSPICIOUS_ACTIVITY` when only the scan history made the scan suspicious, the product has no owner, is open for registration and ships with a claim code (then `claimCodeRequired` is always `true`; §9.4 step 10). |
+| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION`; and `SUSPICIOUS_ACTIVITY` when only the scan history made the scan suspicious, the product has no owner, is open for registration and ships with a claim code (then `claimCodeRequired` is always `true`; §9.4 step 10). **Never on a staff scan** (§9.7): `AUTHENTIC_FIRST_REGISTRATION` without `registration` means the request carried a console session. |
 | `registration.token` | string | Single-use registration token (base64url, 43 characters) for `POST /api/v1/ownership/register`. |
 | `registration.expiresAt` | ISO timestamp | 15 minutes after the scan. |
 | `registration.claimCodeRequired` | boolean | The product ships with a claim code that must be supplied at registration. |
@@ -648,7 +682,7 @@ The wording comes from `services/copy.ts`, the single source of these sentences 
 
 ### 9.4 Decision procedure
 
-The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case. Order: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (normative: `genome/PLATFORM-CONTRACTS.md` §2.4).
+The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case (a staff scan records only the findings of steps 6–7, §9.7). Order: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (normative: `genome/PLATFORM-CONTRACTS.md` §2.4).
 
 | Step | Condition | Result |
 |---|---|---|
@@ -663,8 +697,9 @@ The first step that decides the state ends the decision; the scan event, authent
 | 7 | Genome cross-check: at least 6 glyphs with confidence ≥ 0.5 were provided and 2 or more of them differ from the genome recomputed from the signed identity. Fewer than 6 is inconclusive and never flagged. | `SUSPICIOUS_ACTIVITY` (anomaly `GENOME_MISMATCH`) |
 | 8 | Code status SUPERSEDED or REVOKED; or product status REVOKED, COUNTERFEIT_FLAGGED or RETIRED. | `REVOKED` |
 | 8 | Product status LOST or STOLEN. | `SUSPICIOUS_ACTIVITY` |
-| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
-| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token; otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true`, so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
+| 9 | A public scan of a piece ORBES has not sold yet (product status ISSUED, or SERVICED in a pre-sale service entered from ISSUED) of a code that passed steps 1–6 records the MEDIUM anomaly `UNSOLD_PIECE_SCAN` with the scan's country, once per piece and per UTC day, with weight 0 (§9.7). | unchanged |
+| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans; a staff scan only reads the history, §9.7). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
+| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token (none on a staff scan, §9.7); otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true` (not on a staff scan), so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
 | 11 | Authenticator policy: may set `assurance: "CODE_ONLY"` and `hardwareProofRequired`. Never changes the state. | — |
 | 12 | The authentication record and the final scan state are persisted and the outcome returned. | — |
 
@@ -891,6 +926,24 @@ When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genom
 ### 9.6 Errors
 
 `400 VALIDATION_FAILED`, `400 INVALID_JSON`, `413`, `415`, `429 RATE_LIMITED`, `500 INTERNAL_ERROR`. A verification outcome is never an error.
+
+### 9.7 Pieces not sold yet, and staff scans (S-07)
+
+**A piece ORBES has not sold yet.** Its product status is ISSUED (in stock), or SERVICED in a pre-sale service entered from ISSUED (`isPreSaleService`, §14.4), and its warranty has not started. Until a sale it answers `AUTHENTIC` like any piece in force, and the customer still sees exactly that: same state, title, message and fields (the verify app's OWNERSHIP tab says **NOT YET DELIVERED**: *This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.*, BRAND §4.4). A piece is sold when ORBES or an authorised retailer starts its warranty (the sale mode on a seller's phone, §16.18, or the console, §14.6); before that, a scan of it outside a console session is the earliest sign of diverted stock (theft in stock or in transport, labels taken), before the first copy is sold. Each one records the internal anomaly **`UNSOLD_PIECE_SCAN`** (§16.4), named *Unsold piece scanned* in the console (set in its capitals, **UNSOLD PIECE SCANNED**):
+
+- when the code passed steps 1–6 (a trusted registered code, whatever steps 7–9 then decide), the request carries no console session and the piece's warranty has not started (a started warranty is a sale, whatever the status says; and no warranty starts during a pre-sale service, §14.6);
+- severity MEDIUM, **weight 0**: it never raises the risk score of step 9, so the state shown never changes because of it; the authentication record of every such scan lists the reason `ANOMALY:UNSOLD_PIECE_SCAN`;
+- **once per piece and per UTC day**: the first such scan of the day opens the finding or adds one occurrence to the open one, later scans that day add nothing (concurrent scans included), and a finding of that type already seen for the piece that UTC day, whatever its status, is not raised again before the next day (one last seen the day before and closed today is raised again by today's first scan); `occurrences` therefore counts days;
+- `details`: `country` (ISO alpha-2 of the scan, `null` when unknown), `productStatus` (`ISSUED` or `SERVICED`), `preSaleService: true` for a pre-sale service, `scanEventId` of the day's first scan.
+
+**Staff scans.** A request whose `orbes_admin` cookie is a session the console itself would let in (alive, of an enabled console user with a known role, its password the user's own, past the second factor when `ADMIN_REQUIRE_MFA` holds) is a staff scan, whoever else the browser is signed in as:
+
+- one scan event of type `ADMIN_TEST` naming the console user (`scan_events.admin_id`, shown as *by email* in the console's verification events, §16.1), with the IP pseudonym, coarse location and browser family but **no device, session or account pseudonym**;
+- **no `UNSOLD_PIECE_SCAN`** and no history finding: the scan takes no part in step 9, the code's public history is scored as it stands, so the state is the one a customer would see now, and ADMIN_TEST scans never count in any later scoring;
+- the findings of steps 6–7 are **still recorded**, with `staffScan: true` in their `details`: `VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH` and `GENOME_MISMATCH` describe the code, not who scanned it. A forged but validly signed code most likely reaches ORBES when Client Services checks a suspicious piece a customer brought in, from a browser signed in to the console: that scan pages on a possible key compromise (§16.4) as any other would;
+- **no registration token**, also under step 10's exception: a console user's test is never a buyer's scan. The state stays the one a customer would see (`AUTHENTIC_FIRST_REGISTRATION` included); the verify app's OWNERSHIP tab then says **STAFF SCAN**: *This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered.*
+
+A member of the team who buys a piece therefore scans and registers it from a browser that is not signed in to the console. The admin cookie is `SameSite=Strict`: a cross-site request never carries it, so no other site can make a visitor's scan count as a staff scan, and a console session that the guard would refuse (temporary password, second factor missing when required, disabled account) leaves the scan public.
 
 ---
 
@@ -1149,9 +1202,9 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOU
 
 ## 12. Admin: authentication
 
-Admin routes use the `orbes_admin` cookie (`__Host-orbes_admin` in production). Every route in this section is reachable without a TOTP-verified session, even when MFA is enforced.
+Admin routes use the `orbes_admin` cookie (`__Host-orbes_admin` in production). Every route in this section is reachable without a TOTP-verified session, even when MFA is enforced, except the password change of an admin who has enrolled TOTP (§12.5). Logout, `me` and the password change (§12.5) are also open to a session signed in with a temporary password (§2.4); login has no session yet.
 
-The admin object used below is `{ "id": uuid, "email": string, "role": "ADMIN" | "OPERATOR" | "AUDITOR", "totpEnabled": boolean }`.
+The admin object used below is `{ "id": uuid, "email": string, "role": "ADMIN" | "OPERATOR" | "AUDITOR" | "RETAIL", "totpEnabled": boolean, "passwordChangeRequired": boolean }`. `passwordChangeRequired` is true while a staff account created from the console (§17.8) still has its temporary password.
 
 ### 12.1 `POST /api/admin/auth/login`
 
@@ -1169,7 +1222,7 @@ Session-less (origin rule). Rate group `auth`.
 
 ```json
 {
-  "admin": { "id": "90b8d94a-0460-4db1-b618-38a29ba74eb9", "email": "admin@orbes.example", "role": "ADMIN", "totpEnabled": true },
+  "admin": { "id": "90b8d94a-0460-4db1-b618-38a29ba74eb9", "email": "admin@orbes.example", "role": "ADMIN", "totpEnabled": true, "passwordChangeRequired": false },
   "csrfToken": "Bz6HODVO1RCbUYkv9Bd7gziEOWGaxiMaojVcmTH06KQ",
   "mfaPassed": true,
   "mfaRequired": true
@@ -1192,7 +1245,7 @@ No body. Like the account logout (§10.3): works with or without a session. **20
 
 ### 12.4 TOTP enrolment (extension of the contract)
 
-Two steps, available to every role including AUDITOR, so that MFA can be enforced without shell access. Rate group `auth`. Whoever first enrols an admin's authenticator from the console is trusted (trust on first use): the recommended first enrolment of a new admin is from the shell, `scripts/admin.ts totp-setup` then `totp-enable`, with the secret handed over in person (SECURITY-MODEL §3).
+Two steps, available to every role, RETAIL included, so that MFA can be enforced without shell access. Rate group `auth`. Whoever first enrols an admin's authenticator from the console is trusted (trust on first use): the recommended first enrolment of a new admin is from the shell, `scripts/admin.ts totp-setup` then `totp-enable`, with the secret handed over in person (SECURITY-MODEL §3).
 
 **`POST /api/admin/auth/totp/setup`** — no body (a body is ignored). Generates a secret; nothing is stored yet.
 
@@ -1205,14 +1258,27 @@ Two steps, available to every role including AUDITOR, so that MFA can be enforce
 
 Errors: `409 TOTP_ALREADY_ENABLED`.
 
-**`POST /api/admin/auth/totp/enable`** — proves that the authenticator holds the secret; only then is it stored (encrypted). The current session is then **replaced** by a new session that has passed MFA: a new `orbes_admin` cookie and a new CSRF token, same absolute expiry; the old token stops working (a token captured before the step-up never carries MFA).
+**`POST /api/admin/auth/totp/enable`** — proves that the authenticator holds the secret; only then is it stored (encrypted). **Every other session of that admin ends** in the same transaction (they were opened with the password alone; the audit entry `admin.totp.enable` gives `details.sessionsRevoked`), and the current session is then **replaced** by a new session that has passed MFA: a new `orbes_admin` cookie and a new CSRF token, same absolute expiry; the old token stops working (a token captured before the step-up never carries MFA). The shell's `scripts/admin.ts totp-enable` ends every session of that admin.
 
 | Field | Type | Rules |
 |---|---|---|
 | `secret` | string | 16–128 characters of base32 (`A–Z`, `2–7`, `=`, whitespace); must decode to 16–64 bytes. |
 | `code` | string | 6–16 characters, digits and spaces; a current code for that secret. |
 
-**200** — sets `orbes_admin`: `{ "ok": true, "mfaPassed": true, "csrfToken": string }`. Errors: `400 VALIDATION_FAILED`, `400 TOTP_CODE_INVALID`, `401 UNAUTHORIZED`, `409 TOTP_ALREADY_ENABLED`.
+**200** — sets `orbes_admin`: `{ "ok": true, "mfaPassed": true, "csrfToken": string }`. Errors: `400 VALIDATION_FAILED`, `400 TOTP_CODE_INVALID`, `401 UNAUTHORIZED`, `403 PASSWORD_CHANGE_REQUIRED` (a temporary password is replaced first, §2.4), `409 TOTP_ALREADY_ENABLED`.
+
+### 12.5 `POST /api/admin/auth/password` (extension of the contract)
+
+Every role, at any time: the signed-in admin changes its own password. It is also the way out of a temporary password (§2.4): the console shows nothing else to a staff account until it has chosen its own. Rate group `auth`. When MFA is enforced, a session that has not passed TOTP may use it only while the admin has no second factor (`403 MFA_REQUIRED` once TOTP is enrolled, §2.4).
+
+| Field | Type | Rules |
+|---|---|---|
+| `currentPassword` | string | 1–1024 characters; the password the admin signed in with (the temporary one, the first time). |
+| `newPassword` | string | 1–1024 characters, then the password policy: at least 12 characters (code points after NFKC), at most 1024 bytes, not trivial, not the email, different from the current password. |
+
+The current session is kept (same token and CSRF token); **every other session of that admin ends**, in one transaction with the audit entry `admin.password_change` (`details.sessionsRevoked`; `temporaryReplaced: true` when it replaced a temporary password). `passwordChangeRequired` becomes false, and the failed sign-in counter returns to 0. A wrong current password answers `400 CURRENT_PASSWORD_INVALID` (not 401: the caller is signed in) and counts as a failed sign-in: ten lock the admin for 15 minutes (§12.1), and a locked admin is refused (`429 ACCOUNT_LOCKED`) before the password is looked at and again, under the row lock, before the new one is written (a disabled one `401 UNAUTHORIZED`, its sessions having ended with it), so a stolen session cookie cannot be used to guess the password, not even by a burst of guesses still in flight when the lockout fires.
+
+**200** `{ "ok": true, "admin": { …admin object…, "passwordChangeRequired": false } }`. Errors: `400 VALIDATION_FAILED` (policy), `400 CURRENT_PASSWORD_INVALID`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 MFA_REQUIRED`, `429 ACCOUNT_LOCKED`, `429 RATE_LIMITED`.
 
 ---
 
@@ -1571,8 +1637,11 @@ OPERATOR. Starts the warranty at the purchase date for the category's warranty m
 | Field | Type | Rules |
 |---|---|---|
 | `purchaseDate` | date | `YYYY-MM-DD`, a real date, from 2000-01-01 to tomorrow (UTC). Default: today (UTC). |
-| `retailer` | string \| null | ≤ 200 characters |
-| `country` | string \| null | ISO 3166-1 alpha-2, case-insensitive (stored upper case). |
+| `retailerId` | uuid \| null | (A-08) A point of sale of the register (§16.17), active (`404 RETAILER_NOT_FOUND`, `409 RETAILER_INACTIVE`). Its country is the purchase country unless `country` is given. What the console sends. |
+| `retailer` | string \| null | ≤ 200 characters. Free text, still accepted for the history and API callers; the console no longer sends it. |
+| `country` | string \| null | ISO 3166-1 alpha-2, case-insensitive (stored upper case). Default: the point of sale's country, if any. |
+
+The warranty's `retailer` is the point of sale's current name when `retailerId` is set (a rename shows on every warranty of its sales), the free text otherwise; `retailerId` names the register entry. The audit entry (`warranty.activate`) records both, and `saleScanId` when the activation came from the sale mode (§16.18).
 
 **200**:
 
@@ -1581,7 +1650,8 @@ OPERATOR. Starts the warranty at the purchase date for the category's warranty m
   "warranty": {
     "productId": "O26-J-00006",
     "purchaseDate": "2026-03-01",
-    "retailer": "ORBES PARIS",
+    "retailer": "ORBES PARIS — SAINT-HONORÉ",
+    "retailerId": "5d0c3a8e-6b0f-4c51-9a37-2f1d8e4b7c10",
     "country": "FR",
     "startDate": "2026-03-01",
     "endDate": "2028-03-01",
@@ -1596,7 +1666,7 @@ OPERATOR. Starts the warranty at the purchase date for the category's warranty m
 }
 ```
 
-`statusChange` is `null` when the product was not ISSUED. Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 WARRANTY_ALREADY_ACTIVATED`, `409 WARRANTY_VOID`, `409 WARRANTY_ACTIVATION_NOT_ALLOWED` (status RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN).
+`statusChange` is `null` when the product was not ISSUED. Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`, `404 RETAILER_NOT_FOUND`, `409 RETAILER_INACTIVE`, `409 WARRANTY_ALREADY_ACTIVATED`, `409 WARRANTY_VOID`, `409 WARRANTY_ACTIVATION_NOT_ALLOWED` (status RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN; or SERVICED in a pre-sale service entered from ISSUED: the service is completed or cancelled first, the piece returns to ISSUED, then it is sold. Started during that service, the warranty would run while closing the service brought the piece back to ISSUED, still looking unsold).
 
 ### 14.7 `POST /api/admin/products/:productId/warranty/extend` and `…/warranty/void`
 
@@ -1935,6 +2005,7 @@ Item:
   "codeId": null,
   "packedIdentity": null,
   "accountId": null,
+  "adminEmail": null,
   "deviceHash": "ZoczF36EXHiXIA5PySPFEVXU9dp3DtIwls2sk71UW-I",
   "country": null,
   "region": null,
@@ -1962,7 +2033,7 @@ Item:
 }
 ```
 
-`report` is the customer's report on the scan (§8.5) and the state of its case, or `null`. `productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
+`report` is the customer's report on the scan (§8.5) and the state of its case, or `null`. `productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `eventType` is `VERIFY` for a public scan and `ADMIN_TEST` for a staff scan (the sale mode, §16.18, or `/api/v1/verify` from a browser signed in to the console, §9.7), whose `adminEmail` names the console user who scanned (read at display time; the row keeps `scan_events.admin_id`); `adminEmail` is `null` on every other scan. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
 
 ### 16.2 `GET /api/admin/owners`
 
@@ -1996,7 +2067,7 @@ In the console: Owners has one search field, *Email or REF* (an `@` makes it an 
 
 ### 16.3 `GET /api/admin/warranties`
 
-AUDITOR. Paginated warranty records (shape of §14.6), newest first. Query `status`: `NOT_STARTED`, `ACTIVE`, `EXPIRED` or `VOID` (computed at today's UTC date).
+AUDITOR. Paginated warranty records (shape of §14.6), newest first. Query `status`: `NOT_STARTED`, `ACTIVE`, `EXPIRED` or `VOID` (computed at today's UTC date). `retailer` is the point of sale's name from the register when `retailerId` is set, the free text of older records otherwise.
 
 ### 16.4 `GET /api/admin/anomalies`
 
@@ -2031,11 +2102,14 @@ An empty value (`?type=&sort=`) means the filter is not given. The console keeps
   "resolvedBy": null,
   "resolvedAt": null,
   "resolutionNote": null,
+  "actorEmail": null,
   "reports": { "count": 1, "open": 1, "latest": { "id": "8f0b2c4e-…", "channel": "ONLINE", "place": "a marketplace listing", "note": "…", "status": "OPEN", "createdAt": "…" } }
 }
 ```
 
-`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). In the console, the Reports column shows the number of cases (a link to them in Cases), how many are open, and the latest report's channel, place and note, as Verification events shows a scan's. Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `details.scanEventId` names the scan that last raised the finding, for the rule findings and, since 2026-10-02, for the three service findings too (a service finding recorded before has none until it occurs again: its detail then says the triggering scan was not recorded). `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+`resolvedBy` (`admin:<id>`) and `resolvedAt` are set when a finding is RESOLVED or DISMISSED. `actorEmail` names the console user whose triage decision (§16.5) is the latest on the finding, whatever it was (acknowledged, resolved, dismissed or reopened): read at display time from the audit log's newest `anomaly.update` entry by an admin and from `admin_users`, null while no admin has triaged it. The same object appears in the product detail (§14.3).
+
+`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). In the console, the Reports column shows the number of cases (a link to them in Cases), how many are open, and the latest report's channel, place and note, as Verification events shows a scan's. Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`, `UNSOLD_PIECE_SCAN`. `CODE_MISMATCH` and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) indicate a possible signing-key compromise. These two and `GENOME_MISMATCH` are recorded on every scan, a staff scan included (on `/api/v1/verify` from a browser signed in to the console, §9.7, and in the sale mode, §16.18); the details of one recorded by a staff scan carry `staffScan: true` (details follow the latest occurrence). `details.scanEventId` names the scan that last raised the finding, for the rule findings and, since 2026-10-02, for the three service findings too (a service finding recorded before has none until it occurs again: its detail then says the triggering scan was not recorded). `UNSOLD_PIECE_SCAN` (MEDIUM, risk 0, shown as **UNSOLD PIECE SCANNED** in the console) is a scan of a piece ORBES has not sold yet (its warranty not started) outside a console session, recorded once per piece and per UTC day, so its `occurrences` count days; details `{ country, productStatus, preSaleService?, scanEventId }` (§9.7). `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
@@ -2286,9 +2360,66 @@ The console shows four figures (scans, authentic, counterfeit signals, countries
 
 Errors: `400 VALIDATION_FAILED` (a day that is not `YYYY-MM-DD` or does not exist, a day of year 0000, `days` outside 1–366 or not a whole number, `from` with `days`, `from` after `to`, a window over 366 days, `days` that would start the window before `0001-01-01`).
 
+### 16.17 Points of sale (boutique, extension of the contract)
+
+The register a warranty's point of sale is chosen from (A-08, migration 0008, table `retailers`), in the product page's Activate warranty dialog (§14.6) and in the sale mode (§16.18), so a boutique is never typed three ways. Implementation: `routes/admin/retailers.ts`, `services/retailers.ts`.
+
+**`GET /api/admin/retailers`** (RETAIL and every higher role, read only: the sale screen lists them). Query `active=true`: the active ones only (the lists a sale is chosen from); otherwise all. By name, then city.
+
+```json
+{ "items": [
+  { "id": "5d0c3a8e-6b0f-4c51-9a37-2f1d8e4b7c10", "name": "ORBES PARIS — SAINT-HONORÉ", "city": "Paris", "country": "FR",
+    "active": true, "createdAt": "2026-10-02T09:00:00.000Z", "updatedAt": "2026-10-02T09:00:00.000Z" }
+] }
+```
+
+**`POST /api/admin/retailers`** (**ADMIN**). Body `{ "name": 1–120 characters, "city"?: ≤ 80 characters or null, "country"?: ISO 3166-1 alpha-2 or null }`. **201** `{ "retailer": … }`. The country is the default purchase country of the sales made there; the online shop leaves it empty (the country is then the buyer's, given with the activation). One point of sale per name and city, ignoring case: `409 RETAILER_EXISTS`.
+
+**`PATCH /api/admin/retailers/:id`** (**ADMIN**). Body: any of `name`, `city`, `country`, `active` (at least one). Renames, moves, deactivates (`"active": false`: it leaves the lists and refuses new activations, `409 RETAILER_INACTIVE`) or reactivates. A point of sale is never deleted (the database refuses it): the warranties of its sales keep naming it, by its current name. **200** `{ "retailer": … }`; `404 RETAILER_NOT_FOUND`, `409 RETAILER_EXISTS`.
+
+Audited by RetailerService: `retailer.create` (name, city, country) and `retailer.update` with the changed values before and after (a change that changes nothing is not recorded).
+
+### 16.18 Sale mode (boutique, extension of the contract)
+
+The console's `#/sale` screen on a seller's phone (A-08): scan the seal of the piece being sold, see the piece, choose the point of sale, start the warranty in one gesture. Two steps, so that an activation is always tied to a real scan of that piece, never to a typed or remembered product id (a declared deviation from the brief, which asked for the lookup only). RETAIL and every higher role; ordinary admin mutations (session, CSRF, temporary password, MFA, role); the lookup in rate group `verify` (the budget of `/api/v1/verify`: the counter is not a faster way to judge codes than the public route), the activation in `admin`. Implementation: `routes/admin/sale.ts`, `services/sale.ts`, `VerificationService.staffScan`.
+
+**`POST /api/admin/sale/lookup`**. Body: what the console's decoder read, in the shape of `/api/v1/verify` (§9.1: `code`, optional `genome` and `client`). The code is judged by steps 1–8 of the decision procedure (§9.4: structure, key, signature, revoked-key trust, genome version, registry, genome cross-check, code and product status), then ONE scan event is written, `event_type` **ADMIN_TEST** with the console user's id in `scan_events.admin_id`, and its authentication event (its risk is the weight of a step 6–7 finding when there is one, 0 otherwise). **No history rule is evaluated** (ADMIN_TEST scans are outside every one, so a busy counter never makes a piece look suspicious) and no `UNSOLD_PIECE_SCAN` is raised; **the code's own findings of steps 6–7 are recorded**, with `staffScan: true` in their details, as for a staff scan of `/api/v1/verify` (§9.7): `VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH` and `GENOME_MISMATCH` describe the code, not who scanned it, and a forged but validly signed code shown at the counter pages on a possible key compromise (§16.4) as anywhere else. No registration token, no public wording.
+
+```json
+{
+  "scanId": "8b0f…",
+  "state": "AUTHENTIC",
+  "piece": {
+    "productId": "O26-J-00184", "status": "ISSUED",
+    "category": { "code": "J", "name": "Jewelry" }, "collection": "ORBIT",
+    "model": "MONOLITHE", "type": "RING", "variant": "52", "material": "925 STERLING SILVER", "createdYear": 2026,
+    "registered": false,
+    "warranty": { "status": "NOT_STARTED", "startDate": null, "endDate": null }
+  },
+  "sale": { "token": "Qm9n…43 base64url characters", "expiresAt": "2026-10-02T10:10:00.000Z" },
+  "refusal": null
+}
+```
+
+`state` is the decision of steps 1–8, `AUTHENTIC` when none of them refused the code (no ownership or history state). `piece` is `null` unless the code is a registered ORBES code (key trusted, product and code found, payload hash equal). `sale` is a **10-minute, single-use SALE_ACTIVATION scan token** (stored as its SHA-256 only, minted in the scan's transaction), present only when the piece can be sold; otherwise `sale` is `null` and `refusal` says why, with the console's sentence. The checks run in this order:
+
+| `refusal.code` | When |
+|---|---|
+| `NOT_AUTHENTIC` | `state` is not `AUTHENTIC` (malformed, unknown, invalid signature, suspicious: code or genome mismatch, LOST or STOLEN; revoked). The sentence says the code did not verify; for a piece the registry knows (`piece` present: lost, stolen, revoked, a superseded code, a seal that does not match), that ORBES must review it before it can be sold. |
+| `WARRANTY_VOID` | The warranty was voided. |
+| `WARRANTY_ACTIVE` | The warranty has already started: the piece was sold before. |
+| `ALREADY_REGISTERED` | A client account holds the piece (`piece.registered`): it has been sold, even if its warranty never started. |
+| `NOT_FOR_SALE` | The status does not allow a warranty to start, or the piece is in a service (SERVICED: at the workshop, not at the counter; a pre-sale service is refused by the warranty activation too, §14.6). |
+
+Errors: `400 VALIDATION_FAILED` (body shape only; an undecodable code is a `MALFORMED_CODE` state, recorded like any scan).
+
+**`POST /api/admin/sale/activate`**. Body `{ "token": the sale token, "retailerId": an active point of sale (§16.17) }`. In one transaction: the token is used up, then the warranty starts **today** (UTC) at that point of sale, its country the point of sale's (WarrantyService.activate, §14.6); an ISSUED piece moves to ACTIVATED. The token only works for the console user whose scan earned it; any refusal rolls the use back, so the token stays usable until it expires. **200** `{ "warranty": … (§14.6), "statusChange": … | null, "scanId": "8b0f…" }`. The audit entry `warranty.activate` names the seller (actor), the point of sale (`retailer`, `retailerId`) and the scan (`saleScanId`).
+
+Errors: `400 VALIDATION_FAILED`, `400 SALE_TOKEN_INVALID` (unknown, a registration token, or another console user's), `409 SALE_TOKEN_USED`, `410 SALE_TOKEN_EXPIRED` (the three SALE_TOKEN errors call for a new scan: the screen keeps ACTIVATE WARRANTY off whatever point of sale is then chosen), `404 RETAILER_NOT_FOUND`, `409 RETAILER_INACTIVE`, `409 WARRANTY_ALREADY_ACTIVATED` (sold meanwhile from another phone or the console), `409 WARRANTY_VOID`, `409 WARRANTY_ACTIVATION_NOT_ALLOWED`. Conversely, a sale token is refused by `/api/v1/ownership/register` (`400 REGISTRATION_TOKEN_INVALID`): a sale never registers an owner. The client registers the piece afterwards from the certificate card ("Register your piece with its card at theorbes.com/verify", the sale screen's closing instruction): the activated piece then verifies as AUTHENTIC — FIRST REGISTRATION.
+
 ---
 
-## 17. Admin: keys and audit log
+## 17. Admin: keys, audit log and console users
 
 Private keys never pass through the API: only public keys and registry metadata are returned.
 
@@ -2358,9 +2489,11 @@ AUDITOR. Paginated audit entries, newest first.
   "occurredAt": "2026-10-01T08:15:21.929Z",
   "actorType": "admin",
   "actorId": "90b8d94a-0460-4db1-b618-38a29ba74eb9",
+  "actorEmail": "ops@theorbes.com",
   "action": "warranty.activate",
   "targetType": "product",
   "targetId": "O26-J-00006",
+  "targetEmail": null,
   "details": { "purchaseDate": "2026-03-01", "startDate": "2026-03-01", "endDate": "2028-03-01", "durationMonths": 24, "retailer": "ORBES PARIS", "country": "FR" },
   "ipHash": "_ipKnYv4ukVGRt5d6HoLLPVRTNYiB_f0Atif0lKtMj8",
   "prevHash": "a67a413ea127418798a9ce8bec469bf9a45ce7b55efd2a49f5de11fcc9b581a4",
@@ -2369,6 +2502,8 @@ AUDITOR. Paginated audit entries, newest first.
 ```
 
 `prevHash` and `hash` are hexadecimal. The chain construction is described in [DATABASE §5.21](DATABASE.md#521-audit_logs).
+
+`actorEmail` is the email of the console user when `actorType` is `admin` (null for customers, the system and the CLI), and `targetEmail` the email of the console user when `targetType` is `admin` (the Team page's actions, logins, password changes; null otherwise). Both are read from `admin_users` when the page is served and are not part of the entry, its hash or the chain: the log itself names admins by id, so it never has to change when an email does. Customers stay ids (their emails are personal data, kept out of the audit views).
 
 ### 17.6 `GET /api/admin/audit/verify`
 
@@ -2382,21 +2517,61 @@ On failure, `ok` is `false`, `checked` counts the entries verified before the fa
 
 ### 17.7 `GET /api/admin/admins` (extension of the contract)
 
-**ADMIN**. The console users, by email; never a password hash or TOTP secret.
+**ADMIN**. The console users (the console's Team page), by email; never a password hash or TOTP secret.
 
 ```json
-{ "items": [ { "id": "6a0b…", "email": "ops@theorbes.com", "role": "OPERATOR", "totpEnabled": true, "locked": false, "disabled": false, "createdAt": "2026-09-01T08:00:00.000Z" } ] }
+{ "items": [ { "id": "6a0b…", "email": "ops@theorbes.com", "role": "OPERATOR", "totpEnabled": true, "passwordChangeRequired": false, "locked": false, "disabled": false, "createdAt": "2026-09-01T08:00:00.000Z" } ] }
 ```
 
-`locked`: temporarily locked after 10 failed sign-ins (§12.1).
+`locked`: temporarily locked after 10 failed sign-ins (§12.1). `passwordChangeRequired`: the account still has the temporary password it was created with (§17.8). `disabled`: sign-in refused (§17.10).
 
-### 17.8 `POST /api/admin/admins/:id/totp/reset` (extension of the contract)
+The routes §17.8–§17.13 are the rest of the Team page. All are **ADMIN**, audited by `AuthService` in the transaction of the change with the acting ADMIN as actor, and answer `404 ADMIN_NOT_FOUND` for an unknown id and `400 VALIDATION_FAILED` when `:id` is not a UUID. Their admin object is the list item above. No change may target the caller's own account (`409 SELF_ACTION`; listing one's own sessions and resetting one's own second factor are allowed), and none may leave the console without an active ADMIN (`409 LAST_ADMIN`; role changes and (de)activations are serialised by an advisory lock, so two ADMINs disabling each other at the same moment cannot both succeed).
+
+### 17.8 `POST /api/admin/admins` (extension of the contract)
+
+Creates a staff account. Body `{ "email": string (3–254), "role": "OPERATOR" | "AUDITOR" | "RETAIL" }`; any other role, `ADMIN` included, is a `400 VALIDATION_FAILED` (ADMIN accounts come from the shell, §2.3). RETAIL (A-08) is a seller: after its own password, it reaches the sale mode only (§2.3, §16.18).
+
+The server generates a **temporary password**: 16 Crockford base32 characters (80 bits) in four groups, `XXXX-XXXX-XXXX-XXXX`. It is returned **once**, in this response, and stored only as its scrypt hash; it is never logged nor written to the audit log. The account starts with `passwordChangeRequired: true`: at its first sign-in it can do nothing but choose its own password (§2.4, §12.5). Hand the temporary password over in person or over a trusted channel. Unlike a claim code, it is compared exactly: it is typed as shown, capitals and dashes included, and a wrong try counts as a failed sign-in (§12.1). Audit `admin.create` (`details: { role, passwordChangeRequired: true }`).
+
+**201** `{ "admin": { …, "passwordChangeRequired": true }, "temporaryPassword": "QV7H-JFT0-QK82-V9ER" }`. Errors: `400 VALIDATION_FAILED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `409 EMAIL_TAKEN`.
+
+### 17.9 `PATCH /api/admin/admins/:id/role` (extension of the contract)
+
+Body `{ "role": "OPERATOR" | "AUDITOR" | "RETAIL" }`. Changes the role of another console user, an ADMIN included (stepping down), except the last active ADMIN (`409 LAST_ADMIN`). The guard reads the role from the database at every request: the change applies at that account's next request, without signing it out. Unchanged role: no-op, no audit entry. Audit `admin.role_change` (`details: { from, to }`).
+
+**200** `{ "admin": … }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`, `409 LAST_ADMIN`.
+
+### 17.10 `POST /api/admin/admins/:id/disable` and `…/enable` (extension of the contract)
+
+No body (or `{}`). **Disable** is the departure of a staff member: it sets `disabled_at` and **deletes every session of that account** in the same transaction (their open console is signed out at its next request), and sign-in is then refused with the same `401 INVALID_CREDENTIALS` as a wrong password. The account, its role and its history stay. **Enable** clears `disabled_at`: the account signs in again with its password, in its current role. Both are idempotent (no audit entry when nothing changes). Audit `admin.disable` (`details.sessionsRevoked`) and `admin.enable`.
+
+**200** `{ "admin": …, "sessionsRevoked": number }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`, `409 LAST_ADMIN` (disable).
+
+### 17.11 `POST /api/admin/admins/:id/unlock` (extension of the contract)
+
+No body (or `{}`). Lifts a sign-in lockout (§12.1) before its 15 minutes run out: the failed sign-in counter returns to 0. Check the `admin.login_failed` entries first: a lockout is often someone guessing. Idempotent. Audit `admin.unlock` (`details: { failedLogins, locked }`).
+
+**200** `{ "admin": … }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION`.
+
+### 17.12 `GET` and `DELETE /api/admin/admins/:id/sessions` (extension of the contract)
+
+**GET** lists the live sessions of a console user, newest first, never a token, its hash or a CSRF token:
+
+```json
+{ "items": [ { "createdAt": "2026-10-02T07:12:00.000Z", "lastSeenAt": "2026-10-02T07:40:00.000Z", "expiresAt": "2026-10-02T15:12:00.000Z", "mfaPassed": true, "userAgent": "Mozilla/5.0 (Macintosh; …) Chrome/129.0 Safari/537.36", "current": false } ] }
+```
+
+`current` marks the session making the request (an ADMIN may list its own sessions). **DELETE** (no body) ends every session of another console user, for a lost laptop or a shared screen; the password still works. Audit `admin.sessions_revoke` (`details.sessionsRevoked`).
+
+**200** GET `{ "items": [ … ] }`; DELETE `{ "sessionsRevoked": number }`. Errors: `400 VALIDATION_FAILED`, `404 ADMIN_NOT_FOUND`, `409 SELF_ACTION` (DELETE).
+
+### 17.13 `POST /api/admin/admins/:id/totp/reset` (extension of the contract)
 
 **ADMIN**. Recovery for a lost authenticator, after an identity check: removes the admin's TOTP enrolment and **ends every session of that admin** (they were opened with the lost device), in one transaction with the audit entry `admin.totp.disable` (`details.sessionsRevoked`; the actor is the resetting ADMIN). The admin then signs in with the password and enrols a new device (§12.4). An ADMIN may reset its own second factor; its current session ends too. No body (or `{}`).
 
 **200** `{ "admin": { …admin object…, "totpEnabled": false } }`. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 ADMIN_NOT_FOUND`, `409 TOTP_NOT_ENABLED`.
 
-The same operations exist on the command line (`scripts/admin.ts list` and `reset-totp`), together with `create`, `totp-setup` and `totp-enable` (see [DEPLOYMENT](DEPLOYMENT.md)).
+The same operations exist on the command line (`scripts/admin.ts list`, `reset-totp`, `role`, `disable` and `enable`), together with `create`, `totp-setup` and `totp-enable` (see [DEPLOYMENT](DEPLOYMENT.md)): the fallback when no ADMIN can sign in, and the only way to create an ADMIN or grant the ADMIN role.
 
 ---
 
@@ -2411,7 +2586,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/assets/*` | Bundles and stylesheets | Content-hashed names: `public, max-age=31536000, immutable`; others `no-cache`. Dotfiles are never served. |
 
-Without a build, these paths answer `404 NOT_FOUND`.
+Without a build, these paths answer `404 NOT_FOUND`. Each app has its main bundle and, for the two that read codes with the camera, a decoder worker (`verify-worker-<hash>.js`; `admin-worker-<hash>.js`, the same decoder for the console's sale mode, §16.18), named by the shell's `<meta name="orbes-worker">`; the main bundles never carry the decoder. Both shells are served with `Permissions-Policy: camera=(self)` and a CSP that allows workers from the page's origin.
 
 ---
 

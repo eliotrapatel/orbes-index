@@ -7,9 +7,10 @@
  * and hashes (`mono`).
  */
 import { h, type Child } from '../../shared/dom.js';
-import { formatCount } from '../format.js';
+import { formatCount, humanize } from '../format.js';
 import type { BarRow } from '../model/dashboard.js';
-import type { Tone } from '../model/tone.js';
+import { toneOf, type Tone } from '../model/tone.js';
+import type { AnomalyRecord } from '../types.js';
 
 // ── Text ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,16 @@ export function mono(value: string | number | null | undefined, display?: string
 /** Status mark: a small square (filled, hollow, grey, inverted or red) and the uppercase value. */
 export function statusMark(text: string, tone: Tone): HTMLElement {
   return h('span', { class: ['status', `status--${tone}`] }, h('span', { class: 'status__mark', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'status__text' }, text));
+}
+
+/** An anomaly's status mark and, once a console user has triaged it, who took the latest decision (A-02). */
+export function anomalyStatus(a: Pick<AnomalyRecord, 'status' | 'actorEmail'>): HTMLElement {
+  return h(
+    'span',
+    { data: { testid: 'anomaly-status' } },
+    statusMark(humanize(a.status), toneOf('anomaly', a.status)),
+    a.actorEmail ? h('span', { class: 'cell-sub', data: { testid: 'anomaly-actor' } }, `by ${a.actorEmail}`) : null,
+  );
 }
 
 export function micro(text: string, extra?: string): HTMLElement {

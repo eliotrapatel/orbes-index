@@ -17,6 +17,12 @@
  * Opening a service moves the product to SERVICED; completing (or
  * cancelling) the last open service returns it to its pre-service status via
  * LifecycleService, which derives that status from the status history.
+ *
+ * Point of sale (A-08): an activation names it by `retailerId`, an active
+ * entry of the register (services/retailers.ts), whose country is the
+ * purchase country unless another is given. The free-text `retailer` is still
+ * accepted (history, API callers); a record's `retailer` is the register's
+ * name when `retailerId` is set, the free text otherwise.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -24,7 +30,8 @@ import { SERVICE_TYPES, type ProductRow, type ProductStatus, type ServiceType, t
 import { DomainError, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
-import { actorLabel, cleanReason, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { actorLabel, cleanReason, isPreSaleService, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { requireActiveRetailer } from './retailers.js';
 
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
@@ -100,7 +107,10 @@ export function computeWarrantyStatus(w: WarrantyDates | null | undefined, today
 export interface WarrantyRecord {
   productId: string;
   purchaseDate: string | null;
+  /** The point of sale's name: from the register when `retailerId` is set, else the free text. */
   retailer: string | null;
+  /** The point of sale in the register (A-08), or null (none, or recorded as free text). */
+  retailerId: string | null;
   country: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -122,10 +132,15 @@ export interface WarrantySummary {
 export interface ActivateWarrantyInput {
   /** 'YYYY-MM-DD'; defaults to today (UTC). */
   purchaseDate?: string;
+  /** Free text, kept for the history and API callers; the console sends `retailerId`. */
   retailer?: string | null;
+  /** An active point of sale of the register (A-08); its country is the default purchase country. */
+  retailerId?: string | null;
   /** ISO 3166-1 alpha-2. */
   country?: string | null;
 }
+
+type WarrantyRowWithRetailer = WarrantyRow & { retailer_name: string | null };
 
 export interface ServiceRecord {
   id: string;
@@ -170,9 +185,19 @@ export class WarrantyService {
 
   /**
    * Retailer/admin activation: start the warranty on the purchase date for
-   * the category's warranty months. An ISSUED product moves to ACTIVATED.
+   * the category's warranty months. An ISSUED product moves to ACTIVATED; a
+   * product in a pre-sale service (ISSUED → SERVICED) is refused until the
+   * service is closed (409 WARRANTY_ACTIVATION_NOT_ALLOWED).
+   * `opts.tx` runs it inside the caller's transaction (the sale mode uses up
+   * its scan token in the same one); `opts.saleScanId`, the staff scan that
+   * token came from, is recorded in the audit entry.
    */
-  async activate(productId: string, input: ActivateWarrantyInput, actor: Actor): Promise<{ warranty: WarrantyRecord; statusChange: StatusChange | null }> {
+  async activate(
+    productId: string,
+    input: ActivateWarrantyInput,
+    actor: Actor,
+    opts: { tx?: Db; saleScanId?: string } = {},
+  ): Promise<{ warranty: WarrantyRecord; statusChange: StatusChange | null }> {
     const now = this.clock();
     const today = utcDate(now);
     const purchaseDate = input.purchaseDate === undefined ? today : parseCalendarDate(input.purchaseDate);
@@ -182,9 +207,11 @@ export class WarrantyService {
       throw validationError('Purchase date is out of range.');
     }
     const retailer = cleanText(input.retailer, 'Retailer', MAX_TEXT);
-    const country = cleanCountry(input.country);
+    const givenCountry = cleanCountry(input.country);
 
-    return inTransaction(this.db, async (tx) => {
+    return inTransaction(opts.tx ?? this.db, async (tx) => {
+      const pointOfSale = input.retailerId === undefined || input.retailerId === null ? null : await requireActiveRetailer(tx, input.retailerId);
+      const country = givenCountry ?? pointOfSale?.country?.trim() ?? null;
       const product = await requireProduct(tx, productId, { forUpdate: true });
       const existing = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
       if (existing?.voided_at) throw new DomainError('WARRANTY_VOID', 409, 'The warranty of this product has been voided.');
@@ -194,12 +221,21 @@ export class WarrantyService {
           detail: `status ${product.status}`,
         });
       }
+      // A pre-sale service (ISSUED → SERVICED: inspection, quality control) is not a sale: the piece
+      // would stay SERVICED with ISSUED as its return target, so closing the service would bring it
+      // back to ISSUED with a started warranty. The service is closed first, then the piece is sold.
+      if (await isPreSaleService(tx, product)) {
+        throw new DomainError('WARRANTY_ACTIVATION_NOT_ALLOWED', 409, 'The warranty of this product cannot be activated.', {
+          detail: 'pre-sale service: complete or cancel the service first',
+        });
+      }
 
       const months = await this.categoryMonths(tx, product.category_id);
       const endDate = addMonthsClamped(purchaseDate, months);
       const values = {
         purchase_date: purchaseDate,
         retailer,
+        retailer_id: pointOfSale?.id ?? null,
         country,
         start_date: purchaseDate,
         duration_months: months,
@@ -221,11 +257,20 @@ export class WarrantyService {
           action: 'warranty.activate',
           targetType: 'product',
           targetId: product.product_id,
-          details: { purchaseDate, startDate: purchaseDate, endDate, durationMonths: months, retailer, country },
+          details: {
+            purchaseDate,
+            startDate: purchaseDate,
+            endDate,
+            durationMonths: months,
+            retailer: pointOfSale?.name ?? retailer,
+            ...(pointOfSale ? { retailerId: pointOfSale.id } : {}),
+            country,
+            ...(opts.saleScanId ? { saleScanId: opts.saleScanId } : {}),
+          },
         },
         tx,
       );
-      return { warranty: toRecord(row, product.product_id, today), statusChange };
+      return { warranty: toRecord({ ...row, retailer_name: pointOfSale?.name ?? null }, product.product_id, today), statusChange };
     });
   }
 
@@ -248,7 +293,13 @@ export class WarrantyService {
   /** The full warranty record (admin), or null when none exists yet. */
   async get(productId: string, now?: Date): Promise<WarrantyRecord | null> {
     const product = await requireProduct(this.db, productId);
-    const row = await this.db.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
+    const row = await this.db
+      .selectFrom('warranties as w')
+      .leftJoin('retailers as r', 'r.id', 'w.retailer_id')
+      .selectAll('w')
+      .select('r.name as retailer_name')
+      .where('w.product_id', '=', product.id)
+      .executeTakeFirst();
     return row ? toRecord(row, product.product_id, utcDate(now ?? this.clock())) : null;
   }
 
@@ -283,7 +334,7 @@ export class WarrantyService {
         { actor, action: 'warranty.void', targetType: 'product', targetId: product.product_id, details: why === null ? {} : { reason: why } },
         tx,
       );
-      return toRecord(row, product.product_id, utcDate(now));
+      return toRecord(await withRetailerName(tx, row), product.product_id, utcDate(now));
     });
   }
 
@@ -323,7 +374,7 @@ export class WarrantyService {
         },
         tx,
       );
-      return toRecord(row, product.product_id, utcDate(now));
+      return toRecord(await withRetailerName(tx, row), product.product_id, utcDate(now));
     });
   }
 
@@ -402,7 +453,15 @@ export class WarrantyService {
     let q = this.db.selectFrom('warranties as w').innerJoin('products as p', 'p.id', 'w.product_id');
     if (filters.status !== undefined) q = q.where(statusExpr, '=', filters.status);
     const [rows, count] = await Promise.all([
-      q.selectAll('w').select('p.product_id as canonical_id').orderBy('w.created_at', 'desc').orderBy('w.id').limit(page.pageSize).offset(pageOffset(page)).execute(),
+      q
+        .leftJoin('retailers as r', 'r.id', 'w.retailer_id')
+        .selectAll('w')
+        .select(['p.product_id as canonical_id', 'r.name as retailer_name'])
+        .orderBy('w.created_at', 'desc')
+        .orderBy('w.id')
+        .limit(page.pageSize)
+        .offset(pageOffset(page))
+        .execute(),
       q.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow(),
     ]);
     return makePage(rows.map((r) => toRecord(r, r.canonical_id, today)), Number(count.n), page);
@@ -478,11 +537,19 @@ export class WarrantyService {
 
 // ── Mapping & validation ───────────────────────────────────────────────────
 
-function toRecord(r: WarrantyRow, productId: string, today: string): WarrantyRecord {
+/** A warranty row with the name of its point of sale (null when it has none in the register). */
+async function withRetailerName(db: Db, r: WarrantyRow): Promise<WarrantyRowWithRetailer> {
+  if (r.retailer_id === null) return { ...r, retailer_name: null };
+  const p = await db.selectFrom('retailers').select('name').where('id', '=', r.retailer_id).executeTakeFirst();
+  return { ...r, retailer_name: p?.name ?? null };
+}
+
+function toRecord(r: WarrantyRowWithRetailer, productId: string, today: string): WarrantyRecord {
   return {
     productId,
     purchaseDate: r.purchase_date,
-    retailer: r.retailer,
+    retailer: r.retailer_name ?? r.retailer,
+    retailerId: r.retailer_id,
     country: r.country,
     startDate: r.start_date,
     endDate: r.end_date,

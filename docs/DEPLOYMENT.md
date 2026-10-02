@@ -795,20 +795,27 @@ Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `
 
 ### 8.2 Further admins, lost authenticators: `scripts/admin.ts`
 
-Console users are managed from the shell (every change is audited as `system:cli:admin:<os user>`):
+**Staff accounts (OPERATOR, AUDITOR, and RETAIL for the sellers of the sale mode) are managed in the console**, on the Team page (ADMIN; [API §17.7–§17.13](API.md#17-admin-keys-audit-log-and-console-users)): create an account with a temporary password shown once (it must be replaced at the first sign-in, then the second factor is enrolled), change a role between OPERATOR, AUDITOR and RETAIL, disable a departing account (its sessions end at once) and enable it again, lift a lockout, list and end sessions, reset a lost second factor. Every admin changes its own password from the foot of the sidebar (*Change password*, [API §12.5](API.md#125-post-apiadminauthpassword-extension-of-the-contract)).
+
+**ADMIN accounts and the ADMIN role come from the shell only**, where the second factor is enrolled out of band (§8.1). The same commands are the fallback when no ADMIN can sign in (every change is audited as `system:cli:admin:<os user>`):
 
 ```sh
-# a new OPERATOR (or ADMIN, AUDITOR); the password comes from the environment, never argv
-docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role OPERATOR
-docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, locked/disabled
+# a new ADMIN (or OPERATOR, AUDITOR); the password comes from the environment, never argv
+docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role ADMIN
+docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, active/locked/disabled/temporary password
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email ops@theorbes.com
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>
+docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>   # ends that admin's sessions
 docker compose exec app node --import tsx scripts/admin.ts reset-totp --email ops@theorbes.com --yes   # lost device
+docker compose exec app node --import tsx scripts/admin.ts role --email ops@theorbes.com --role ADMIN  # the only way to grant ADMIN
+docker compose exec app node --import tsx scripts/admin.ts disable --email ops@theorbes.com --yes      # sign-in refused, sessions end
+docker compose exec app node --import tsx scripts/admin.ts enable --email ops@theorbes.com
 ```
 
-- **A lost authenticator:** after an identity check, an ADMIN resets it from the console (SECURITY page, *Reset two-factor*, typed confirmation; `POST /api/admin/admins/:id/totp/reset`) or with `reset-totp` above. The reset removes the enrolment and ends every session of that admin; they sign in with the password and enrol again. If no ADMIN with a working second factor is left, use the shell command.
+- **The last active ADMIN** can be neither demoted nor disabled, from the console or the shell (`LAST_ADMIN`); create or promote another ADMIN first. Keep two.
+- **A lost authenticator:** after an identity check, an ADMIN resets it from the console (Team page, *Reset two-factor*, typed confirmation; `POST /api/admin/admins/:id/totp/reset`) or with `reset-totp` above. The reset removes the enrolment and ends every session of that admin; they sign in with the password and enrol again. If no ADMIN with a working second factor is left, use the shell command.
 - **Lockout as denial of service:** anyone who knows an admin's email can keep that admin locked out with wrong passwords (10 per 15 minutes suffice). Keep admin emails private and, ideally, put `/admin` and `/api/admin` behind an IP allow-list or VPN at the edge (SECURITY-MODEL §3.3).
-- **Still missing:** changing passwords, changing roles and disabling admins have no command or route yet (they exist in `AuthService` or need a statement in SQL).
+- **Enrolling a second factor ends the sessions opened without it**, from the shell (every session of that admin) as in the console (every session but the one that enrolled): none is left with the password alone. Once enrolled, the console's *Change password* needs a session that passed the second factor when MFA is enforced.
+- **A forgotten password** has no reset yet, neither in the console nor in the shell: disable the account and create a new one under another address (the old account and its history stay). Once signed in, anyone can change their own password (*Change password*).
 
 ---
 
@@ -852,6 +859,7 @@ docker compose exec app node --import tsx scripts/admin.ts reset-totp --email op
 | `signature failed verify-after-sign; refused`, `signing failed`, `key generation failed` | Log (error) | Page: custody problem |
 | `startup failed`, `uncaught exception`, `unhandled rejection`, `graceful shutdown timed out` | Log (error) | Page |
 | New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` (`GET /api/admin/anomalies/summary`: `open.CRITICAL`). In the console, the badge on ANOMALIES and the `(n)` of the tab title count the OPEN HIGH and CRITICAL findings | Page: possible key compromise |
+| New `UNSOLD_PIECE_SCAN` anomaly (console: UNSOLD PIECE SCANNED): a piece not sold yet, scanned outside the console | `GET /api/admin/anomalies?type=UNSOLD_PIECE_SCAN&status=OPEN`, or `anomalies` rows with `type = 'UNSOLD_PIECE_SCAN' AND status = 'OPEN'` (country in `details`), daily | Ticket: stock possibly diverted (API §9.7, THREAT-MODEL W) |
 | `verification flagged` (SUSPICIOUS ACTIVITY) | Log (warn) | Ticket / dashboard |
 | `housekeeping job failed`, `health check: database unavailable` | Log (error; `job: scanStats` also holds back that pass's scan-history purge) | Ticket |
 | Audit chain broken | `GET /api/admin/audit/verify` (daily job) returns `ok: false` | Page |

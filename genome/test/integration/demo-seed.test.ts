@@ -121,6 +121,11 @@ describe('demo seed', () => {
   });
 
   it('records warranties, service records, transfers and scan histories', async () => {
+    // Every warranty started names its point of sale from the register (A-08), never free text.
+    const started = await ctx.db.selectFrom('warranties').select(['retailer', 'retailer_id']).where('start_date', 'is not', null).execute();
+    expect(started.length).toBeGreaterThan(10);
+    expect(started.every((w) => w.retailer_id !== null && w.retailer === null)).toBe(true);
+    expect((await ctx.services.retailers.list()).map((r) => r.name)).toContain('ORBES PARIS — SAINT-HONORÉ');
     const services = await ctx.db.selectFrom('service_records').select(['status']).execute();
     expect(services.filter((s) => s.status === 'OPEN').length).toBeGreaterThanOrEqual(2);
     expect(services.filter((s) => s.status === 'COMPLETED').length).toBeGreaterThanOrEqual(2);
@@ -153,7 +158,13 @@ describe('demo seed', () => {
     expect(stolen.items[0]).toMatchObject({ productId: 'O26-J-00193', status: 'OPEN' });
     const triaged = await ctx.services.anomaly.list({ type: 'POST_REVOCATION_SCAN' }, { page: 1, pageSize: 10 });
     expect(triaged.items[0]).toMatchObject({ productId: 'O26-J-00198', status: 'DISMISSED' });
-    expect(result.anomalies.open).toBe(2);
+    // S-07: stock scanned outside a console session. Lyon, by a stranger: open; the Paris boutique's own check: dismissed.
+    const unsold = await ctx.services.anomaly.list({ type: 'UNSOLD_PIECE_SCAN' }, { page: 1, pageSize: 10 });
+    expect(unsold.items.map((a) => [a.productId, a.status, a.severity, a.riskScore, a.details.country])).toEqual([
+      ['O26-L-00018', 'OPEN', 'MEDIUM', 0, 'FR'],
+      ['O26-J-00186', 'DISMISSED', 'MEDIUM', 0, 'FR'],
+    ]);
+    expect(result.anomalies.open).toBe(3);
 
     const states = await ctx.db
       .selectFrom('scan_events as s')

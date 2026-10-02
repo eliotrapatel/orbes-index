@@ -41,7 +41,7 @@ genome/
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
@@ -117,7 +117,7 @@ All of them read the server's configuration and exit with `0` success, `1` failu
 | `npm run keys:rotate` | `tsx scripts/keys.ts rotate [--kid <label>]`: new ACTIVE key, the previous one RETIRED |
 | `npm run keys:list` | `tsx scripts/keys.ts list`: every key with status, dates and fingerprint |
 | (no npm alias) | `tsx scripts/keys.ts retire <keyId> --yes` and `tsx scripts/keys.ts revoke <keyId> --reason <text> [--compromised-at <ISO 8601>] --yes` |
-| (no npm alias) | `ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <e> --role ADMIN\|OPERATOR\|AUDITOR`, `list`, `totp-setup --email <e>`, `totp-enable --email <e> --secret <s> --code <c>`, `reset-totp --email <e> --yes`: console users ([DEPLOYMENT §8](../docs/DEPLOYMENT.md#8-admin-accounts)) |
+| (no npm alias) | `ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <e> --role ADMIN\|OPERATOR\|AUDITOR`, `list`, `totp-setup --email <e>`, `totp-enable --email <e> --secret <s> --code <c>`, `reset-totp --email <e> --yes`, `role --email <e> --role <r>`, `disable --email <e> --yes`, `enable --email <e>`: console users, the fallback of the console's Team page and the only way to grant ADMIN ([DEPLOYMENT §8](../docs/DEPLOYMENT.md#8-admin-accounts)) |
 
 `keys:generate` and `keys:rotate` refuse `KEY_PROVIDER=memory`, because the key would vanish when the command exits. Runbooks: [DEPLOYMENT §7](../docs/DEPLOYMENT.md#7-signing-keys).
 

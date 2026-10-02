@@ -157,16 +157,17 @@ const authentic: Scenario = {
   key: 'authentic',
   title: 'Authentic code (control)',
   setup:
-    'A ring is issued through the admin generator (with a claim code), its 30 mm / 600 dpi PNG artifact downloaded from the admin API and photographed by phones in Paris: in the boutique before sale, by the buyer after the retail activation, by a friend after the buyer registered it with token + claim code, by the logged-in owner, then by eight more phones (every capture preset) in Paris and Lyon over the day.',
+    "A ring is issued through the admin generator (with a claim code), its 30 mm / 600 dpi PNG artifact downloaded from the admin API and photographed by phones in Paris: in the boutique before sale, on a tablet signed in to the console (a staff scan), by the buyer after the retail activation, by a friend after the buyer registered it with token + claim code, by the logged-in owner, then by eight more phones (every capture preset) in Paris and Lyon over the day.",
   knownGaps: [],
   knownLimits: [],
   async run(lab) {
     lab.at('2026-06-01T09:00:00Z');
     const p = await lab.issue({ claim: true });
     const art = await lab.artifact(p);
-    const boutique = lab.device('boutique-tablet', PLACES.paris, { preset: 'clean' });
-    const s1 = await lab.scan(boutique, art);
-    await lab.expectState('1a', 'issued, not yet sold: stock check in the boutique', s1, 'AUTHENTIC');
+    // The boutique checks its stock as staff (S-07): a public scan of a piece not sold yet would raise UNSOLD_PIECE_SCAN.
+    const seller = await lab.staff('boutique-tablet', PLACES.paris, { preset: 'clean' });
+    const s1 = await lab.scan(seller.device, art);
+    await lab.expectState('1a', 'issued, not yet sold: stock check on the boutique tablet signed in to the console', s1, 'AUTHENTIC');
 
     await lab.activate(p);
     lab.at('2026-06-01T09:10:00Z');
@@ -207,6 +208,14 @@ const authentic: Scenario = {
     const checks = await Promise.all(all.map(async (s) => (await lab.authEvent(s.scanId))?.genome_check ?? 'none'));
     lab.expectTrue('1j', 'genome cross-check on genuine camera scans', 'no MISMATCH', tally(checks), !checks.includes('MISMATCH') && checks.includes('MATCH'));
     await lab.expectAnomalies('1k', 'genuine use creates no anomaly', p, []);
+    const staffScan = await lab.scanEventOf(s1.scanId);
+    lab.expectTrue(
+      '1l',
+      'the stock check is a staff scan: ADMIN_TEST naming the seller, no device pseudonym',
+      'ADMIN_TEST, seller, no device',
+      staffScan ? `${staffScan.event_type}, ${staffScan.admin_id === seller.adminId ? 'seller' : String(staffScan.admin_id)}, ${staffScan.device_hash ? 'device' : 'no device'}` : 'no scan',
+      staffScan?.event_type === 'ADMIN_TEST' && staffScan.admin_id === seller.adminId && staffScan.device_hash === null,
+    );
     lab.redactionCheck('1z');
   },
 };
@@ -826,6 +835,8 @@ const keys: Scenario = {
     lab.expectTrue('10o', 'the re-issued code is signed by the new key', `key ${k2}`, `key ${mid2.code.keyId}`, mid2.code.keyId === k2);
     const fresh = await lab.issue();
     await lab.expectState('10p', 'product issued after rotation', await lab.scan(victim, await lab.artifact(fresh)), 'AUTHENTIC');
+    // Not sold yet, and scanned outside a console session: the earliest sign of diverted stock (S-07), weight 0.
+    await lab.expectAnomalies('10q', 'that piece is not sold yet: its public scan records UNSOLD_PIECE_SCAN (state unchanged)', fresh, ['UNSOLD_PIECE_SCAN']);
     lab.redactionCheck('10z');
   },
 };

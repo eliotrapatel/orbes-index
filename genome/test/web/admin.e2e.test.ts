@@ -18,9 +18,13 @@
  * the Analytics view (90 and 30 days, its cursor, the countries of the
  * counterfeit signals), anomaly triage (the badge and the tab title, the
  * filters, a finding's scans, one dialog that marks the piece, revokes its
- * code and resolves the finding), TOTP enrolment + two-step sign-in, and the
- * read-only AUDITOR console (emails masked). No CSP violation or page error
- * is tolerated.
+ * code and resolves the finding), TOTP enrolment + two-step sign-in, the
+ * Team page (A-02: a staff account, its temporary password and forced first
+ * change, the own password change, a role change, a departure), the
+ * read-only AUDITOR console (emails masked), and the sale mode on a 390 px
+ * phone (A-08: the points of sale, a RETAIL account and its first sign-in in
+ * the sale shell, a sale through the phone's camera in under 20 s, nothing
+ * else reachable). No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -49,6 +53,9 @@ import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { svgToGray } from '../support/raster.js';
+import { writePng } from '../support/image-io.js';
+import { writeY4m } from '../support/y4m.js';
+import { cameraClipFrames, codeSource, launchCamera, mobileContext, phonePhoto, printedCodeOf } from '../e2e/support.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -233,6 +240,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       .executeTakeFirstOrThrow();
     modelId = model.id;
     seeded = await seedRegistry(ctx, modelId);
+    // The register of points of sale (A-08): the warranty dialog picks from it.
+    await ctx.services.retailers.create({ name: 'ORBES Paris — Saint-Honoré', city: 'Paris', country: 'FR' }, SYSTEM_ACTOR);
 
     app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
     await app.listen({ port, host: '127.0.0.1' });
@@ -491,9 +500,16 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.waitForSelector('dialog.dialog .dialog__eyebrow');
     expect((await page.locator('dialog.dialog .dialog__eyebrow').textContent())?.trim()).toBe(issuedProductId);
     expect(await figuresInDisplayFace(page)).toEqual([]);
+    // The point of sale is chosen from the register (A-08), never typed.
+    expect(await page.locator('dialog input[name=retailer]').count()).toBe(0);
+    expect(await page.locator('dialog select[name=retailerId] option').allTextContents()).toEqual(['None recorded', 'ORBES Paris — Saint-Honoré · Paris · FR']);
+    await page.selectOption('dialog select[name=retailerId]', { label: 'ORBES Paris — Saint-Honoré · Paris · FR' });
     await confirmDialog(page);
     await expect.poll(() => row('warranty').textContent()).toContain('ACTIVE');
     await expect.poll(() => row('status').textContent()).toContain('ACTIVATED');
+    // Shown by its name, the country taken from it.
+    expect(await ctx.services.warranty.get(issuedProductId)).toMatchObject({ retailer: 'ORBES Paris — Saint-Honoré', country: 'FR' });
+    await expect.poll(() => page.locator('#warranty').textContent()).toContain('ORBES Paris — Saint-Honoré · FR');
     await shot(page, 'product', { full: true });
 
     // Extend the warranty by 12 months (the dialog's default).
@@ -546,6 +562,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     await shot(page, 'anomalies');
     expect(await page.locator('.status--critical').count()).toBeGreaterThanOrEqual(1);
+    // S-07: the piece issued above, scanned outside the console while still in stock, under its console name.
+    const unsold = page.locator('table.table tbody tr', { hasText: 'UNSOLD PIECE SCANNED' });
+    expect(await unsold.count()).toBe(1);
+    expect(await unsold.textContent()).toContain(issuedProductId);
   }, STEP_TIMEOUT);
 
   it('triages an anomaly', async () => {
@@ -1498,14 +1518,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await cspViolations(p)).toEqual([]);
     await p.close();
 
-    // The device is lost: an ADMIN resets the operator's second factor from the security page.
+    // The device is lost: an ADMIN resets the operator's second factor from the Team page.
     const operatorId = (await ctx.services.auth.listAdmins()).find((a) => a.email === operator.email)!.id;
     const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
-    await go(a, '#/security', 'Security');
+    await go(a, '#/team', 'Team');
     const userRow = a.locator('[data-testid=admin-users] tr', { hasText: operator.email });
     await userRow.locator('[data-testid=reset-totp]').click();
     await confirmDialog(a, `RESET 2FA ${operator.email}`);
@@ -1513,6 +1533,113 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => userRow.textContent()).toContain('NOT ENROLLED');
     expect(await cspViolations(a)).toEqual([]);
     await a.click('[data-testid=sign-out]');
+    await adminContext.close();
+  }, STEP_TIMEOUT);
+
+  it('manages the team: a staff account, its temporary password, its first sign-in, a role change and its departure', async () => {
+    const staffEmail = 'atelier@orbes.test';
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const a = await adminContext.newPage();
+    await watch(a);
+    await signIn(a, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    // The ADMIN's sidebar, its longest: SIGN OUT and CHANGE PASSWORD show on a 900 px screen without scrolling it.
+    for (const id of ['sign-out', 'change-password']) {
+      const box = (await a.locator(`[data-testid=${id}]`).boundingBox())!;
+      expect(box.y + box.height, id).toBeLessThanOrEqual(900);
+      expect(box.x + box.width, id).toBeLessThanOrEqual(248 - 32);
+    }
+    await a.locator('.side__link', { hasText: 'Team' }).click();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
+    expect(await a.locator('.side__link.is-active').textContent()).toBe('Team');
+    // One's own row offers nothing but its own second factor.
+    const selfRow = a.locator('[data-testid=admin-users] tr', { hasText: ADMIN.email });
+    expect(await selfRow.locator('[data-testid=team-disable], [data-testid=team-role]').count()).toBe(0);
+
+    await a.click('[data-testid=team-create]');
+    await a.fill('dialog input[name=email]', staffEmail);
+    await a.selectOption('dialog select[name=role]', 'OPERATOR');
+    await confirmDialog(a);
+    const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
+    expect(temporary).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+    const staffRow = a.locator('[data-testid=admin-users] tr', { hasText: staffEmail });
+    await expect.poll(() => staffRow.textContent()).toContain('TEMPORARY PASSWORD');
+    expect(await figuresInDisplayFace(a)).toEqual([]);
+    await shot(a, 'team');
+    await a.click('[data-testid=temporary-password-hide]');
+    expect(await a.locator('[data-testid=temporary-password]').count()).toBe(0);
+
+    // The staff member's first sign-in: only the new password, whatever the address.
+    const staffContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await staffContext.newPage();
+    await watch(s);
+    await signIn(s, staffEmail, temporary);
+    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('New password');
+    // The screen is the change itself: no CHANGE PASSWORD beside it, whose dialog would leave this form asking for a temporary password that no longer works.
+    expect(await s.locator('[data-testid=change-password]').count()).toBe(0);
+    expect(await s.isVisible('[data-testid=sign-out]')).toBe(true);
+    expect(await s.locator('[data-testid=password-form]').textContent()).toContain('capitals and dashes included');
+    await shot(s, 'password');
+    await go(s, '#/products', 'New password');
+    await s.fill('input[name=currentPassword]', 'not the temporary password');
+    await s.fill('input[name=newPassword]', 'atelier passphrase 2026');
+    await s.fill('input[name=confirmPassword]', 'atelier passphrase 2026');
+    await s.click('[data-testid=password-save]');
+    await expect.poll(() => s.locator('[data-testid=password-form] .form-error').textContent()).toMatch(/current password is not correct/i);
+    expect(await s.isVisible('[data-testid=login-form]')).toBe(false); // a refusal, not a sign-out
+    await s.fill('input[name=currentPassword]', temporary);
+    await s.click('[data-testid=password-save]');
+    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('Dashboard');
+    expect(await s.locator('.side__role').textContent()).toContain('OPERATOR');
+    expect(await s.locator('.side__link', { hasText: 'Team' }).count()).toBe(0);
+
+    // Later, a voluntary change from the foot of the sidebar.
+    await s.click('[data-testid=change-password]');
+    await shot(s, 'password-dialog');
+    await s.fill('dialog input[name=currentPassword]', 'atelier passphrase 2026');
+    await s.fill('dialog input[name=newPassword]', 'atelier passphrase 2027');
+    await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2028');
+    await s.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => s.locator('.dialog__error').textContent()).toMatch(/differ/);
+    await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2027');
+    await confirmDialog(s);
+    await s.waitForSelector('.toast:has-text("Password changed.")');
+
+    // The ADMIN changes the role, then the staff member leaves: their open console is signed out.
+    await a.reload();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
+    await expect.poll(() => staffRow.textContent()).toContain('ACTIVE');
+    await staffRow.locator('[data-testid=team-role]').click();
+    await a.selectOption('dialog select[name=role]', 'AUDITOR');
+    await confirmDialog(a);
+    await expect.poll(() => staffRow.textContent()).toContain('AUDITOR');
+    await staffRow.locator('[data-testid=team-sessions]').click();
+    await expect.poll(() => a.locator('dialog.dialog tbody tr').count()).toBe(1);
+    expect(await a.locator('dialog.dialog tbody tr').textContent()).toMatch(/Chrome · macOS|Chrome · Linux/);
+    await shot(a, 'team-sessions');
+    await a.click('[data-testid=dialog-cancel]');
+    await staffRow.locator('[data-testid=team-disable]').click();
+    expect(await a.locator('dialog.dialog--danger').count()).toBe(1);
+    await confirmDialog(a);
+    await expect.poll(() => staffRow.textContent()).toContain('DISABLED');
+    await s.evaluate(() => (location.hash = '#/products'));
+    await s.waitForSelector('[data-testid=login-form]');
+    await expect.poll(() => s.locator('.login__error').textContent()).toMatch(/session has ended/i);
+
+    // Who did it: the audit log and the anomaly triage name the console user by email.
+    await go(a, '#/audit?action=admin.disable', 'Audit log');
+    await expect.poll(() => a.locator('table.table tbody tr').first().textContent()).toContain(ADMIN.email);
+    expect(await a.locator('table.table tbody tr').first().textContent()).toContain(staffEmail); // the account acted upon
+    await go(a, '#/anomalies?status=OPEN', 'Anomalies');
+    expect(await a.locator('[data-testid=anomaly-actor]').count()).toBe(0); // never triaged
+    await a.locator('[data-testid=triage]').first().click();
+    await a.selectOption('dialog select[name=status]', 'ACKNOWLEDGED');
+    await confirmDialog(a);
+    await go(a, '#/anomalies?status=ACKNOWLEDGED', 'Anomalies');
+    await expect.poll(() => a.locator('[data-testid=anomaly-actor]').first().textContent()).toBe(`by ${ADMIN.email}`);
+    expect(await cspViolations(a)).toEqual([]);
+    expect(await cspViolations(s)).toEqual([]);
+    await staffContext.close();
     await adminContext.close();
   }, STEP_TIMEOUT);
 
@@ -1564,6 +1691,154 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.waitForSelector('[data-testid=chain-result][data-ok=true]');
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
+  }, STEP_TIMEOUT);
+
+  it('sells from a phone (A-08, 390 px): a RETAIL account from the Team page, its own password in the sale shell, a sale in under 20 s, nothing else', async () => {
+    const seller = { email: 'boutique@orbes.test', password: 'boutique passphrase 2026' };
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const a = await adminContext.newPage();
+    await watch(a);
+    await signIn(a, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    for (const label of ['Points of sale', 'Sale mode']) expect(await a.locator('.side__link', { hasText: label }).count(), label).toBe(1);
+
+    // A point of sale added from the console.
+    await go(a, '#/retailers', 'Points of sale');
+    await a.click('[data-testid=retailer-create]');
+    await a.fill('dialog input[name=name]', 'ORBES London — Mount Street');
+    await a.fill('dialog input[name=city]', 'London');
+    await a.fill('dialog input[name=country]', 'gb');
+    await confirmDialog(a);
+    await expect.poll(() => a.locator('table.table tbody tr', { hasText: 'ORBES London — Mount Street' }).count()).toBe(1);
+    await shot(a, 'retailers');
+    const london = (await ctx.services.retailers.list()).find((r) => r.name === 'ORBES London — Mount Street')!;
+    expect(london).toMatchObject({ city: 'London', country: 'GB', active: true });
+
+    // The seller's account: RETAIL, with a temporary password.
+    await go(a, '#/team', 'Team');
+    await a.click('[data-testid=team-create]');
+    await a.fill('dialog input[name=email]', seller.email);
+    await a.selectOption('dialog select[name=role]', 'RETAIL');
+    await confirmDialog(a);
+    const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
+    expect(temporary).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+    await expect.poll(() => a.locator('[data-testid=admin-users] tr', { hasText: seller.email }).textContent()).toContain('RETAIL');
+
+    // The piece on the counter, filmed by the phone's camera (Chromium's fake device plays a hand-held clip).
+    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: '54' }, SYSTEM_ACTOR);
+    const clip = join(workDir, 'sale-piece.y4m');
+    writeY4m(clip, cameraClipFrames(codeSource(printedCodeOf(piece)), { n: 8, seed: 3 }), 15, { range: 'limited' });
+    const phoneBrowser = await launchCamera(clip);
+    try {
+      const phone = await mobileContext(phoneBrowser, { reducedMotion: 'reduce' });
+      const p = await phone.newPage();
+      await watch(p);
+      /** The computed font size of the first match, in px: iOS Safari zooms into a field under 16 px (BRAND §3.1). */
+      const fontPx = (sel: string) => p.locator(sel).first().evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+      await p.goto(`${origin}/admin`);
+      await p.waitForSelector('[data-testid=login-form]');
+      for (const sel of ['input[name=email]', 'input[name=password]']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(16);
+      await signIn(p, seller.email, temporary);
+      // The first sign-in: the new password, framed by the sale shell (no console sidebar).
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('New password');
+      expect(await p.locator('[data-testid=sale-shell]').count()).toBe(1);
+      expect(await p.locator('.side').count()).toBe(0);
+      expect(await p.locator('[data-testid=change-password]').count()).toBe(0);
+      expect(await p.isVisible('[data-testid=sign-out]')).toBe(true);
+      for (const sel of ['input[name=currentPassword]', 'input[name=newPassword]', 'input[name=confirmPassword]']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(16);
+      for (const sel of ['[data-testid=password-save]', '.saleshell .cfield__label']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(10);
+      await p.fill('input[name=currentPassword]', temporary);
+      await p.fill('input[name=newPassword]', seller.password);
+      await p.fill('input[name=confirmPassword]', seller.password);
+      await p.click('[data-testid=password-save]');
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      expect(await p.locator('.saleshell__role').textContent()).toBe('RETAIL');
+      expect(await p.locator('[data-testid=to-console]').count()).toBe(0);
+      expect(await p.locator('[data-testid=change-password]').count()).toBe(1);
+      await shot(p, 'sale-ready');
+
+      // Nothing of the registry: every other address leads back to the sale mode, and the server refuses it.
+      for (const hash of ['#/dashboard', '#/products', '#/owners', '#/scans', `#/products/${piece.product.productId}`, '#/team', '#/retailers']) {
+        await p.evaluate((h) => (location.hash = h), hash);
+        await expect.poll(() => p.evaluate(() => location.hash), { timeout: 5_000 }).toBe('#/sale');
+      }
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      const refused = await p.evaluate(async () =>
+        Promise.all(['/api/admin/products', '/api/admin/scans', '/api/admin/owners', '/api/admin/dashboard', '/api/admin/codes'].map(async (u) => (await fetch(u)).status)),
+      );
+      expect(refused).toEqual([403, 403, 403, 403, 403]);
+
+      // A phone screen: nothing wider than it, the controls a thumb's size.
+      expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      for (const id of ['sale-scan', 'sale-upload', 'sale-retailer', 'sign-out', 'change-password']) {
+        expect((await p.locator(`[data-testid=${id}]`).boundingBox())!.height, id).toBeGreaterThanOrEqual(44);
+      }
+      // Read at arm's length: the point of sale at 16 px (no zoom when it is focused), buttons and labels at the 10 px floor.
+      expect(await fontPx('[data-testid=sale-retailer]')).toBeGreaterThanOrEqual(16);
+      for (const sel of ['[data-testid=sale-scan]', '[data-testid=sale-upload]', '.saleshell .cfield__label']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(10);
+
+      // The sale (acceptance: under 20 s from the phone): the point of sale, the scan, the piece, one gesture.
+      const started = Date.now();
+      await p.selectOption('[data-testid=sale-retailer]', london.id);
+      await p.click('[data-testid=sale-scan]');
+      await p.locator('[data-testid=sale-camera]').waitFor();
+      expect((await p.locator('[data-testid=sale-camera]').boundingBox())!.width).toBeLessThanOrEqual(390);
+      await p.locator('[data-testid=sale-verdict]').waitFor({ timeout: 30_000 });
+      expect(await p.locator('[data-testid=sale-verdict]').textContent()).toBe('READY TO SELL');
+      expect(await p.locator('[data-testid=sale-product]').textContent()).toBe(piece.product.productId);
+      expect(await p.locator('[data-testid=sale-product]').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+      await shot(p, 'sale-piece');
+      await p.click('[data-testid=sale-activate]');
+      await p.locator('[data-testid=sale-done]').waitFor({ timeout: 15_000 });
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(20_000);
+      expect(await p.locator('[data-testid=sale-client-note]').textContent()).toBe('Register your piece with its card at theorbes.com/verify.');
+      expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await shot(p, 'sale-done');
+
+      // In the registry: the warranty at that point of sale, the scan under the seller's name, no anomaly.
+      expect(await ctx.services.warranty.get(piece.product.productId)).toMatchObject({ status: 'ACTIVE', retailer: 'ORBES London — Mount Street', retailerId: london.id, country: 'GB' });
+      const sellerId = (await ctx.services.auth.findAdminByEmail(seller.email))!.id;
+      expect(await ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id', 'result_state']).where('product_id', '=', piece.product.id).execute()).toEqual([
+        { event_type: 'ADMIN_TEST', admin_id: sellerId, result_state: 'AUTHENTIC' },
+      ]);
+      expect(await ctx.db.selectFrom('anomalies').select('id').where('product_id', '=', piece.product.id).execute()).toEqual([]);
+
+      // NEXT SALE scans again: the same piece is now sold.
+      await p.click('[data-testid=sale-next]');
+      await expect.poll(() => p.locator('[data-testid=sale-verdict]').textContent(), { timeout: 30_000 }).toBe('ALREADY SOLD');
+      expect(await p.locator('[data-testid=sale-activate]').count()).toBe(0);
+
+      // Without a usable camera, a photo of the piece does the same (the verification app's photo reader).
+      const other = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: '56' }, SYSTEM_ACTOR);
+      const photo = join(workDir, 'sale-photo.png');
+      writePng(photo, phonePhoto(codeSource(printedCodeOf(other))));
+      await p.setInputFiles('[data-testid=sale-photo]', photo);
+      await expect.poll(() => p.locator('[data-testid=sale-product]').textContent(), { timeout: 30_000 }).toBe(other.product.productId);
+      expect(await p.locator('[data-testid=sale-verdict]').textContent()).toBe('READY TO SELL');
+      expect(await ctx.db.selectFrom('scan_events').select('client_metrics').where('product_id', '=', other.product.id).executeTakeFirstOrThrow()).toMatchObject({ client_metrics: { source: 'upload' } });
+
+      // The point of sale stays chosen on this phone.
+      await p.reload();
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      expect(await p.inputValue('[data-testid=sale-retailer]')).toBe(london.id);
+      expect(await cspViolations(p)).toEqual([]);
+      await phone.close();
+    } finally {
+      await phoneBrowser.close();
+    }
+
+    // The console names the seller on the scan.
+    await go(a, `#/scans?productId=${piece.product.productId}`, 'Verification events');
+    await expect.poll(() => a.locator('[data-testid=scan-staff]').first().textContent()).toBe(`by ${seller.email}`);
+    // An ADMIN opens the sale mode too, in the same phone-first shell, and comes back with CONSOLE.
+    await a.locator('.side__link', { hasText: 'Sale mode' }).click();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Sale mode');
+    expect(await a.locator('.side').count()).toBe(0);
+    await a.click('[data-testid=to-console]');
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    expect(await cspViolations(a)).toEqual([]);
+    await adminContext.close();
   }, STEP_TIMEOUT);
 
   it('raised no page error or CSP violation', () => {

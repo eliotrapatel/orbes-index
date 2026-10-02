@@ -26,7 +26,7 @@ export async function warrantiesView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Start', cell: (w) => formatDate(w.startDate), kind: ['nowrap'] },
         { label: 'End', cell: (w) => formatDate(w.endDate), kind: ['nowrap'] },
         { label: 'Months', cell: (w) => String(w.durationMonths), kind: ['num'] },
-        { label: 'Retailer', cell: (w) => w.retailer ?? '—', kind: ['wide'] },
+        { label: 'Point of sale', cell: (w) => w.retailer ?? '—', kind: ['wide'] },
         { label: 'Country', cell: (w) => w.country ?? '—', kind: ['nowrap'] },
         { label: 'Void', cell: (w) => (w.voidedAt ? h('span', { attrs: { title: w.voidReason ?? '' } }, formatDate(w.voidedAt)) : '—'), kind: ['nowrap'] },
       ],

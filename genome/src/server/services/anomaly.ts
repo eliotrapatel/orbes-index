@@ -30,6 +30,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { makePage, noopLogger, pageOffset, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 import type { AnomalyConfig } from '../config.js';
 import type { AuditService } from './audit.js';
+import { adminEmailsById } from './auth.js';
 import { ANOMALY_TYPES, evaluateRules, horizonMs, type ScanRecord, type ScoredFinding } from './anomaly-rules.js';
 
 export type { AnomalyConfig } from '../config.js';
@@ -102,6 +103,24 @@ export interface EvaluateOptions {
   codeStatus?: CodeStatus;
   /** Current owner's account id (null = no owner). Loaded when undefined. */
   ownerAccountId?: string | null;
+  /**
+   * A staff scan (ADMIN_TEST, S-07): score the public history as it stands, without the scan
+   * `scanEventId` taking part, and record nothing. The console user sees the state a customer would
+   * see now, and a staff scan never adds to a history finding.
+   */
+  observeOnly?: boolean;
+}
+
+/** Options of AnomalyService.recordFinding. */
+export interface RecordFindingOptions {
+  /**
+   * At most one occurrence per product and UTC day (S-07, UNSOLD_PIECE_SCAN): the finding is
+   * dropped when one of its type was already seen for this product on the day of `f.at`
+   * (`last_seen_at` that day), whatever its status: a finding seen today and dismissed is not raised
+   * again before tomorrow, while one last seen yesterday and dismissed today is raised again by
+   * today's first scan. `occurrences` then counts days. Product findings only.
+   */
+  oncePerUtcDay?: boolean;
 }
 
 export interface EvaluateResult {
@@ -126,6 +145,12 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Date | null;
   resolutionNote: string | null;
+  /**
+   * Email of the console user whose decision is the latest on this finding (acknowledged,
+   * resolved, dismissed or reopened it), from the audit log (`anomaly.update`) and `admin_users`
+   * at read time; null while no admin has triaged it.
+   */
+  actorEmail: string | null;
 }
 
 export interface AnomalyFilters {
@@ -226,7 +251,8 @@ export class AnomalyService {
    * Score the code's recent history, which includes the scan `scanEventId`.
    * Findings that involve this scan are recorded (upserted); older ones only
    * contribute their decayed weight to the score, so one past burst is not
-   * re-counted on every later scan.
+   * re-counted on every later scan. With `observeOnly` (a staff scan), the
+   * scan takes no part and nothing is recorded.
    */
   async evaluate(input: EvaluateInput, opts: EvaluateOptions = {}): Promise<EvaluateResult> {
     for (const [k, v] of [['productId', input?.productId], ['codeId', input?.codeId], ['scanEventId', input?.scanEventId]] as const) {
@@ -260,7 +286,8 @@ export class AnomalyService {
       ownerAccountId = owner?.account_id ?? null;
     }
 
-    const history = await this.loadHistory(db, input.codeId, input.scanEventId, now);
+    const observeOnly = opts.observeOnly === true;
+    const history = await this.loadHistory(db, input.codeId, input.scanEventId, now, !observeOnly);
     const records: ScanRecord[] = history.map((r) => ({
       id: r.id,
       at: r.occurred_at,
@@ -283,6 +310,7 @@ export class AnomalyService {
     });
 
     const out = findings.map((f) => toFinding(f, input.productId, input.codeId));
+    if (observeOnly) return { riskScore, findings: out };
     for (let i = 0; i < findings.length; i++) {
       if (findings[i].scanIds.includes(input.scanEventId)) {
         await this.recordFinding({ ...out[i], details: { ...out[i].details, scanEventId: input.scanEventId } }, db);
@@ -295,10 +323,25 @@ export class AnomalyService {
    * Upsert a finding: a new OPEN anomaly, or `occurrences + 1` on the open
    * (or acknowledged) one of the same product and type. The stored risk score
    * keeps its maximum; details and code follow the latest occurrence.
+   * `oncePerUtcDay`: see RecordFindingOptions.
    */
-  async recordFinding(f: AnomalyFinding, trx?: Db): Promise<void> {
+  async recordFinding(f: AnomalyFinding, trx?: Db, opts: RecordFindingOptions = {}): Promise<void> {
     const v = validateFinding(f);
     const db = trx ?? this.db;
+    let dayStart: Date | undefined;
+    if (opts.oncePerUtcDay === true) {
+      if (v.productId === null) throw new TypeError('recordFinding: oncePerUtcDay needs a productId');
+      dayStart = new Date(Date.UTC(v.at.getUTCFullYear(), v.at.getUTCMonth(), v.at.getUTCDate()));
+      const seen = await db
+        .selectFrom('anomalies')
+        .select('id')
+        .where('product_id', '=', v.productId)
+        .where('type', '=', v.type)
+        .where('last_seen_at', '>=', dayStart)
+        .limit(1)
+        .executeTakeFirst();
+      if (seen) return;
+    }
     const values = {
       product_id: v.productId,
       code_id: v.codeId,
@@ -314,8 +357,8 @@ export class AnomalyService {
       await db
         .insertInto('anomalies')
         .values(values)
-        .onConflict((oc) =>
-          oc
+        .onConflict((oc) => {
+          const update = oc
             .columns(['product_id', 'type'])
             .where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])
             .doUpdateSet({
@@ -324,8 +367,11 @@ export class AnomalyService {
               risk_score: sql<number>`GREATEST(anomalies.risk_score, excluded.risk_score)`,
               details: sql<string>`excluded.details`,
               code_id: sql<string | null>`COALESCE(excluded.code_id, anomalies.code_id)`,
-            }),
-        )
+            });
+          // Once a day, even against a concurrent scan that passed the check above: the row it
+          // created (or updated) today makes this update a no-op.
+          return dayStart ? update.where('anomalies.last_seen_at', '<', dayStart) : update;
+        })
         .execute();
       return;
     }
@@ -391,7 +437,7 @@ export class AnomalyService {
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
-    return makePage(found.map((r) => toRecord(r, r.canonical_id)), Number(total), page);
+    return makePage(await this.withActors(found.map((r) => toRecord(r, r.canonical_id))), Number(total), page);
   }
 
   /** OPEN findings by severity, the badge count (OPEN HIGH + CRITICAL) and the known types. */
@@ -486,7 +532,7 @@ export class AnomalyService {
       .where('a.id', '=', id)
       .executeTakeFirst();
     if (!row) throw notFound('Anomaly', 'ANOMALY_NOT_FOUND');
-    return toRecord(row, row.canonical_id);
+    return (await this.withActors([toRecord(row, row.canonical_id)]))[0];
   }
 
   /** Admin triage (PATCH /api/admin/anomalies/:id). RESOLVED / DISMISSED record who and when; OPEN reopens. */
@@ -535,21 +581,45 @@ export class AnomalyService {
 
   // ── Internals ────────────────────────────────────────────────────────────
 
-  private async loadHistory(db: Db, codeId: string, scanEventId: string, now: Date) {
+  /**
+   * Who triaged each finding last: the newest `anomaly.update` audit entry by an admin, per
+   * anomaly (served by the audit_logs (target_type, target_id) index), named by its email.
+   */
+  private async withActors(records: AnomalyRecord[]): Promise<AnomalyRecord[]> {
+    if (records.length === 0) return records;
+    const latest = await this.db
+      .selectFrom('audit_logs')
+      .select(['target_id', 'actor_id'])
+      .distinctOn('target_id')
+      .where('target_type', '=', 'anomaly')
+      .where('target_id', 'in', records.map((r) => r.id))
+      .where('action', '=', 'anomaly.update')
+      .where('actor_type', '=', 'admin')
+      .orderBy('target_id')
+      .orderBy('id', 'desc')
+      .execute();
+    const actorOf = new Map(latest.map((r) => [r.target_id, r.actor_id]));
+    const emails = await adminEmailsById(this.db, actorOf.values());
+    return records.map((r) => {
+      const actorId = actorOf.get(r.id);
+      return { ...r, actorEmail: actorId ? (emails.get(actorId.toLowerCase()) ?? null) : null };
+    });
+  }
+
+  /** The code's scans the rules look at; ADMIN_TEST ones never, the scan being verified always when `includeCurrent`. */
+  private async loadHistory(db: Db, codeId: string, scanEventId: string, now: Date, includeCurrent: boolean) {
     const since = new Date(now.getTime() - horizonMs(this.config));
     const cols = ['id', 'occurred_at', 'device_hash', 'session_hash', 'ip_hash', 'account_id', 'country', 'lat', 'lon'] as const;
-    const rows = await db
+    let q = db
       .selectFrom('scan_events')
       .select(cols)
       .where('code_id', '=', codeId)
       .where('event_type', '!=', 'ADMIN_TEST')
       .where('occurred_at', '>=', since)
-      .where('occurred_at', '<=', now)
-      .orderBy('occurred_at', 'desc')
-      .orderBy('id', 'desc')
-      .limit(this.historyLimit)
-      .execute();
-    if (!rows.some((r) => r.id === scanEventId)) {
+      .where('occurred_at', '<=', now);
+    if (!includeCurrent) q = q.where('id', '!=', scanEventId);
+    const rows = await q.orderBy('occurred_at', 'desc').orderBy('id', 'desc').limit(this.historyLimit).execute();
+    if (includeCurrent && !rows.some((r) => r.id === scanEventId)) {
       // Beyond the limit or stamped in the future by a skewed clock: the current scan always takes part.
       const current = await db.selectFrom('scan_events').select(cols).where('id', '=', scanEventId).executeTakeFirst();
       if (current) rows.push({ ...current, occurred_at: current.occurred_at.getTime() > now.getTime() ? now : current.occurred_at });
@@ -602,6 +672,7 @@ function toRecord(r: AnomalyRow, canonicalId: string | null): AnomalyRecord {
     resolvedBy: r.resolved_by,
     resolvedAt: r.resolved_at,
     resolutionNote: r.resolution_note,
+    actorEmail: null,
   };
 }
 

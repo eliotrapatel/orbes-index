@@ -1,9 +1,10 @@
 /**
  * Demo dataset: a small, believable ORBES maison: five categories, a
  * catalogue of models, 41 products across the lifecycle, eight customer
- * accounts, warranties, service records, transfers, incidents and scan
- * histories, with anomalies that came out of real anomaly scoring and two
- * customers' reports on scans that were not authentic (open cases).
+ * accounts, the points of sale where the pieces were sold, warranties,
+ * service records, transfers, incidents and scan histories, with anomalies
+ * that came out of real anomaly scoring and two customers' reports on scans
+ * that were not authentic (open cases).
  *
  * Everything goes through the real services (issuance, warranty, ownership,
  * lifecycle, verification, anomaly): there are no hand-written rows, so
@@ -31,6 +32,9 @@
  *   O26-J-00193  ECLIPSE PENDANT reported stolen, then scanned by a stranger:
  *                SUSPICIOUS ACTIVITY and an OPEN anomaly; the stranger says
  *                where it was offered, an OPEN case
+ *   O26-L-00018  APOGEE BELT in stock in Milan (ISSUED), its code scanned in
+ *                Lyon by a stranger: AUTHENTIC, and an OPEN UNSOLD PIECE
+ *                SCANNED finding (S-07)
  *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
@@ -167,6 +171,16 @@ const BOUTIQUES = {
 } as const satisfies Record<string, { retailer: string; place: PlaceKey }>;
 type BoutiqueKey = keyof typeof BOUTIQUES;
 
+/** The register of points of sale (A-08): one per boutique, the online shop once (its country is the buyer's). */
+const POINTS_OF_SALE: readonly { name: string; city: string | null; country: string | null }[] = [
+  { name: BOUTIQUES.PARIS.retailer, city: 'Paris', country: 'FR' },
+  { name: BOUTIQUES.LONDON.retailer, city: 'London', country: 'GB' },
+  { name: BOUTIQUES.MILAN.retailer, city: 'Milan', country: 'IT' },
+  { name: BOUTIQUES.TOKYO.retailer, city: 'Tokyo', country: 'JP' },
+  { name: BOUTIQUES.DUBAI.retailer, city: 'Dubai', country: 'AE' },
+  { name: BOUTIQUES.ONLINE_DE.retailer, city: null, country: null },
+];
+
 const ATELIER = 'ORBES ATELIER — PARIS';
 
 export interface DemoAccount {
@@ -294,8 +308,12 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'B2604-MNL',
     issuedAt: '2026-04-08T09:10',
     expect: 'AUTHENTIC',
-    scenario: 'In stock in Paris (ISSUED): authentic, not sold.',
-    story: (s, t) => s.scan(t.ago(12, 2), { boutique: 'PARIS' }, 'PARIS', 'AUTHENTIC'),
+    scenario:
+      'In stock in Paris (ISSUED): authentic, not sold. Checked by the boutique on a phone outside the console, so the scan raised UNSOLD PIECE SCANNED; dismissed with a note.',
+    story: (s, t) => {
+      s.scan(t.ago(12, 2), { boutique: 'PARIS' }, 'PARIS', 'AUTHENTIC');
+      s.triage(t.ago(11, 5), 'UNSOLD_PIECE_SCAN', 'DISMISSED', 'Stock check by the Paris boutique on a phone that was not signed in to the console.');
+    },
   },
   {
     productId: 'O26-J-00187',
@@ -600,8 +618,8 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'L2602-APG',
     issuedAt: '2026-02-16T08:30',
     expect: 'AUTHENTIC',
-    scenario: 'In stock in Milan (ISSUED), checked yesterday.',
-    story: (s, t) => s.scan(t.ago(0, 20), { boutique: 'MILAN' }, 'MILAN', 'AUTHENTIC'),
+    scenario: 'In stock in Milan (ISSUED), never sold, yet its code was scanned in Lyon yesterday, outside the maison: AUTHENTIC all the same, and an open UNSOLD PIECE SCANNED finding.',
+    story: (s, t) => s.scan(t.ago(0, 20), { stranger: 5 }, 'LYON', 'AUTHENTIC'),
   },
   {
     productId: 'O26-L-00019',
@@ -868,6 +886,8 @@ interface World {
   pepper: string;
   password: string;
   catalogue: CatalogueIds;
+  /** Point-of-sale name → retailers.id. */
+  retailers: Map<string, string>;
   products: Map<string, ProductState>;
   accounts: Map<AccountKey, string>;
   /** One-time secrets between two steps: registration tokens and transfer codes. */
@@ -923,6 +943,7 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     pepper: ctx.config.ipHashPepper,
     password,
     catalogue: await loadCatalogueIds(ctx.db),
+    retailers: await ensureRetailers(ctx),
     products: new Map(),
     accounts: new Map(),
     pending: new Map(),
@@ -1197,11 +1218,18 @@ async function issue(w: World, p: ProductDef): Promise<void> {
 
 async function activate(w: World, productId: string, when: When, boutique: BoutiqueKey): Promise<void> {
   const b = BOUTIQUES[boutique];
-  await w.ctx.services.warranty.activate(
-    productId,
-    { purchaseDate: utcDate(at(when)), retailer: b.retailer, country: PLACES[b.place].country },
-    DEMO_SEED_ACTOR,
-  );
+  const retailerId = w.retailers.get(b.retailer);
+  if (!retailerId) throw new DemoSeedError(`no point of sale ${b.retailer}`);
+  await w.ctx.services.warranty.activate(productId, { purchaseDate: utcDate(at(when)), retailerId, country: PLACES[b.place].country }, DEMO_SEED_ACTOR);
+}
+
+/** The register of points of sale, as the console's Points of sale page keeps it (A-08). */
+async function ensureRetailers(ctx: AppContext): Promise<Map<string, string>> {
+  const existing = new Map((await ctx.services.retailers.list()).map((r) => [r.name, r.id]));
+  for (const p of POINTS_OF_SALE) {
+    if (!existing.has(p.name)) existing.set(p.name, (await ctx.services.retailers.create(p, DEMO_SEED_ACTOR)).id);
+  }
+  return existing;
 }
 
 async function scan(w: World, productId: string, who: Who, placeKey: PlaceKey, expect: VerificationState, oldIssue?: number): Promise<VerifyOutcome> {

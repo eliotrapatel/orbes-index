@@ -39,8 +39,16 @@ export type CodeStatus = (typeof CODE_STATUSES)[number];
 export const ACCOUNT_STATUSES = ['ACTIVE', 'LOCKED', 'DELETED'] as const;
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
-export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR'] as const;
+/** RETAIL (migration 0008): a seller's account, ranked under AUDITOR, limited to the sale mode (A-08). */
+export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+/**
+ * The roles an ADMIN may give from the console (create a staff account, change a role). ADMIN
+ * itself is granted from the shell only (scripts/admin.ts), where the second factor is enrolled
+ * out of band (SECURITY-MODEL §3.3).
+ */
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL'] as const satisfies readonly AdminRole[];
+export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const SESSION_SUBJECT_TYPES = ['account', 'admin'] as const;
 export type SessionSubjectType = (typeof SESSION_SUBJECT_TYPES)[number];
@@ -57,7 +65,8 @@ export type ServiceType = (typeof SERVICE_TYPES)[number];
 export const SERVICE_STATUSES = ['OPEN', 'COMPLETED', 'CANCELLED'] as const;
 export type ServiceStatus = (typeof SERVICE_STATUSES)[number];
 
-export const SCAN_TOKEN_PURPOSES = ['FIRST_REGISTRATION'] as const;
+/** SALE_ACTIVATION (migration 0008): the token of a sale lookup, used up by the warranty activation it allows. */
+export const SCAN_TOKEN_PURPOSES = ['FIRST_REGISTRATION', 'SALE_ACTIVATION'] as const;
 export type ScanTokenPurpose = (typeof SCAN_TOKEN_PURPOSES)[number];
 
 export const SCAN_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER', 'ADMIN_TEST'] as const;
@@ -272,6 +281,8 @@ export interface AdminUsersTable {
   failed_logins: WithDefault<number>;
   locked_until: TimestampNullable;
   disabled_at: TimestampNullable;
+  /** Migration 0006: a temporary password (set by an ADMIN) must be replaced before the console can be used. */
+  password_change_required: WithDefault<boolean>;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -312,11 +323,25 @@ export interface OwnershipTransfersTable {
   completed_at: TimestampNullable;
 }
 
+/** Points of sale (migration 0008), chosen from a list when a warranty starts; made inactive, never deleted. */
+export interface RetailersTable {
+  id: Generated<string>;
+  name: string;
+  city: string | null;
+  country: string | null;              // char(2)
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
 export interface WarrantiesTable {
   id: Generated<string>;
   product_id: string;
   purchase_date: DateNullable;
+  /** Free text (history and API callers); the name shown comes from retailer_id first. */
   retailer: string | null;
+  /** Migration 0008: the point of sale, from the register. */
+  retailer_id: string | null;
   country: string | null;
   start_date: DateNullable;
   duration_months: number;
@@ -359,6 +384,8 @@ export interface ScanEventsTable {
   device_hash: string | null;
   session_hash: string | null;
   account_id: string | null;
+  /** Migration 0008: the console user behind an ADMIN_TEST scan (a sale lookup, or /verify with a console session: S-07); null otherwise. */
+  admin_id: string | null;
   ip_hash: string | null;
   country: string | null;              // char(2)
   region: string | null;
@@ -503,6 +530,7 @@ export interface Database {
   sessions: SessionsTable;
   ownership: OwnershipTable;
   ownership_transfers: OwnershipTransfersTable;
+  retailers: RetailersTable;
   warranties: WarrantiesTable;
   service_records: ServiceRecordsTable;
   scan_tokens: ScanTokensTable;
@@ -551,6 +579,9 @@ export type OwnershipRow = Selectable<OwnershipTable>;
 export type NewOwnership = Insertable<OwnershipTable>;
 export type OwnershipTransferRow = Selectable<OwnershipTransfersTable>;
 export type NewOwnershipTransfer = Insertable<OwnershipTransfersTable>;
+export type RetailerRow = Selectable<RetailersTable>;
+export type NewRetailer = Insertable<RetailersTable>;
+export type RetailerUpdate = Updateable<RetailersTable>;
 export type WarrantyRow = Selectable<WarrantiesTable>;
 export type NewWarranty = Insertable<WarrantiesTable>;
 export type WarrantyUpdate = Updateable<WarrantiesTable>;

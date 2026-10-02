@@ -745,6 +745,217 @@ describe('step 9: anomaly scoring and the owner notice', () => {
   });
 });
 
+describe('S-07: public scans of a piece ORBES has not sold yet, and staff scans', () => {
+  let w: World;
+  let seller: string;
+  beforeAll(async () => {
+    w = await createWorld();
+    // A console user (the sale mode's seller); the request's console session is the route's business (test/api/unsold-scan.test.ts).
+    seller = (
+      await w.t.db
+        .insertInto('admin_users')
+        .values({ email: 'seller@orbes.test', email_normalized: 'seller@orbes.test', password_hash: 'scrypt$x', role: 'RETAIL' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+  });
+  afterAll(() => w.close());
+
+  const unsoldOf = async (r: { product: { id: string } }) => (await anomalies(w)).filter((a) => a.product_id === r.product.id && a.type === 'UNSOLD_PIECE_SCAN');
+  const findingsOf = async (r: { product: { id: string } }) => (await anomalies(w)).filter((a) => a.product_id === r.product.id);
+
+  it('an ISSUED piece scanned by the public: UNSOLD_PIECE_SCAN (MEDIUM, weight 0, with the country), and the customer sees AUTHENTIC as before', async () => {
+    const r = await issue(w);
+    const out = await verify(w, r.code.data, { deviceHash: 'stranger', ipHash: 'ip-stranger', geo: { country: 'IT' } });
+    expect(out.state).toBe('AUTHENTIC');
+    expect(out.title).toBe('AUTHENTIC');
+    expect(out.message).toBe('This ORBES identity was issued and signed by ORBES and is registered to an active piece.');
+    expect(out.notice).toBeUndefined();
+    expect(out.registration).toBeUndefined();
+    expect(out.warranty).toEqual({ status: 'NOT_STARTED' });
+    expect(out.ownership).toEqual({ registered: false, you: false });
+    expect(Object.keys(out).sort()).toEqual(['genome', 'message', 'ownership', 'product', 'scanId', 'state', 'title', 'verification', 'verifiedAt', 'warranty']);
+    expect(JSON.stringify(out)).not.toMatch(/UNSOLD|ANOMAL|[Aa]nomal|[Rr]isk|ISSUED/);
+
+    const [a, ...more] = await unsoldOf(r);
+    expect(more).toEqual([]);
+    expect(a).toMatchObject({
+      severity: 'MEDIUM',
+      risk_score: 0,
+      status: 'OPEN',
+      occurrences: 1,
+      code_id: r.code.id,
+      details: { country: 'IT', productStatus: 'ISSUED', scanEventId: out.scanId },
+    });
+    const ev = await authEvent(w, out.scanId);
+    expect(ev).toMatchObject({ state: 'AUTHENTIC', risk_score: 0, reasons: ['ANOMALY:UNSOLD_PIECE_SCAN'] });
+    expect(await scanEvent(w, out.scanId)).toMatchObject({ event_type: 'VERIFY', admin_id: null, device_hash: 'stranger', country: 'IT' });
+
+    // No country known: recorded all the same, the country null.
+    const b = await issue(w);
+    await verify(w, b.code.data, { deviceHash: 'somewhere' });
+    expect((await unsoldOf(b))[0].details).toMatchObject({ country: null, productStatus: 'ISSUED' });
+  });
+
+  it('a piece in a pre-sale service (ISSUED → SERVICED) is unsold too; an after-sale service is not', async () => {
+    const pre = await issue(w);
+    await w.warranty.openService(pre.product.productId, { type: 'CLEANING' }, admin);
+    const out = await verify(w, pre.code.data, { deviceHash: 'd', geo: { country: 'FR' } });
+    expect(out.state).toBe('AUTHENTIC');
+    expect((await unsoldOf(pre))[0]).toMatchObject({ details: { country: 'FR', productStatus: 'SERVICED', preSaleService: true } });
+
+    const after = await issueActivated(w);
+    await w.warranty.openService(after.product.productId, { type: 'CLEANING' }, admin);
+    expect((await verify(w, after.code.data, { deviceHash: 'd', geo: { country: 'FR' } })).state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    expect(await findingsOf(after)).toEqual([]);
+  });
+
+  it('a sold piece records none: ACTIVATED, then registered to its owner', async () => {
+    const r = await issueActivated(w);
+    const first = await verify(w, r.code.data, { deviceHash: 'buyer', geo: { country: 'FR' } });
+    expect(first.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    expect((await authEvent(w, first.scanId)).reasons).toEqual([]);
+    const owner = await createAccount(w);
+    await registerOwner(w, r, owner);
+    expect((await verify(w, r.code.data, { deviceHash: 'friend', geo: { country: 'FR' } })).state).toBe('AUTHENTIC_REGISTERED');
+    expect(await findingsOf(r)).toEqual([]);
+  });
+
+  it('once per piece and per UTC day: later scans that day add nothing, the next day counts once more', async () => {
+    const base = Date.parse('2026-06-10T08:00:00.000Z');
+    const r = await issue(w);
+    const reasons: string[][] = [];
+    for (const [i, at] of [base, base + 5 * HOUR, base + 15 * HOUR + 59 * MIN].entries()) {
+      w.clock.set(at);
+      const out = await verify(w, r.code.data, { deviceHash: `phone-${i}`, ipHash: `ip-${i}`, geo: { country: i === 0 ? 'FR' : 'BE' } });
+      expect(out.state).toBe('AUTHENTIC');
+      reasons.push((await authEvent(w, out.scanId)).reasons);
+    }
+    // Every such scan says so in its reasons; one finding, one occurrence, the first scan's details.
+    expect(reasons).toEqual([['ANOMALY:UNSOLD_PIECE_SCAN'], ['ANOMALY:UNSOLD_PIECE_SCAN'], ['ANOMALY:UNSOLD_PIECE_SCAN']]);
+    let [a, ...more] = await unsoldOf(r);
+    expect(more).toEqual([]);
+    expect(a).toMatchObject({ occurrences: 1, details: { country: 'FR' } });
+    expect(a.last_seen_at.getTime()).toBe(base);
+
+    w.clock.set(base + 16 * HOUR); // 00:00 UTC the next day
+    await verify(w, r.code.data, { deviceHash: 'phone-next-day', geo: { country: 'DE' } });
+    [a, ...more] = await unsoldOf(r);
+    expect(more).toEqual([]);
+    expect(a).toMatchObject({ occurrences: 2, details: { country: 'DE' } });
+    w.clock.set(Date.parse('2026-06-01T10:00:00.000Z'));
+  });
+
+  it('a staff scan (console session) records none and is ADMIN_TEST under its console user, without device, session or account', async () => {
+    const r = await issue(w);
+    const viewer = await createAccount(w);
+    const out = await verify(w, r.code.data, {
+      adminId: seller,
+      deviceHash: 'counter-tablet',
+      sessionHash: 'counter-session',
+      accountId: viewer,
+      ipHash: 'ip-boutique',
+      geo: { country: 'FR' },
+      userAgentFamily: 'Safari/iOS',
+    });
+    expect(out.state).toBe('AUTHENTIC');
+    expect(await scanEvent(w, out.scanId)).toMatchObject({
+      event_type: 'ADMIN_TEST',
+      admin_id: seller,
+      device_hash: null,
+      session_hash: null,
+      account_id: null,
+      ip_hash: 'ip-boutique',
+      country: 'FR',
+      user_agent_family: 'Safari/iOS',
+      result_state: 'AUTHENTIC',
+    });
+    expect((await authEvent(w, out.scanId)).reasons).toEqual([]);
+    expect(await findingsOf(r)).toEqual([]);
+
+    // The staff scan did not use up the day: the first public scan still records the finding.
+    await verify(w, r.code.data, { deviceHash: 'stranger', geo: { country: 'FR' } });
+    expect(await unsoldOf(r)).toHaveLength(1);
+
+    // An id that is not a uuid is no console user: a public scan.
+    const other = await issue(w);
+    const pub = await verify(w, other.code.data, { adminId: 'seller', deviceHash: 'x' });
+    expect(await scanEvent(w, pub.scanId)).toMatchObject({ event_type: 'VERIFY', admin_id: null, device_hash: 'x' });
+  });
+
+  it('a staff scan earns no registration token', async () => {
+    const r = await issueActivated(w, { withClaimSecret: true });
+    const out = await verify(w, r.code.data, { adminId: seller, geo: { country: 'FR' } });
+    // The state a buyer would see, without the token that would let the console user register the piece.
+    expect(out.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    expect(out.registration).toBeUndefined();
+    expect(await w.t.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', r.product.id).execute()).toEqual([]);
+    expect(await findingsOf(r)).toEqual([]);
+  });
+
+  it('a staff scan still records the code’s own findings (steps 6–7), marked staffScan, and never UNSOLD_PIECE_SCAN', async () => {
+    // An altered genome on a piece not sold yet: GENOME_MISMATCH as for any scan, and no unsold finding.
+    const r = await issue(w);
+    const glyphs = [...r.genome.glyphs].map((g, i) => (i < 3 ? (g + 1) % 16 : g));
+    const altered = await verify(w, { code: r.code.data, genome: { glyphs } }, { adminId: seller, geo: { country: 'FR' } });
+    expect(altered.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(altered.registration).toBeUndefined();
+    expect((await authEvent(w, altered.scanId)).reasons).toEqual(['GENOME_MISMATCH']);
+    expect(await scanEvent(w, altered.scanId)).toMatchObject({ event_type: 'ADMIN_TEST', admin_id: seller });
+    const [genome, ...others] = await findingsOf(r);
+    expect(others).toEqual([]);
+    expect(genome).toMatchObject({ type: 'GENOME_MISMATCH', severity: 'HIGH', status: 'OPEN', details: { staffScan: true } });
+
+    // Client Services checking a suspicious piece: a validly signed code ORBES never registered pages as for any scan.
+    const forged = await signedCode(w, { serial: 77_501 });
+    const unknown = await verify(w, forged, { adminId: seller, geo: { country: 'FR' } });
+    expect(unknown.state).toBe('UNKNOWN');
+    expect(await scanEvent(w, unknown.scanId)).toMatchObject({ event_type: 'ADMIN_TEST', admin_id: seller });
+    const packed = packIdentity({ year: 2026, categoryIndex: 1, serial: 77_501 });
+    const critical = (await anomalies(w)).filter((x) => x.type === 'VALID_SIGNATURE_UNREGISTERED' && x.details.packedIdentity === packed);
+    expect(critical).toHaveLength(1);
+    expect(critical[0]).toMatchObject({ severity: 'CRITICAL', risk_score: 100, product_id: null, details: { reason: 'PRODUCT_NOT_REGISTERED', staffScan: true } });
+
+    // A valid signature over a payload that differs from the registered code: CODE_MISMATCH, CRITICAL.
+    const s = await issue(w);
+    const nonce = unframeCodeData(fromBase64Url(s.code.data)).payloadBytes.slice(9, 13);
+    nonce[0] ^= 0xff;
+    const mismatch = await verify(w, await signedCode(w, { serial: s.product.serial, issue: 1, nonce }), { adminId: seller });
+    expect(mismatch.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(await findingsOf(s)).toEqual([expect.objectContaining({ type: 'CODE_MISMATCH', severity: 'CRITICAL', code_id: s.code.id, details: expect.objectContaining({ staffScan: true }) })]);
+
+    // A public scan's findings carry no such mark.
+    const p = await issue(w);
+    await verify(w, { code: p.code.data, genome: { glyphs: [...p.genome.glyphs].map((g, i) => (i < 3 ? (g + 1) % 16 : g)) } }, { deviceHash: 'stranger' });
+    const pub = (await findingsOf(p)).find((a) => a.type === 'GENOME_MISMATCH');
+    expect(pub?.details).not.toHaveProperty('staffScan');
+  });
+
+  it('a staff scan reads the public history: a customer’s state, without adding to the findings', async () => {
+    const base = Date.parse('2026-06-20T10:00:00.000Z');
+    const r = await issueActivated(w);
+    for (let i = 0; i < 21; i++) {
+      w.clock.set(base + i * MIN);
+      await verify(w, r.code.data, { deviceHash: `copy-${i}`, ipHash: `copy-ip-${i}`, geo: { country: 'FR' } });
+    }
+    const before = await findingsOf(r);
+    expect(before.map((a) => a.type).sort()).toEqual(['DEVICE_DIVERSITY', 'SCAN_VELOCITY']);
+    w.clock.set(base + 21 * MIN);
+    const staff = await verify(w, r.code.data, { adminId: seller, geo: { country: 'FR' } });
+    expect(staff.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(staff.registration).toBeUndefined();
+    expect(await findingsOf(r)).toEqual(before);
+    // Staff scans never count: a burst of them on a quiet piece stays quiet.
+    const quiet = await issueActivated(w);
+    for (let i = 0; i < 25; i++) {
+      w.clock.set(base + HOUR + i * MIN);
+      expect((await verify(w, quiet.code.data, { adminId: seller, ipHash: `staff-ip-${i}`, geo: { country: 'FR' } })).state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    }
+    expect(await findingsOf(quiet)).toEqual([]);
+    w.clock.set(Date.parse('2026-06-01T10:00:00.000Z'));
+  });
+});
+
 describe('step 11: authenticator policy', () => {
   let w: World;
   beforeAll(async () => {

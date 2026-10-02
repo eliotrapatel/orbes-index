@@ -158,7 +158,8 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     canReissue: can(role, 'reissueCode') && !NOT_PRINTABLE.has(status) && maxIssue < MAX_ISSUE,
     revocableCodeId: active && can(role, 'revokeCode') ? active.id : null,
     canDownload: can(role, 'download'),
-    canActivateWarranty: can(role, 'warranty') && WARRANTY_ACTIVATABLE.has(status) && !w?.startDate && !w?.voidedAt,
+    // Not during a pre-sale service (ISSUED → SERVICED, its return target ISSUED): the server refuses it until the service closes.
+    canActivateWarranty: can(role, 'warranty') && WARRANTY_ACTIVATABLE.has(status) && !(status === 'SERVICED' && d.lifecycle.returnTo === 'ISSUED') && !w?.startDate && !w?.voidedAt,
     canVoidWarranty: can(role, 'warranty') && !w?.voidedAt,
     canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt,
     canOpenService: can(role, 'service') && d.lifecycle.allowed.includes('SERVICED'),

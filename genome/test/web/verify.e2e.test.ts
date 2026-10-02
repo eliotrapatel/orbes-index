@@ -26,7 +26,7 @@ import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD } from '../../src/web/verify/copy.js';
+import { CLAIM_HELD, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
@@ -298,7 +298,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(ring.right).toBeLessThan(dots[1].left - 1);
     await page.keyboard.press('End');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
-    await textOf(page.locator('.ownership__status'), 'NOT YET REGISTERED');
+    // A piece ORBES has not sold yet says so (S-07): not yet delivered by ORBES or an authorised retailer.
+    await textOf(page.locator('.ownership__status'), 'NOT YET DELIVERED');
+    await textOf(page.locator('.ownership__text'), 'This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.');
 
     // Back returns to the landing screen.
     await page.goBack();
@@ -465,6 +467,34 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect((await srv.ctx.services.auth.login({ email, password: 'another new passphrase' }, {})).account.email).toBe(email);
     expect(problems).toEqual([]);
     await page.context().close();
+  }, 120_000);
+
+  it('scans as staff in a browser signed in to the console (S-07): no registration offered, the scan recorded under the console user', async () => {
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const creds = { email: `seller-${issued.product.productId.toLowerCase()}@orbes.test`, password: PASSWORD };
+    const seller = await srv.ctx.services.auth.createAdmin({ ...creds, role: 'RETAIL' }, SYSTEM_ACTOR);
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The console's sign-in, from this browser: its cookie (Path=/) now goes with every request of the origin.
+    const signedIn = await page.evaluate(
+      async (c) => (await fetch('/api/admin/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) })).status,
+      creds,
+    );
+    expect(signedIn).toBe(200);
+
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'staff.png', issued));
+    // The state a buyer would see, but no registration: the result opens on PRODUCT, and OWNERSHIP says why.
+    expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
+    await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    await textOf(page.locator('.ownership__status'), 'STAFF SCAN');
+    await textOf(page.locator('.ownership__text'), STAFF_SCAN_NOTE);
+    await countOf(page.locator('.ownership form, .ownership button'), 0);
+
+    const scan = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id', 'device_hash']).where('product_id', '=', issued.product.id).executeTakeFirstOrThrow();
+    expect(scan).toEqual({ event_type: 'ADMIN_TEST', admin_id: seller.id, device_hash: null });
+    expect(await srv.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', issued.product.id).execute()).toEqual([]);
+    expect(problems).toEqual([]);
   }, 120_000);
 
   it('lets the holder of the certificate card register from an UNUSUAL ACTIVITY result, with its claim code', async () => {
