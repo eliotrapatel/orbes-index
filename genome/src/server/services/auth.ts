@@ -161,7 +161,8 @@ const invalidCredentials = () => new DomainError('INVALID_CREDENTIALS', 401, 'In
 
 /**
  * A customer account LOCKED by ORBES Client Services (A-06, POST /api/admin/owners/:id/lock): refused after a
- * correct password (login) or recovery code (§10.8), and by a transfer begun before the lock took effect.
+ * correct password (login, also when the lock took effect during the password check) or recovery code (§10.8),
+ * and by a transfer begun before the lock took effect.
  */
 export const customerAccountLocked = () => new DomainError('ACCOUNT_LOCKED', 403, 'This account is locked. ORBES Client Services can assist you.');
 
@@ -263,6 +264,12 @@ export class AuthService {
 
     const rehash = needsRehash(account.password_hash) ? await hashSecret(password) : undefined;
     return inTransaction(this.db, async (tx) => {
+      // Read again under the row lock: a lock by Client Services that committed during the scrypt check above has
+      // already ended the account's sessions, so the session opened here would outlive it (and work after an unlock).
+      // FOR SHARE: a lock still in progress is waited for, and one that starts now waits for this session, then ends it.
+      const fresh = await tx.selectFrom('accounts').select('status').where('id', '=', account.id).forShare().executeTakeFirst();
+      if (fresh?.status === 'LOCKED') throw customerAccountLocked();
+      if (fresh?.status !== 'ACTIVE') throw invalidCredentials();
       if (rehash) await tx.updateTable('accounts').set({ password_hash: rehash, updated_at: this.clock() }).where('id', '=', account.id).execute();
       if (account.failed_logins !== 0 || account.failed_logins_since !== null) {
         await tx.updateTable('accounts').set({ failed_logins: 0, failed_logins_since: null }).where('id', '=', account.id).execute();

@@ -12,14 +12,16 @@
  *            owns and owned (`ownership`), its transfers in progress and its 20
  *            latest scans (`scan_events.account_id`).
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
- *            transaction with every session of the account revoked and its
- *            pending transfers cancelled. Sign-in and a recovery code are then
- *            refused (403 ACCOUNT_LOCKED) until it is unlocked. Audited
+ *            transaction with every session of the account revoked, its
+ *            pending transfers cancelled and its open recovery code revoked.
+ *            Sign-in is then refused (403 ACCOUNT_LOCKED) until it is
+ *            unlocked, and a recovery code cannot be issued. Audited
  *            `account.lock`.
  *   unlock   POST /api/admin/owners/:id/unlock (ADMIN): back to ACTIVE. Audited
  *            `account.unlock`.
  *   export   GET  /api/admin/owners/:id/export (ADMIN): everything the registry
- *            holds about the account, for a request under the right of access.
+ *            holds about the account, for a request under the right of access,
+ *            including every audit entry that names it, as target or as actor.
  *            Audited `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -32,7 +34,7 @@
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -162,6 +164,8 @@ export interface LockOutcome {
   sessionsRevoked: number;
   /** Ids of the pending transfers the lock cancelled. */
   transfersCancelled: string[];
+  /** The open recovery code the lock revoked (0 or 1). */
+  recoveryCodesRevoked: number;
 }
 
 /** The answer to a request under the right of access: what the registry holds about one account. */
@@ -191,13 +195,30 @@ export interface AccountExport {
     region: string | null;
     lat: number | null;
     lon: number | null;
+    /** The browser family of the scan, e.g. `Safari/iOS` (never the whole user agent). */
+    userAgentFamily: string | null;
+    /** What the app measured while decoding (corrections, module size, decode time, camera or upload), as stored. */
+    clientMetrics: JsonObject | null;
     /** The customer's answer to WHERE DID YOU SEE OR BUY THIS PIECE? on that scan (C-02). */
     report: { channel: ReportChannel; place: string | null; note: string | null; createdAt: Date } | null;
   }[];
   sessions: { createdAt: Date; lastSeenAt: Date; expiresAt: Date; userAgent: string | null }[];
   recoveryCodes: { createdAt: Date; expiresAt: Date; usedAt: Date | null; revokedAt: Date | null }[];
-  /** The audit entries about the account (sign-ins, password changes, recovery, lock), oldest first. */
-  activity: { occurredAt: Date; action: string; by: ActorType }[];
+  /**
+   * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
+   * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
+   */
+  activity: {
+    occurredAt: Date;
+    action: string;
+    by: ActorType;
+    /** The piece the entry was about, by its canonical id. */
+    productId: string | null;
+    /** The scan the entry was about, by its REF (never its whole id). */
+    reference: string | null;
+    /** The status the entry gave the piece: LOST or STOLEN for a declared incident, the new one for a change of status. */
+    status: string | null;
+  }[];
   /** Lists cut at EXPORT_LIST_LIMIT entries (empty when complete). */
   truncated: ('scans' | 'activity')[];
   /** What the registry holds but cannot give back in a readable form. */
@@ -206,7 +227,7 @@ export interface AccountExport {
 
 export const EXPORT_NOT_INCLUDED: readonly string[] = Object.freeze([
   'The password and the recovery codes, stored only as one-way scrypt hashes.',
-  'The IP address and device cookie of each scan and session: never stored; only keyed one-way pseudonyms (HMAC) are kept, which identify nothing on their own.',
+  'The IP address and device cookie behind each scan, session and audit entry: never stored; only keyed one-way pseudonyms (HMAC) are kept, which identify nothing on their own.',
 ]);
 
 export interface OwnerServiceDeps {
@@ -309,8 +330,9 @@ export class OwnerService {
   // ── Lock ─────────────────────────────────────────────────────────────────
 
   /**
-   * Lock an ACTIVE account (an ADMIN of ORBES Client Services): every session ends and the pending transfers
-   * it offered are cancelled, in one transaction. 409 ACCOUNT_ALREADY_LOCKED, ACCOUNT_NOT_ACTIVE (deleted).
+   * Lock an ACTIVE account (an ADMIN of ORBES Client Services): every session ends, the pending transfers
+   * it offered are cancelled and its open recovery code is revoked, in one transaction.
+   * 409 ACCOUNT_ALREADY_LOCKED, ACCOUNT_NOT_ACTIVE (deleted).
    */
   async lock(accountId: string, actor: Actor): Promise<LockOutcome> {
     assertStaff(actor, 'lock an account');
@@ -324,11 +346,29 @@ export class OwnerService {
       await tx.updateTable('accounts').set({ status: 'LOCKED', updated_at: now }).where('id', '=', account.id).execute();
       const sessionsRevoked = await this.sessions.revokeAllForSubject('account', account.id, {}, tx);
       const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
+      // A code issued before the lock may be the takeover itself (a fooled identity check, THREAT-MODEL U):
+      // it does not outlive the lock. After the unlock, Client Services issues a new one if the client needs it.
+      const revoked = await tx
+        .updateTable('account_recovery_codes')
+        .set({ revoked_at: now })
+        .where('account_id', '=', account.id)
+        .where('used_at', 'is', null)
+        .where('revoked_at', 'is', null)
+        .where('expires_at', '>', now)
+        .returning('id')
+        .execute();
+      const recoveryCodesRevoked = revoked.length;
       await this.audit.record(
-        { actor, action: 'account.lock', targetType: 'account', targetId: account.id, details: { sessionsRevoked, transfersCancelled: transfersCancelled.length } },
+        {
+          actor,
+          action: 'account.lock',
+          targetType: 'account',
+          targetId: account.id,
+          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked },
+        },
         tx,
       );
-      return { sessionsRevoked, transfersCancelled };
+      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked };
     });
   }
 
@@ -377,6 +417,8 @@ export class OwnerService {
           's.region',
           's.lat',
           's.lon',
+          's.user_agent_family',
+          's.client_metrics',
           'p.product_id',
           'r.channel',
           'r.place',
@@ -401,11 +443,29 @@ export class OwnerService {
         .where('account_id', '=', a.id)
         .orderBy('created_at')
         .execute();
+      // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
+      // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
+      // accepted for a rare ADMIN request (DATABASE §5.21).
       const activity = await tx
         .selectFrom('audit_logs')
-        .select(['occurred_at', 'action', 'actor_type'])
-        .where('target_type', '=', 'account')
-        .where('target_id', '=', a.id)
+        .select([
+          'occurred_at',
+          'action',
+          'actor_type',
+          'target_type',
+          'target_id',
+          // The status an entry gave a piece; nothing else of `details`, which can name staff or other accounts.
+          sql<string | null>`CASE
+            WHEN target_type = 'product' AND action IN ('product.transition', 'product.reinstate') THEN details->>'to'
+            WHEN target_type = 'product' AND action = 'ownership.incident' THEN details->>'type'
+          END`.as('status'),
+        ])
+        .where((eb) =>
+          eb.or([
+            eb.and([eb('target_type', '=', 'account'), eb('target_id', '=', a.id)]),
+            eb.and([eb('actor_type', '=', 'account'), eb('actor_id', '=', a.id)]),
+          ]),
+        )
         .orderBy('id')
         .limit(EXPORT_LIST_LIMIT + 1)
         .execute();
@@ -447,11 +507,21 @@ export class OwnerService {
           region: s.region,
           lat: s.lat,
           lon: s.lon,
+          userAgentFamily: s.user_agent_family,
+          clientMetrics: s.client_metrics ?? null,
           report: s.channel ? { channel: s.channel, place: s.place ?? null, note: s.note ?? null, createdAt: s.report_created_at! } : null,
         })),
         sessions: sessions.map((s) => ({ createdAt: s.created_at, lastSeenAt: s.last_seen_at, expiresAt: s.expires_at, userAgent: s.user_agent })),
         recoveryCodes: codes.map((c) => ({ createdAt: c.created_at, expiresAt: c.expires_at, usedAt: c.used_at, revokedAt: c.revoked_at })),
-        activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({ occurredAt: e.occurred_at, action: e.action, by: e.actor_type })),
+        activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
+          occurredAt: e.occurred_at,
+          action: e.action,
+          by: e.actor_type,
+          productId: e.target_type === 'product' ? e.target_id : null,
+          // A scan by its REF: its whole id is never handed over.
+          reference: e.target_type === 'scan' && e.target_id !== null ? scanReference(e.target_id) : null,
+          status: e.status ?? null,
+        })),
         truncated,
         notIncluded: [...EXPORT_NOT_INCLUDED],
       };

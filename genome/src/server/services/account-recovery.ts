@@ -28,7 +28,9 @@
  *            paused for 72 hours (`accounts.transfers_frozen_until`, 409
  *            TRANSFERS_PAUSED) against a takeover by social engineering, and
  *            the code marked used. Audited `account.recover`. A LOCKED
- *            account is refused (403 ACCOUNT_LOCKED, the code is kept).
+ *            account is refused (403 ACCOUNT_LOCKED, the code is not used);
+ *            the lock itself (A-06, services/owners.ts) revokes the open
+ *            code, so a code checked just before a lock fails after it.
  *
  * Lock order: the account row, then the products of its pending transfers
  * (OwnershipService.cancelPendingTransfersFrom), as in initiateTransfer.
@@ -229,7 +231,7 @@ export class AccountRecoveryService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const fresh = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', account.id).forUpdate().executeTakeFirstOrThrow();
-      // Locked by staff: refused like a login with the right password; the code stays for when it is unlocked.
+      // Locked by staff since the code was checked: refused like a login with the right password. The lock revoked the code.
       if (fresh.status === 'LOCKED') throw customerAccountLocked();
       if (fresh.status !== 'ACTIVE') throw recoveryCodeInvalid();
       // Used by a concurrent attempt, or replaced by a newer code, since it was checked.

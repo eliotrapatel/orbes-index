@@ -2,8 +2,9 @@
  * The owner's sheet of ORBES Client Services (A-06): search by exact email
  * and by the REF printed under a result, the sheet (pieces, transfers in
  * progress, 20 latest scans), lock and unlock (ADMIN: sessions end, pending
- * transfers cancelled, sign-in refused), the right-of-access export (ADMIN,
- * no-store, audited), emails masked for an AUDITOR everywhere, and the
+ * transfers cancelled, the open recovery code revoked, sign-in refused), the
+ * right-of-access export (ADMIN, no-store, audited, every audit entry that
+ * names the account), emails masked for an AUDITOR everywhere, and the
  * recovery code of C-04 refused once expired or used.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -157,7 +158,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
   });
 
   describe('POST /api/admin/owners/:id/lock and /unlock', () => {
-    it('locks: every session ends, pending transfers are cancelled, sign-in and a recovery code are refused; unlocking restores sign-in', async () => {
+    it('locks: every session ends, pending transfers are cancelled, the open recovery code is revoked, sign-in is refused; unlocking restores sign-in', async () => {
       const cs = await adminClient(h, 'ADMIN');
       const owner = await accountClient(h);
       const id = await accountIdOf(owner.email);
@@ -179,7 +180,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const locked = await cs.post(`/api/admin/owners/${id}/lock`);
       expect(locked.statusCode).toBe(200);
-      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1 });
+      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1 });
 
       // The sessions have ended; the right password is refused with the lock, a wrong one as ever.
       expect((await owner.client.get('/api/v1/account/me')).statusCode).toBe(401);
@@ -191,10 +192,12 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const wrong = await h.client().post('/api/v1/account/login', { email: owner.email, password: 'not the password at all' });
       expect(wrong.statusCode).toBe(401);
       expect(errorOf(wrong).code).toBe('INVALID_CREDENTIALS');
-      // The open recovery code does not get round the lock.
+      // The recovery code issued before the lock was revoked with it: it fails like a wrong one, and reveals no lock.
       const recover = await h.client().post('/api/v1/account/recover', { email: owner.email, recoveryCode: code, newPassword: NEW_PASSWORD });
-      expect(recover.statusCode).toBe(403);
-      expect(errorOf(recover).code).toBe('ACCOUNT_LOCKED');
+      expect(recover.statusCode).toBe(400);
+      expect(errorOf(recover).code).toBe('RECOVERY_CODE_INVALID');
+      const codeRow = await h.ctx.db.selectFrom('account_recovery_codes').select(['used_at', 'revoked_at']).where('account_id', '=', id).executeTakeFirstOrThrow();
+      expect(codeRow).toEqual({ used_at: null, revoked_at: h.clock.now() });
       // The transfer code handed out before the lock no longer completes.
       const taken = await (await accountClient(h)).client.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode });
       expect(taken.statusCode).toBe(410);
@@ -206,11 +209,13 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const issue2 = await cs.post(`/api/admin/owners/${id}/recovery-code`);
       expect(issue2.statusCode).toBe(409);
       expect(errorOf(issue2).code).toBe('ACCOUNT_NOT_ACTIVE');
-      expect((await list(cs, `?email=${encodeURIComponent(owner.email)}`)).items[0]).toMatchObject({ status: 'LOCKED', products: 1 });
+      expect((await list(cs, `?email=${encodeURIComponent(owner.email)}`)).items[0]).toMatchObject({ status: 'LOCKED', products: 1, recoveryCodeExpiresAt: null });
 
       // The audit log names the account, the counts and the admin; never the email.
       const lockEntry = (await h.ctx.audit.list({ action: 'account.lock', targetId: id })).items;
-      expect(lockEntry).toEqual([expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1 } })]);
+      expect(lockEntry).toEqual([
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1 } }),
+      ]);
       expect(JSON.stringify(lockEntry)).not.toContain(owner.email);
       expect((await h.ctx.audit.list({ action: 'ownership.transfer.cancel', targetId: productId })).items[0].details).toMatchObject({ reason: 'account_locked' });
 
@@ -221,6 +226,10 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(unlocked.statusCode).toBe(200);
       expect(safeJson(unlocked)).toEqual({ status: 'ACTIVE' });
       expect((await h.client().post('/api/v1/account/login', { email: owner.email, password: PASSWORD })).statusCode).toBe(200);
+      // The revoked code does not come back with the unlock.
+      const afterUnlock = await h.client().post('/api/v1/account/recover', { email: owner.email, recoveryCode: code, newPassword: NEW_PASSWORD });
+      expect(afterUnlock.statusCode).toBe(400);
+      expect(errorOf(afterUnlock).code).toBe('RECOVERY_CODE_INVALID');
       const twice = await cs.post(`/api/admin/owners/${id}/unlock`);
       expect(twice.statusCode).toBe(409);
       expect(errorOf(twice).code).toBe('ACCOUNT_NOT_LOCKED');
@@ -291,9 +300,17 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const owner = await accountClient(h);
       const id = await accountIdOf(owner.email);
       const { productId } = await ownedPiece(owner.client);
-      // A transfer offered then cancelled, a report on a scan that was not authentic, a recovery code.
+      // A transfer offered then cancelled, a claim code mistyped on another piece, the first piece declared STOLEN,
+      // a report on a scan that was not authentic, a recovery code.
       expect((await owner.client.post('/api/v1/ownership/transfers', { productId })).statusCode).toBe(201);
       expect((await owner.client.post('/api/v1/ownership/transfers/cancel', { productId })).statusCode).toBe(200);
+      const claimed = await issue(h.ctx, catalog, { withClaimSecret: true });
+      await h.ctx.services.warranty.activate(claimed.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+      h.clock.advance(1_000);
+      const offered = safeJson(await owner.client.post('/api/v1/verify', { code: claimed.code.data })) as { registration: { token: string } };
+      const mistyped = await owner.client.post('/api/v1/ownership/register', { registrationToken: offered.registration.token, claimCode: 'AAAA-AAAA-AAAA' });
+      expect(errorOf(mistyped).code).toBe('CLAIM_CODE_INVALID');
+      expect((await owner.client.post('/api/v1/ownership/incidents', { productId, type: 'STOLEN' })).statusCode).toBe(201);
       h.clock.advance(1_000);
       const bad = safeJson(await owner.client.post('/api/v1/verify', { code: 'not-a-code' })) as { scanId: string };
       expect((await owner.client.post('/api/v1/reports', { scanId: bad.scanId, channel: 'ONLINE', where: 'a marketplace', note: 'Too cheap.' })).statusCode).toBe(201);
@@ -313,26 +330,46 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const x = safeJson(res) as Record<string, any>;
       expect(x).toMatchObject({ format: 'orbes.account-export', version: 1, truncated: [] });
       expect(x.account).toMatchObject({ id, email: owner.email, displayName: 'Owner', status: 'ACTIVE', transfersPausedUntil: null });
-      expect(x.pieces).toEqual([expect.objectContaining({ productId, until: null, acquiredVia: 'FIRST_REGISTRATION' })]);
+      expect(x.pieces).toEqual([expect.objectContaining({ productId, until: null, acquiredVia: 'FIRST_REGISTRATION', status: 'STOLEN' })]);
       expect(x.transfers).toEqual([expect.objectContaining({ productId, direction: 'OUT', status: 'CANCELLED' })]);
-      expect(x.scans.map((s: any) => s.state)).toEqual(['AUTHENTIC_FIRST_REGISTRATION', 'MALFORMED_CODE']);
-      expect(x.scans[1]).toMatchObject({ reference: bad.scanId.slice(0, 8).toUpperCase(), report: { channel: 'ONLINE', place: 'a marketplace', note: 'Too cheap.' } });
+      expect(x.scans.map((s: any) => s.state)).toEqual(['AUTHENTIC_FIRST_REGISTRATION', 'AUTHENTIC_FIRST_REGISTRATION', 'MALFORMED_CODE']);
+      const ref = bad.scanId.slice(0, 8).toUpperCase();
+      expect(x.scans[2]).toMatchObject({ reference: ref, report: { channel: 'ONLINE', place: 'a marketplace', note: 'Too cheap.' } });
+      // Each scan with its browser family and what the app measured (none here: the test client sends no metrics).
+      const family = (await h.ctx.db.selectFrom('scan_events').select('user_agent_family').where('id', '=', bad.scanId).executeTakeFirstOrThrow()).user_agent_family;
+      expect(family).toEqual(expect.any(String));
+      expect(x.scans[2]).toMatchObject({ userAgentFamily: family, clientMetrics: null });
       expect(x.sessions).toEqual([expect.objectContaining({ userAgent: expect.stringContaining('iPhone') })]);
       expect(x.recoveryCodes).toEqual([expect.objectContaining({ usedAt: null, revokedAt: null })]);
-      expect(x.activity.map((e: any) => e.action)).toEqual(['account.register', 'account.recovery_code.issue']);
-      expect(x.activity.map((e: any) => e.by)).toEqual(['account', 'admin']);
+      // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
+      // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
+      expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
+        ['account.register', 'account', null, null, null],
+        ['product.transition', 'account', productId, null, 'REGISTERED'],
+        ['ownership.register', 'account', productId, null, null],
+        ['ownership.transfer.initiate', 'account', productId, null, null],
+        ['ownership.transfer.cancel', 'account', productId, null, null],
+        ['ownership.claim_failed', 'account', claimed.product.productId, null, null],
+        ['product.transition', 'account', productId, null, 'STOLEN'],
+        ['ownership.incident', 'account', productId, null, 'STOLEN'],
+        ['scan.report', 'account', null, ref, null],
+        ['account.recovery_code.issue', 'admin', null, null, null],
+      ]);
+      const declared = await h.ctx.audit.list({ action: 'ownership.incident', targetId: productId });
+      expect(x.activity[7].occurredAt).toBe(declared.items[0].occurredAt.toISOString());
       expect(x.notIncluded).toHaveLength(2);
       // No secret and no pseudonym: neither the password hash, the code's hash, nor the scan's IP or device keys.
       const stored = await h.ctx.db.selectFrom('scan_events').select(['ip_hash', 'device_hash']).where('id', '=', bad.scanId).executeTakeFirstOrThrow();
       expect(res.body).not.toContain('scrypt$');
       expect(res.body).not.toContain(stored.ip_hash!);
       expect(res.body).not.toContain(stored.device_hash!);
+      expect(res.body).not.toContain(bad.scanId); // a scan by its REF only
       expect(res.body).not.toMatch(/"(ipHash|ip_hash|deviceHash|device_hash|sessionHash|passwordHash|codeHash)"/);
       for (const s of x.scans) expect(s).not.toHaveProperty('id');
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 2, sessions: 1, recoveryCodes: 1, activity: 2 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

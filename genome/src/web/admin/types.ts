@@ -503,6 +503,8 @@ export interface OwnerLock {
   status: 'LOCKED';
   sessionsRevoked: number;
   transfersCancelled: number;
+  /** The open recovery code the lock revoked (0 or 1). */
+  recoveryCodesRevoked: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */

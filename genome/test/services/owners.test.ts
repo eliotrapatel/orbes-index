@@ -1,13 +1,15 @@
 /**
  * OwnerService (A-06) and its helpers: the REF a customer reads under a
  * result, the email mask of an AUDITOR, the lock (staff only, sessions and
- * pending transfers ended in one transaction, a transfer begun before the
- * lock refused) and the unlock.
+ * pending transfers ended and the open recovery code revoked in one
+ * transaction, a transfer or a sign-in begun before the lock refused) and the
+ * unlock.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { DomainError } from '../../src/server/errors.js';
 import { clientEmail, maskEmail } from '../../src/server/routes/admin/serialize.js';
+import { AccountRecoveryService, RECOVERY_CODE_TTL_MS } from '../../src/server/services/account-recovery.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
@@ -58,6 +60,7 @@ describe('OwnerService', () => {
   let lifecycle: LifecycleService;
   let ownership: OwnershipService;
   let owners: OwnerService;
+  let recovery: AccountRecoveryService;
   let admin: Actor;
   let modelId: string;
   let serial = 0;
@@ -72,6 +75,7 @@ describe('OwnerService', () => {
     lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
     ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: new Uint8Array(32).fill(7) });
     owners = new OwnerService({ db: t.db, audit, sessions, ownership, clock: clock.now });
+    recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
     const a = await auth.createAdmin({ email: 'cs@orbes.test', password: PASSWORD, role: 'ADMIN' }, SYSTEM_ACTOR);
     admin = { type: 'admin', id: a.id, ipHash: 'ip-admin' };
     await t.db.insertInto('categories').values({ id: 1, code: 'J', name: 'Jewelry', warranty_months: 24 }).execute();
@@ -137,6 +141,57 @@ describe('OwnerService', () => {
     await expectDomainError(ownership.initiateTransfer(c.id, piece, c.actor), 'ACCOUNT_LOCKED', 403);
     await owners.unlock(c.id, admin);
     expect((await ownership.initiateTransfer(c.id, piece, c.actor)).transferCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+  });
+
+  it('refuses a sign-in whose password check was under way when the lock committed, after the unlock too', async () => {
+    const c = await customer();
+    const email = `client.${n}@example.com`;
+    // The lock commits after login has read the account and checked the password, before it opens the session.
+    const begin = t.db.transaction.bind(t.db);
+    const spy = vi.spyOn(t.db, 'transaction').mockImplementationOnce(() => {
+      const builder = begin();
+      return {
+        execute: async <T>(fn: Parameters<typeof builder.execute<T>>[0]) => {
+          await owners.lock(c.id, admin);
+          return builder.execute(fn);
+        },
+      } as unknown as ReturnType<typeof begin>;
+    });
+    try {
+      await expectDomainError(auth.login({ email, password: PASSWORD }), 'ACCOUNT_LOCKED', 403);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await status(c.id)).toBe('LOCKED');
+    const left = async () => (await t.db.selectFrom('sessions').select('subject_id').where('subject_id', '=', c.id).execute()).length;
+    expect(await left()).toBe(0);
+    // Nothing comes back with the unlock: the client signs in again, with a session of their own.
+    await owners.unlock(c.id, admin);
+    expect(await left()).toBe(0);
+    expect((await auth.login({ email, password: PASSWORD })).account.id).toBe(c.id);
+    expect(await left()).toBe(1);
+  });
+
+  it('revokes the open recovery code: a code handed out before the lock does not work after the unlock', async () => {
+    const c = await customer();
+    const email = `client.${n}@example.com`;
+    const { recoveryCode } = await recovery.issue(c.id, admin);
+    const r = await owners.lock(c.id, admin);
+    expect(r.recoveryCodesRevoked).toBe(1);
+    expect((await owners.sheet(c.id)).owner.recoveryCodeExpiresAt).toBeNull();
+    await owners.unlock(c.id, admin);
+    await expectDomainError(recovery.recover({ email, recoveryCode, newPassword: 'a brand new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
+    // A code that has already expired is left as it was: the lock revokes only one that still works.
+    await recovery.issue(c.id, admin);
+    clock.advance(RECOVERY_CODE_TTL_MS);
+    expect((await owners.lock(c.id, admin)).recoveryCodesRevoked).toBe(0);
+    const entries = await audit.list({ action: 'account.lock', targetId: c.id });
+    expect(entries.items.map((e) => e.details.recoveryCodesRevoked)).toEqual([0, 1]);
+    const rows = await t.db.selectFrom('account_recovery_codes').select(['revoked_at', 'used_at']).where('account_id', '=', c.id).orderBy('created_at').execute();
+    expect(rows.map((r) => [r.revoked_at !== null, r.used_at])).toEqual([
+      [true, null],
+      [false, null],
+    ]);
   });
 
   it('locks an ACTIVE account only, unlocks a LOCKED one only, and refuses an unknown one', async () => {

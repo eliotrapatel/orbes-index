@@ -8,7 +8,8 @@
  *   GET  /api/admin/owners/:id                AUDITOR  the owner's sheet: pieces, transfers in progress,
  *                                                      20 latest scans
  *   POST /api/admin/owners/:id/recovery-code  ADMIN    a one-time recovery code, after an identity check
- *   POST /api/admin/owners/:id/lock           ADMIN    LOCKED: sessions end, pending transfers cancelled
+ *   POST /api/admin/owners/:id/lock           ADMIN    LOCKED: sessions end, pending transfers cancelled,
+ *                                                      the open recovery code revoked
  *   POST /api/admin/owners/:id/unlock         ADMIN    ACTIVE again
  *   GET  /api/admin/owners/:id/export         ADMIN    everything held about the account (right of
  *                                                      access), a JSON attachment
@@ -73,7 +74,7 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(ownerParams, request.params);
     parse(emptyBody, request.body);
     const r = await owners.lock(id, adminActor(request));
-    return { status: 'LOCKED' as const, sessionsRevoked: r.sessionsRevoked, transfersCancelled: r.transfersCancelled.length };
+    return { status: 'LOCKED' as const, sessionsRevoked: r.sessionsRevoked, transfersCancelled: r.transfersCancelled.length, recoveryCodesRevoked: r.recoveryCodesRevoked };
   });
 
   app.post('/api/admin/owners/:id/unlock', { config: ADMIN }, async (request) => {
