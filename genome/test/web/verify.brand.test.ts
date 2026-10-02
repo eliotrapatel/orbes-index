@@ -147,6 +147,16 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.scan__control')['min-width'])).toBeGreaterThanOrEqual(44);
   });
 
+  it('keeps the hairline button for the primary action: the contact of ORBES Client Services is a text link', () => {
+    // A result draws one .btn of its own, the foot's SCAN AGAIN or SCAN ANOTHER; the contact, under
+    // the help line or in the WARRANTY tab, is a secondary action beside it (§3.8, §4.2).
+    const btns = (f: string) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']*)'/g)].filter((m) => m[1].split(' ').includes('btn')).length;
+    expect(['views/result.ts', 'views/common.ts', 'views/panels.ts', 'views/tabs.ts'].map(btns)).toEqual([1, 0, 0, 0]);
+    expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).toContain("class: 'textlink contact__email'");
+    // No rule restyles it: it takes the text link's 10 px, tracking and 44 px zone as they are.
+    expect(about('.contact__email')).toEqual([]);
+  });
+
   it('draws text links at 80 % ink at rest (11 : 1 on white), no longer 62 %', () => {
     expect(Number(rule(brand, '.textlink').opacity)).toBeGreaterThanOrEqual(0.8);
   });

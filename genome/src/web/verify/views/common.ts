@@ -75,14 +75,16 @@ export function rows(list: readonly Row[], extraClass = ''): HTMLDListElement {
 }
 
 /**
- * ORBES Client Services: the prefilled email as the one button, then the
- * phone (a tel: link) and the hours, centred. Each line only when configured.
+ * ORBES Client Services: the prefilled email as a text link (a secondary
+ * action: the hairline button stays the foot's SCAN AGAIN or SCAN ANOTHER,
+ * BRAND-DESIGN-SYSTEM §3.8), then the phone (a tel: link) and the hours,
+ * centred. Each line only when configured.
  */
 export function contactBlock(c: ContactModel): HTMLElement {
   return h(
     'div',
     { class: 'contact', data: { placement: c.placement } },
-    c.mailto ? h('a', { class: 'btn contact__email', attrs: { href: c.mailto }, text: CONTACT.action }) : null,
+    c.mailto ? h('a', { class: 'textlink contact__email', attrs: { href: c.mailto }, text: CONTACT.action }) : null,
     c.phone ? h('a', { class: 'textlink contact__phone', attrs: { href: c.phone.href, 'aria-label': `${CONTACT.call} ${c.phone.label}` }, text: c.phone.label }) : null,
     c.hours ? h('p', { class: 'contact__hours micro', text: c.hours }) : null,
   );

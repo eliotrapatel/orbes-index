@@ -737,9 +737,10 @@ h1[tabindex="-1"]:focus {
 
 /* ORBES Client Services (BRAND-DESIGN-SYSTEM §4.2), under the help line of a
    non-authentic result and under the note of a warranty that no longer
-   applies: the prefilled email is the one button, then the phone (a figure,
-   so in the reading face) and the hours, centred. The 12 px gap keeps the tap
-   zones apart (the text link's zone reaches 4 px past its box). */
+   applies: the prefilled email, a text link (the hairline button stays the
+   foot's), then the phone (a text link made of figures, so in the reading
+   face) and the hours, centred. The 12 px gap keeps the tap zones apart (a
+   text link's zone reaches 4 px past its box). */
 .contact {
   display: flex;
   flex-direction: column;
@@ -1149,12 +1150,6 @@ h1[tabindex="-1"]:focus {
   .btn {
     min-width: 0;
     width: 100%;
-  }
-  /* CONTACT ORBES CLIENT SERVICES keeps one line: a text link's tracking, a narrower margin. */
-  .contact__email {
-    padding: 0 12px;
-    letter-spacing: var(--track-micro);
-    text-indent: var(--track-micro);
   }
 }
 

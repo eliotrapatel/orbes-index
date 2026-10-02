@@ -198,7 +198,7 @@ export const FALLBACK_TITLES: Readonly<Record<VerificationState, string>> = Obje
 
 /**
  * ORBES Client Services, where a result asks the customer to contact it (BRAND-DESIGN-SYSTEM
- * §4.2): the one button opens an email prefilled with the facts Client Services needs, the
+ * §4.2): a text link opens an email prefilled with the facts Client Services needs, the
  * scan reference first. Never "Contact support" (§4.5).
  */
 export const CONTACT = Object.freeze({

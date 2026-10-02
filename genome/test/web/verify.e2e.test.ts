@@ -65,6 +65,21 @@ async function figuresInDisplayFace(page: Page): Promise<string[]> {
   );
 }
 
+/**
+ * The lines a control's text takes: its line boxes, told apart by their top edge. A height
+ * cannot say it, since two lines of 10 px type fit inside a 44 or 52 px control.
+ */
+async function linesOf(loc: Locator): Promise<number> {
+  return loc.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  });
+}
+
+/** The phone widths in use, narrowest last: Android (360), iPhone SE, 8 and mini (375), the smallest (320). */
+const PHONE_WIDTHS = [360, 375, 320] as const;
+
 /** The floors of BRAND-DESIGN-SYSTEM §3.8 on the current screen, which shows at least `controls`. */
 async function keepsFloors(page: Page, controls: string[]): Promise<void> {
   const { checked, problems } = await tapZoneFloors(page);
@@ -373,7 +388,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
 
-    // Under the help line: the one button, an email to Client Services that quotes this scan's reference.
+    // Under the help line: a text link (the hairline button stays SCAN AGAIN), an email to Client
+    // Services that quotes this scan's reference.
     const help = page.locator('.result__help');
     const email = help.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
     await visible(email);
@@ -386,8 +402,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(href.pathname).toBe(CLIENT_SERVICES.email);
     expect(href.searchParams.get('subject')).toBe(`ORBES — REF ${ref} — INVALID SIGNATURE`);
     expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d$`));
-    // One line, inside the column (never wider than the page).
-    expect((await email.boundingBox())!.height).toBe(52);
+    await attrOf(email, 'class', 'textlink contact__email');
+    await countOf(page.locator('.btn:visible'), 1);
+    // One line, inside the column (never wider than the page), in a text link's 44 px tap zone.
+    expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await linesOf(email)).toBe(1);
     // Then the phone, a tel: link read in Helvetica Neue (figures), and the hours.
     const phone = help.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` });
     await attrOf(phone, 'href', 'tel:+33123456789');
@@ -397,10 +416,13 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-contact.png'), fullPage: true });
-    // On the smallest phone in use, the button keeps its one line (a text link's tracking) and nothing scrolls sideways.
-    await page.setViewportSize({ width: 320, height: 640 });
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
-    expect((await email.boundingBox())!.height).toBe(52);
+    // On the phones in use, down to the smallest, the link keeps its one line and nothing scrolls sideways.
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
+      expect((await email.boundingBox())!.height, `${width} px`).toBeGreaterThanOrEqual(44);
+      expect(await linesOf(email), `${width} px`).toBe(1);
+    }
     await page.setViewportSize(MOBILE_VIEWPORT);
     expect(problems).toEqual([]);
   }, 120_000);
@@ -423,6 +445,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
     await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
     await countOf(page.locator('.contact'), 1);
+    // A text link at the width of a tab panel: one line on this phone and on the narrower ones in use.
+    await attrOf(email, 'class', 'textlink contact__email');
+    await countOf(page.locator('.btn:visible'), 1);
+    expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await linesOf(email)).toBe(1);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
+      expect((await email.boundingBox())!.height, `${width} px`).toBeGreaterThanOrEqual(44);
+      expect(await linesOf(email), `${width} px`).toBe(1);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
     expect(problems).toEqual([]);
   }, 120_000);
 
