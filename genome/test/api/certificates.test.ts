@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { createForwardingLogger, loggerOptions } from '../../src/server/http/logging.js';
-import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('certificate cards API', () => {
@@ -76,7 +76,7 @@ describe('certificate cards API', () => {
     expectAttachment(sheet, /^application\/pdf$/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-sheet-PROOF\.pdf"$/);
 
     const csv = await post(operator, { items, format: 'csv' });
-    expectAttachment(csv, /^text\/csv; charset=utf-8/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2\.csv"$/);
+    expectAttachment(csv, /^text\/csv; charset=utf-8/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-PROOF\.csv"$/);
     expect(csv.body).toBe(
       '"productId","model","material","code"\r\n' +
         `"${a.product.productId}","MONOLITHE · RING","925 STERLING SILVER","${a.claimCode}"\r\n` +
@@ -209,6 +209,45 @@ describe('certificate cards API', () => {
       for (const s of spellings(a.claimCode!)) expect(res.body).not.toContain(s);
     }
     expect(errorOf(await post(operator, bad[3])).message).toBe(`${a.product.productId} appears more than once.`);
+  });
+
+  it('bounds the cost of a request: one render at a time per admin, checks stop at the first wrong code', async () => {
+    const svc = h.ctx.services.certificates;
+    const a = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const b = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const c = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const one: Actor = { type: 'admin', id: 'cost-test-one' };
+    const other: Actor = { type: 'admin', id: 'cost-test-other' };
+    const items = [
+      { productId: a.product.productId, claimCode: a.claimCode! },
+      { productId: b.product.productId, claimCode: b.claimCode! },
+    ];
+
+    // A second render of the same admin while the first is in progress: 429, nothing audited for it.
+    const first = svc.render(items, {}, one);
+    const again = svc.render(items, {}, one);
+    const elsewhere = svc.render(items, { format: 'csv' }, other);
+    await expect(again).rejects.toMatchObject({ code: 'RATE_LIMITED', httpStatus: 429 });
+    await expect(first).resolves.toMatchObject({ contentType: 'application/pdf' });
+    await expect(elsewhere).resolves.toMatchObject({ filename: expect.stringMatching(/-PROOF\.csv$/) });
+    // Once it is done, the same admin may render again, even after a refusal.
+    await expect(svc.render([{ productId: c.product.productId, claimCode: 'ZZZZ-ZZZZ-ZZZZ' }], {}, one)).rejects.toMatchObject({ code: 'CLAIM_CODE_MISMATCH' });
+    await expect(svc.render(items, { format: 'csv' }, one)).resolves.toBeTruthy();
+
+    // Wrong codes cost one check: the first mismatch is the refusal, the codes after it are not checked.
+    const wrong = svc.render(
+      [
+        { productId: b.product.productId, claimCode: 'ZZZZ-ZZZZ-ZZZZ' },
+        { productId: c.product.productId, claimCode: 'YYYY-YYYY-YYYY' },
+      ],
+      {},
+      one,
+    );
+    await expect(wrong).rejects.toMatchObject({ code: 'CLAIM_CODE_MISMATCH', internal: { refused: [b.product.productId] } });
+    const audited = (await h.ctx.audit.list({ action: 'certificate.render_refused' })).items.filter((e) =>
+      (e.details.productIds as string[]).includes(c.product.productId),
+    );
+    expect(audited.at(0)?.details).toMatchObject({ reason: 'CLAIM_CODE_MISMATCH', refused: [b.product.productId] });
   });
 
   it('is OPERATOR-only and CSRF-protected', async () => {

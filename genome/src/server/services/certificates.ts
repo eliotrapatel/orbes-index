@@ -17,15 +17,21 @@
  *   422 NO_CLAIM_SECRET        issued without a claim code
  *   409 PRODUCT_NOT_PRINTABLE  revoked, retired, flagged, lost or stolen
  *   409 ALREADY_REGISTERED     the product has an owner: its claim code is spent
- *   422 CLAIM_CODE_MISMATCH    a code does not match its product's hash
+ *   422 CLAIM_CODE_MISMATCH    a code does not match its product's hash (the first one)
  * Mismatches are not counted towards the customers' claim-code attempt limit
  * (ownership.ts): this route needs an OPERATOR session with MFA, and every
  * refusal is in the audit log.
+ *
+ * Cost. Each check is one scrypt (32 MiB) on libuv's small thread pool, which
+ * customers' logins and claim-code registrations share. So the checks run
+ * one at a time and stop at the first code that does not match (a request of
+ * wrong codes costs one scrypt), and each admin has at most one render in
+ * progress: a second one answers 429 RATE_LIMITED until the first is done.
  */
 import { computeGenome } from '../../core/genome/genome.js';
 import type { Db } from '../db/connection.js';
 import type { ProductRow } from '../db/schema.js';
-import { DomainError, validationError } from '../errors.js';
+import { DomainError, tooManyRequests, validationError } from '../errors.js';
 import {
   CERTIFICATE_FORMATS,
   CERTIFICATE_LAYOUT_STATUS,
@@ -84,10 +90,15 @@ function listIds(ids: readonly string[]): string {
 
 const refusal = (code: string, status: number, message: string, refused: readonly string[]) => new DomainError(code, status, message, { refused: [...refused] });
 
+/** The key of an actor's renders in progress (one at a time per admin). */
+const actorKey = (actor: Actor) => `${actor.type}:${actor.id ?? ''}`;
+
 export class CertificateService {
   private readonly db: Db;
   private readonly audit: AuditService;
   private readonly clock: Clock;
+  /** Actors with a render in progress: a second concurrent one is refused, so one session holds at most one scrypt thread. */
+  private readonly inProgress = new Set<string>();
 
   constructor(deps: CertificateServiceDeps) {
     this.db = deps.db;
@@ -111,6 +122,24 @@ export class CertificateService {
     }
     const shape = format === 'pdf' ? { format, layout } : { format };
 
+    // Claimed before the first await, so two concurrent requests of one admin cannot both pass.
+    const key = actorKey(actor);
+    if (this.inProgress.has(key)) throw tooManyRequests('A certificate download is already being prepared. Wait for it to finish, then try again.');
+    this.inProgress.add(key);
+    try {
+      return await this.renderChecked(items, format, layout, shape, actor);
+    } finally {
+      this.inProgress.delete(key);
+    }
+  }
+
+  private async renderChecked(
+    items: readonly CertificateRequestItem[],
+    format: CertificateFormat,
+    layout: CertificateLayout,
+    shape: { format: CertificateFormat; layout?: CertificateLayout },
+    actor: Actor,
+  ): Promise<RenderedCertificates> {
     const found: string[] = [];
     let cards: CertificateItem[];
     try {
@@ -134,13 +163,14 @@ export class CertificateService {
     }
 
     const createdAt = this.clock();
-    const file = format === 'csv' ? renderCertificateCsv(cards, { createdAt }) : await renderCertificatePdf(cards, { layout, createdAt });
+    const status = CERTIFICATE_LAYOUT_STATUS;
+    const file = format === 'csv' ? renderCertificateCsv(cards, { createdAt, status }) : await renderCertificatePdf(cards, { layout, createdAt, status });
     await this.audit.record({
       actor,
       action: CERTIFICATE_RENDER_ACTION,
       targetType: 'product',
       targetId: cards.length === 1 ? cards[0].productId : null,
-      details: { productIds: cards.map((c) => c.productId), count: cards.length, ...shape, layoutStatus: CERTIFICATE_LAYOUT_STATUS },
+      details: { productIds: cards.map((c) => c.productId), count: cards.length, ...shape, layoutStatus: status },
     });
     return file;
   }
@@ -183,13 +213,12 @@ export class CertificateService {
       throw refusal('ALREADY_REGISTERED', 409, `Already registered to an owner, so the claim code has been used: ${listIds(registered)}.`, registered);
     }
 
-    // One scrypt at a time (32 MiB each): the most expensive check comes last.
-    const mismatched: string[] = [];
+    // One scrypt at a time (32 MiB each), the most expensive check last, stopping at the first code that does not match.
     for (const r of rows) {
-      if (!(await verifyClaimCode(r.code, r.p.claim_secret_hash!))) mismatched.push(r.p.product_id);
-    }
-    if (mismatched.length > 0) {
-      throw refusal('CLAIM_CODE_MISMATCH', 422, `The claim code does not match ${listIds(mismatched)}. Use the code shown when the product was issued.`, mismatched);
+      if (!(await verifyClaimCode(r.code, r.p.claim_secret_hash!))) {
+        const id = r.p.product_id;
+        throw refusal('CLAIM_CODE_MISMATCH', 422, `The claim code does not match ${id}. Use the code shown when the product was issued.`, [id]);
+      }
     }
 
     const models = new Map(

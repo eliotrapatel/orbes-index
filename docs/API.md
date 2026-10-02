@@ -272,7 +272,7 @@ Codes, artifacts, warranty and service:
 | `CODE_NOT_ACTIVE` | 409 | Only the ACTIVE code of a product can be rendered. |
 | `PRODUCT_NOT_PRINTABLE` | 409 | The product is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN: no new prints (codes and certificate cards). |
 | `CODE_INTEGRITY` | 409 | The stored code failed its end-to-end integrity check and is never rendered. |
-| `CLAIM_CODE_MISMATCH` | 422 | (Certificate cards, §15.7) a claim code does not match its product's hash, or is malformed. The message names the product ids, never the code. |
+| `CLAIM_CODE_MISMATCH` | 422 | (Certificate cards, §15.7) a claim code does not match its product's hash, or is malformed. The message names the first such product, never the code. |
 | `NO_CLAIM_SECRET` | 422 | (Certificate cards, §15.7) the product was issued without a claim code. |
 | `PRODUCT_NOT_REISSUABLE` | 409 | A RETIRED or REVOKED product cannot receive a new code. |
 | `NO_CODE` | 409 | The product has no code to replace. |
@@ -1604,7 +1604,9 @@ The claim code is shown once at issuance (§14.2) and only its scrypt hash is st
 | `format` | string | no | `pdf` | `pdf` or `csv` |
 | `layout` | string | no | `card` | PDF only. `card`: one 85 × 55 mm page per card. `sheet`: A4 sheets of ten cards (2 × 5, abutting, 11 mm top and bottom margins) with cut marks outside the grid, a caption and a 10 mm scale bar. |
 
-Checks, in this order (nothing is rendered when one fails): every product exists (`404 PRODUCT_NOT_FOUND`, naming it); every product was issued with a claim code (`422 NO_CLAIM_SECRET`); none is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN (`409 PRODUCT_NOT_PRINTABLE`); none has an owner, whose registration has spent the code (`409 ALREADY_REGISTERED`); every claim code matches its product's hash (`422 CLAIM_CODE_MISMATCH`, naming the products, never the codes). A malformed code is a mismatch. Mismatches are not counted towards the customers' claim-code attempt limit (§11.1): the route needs an OPERATOR session (with TOTP in production) and every refusal is audited.
+Checks, in this order (nothing is rendered when one fails): every product exists (`404 PRODUCT_NOT_FOUND`, naming it); every product was issued with a claim code (`422 NO_CLAIM_SECRET`); none is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN (`409 PRODUCT_NOT_PRINTABLE`); none has an owner, whose registration has spent the code (`409 ALREADY_REGISTERED`); every claim code matches its product's hash (`422 CLAIM_CODE_MISMATCH`, naming the product, never the code). A malformed code is a mismatch. Mismatches are not counted towards the customers' claim-code attempt limit (§11.1): the route needs an OPERATOR session (with TOTP in production) and every refusal is audited.
+
+**Cost.** Each check is one scrypt (32 MiB) on the server's small worker pool, which customers' logins and claim-code registrations share. The codes are checked one at a time, in the order given, and the checks stop at the first code that does not match: the refusal names that product only, and the codes after it are not checked. Each admin has at most one certificate request in progress: a second one sent before the first is done answers `429 RATE_LIMITED` (*A certificate download is already being prepared. Wait for it to finish, then try again.*), and is not audited. The route also draws on the `admin` rate-limit group.
 
 **200**, `Cache-Control: no-store`, as an attachment:
 
@@ -1613,9 +1615,9 @@ Checks, in this order (nothing is rendered when one fails): every product exists
 | `pdf` / `card`, one item | `application/pdf` | `ORBES-certificate-<productId>[-PROOF].pdf` |
 | `pdf` / `card`, several | `application/pdf` | `ORBES-certificates-<YYYY-MM-DD>-<count>-card[-PROOF].pdf` |
 | `pdf` / `sheet` | `application/pdf` | `ORBES-certificates-<YYYY-MM-DD>-<count>-sheet[-PROOF].pdf` |
-| `csv` | `text/csv; charset=utf-8; header=present` | `ORBES-certificates-<YYYY-MM-DD>-<count>.csv` |
+| `csv` | `text/csv; charset=utf-8; header=present` | `ORBES-certificates-<YYYY-MM-DD>-<count>[-PROOF].csv` |
 
-**The PDF** is pure vector and embeds no font: lettering is stroked geometry (the print label's), the GENOME and the monogram are filled paths, so the claim code is never text that could be searched or copied out of the file. Black is DeviceCMYK K only (as `kOnly`, §15.2). The scratch-off panel is a flat fill in the spot colour **`ORBES SCRATCH-OFF`** (a Separation colour space; its CMYK alternate, K 35 %, is only how viewers and office printers show it) set to **overprint** (`OP`/`op` true, `OPM 1`), so the claim code printed beneath it stays whole on the black plate. Tell the print shop to lay the scratch-off ink on that plate. Until the brand validates the layout, every card says **PROOF · LAYOUT NOT VALIDATED**, and the sheet caption, the document title and the file name say PROOF (`CERTIFICATE_LAYOUT_STATUS`, `genome/src/server/render/certificate.ts`).
+**The PDF** is pure vector and embeds no font: lettering is stroked geometry (the print label's), the GENOME and the monogram are filled paths, so the claim code is never text that could be searched or copied out of the file. Black is DeviceCMYK K only (as `kOnly`, §15.2). The scratch-off panel is a flat fill in the spot colour **`ORBES SCRATCH-OFF`** (a Separation colour space; its CMYK alternate, K 35 %, is only how viewers and office printers show it) set to **overprint** (`OP`/`op` true, `OPM 1`), so the claim code printed beneath it stays whole on the black plate. Tell the print shop to lay the scratch-off ink on that plate. Until the brand validates the layout, every card says **PROOF · LAYOUT NOT VALIDATED**, and the sheet caption, the document title and the file name say PROOF (`CERTIFICATE_LAYOUT_STATUS`, `genome/src/server/render/certificate.ts`). The CSV's name says PROOF too (its columns stay the print shop's).
 
 **The CSV** (RFC 4180, UTF-8 without BOM, CRLF, a header row, every field quoted) has the columns `productId`, `model` (`<name> · <type>`), `material` and `code` (`XXXX-XXXX-XXXX`), values as recorded. A value starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe, so opening the file in a spreadsheet never runs a formula. The GENOME row is not in the CSV (a print shop cannot typeset it): the PDF remains the reference.
 
@@ -1629,7 +1631,7 @@ Audited: `certificate.render` with `{ productIds, count, format, layout, layoutS
 
 In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
 
-Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`.
+Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`, `429 RATE_LIMITED` (a request of the same admin still in progress, or the `admin` group's limit).
 
 ---
 
