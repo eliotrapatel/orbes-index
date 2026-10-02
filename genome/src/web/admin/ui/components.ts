@@ -230,7 +230,7 @@ export interface FieldOptions {
 }
 
 /** Label + control + hint/error line. The control gets an id and aria-describedby. */
-export function field(label: string, control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, o: FieldOptions = {}): HTMLElement {
+export function field(label: string | Node, control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, o: FieldOptions = {}): HTMLElement {
   const id = control.id || `f${++fieldSeq}`;
   control.id = id;
   if (o.required) control.required = true;

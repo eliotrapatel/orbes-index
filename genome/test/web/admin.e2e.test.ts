@@ -388,6 +388,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
 
     await page.click('[data-testid=action-warranty]');
+    // The dialog's eyebrow is the product id, and no field label carries a figure: nothing there in Gravesend.
+    await page.waitForSelector('dialog.dialog .dialog__eyebrow');
+    expect((await page.locator('dialog.dialog .dialog__eyebrow').textContent())?.trim()).toBe(issuedProductId);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     await confirmDialog(page);
     await expect.poll(() => row('warranty').textContent()).toContain('ACTIVE');
     await expect.poll(() => row('status').textContent()).toContain('ACTIVATED');
@@ -486,6 +490,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=dialog-confirm]');
     // Second step: the irreversible move needs the exact phrase.
     await page.waitForSelector('[data-testid=dialog-phrase]');
+    // The phrase to retype names the product: it reads in Helvetica Neue, as the eyebrow does.
+    expect(await page.locator('dialog.dialog .cfield__phrase').textContent()).toBe(`REVOKE ${pid}`);
+    expect(await page.locator('dialog.dialog .cfield__phrase').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     await page.fill('[data-testid=dialog-phrase]', 'REVOKE O26-J-00008');
     expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
     await confirmDialog(page, `revoke ${pid.toLowerCase()}`);

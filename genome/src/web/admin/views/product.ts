@@ -232,7 +232,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
               fields: [
                 { name: 'purchaseDate', label: 'Purchase date', kind: 'date', value: isoDay(ctx.now()), required: true },
                 { name: 'retailer', label: 'Retailer', maxlength: 200 },
-                { name: 'country', label: 'Country (ISO 3166-1, e.g. FR)', maxlength: 2 },
+                { name: 'country', label: 'Country', maxlength: 2, hint: 'Two-letter ISO code, e.g. FR.' },
               ],
               validate: (v) => (v.country && !/^[A-Za-z]{2}$/.test(v.country.trim()) ? 'Country is a two-letter code.' : null),
               confirmLabel: 'Activate',
@@ -254,7 +254,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
               title: 'Extend the warranty',
               eyebrow: pid,
               body: h('p', { class: 'dialog__text' }, `The end date moves by whole months from the start date (now ${formatDate(d.warranty?.endDate ?? null)}).`),
-              fields: [{ name: 'months', label: 'Months to add (1–120)', required: true, maxlength: 3, value: '12' }],
+              fields: [{ name: 'months', label: 'Months to add', hint: 'From 1 to 120.', required: true, maxlength: 3, value: '12' }],
               validate: (v) => (/^\d{1,3}$/.test(v.months.trim()) && Number(v.months) >= 1 && Number(v.months) <= 120 ? null : 'Enter a whole number of months from 1 to 120.'),
               confirmLabel: 'Extend',
               submit: async (v) => {

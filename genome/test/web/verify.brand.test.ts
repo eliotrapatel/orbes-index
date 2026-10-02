@@ -8,7 +8,7 @@
  * face (Gravesend Sans) on titles and labels of both apps, never on what is
  * read.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -240,11 +240,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
   const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.auth__option'];
-  const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.dialog__eyebrow', '.login__title'];
+  const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
   const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
-  const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__title', '.page-head__title--id', '.side__who', '.side__role'];
+  const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
     expect(displaySelectors(brand)).toEqual(BRAND_DISPLAY);
@@ -268,7 +268,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 
   it('sets a figure in the reading face where a display role may show one (Gravesend\'s one is its capital I)', () => {
     // The overrides come after the display rule of their stylesheet, so they win at equal specificity.
-    for (const [css, selector] of [[styles, '.scan__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id']] as const) {
+    for (const [css, selector] of [[styles, '.scan__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id'], [adminStyles, '.cfield__phrase']] as const) {
       const all = rules(css);
       const at = all.findIndex((r) => r.selectors.includes(selector));
       expect(all[at]?.decls['font-family'], selector).toBe('var(--font)');
@@ -282,6 +282,16 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
       const titled = (src.match(/title: p\.productId,/g) ?? []).length;
       expect(titled, view).toBeGreaterThan(0);
       expect((src.match(/title: p\.productId,\n\s*identifier: true,/g) ?? []).length, view).toBe(titled);
+    }
+    // A dialog's eyebrow names the product, key or anomaly it acts on, so it has no display rule at all;
+    // the phrase to type in a confirmation (REVOKE O26-J-00184) is a --font span inside its label;
+    // and no field label is written with a figure (its range or example goes in the hint, read in --font).
+    expect(rules(adminStyles).some((r) => r.selectors.includes('.dialog__eyebrow') && r.decls['font-family'] !== undefined)).toBe(false);
+    expect(readFileSync(join(WEB, 'admin/ui/dialog.ts'), 'utf8')).toContain("h('span', { class: 'cfield__phrase' }, o.phrase)");
+    for (const view of readdirSync(join(WEB, 'admin/views'))) {
+      const src = readFileSync(join(WEB, 'admin/views', view), 'utf8');
+      const labels = [...src.matchAll(/\blabel: '([^']*)'/g), ...src.matchAll(/\bfield\('([^']*)'/g)].map((m) => m[1]);
+      for (const l of labels) expect(/[0-9]/.test(l) && !/^(Payload SHA-256|Public key \(base64url\))$/.test(l), `${view}: ${l}`).toBe(false);
     }
   });
 

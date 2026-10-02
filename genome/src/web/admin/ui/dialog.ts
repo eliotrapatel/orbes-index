@@ -86,7 +86,9 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     if (o.phrase) {
       phraseInput = input('__phrase', { placeholder: o.phrase, mono: true });
       phraseInput.setAttribute('data-testid', 'dialog-phrase');
-      controls.push(field(`Type ${o.phrase} to confirm`, phraseInput, { wide: true, hint: 'This cannot be undone.' }));
+      // The phrase can hold an identifier (REVOKE O26-J-00184): it reads in --font, the words around it in the display face.
+      const label = h('span', null, 'Type ', h('span', { class: 'cfield__phrase' }, o.phrase), ' to confirm');
+      controls.push(field(label, phraseInput, { wide: true, hint: 'This cannot be undone.' }));
       confirm.disabled = true;
       phraseInput.addEventListener('input', () => {
         confirm.disabled = !phraseMatches(phraseInput!.value, o.phrase!);

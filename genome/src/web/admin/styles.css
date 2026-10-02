@@ -1938,9 +1938,9 @@ a.bar__label:hover {
    titles, eyebrows, column heads, field and group labels, buttons, the
    sign-in page. What the console reports stays in --font: values, statuses,
    identifiers, counts, dates, codes, hashes and body text, and every line
-   that can carry them (the crumb, panel notes, dialog titles, numbered
-   steps). Gravesend's figure one is its capital I, and its figures do not
-   align. */
+   that can carry them (the crumb, panel notes, dialog eyebrows and titles,
+   the phrase to type in a confirmation, numbered steps). Gravesend's figure
+   one is its capital I, and its figures do not align. */
 .side__product,
 .side__group-title,
 .side__link,
@@ -1967,7 +1967,6 @@ a.bar__label:hover {
 .claim__label,
 .loading__text,
 .failure__title,
-.dialog__eyebrow,
 .login__subtitle,
 .login__title,
 .login__foot,
@@ -1977,6 +1976,11 @@ a.bar__label:hover {
 
 /* A page title that is an identifier (the product page, the generator result) reads in --font. */
 .page-head__title--id {
+  font-family: var(--font);
+}
+
+/* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label. */
+.cfield__phrase {
   font-family: var(--font);
 }
 
