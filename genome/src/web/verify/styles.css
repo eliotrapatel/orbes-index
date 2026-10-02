@@ -644,6 +644,15 @@ h1[tabindex="-1"]:focus {
   height: auto;
 }
 
+/* The orbit, as on the piece: a centred square. A glyph is 3.5 u of the 21 u
+   figure, so 260 px draws it at about 43 px (42 px on a 390 px phone). */
+.genome-svg--orbit {
+  width: min(64vw, 260px);
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+
 .genome__meta {
   display: flex;
   justify-content: center;

@@ -14,9 +14,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, ConsoleMessage, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { genomeLayout } from '../../src/core/genome/render.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
+import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -130,8 +131,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.genome__id'), plain.product.productId);
     expect(plain.product.productId).toBe('O26-J-00184');
     await textsOf(page.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-    // The genome row is drawn from the core renderer, one path group per glyph.
-    await attrOf(page.locator('.genome-svg--row'), 'aria-label', new RegExp(plain.genome.fingerprint));
+    // The GENOME is drawn from the core renderer, in its orbit around the SEAL as on the piece:
+    // the seal layer, then one path group per glyph.
+    const genome = page.locator('.genome__glyphs .genome-svg');
+    await attrOf(genome, 'aria-label', new RegExp(plain.genome.fingerprint));
+    await attrOf(genome, 'class', /\bgenome-svg--orbit\b/);
+    await countOf(genome.locator('g[data-layer="seal"]'), 1);
+    await countOf(genome.locator('g[data-layer="genome"]'), 8);
+    // A square of min(64vw, 260px): glyphs of about 42 px on this 390 px phone (43 px from 407 px).
+    const box = await genome.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeCloseTo(Math.min(0.64 * MOBILE_VIEWPORT.width, 260), 0);
+    expect(box!.height).toBeCloseTo(box!.width, 0);
+    expect(box!.x + box!.width / 2).toBeCloseTo(MOBILE_VIEWPORT.width / 2, 0);
+    const orbit = genomeLayout(plain.genome, 'orbit');
+    expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(41);
     await textsOf(page.getByRole('tab'), ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     // Honest limits are stated on every positive result.

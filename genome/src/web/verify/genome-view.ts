@@ -1,7 +1,12 @@
 /**
- * The GENOME glyph row, drawn by the core renderer (renderGenomeSvg) exactly
- * as it is defined for print, so the screen, the PDF certificate and the
- * printed code show the same eight glyphs.
+ * The GENOME figure, drawn by the core renderer (renderGenomeSvg) exactly as
+ * it is defined for print, so the screen, the PDF certificate and the printed
+ * code show the same eight glyphs.
+ *
+ * The result page draws them in their orbit around the SEAL, as they sit on
+ * the piece and in the console (glyph 0 at north, then clockwise, each glyph
+ * in its absolute orientation): the customer compares the screen with the
+ * object at a glance, without unrolling the orbit in their head.
  *
  * The glyphs come from the server's verification outcome. They are recomputed
  * here only to cross-check the fingerprint the server sent: a mismatch means
@@ -27,10 +32,10 @@ export function genomeFromModel(m: GenomeModel): Genome | null {
 }
 
 /**
- * SVG markup of the glyph row, or null when it cannot be drawn faithfully.
- * The GENOME sits on an ivory plate (`.result__genome`), so it is drawn in
- * the ivory colourway's ink, exactly as the ivory code prints it
- * (BRAND-DESIGN-SYSTEM §2.4).
+ * SVG markup of the GENOME (glyph row by default, or the orbit), or null when
+ * it cannot be drawn faithfully. The GENOME sits on an ivory plate
+ * (`.result__genome`), so it is drawn in the ivory colourway's ink, exactly
+ * as the ivory code prints it (BRAND-DESIGN-SYSTEM §2.4).
  */
 export function genomeRowMarkup(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): string | null {
   const genome = genomeFromModel(m);
@@ -38,7 +43,7 @@ export function genomeRowMarkup(m: GenomeModel, opts: { layout?: 'row' | 'orbit'
   return renderGenomeSvg(genome, { layout: opts.layout ?? 'row', ink: ORBES_CODE_STYLES.ivory.ink, paper: null });
 }
 
-/** The glyph row as an inline SVG (ivory colourway ink), or null when it cannot be drawn faithfully. */
+/** The GENOME as an inline SVG (ivory colourway ink), or null when it cannot be drawn faithfully. */
 export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): SVGSVGElement | null {
   const markup = genomeRowMarkup(m, opts);
   if (markup === null) return null;
@@ -51,15 +56,15 @@ export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {
   return svg;
 }
 
-/** The GENOME block: label, product id, glyph row, fingerprint. */
+/** The GENOME block: label, product id, the glyphs in their orbit around the SEAL, fingerprint. */
 export function genomeBlock(m: GenomeModel): HTMLElement {
-  const row = genomeRow(m);
+  const figure = genomeRow(m, { layout: 'orbit' });
   return h(
     'section',
     { class: 'genome', attrs: { 'aria-labelledby': 'genome-label' } },
     h('h2', { class: 'genome__label micro', id: 'genome-label', text: 'GENOME' }),
     h('p', { class: 'genome__id', text: m.id }),
-    row ? h('div', { class: 'genome__glyphs' }, row) : null,
+    figure ? h('div', { class: 'genome__glyphs' }, figure) : null,
     h('p', { class: 'genome__meta nano soft' }, h('span', { text: m.fingerprint }), h('span', { class: 'sep', attrs: { 'aria-hidden': 'true' }, text: '·' }), h('span', { text: m.version })),
   );
 }

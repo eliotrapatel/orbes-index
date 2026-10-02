@@ -137,8 +137,10 @@ In the code, glyph *i* is drawn with R = 1.75 u, centred at radius 7.5 u and ang
 
 | Layout | Use | Description |
 |---|---|---|
-| **Row** | Verification page, certificates, packaging | The 8 glyphs in reading order, separated by small centred points: `◟ · ◉ · ◞ · ◝ · ⤡ · ◟ · ) · ◦`. |
-| **Orbit** | Hero presentation, engraving | The 8 glyphs on a circle around a small ORBES SEAL, mirroring the code. |
+| **Row** | Certificate card, packaging, console genome list | The 8 glyphs in reading order, separated by small centred points: `◟ · ◉ · ◞ · ◝ · ⤡ · ◟ · ) · ◦`. |
+| **Orbit** | Verification page, console product page and generator, hero presentation, engraving | The 8 glyphs on a circle around a small ORBES SEAL, mirroring the code: glyph 0 at north, then clockwise, each glyph in its absolute orientation. |
+
+The verification page draws the **orbit** (since 2026-10-02), so a customer can compare the screen with the piece in hand at a glance: same glyphs, same order, same orientation, same SEAL at the centre. On screen the figure is a centred square of `min(64vw, 260px)`; a glyph is 3.5 u of the figure's 21 u, so it is drawn at about 43 px (42 px on a 390 px phone, 34 px on a 320 px one), well above the 12 px from which the symbol study classifies every glyph (§4.1). The figure carries no north marker: glyph 0 is at the top, where it sits on the piece when the code's polaris moon (the haloed one) is at the top left. A polaris marker would only come as an option of `renderGenomeSvg`, once the brand validates it, without changing the console figure.
 
 The plain-text hint (`◟◉◞◝⤡◟)◦`) may be used in logs and plain-text channels. It is an approximation only.
 

@@ -208,7 +208,11 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         await textOf(page.locator('#result-title'), 'AUTHENTIC');
         await textOf(page.locator('.genome__id'), 'O26-J-00184');
         expect((await page.locator('.lines__line').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-        expect(await page.locator('.genome-svg--row').getAttribute('aria-label')).toContain(issued.genome.fingerprint);
+        // The GENOME in its orbit around the SEAL, as on the piece: the seal layer and one group per glyph.
+        const genome = page.locator('.genome__glyphs .genome-svg');
+        expect(await genome.getAttribute('aria-label')).toContain(issued.genome.fingerprint);
+        expect(await genome.locator('g[data-layer="seal"]').count()).toBe(1);
+        expect(await genome.locator('g[data-layer="genome"]').count()).toBe(8);
         expect((await page.getByRole('tab').allInnerTexts()).map(norm)).toEqual(['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
 
         const timeline = await readTimeline(page);

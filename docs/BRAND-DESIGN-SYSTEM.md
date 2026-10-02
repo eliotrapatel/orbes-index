@@ -111,8 +111,10 @@ Two layouts, both drawn by the core renderer `renderGenomeSvg`:
 
 | Layout | Geometry | Used in |
 |---|---|---|
-| **Row** | Glyph pitch 3.4 R; separator points r 0.13 R between glyphs; margin 0.7 R | Verification result (the GENOME specimen) |
-| **Orbit** | Glyph 0 at north, then clockwise every 45° on radius 7.5 u; glyph R = 1.75 u; separator points r 0.22 u at the half-steps; SEAL at the centre; margin 1.25 u | Console product page and generator; the inner orbit of every code |
+| **Row** | Glyph pitch 3.4 R; separator points r 0.13 R between glyphs; margin 0.7 R | Certificate card (§7); console genome list |
+| **Orbit** | Glyph 0 at north, then clockwise every 45° on radius 7.5 u; glyph R = 1.75 u; separator points r 0.22 u at the half-steps; SEAL at the centre; margin 1.25 u | Verification result (the GENOME specimen); console product page and generator; the inner orbit of every code |
+
+**On the verification page, the orbit** (since 2026-10-02). The GENOME is the one mark that belongs to a single piece; the result page draws it as it sits on the piece, around the SEAL, in the same order and orientation, so the customer compares screen and object at a glance instead of unrolling the orbit in their head. It is the same figure as the console's (`genomeBlock` calls `genomeRow(m, { layout: 'orbit' })`, `genome/src/web/verify/genome-view.ts`; the fingerprint cross-check and the spoken label are unchanged). No north marker is drawn: glyph 0 is at the top, where it sits when the code's polaris is at the top left. A polaris marker would come only as an option of `renderGenomeSvg`, after brand validation, and would not change the console figure.
 
 Specimen of the vocabulary: [`assets/genome-01-vocabulary.svg`](assets/genome-01-vocabulary.svg) (§7).
 
@@ -156,7 +158,7 @@ The physical size of a code is the side of its 50 u square, quiet zone included.
 | ORBES CODE, light on dark (white on black, foil on dark leather) | 25 mm, only after a passed physical test-sheet run | print-size matrix: simulated minimum 20 mm, recommended 25 mm for white on black. |
 | Absolute floor, whatever a test shows | 17.5 mm | [scan matrix](reports/scan-matrix.md): ≥ 95 % from 3.50 px/u under the low-light preset at ≈ 10 px/mm, "do not print below 17.5 mm … prefer 25 mm or more". |
 | GENOME glyph, printed standalone | 2.1 mm glyph diameter | Its size inside a 30 mm code (3.5 u × 0.6 mm). No standalone print study exists. |
-| GENOME glyph, on screen | 12 px glyph diameter | [Symbol study](reports/genome-symbol-study.md): 100 % template classification from 12 px (99.09 % at 8 px). The verify specimen renders glyphs at ≈ 21 px on a 390 px screen. |
+| GENOME glyph, on screen | 12 px glyph diameter | [Symbol study](reports/genome-symbol-study.md): 100 % template classification from 12 px (99.09 % at 8 px). The verify specimen draws the orbit as a centred square of `min(64vw, 260px)` (`.genome-svg--orbit`): a glyph is 3.5 u of 21 u, so ≈ 43 px from a 407 px screen, ≈ 42 px on a 390 px one and ≈ 34 px on a 320 px one (it was ≈ 21 px in the row layout). |
 | ORBES SEAL, printed standalone | 4.8 mm diameter | Its size inside a 30 mm code (8 u). |
 
 The renderer accepts 10–500 mm (`ARTIFACT_LIMITS`). That is a technical bound for memory and resolution, not a brand permission: the console warns under 30 mm and refuses under 15 mm unless the operator checks *Test print* (`artifactSizeAdvice`, `genome/src/web/admin/model/generator.ts`).
@@ -565,7 +567,7 @@ The scanner decodes only the square under the reticle (×1.45 margin), at most e
 
 <table>
 <tr>
-<td width="40%"><img src="assets/ui/verify-04-result-first-registration.png" width="300" alt="Result for O26-J-00184: AUTHENTIC — FIRST REGISTRATION, GENOME specimen on ivory, product lines, tabs with OWNERSHIP selected, footnote"></td>
+<td width="40%"><img src="assets/ui/verify-04-result-first-registration.png" width="300" alt="Result for O26-J-00184: AUTHENTIC — FIRST REGISTRATION, GENOME specimen on ivory with the eight glyphs in their orbit around the seal, product lines, tabs with OWNERSHIP selected, footnote"></td>
 <td valign="top">
 <b>4 · Result, O26-J-00184 — AUTHENTIC · FIRST REGISTRATION.</b> From top to bottom:
 <ol>
@@ -573,12 +575,12 @@ The scanner decodes only the square under the reticle (×1.45 margin), at most e
 <li>the state mark (here the authentic seal echo);</li>
 <li>the title, split at the dash into a 24 px main word and a tracked sub-title;</li>
 <li>one sentence from the server;</li>
-<li>the <b>GENOME specimen</b>: an ivory plate framed by hairline brackets, with the product id, the eight glyphs drawn by the core renderer (the same function as print) and the fingerprint <code>G1-E1DC-BE52 · GENOME-01</code>;</li>
+<li>the <b>GENOME specimen</b>: an ivory plate framed by hairline brackets, with the product id, the eight glyphs in their orbit around the SEAL as on the piece (glyph 0 at north, then clockwise), drawn by the core renderer (the same function as print), and the fingerprint <code>G1-E1DC-BE52 · GENOME-01</code>;</li>
 <li>the product lines MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY;</li>
 <li>the tabs PRODUCT · WARRANTY · CARE · OWNERSHIP, opening on OWNERSHIP because registration is open (PRODUCT otherwise);</li>
 <li>SCAN ANOTHER, the honest footnote, and the VERIFIED · REF line.</li>
 </ol>
-The client recomputes the genome from the glyphs it received and draws the row only if it matches the server's fingerprint. Product lines and tabs appear only for the four AUTHENTIC states; the GENOME appears whenever the server sends it (authentic, unusual activity, revoked).
+The client recomputes the genome from the glyphs it received and draws the orbit only if it matches the server's fingerprint. Product lines and tabs appear only for the four AUTHENTIC states; the GENOME appears whenever the server sends it (authentic, unusual activity, revoked).
 </td>
 </tr>
 </table>
@@ -602,7 +604,7 @@ Tabs follow the ARIA tablist pattern (arrow keys, Home, End, roving tab index); 
 <table>
 <tr>
 <td width="33%"><img src="assets/ui/verify-09-verifying.png" width="250" alt="VERIFYING… with a moon orbiting a faint ring"></td>
-<td width="33%"><img src="assets/ui/verify-10-unusual-activity.png" width="250" alt="UNUSUAL ACTIVITY DETECTED for O26-J-00193, caution mark, GENOME specimen, help text, SCAN AGAIN"></td>
+<td width="33%"><img src="assets/ui/verify-10-unusual-activity.png" width="250" alt="UNUSUAL ACTIVITY DETECTED for O26-J-00193, caution mark, GENOME specimen in its orbit, help text, SCAN AGAIN"></td>
 <td width="33%"><img src="assets/ui/verify-11-invalid-signature.png" width="250" alt="INVALID SIGNATURE, empty orbit mark, help text, SCAN AGAIN"></td>
 </tr>
 <tr>

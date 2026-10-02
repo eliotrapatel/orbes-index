@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CODE01 } from '../../src/core/code/profile.js';
 import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
-import { computeGenome } from '../../src/core/genome/index.js';
+import { computeGenome, genomeLayout } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
+import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
 
@@ -33,6 +34,9 @@ function rule(css: string, selector: string): Record<string, string> {
   return out;
 }
 
+const G184 = computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 }), 1);
+const GENOME_184 = { id: 'O26-J-00184', version: 'GENOME-01', versionNumber: 1, fingerprint: G184.fingerprint, glyphs: [...G184.glyphs], ids: [...G184.ids] };
+
 const tokens: Record<string, string> = {};
 for (const m of brand.matchAll(/^\s*(--[\w-]+):\s*([^;]+);/gm)) tokens[m[1]] = m[2].trim();
 const resolve = (v: string): string => v.replace(/var\((--[\w-]+)\)/g, (_, t: string) => tokens[t] ?? t);
@@ -46,11 +50,12 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
   });
 
   it('draws the GENOME on its ivory plate in the ivory colourway ink (#111111), as it is printed', () => {
-    const g = computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 }), 1);
-    const markup = genomeRowMarkup({ id: 'O26-J-00184', version: 'GENOME-01', versionNumber: 1, fingerprint: g.fingerprint, glyphs: [...g.glyphs], ids: [...g.ids] });
-    expect(markup).not.toBeNull();
-    const inks = new Set([...markup!.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
-    expect([...inks]).toEqual([ORBES_CODE_STYLES.ivory.ink]);
+    for (const layout of ['orbit', 'row'] as const) {
+      const markup = genomeRowMarkup(GENOME_184, { layout });
+      expect(markup, layout).not.toBeNull();
+      const inks = new Set([...markup!.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
+      expect([...inks], layout).toEqual([ORBES_CODE_STYLES.ivory.ink]);
+    }
     expect(rule(styles, '.result__genome').background).toBe('var(--ivory)');
     expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
   });
@@ -106,6 +111,38 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       const used = [brand, styles, admin].some((css) => css.includes(`var(${t})`));
       expect(used, t).toBe(true);
     }
+  });
+});
+
+describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYSTEM §2.3, §2.6)', () => {
+  it('draws the result GENOME in the orbit layout, the figure of the console and of the code', () => {
+    const view = readFileSync(join(WEB, 'verify/genome-view.ts'), 'utf8');
+    const block = view.slice(view.indexOf('export function genomeBlock'));
+    expect(block).toContain("genomeRow(m, { layout: 'orbit' })");
+    // The same core renderer, the same ink and the same geometry as the console's product page.
+    const json = { id: 'g', productId: GENOME_184.id, version: 1, versionLabel: 'GENOME-01', value: G184.value, glyphs: [...G184.glyphs], ids: [...G184.ids], pattern: '', fingerprint: G184.fingerprint, createdAt: '2026-01-01T00:00:00.000Z' };
+    expect(genomeRowMarkup(GENOME_184, { layout: 'orbit' })).toBe(genomeFigureMarkup(json, 'orbit'));
+    // The seal at the centre, then one group per glyph (glyph 0 at north, clockwise: genomeLayout).
+    const markup = genomeRowMarkup(GENOME_184, { layout: 'orbit' })!;
+    expect(markup.match(/data-layer="seal"/g)).toHaveLength(1);
+    expect(markup.match(/data-layer="genome"/g)).toHaveLength(CODE01.genome.count);
+  });
+
+  it('sizes the orbit as a centred square of min(64vw, 260px): glyphs of about 43 px, never under the 12 px floor', () => {
+    const orbit = rule(styles, '.genome-svg--orbit');
+    expect(orbit.width).toBe('min(64vw, 260px)');
+    expect(orbit['aspect-ratio']).toBe('1');
+    expect(orbit.margin).toBe('0 auto');
+    const { viewBox, glyphRadius } = genomeLayout(G184, 'orbit');
+    expect(viewBox.w).toBe(viewBox.h);
+    const glyphPx = (side: number) => (side * 2 * glyphRadius) / viewBox.w;
+    expect(glyphPx(260)).toBeCloseTo(43, 0);
+    // 390 px phone: 64vw = 249.6 px; the smallest phone in use (320 px) still draws 34 px glyphs.
+    expect(glyphPx(0.64 * 390)).toBeGreaterThan(41);
+    expect(glyphPx(0.64 * 320)).toBeGreaterThan(12);
+    // The ivory plate keeps its margins (§2.5: 34 / 22 / 28 px).
+    expect(rule(styles, '.result__genome').padding).toBe('34px 22px 28px');
+    expect(rule(styles, '.result__genome')['margin-top']).toBe('52px');
   });
 });
 
