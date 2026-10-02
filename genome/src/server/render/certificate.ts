@@ -86,8 +86,9 @@ export const SCRATCH_OFF_SPOT: Readonly<PdfSpotColor> = Object.freeze({ name: 'O
 
 /**
  * The card's fixed copy (house voice: uppercase, tracked). The three steps
- * are those of the packaging kit, word for word: step 2 names the ORBES CODE,
- * what the buyer scans, not the SEAL, its finder (BRAND §2.1).
+ * are those of the packaging kit (docs/launch/PACKAGING-KIT.md), word for
+ * word, as test/docs/packaging-kit.test.ts checks: step 2 names the ORBES
+ * CODE, what the buyer scans, not the SEAL, its finder (BRAND §2.1).
  */
 export const CERTIFICATE_COPY = Object.freeze({
   title: 'CERTIFICATE',

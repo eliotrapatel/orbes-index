@@ -123,7 +123,7 @@ Nothing the browser computes is trusted. The decoder runs client-side only for s
 | | |
 |---|---|
 | **Attack** | A counterfeiter prints a QR code or link that leads to a look-alike site which always says AUTHENTIC. |
-| **Current protection** | The ORBES CODE is not a URL and does not open a website by itself. The customer must go to the official ORBES domain, so packaging and the website consistently say: "verify only at theorbes.com/verify". The public key set is published at `/.well-known/orbes-keys.json`, so third parties (resellers, insurers) can verify signatures independently. Account-based ownership means a fake site cannot show the customer's own registered products. |
+| **Current protection** | The ORBES CODE is not a URL and does not open a website by itself. The customer must go to the official ORBES domain, so packaging and the website consistently say: "verify only at theorbes.com/verify" (wording in the [packaging kit](launch/PACKAGING-KIT.md)). The public key set is published at `/.well-known/orbes-keys.json`, so third parties (resellers, insurers) can verify signatures independently. Account-based ownership means a fake site cannot show the customer's own registered products. |
 | **Residual risk** | **Medium.** Phishing cannot be eliminated technically. |
 | **Future mitigation** | A native app with pinned keys. Verification receipts. Domain monitoring and takedown. Customer education. |
 
