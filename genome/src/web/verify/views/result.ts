@@ -13,6 +13,10 @@
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP
  *
+ * Other results show no product lines and no tabs, only a line for ORBES
+ * Client Services; UNUSUAL ACTIVITY adds, when the server offers it, the
+ * section DO YOU HOLD THE CERTIFICATE CARD? (registration with the claim code).
+ *
  * Everything shown comes from the server outcome through resultViewModel().
  */
 import { bracket } from '../../shared/corners.js';
@@ -94,6 +98,23 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         h('p', { class: 'prose', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
       ),
     );
+    // UNUSUAL ACTIVITY with a registration token (the server's step 10 exception): the buyer holding
+    // the certificate card may still register, with its claim code. Sign-in, then the claim code; no product data.
+    if (vm.ownership.kind === 'register') {
+      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh });
+      sections.push(
+        h(
+          'section',
+          { class: 'result__card', attrs: { 'aria-labelledby': 'card-title' } },
+          h('h2', { class: 'result__card-title', id: 'card-title', text: 'DO YOU HOLD THE CERTIFICATE CARD?' }),
+          h('p', {
+            class: 'prose result__card-text',
+            text: 'If this piece was delivered to you with its ORBES certificate card, you may register it in your name with the claim code printed under the scratch-off panel.',
+          }),
+          ownership.root,
+        ),
+      );
+    }
   }
 
   const foot = h(

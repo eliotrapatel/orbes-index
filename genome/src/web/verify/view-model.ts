@@ -4,8 +4,10 @@
  * Pure (no DOM) and unit-tested. The server decides the state and writes the
  * title and message; this module only arranges them: which sections appear,
  * how product facts read as brand lines, which tabs exist and what the
- * ownership tab offers. It never infers anything the server did not say
- * (no internal statuses, no scores), and it never upgrades a state.
+ * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
+ * registration token, the certificate-card section). It never infers
+ * anything the server did not say (no internal statuses, no scores), and it
+ * never upgrades a state.
  */
 import { ASSURANCE_NOTE, DEFAULT_CARE, FALLBACK_TITLES } from './copy.js';
 import { VERIFICATION_STATES, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
@@ -23,8 +25,12 @@ export const TAB_LABELS: Readonly<Record<TabId, string>> = Object.freeze({
 export type Row = readonly [label: string, value: string];
 
 export type OwnershipMode =
-  /** First registration is open: token from this scan. */
-  | { kind: 'register'; token: string; expiresAt: string; claimCodeRequired: boolean }
+  /**
+   * First registration is open: token from this scan. `underReview`: offered on
+   * an UNUSUAL ACTIVITY result (the server's step 10 exception), to the holder
+   * of the certificate card only, so the claim code is always required.
+   */
+  | { kind: 'register'; token: string; expiresAt: string; claimCodeRequired: boolean; underReview: boolean }
   /** The viewer owns it. */
   | { kind: 'yours'; productId: string; transferPending: boolean }
   /** Someone else owns it; the viewer may hold a transfer code. */
@@ -245,19 +251,26 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     }
     vm.ownership = ownershipMode(outcome);
     vm.footnote = ASSURANCE_NOTE;
+  } else if (state === 'SUSPICIOUS_ACTIVITY') {
+    // The holder of the certificate card may still register (no tabs, no product data): see ownershipMode.
+    vm.ownership = ownershipMode(outcome);
   }
   return vm;
 }
 
 function ownershipMode(o: VerifyOutcome): OwnershipMode {
   const productId = o.product?.productId ?? '';
-  if (o.state === 'AUTHENTIC_FIRST_REGISTRATION' && o.registration?.token) {
-    return {
-      kind: 'register',
-      token: o.registration.token,
-      expiresAt: o.registration.expiresAt,
-      claimCodeRequired: o.registration.claimCodeRequired === true,
-    };
+  const reg = o.registration;
+  if (o.state === 'SUSPICIOUS_ACTIVITY') {
+    // The server's rule (verification.ts, step 10): a token on an unusual activity result is usable
+    // with the claim code of the certificate card only. A token without that requirement is ignored.
+    if (reg?.token && reg.claimCodeRequired === true) {
+      return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: true, underReview: true };
+    }
+    return { kind: 'unregistered' };
+  }
+  if (o.state === 'AUTHENTIC_FIRST_REGISTRATION' && reg?.token) {
+    return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
   }
   const own = o.ownership;
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };

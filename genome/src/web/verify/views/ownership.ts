@@ -1,7 +1,9 @@
 /**
  * OWNERSHIP tab: sign in / create an account, register a piece at its first
  * registration (scan token + claim code), create or cancel a transfer code,
- * and receive a piece with a transfer code.
+ * and receive a piece with a transfer code. The same panel, in its register
+ * mode alone, is the certificate-card section of an UNUSUAL ACTIVITY result
+ * (`underReview`: the claim code is required).
  *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
@@ -146,7 +148,13 @@ export class OwnershipPanel {
       );
       return out;
     }
-    out.push(this.text('Register this piece in your name to keep its warranty, service history and ownership together.'));
+    out.push(
+      this.text(
+        m.underReview
+          ? 'While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.'
+          : 'Register this piece in your name to keep its warranty, service history and ownership together.',
+      ),
+    );
     const until = timeOf(m.expiresAt);
     if (until) out.push(h('p', { class: 'ownership__meta micro soft', text: `REGISTRATION OPEN UNTIL ${until}` }));
     if (s.status !== 'signed-in') {

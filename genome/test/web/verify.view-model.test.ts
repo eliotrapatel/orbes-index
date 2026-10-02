@@ -179,7 +179,7 @@ describe('verify view-model: ownership modes', () => {
     );
     expect(vm.titleMain).toBe('AUTHENTIC');
     expect(vm.titleSub).toBe('FIRST REGISTRATION');
-    expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true });
+    expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true, underReview: false });
   });
 
   it('FIRST_REGISTRATION without a token offers nothing to register', () => {
@@ -226,6 +226,42 @@ describe('verify view-model: negative states', () => {
     expect(vm.warranty).toBeUndefined();
     expect(vm.footnote).toBeUndefined();
     expect(vm.ownership).toEqual({ kind: 'unregistered' });
+  });
+
+  describe('SUSPICIOUS_ACTIVITY with a registration token (the server’s step 10 exception)', () => {
+    const registration = { token: 'tok_card', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true };
+
+    it('opens registration for the holder of the certificate card, claim code required, with the tabs left empty', () => {
+      const vm = resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration }));
+      expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_card', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true, underReview: true });
+      expect(vm.tone).toBe('caution');
+      expect(vm.titleMain).toBe('UNUSUAL ACTIVITY DETECTED');
+      expect(vm.tabs).toEqual([]);
+      // Still no product data: the section offers the sign-in and the claim code, nothing else.
+      expect(vm.productLines).toEqual([]);
+      expect(vm.productRows).toEqual([]);
+      expect(vm.warranty).toBeUndefined();
+      expect(vm.footnote).toBeUndefined();
+    });
+
+    it('never shows product data, even if a product block came with the token', () => {
+      const vm = resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration, product: PRODUCT, warranty: { status: 'ACTIVE' }, ownership: { registered: false, you: false } }));
+      expect(vm.ownership.kind).toBe('register');
+      expect(vm.productLines).toEqual([]);
+      expect(vm.tabs).toEqual([]);
+      expect(vm.warranty).toBeUndefined();
+    });
+
+    it('offers nothing when the claim code is not required, or without a token (the same rule as the server)', () => {
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration: { ...registration, claimCodeRequired: false } })).ownership).toEqual({ kind: 'unregistered' });
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration: { ...registration, token: '' } })).ownership).toEqual({ kind: 'unregistered' });
+      const loose = { ...registration, claimCodeRequired: 'true' } as unknown as typeof registration;
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { registration: loose })).ownership).toEqual({ kind: 'unregistered' });
+    });
+
+    it.each(['REVOKED', 'UNKNOWN', 'INVALID_SIGNATURE', 'MALFORMED_CODE'] as const)('%s never offers registration, whatever it carries', (state) => {
+      expect(resultViewModel(outcome(state, { registration })).ownership).toEqual({ kind: 'unregistered' });
+    });
   });
 
   it('REVOKED keeps the genome for reference', () => {

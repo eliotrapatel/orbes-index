@@ -229,7 +229,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.auth__option'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.dialog__eyebrow', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).

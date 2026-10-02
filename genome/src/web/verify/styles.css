@@ -735,6 +735,36 @@ h1[tabindex="-1"]:focus {
   margin: 0 auto;
 }
 
+/* DO YOU HOLD THE CERTIFICATE CARD? Under the help line of an UNUSUAL
+   ACTIVITY result that carries a registration token: a hairline, the
+   question (a status line: 11 px, label tracking, not the 8.5 px of a
+   section label, since it asks the reader something) and its sentence
+   centred as the help line, then the OWNERSHIP panel (sign-in, then the
+   claim code) at the width of a tab panel. */
+.result__card {
+  margin-top: 50px;
+  border-top: 1px solid var(--hairline);
+}
+
+.result__card-title {
+  margin-top: 36px;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: 1.7;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  text-align: center;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.result__card-text {
+  max-width: 32ch;
+  margin: 12px auto 0;
+  text-align: center;
+  text-wrap: balance;
+}
+
 /* Tabs */
 
 .tabs {
@@ -1063,6 +1093,7 @@ h1[tabindex="-1"]:focus {
 .rows__label,
 .section-label,
 .ownership__status,
+.result__card-title,
 .auth__option {
   font-family: var(--font-display);
 }

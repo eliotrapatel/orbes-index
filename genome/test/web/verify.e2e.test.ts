@@ -3,8 +3,9 @@
  * (buildApp, in-memory database, ephemeral port), driven in Chromium at a
  * phone viewport. Covers the photo upload path, the camera path (Chromium's
  * fake capture device fed with a simulated phone clip of a real issued
- * code), first registration with a claim code through the OWNERSHIP tab, and
- * the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * code), first registration with a claim code through the OWNERSHIP tab, the
+ * same registration from an UNUSUAL ACTIVITY result (a burst of scans of
+ * copies, then the holder of the certificate card), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -287,6 +288,71 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('lets the holder of the certificate card register from an UNUSUAL ACTIVITY result, with its claim code', async () => {
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    // A burst of scans of copies of its code, from 22 sources within a minute (velocity ⊕ diversity):
+    // the buyer's own scan, the next one, comes out suspicious from the scan history alone.
+    for (let i = 0; i < 22; i++) {
+      await srv.ctx.services.verification.verify({ code: issued.code.data }, { deviceHash: `copy-device-${i}`, ipHash: `copy-ip-${i}`, geo: { country: 'FR' } });
+    }
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'burst.png', issued));
+    expect(await resultTitle(page)).toBe('UNUSUAL ACTIVITY DETECTED');
+    await attrOf(page.locator('.view--result'), 'data-tone', 'caution');
+    // No tabs and no product data: the GENOME, the help line, then the certificate-card section beneath it.
+    await countOf(page.getByRole('tab'), 0);
+    await countOf(page.locator('.lines__line, .rows'), 0);
+    const card = page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' });
+    await visible(card);
+    expect(await page.locator('.result__help + .result__card').count()).toBe(1);
+    await textOf(card.locator('.result__card-text'), /certificate card, you may register it in your name with the claim code/);
+    await textOf(card.locator('.ownership__status'), 'REGISTRATION OPEN');
+    await textOf(card.locator('.ownership__text').first(), 'While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.');
+    // The question is a status line in the display face, 11 px: read, not decoration.
+    const title = card.getByRole('heading', { level: 2 });
+    expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe('11px');
+    expect(await title.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'SCAN AGAIN']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-unusual-activity-card.png'), fullPage: true });
+    // On the smallest phone in use the question wraps, balanced, and nothing scrolls sideways.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'SCAN AGAIN']);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // Sign-in first (an account is created), then the CLAIM CODE, which is required.
+    await card.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await page.getByLabel('EMAIL').fill('card-holder@example.com');
+    await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await card.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await visible(page.getByLabel('CLAIM CODE'));
+    await keepsFloors(page, ['REGISTER THIS PIECE', 'SIGN OUT', 'SCAN AGAIN']);
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(page.getByRole('alert'), /Enter the 12 characters of your claim code/);
+    // A wrong code: the server's answer, as it comes.
+    await page.getByLabel('CLAIM CODE').fill('ZZZZ-ZZZZ-ZZZZ');
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(page.getByRole('alert'), 'The claim code does not match this product.');
+    expect(await srv.ctx.services.ownership.currentOwner(issued.product.id)).toBeFalsy();
+    // The code of the card: REGISTERED TO YOU.
+    await page.getByLabel('CLAIM CODE').fill(issued.claimCode!);
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(card, /Ownership verified with its claim code/);
+    expect(await srv.ctx.services.ownership.currentOwner(issued.product.id)).toBeTruthy();
+
+    // VIEW AS OWNER verifies again: the owner's own piece, with the unusual activity said once.
+    await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await attrOf(page.locator('.view--result'), 'data-tone', 'authentic');
+    await textOf(page.locator('.result__message'), /Unusual activity has been recorded for it/);
+    await countOf(page.locator('.result__card'), 0);
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
     expect(problems).toEqual([]);
   }, 120_000);
 
