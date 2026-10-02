@@ -256,6 +256,8 @@ pyftsubset GravesendSans-Medium.otf --flavor=woff2 --desubroutinize --layout-fea
 
 **Rendering.** Display text renders in Gravesend Sans on every platform, Android and Windows included. Reading text renders in Helvetica Neue on Apple devices (Helvetica Neue Light for weight 300); elsewhere it falls back to Helvetica or Arial, and on most Android devices to the platform sans-serif (Roboto), where weight 300 renders as 400. The screenshots in this document were taken on 2026-10-02 in Chrome for Testing on macOS, so reading text is Helvetica Neue. One predates the display face: the locked scanner (`verify-03-locked.png`), kept from an earlier capture in Chromium on Linux because Chrome for Testing on macOS paints the frozen camera frame black; on Linux the reading stack resolves to Liberation Sans, metric-compatible with Helvetica and Arial.
 
+**Floors.** Nothing that is acted on, and no fact the visitor has to read, is set under 10 px (`--fs-micro`) in the verification app: buttons, text links, scanner controls, sign-in options, tabs, field labels, the GENOME fingerprint line and the ownership lines. 8 px (`--fs-nano`) and the 7–9 px component sizes are left to decoration and to labels nobody taps (landing foot, GENOME label, section and row labels). Every tap zone is at least 44 × 44 px (§3.8).
+
 **Case and tracking.** Titles, labels, buttons, tabs and metadata are uppercase with wide tracking. Explanatory sentences are sentence case, never tracked beyond 0.06 em. Tracked type carries trailing letter-spacing after its last glyph, so centred tracked text is compensated with an equal `text-indent` (`.indent-micro`, `.indent-label`, and per-component indents), as theorbes.com does.
 
 **Weights.** Gravesend has one weight, Medium (500), and the display face renders every display role in it, whatever weight the role asks for: the result title and the console page title ask for 300, which only their fallback honours. In `--font`: 400 everywhere; 300 for display numerals (KPI values, the product id of the console sheet, the generator identity, a page titled with a product id); 700 only in the console, for alert and critical status labels and the lifecycle move in the history timeline, all in `--font`. No display role asks for a bold the browser would have to fake from the single cut (checked).
@@ -280,8 +282,8 @@ Component sizes between those steps are tokens too, so neither stylesheet sets a
 | Token | Value | Used for |
 |---|---|---|
 | `--fs-hint` | 7px | landing meta (theorbes.com's micro meta) |
-| `--fs-overline` | 8.5px | section labels, sign-in options |
-| `--fs-caption` | 9px | AUTHENTICATION, tabs, row labels |
+| `--fs-overline` | 8.5px | section labels |
+| `--fs-caption` | 9px | AUTHENTICATION, row labels, the dots between tabs |
 | `--fs-mono-sm` / `--fs-mono` / `--fs-mono-lg` | 10.5 / 11.5 / 12.5px | monospace identifiers (optically one step below the sans they sit beside) |
 | `--fs-sub` | 14px | console plain values, toast close |
 | `--fs-heading` / `--fs-heading-lg` | 17 / 18px | GENOME id, dialog title / caution and void result titles, TOTP code |
@@ -305,14 +307,16 @@ Component sizes between those steps are tokens too, so neither stylesheet sets a
 | Owner notice | reading | 12px | 400 | 0.02em | between two `--hairline-strong` rules |
 | GENOME label | display | 8px | 400 | 0.36em | `--ink-soft` |
 | GENOME id | reading | 17px | 400 | 0.22em | tabular |
+| GENOME fingerprint line | reading | 10px | 400 | 0.22em | `--ink-soft`, e.g. G1-E1DC-BE52 · GENOME-01 |
 | Product lines | reading | 11px | 400 | 0.30em | line-height 2.55 |
-| Tabs | display | 9px | 400 | 0.22em | selected `--ink`, others `--ink-soft` |
+| Tabs | display | 10px | 400 | 0.16em | selected `--ink`, others `--ink-soft`; 0.12em under 350 px, so the four tabs keep the width they had at 9px |
 | Row label / value | display / reading | 9px / 11px | 400 | 0.28em / 0.14em | value right-aligned, tabular |
 | Section label | display | 8.5px | 400 | 0.34em | e.g. VERIFICATION |
 | Status line (scanner, verifying) | display | 10px | 400 | 0.34em | |
 | Scan hint | reading | 11px | 400 | 0.06em | sentence case, `rgba(255,255,255,0.74)` |
 | Button | display | 10px | 400 | 0.28em | |
-| Text link, scanner controls, field labels | display (zoom control: reading) | 8px | 400 | 0.30em | |
+| Text link, scanner controls, sign-in options, field labels | display (zoom control: reading) | 10px | 400 | 0.22em | the gap between letters stays about what it was (2.2 px; 2.4 px at 8px and 0.30em, 2.2 px at 8.5px and 0.26em); text links at 80 % ink at rest |
+| Ownership lines | reading | 10px | 400 | 0.22em | `--ink-soft`: REGISTRATION OPEN UNTIL, the transfer code's label and validity, SIGNED IN AS |
 | Field input | reading | 16px | 400 | 0.04em | 16px so iOS does not zoom; code input 18px / 0.28em |
 | Transfer code | reading | 19px | 400 | 0.26em | tabular, on ivory |
 | Footnote | reading | 10px | 400 | 0.02em | line-height 1.75 |
@@ -447,8 +451,9 @@ The verification app carries theorbes.com's film grain: a fixed SVG `feTurbulenc
 ### 3.8 Controls
 
 - **The hairline button** (`.btn`): 1 px `currentColor` border, no radius, transparent; fills with ink on hover (where hover exists) or press. One per screen, for the primary action. Disabled at 35 % opacity.
-- **The text link** (`.textlink`): 8 px tracked caps at 62 % opacity, rising to 100 % with an underline drawn on hover or focus. For the secondary action.
-- **Fields**: a label in 8 px tracked caps, a single 1 px underline (`--hairline-strong`, ink on focus), no box.
+- **The text link** (`.textlink`): 10 px tracked caps (`--fs-micro`, `--track-micro`) at 80 % opacity (11 : 1 on white), rising to 100 % with an underline drawn on hover or focus. For the secondary action.
+- **Fields**: a label in 10 px tracked caps, a single 1 px underline (`--hairline-strong`, ink on focus), no box; the field is 44 px high.
+- **Floors** (verification app, the screens a customer touches on a phone): **10 px** for any text that is acted on and any fact to read, the 8 px step being left to decoration (§3.1); a tap zone of **at least 44 × 44 px** for every button, text link, scanner control (LIGHT, the zoom, UPLOAD A PHOTO, CLOSE), sign-in option and tab. The zone is transparent padding, and an equal negative margin gives the room back: the layout, the word and its hairline (the text link's underline, the tab's underline, the pressed rule of a scanner control or a sign-in option) stay where they were, at the same distance from the word. The two words narrower than 44 px, the zoom (1×, 2×) and the CARE tab, gain width the same way. The hairline button (52 px) and the fields (44 px) already kept the floor. Checked statically by `genome/test/web/verify.brand.test.ts` (no selector that shows a pointer under 10 px of type or a 44 px minimum height, no fact line in the 8 px class), and in Chromium at 390 × 844 px by `genome/test/web/verify.e2e.test.ts` (landing; result, again at 320 px; OWNERSHIP sign-in, account creation, claim form and transfer code; a problem screen) and `genome/test/e2e/fallbacks.test.ts` (the scanner): every visible button, link and tab measures at least 44 × 44 px in type of at least 10 px, no two tap zones overlap, nothing scrolls sideways (`genome/test/support/tap-zones.ts`). The console, a desktop instrument used with a pointer, keeps its 8 px tracked caps and 38 px buttons.
 - **Focus**: a 1 px `currentColor` outline 4 px outside the element, keyboard only (`:focus-visible`); headings that receive focus programmatically on screen changes show none.
 - **Console buttons** (`.cbtn`): 38 px, 8 px tracked caps, square; *primary* is the hairline button (outlined in ink, filled only on hover or keyboard focus), *secondary* outlined, *ghost* an underlined word, *danger* outlined in oxblood.
 - **Type**: buttons, text links and field labels speak in the display face; what is typed into a field reads in `--font` (§3.1).
