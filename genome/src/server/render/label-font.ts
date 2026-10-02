@@ -56,6 +56,8 @@ const NINE_T = tangentDeg(0.16, 1, 0.33, 0.3, 0.3, -1);
 const GLYPHS: Readonly<Record<string, GlyphDef>> = {
   ' ': { w: 0.4, ops: [] },
   '-': { w: 0.42, ops: [['M', 0.04, 0.56], ['L', 0.38, 0.56]] },
+  // The dot sits on the baseline: its ink bottom meets the other glyphs' stroke overhang.
+  '.': { w: 0.16, ops: circle(0.08, 0.965, 0.035) },
   '/': { w: 0.42, ops: [['M', 0.02, 1], ['L', 0.4, 0]] },
   '·': { w: 0.16, ops: circle(0.08, 0.52, 0.035) },
   '0': { w: 0.64, ops: [['M', 0, 0.5], ['arc', 0.32, 0.5, 0.32, 0.5, 180, 540]] },
@@ -112,6 +114,27 @@ const MAX_ARC_DEG = 90;
 const DECIMALS = 3;
 
 export const LABEL_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS));
+
+/** Letters that do not decompose into a base letter and accents (NFKD), spelt the way French and English print them in capitals. */
+const SPELLED: Readonly<Record<string, string>> = Object.freeze({ Æ: 'AE', Œ: 'OE', Ø: 'O', Đ: 'D', Ł: 'L', Þ: 'TH' });
+const DASHES = /[\u2010-\u2015\u2212]/g;
+
+/**
+ * Free text (a model name, a material) as the lettering can draw it: accents
+ * removed, uppercase, ligatures spelt out, dashes as '-', and every other
+ * character outside LABEL_CHARSET a space (runs collapsed, ends trimmed).
+ * "Argent 925, œuvre" → "ARGENT 925 OEUVRE". Never throws.
+ */
+export function toLabelText(text: string): string {
+  const upper = text
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toUpperCase()
+    .replace(DASHES, '-');
+  let out = '';
+  for (const ch of upper) out += SPELLED[ch] ?? (LABEL_CHARSET.has(ch) ? ch : ' ');
+  return out.replace(/ {2,}/g, ' ').trim();
+}
 
 export interface TextRunOptions {
   /** Cap height in output units. */

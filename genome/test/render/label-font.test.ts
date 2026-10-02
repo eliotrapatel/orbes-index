@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LABEL_CHARSET, measureText, STROKE_RATIO, textRun } from '../../src/server/render/label-font.js';
+import { LABEL_CHARSET, measureText, STROKE_RATIO, textRun, toLabelText } from '../../src/server/render/label-font.js';
 
 /** Endpoints of every M/L/A command in absolute path data. */
 function endpoints(d: string): [number, number][] {
@@ -13,8 +13,28 @@ function endpoints(d: string): [number, number][] {
 }
 
 describe('label lettering', () => {
-  it('covers the characters of product ids, the brand line and sheet captions', () => {
-    for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/· ') expect(LABEL_CHARSET.has(ch), ch).toBe(true);
+  it('covers the characters of product ids, the brand line, sheet captions and web addresses', () => {
+    for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/·. ') expect(LABEL_CHARSET.has(ch), ch).toBe(true);
+  });
+
+  it('sits the full stop on the baseline, the middle dot at mid-height', () => {
+    const dot = endpoints(textRun('.', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d).map(([, y]) => y);
+    const mid = endpoints(textRun('·', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d).map(([, y]) => y);
+    expect(Math.max(...dot)).toBeCloseTo(10, 6);
+    expect((Math.min(...mid) + Math.max(...mid)) / 2).toBeCloseTo(5.2, 6);
+  });
+
+  it('toLabelText: free text as the lettering can draw it, never throwing', () => {
+    expect(toLabelText('Argent 925, œuvre')).toBe('ARGENT 925 OEUVRE');
+    expect(toLabelText('Or jaune 18 carats – « Soleil »')).toBe('OR JAUNE 18 CARATS - SOLEIL');
+    expect(toLabelText('Été\tà Paris\n')).toBe('ETE A PARIS');
+    expect(toLabelText('Großartig · Æther Ø')).toBe('GROSSARTIG · AETHER O');
+    expect(toLabelText('theorbes.com/verify')).toBe('THEORBES.COM/VERIFY');
+    expect(toLabelText('✓ ✓')).toBe('');
+    for (const s of ['<script>', '日本語', '\u0000', 'a\u0301']) {
+      const t = toLabelText(s);
+      expect(() => textRun(t || 'A', { capHeight: 1, x: 0, baseline: 1 })).not.toThrow();
+    }
   });
 
   it('draws every glyph inside its advance box, with arcs continuous from the pen', () => {

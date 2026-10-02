@@ -50,7 +50,7 @@ export interface GenomeLayout {
   glyphRadius: number;
 }
 
-function rowLayout(genome: Genome): GenomeLayout {
+function rowLayout(genome: Pick<Genome, 'glyphs' | 'version'>): GenomeLayout {
   const primitives: Primitive[] = [];
   genome.glyphs.forEach((g, i) => {
     if (i > 0) primitives.push({ kind: 'disc', layer: 'decor', cx: (i - 0.5) * ROW_PITCH, cy: 0, r: ROW_SEPARATOR_RADIUS });
@@ -64,7 +64,7 @@ function rowLayout(genome: Genome): GenomeLayout {
   };
 }
 
-function orbitLayout(genome: Genome): GenomeLayout {
+function orbitLayout(genome: Pick<Genome, 'glyphs' | 'version'>): GenomeLayout {
   const { seal } = CODE01;
   const { orbitRadius, glyphRadius, stepRad } = CODE01.genome;
   const ringWidth = seal.ringOuter - seal.gapOuter;
@@ -82,8 +82,8 @@ function orbitLayout(genome: Genome): GenomeLayout {
   return { primitives, viewBox: { x: -edge, y: -edge, w: 2 * edge, h: 2 * edge }, glyphRadius };
 }
 
-/** Geometry of a genome presentation, for renderers other than SVG (PDF labels, specimen sheets). */
-export function genomeLayout(genome: Genome, layout: 'row' | 'orbit' = 'row'): GenomeLayout {
+/** Geometry of a genome presentation, for renderers other than SVG (PDF labels and cards, specimen sheets). */
+export function genomeLayout(genome: Pick<Genome, 'glyphs' | 'version'>, layout: 'row' | 'orbit' = 'row'): GenomeLayout {
   if (genome.glyphs.length !== CODE01.genome.count) throw new RangeError(`a genome has ${CODE01.genome.count} glyphs, got ${genome.glyphs.length}`);
   if (layout === 'row') return rowLayout(genome);
   if (layout === 'orbit') return orbitLayout(genome);

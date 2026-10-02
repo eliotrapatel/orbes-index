@@ -227,9 +227,11 @@ export function sampleCodeFor(rendition: Rendition): SampleCode {
 
 // ── Lettering ──────────────────────────────────────────────────────────────
 //
-// The label alphabet covers A–Z, 0–9, space, '-', '/', '·'. Instructions also
-// need a little punctuation, drawn here in the same glyph space (cap height
-// 1, y down, baseline at 1) and the same monoline style.
+// The label alphabet covers A–Z, 0–9, space, '-', '.', '/', '·'. Instructions
+// also need a little punctuation, drawn here in the same glyph space (cap
+// height 1, y down, baseline at 1) and the same monoline style. These glyphs
+// win over the alphabet's: the kit's '.' predates the alphabet's, and the
+// committed kit is drawn with it.
 
 const circlePath = (cx: number, cy: number, r: number): string => `M${cx - r} ${cy}A${r} ${r} 0 0 1 ${cx + r} ${cy}A${r} ${r} 0 0 1 ${cx - r} ${cy}`;
 
@@ -252,10 +254,10 @@ const EXTRA_GLYPHS: Readonly<Record<string, { w: number; d: string }>> = {
 const SIDE_BEARING = measureText('II') - 2 * measureText('I');
 
 function glyphAdvance(ch: string): number {
-  if (LABEL_CHARSET.has(ch)) return measureText(ch);
   const extra = EXTRA_GLYPHS[ch];
-  if (!extra) throw new RangeError(`test sheet lettering: unsupported character ${JSON.stringify(ch)}`);
-  return extra.w;
+  if (extra) return extra.w;
+  if (LABEL_CHARSET.has(ch)) return measureText(ch);
+  throw new RangeError(`test sheet lettering: unsupported character ${JSON.stringify(ch)}`);
 }
 
 /** Width of `text` in mm at cap height `cap`. */
@@ -331,9 +333,9 @@ function text(content: string, o: TextOptions): Item {
   let d = '';
   for (const ch of upper) {
     if (ch !== ' ') {
-      d += LABEL_CHARSET.has(ch)
-        ? textRun(ch, { capHeight: cap, x: pen, baseline: o.baseline, align: 'start' }).d
-        : placeGlyphPath(EXTRA_GLYPHS[ch].d, pen, top, cap);
+      d += EXTRA_GLYPHS[ch]
+        ? placeGlyphPath(EXTRA_GLYPHS[ch].d, pen, top, cap)
+        : textRun(ch, { capHeight: cap, x: pen, baseline: o.baseline, align: 'start' }).d;
     }
     pen += (glyphAdvance(ch) + SIDE_BEARING + tracking) * cap;
   }

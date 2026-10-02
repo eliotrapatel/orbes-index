@@ -168,6 +168,7 @@ export function layoutSheet(cellWmm: number, cellHmm: number, count: number, opt
 
 /** Height reserved at the bottom of a sheet for the footer line and scale bar. */
 export const SHEET_FOOTER_MM = 10;
+/** Crop and cut marks: 3 mm ticks starting 1 mm from the edge, 0.1 mm wide. */
 const MARK_LEN_MM = 3;
 const MARK_GAP_MM = 1;
 const MARK_WIDTH_MM = 0.1;
@@ -195,11 +196,35 @@ export function cropMarks(placements: readonly SheetPlacement[], cellWmm: number
 }
 
 /**
- * Footer of a sheet page in page millimetres: a caption and a 10 mm scale bar
- * so the printer can confirm the sheet was printed at 100 %.
+ * Cut marks of a grid of abutting cells (no gutter, cut on shared edges):
+ * ticks outside the grid on the extension of every cut line, never between
+ * cells, where they would land on the neighbouring artwork. Page millimetres.
  */
-export function sheetFooter(layout: SheetLayout, pageIndex: number, caption: string): StrokePath[] {
-  const y = layout.pageHeightMm - SHEET_FOOTER_MM / 2 - 2;
+export function gridCutMarks(x0: number, y0: number, columns: number, rows: number, cellWmm: number, cellHmm: number): StrokePath {
+  if (!(Number.isInteger(columns) && columns >= 1 && Number.isInteger(rows) && rows >= 1)) throw new RangeError('a grid needs at least one row and one column');
+  const x1 = x0 + columns * cellWmm;
+  const y1 = y0 + rows * cellHmm;
+  let d = '';
+  for (let c = 0; c <= columns; c++) {
+    const x = x0 + c * cellWmm;
+    d += `M${fmt(x)} ${fmt(y0 - MARK_GAP_MM)}L${fmt(x)} ${fmt(y0 - MARK_GAP_MM - MARK_LEN_MM)}`;
+    d += `M${fmt(x)} ${fmt(y1 + MARK_GAP_MM)}L${fmt(x)} ${fmt(y1 + MARK_GAP_MM + MARK_LEN_MM)}`;
+  }
+  for (let r = 0; r <= rows; r++) {
+    const y = y0 + r * cellHmm;
+    d += `M${fmt(x0 - MARK_GAP_MM)} ${fmt(y)}L${fmt(x0 - MARK_GAP_MM - MARK_LEN_MM)} ${fmt(y)}`;
+    d += `M${fmt(x1 + MARK_GAP_MM)} ${fmt(y)}L${fmt(x1 + MARK_GAP_MM + MARK_LEN_MM)} ${fmt(y)}`;
+  }
+  return { d, width: MARK_WIDTH_MM };
+}
+
+/**
+ * Footer of a sheet page in page millimetres: a caption and a 10 mm scale bar
+ * so the printer can confirm the sheet was printed at 100 %. `centerYmm`
+ * moves its centre line (default: inside the SHEET_FOOTER_MM band).
+ */
+export function sheetFooter(layout: SheetLayout, pageIndex: number, caption: string, centerYmm?: number): StrokePath[] {
+  const y = centerYmm ?? layout.pageHeightMm - SHEET_FOOTER_MM / 2 - 2;
   const left = 12;
   const text = `${caption} · PAGE ${pageIndex + 1}/${layout.pages.length} · PRINT AT ACTUAL SIZE`;
   const run = textRun(text, { capHeight: 1.6, tracking: 0.35, x: left, baseline: y + 0.8, align: 'start' });

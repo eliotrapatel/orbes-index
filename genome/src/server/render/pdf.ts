@@ -13,6 +13,13 @@
  * that would otherwise convert RGB black into a four-colour rich black. Only
  * neutral colours can be expressed that way.
  *
+ * Spot colours: a page may also carry flat fills (`shapes`) in a named spot
+ * colour, written as a Separation colour space with a CMYK alternate (how a
+ * viewer or an office printer shows it). The certificate card uses one for
+ * its scratch-off panel. A shape can be set to overprint (OP/op true, OPM 1):
+ * its ink is then laid over what is under it instead of knocking it out, so
+ * the claim code printed beneath the panel stays on its own plate.
+ *
  * Pages are sized in millimetres to the artifact (plus label) for single
  * artifacts, or to a standard paper size for multi-up sheets. Output is
  * deterministic for a given input and creation date (pdfkit derives the file
@@ -34,10 +41,31 @@ export interface PdfPage {
   widthMm: number;
   heightMm: number;
   placements: readonly PdfPlacement[];
-  /** Extra stroked paths in page millimetres (crop marks, footer). */
+  /** Extra stroked paths in page millimetres (crop marks, footer, card lettering). */
   marks?: readonly StrokePath[];
   /** Colour for `marks` (default black). */
   markColor?: string;
+  /** Flat fills in page millimetres, drawn last, over the placements and marks (a scratch-off panel). */
+  shapes?: readonly PdfShape[];
+}
+
+/** A named spot colour: a Separation colour space the print shop sees as its own plate. */
+export interface PdfSpotColor {
+  /** Separation name, e.g. 'ORBES SCRATCH-OFF' (printable ASCII). */
+  name: string;
+  /** CMYK alternate in percent: how viewers, proofs and office printers show the ink. */
+  cmyk: readonly [number, number, number, number];
+}
+
+/** A flat fill (aplat). */
+export interface PdfShape {
+  /** Closed path data in page millimetres. */
+  d: string;
+  /** '#rrggbb', or the name of a spot colour declared in `PdfMeta.spotColors` (always at 100 % tint). */
+  color: string;
+  /** Lay the ink over what is under it instead of knocking it out (OP/op true, OPM 1). */
+  overprint?: boolean;
+  rule?: 'non-zero' | 'even-odd';
 }
 
 export interface PdfMeta {
@@ -48,6 +76,8 @@ export interface PdfMeta {
   creationDate: Date;
   /** 'rgb' (default) or 'k-only' (DeviceCMYK, K channel only; neutral colours only). */
   colorMode?: PdfColorMode;
+  /** Spot colours that `shapes` may name (spot colours are never converted, whatever the colour mode). */
+  spotColors?: readonly PdfSpotColor[];
 }
 
 export type PdfColorMode = 'rgb' | 'k-only';
@@ -112,6 +142,44 @@ function drawScene(doc: PDFKit.PDFDocument, scene: ArtifactScene, xMm: number, y
   doc.restore();
 }
 
+const SPOT_NAME_RE = /^[\x21-\x7e](?:[\x20-\x7e]{0,62}[\x21-\x7e])?$/;
+/** ExtGState resource name of the overprint state (pdfkit names its opacity states Gs1, Gs2, …). */
+const OVERPRINT_GS = 'GsOP';
+
+/** The spot colour API of pdfkit 0.20, absent from its type definitions. */
+type SpotColorDoc = PDFKit.PDFDocument & { addSpotColor(name: string, c: number, m: number, y: number, k: number): unknown };
+
+function declareSpotColors(doc: PDFKit.PDFDocument, spots: readonly PdfSpotColor[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const spot of spots) {
+    if (!SPOT_NAME_RE.test(spot.name) || spot.name.startsWith('#') || names.has(spot.name)) throw new RangeError(`invalid spot colour name ${JSON.stringify(spot.name)}`);
+    if (spot.cmyk.length !== 4 || !spot.cmyk.every((v) => Number.isFinite(v) && v >= 0 && v <= 100)) throw new RangeError(`spot colour ${spot.name}: CMYK must be four values in 0..100`);
+    (doc as SpotColorDoc).addSpotColor(spot.name, ...(spot.cmyk as [number, number, number, number]));
+    names.add(spot.name);
+  }
+  return names;
+}
+
+function drawShapes(doc: PDFKit.PDFDocument, shapes: readonly PdfShape[], spots: ReadonlySet<string>, mode: PdfColorMode, overprint: () => PDFKit.PDFKitReference): void {
+  doc.save();
+  const k = mmToPt(1);
+  doc.transform(k, 0, 0, k, 0, 0);
+  for (const shape of shapes) {
+    let color: string | Cmyk;
+    if (spots.has(shape.color)) color = shape.color;
+    else if (parseHexColor(shape.color)) color = mode === 'k-only' ? kTint(kSolid(shape.color)) : shape.color;
+    else throw new RangeError(`unknown colour ${JSON.stringify(shape.color)}: not hex and not a declared spot colour`);
+    doc.save();
+    if (shape.overprint) {
+      doc.page.ext_gstates[OVERPRINT_GS] = overprint();
+      doc.addContent(`/${OVERPRINT_GS} gs`);
+    }
+    doc.path(shape.d).fill(color, shape.rule ?? 'non-zero');
+    doc.restore();
+  }
+  doc.restore();
+}
+
 /** Render pages to a PDF file. */
 export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promise<Uint8Array> {
   if (pages.length === 0) throw new RangeError('a PDF needs at least one page');
@@ -142,7 +210,17 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
   finished.catch(() => {});
 
   const mode = meta.colorMode ?? 'rgb';
+  // One overprint state per document, created on first use.
+  let overprintState: PDFKit.PDFKitReference | undefined;
+  const overprint = (): PDFKit.PDFKitReference => {
+    if (!overprintState) {
+      overprintState = doc.ref({ Type: 'ExtGState', OP: true, op: true, OPM: 1 });
+      overprintState.end(undefined);
+    }
+    return overprintState;
+  };
   try {
+    const spots = declareSpotColors(doc, meta.spotColors ?? []);
     for (const page of pages) {
       doc.addPage({ size: [mmToPt(page.widthMm), mmToPt(page.heightMm)], margin: 0 });
       for (const pl of page.placements) drawScene(doc, pl.scene, pl.xMm, pl.yMm, mode);
@@ -156,6 +234,7 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
         }
         doc.restore();
       }
+      if (page.shapes && page.shapes.length > 0) drawShapes(doc, page.shapes, spots, mode, overprint);
     }
   } finally {
     // Always end the stream so a drawing error cannot leave the promise pending forever.

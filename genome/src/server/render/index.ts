@@ -1,4 +1,4 @@
-/** Server-side artifact rendering: SVG (core renderer), PNG (resvg), PDF (pdfkit, pure vector). */
+/** Server-side artifact rendering: SVG (core renderer), PNG (resvg), PDF (pdfkit, pure vector); certificate cards. */
 export {
   ARTIFACT_DEFAULTS,
   ARTIFACT_FORMATS,
@@ -20,7 +20,33 @@ export {
   type RenderedArtifact,
   type ResolvedArtifactOptions,
 } from './artifact.js';
-export { renderPdf, sceneToPdf, type PdfMeta, type PdfPage, type PdfPlacement } from './pdf.js';
+export {
+  CARD_LAYOUT,
+  CERTIFICATE_CARD,
+  CERTIFICATE_COPY,
+  CERTIFICATE_FORMATS,
+  CERTIFICATE_LAYOUT_STATUS,
+  CERTIFICATE_LAYOUTS,
+  CERTIFICATE_SHEET,
+  CertificateInputError,
+  MAX_CERTIFICATE_ITEMS,
+  SCRATCH_OFF_SPOT,
+  certificateCardSvg,
+  certificatesCsv,
+  csvField,
+  layoutCertificateCard,
+  layoutCertificateSheet,
+  renderCertificateCsv,
+  renderCertificatePdf,
+  type CertificateCard,
+  type CertificateFormat,
+  type CertificateItem,
+  type CertificateLayout,
+  type CertificateLayoutStatus,
+  type CertificateOptions,
+  type RenderedCertificates,
+} from './certificate.js';
+export { renderPdf, sceneToPdf, type PdfMeta, type PdfPage, type PdfPlacement, type PdfShape, type PdfSpotColor } from './pdf.js';
 export { PNG_SIGNATURE, pixelsFor, readPngDpi, setPngDpi, svgToPng } from './png.js';
 export {
   LABEL_LAYOUT,
@@ -28,6 +54,7 @@ export {
   SHEET_PAGES,
   buildArtifactScene,
   cropMarks,
+  gridCutMarks,
   labelStrokes,
   layoutSheet,
   sceneToSvg,
@@ -35,7 +62,7 @@ export {
   type SheetLayout,
   type SheetPageSize,
 } from './print-sheet.js';
-export { LABEL_CHARSET, measureText, textRun } from './label-font.js';
+export { LABEL_CHARSET, measureText, textRun, toLabelText } from './label-font.js';
 export {
   ARTIFACT_THEMES,
   ARTIFACT_THEME_NAMES,
