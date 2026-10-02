@@ -283,7 +283,7 @@ Nothing is printed or published while a line it depends on is open. · Rien n'es
 |---|---|---|---|
 | Packaging text, FR and EN (§1) | Brand | printing packaging | Open |
 | Capitals check: THEORBES.COM/VERIFY typed in capitals on a phone reaches the scanner (§1, Capitals) | Brand and operator | printing packaging or cards | Open |
-| Card recto: the specimen of BRAND §7, then `CERTIFICATE_LAYOUT_STATUS` set to `VALIDATED` and the specimens regenerated (BRAND §8 item 20) | Brand | printing cards | Open |
+| Card recto: the specimen of BRAND §7 and a physical print proof from the chosen press (the monogram's 0.077 mm hairlines, BRAND §3.9), then `CERTIFICATE_LAYOUT_STATUS` set to `VALIDATED` and the specimens regenerated (BRAND §8 item 20) | Brand | printing cards | Open |
 | Card verso, or insert (§2), with its line for a piece resold before its first registration (§3) | Brand | printing cards | Open |
 | Second-hand sentence (§3) | Legal | printing or publishing it | Open |
 | French lexicon (§4) | Brand and legal | any French copy | Open |
