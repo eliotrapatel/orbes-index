@@ -533,10 +533,19 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=detail-triage]');
     await page.waitForSelector('dialog.dialog');
     const phrase = page.locator('[data-testid=dialog-phrase]');
+    const confirmButton = page.locator('[data-testid=dialog-confirm]');
+    const destructive = () => page.locator('dialog.dialog').evaluate((d) => d.classList.contains('dialog--danger'));
     expect(await phrase.isVisible()).toBe(false);
     await page.selectOption('dialog select[name=status]', 'RESOLVED');
+    // Resolving alone is not destructive: no oxblood rule, the primary confirm.
+    expect(await destructive()).toBe(false);
+    expect(await confirmButton.getAttribute('class')).toContain('cbtn--primary');
     // The boxes are ticked through their labels, as a pointer does (the drawn mark covers the input).
     await page.locator('dialog label.ccheck', { hasText: 'Mark the piece COUNTERFEIT FLAGGED' }).click();
+    // Flagging the piece is (BRAND §6, as on the product page): the 3 px oxblood rule and a danger confirm.
+    expect(await destructive()).toBe(true);
+    expect(await confirmButton.getAttribute('class')).toContain('cbtn--danger');
+    expect(await page.locator('dialog.dialog').evaluate((d) => getComputedStyle(d).borderTopWidth)).toBe('3px');
     await page.locator('dialog label.ccheck', { hasText: 'Revoke the code (issue 1)' }).click();
     expect(await page.getByLabel('Mark the piece COUNTERFEIT FLAGGED').isChecked()).toBe(true);
     expect(await page.getByLabel('Mark the piece STOLEN').isChecked()).toBe(false);
@@ -550,9 +559,31 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // A step that fails stops the chain and the dialog says which steps were done.
     const revokeUrl = `**/api/admin/codes/${piece.code.id}/revoke`;
-    await page.route(revokeUrl, (r) => r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'The server is busy.' } }) }));
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    await page.route(revokeUrl, async (r) => {
+      await answered;
+      await r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'The server is busy.' } }) });
+    });
+    const transitions: string[] = [];
+    const onTransition = (r: { url(): string; method(): string }) => {
+      if (r.method() === 'POST' && r.url().endsWith('/transitions')) transitions.push(r.url());
+    };
+    page.on('request', onTransition);
     await page.click('[data-testid=dialog-confirm]');
+    // While a step is in flight, typing in the note never makes Confirm pressable, and a second submission is ignored.
+    await expect.poll(() => confirmButton.getAttribute('aria-busy')).toBe('true');
+    await page.focus('dialog textarea[name=note]');
+    await page.keyboard.type(' x');
+    expect(await confirmButton.isDisabled()).toBe(true);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.locator('dialog form').evaluate((f) => (f as HTMLFormElement).requestSubmit());
+    expect(await confirmButton.isDisabled()).toBe(true);
+    answer();
     await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/^Revoke the code: The server is busy\. The steps done stay done/);
+    page.off('request', onTransition);
+    expect(transitions).toHaveLength(1);
     const report = page.locator('[data-testid=decision-steps] .steps__item');
     expect(await report.evaluateAll((items) => items.map((i) => `${i.querySelector('.steps__label')?.textContent} ${(i as HTMLElement).dataset.state}`))).toEqual([
       'Mark the piece COUNTERFEIT FLAGGED done',
@@ -576,6 +607,27 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The finding has left the badge and the title.
     await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before - 1));
     await expect.poll(() => page.title()).toBe(`(${before - 1}) Anomalies — ORBES Genome Console`);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('keeps the anomaly filters on screen: a partial product id is said on its field, a refused filter keeps the form', async () => {
+    await go(page, '#/anomalies', 'Anomalies');
+    await page.fill('input[name=productId]', 'O26-J');
+    await page.click('[data-testid=anomalies-apply]');
+    await expect.poll(() => page.locator('.cfield[data-field=productId] .cfield__hint').textContent()).toBe('Enter a full product id (O26-J-00184).');
+    expect(await page.evaluate(() => location.hash)).toBe('#/anomalies');
+    expect(await page.getAttribute('input[name=productId]', 'aria-invalid')).toBe('true');
+    expect(await page.locator('table.table').count()).toBe(1);
+
+    // A filter the server refuses (a URL typed by hand): the form, the refusal, and the way back.
+    await go(page, '#/anomalies?type=NOT_A_TYPE', 'Anomalies');
+    await page.waitForSelector('[data-testid=anomalies-refused]');
+    expect(await page.locator('[data-testid=anomalies-refused] .failure__text').textContent()).toMatch(/^type: /);
+    expect(await page.inputValue('select[name=type]')).toBe('NOT_A_TYPE');
+    expect(await page.locator('form[aria-label="Filter anomalies"]').count()).toBe(1);
+    await page.click('[data-testid=anomalies-refused] a.cbtn:has-text("Clear filters")');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/anomalies');
+    await page.waitForSelector('table.table');
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -888,11 +940,19 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=batch-submit]');
     await expect.poll(() => page.locator('[data-testid=batch-form] .form-error').textContent()).toBe('Fix the pieces listed above.');
 
+    // Excel's plain CSV is Windows-1252: read as such, its accents whole, and said above the preview.
+    const legacy = Buffer.concat([Buffer.from('variant;sku\r\n', 'latin1'), Buffer.from([0xc9]), Buffer.from('crin 7,5 cm;\r\n', 'latin1')]);
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'excel.csv', mimeType: 'text/csv', buffer: legacy });
+    await page.waitForSelector('[data-testid=batch-encoding]');
+    expect(await page.locator('[data-testid=batch-preview] tbody tr td').nth(1).textContent()).toBe('Écrin 7,5 cm');
+    expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
+
     // The production file: its first rows and the plan, before anything is signed.
     await page.setInputFiles('[data-testid=batch-file]', { name: 'batch.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
     await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('120 pieces · 3 requests of up to 50');
     expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
     expect(await page.locator('[data-testid=batch-count]').textContent()).toBe('120');
+    expect(await page.locator('[data-testid=batch-encoding]').count()).toBe(0); // UTF-8 this time
     const preview = page.locator('[data-testid=batch-preview] tbody tr');
     expect(await preview.count()).toBe(10);
     expect(await preview.first().textContent()).toBe('2Size 44MNL-RG-44-PNext');
@@ -1009,6 +1069,106 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog.dialog').count()).toBe(0);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
+
+  it("keeps a batch's claim codes on screen when the session ends: the badge's refresh never signs out, and the codes can still be saved", async () => {
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    const unloadPrevented = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-HELD');
+    await page.selectOption('select[name=source]', 'quantity');
+    await page.fill('input[name=quantity]', '2');
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    const codes = await rows.locator('td:nth-child(7)').allTextContents();
+    expect(codes.every((c) => /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(c))).toBe(true);
+
+    // The badge's refresh runs on a timer: its 401 never signs the admin out, nor replaces the page.
+    const summaryUrl = '**/api/admin/anomalies/summary';
+    await page.route(summaryUrl, (r) => r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required.' } }) }));
+    await Promise.all([page.waitForResponse(summaryUrl), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
+    await page.unroute(summaryUrl);
+    expect((await title(page).textContent())?.trim()).toBe('Batch signed');
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(codes);
+    expect(await unloadPrevented()).toBe(true);
+
+    // The session ends for good (its absolute lifetime): a request the admin makes meets it, and the page stays.
+    await ctx.db.deleteFrom('sessions').where('subject_type', '=', 'admin').execute();
+    await page.click('[data-testid=batch-certificates]');
+    const ended = page.locator('.toast--error .toast__text', { hasText: 'Your session has ended. This page stays open' });
+    await ended.waitFor();
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(codes);
+    expect(await unloadPrevented()).toBe(true);
+
+    // The results file needs no session: the claim codes are saved, the page released.
+    const [file] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=batch-download-results]')]);
+    const saved = readFileSync((await file.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(saved).toHaveLength(3);
+    expect(saved.slice(1).map((l) => l.split('","')[8])).toEqual(codes);
+    expect(await unloadPrevented()).toBe(false);
+
+    // Leaving it signs in again, saying why; the notice about the page goes with it.
+    await page.click('.side__link[data-route=products]');
+    await page.waitForSelector('[data-testid=login-form]');
+    expect(await page.locator('.login__error').textContent()).toBe('Your session has ended. Sign in again.');
+    expect(await ended.count()).toBe(0);
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('shows the pieces signed before the session ended mid-batch, with their claim codes, and holds the page', async () => {
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-ENDED');
+    await page.selectOption('select[name=source]', 'quantity');
+    await page.fill('input[name=quantity]', '51');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('51 pieces · 2 requests of up to 50');
+    // The session ends between the two requests: the second one answers 401.
+    const batchUrl = '**/api/admin/products/batch';
+    let sent = 0;
+    await page.route(batchUrl, async (r) => {
+      if (++sent === 2) await ctx.db.deleteFrom('sessions').where('subject_type', '=', 'admin').execute();
+      await r.continue();
+    });
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 120_000 }).toBe('Batch partly signed');
+    await page.unroute(batchUrl);
+    expect(sent).toBe(2);
+    expect(await page.locator('.page-head__lead').textContent()).toBe('50 of 51 pieces signed · 1 not signed. Production batch B-2026-10-ENDED.');
+    expect(await rows.count()).toBe(51);
+    const codes = await rows.locator('td:nth-child(7)').allTextContents();
+    expect(codes.slice(0, 50).every((c) => /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(c))).toBe(true);
+    expect(await rows.nth(50).locator('.status__text').textContent()).toBe('NOT SIGNED');
+    expect(await rows.nth(50).locator('td').last().textContent()).toBe('Not signed: the session ended before this request. Sign in again, then sign this piece.');
+    await page.locator('.toast--error .toast__text', { hasText: 'Your session has ended. This page stays open' }).waitFor();
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+
+    // The 50 claim codes are held: leaving asks first, then signs in again.
+    await page.click('.side__link[data-route=dashboard]');
+    await page.waitForSelector('dialog.dialog');
+    expect(await page.locator('dialog.dialog .dialog__text').textContent()).toMatch(/^The 50 claim codes of this batch are on this page and nowhere else\./);
+    await page.click('[data-testid=dialog-confirm]');
+    await page.waitForSelector('[data-testid=login-form]');
+    expect(await page.locator('.login__error').textContent()).toBe('Your session has ended. Sign in again.');
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    expect(await cspViolations(page)).toEqual([]);
+  }, 240_000);
 
   it('signs out', async () => {
     await page.click('[data-testid=sign-out]');

@@ -38,6 +38,7 @@ import {
   badgeText,
   consoleTitle,
   countriesLine,
+  decisionDanger,
   decisionError,
   decisionNeedsContext,
   decisionOffer,
@@ -46,6 +47,7 @@ import {
   decisionSteps,
   decisionSummary,
   hasAnomalyFilters,
+  isProductFilter,
   MARK_FIELDS,
   REASON_MAX,
   REVOKE_FIELD,
@@ -81,9 +83,11 @@ import {
   batchResultRows,
   batchResultsCsv,
   batchResultsFilename,
+  batchSigningOrder,
   batchSummary,
   buildIssueBatch,
   CERTIFICATE_LIMITS,
+  decodeBatchCsv,
   ISSUE_BATCH_LIMITS,
   parseBatchCsv,
   quantityRows,
@@ -105,6 +109,7 @@ import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMat
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import * as web from '../../src/web/admin/types.js';
 import type { AnalyticsData, AnomalyContext, DashboardData, Model, ProductDetail, VerificationState } from '../../src/web/admin/types.js';
+import { ApiError } from '../../src/web/admin/api.js';
 import { ATTENTION_INTERVAL_MS, startAttentionPoll, type VisibilitySource } from '../../src/web/admin/ui/attention.js';
 
 describe('admin enums mirror the server', () => {
@@ -563,6 +568,9 @@ describe('generator view model', () => {
     expect(buildPrintSheetOptions({ ...f, widthMm: '12' }, 1).ok).toBe(false); // test-print rule applies to sheets too
     expect(isSheetSelectable({ status: 'ACTIVE' })).toBe(true);
     for (const status of ['SUPERSEDED', 'REVOKED'] as const) expect(isSheetSelectable({ status })).toBe(false);
+    // The ACTIVE code of a LOST, STOLEN, RETIRED, REVOKED or flagged piece: the list says it does not print.
+    expect(isSheetSelectable({ status: 'ACTIVE', printable: false })).toBe(false);
+    expect(isSheetSelectable({ status: 'ACTIVE', printable: true })).toBe(true);
   });
 
   it('previews the layout before rendering ("35 per A4 · 4 pages") with the grid the server prints', () => {
@@ -679,6 +687,41 @@ describe('batch issuance view model', () => {
     expect(one.ok && one.columns).toEqual(['variant']);
   });
 
+  it('reads a file of one column as one value per line: a decimal comma never splits it', () => {
+    // Excel (France) writes it unquoted: its delimiter is the semicolon, so it never quotes a comma.
+    expect(parseBatchCsv('variant\r\n7,5 ML\r\n')).toEqual({ ok: true, delimiter: null, columns: ['variant'], rows: [{ line: 2, variant: '7,5 ML', sku: '', serial: '' }] });
+    // A quoted value still reads as one, quotes undone.
+    const quoted = parseBatchCsv('variant\n"Size ""52""; polished"\n12,5 cm\n');
+    expect(quoted.ok && quoted.rows.map((r) => r.variant)).toEqual(['Size "52"; polished', '12,5 cm']);
+  });
+
+  it('takes the delimiter from the first line that is not blank', () => {
+    const r = parseBatchCsv('\r\n  \r\nvariant;sku\r\n7,5 ML;MNL-RG-75\r\n');
+    expect(r).toEqual({ ok: true, delimiter: ';', columns: ['variant', 'sku'], rows: [{ line: 4, variant: '7,5 ML', sku: 'MNL-RG-75', serial: '' }] });
+  });
+
+  it('reads a UTF-8 file as such, and a file that is not UTF-8 as Windows-1252 (Excel\'s plain CSV), accents whole', () => {
+    // "variant;sku" then "Écrin doré;" in Windows-1252: É is 0xC9, é 0xE9 (neither is valid UTF-8 there).
+    const cp1252 = new Uint8Array([...Buffer.from('variant;sku\r\n', 'latin1'), 0xc9, ...Buffer.from('crin dor', 'latin1'), 0xe9, ...Buffer.from(';\r\n', 'latin1')]);
+    const legacy = decodeBatchCsv(cp1252);
+    expect(legacy).toEqual({ text: 'variant;sku\r\nÉcrin doré;\r\n', encoding: 'windows-1252' });
+    const parsed = parseBatchCsv(legacy.text);
+    expect(parsed.ok && parsed.rows.map((r) => r.variant)).toEqual(['Écrin doré']);
+    // Read as UTF-8 (Blob.text()), the same bytes would have become U+FFFD.
+    expect(new TextDecoder().decode(cp1252)).toContain('\uFFFD');
+    // UTF-8, with its byte-order mark: as is (the mark is dropped).
+    expect(decodeBatchCsv(new TextEncoder().encode('\uFEFFvariant\nÉcrin\n'))).toEqual({ text: 'variant\nÉcrin\n', encoding: 'utf-8' });
+    expect(decodeBatchCsv(new TextEncoder().encode('variant\n€ 12\n')).encoding).toBe('utf-8');
+  });
+
+  it('refuses a value that lost a letter (U+FFFD), on its line, before anything is signed', () => {
+    const r = parseBatchCsv('variant;sku\nSize 52;MNL\n\uFFFDcrin;MNL\nSize 54;MN\uFFFD\n');
+    expect(!r.ok && r.problems.map(batchProblemText)).toEqual([
+      'Line 3 · A character could not be read (\uFFFD): save the file as CSV UTF-8, then choose it again.',
+      'Line 4 · A character could not be read (\uFFFD): save the file as CSV UTF-8, then choose it again.',
+    ]);
+  });
+
   it('names the line of every problem in the file', () => {
     const problems = (csv: string) => {
       const r = parseBatchCsv(csv);
@@ -727,10 +770,43 @@ describe('batch issuance view model', () => {
         'Line 6 · Serial 12 is already on line 5.',
       ]);
     }
+    // A C1 control is refused here as the server refuses it (\p{Cc}), before any request is signed.
+    const c1 = buildIssueBatch(T, [row(2, 'Size 50'), row(3, 'Size\u008552')], NOW);
+    expect(!c1.ok && c1.problems.map(batchProblemText)).toEqual(['Line 3 · Variant: At most 100 characters, no control characters.']);
+    expect(buildIssueBatch({ ...T, material: '925\u009fSILVER' }, [row(2)], NOW)).toMatchObject({ ok: false, templateErrors: { material: expect.any(String) } });
     // The template's errors go on its fields, once, not on every line.
     const template = buildIssueBatch({ ...T, material: '', productionDate: '2026-02-30' }, [row(2), row(3)], NOW);
     expect(!template.ok && template).toMatchObject({ templateErrors: { material: expect.any(String), productionDate: expect.any(String) }, problems: [] });
     expect(buildIssueBatch(T, [], NOW)).toMatchObject({ ok: false, problems: [{ line: null, message: 'Add at least one piece.' }] });
+  });
+
+  it('sends the pieces that name their serial first, and refuses a serial that leaves the others none', () => {
+    // [allocated, allocated, serial 12]: serial 12 goes first, so the allocated ones never take it.
+    const items = [{ variant: '50' }, { variant: '52' }, { serial: 12 }, {}, { serial: 7 }];
+    const order = batchSigningOrder(items);
+    expect(order).toEqual([2, 4, 0, 1, 3]);
+    // The results come back in the batch's order, whatever the order sent.
+    const sent = order.map((i) => items[i]);
+    const issued = (index: number, serial: number) => ({ index, status: 'ISSUED' as const, productId: `O26-J-${String(serial).padStart(5, '0')}`, codeId: `c${serial}`, serial, sku: 'MNL-RG', variant: null });
+    const rows = batchResultRows([2, 3, 4, 5, 6], items, [
+      { start: 0, count: 3, kind: 'answered', response: { issued: 3, failed: 0, skipped: 0, items: [issued(0, 12), issued(1, 7), issued(2, 13)] } },
+      { start: 3, count: 2, kind: 'refused', message: 'Not signed: the session ended before this request. Sign in again, then sign this piece.' },
+    ], order);
+    expect(sent[0]).toEqual({ serial: 12 });
+    expect(rows.map((r) => [r.line, r.status, r.serial ?? null])).toEqual([
+      [2, 'ISSUED', 13],
+      [3, 'FAILED', null],
+      [4, 'ISSUED', 12],
+      [5, 'FAILED', null],
+      [6, 'ISSUED', 7],
+    ]);
+    expect(batchSigningOrder([{}, {}])).toEqual([0, 1]);
+
+    // Serial 999 999 would leave the two allocated pieces nothing (they come after it, above it).
+    const high = buildIssueBatch(T, [row(2, '', '', '999999'), row(3), row(4)], NOW);
+    expect(!high.ok && high.problems.map(batchProblemText)).toEqual(['Line 2 · Serial 999999 leaves no serial for the 2 pieces allocated after it: sign it apart, or give them serials.']);
+    expect(buildIssueBatch(T, [row(2, '', '', '999998'), row(3)], NOW).ok).toBe(true);
+    expect(buildIssueBatch(T, [row(2, '', '', '999999'), row(3, '', '', '5')], NOW).ok).toBe(true);
   });
 
   it('turns a quantity into identical pieces, and reports a piece error once', () => {
@@ -935,6 +1011,11 @@ describe('anomaly triage view model', () => {
     expect([sortValue(undefined), sortValue('severity'), sortValue('lastSeen')]).toEqual(['', '', 'lastSeen']);
   });
 
+  it('filters by a full product id or uuid only, as the server reads it', () => {
+    for (const ok of ['', '  ', 'O26-J-00184', 'o26-j-00184', 'O26-J-990001', '11111111-1111-4111-8111-111111111111']) expect(isProductFilter(ok), ok).toBe(true);
+    for (const bad of ['ABC', 'O26-J', 'O26-J-184', 'O26-JJ-00184', 'O26-J-00184x', '11111111-1111-4111-8111']) expect(isProductFilter(bad), bad).toBe(false);
+  });
+
   it('offers every type the server lists (and keeps a type of the URL it no longer lists)', () => {
     const types = ['IMPOSSIBLE_TRAVEL', 'UNSOLD_PIECE_SCAN'];
     expect(typeOptions(types)).toEqual([
@@ -1013,6 +1094,16 @@ describe('anomaly triage view model', () => {
     // Revoking the code asks for the product page's typed phrase.
     expect(decisionPhrase({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, offer)).toBe(confirmationPhrase('revoke-code', 1));
     expect(decisionPhrase({ status: 'RESOLVED', [MARK_FIELDS.STOLEN]: 'true' }, offer)).toBeNull();
+  });
+
+  it('marks the dialog destructive when it revokes the code or flags the piece COUNTERFEIT, as the product page does', () => {
+    const offer = decisionOffer(context(), 'ADMIN', triageMoves('OPEN'));
+    expect(decisionDanger({ status: 'RESOLVED' }, offer)).toBe(false);
+    expect(decisionDanger({ status: 'RESOLVED', [MARK_FIELDS.STOLEN]: 'true' }, offer)).toBe(false);
+    expect(decisionDanger({ status: 'RESOLVED', [MARK_FIELDS.COUNTERFEIT_FLAGGED]: 'true' }, offer)).toBe(true);
+    expect(decisionDanger({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, offer)).toBe(true);
+    // A box the offer does not hold (OPERATOR: no revocation) changes nothing.
+    expect(decisionDanger({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, decisionOffer(context(), 'OPERATOR', triageMoves('OPEN')))).toBe(false);
   });
 
   it('cites the finding in every reason, within each route limit', () => {
@@ -1098,6 +1189,47 @@ describe('anomaly badge refresh', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(shown).toEqual([2]);
     poll.stop();
+  });
+
+  it('never ends the session: a 401 stops the refresh and tells the console, which keeps the page', async () => {
+    vi.useFakeTimers();
+    const doc = new FakeDoc();
+    const load = vi.fn(async (): Promise<number> => {
+      throw new ApiError(401, 'UNAUTHORIZED', 'Authentication required.');
+    });
+    const ended = vi.fn();
+    const shown: number[] = [];
+    startAttentionPoll({ load, apply: (n) => shown.push(n), onEnded: ended, doc });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(doc.watched).toBe(0);
+    // Nothing more is asked: not every minute, not when the tab is shown again.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    doc.show(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(shown).toEqual([]);
+  });
+
+  it('takes the count a view has just read, without asking at once, and newer than an answer on its way', async () => {
+    vi.useFakeTimers();
+    const doc = new FakeDoc();
+    const answers: ((n: number) => void)[] = [];
+    const load = vi.fn(() => new Promise<number>((resolve) => answers.push(resolve)));
+    const shown: number[] = [];
+    const poll = startAttentionPoll({ load, apply: (n) => shown.push(n), immediate: false, doc });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).not.toHaveBeenCalled();
+    poll.set(5);
+    expect(shown).toEqual([5]);
+    await vi.advanceTimersByTimeAsync(60_000); // the minute's request, slow to answer
+    poll.set(4); // the view reads a newer count meanwhile
+    answers[0](9);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown).toEqual([5, 4]);
+    poll.stop();
+    poll.set(1);
+    expect(shown).toEqual([5, 4]);
   });
 });
 

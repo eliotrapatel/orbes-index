@@ -13,8 +13,9 @@
  * product, genome and audit trail.
  *
  * issueBatch issues up to 50 pieces that share a template, one issueProduct
- * (one transaction) each: lines are checked before anything is signed, a
- * piece refused at signing time fails alone, and signed pieces stay signed.
+ * (one transaction) each, the pieces that name their serial first: lines are
+ * checked before anything is signed, a piece refused at signing time fails
+ * alone, and signed pieces stay signed.
  *
  * The signing key row is read FOR SHARE inside the transaction, so a code is
  * never committed under a key that a concurrent rotation/revocation has
@@ -212,13 +213,18 @@ const PRODUCT_ID_RE = /^O\d{2}-[A-Z]-(\d{5}|[1-9]\d{5})$/;
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' || v === null ? undefined : v), schema.optional());
 
+/**
+ * Bounded text, signed for good with the piece: no control character (C0, DEL, C1) and no U+FFFD, the
+ * replacement character a wrong decoding leaves (a Windows-1252 CSV read as UTF-8), which would stand
+ * for a lost letter in the public result.
+ */
 const text = (max: number, label: string) =>
   z
     .string()
     .trim()
     .min(1, `${label} is required.`)
     .max(max, `${label} is too long.`)
-    .regex(/^[^\p{Cc}]+$/u, `${label} contains invalid characters.`);
+    .regex(/^[^\p{Cc}�]+$/u, `${label} contains invalid characters.`);
 
 const isoDate = z
   .string()
@@ -360,15 +366,18 @@ export class IssuanceService {
 
   /**
    * Issue the pieces of a batch (POST /api/admin/products/batch): up to MAX_ISSUE_BATCH items
-   * that share a template, one issueProduct each, in order, each in its own transaction.
+   * that share a template, one issueProduct each, each in its own transaction: the pieces that
+   * name their serial first, then those whose serial is allocated (max+1), each group in the
+   * order given. An allocated serial so never takes a serial a later piece of the batch names.
    *
    * Before anything is signed, the whole request is refused (nothing issued) when a line is
    * invalid (the template merged with the line, against the issue schema), when two lines name
-   * the same serial, or when the template's category, model or collection is wrong. Then a piece
+   * the same serial, when a named serial leaves no serial for the pieces allocated after it
+   * (999 999 reached), or when the template's category, model or collection is wrong. Then a piece
    * refused at signing time (its serial taken meanwhile, a concurrent change) fails alone and the
    * others are issued: a piece already signed is never undone. A failure that is not the piece's
-   * own (signing unavailable, an unexpected error) stops the batch, and the pieces after it are
-   * SKIPPED, never attempted.
+   * own (signing unavailable, an unexpected error) stops the batch, and the pieces not yet
+   * attempted are SKIPPED. The results are given in the order of `items`.
    *
    * Audit: `product.issue` for each piece (in its transaction, as for one product), then
    * `product.issue_batch` with the product ids and the failures' codes. No claim code in either.
@@ -391,6 +400,8 @@ export class IssuanceService {
     }
     const inputs: IssueProductInput[] = [];
     const serials = new Map<number, number>();
+    const named: number[] = [];
+    const allocated: number[] = [];
     items.forEach((item, i) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw validationError(`items.${i}: a piece must be an object.`);
       const input = {
@@ -410,9 +421,20 @@ export class IssuanceService {
         const first = serials.get(p.serial);
         if (first !== undefined) throw validationError(`items.${i}.serial: the same serial as items.${first}.`);
         serials.set(p.serial, i);
-      }
+        named.push(i);
+      } else allocated.push(i);
       inputs.push(input);
     });
+    // The named serials are signed first: the allocated ones then start above the highest of them at least.
+    if (allocated.length > 0 && serials.size > 0) {
+      const top = Math.max(...serials.keys());
+      if (top + allocated.length > SERIAL_MAX) {
+        throw validationError(
+          `items.${serials.get(top)}.serial: serial ${top} leaves no serial for the ${allocated.length} ${allocated.length === 1 ? 'piece' : 'pieces'} allocated after it. Sign it apart, or name their serials.`,
+        );
+      }
+    }
+    const order = [...named, ...allocated];
 
     // Claimed before the first await, so two concurrent batches of one admin cannot both pass.
     const key = actorKey(actor);
@@ -421,22 +443,20 @@ export class IssuanceService {
     try {
       // The template's own checks (category active, model of that category, collection, dates), once.
       const t = await this.prepareIssue(shared);
-      const lines: IssueBatchLine[] = [];
+      // One result per piece, at its index, whatever the order of signing.
+      const lines: IssueBatchLine[] = inputs.map((_, i) => ({ index: i, status: 'SKIPPED' }));
       let stopped = false;
-      for (let i = 0; i < inputs.length; i++) {
-        if (stopped) {
-          lines.push({ index: i, status: 'SKIPPED' });
-          continue;
-        }
+      for (const i of order) {
+        if (stopped) continue; // SKIPPED: never attempted
         try {
-          lines.push({ index: i, status: 'ISSUED', result: await this.issueProduct(inputs[i], actor) });
+          lines[i] = { index: i, status: 'ISSUED', result: await this.issueProduct(inputs[i], actor) };
         } catch (e) {
           if (e instanceof DomainError) {
-            lines.push({ index: i, status: 'FAILED', error: { code: e.code, message: e.publicMessage } });
+            lines[i] = { index: i, status: 'FAILED', error: { code: e.code, message: e.publicMessage } };
             if (e.httpStatus >= 500) stopped = true;
           } else {
             this.log.error({ index: i, err: errorFields(e) }, 'a piece of a batch failed unexpectedly; the rest of the batch is skipped');
-            lines.push({ index: i, status: 'FAILED', error: { code: 'INTERNAL_ERROR', message: 'This piece could not be issued.' } });
+            lines[i] = { index: i, status: 'FAILED', error: { code: 'INTERNAL_ERROR', message: 'This piece could not be issued.' } };
             stopped = true;
           }
         }
@@ -977,12 +997,17 @@ export class IssuanceService {
       .where('c.id', '=', codeId)
       .executeTakeFirst();
     if (!row) throw notFound('Code', 'CODE_NOT_FOUND');
+    // Each refusal names the piece: in a print sheet of up to 200 codes, the operator then knows which one to leave out.
     if (row.status !== 'ACTIVE') {
-      throw conflict('CODE_NOT_ACTIVE', 'Only the active code of a product can be rendered.', `status ${row.status}`);
+      throw conflict('CODE_NOT_ACTIVE', `Only the active code of a product can be rendered: issue ${row.issue} of ${row.canonical_id} is ${row.status}.`, `status ${row.status}`);
     }
     // New prints of a code would only help copy it: none for products that are out of circulation or under incident.
     if (NOT_PRINTABLE.has(row.product_status)) {
-      throw conflict('PRODUCT_NOT_PRINTABLE', 'Codes of this product cannot be printed in its current state.', `status ${row.product_status}`);
+      throw conflict(
+        'PRODUCT_NOT_PRINTABLE',
+        `Codes of ${row.canonical_id} cannot be printed in its current state (${row.product_status.replace(/_/g, ' ')}).`,
+        `status ${row.product_status}`,
+      );
     }
 
     const fail = (detail: string): never => {

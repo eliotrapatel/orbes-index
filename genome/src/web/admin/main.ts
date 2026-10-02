@@ -11,10 +11,14 @@
  * HIGH and CRITICAL findings (GET /api/admin/anomalies/summary), also
  * prefixed to the tab title as `(3)`: asked on every navigation and every
  * minute while the tab is visible (ui/attention.ts), only by a role that
- * sees the link.
+ * sees the link; the Anomalies view gives the count it reads itself. The
+ * refresh is a background request: it never signs the admin out.
  *
  * A view may hold its page (ui/leave-guard.ts: a batch's claim codes not yet
- * saved): navigating away or signing out then asks first.
+ * saved): navigating away or signing out then asks first. A session that
+ * ends while the page is held (a 401) leaves the page on screen, so what it
+ * holds can still be saved (the batch's results file is made in the
+ * browser); the sign-in comes once the page is left.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
 import { monogramSvg } from '../shared/monogram.js';
@@ -27,7 +31,7 @@ import type { AdminSession } from './types.js';
 import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
 import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
-import { notifyError } from './ui/toast.js';
+import { notify, notifyError } from './ui/toast.js';
 import { analyticsView } from './views/analytics.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
@@ -111,6 +115,14 @@ let pageTitle = 'Orbes';
 /** OPEN HIGH + CRITICAL findings, as last read (0 when signed out). */
 let attention = 0;
 let attentionPoll: AttentionPoll | null = null;
+/** The session ended while a page was held: that page stays until it is left, then the sign-in says why. */
+let endedWhileHeld = false;
+/** The notice that said so: taken down with the page. */
+let endedNotice: HTMLElement | null = null;
+
+const SESSION_ENDED = 'Your session has ended. Sign in again.';
+const SESSION_ENDED_HELD =
+  'Your session has ended. This page stays open so that you can save what it holds: Download results (CSV) needs no session. Then leave the page to sign in again.';
 
 function setTitle(t: string): void {
   pageTitle = t;
@@ -128,16 +140,32 @@ function showAttention(count: number): void {
   document.title = consoleTitle(pageTitle, attention);
 }
 
-/** Start the badge's refresh once signed in (and past MFA), or ask again after a navigation. */
-function watchAttention(): void {
-  if (attentionPoll) void attentionPoll.refresh();
-  else attentionPoll = startAttentionPoll({ load: async () => (await api.anomalySummary()).attention, apply: showAttention });
+/**
+ * Start the badge's refresh once signed in (and past MFA), or ask again after a navigation. `viewReads`:
+ * the view about to render reads the count itself (Anomalies), so nothing is asked twice.
+ */
+function watchAttention(viewReads: boolean): void {
+  if (attentionPoll) {
+    if (!viewReads) void attentionPoll.refresh();
+    return;
+  }
+  const poll: AttentionPoll = startAttentionPoll({
+    load: async () => (await api.anomalySummary({ background: true })).attention,
+    apply: showAttention,
+    immediate: !viewReads,
+    // The session ended: the refresh stopped itself; the next navigation starts it again, or meets the ended session.
+    onEnded: () => {
+      if (attentionPoll === poll) attentionPoll = null;
+    },
+  });
+  attentionPoll = poll;
 }
 
+/** Stop the badge's refresh and clear the count it shows (signed out, or back to enrolment). */
 function forgetAttention(): void {
   attentionPoll?.stop();
   attentionPoll = null;
-  attention = 0;
+  showAttention(0);
 }
 
 /** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
@@ -244,6 +272,9 @@ function markNav(active: RouteName | null): void {
 function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
+  endedWhileHeld = false;
+  endedNotice?.remove();
+  endedNotice = null;
   // Whatever a view held (a batch's claim codes) left with it.
   releasePage();
   forgetAttention();
@@ -266,10 +297,13 @@ function showLogin(notice?: string): void {
 
 async function logout(): Promise<void> {
   if (!(await confirmLeave())) return;
-  try {
-    await api.logout();
-  } catch (e) {
-    notifyError(e);
+  // A session that has already ended has nothing to close on the server.
+  if (session) {
+    try {
+      await api.logout();
+    } catch (e) {
+      notifyError(e);
+    }
   }
   session = null;
   // An explicit sign-out starts the next session on the dashboard (an expired session resumes where it was).
@@ -277,10 +311,24 @@ async function logout(): Promise<void> {
   showLogin();
 }
 
+/**
+ * A request answered 401: the session has ended. A held page (a batch's claim codes not yet saved, or
+ * a batch being signed) is not replaced: the console says so once and keeps it, so its codes can still
+ * be saved with the results file, which the browser makes without the server. Leaving it then asks as
+ * ever, and the next view is the sign-in (route()). A request after it is released signs in at once.
+ */
 api.onUnauthorized = () => {
-  if (!session) return;
+  if (!session && !endedWhileHeld) return;
   session = null;
-  showLogin('Your session has ended. Sign in again.');
+  if (heldMessage() !== null) {
+    if (!endedWhileHeld) {
+      endedWhileHeld = true;
+      forgetAttention();
+      endedNotice = notify(SESSION_ENDED_HELD, 'error');
+    }
+    return;
+  }
+  showLogin(SESSION_ENDED);
 };
 
 // ── Routing ────────────────────────────────────────────────────────────────
@@ -295,6 +343,10 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
       location.hash = hash.startsWith('#') ? hash.slice(1) : hash;
     },
     reload: () => void route({ keepScroll: true }),
+    attention: (count) => {
+      if (attentionPoll) attentionPoll.set(count);
+      else showAttention(count);
+    },
     setQuery: (q) => {
       const merged: Record<string, string> = { ...r.query };
       for (const [k, v] of Object.entries(q)) {
@@ -312,11 +364,13 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
 async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const r = parseHash(location.hash);
   const s = session;
-  if (!s) return showLogin();
+  if (!s) return showLogin(endedWhileHeld ? SESSION_ENDED : undefined);
 
   // MFA enforced and not passed: an enrolled admin signs in again with the code; others enrol first.
   if (s.mfaRequired && !s.mfaPassed) {
     if (s.admin.totpEnabled) return showLogin('Two-factor authentication is required. Sign in with your code.');
+    // Enrolment comes first: the badge's refresh would only be refused (MFA_REQUIRED) meanwhile.
+    forgetAttention();
     const sh = ensureShell(s);
     markNav(null);
     sh.crumb.textContent = 'Account · Security';
@@ -333,8 +387,8 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const sh = ensureShell(s);
   const seq = ++renderSeq;
   const scrollY = opts.keepScroll ? window.scrollY : 0;
-  // Only a role that sees the Anomalies link asks for its count.
-  if (sh.nav.contains(sh.badge)) watchAttention();
+  // Only a role that sees the Anomalies link asks for its count (the Anomalies view reads it itself).
+  if (sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
 
   if (r.name === 'security') {
     markNav(null);

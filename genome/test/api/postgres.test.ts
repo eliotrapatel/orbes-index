@@ -134,7 +134,12 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const day = batched.code.issuedAt;
     const filtered = safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&modelId=${model.id}&status=ACTIVE&issuedFrom=${day}&issuedTo=${day}`)) as any;
     expect(filtered.items.map((c: any) => c.id)).toEqual([batched.code.id]);
+    expect(filtered.items[0].printable).toBe(true);
     expect((safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&issuedTo=2000-01-01`)) as any).total).toBe(0);
+    // The last day of year 9999 holds every code; a bound in year 10000 is refused before any query.
+    expect((safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&issuedTo=9999-12-31`)) as any).total).toBe(1);
+    expect((await op.get(`/api/admin/scans?to=9999-12-31T23:00:00-05:00`)).statusCode).toBe(400);
+    expect((await op.get(`/api/admin/scans?productId=${p.product.productId}&to=9999-12-31`)).statusCode).toBe(200);
     expect(safeJson(await op.get('/api/admin/codes/ids?productionBatch=B-PG-1'))).toEqual({ ids: [batched.code.id], total: 1, truncated: false });
     expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-1')) as any).total).toBe(1);
     const manifest = await op.post('/api/admin/codes/print-sheet/manifest', { codeIds: [batched.code.id] });

@@ -10,6 +10,9 @@
  *   first attempt cannot have had an effect.
  * - Errors are always `ApiError(status, code, message)`; the message is the
  *   server's public message (never a stack trace).
+ * - A 401 ends the session through `onUnauthorized`, except for a request
+ *   made in the background (the Anomalies badge's refresh): a timer never
+ *   decides what happens to the page on screen; the admin's next action does.
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
@@ -120,6 +123,8 @@ interface RequestOptions {
   body?: unknown;
   /** Return the raw Response (artifacts). */
   raw?: boolean;
+  /** Made by a timer, not by the admin: a 401 is thrown to the caller without calling `onUnauthorized`. */
+  background?: boolean;
 }
 
 export interface ArtifactOptions {
@@ -233,7 +238,7 @@ export class AdminApi {
     }
     if (err.status === 401 && !NO_SESSION_PATHS.includes(pathOnly)) {
       this.csrf = null;
-      this.onUnauthorized?.();
+      if (!opts.background) this.onUnauthorized?.();
     }
     throw err;
   }
@@ -469,8 +474,8 @@ export class AdminApi {
   }
 
   /** OPEN findings by severity, the badge count (OPEN HIGH + CRITICAL) and the known types. */
-  anomalySummary(): Promise<AnomalySummary> {
-    return this.get('/api/admin/anomalies/summary');
+  anomalySummary(opts: { background?: boolean } = {}): Promise<AnomalySummary> {
+    return this.request('GET', '/api/admin/anomalies/summary', { background: opts.background === true });
   }
 
   /** The scans around one finding, its code and what its product's lifecycle allows. */

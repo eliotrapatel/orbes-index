@@ -48,7 +48,8 @@ export type FieldErrors = Partial<Record<keyof IssueForm, string>>;
 export type Validated<T> = { ok: true; value: T } | { ok: false; errors: FieldErrors };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CONTROL = /[\u0000-\u001f\u007f]/;
+/** Every control character (C0, DEL and C1), as the server's issuance schema refuses them (`\p{Cc}`). */
+const CONTROL = /\p{Cc}/u;
 
 function isCalendarDate(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
@@ -239,9 +240,13 @@ export interface PrintSheetForm extends ArtifactForm {
   page: string;
 }
 
-/** Only ACTIVE codes print: superseded and revoked ones verify as REVOKED. */
-export function isSheetSelectable(code: Pick<CodeJson, 'status'>): boolean {
-  return code.status === 'ACTIVE';
+/**
+ * Only ACTIVE codes print (superseded and revoked ones verify as REVOKED), and only those of a
+ * product that may still be printed: the list says so (`printable`), as the batch selection
+ * (GET /api/admin/codes/ids) does, so a sheet of 200 is never refused for one code picked by hand.
+ */
+export function isSheetSelectable(code: Pick<CodeJson, 'status' | 'printable'>): boolean {
+  return code.status === 'ACTIVE' && code.printable !== false;
 }
 
 export function buildPrintSheetOptions(
@@ -392,15 +397,38 @@ export interface BatchProblem {
   message: string;
 }
 
-export type BatchCsv = { ok: true; rows: BatchRow[]; columns: BatchColumn[]; delimiter: ',' | ';' } | { ok: false; problems: BatchProblem[] };
+/** `delimiter`: null when the first line names one column, so each line is one value (a decimal comma never splits it). */
+export type BatchCsv = { ok: true; rows: BatchRow[]; columns: BatchColumn[]; delimiter: ',' | ';' | null } | { ok: false; problems: BatchProblem[] };
 
 const count = (s: string, c: string) => s.split(c).length - 1;
+
+/** The character a decoder puts for bytes it could not read: a letter the file lost. */
+const REPLACEMENT = '\uFFFD';
+
+/** How a batch CSV file was read: `windows-1252` when its bytes are not UTF-8 (Excel's plain CSV). */
+export type BatchCsvEncoding = 'utf-8' | 'windows-1252';
+
+/**
+ * The text of a batch CSV file, from its bytes. UTF-8, with or without its byte-order mark, is read
+ * as such. Bytes that are not UTF-8 are read as Windows-1252: Excel saves a plain "CSV" (in France
+ * "CSV (séparateur : point-virgule)", the reason semicolons are accepted) in that encoding, so its
+ * accents arrive whole instead of as U+FFFD; the console says so above the preview, where they can
+ * be checked before anything is signed.
+ */
+export function decodeBatchCsv(bytes: ArrayBuffer | ArrayBufferView): { text: string; encoding: BatchCsvEncoding } {
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf-8' };
+  } catch {
+    return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' };
+  }
+}
 
 /**
  * The records of a CSV text (RFC 4180: quoted values may hold the
  * delimiter, quotes doubled, line breaks), each with the line it starts on.
+ * A null delimiter never splits a line: each record is one value.
  */
-function csvRecords(text: string, delimiter: string): { ok: true; records: { line: number; fields: string[] }[] } | { ok: false; problem: BatchProblem } {
+function csvRecords(text: string, delimiter: string | null): { ok: true; records: { line: number; fields: string[] }[] } | { ok: false; problem: BatchProblem } {
   const records: { line: number; fields: string[] }[] = [];
   let fields: string[] = [];
   let field = '';
@@ -462,13 +490,17 @@ function csvRecords(text: string, delimiter: string): { ok: true; records: { lin
  * (variant, sku, serial; any of them, in any order, case-insensitive). A
  * byte-order mark is dropped, and the delimiter is the comma or, as
  * spreadsheets write it in France, the semicolon (the one the first line
- * uses most). Blank lines are skipped; a row may stop short of the last
- * columns (empty values), never run past them. Every problem names its line.
+ * that is not blank uses most). A first line that names one column holds
+ * neither: each line is then one value, so `7,5 ML` stays one variant.
+ * Blank lines are skipped; a row may stop short of the last columns (empty
+ * values), never run past them. A value with U+FFFD (a letter the file's
+ * encoding lost) is refused. Every problem names its line.
  */
 export function parseBatchCsv(input: string): BatchCsv {
   const text = (input ?? '').replace(/^\uFEFF/, '');
-  const firstLine = text.split(/\r\n|\r|\n/, 1)[0] ?? '';
-  const delimiter = count(firstLine, ';') > count(firstLine, ',') ? ';' : ',';
+  const firstLine = text.split(/\r\n|\r|\n/).find((l) => l.trim() !== '') ?? '';
+  const [semicolons, commas] = [count(firstLine, ';'), count(firstLine, ',')];
+  const delimiter = semicolons === 0 && commas === 0 ? null : semicolons > commas ? ';' : ',';
   const parsed = csvRecords(text, delimiter);
   if (!parsed.ok) return { ok: false, problems: [parsed.problem] };
   const records = parsed.records.filter((r) => r.fields.some((f) => f.trim() !== ''));
@@ -494,7 +526,11 @@ export function parseBatchCsv(input: string): BatchCsv {
     // A value in a column without a name (or past the last one) is most often a comma that was not quoted.
     const unnamed = names.some((n, i) => n === '' && (r.fields[i] ?? '').trim() !== '');
     if (extra.length > 0 || unnamed) {
-      problems.push({ line: r.line, message: `${r.fields.length} values for ${names.filter((n) => n !== '').length} named columns: quote a value that holds "${delimiter}".` });
+      problems.push({ line: r.line, message: `${r.fields.length} values for ${names.filter((n) => n !== '').length} named columns: quote a value that holds "${delimiter ?? ','}".` });
+      continue;
+    }
+    if (r.fields.some((f) => f.includes(REPLACEMENT))) {
+      problems.push({ line: r.line, message: `A character could not be read (${REPLACEMENT}): save the file as CSV UTF-8, then choose it again.` });
       continue;
     }
     const value = (c: BatchColumn) => {
@@ -525,10 +561,15 @@ export type BatchBuild =
   | { ok: true; template: IssueBatchTemplate; items: IssueBatchItem[]; lines: (number | null)[] }
   | { ok: false; templateErrors: FieldErrors; problems: BatchProblem[] };
 
+/** The highest serial of a year and category (the server's SERIAL_MAX). */
+const SERIAL_MAX = 999_999;
+
 /**
  * The template and the pieces of a batch, checked with buildIssueInput (the
  * generator's own rules): the template's errors go on its fields, a piece's
- * on its line. Two pieces may not ask for the same serial.
+ * on its line. Two pieces may not ask for the same serial, and a serial may
+ * not leave the pieces allocated after it without one (they are signed after
+ * every named serial, above the highest: batchSigningOrder).
  */
 export function buildIssueBatch(f: BatchTemplateForm, rows: readonly BatchRow[], now: Date): BatchBuild {
   const shared = buildIssueInput({ ...f, variant: '', sku: '', serial: '' }, now);
@@ -561,8 +602,29 @@ export function buildIssueBatch(f: BatchTemplateForm, rows: readonly BatchRow[],
     }
     items.push({ ...(variant ? { variant } : {}), ...(sku ? { sku } : {}), ...(serial !== undefined ? { serial } : {}) });
   }
+  const allocated = rows.length - serials.size;
+  if (problems.length === 0 && allocated > 0 && serials.size > 0) {
+    const top = Math.max(...serials.keys());
+    if (top + allocated > SERIAL_MAX) {
+      const pieces = `${formatCount(allocated)} ${allocated === 1 ? 'piece' : 'pieces'}`;
+      add({ line: serials.get(top) ?? null, message: `Serial ${top} leaves no serial for the ${pieces} allocated after it: sign it apart, or give them serials.` });
+    }
+  }
   if (!shared.ok || problems.length > 0) return { ok: false, templateErrors: shared.ok ? {} : shared.errors, problems };
   return { ok: true, template: shared.value, items, lines: rows.map((r) => r.line) };
+}
+
+/**
+ * The order the pieces of a batch are sent in, as indexes: those that name their serial first, then
+ * those whose serial is allocated, each group in the batch's order (the server signs a request in the
+ * same order). Over several requests, an allocated serial (the highest + 1) then never takes the
+ * serial a piece of a later request names.
+ */
+export function batchSigningOrder(items: readonly IssueBatchItem[]): number[] {
+  const named: number[] = [];
+  const allocated: number[] = [];
+  items.forEach((item, i) => (item.serial !== undefined ? named : allocated).push(i));
+  return [...named, ...allocated];
 }
 
 /** "Line 4 · SKU: …", or the message alone when it has no line. */
@@ -652,9 +714,10 @@ export const BATCH_OUTCOME_LABELS: Readonly<Record<BatchOutcome, string>> = Obje
 /**
  * One row per piece, in the batch's order, from the requests sent (pieces of no request were not
  * sent). A piece not signed keeps what was asked for it (variant, SKU, serial); a signed one shows
- * what the server recorded.
+ * what the server recorded. `order` maps a position in the requests to the piece's index in the
+ * batch (batchSigningOrder); the requests are in the batch's order without it.
  */
-export function batchResultRows(lines: readonly (number | null)[], items: readonly IssueBatchItem[], parts: readonly BatchPart[]): BatchResultRow[] {
+export function batchResultRows(lines: readonly (number | null)[], items: readonly IssueBatchItem[], parts: readonly BatchPart[], order?: readonly number[]): BatchResultRow[] {
   const rows: BatchResultRow[] = lines.map((line, i) => ({
     piece: i + 1,
     line,
@@ -666,7 +729,8 @@ export function batchResultRows(lines: readonly (number | null)[], items: readon
   }));
   for (const part of parts) {
     for (let k = 0; k < part.count; k++) {
-      const row = rows[part.start + k];
+      const at = part.start + k;
+      const row = rows[order ? (order[at] ?? -1) : at];
       if (!row) continue;
       if (part.kind === 'refused') Object.assign(row, { status: 'FAILED', message: part.message });
       else if (part.kind === 'unanswered') Object.assign(row, { status: 'NO_ANSWER', message: part.message });

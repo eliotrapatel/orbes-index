@@ -5,7 +5,10 @@
  *
  * Filters, all kept in the view's URL: product, type (every type the server
  * can record), status, severity and the order (most severe first, then the
- * highest risk; risk; last seen). `id` opens a finding's detail panel: the
+ * highest risk; risk; last seen). A product that is not a full id is
+ * refused on its field, before the URL changes; filters the server refuses
+ * (a URL typed by hand) keep the form on screen, with the refusal and a way
+ * back to the whole list. `id` opens a finding's detail panel: the
  * timeline of its product's scans in its window, their countries, the
  * distinct devices, a link to the scan that raised it and to the window in
  * Verification events (GET /api/admin/anomalies/:id/context).
@@ -15,7 +18,11 @@
  * revoke its code (ADMIN, typed confirmation), through the existing routes
  * with a reason that cites the finding, in that order, then resolve it. A
  * step that fails stops the chain; the dialog reports each step, and a retry
- * never repeats a step already done.
+ * never repeats a step already done. Ticking a revocation or the
+ * COUNTERFEIT FLAGGED mark gives the dialog its destructive marks.
+ *
+ * The view reads the summary itself (the Type list): its count goes to the
+ * badge, which then asks nothing more on this navigation.
  */
 import { h } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
@@ -23,6 +30,7 @@ import { formatCount, formatDateTime, humanize, shortHash, summarizeDetails } fr
 import {
   anomalyFiltersFrom,
   countriesLine,
+  decisionDanger,
   decisionError,
   decisionNeedsContext,
   decisionOffer,
@@ -31,6 +39,7 @@ import {
   decisionSteps,
   decisionSummary,
   hasAnomalyFilters,
+  isProductFilter,
   MARK_FIELDS,
   REASON_MAX,
   REVOKE_FIELD,
@@ -46,8 +55,8 @@ import { can } from '../model/permissions.js';
 import { triageMoves } from '../model/registry.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import { ANOMALY_SEVERITIES, ANOMALY_STATUSES, type AnomalyContext, type AnomalyRecord, type AnomalyScan } from '../types.js';
-import { button, defList, field, filterBar, input, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
+import { ANOMALY_SEVERITIES, ANOMALY_STATUSES, type AnomalyContext, type AnomalyRecord, type AnomalyScan, type Paged } from '../types.js';
+import { button, defList, field, filterBar, input, linkButton, mono, pageHeader, pager, section, select, setFieldError, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import { pageParam, type ViewContext } from './context.js';
@@ -58,11 +67,18 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
   const q = ctx.route.query;
   const filters = anomalyFiltersFrom(q);
   const openId = q.id && UUID_RE.test(q.id) ? q.id : null;
-  const [list, summary, detail] = await Promise.all([
-    ctx.api.anomalies({ ...filters, page: pageParam(ctx), pageSize: 50 }),
+  const [listed, summary, detail] = await Promise.all([
+    // Filters the server refuses (a URL typed by hand): the form stays, with the refusal, instead of a failed page.
+    ctx.api
+      .anomalies({ ...filters, page: pageParam(ctx), pageSize: 50 })
+      .catch((e: unknown): { refused: string } => {
+        if (e instanceof ApiError && e.status === 400 && e.code === 'VALIDATION_FAILED') return { refused: e.message };
+        throw e;
+      }),
     ctx.api.anomalySummary(),
     openId ? ctx.api.anomalyContext(openId).catch((e: unknown) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))) : Promise.resolve(null),
   ]);
+  ctx.attention(summary.attention);
   const canTriage = can(ctx.session.admin.role, 'triageAnomaly');
   const decide = (a: AnomalyRecord, known: AnomalyContext | null) => () => void decision(ctx, a, known);
   const detailHref = (a: AnomalyRecord) => href('anomalies', {}, { ...q, id: a.id });
@@ -74,10 +90,28 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
     return h('span', { class: 'cell-actions' }, details, button('Triage', { kind: 'ghost', testId: 'triage', onClick: decide(a, a.id === detail?.anomaly.id ? detail : null) }));
   };
 
+  const header = pageHeader({ eyebrow: 'Activity', title: 'Anomalies', lead: 'Findings from scan patterns and registry checks. Detection only: nothing is revoked automatically.' });
+  if ('refused' in listed) {
+    return h(
+      'div',
+      { class: 'view view--anomalies' },
+      header,
+      filterForm(ctx, summary.types),
+      h(
+        'div',
+        { class: 'failure', attrs: { role: 'alert' }, data: { testid: 'anomalies-refused' } },
+        h('p', { class: 'failure__title' }, 'Filters not applied'),
+        h('p', { class: 'failure__text' }, listed.refused),
+        linkButton('Clear filters', href('anomalies'), 'secondary'),
+      ),
+    );
+  }
+  const list: Paged<AnomalyRecord> = listed;
+
   return h(
     'div',
     { class: 'view view--anomalies' },
-    pageHeader({ eyebrow: 'Activity', title: 'Anomalies', lead: 'Findings from scan patterns and registry checks. Detection only: nothing is revoked automatically.' }),
+    header,
     filterForm(ctx, summary.types),
     detail ? detailPanel(ctx, detail, canTriage ? decide(detail.anomaly, detail) : null) : null,
     table(
@@ -137,6 +171,13 @@ function filterForm(ctx: ViewContext, types: readonly string[]): HTMLElement {
   );
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
+    // The server filters by a full product id only: a partial one is said here, the list stays as it was.
+    if (!isProductFilter(product.value)) {
+      setFieldError(form, 'productId', 'Enter a full product id (O26-J-00184).');
+      product.focus();
+      return;
+    }
+    setFieldError(form, 'productId', undefined);
     ctx.setQuery({ productId: product.value.trim().toUpperCase(), type: type.value, status: status.value, severity: severity.value, sort: sort.value, page: undefined });
   });
   for (const s of [type, status, severity, sort]) s.addEventListener('change', () => form.requestSubmit());
@@ -248,6 +289,7 @@ async function decision(ctx: ViewContext, a: AnomalyRecord, known: AnomalyContex
     body: [h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'), report],
     fields,
     phrase: (v) => decisionPhrase(v, offer),
+    danger: (v) => decisionDanger(v, offer),
     validate: (v) => decisionError(v, offer, moves),
     confirmLabel: 'Record decision',
     submit: async (v) => {

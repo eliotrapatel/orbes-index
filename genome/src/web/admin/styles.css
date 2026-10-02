@@ -2613,6 +2613,16 @@ a.bar__label:hover {
   .trend__axis {
     margin-left: 42px;
   }
+  /* A batch's claim codes: the tools under the note, the width of the panel. */
+  .claim--batch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .claim--batch .claim__tools {
+    grid-column: 1;
+    grid-row: auto;
+    width: auto;
+    margin-top: 14px;
+  }
 }
 
 /* A phone: three day labels under the curve, the first, the middle and the last. */

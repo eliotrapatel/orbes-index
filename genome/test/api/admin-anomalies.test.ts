@@ -174,7 +174,7 @@ describe('actionable anomalies', () => {
       expect(await window('from=&to=')).toEqual([3, 2, 1, 0]);
     });
 
-    it('refuses a window that ends before it starts, a time without a zone, or a bound before year 0001', async () => {
+    it('refuses a window that ends before it starts, a time without a zone, or a bound outside years 0001 to 9999', async () => {
       for (const q of [
         'from=2026-10-02&to=2026-10-01',
         'from=2026-10-01T12:00:00Z&to=2026-10-01T11:59:59Z',
@@ -185,12 +185,16 @@ describe('actionable anomalies', () => {
         'from=0000-01-01',
         'to=0000-06-01T00:00:00Z',
         'from=0001-01-01T00:00:00%2B01:00',
+        // Nor year 10000, which PGlite cannot send (+010000-…): 9999-12-31 at 23:00 in New York is already 10000 in UTC.
+        'to=9999-12-31T23:00:00-05:00',
       ]) {
         const res = await auditor.get(`/api/admin/scans?${q}`);
         expect(res.statusCode, q).toBe(400);
         expect(errorOf(res).code, q).toBe('VALIDATION_FAILED');
       }
       expect(await window('from=0001-01-01T00:00:00Z')).toEqual([3, 2, 1, 0]);
+      expect(await window('to=9999-12-31')).toEqual([3, 2, 1, 0]);
+      expect(await window('to=9999-12-31T23:59:59.999Z')).toEqual([3, 2, 1, 0]);
     });
   });
 

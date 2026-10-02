@@ -261,6 +261,8 @@ export interface CodeJson {
   revokedAt: Iso | null;
   revocationReason: string | null;
   createdAt: Iso;
+  /** In the codes registry only (GET /api/admin/codes): a print sheet accepts it (ACTIVE, of a product that may still be printed). */
+  printable?: boolean;
 }
 
 /** Filters of the codes registry (GET /api/admin/codes and /api/admin/codes/ids). Dates are UTC days, both included. */

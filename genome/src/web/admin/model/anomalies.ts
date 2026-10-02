@@ -26,6 +26,19 @@ export function anomalyFiltersFrom(query: Readonly<Record<string, string | undef
   return out;
 }
 
+const CANONICAL_PRODUCT_ID = /^O\d{2}-[A-Z]-\d{5,6}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True for a product reference the list can filter by, as the server reads it (`productRef`): a full
+ * canonical id (O26-J-00184) or a product's uuid. Blank means no filter. Checked before the filter is
+ * applied, so a partial id never turns the page into a refusal.
+ */
+export function isProductFilter(value: string): boolean {
+  const v = value.trim();
+  return v === '' || (v.length <= 64 && (CANONICAL_PRODUCT_ID.test(v) || UUID.test(v)));
+}
+
 /** True when a filter narrows the list (the order does not). */
 export function hasAnomalyFilters(f: AnomalyFilters): boolean {
   return !!(f.status || f.severity || f.type || f.productId);
@@ -153,6 +166,15 @@ export function decisionError(v: Readonly<Record<string, string>>, offer: Decisi
   const acting = marks.length > 0 || (!!offer.revoke && ticked(v, REVOKE_FIELD));
   if (acting && v.status !== 'RESOLVED') return 'Marking the piece or revoking its code resolves the finding: choose Resolve.';
   return null;
+}
+
+/**
+ * True when the decision is destructive, as the product page rules the same actions: it revokes the
+ * code, or marks the piece COUNTERFEIT FLAGGED (a STOLEN mark is not, there or here). The dialog then
+ * wears the oxblood rule and a danger confirm (BRAND §6).
+ */
+export function decisionDanger(v: Readonly<Record<string, string>>, offer: DecisionOffer): boolean {
+  return decisionSteps(v, offer).some((s) => s.kind === 'revoke' || (s.kind === 'mark' && s.to === 'COUNTERFEIT_FLAGGED'));
 }
 
 /** The typed confirmation a ticked code revocation needs (`REVOKE ISSUE 1`), as on the product page; null otherwise. */

@@ -87,12 +87,18 @@ const isoDate = z
 
 /** The first instant PostgreSQL stores as one of the common era (0001-01-01, UTC). */
 const FIRST_INSTANT_MS = Date.parse('0001-01-01T00:00:00.000Z');
+/**
+ * The last instant of a four-digit year (9999-12-31, UTC). A later one (`9999-12-31T23:00:00-05:00`)
+ * is in year 10000, which PGlite sends as `+010000-…` and PostgreSQL refuses: refused here (400).
+ */
+const LAST_INSTANT_MS = Date.parse('9999-12-31T23:59:59.999Z');
 
 const isoDateTime = z
   .string()
   .max(40)
   .refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.test(s) && !Number.isNaN(Date.parse(s)), 'Must be an ISO 8601 date-time with a time zone')
   .refine((s) => !(Date.parse(s) < FIRST_INSTANT_MS), 'Must be on or after 0001-01-01 (UTC)')
+  .refine((s) => !(Date.parse(s) > LAST_INSTANT_MS), 'Must be on or before 9999-12-31 (UTC)')
   .transform((s) => new Date(s));
 
 /** A query value where an empty or blank string means "not given" (filter forms send empty fields). */

@@ -60,7 +60,7 @@ describe('admin codes: filters, batch ids and the print-sheet manifest', () => {
   const list = async (query: string) => {
     const res = await auditor.get(`/api/admin/codes?pageSize=200&${query}`);
     expect(res.statusCode, res.body).toBe(200);
-    return safeJson(res) as { items: { id: string; productId: string; status: string; issuedAt: string; createdAt: string }[]; total: number; page: number; pageSize: number };
+    return safeJson(res) as { items: { id: string; productId: string; status: string; issuedAt: string; createdAt: string; printable: boolean }[]; total: number; page: number; pageSize: number };
   };
   const ids = async (query: string) => {
     const res = await auditor.get(`/api/admin/codes/ids?${query}`);
@@ -100,6 +100,18 @@ describe('admin codes: filters, batch ids and the print-sheet manifest', () => {
       expect((await list(`issuedTo=${DAY1}`)).total).toBe(5); // everything issued on day 1, both batches
       expect((await list(`issuedFrom=${DAY2}&issuedTo=${DAY2}&status=ACTIVE&modelId=${rings.modelId}`)).total).toBe(4); // a0's re-issue, a3, a4, the unbatched one
       expect((await list('issuedFrom=2026-03-04')).total).toBe(0);
+      // The last day of year 9999 holds every code (its next day, in year 10000, is never sent to PostgreSQL).
+      expect((await list('issuedTo=9999-12-31')).total).toBe(9);
+      expect((await list(`issuedFrom=${DAY2}&issuedTo=9999-12-31`)).total).toBe(4);
+      expect((await ids(`${batch(BATCH_A)}&issuedTo=9999-12-31`)).total).toBe(3);
+    });
+
+    it('says which codes a print sheet accepts: ACTIVE, of a product that may still be printed', async () => {
+      const r = await list(batch(BATCH_A));
+      const printable = r.items.filter((c) => c.printable).map((c) => c.id);
+      // a0's superseded code and a1's revoked one are not ACTIVE; a2 is LOST. The same codes as /codes/ids.
+      expect(printable.sort()).toEqual([a0Reissued, a[3].code.id, a[4].code.id].sort());
+      expect(r.items.find((c) => c.productId === a[2].product.productId)).toMatchObject({ status: 'ACTIVE', printable: false });
     });
 
     it('pages within the filters and ignores blank filter values', async () => {
@@ -218,6 +230,11 @@ describe('admin codes: filters, batch ids and the print-sheet manifest', () => {
         expect([errorOf(s).code, errorOf(m).code], JSON.stringify(body).slice(0, 80)).toEqual([code, code]);
         expect(m.statusCode).toBe(s.statusCode);
       }
+      // A refused sheet names the code at fault, so the operator knows which one to leave out.
+      const lost = await operator.post('/api/admin/codes/print-sheet', { codeIds: [a0Reissued, a[2].code.id, a[3].code.id] });
+      expect(errorOf(lost).message).toBe(`Codes of ${a[2].product.productId} cannot be printed in its current state (LOST).`);
+      const revoked = await operator.post('/api/admin/codes/print-sheet', { codeIds: [a[1].code.id] });
+      expect(errorOf(revoked).message).toBe(`Only the active code of a product can be rendered: issue 1 of ${a[1].product.productId} is REVOKED.`);
     });
 
     it('needs OPERATOR and the CSRF token', async () => {

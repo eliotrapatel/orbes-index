@@ -4,8 +4,9 @@
  * Filters, kept in the URL: production batch, model, code status and the
  * days the code was issued (GET /api/admin/codes).
  *
- * Print sheet (OPERATOR and above): select ACTIVE codes in the list, page
- * after page, or every printable code of the filters at once ("Select the
+ * Print sheet (OPERATOR and above): select printable codes in the list
+ * (ACTIVE, of a product that may still be printed: the list's `printable`),
+ * page after page, or every printable code of the filters at once ("Select the
  * 120 codes of this batch", GET /api/admin/codes/ids). The layout shows
  * before anything is rendered ("35 per A4 · 4 pages", the core's
  * layoutSheet), then one PDF with labelled codes and crop marks

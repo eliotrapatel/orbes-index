@@ -15,13 +15,16 @@
  *
  * Batch (`#/generator?mode=batch`): one template (category, model,
  * material, production batch and date, policy, claim code or not), then a
- * quantity or a CSV of one row per piece (variant, sku, serial), checked
- * line by line before anything is signed; the preview and "Sign 120
+ * quantity or a CSV of one row per piece (variant, sku, serial; read as
+ * UTF-8, or as Windows-1252 when it is not, as Excel saves a plain CSV),
+ * checked line by line before anything is signed; the preview and "Sign 120
  * products" (POST /api/admin/products/batch, automatically in requests of
- * 50). The result is given piece by piece: signed pieces stay signed when
- * others fail. Their claim codes are held in this page's memory only, as
- * for one product; until they are saved (certificate cards, results file)
- * or hidden, leaving the page asks first (ui/leave-guard.ts).
+ * 50, the pieces that name their serial first). The result is given piece
+ * by piece: signed pieces stay signed when others fail. Their claim codes
+ * are held in this page's memory only, as for one product; until they are
+ * saved (certificate cards, results file) or hidden, leaving the page asks
+ * first (ui/leave-guard.ts), and a session that ends meanwhile leaves the
+ * page on screen (main.ts).
  */
 import { bracket } from '../../shared/corners.js';
 import { focusFirst, h, mount } from '../../shared/dom.js';
@@ -37,10 +40,12 @@ import {
   batchResultRows,
   batchResultsCsv,
   batchResultsFilename,
+  batchSigningOrder,
   batchSummary,
   buildIssueBatch,
   buildIssueInput,
   CERTIFICATE_LIMITS,
+  decodeBatchCsv,
   formatClaimCode,
   ISSUE_BATCH_LIMITS,
   modelsFor,
@@ -50,6 +55,7 @@ import {
   sheetChunks,
   sheetPartFilename,
   signBatchLabel,
+  type BatchCsvEncoding,
   type BatchOutcome,
   type BatchPart,
   type BatchProblem,
@@ -83,7 +89,7 @@ import {
 } from '../ui/components.js';
 import { saveDownload } from '../ui/download.js';
 import { genomeFigure } from '../ui/figures.js';
-import { confirmLeave, holdPage, releasePage } from '../ui/leave-guard.js';
+import { confirmLeave, holdPage } from '../ui/leave-guard.js';
 import { notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
@@ -458,6 +464,7 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
   // The file as last read: its pieces, or what is wrong with it.
   let fileRows: BatchRow[] = [];
   let fileProblems: BatchProblem[] = [];
+  let fileEncoding: BatchCsvEncoding = 'utf-8';
   let fileSeq = 0;
   let signing = false;
 
@@ -484,7 +491,9 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
   const count = h('p', { class: 'gen__identity-id', data: { testid: 'batch-count' } });
   const plan = h('p', { class: 'gen__identity-note', attrs: { 'aria-live': 'polite' }, data: { testid: 'batch-plan' } });
   const aside = h('div', { class: 'gen__identity' }, h('p', { class: 'gen__identity-label' }, 'Batch'), count, plan);
-  const problemsList = h('ul', { class: 'batch__problems', attrs: { role: 'alert' }, data: { testid: 'batch-problems' } });
+  // Re-mounted only when the problems change, so a screen reader hears them once, not on every keystroke.
+  const problemsList = h('ul', { class: 'batch__problems', attrs: { 'aria-live': 'polite' }, data: { testid: 'batch-problems' } });
+  let problemsShown = '';
   const previewHost = h('div', { class: 'batch__preview', data: { testid: 'batch-preview' } });
   const submit = button('', { kind: 'primary', type: 'submit', testId: 'batch-submit' });
   const progress = h('span', { class: 'form-actions__note', attrs: { 'aria-live': 'polite' }, data: { testid: 'batch-progress' } }, 'Signing is irreversible: every piece consumes an identity and a serial.');
@@ -509,11 +518,12 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
     count.textContent = rows.length > 0 ? formatCount(rows.length) : '·····';
     plan.textContent = rows.length > 0 ? batchPlanText(rows.length, requests) : 'No piece yet';
     setSubmitLabel(rows.length);
-    mount(
-      problemsList,
-      ...shown.slice(0, PROBLEMS_SHOWN).map((p) => h('li', { class: 'batch__problem' }, batchProblemText(p))),
-      shown.length > PROBLEMS_SHOWN ? h('li', { class: 'batch__problem' }, `And ${formatCount(shown.length - PROBLEMS_SHOWN)} more.`) : null,
-    );
+    const texts = shown.slice(0, PROBLEMS_SHOWN).map(batchProblemText);
+    if (shown.length > PROBLEMS_SHOWN) texts.push(`And ${formatCount(shown.length - PROBLEMS_SHOWN)} more.`);
+    if (texts.join('\n') !== problemsShown) {
+      problemsShown = texts.join('\n');
+      mount(problemsList, ...texts.map((t) => h('li', { class: 'batch__problem' }, t)));
+    }
     if (rows.length === 0) {
       mount(previewHost);
       return;
@@ -528,6 +538,9 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
     const first = rows.slice(0, PREVIEW_ROWS).map((r, i) => ({ ...r, piece: i + 1 }));
     mount(
       previewHost,
+      fromFile && fileEncoding === 'windows-1252'
+        ? h('p', { class: 'batch__more', data: { testid: 'batch-encoding' } }, 'The file is not UTF-8: it was read as Windows-1252, as Excel saves a plain CSV. Check the accents below before signing.')
+        : null,
       table(columns, first, { caption: 'Pieces to sign' }),
       rows.length > PREVIEW_ROWS ? h('p', { class: 'batch__more' }, `The first ${PREVIEW_ROWS} of ${formatCount(rows.length)} pieces.`) : null,
     );
@@ -543,15 +556,20 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
     const f = file.files?.[0];
     let rows: BatchRow[] = [];
     let problems: BatchProblem[] = [];
+    let encoding: BatchCsvEncoding = 'utf-8';
     if (f && f.size > ISSUE_BATCH_LIMITS.maxFileBytes) problems = [{ line: null, message: 'The file is larger than 1 MB.' }];
     else if (f) {
-      const parsed = parseBatchCsv(await f.text());
+      // Read as bytes: Blob.text() would turn a Windows-1252 accent into U+FFFD without a word.
+      const decoded = decodeBatchCsv(await f.arrayBuffer());
+      encoding = decoded.encoding;
+      const parsed = parseBatchCsv(decoded.text);
       if (parsed.ok) rows = parsed.rows;
       else problems = parsed.problems;
     }
     if (seq !== fileSeq) return; // a newer file was chosen meanwhile
     fileRows = rows;
     fileProblems = problems;
+    fileEncoding = encoding;
     renderPreview();
   });
 
@@ -604,17 +622,23 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
     void sign(built.template, built.items, built.lines);
   });
 
-  /** One request after the other (one batch at a time per admin); a request that fails stops the rest. */
+  /**
+   * One request after the other (one batch at a time per admin); a request that fails stops the rest.
+   * The pieces that name their serial go first (batchSigningOrder), so an allocated serial never takes
+   * one a later request names. A session that ends meanwhile (401) keeps the page (main.ts): the
+   * requests already answered, and their claim codes, still reach the result screen.
+   */
   const sign = async (template: Parameters<typeof batchRequests>[0], items: Parameters<typeof batchRequests>[1], lines: (number | null)[]) => {
     signing = true;
     submit.disabled = true;
     submit.setAttribute('aria-busy', 'true');
-    holdPage(
+    const release = holdPage(
       template.withClaimSecret
         ? 'The batch is being signed. Leaving now would lose its results, and the claim codes of the pieces already signed.'
         : 'The batch is being signed. Leaving now would lose its results.',
     );
-    const requests = batchRequests(template, items);
+    const order = batchSigningOrder(items);
+    const requests = batchRequests(template, order.map((i) => items[i]));
     const parts: BatchPart[] = [];
     let issued = 0;
     progress.textContent = `Signing… 0 of ${formatCount(items.length)}`;
@@ -630,17 +654,19 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
         if (response.skipped > 0) break;
       } catch (e) {
         parts.push(
-          refusedBeforeSigning(e)
-            ? { start: r.start, count: r.items.length, kind: 'refused', message: e.message }
-            : { start: r.start, count: r.items.length, kind: 'unanswered', message: 'No answer from the server: it may have signed this piece. Look for it in Products before signing it again.' },
+          e instanceof ApiError && e.status === 401
+            ? { start: r.start, count: r.items.length, kind: 'refused', message: 'Not signed: the session ended before this request. Sign in again, then sign this piece.' }
+            : refusedBeforeSigning(e)
+              ? { start: r.start, count: r.items.length, kind: 'refused', message: e.message }
+              : { start: r.start, count: r.items.length, kind: 'unanswered', message: 'No answer from the server: it may have signed this piece. Look for it in Products before signing it again.' },
         );
         break;
       }
     }
-    releasePage();
-    // Replaced meanwhile (left, or signed out when the session ended): the results have no page to show on.
+    release();
+    // Replaced meanwhile (the admin left, and chose to): the results have no page to show on.
     if (!form.isConnected) return;
-    onDone({ rows: batchResultRows(lines, items, parts), productionBatch: template.productionBatch });
+    onDone({ rows: batchResultRows(lines, items, parts, order), productionBatch: template.productionBatch });
   };
 
   renderPreview();
@@ -678,9 +704,11 @@ function batchResultScreen(ctx: ViewContext, d: BatchDone): HTMLElement[] {
   };
 
   let hidden = false;
+  // Released when the claim codes are saved or hidden (a no-op when this page never held them).
+  let release = () => {};
   const saved = h('p', { class: 'batch__saved', attrs: { 'aria-live': 'polite' }, data: { testid: 'batch-saved' } });
   const markSaved = (text: string) => {
-    releasePage();
+    release();
     saved.textContent = text;
   };
 
@@ -693,7 +721,7 @@ function batchResultScreen(ctx: ViewContext, d: BatchDone): HTMLElement[] {
 
   let claim: HTMLElement | null = null;
   if (sum.claimCodes > 0) {
-    holdPage(
+    release = holdPage(
       `The ${formatCount(sum.claimCodes)} claim codes of this batch are on this page and nowhere else. Leave without saving the certificate cards or the results file?`,
     );
     const layout = select(
@@ -736,7 +764,7 @@ function batchResultScreen(ctx: ViewContext, d: BatchDone): HTMLElement[] {
       // Drop the only copies the console holds.
       for (const r of rows) delete r.claimCode;
       hidden = true;
-      releasePage();
+      release();
       panel.classList.add('is-hidden');
       note.textContent = 'The claim codes are hidden: the console no longer holds them.';
       layoutField.remove();

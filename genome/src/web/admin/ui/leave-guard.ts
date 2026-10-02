@@ -7,11 +7,14 @@
  * before another view replaces it: main.ts calls `confirmLeave` on every
  * navigation (hashchange) and on sign-out, and a view's own "start again"
  * does too. Leaving anyway, or saving what was held, releases the page.
+ * A session that ends while a page is held leaves it on screen (main.ts):
+ * the sign-in waits until the page is left, through the same question.
  */
 import { h } from '../../shared/dom.js';
 import { openDialog } from './dialog.js';
 
-let held: string | null = null;
+/** The hold in force: its own object, so that a release only ever clears the hold it was given for. */
+let held: { message: string } | null = null;
 
 function onBeforeUnload(ev: BeforeUnloadEvent): void {
   ev.preventDefault();
@@ -19,14 +22,20 @@ function onBeforeUnload(ev: BeforeUnloadEvent): void {
   ev.returnValue = '';
 }
 
-/** Hold the page with the message the console's dialog shows; returns the release. */
+/**
+ * Hold the page with the message the console's dialog shows. Returns the release of this hold only:
+ * a batch left while its last request was in flight never releases the batch started after it.
+ */
 export function holdPage(message: string): () => void {
   if (held === null) window.addEventListener('beforeunload', onBeforeUnload);
-  held = message;
-  return releasePage;
+  const mine = { message };
+  held = mine;
+  return () => {
+    if (held === mine) releasePage();
+  };
 }
 
-/** Nothing would be lost any more (saved, hidden, or the session ended). */
+/** Nothing would be lost any more, whatever held the page (the admin chose to leave, or signed in as someone else). */
 export function releasePage(): void {
   if (held === null) return;
   held = null;
@@ -35,7 +44,7 @@ export function releasePage(): void {
 
 /** What leaving would lose now, or null. */
 export function heldMessage(): string | null {
-  return held;
+  return held?.message ?? null;
 }
 
 /**
@@ -43,7 +52,7 @@ export function heldMessage(): string | null {
  * leave anyway (the page is then released). False: the admin stays.
  */
 export async function confirmLeave(): Promise<boolean> {
-  const message = held;
+  const message = heldMessage();
   if (message === null) return true;
   const ok = await openDialog({
     title: 'Leave this page?',

@@ -25,6 +25,8 @@ import { codeJson, genomeJson } from './serialize.js';
 export const MAX_CODE_IDS = 1000;
 
 const DAY_MS = 86_400_000;
+/** The last day of a four-digit year: the day after it (year 10000) cannot be sent to PostgreSQL (PGlite writes `+010000-…`). */
+const LAST_DAY = '9999-12-31';
 
 /** The codes (joined to their products) that match the registry filters. */
 export function filteredCodes(db: Db, f: CodeListQuery) {
@@ -32,9 +34,9 @@ export function filteredCodes(db: Db, f: CodeListQuery) {
   if (f.productionBatch !== undefined) q = q.where('p.production_batch', '=', f.productionBatch);
   if (f.modelId !== undefined) q = q.where('p.model_id', '=', f.modelId);
   if (f.status !== undefined) q = q.where('c.status', '=', f.status);
-  // Issue days are UTC days (as `issuedAt`); both ends are included.
+  // Issue days are UTC days (as `issuedAt`); both ends are included. Every code is issued before the end of the last day.
   if (f.issuedFrom !== undefined) q = q.where('c.created_at', '>=', new Date(`${f.issuedFrom}T00:00:00.000Z`));
-  if (f.issuedTo !== undefined) q = q.where('c.created_at', '<', new Date(Date.parse(`${f.issuedTo}T00:00:00.000Z`) + DAY_MS));
+  if (f.issuedTo !== undefined && f.issuedTo < LAST_DAY) q = q.where('c.created_at', '<', new Date(Date.parse(`${f.issuedTo}T00:00:00.000Z`) + DAY_MS));
   return q;
 }
 
@@ -108,14 +110,15 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const total = await base.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await base
       .selectAll('c')
-      .select('p.product_id as canonical_id')
+      .select(['p.product_id as canonical_id', 'p.status as product_status'])
       .orderBy('c.created_at', 'desc')
       .orderBy('c.id')
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
     return makePage(
-      rows.map((r) => codeJson(toCodeRecord(r, r.canonical_id))),
+      // `printable`: a print sheet accepts the code (ACTIVE, of a product that may still be printed), as /codes/ids selects.
+      rows.map((r) => ({ ...codeJson(toCodeRecord(r, r.canonical_id)), printable: r.status === 'ACTIVE' && !NOT_PRINTABLE.has(r.product_status) })),
       Number(total.n),
       page,
     );

@@ -17,6 +17,8 @@ export interface ViewContext {
   reload(): void;
   /** Merge query values into the current route (empty values removed) and navigate. */
   setQuery(q: Record<string, string | number | undefined | null>): void;
+  /** The count of OPEN HIGH + CRITICAL findings a view has just read (Anomalies): the badge and the title show it. */
+  attention(count: number): void;
 }
 
 export type View = (ctx: ViewContext) => Promise<HTMLElement>;

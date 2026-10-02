@@ -525,13 +525,17 @@ describe('IssuanceService.renderCode', () => {
     await w.issuance.reissueCode(r.product.productId, 'damaged', admin);
     const e = await domainError(w.issuance.renderCode(r.code.id, 'svg'));
     expect(e.code).toBe('CODE_NOT_ACTIVE');
+    // The refusal names the code, so a print sheet of 200 says which one to leave out.
+    expect(e.publicMessage).toBe(`Only the active code of a product can be rendered: issue 1 of ${r.product.productId} is SUPERSEDED.`);
   });
 
   it('refuses codes of products out of circulation or under incident', async () => {
     const r = await w.issuance.issueProduct(ring(w), admin);
     for (const status of ['STOLEN', 'LOST', 'COUNTERFEIT_FLAGGED', 'REVOKED', 'RETIRED'] as const) {
       await w.t.db.updateTable('products').set({ status }).where('id', '=', r.product.id).execute();
-      expect((await domainError(w.issuance.renderCode(r.code.id, 'png'))).code, status).toBe('PRODUCT_NOT_PRINTABLE');
+      const e = await domainError(w.issuance.renderCode(r.code.id, 'png'));
+      expect(e.code, status).toBe('PRODUCT_NOT_PRINTABLE');
+      expect(e.publicMessage).toBe(`Codes of ${r.product.productId} cannot be printed in its current state (${status.replace('_', ' ')}).`);
     }
     for (const status of ['ACTIVATED', 'OWNED', 'SERVICED'] as const) {
       await w.t.db.updateTable('products').set({ status }).where('id', '=', r.product.id).execute();
@@ -649,6 +653,10 @@ describe('IssuanceService.issueBatch', () => {
     expect(twice.publicMessage).toBe('items.2.serial: the same serial as items.0.');
     const material = await domainError(w.issuance.issueBatch(template(w, { material: 'a\tb' }), [{}, {}], admin));
     expect(material.publicMessage).toBe('template: Material contains invalid characters.');
+    // A C1 control, or the replacement character a wrong decoding leaves for a lost letter, is never signed.
+    for (const variant of ['Size\u008552', 'Pi\uFFFDce']) {
+      expect((await domainError(w.issuance.issueBatch(template(w), [{}, { variant }], admin))).publicMessage, variant).toBe('items.1: Variant contains invalid characters.');
+    }
     expect(await domainError(w.issuance.issueBatch(template(w, { modelId: w.leatherModelId }), [{}], admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
     expect(await domainError(w.issuance.issueBatch(template(w, { modelId: '00000000-0000-4000-8000-000000000000' }), [{}], admin))).toMatchObject({ code: 'MODEL_NOT_FOUND' });
     expect(await domainError(w.issuance.issueBatch(template(w, { productionDate: '2026-06-30' }), [{}], admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
@@ -667,6 +675,26 @@ describe('IssuanceService.issueBatch', () => {
     ]);
     const batch = (await w.audit.list({ action: ISSUE_BATCH_ACTION })).items[0];
     expect(batch.details).toMatchObject({ issued: 2, failed: 1, failures: [{ index: 1, code: 'SERIAL_TAKEN' }] });
+  });
+
+  it('signs the pieces that name their serial first, so an allocated serial never takes one the batch names', async () => {
+    await w.issuance.issueProduct(ring(w), admin); // serial 1, the highest so far
+    const r = await w.issuance.issueBatch(template(w), [{ variant: '50' }, { variant: '52' }, { serial: 3 }], admin);
+    expect(r).toMatchObject({ issued: 3, failed: 0, skipped: 0 });
+    // Serial 3 first; the allocated ones above it. The results stay in the order of the items.
+    expect(r.lines.map((l) => [l.index, l.status === 'ISSUED' ? l.result.product.serial : null])).toEqual([
+      [0, 4],
+      [1, 5],
+      [2, 3],
+    ]);
+    // A named serial that would leave the allocated pieces without one is refused before anything is signed.
+    const high = await domainError(w.issuance.issueBatch(template(w), [{ serial: 999_999 }, {}, {}], admin));
+    expect(high).toMatchObject({ code: 'VALIDATION_FAILED', httpStatus: 400 });
+    expect(high.publicMessage).toBe('items.0.serial: serial 999999 leaves no serial for the 2 pieces allocated after it. Sign it apart, or name their serials.');
+    expect((await products(w)).map((p) => p.serial)).toEqual([1, 3, 4, 5]);
+    // Up to the last serial, it fits.
+    const edge = await w.issuance.issueBatch(template(w), [{}, { serial: 999_998 }], admin);
+    expect(edge.lines.map((l) => (l.status === 'ISSUED' ? l.result.product.serial : null))).toEqual([999_999, 999_998]);
   });
 
   it('a failure that is not the piece\'s own stops the batch: signed pieces stay, the rest is skipped', async () => {
