@@ -463,9 +463,13 @@ export class AuthService {
 
   /**
    * Step 2: the admin proves the authenticator app holds `secret` by sending
-   * a current code; only then is the secret stored (encrypted).
+   * a current code; only then is the secret stored (encrypted). Every session
+   * of that admin ends in the same transaction, except `opts.keepToken` (the
+   * console's own, which the route then rotates into an MFA-passed one): they
+   * were opened with the password alone, and one left alive could still use
+   * what MFA does not guard. Audited `admin.totp.enable` with `sessionsRevoked`.
    */
-  async enableTotp(adminId: string, input: { secret: string; code: string }, actor: Actor): Promise<void> {
+  async enableTotp(adminId: string, input: { secret: string; code: string }, actor: Actor, opts: { keepToken?: string } = {}): Promise<{ sessionsRevoked: number }> {
     let secretBytes: Uint8Array;
     try {
       secretBytes = base32Decode(input?.secret);
@@ -476,7 +480,7 @@ export class AuthService {
     const r = verifyTotp(secretBytes, input.code, this.clock().getTime());
     if (!r.ok) throw new DomainError('TOTP_CODE_INVALID', 400, 'The code is not valid. Check the time on your device and try again.');
 
-    await inTransaction(this.db, async (tx) => {
+    return inTransaction(this.db, async (tx) => {
       const admin = await this.requireAdmin(tx, adminId);
       const sealed = this.sealTotp(admin.id, { v: 1, s: base32Encode(secretBytes), c: r.counter });
       const u = await tx
@@ -486,7 +490,9 @@ export class AuthService {
         .where('totp_secret_enc', 'is', null)
         .executeTakeFirst();
       if (Number(u.numUpdatedRows) !== 1) throw conflict('TOTP_ALREADY_ENABLED', 'Two-factor authentication is already enabled.');
-      await this.audit.record({ actor, action: 'admin.totp.enable', targetType: 'admin', targetId: admin.id }, tx);
+      const sessionsRevoked = await this.sessions.revokeAllForSubject('admin', admin.id, { exceptToken: opts.keepToken }, tx);
+      await this.audit.record({ actor, action: 'admin.totp.enable', targetType: 'admin', targetId: admin.id, details: { sessionsRevoked } }, tx);
+      return { sessionsRevoked };
     });
   }
 

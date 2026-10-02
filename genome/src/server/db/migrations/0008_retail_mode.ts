@@ -23,11 +23,17 @@
  * (refused everywhere). `down` restores the previous schema exactly, and with
  * it drops what only this migration gave a meaning to, as it drops the
  * register itself: the outstanding SALE_ACTIVATION tokens (10-minute proofs,
- * nothing else refers to them) and the RETAIL accounts with their sessions
- * (sellers of a sale mode that no longer exists; never promoted to a role
- * that reads the registry, and the audit log keeps their history by id). The
- * name of each warranty's point of sale is first copied into the free-text
- * `retailer` where that is empty, so the history keeps it.
+ * nothing else refers to them) and the sessions of the RETAIL accounts. The
+ * RETAIL accounts themselves are kept but can no longer sign in: they become
+ * AUDITOR and disabled (`disabled_at` set, an earlier one kept). Deleting them
+ * could fail: other tables point to a console user with ON DELETE RESTRICT
+ * (a case handled, 0004 `scan_reports.handled_by`; a recovery code issued,
+ * 0005 `account_recovery_codes.created_by`), and a member of the team stepped
+ * down to RETAIL keeps what they did before. AUDITOR is the lowest role the
+ * previous schema knows; an ADMIN who re-enables such an account gives it
+ * AUDITOR rights (DATABASE §9.1). The name of each warranty's point of sale is
+ * first copied into the free-text `retailer` where that is empty, so the
+ * history keeps it.
  *
  * One statement per array entry (PGlite's extended protocol); Kysely's
  * Migrator applies the migration inside a transaction.
@@ -79,9 +85,9 @@ export const DOWN: readonly string[] = [
 
   `DROP TABLE IF EXISTS retailers`,
 
-  // After scan_events.admin_id is gone, nothing references a console user: the sellers go with their sessions.
+  // The sellers' sessions end; their accounts stay (other tables may point to them) but cannot sign in.
   `DELETE FROM sessions WHERE subject_type = 'admin' AND subject_id IN (SELECT id FROM admin_users WHERE role = 'RETAIL')`,
-  `DELETE FROM admin_users WHERE role = 'RETAIL'`,
+  `UPDATE admin_users SET role = 'AUDITOR', disabled_at = COALESCE(disabled_at, now()) WHERE role = 'RETAIL'`,
   `ALTER TABLE admin_users DROP CONSTRAINT admin_users_role_check`,
   `ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check CHECK (role IN ('ADMIN','OPERATOR','AUDITOR'))`,
 ];

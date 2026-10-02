@@ -8,11 +8,13 @@
  *               /api/v1/verify (VerificationService.staffScan: structure,
  *               key, signature, revoked-key trust, registry, genome
  *               cross-check, code and product status), recorded as ONE
- *               ADMIN_TEST scan naming the console user, without any anomaly
- *               evaluation. When the piece can be sold (an authentic, known
- *               piece whose warranty has not started and is not void), a
- *               10-minute single-use SALE_ACTIVATION scan token comes back
- *               with it, minted in the scan's own transaction.
+ *               ADMIN_TEST scan naming the console user, outside the history
+ *               rules (the code's own findings of steps 6–7 are recorded,
+ *               marked staffScan). When the piece can be sold (an authentic,
+ *               known piece that no client holds, whose warranty has not
+ *               started and is not void, not in a service), a 10-minute
+ *               single-use SALE_ACTIVATION scan token comes back with it,
+ *               minted in the scan's own transaction.
  *   2. activate the token and a point of sale of the register: the token is
  *               used up and the warranty started (WarrantyService.activate,
  *               purchase date today, country of the point of sale) in one
@@ -38,12 +40,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /**
  * Why a scanned piece cannot be sold:
- *  - NOT_AUTHENTIC     the code did not verify as a registered ORBES piece (state ≠ AUTHENTIC);
- *  - WARRANTY_ACTIVE   its warranty has already started (sold before);
- *  - WARRANTY_VOID     its warranty was voided;
- *  - NOT_FOR_SALE      its status does not allow a warranty to start.
+ *  - NOT_AUTHENTIC       the code did not verify as a registered ORBES piece in force (state ≠ AUTHENTIC);
+ *  - WARRANTY_ACTIVE     its warranty has already started (sold before);
+ *  - WARRANTY_VOID       its warranty was voided;
+ *  - ALREADY_REGISTERED  a client account holds it: it has been sold, whatever its warranty says;
+ *  - NOT_FOR_SALE        its status does not allow a sale: not one a warranty starts from, or in a
+ *                        service (at the workshop, not at the counter; a pre-sale service would leave
+ *                        the piece looking unsold, WarrantyService.activate refuses it too).
  */
-export const SALE_REFUSALS = ['NOT_AUTHENTIC', 'WARRANTY_ACTIVE', 'WARRANTY_VOID', 'NOT_FOR_SALE'] as const;
+export const SALE_REFUSALS = ['NOT_AUTHENTIC', 'WARRANTY_ACTIVE', 'WARRANTY_VOID', 'ALREADY_REGISTERED', 'NOT_FOR_SALE'] as const;
 export type SaleRefusal = (typeof SALE_REFUSALS)[number];
 
 export interface SaleLookup {
@@ -67,7 +72,8 @@ export function saleRefusal(state: VerificationState, piece: StaffScanPiece | nu
   if (state !== 'AUTHENTIC' || !piece) return 'NOT_AUTHENTIC';
   if (piece.warranty.voided) return 'WARRANTY_VOID';
   if (piece.warranty.startDate !== null) return 'WARRANTY_ACTIVE';
-  if (!ACTIVATABLE_STATUSES.includes(piece.status)) return 'NOT_FOR_SALE';
+  if (piece.registered) return 'ALREADY_REGISTERED';
+  if (piece.status === 'SERVICED' || !ACTIVATABLE_STATUSES.includes(piece.status)) return 'NOT_FOR_SALE';
   return null;
 }
 

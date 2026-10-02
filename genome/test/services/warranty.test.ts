@@ -179,6 +179,25 @@ describe('WarrantyService', () => {
       }
     });
 
+    it('refuses a piece in a pre-sale service (ISSUED → SERVICED) until the service is closed; an after-sale service is no obstacle', async () => {
+      // Started there, the warranty would run while closing the service brings the piece back to ISSUED, unsold.
+      const pre = await product();
+      const svc = await warranty.openService(pre.productId, { type: 'INSPECTION' }, admin);
+      await expectDomainError(warranty.activate(pre.productId, {}, admin), 'WARRANTY_ACTIVATION_NOT_ALLOWED', 409);
+      expect(await statusOf(pre.id)).toBe('SERVICED');
+      expect(await t.db.selectFrom('warranties').select('id').where('product_id', '=', pre.id).execute()).toEqual([]);
+      await warranty.completeService(svc.id, {}, admin);
+      const sold = await warranty.activate(pre.productId, { purchaseDate: '2026-06-14' }, admin);
+      expect(sold.statusChange).toMatchObject({ from: 'ISSUED', to: 'ACTIVATED' });
+
+      const after = await product({ path: ['ACTIVATED'] });
+      await warranty.openService(after.productId, { type: 'CLEANING' }, admin);
+      const r = await warranty.activate(after.productId, { purchaseDate: '2026-06-14' }, admin);
+      expect(r.statusChange).toBeNull();
+      expect(r.warranty.status).toBe('ACTIVE');
+      expect(await statusOf(after.id)).toBe('SERVICED');
+    });
+
     it('starts the warranty without a status change when the product is already past ISSUED', async () => {
       const p = await product({ path: ['ACTIVATED', 'OWNED'] });
       const r = await warranty.activate(p.productId, { purchaseDate: '2026-06-10' }, admin);

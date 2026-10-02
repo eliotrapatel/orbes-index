@@ -7,7 +7,8 @@
  * enforces MFA; enrolling with a valid code replaces the current session by
  * a NEW, MFA-passed one (new token and CSRF token, same expiry: the admin has
  * just proven possession of the authenticator, and a token captured before
- * the step-up must not inherit it).
+ * the step-up must not inherit it), and ends every other session of that
+ * admin: they were opened with the password alone.
  *
  * The two enrolment routes are not in the contract table: without them TOTP
  * could only be enabled from a shell, and MFA could not be enforced.
@@ -17,7 +18,11 @@
  * temporary password of a staff account created from the console: while
  * `passwordChangeRequired` is true, every admin route except logout, me and
  * this one answers 403 PASSWORD_CHANGE_REQUIRED (http/sessions.ts). The
- * caller's session is kept; every other session of that admin ends.
+ * caller's session is kept; every other session of that admin ends. It is
+ * exempt from MFA only until the admin enrols a second factor (`mfaExempt:
+ * 'until-enrolled'`): the temporary password comes before enrolment, but a
+ * password-only session must not replace the password of an enrolled admin
+ * (and end the sessions that passed the factor).
  *
  * Every route here accepts RETAIL (A-08), the lowest role: a seller signs in,
  * reads `me`, replaces a temporary password, enrols a second factor and signs
@@ -66,7 +71,7 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post(
     '/api/admin/auth/password',
-    { config: { guard: { mfaExempt: true, passwordChangeExempt: true, minRole: 'RETAIL' }, rateGroup: 'auth' } },
+    { config: { guard: { mfaExempt: 'until-enrolled', passwordChangeExempt: true, minRole: 'RETAIL' }, rateGroup: 'auth' } },
     async (request) => {
       const { admin, token } = requireAdmin(request);
       const b = parse(adminPasswordChangeBody, request.body);
@@ -91,7 +96,8 @@ export const adminAuthRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     async (request, reply) => {
       const { admin, token } = requireAdmin(request);
       const b = parse(totpEnableBody, request.body);
-      await auth.enableTotp(admin.id, { secret: b.secret.replace(/[\s=]/g, '').toUpperCase(), code: b.code.replace(/\s/g, '') }, adminActor(request));
+      // Every other session of this admin ends with the enrolment (opened with the password alone).
+      await auth.enableTotp(admin.id, { secret: b.secret.replace(/[\s=]/g, '').toUpperCase(), code: b.code.replace(/\s/g, '') }, adminActor(request), { keepToken: token });
       // Privilege change: the MFA-passed session gets a NEW token (and CSRF token); the old one dies.
       const session = await ctx.sessions.rotate(token, 'admin', { mfaPassed: true });
       if (!session) throw unauthorized();

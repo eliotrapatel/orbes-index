@@ -16,6 +16,10 @@
  *                 `me` and change the password (403 PASSWORD_CHANGE_REQUIRED);
  *   4. MFA      — optionally (production default), admin sessions must have
  *                 passed TOTP before using anything but the auth routes (403);
+ *                 the own password change is exempt only while the admin has
+ *                 no second factor (`mfaExempt: 'until-enrolled'`), so a
+ *                 password-only session cannot replace the password of an
+ *                 enrolled admin;
  *   5. role     — admin routes: AUDITOR reads, OPERATOR mutates, ADMIN for
  *                 keys/revocations/reinstatement/categories/console users (403).
  *                 RETAIL ranks under AUDITOR, so the default rule refuses it
@@ -64,8 +68,12 @@ export interface RouteGuard {
   session?: 'required' | 'optional' | 'none';
   /** Admin routes: minimum role. Default AUDITOR for GET/HEAD, OPERATOR otherwise. */
   minRole?: AdminRole;
-  /** Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes). */
-  mfaExempt?: boolean;
+  /**
+   * Admin routes: reachable without a TOTP-verified session even when MFA is enforced (auth routes).
+   * 'until-enrolled': only while the admin has no second factor (the own password change: the
+   * temporary password is replaced before enrolment; once enrolled, the change needs the factor).
+   */
+  mfaExempt?: boolean | 'until-enrolled';
   /** Admin routes: reachable while the admin must still replace a temporary password (sign-out, me, the change itself). */
   passwordChangeExempt?: boolean;
 }
@@ -248,7 +256,8 @@ export function sessionGuard(ctx: AppContext, opts: SessionGuardOptions): onRequ
       const { admin, session } = auth as AdminAuth;
       // First the temporary password, then the second factor: the TOTP routes are not open before the password is the admin's own.
       if (admin.passwordChangeRequired && !g.passwordChangeExempt) throw passwordChangeRequired();
-      if (opts.requireMfa && !g.mfaExempt && !session.mfaPassed) throw mfaRequired();
+      const mfaExempt = g.mfaExempt === true || (g.mfaExempt === 'until-enrolled' && !admin.totpEnabled);
+      if (opts.requireMfa && !mfaExempt && !session.mfaPassed) throw mfaRequired();
       const min = g.minRole ?? (unsafe ? 'OPERATOR' : 'AUDITOR');
       if (!hasRole(admin.role, min)) throw insufficientRole(admin.role, min);
     }

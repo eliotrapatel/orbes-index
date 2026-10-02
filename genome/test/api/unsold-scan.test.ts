@@ -82,6 +82,18 @@ describe('POST /api/v1/verify: unsold pieces and staff scans (S-07)', () => {
     expect(await findings(h, r.product.id)).toEqual([]);
   });
 
+  it('a piece whose warranty has started is sold, whatever its status says: no finding', async () => {
+    // ISSUED with a started warranty (dates written outside WarrantyService, an import): sold all the same.
+    const r = await issue(h.ctx, catalog);
+    await h.ctx.db.updateTable('warranties').set({ purchase_date: '2026-09-20', start_date: '2026-09-20', end_date: '2028-09-20' }).where('product_id', '=', r.product.id).execute();
+    expect(await h.ctx.db.selectFrom('products').select('status').where('id', '=', r.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'ISSUED' });
+    const out = await scan(h.client({ ip: '198.51.100.10' }), r.code.data);
+    expect(out.state).toBe('AUTHENTIC');
+    expect(await findings(h, r.product.id)).toEqual([]);
+    const auth = await h.ctx.db.selectFrom('authentication_events').select('reasons').where('scan_event_id', '=', out.scanId).executeTakeFirstOrThrow();
+    expect(auth.reasons).not.toContain('ANOMALY:UNSOLD_PIECE_SCAN');
+  });
+
   it('a browser signed in to the console scans as staff: ADMIN_TEST under that console user, no finding, nothing of the browser recorded', async () => {
     const r = await issue(h.ctx, catalog);
     const seller = await adminClient(h, 'RETAIL', { ip: '198.51.100.20' });

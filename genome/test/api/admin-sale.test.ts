@@ -1,15 +1,18 @@
 /**
  * The sale mode (A-08): a RETAIL account created on the Team page, the
  * points of sale, the staff scan (`POST /api/admin/sale/lookup`: one
- * ADMIN_TEST scan naming the console user, no anomaly, a 10-minute token
- * when the piece can be sold) and the activation it allows
+ * ADMIN_TEST scan naming the console user, outside the history rules but
+ * with the code's own findings of steps 6–7 marked staffScan, a 10-minute
+ * token when the piece can be sold) and the activation it allows
  * (`POST /api/admin/sale/activate`), and the point of sale chosen from the
  * register in the console's own warranty activation.
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
-import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
+import { packIdentity } from '../../src/core/identity.js';
+import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '../../src/core/payload.js';
+import { SALE_REFUSAL_MESSAGES, SALE_REVIEW_MESSAGE } from '../../src/server/routes/admin/sale.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
@@ -132,7 +135,7 @@ describe('sale mode (A-08)', () => {
     expect((await c.get('/api/admin/auth/me')).statusCode).toBe(401);
   });
 
-  it('lookup records one ADMIN_TEST scan naming the seller, without any anomaly, and returns the piece with a 10-minute token', async () => {
+  it('lookup records one ADMIN_TEST scan naming the seller, without any anomaly for a piece in order, and returns the piece with a 10-minute token', async () => {
     const piece = await issue(h.ctx, catalog, { variant: '52' });
     const anomaliesBefore = await h.ctx.db.selectFrom('anomalies').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const r = await lookup(seller, scanOf(piece));
@@ -255,44 +258,102 @@ describe('sale mode (A-08)', () => {
     expect((await seller.post('/api/admin/sale/activate', { token: f.sale!.token })).statusCode).toBe(400);
   });
 
-  it('a code that does not verify, a lost piece or a void warranty gets no token; every lookup stays out of the anomaly rules', async () => {
-    const before = await h.ctx.db.selectFrom('anomalies').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+  it('a code that does not verify, a lost piece or a void warranty gets no token; the code’s own findings are recorded, never the history rules', async () => {
+    const count = async () => Number((await h.ctx.db.selectFrom('anomalies').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n);
+    const before = await count();
 
-    // A forged signature: no piece, no token, an ADMIN_TEST scan all the same.
+    // A forged signature: no piece, no token, an ADMIN_TEST scan all the same, and nothing to page on (no key vouches for it).
     const genuine = await issue(h.ctx, catalog);
     const { payloadBytes, signature } = unframeCodeData(fromBase64Url(genuine.code.data));
     const sig = signature.slice();
     sig[9] ^= 0x10;
     const forged = await lookup(seller, { code: toBase64Url(frameCodeData(payloadBytes, sig)) });
-    expect(forged).toMatchObject({ state: 'INVALID_SIGNATURE', piece: null, sale: null, refusal: { code: 'NOT_AUTHENTIC' } });
+    expect(forged).toMatchObject({ state: 'INVALID_SIGNATURE', piece: null, sale: null, refusal: { code: 'NOT_AUTHENTIC', message: SALE_REFUSAL_MESSAGES.NOT_AUTHENTIC } });
     expect(forged.refusal?.message).toMatch(/did not verify/);
     expect((await h.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id']).where('id', '=', forged.scanId).executeTakeFirstOrThrow())).toEqual({ event_type: 'ADMIN_TEST', admin_id: sellerId });
     expect((await lookup(seller, { code: 'not-a-code' })).state).toBe('MALFORMED_CODE');
+    expect(await count()).toBe(before);
 
-    // A genome that does not match the signed identity (a copied seal, redrawn).
+    // A genome that does not match the signed identity (a copied seal, redrawn): the piece is ORBES's, so the
+    // sentence asks for a review, and the finding is recorded as /verify records it, marked staffScan.
     const g = [...genuine.genome.glyphs];
     g[0] = (g[0] + 1) % 16;
     g[1] = (g[1] + 1) % 16;
     const mismatch = await lookup(seller, { code: genuine.code.data, genome: { glyphs: g } });
-    expect(mismatch).toMatchObject({ state: 'SUSPICIOUS_ACTIVITY', sale: null, refusal: { code: 'NOT_AUTHENTIC' } });
+    expect(mismatch).toMatchObject({ state: 'SUSPICIOUS_ACTIVITY', sale: null, refusal: { code: 'NOT_AUTHENTIC', message: SALE_REVIEW_MESSAGE }, piece: { productId: genuine.product.productId } });
+    const seal = await h.ctx.db.selectFrom('anomalies').selectAll().where('product_id', '=', genuine.product.id).execute();
+    expect(seal).toEqual([expect.objectContaining({ type: 'GENOME_MISMATCH', severity: 'HIGH', status: 'OPEN', details: expect.objectContaining({ staffScan: true }) })]);
+    expect(await h.ctx.db.selectFrom('authentication_events').select(['risk_score', 'reasons']).where('scan_event_id', '=', mismatch.scanId).executeTakeFirstOrThrow()).toEqual({
+      risk_score: 60,
+      reasons: ['GENOME_MISMATCH'],
+    });
+
+    // A code validly signed by ORBES for an identity it never registered (a possible key compromise, shown at
+    // the counter): CRITICAL, as on /verify, marked staffScan.
+    const signer = await h.ctx.keys.activeSigner();
+    const identity = { year: 2026, categoryIndex: 1, serial: 99_901 };
+    const payload = encodePayload({ codeVersion: 1, genomeVersion: 1, keyId: signer.keyId, identity, issue: 1, issuedDay: 880, nonce: Uint8Array.from(randomBytes(4)) });
+    const unregistered = await lookup(seller, { code: toBase64Url(frameCodeData(payload, await signer.sign(signingMessage(payload)))) });
+    expect(unregistered).toMatchObject({ state: 'UNKNOWN', piece: null, sale: null, refusal: { code: 'NOT_AUTHENTIC', message: SALE_REFUSAL_MESSAGES.NOT_AUTHENTIC } });
+    const critical = (await h.ctx.db.selectFrom('anomalies').selectAll().where('type', '=', 'VALID_SIGNATURE_UNREGISTERED').execute()).filter(
+      (a) => (a.details as { packedIdentity?: number }).packedIdentity === packIdentity(identity),
+    );
+    expect(critical).toEqual([
+      expect.objectContaining({ severity: 'CRITICAL', risk_score: 100, product_id: null, details: expect.objectContaining({ reason: 'PRODUCT_NOT_REGISTERED', staffScan: true }) }),
+    ]);
+    expect(await count()).toBe(before + 2);
 
     // Known, but reported lost; or a warranty voided.
     const lost = await issue(h.ctx, catalog);
     await h.ctx.services.lifecycle.transition(lost.product.productId, 'LOST', { reason: 'test' }, SYSTEM_ACTOR);
     const l = await lookup(seller, scanOf(lost));
-    expect(l).toMatchObject({ state: 'SUSPICIOUS_ACTIVITY', sale: null, refusal: { code: 'NOT_AUTHENTIC' }, piece: { productId: lost.product.productId, status: 'LOST' } });
+    expect(l).toMatchObject({
+      state: 'SUSPICIOUS_ACTIVITY',
+      sale: null,
+      refusal: { code: 'NOT_AUTHENTIC', message: SALE_REVIEW_MESSAGE },
+      piece: { productId: lost.product.productId, status: 'LOST' },
+    });
     const voided = await issue(h.ctx, catalog);
     await h.ctx.services.warranty.void(voided.product.productId, 'grey market', SYSTEM_ACTOR);
     expect((await lookup(seller, scanOf(voided))).refusal?.code).toBe('WARRANTY_VOID');
+    // A lost piece scanned by staff adds no LOST_STOLEN_SCAN: the history rules stay out.
+    expect(await count()).toBe(before + 2);
 
     // Thirty scans of one code in a minute: verify() would flag the velocity, a staff scan never does.
     const busy = await issue(h.ctx, catalog);
     for (let i = 0; i < 30; i++) await lookup(seller, scanOf(busy));
-    const after = await h.ctx.db.selectFrom('anomalies').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    expect(Number(after.n)).toBe(Number(before.n));
+    expect(await count()).toBe(before + 2);
     // …and they do not count in the public history either.
     const pub = body<{ state: string }>(await h.client().post('/api/v1/verify', { code: busy.code.data }));
     expect(pub.state).toBe('AUTHENTIC');
+  });
+
+  it('a piece in a pre-sale service, or one a client already holds, gets no token', async () => {
+    // In a service opened before any sale (ISSUED → SERVICED, an inspection): at the workshop, not for sale.
+    const inspected = await issue(h.ctx, catalog);
+    const svc = await h.ctx.services.warranty.openService(inspected.product.productId, { type: 'INSPECTION' }, SYSTEM_ACTOR);
+    const preSale = await lookup(seller, scanOf(inspected));
+    expect(preSale).toMatchObject({ state: 'AUTHENTIC', sale: null, refusal: { code: 'NOT_FOR_SALE' }, piece: { status: 'SERVICED', registered: false } });
+    expect(await h.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', inspected.product.id).execute()).toEqual([]);
+    // Once the inspection is over, the piece is ISSUED again and can be sold.
+    await h.ctx.services.warranty.completeService(svc.id, {}, SYSTEM_ACTOR);
+    expect((await lookup(seller, scanOf(inspected))).sale?.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    // Moved to ACTIVATED by a transition (no warranty started), then registered by its buyer: sold, whatever the warranty says.
+    const held = await issue(h.ctx, catalog);
+    await h.ctx.services.lifecycle.transition(held.product.productId, 'ACTIVATED', { reason: 'delivered' }, SYSTEM_ACTOR);
+    const token = body<{ registration?: { token: string } }>(await h.client().post('/api/v1/verify', { code: held.code.data })).registration!.token;
+    const { client: buyer } = await accountClient(h);
+    const registration = await buyer.post('/api/v1/ownership/register', { registrationToken: token });
+    expect(registration.statusCode, registration.body).toBe(201);
+    const registered = await lookup(seller, scanOf(held));
+    expect(registered).toMatchObject({
+      state: 'AUTHENTIC',
+      sale: null,
+      refusal: { code: 'ALREADY_REGISTERED', message: SALE_REFUSAL_MESSAGES.ALREADY_REGISTERED },
+      piece: { registered: true, warranty: { status: 'NOT_STARTED' } },
+    });
+    expect(await h.ctx.db.selectFrom('scan_tokens').select('purpose').where('product_id', '=', held.product.id).where('purpose', '=', 'SALE_ACTIVATION').execute()).toEqual([]);
   });
 
   it('points of sale: ADMIN creates, renames and deactivates; every role down to RETAIL reads the list', async () => {

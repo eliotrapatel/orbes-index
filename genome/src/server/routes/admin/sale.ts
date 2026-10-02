@@ -5,13 +5,16 @@
  *
  * - `POST /api/admin/sale/lookup` takes what the console's decoder read (the
  *   body of /api/v1/verify), records ONE ADMIN_TEST scan naming the console
- *   user without evaluating anomalies, and answers the piece, its warranty
- *   and, when it can be sold, a 10-minute sale token (SaleService);
+ *   user outside the history rules (the code's own findings of steps 6–7 are
+ *   recorded, marked staffScan), and answers the piece, its warranty and,
+ *   when it can be sold, a 10-minute sale token (SaleService). It draws from
+ *   the `verify` rate group, the budget of /api/v1/verify: the counter is not
+ *   a faster way to judge codes than the public route;
  * - `POST /api/admin/sale/activate` uses the token up and starts the warranty
- *   today at the chosen point of sale.
+ *   today at the chosen point of sale (`admin` rate group).
  *
  * Both are ordinary admin mutations: session, CSRF, temporary password, MFA,
- * then the role (`minRole: 'RETAIL'`), in the `admin` rate group.
+ * then the role (`minRole: 'RETAIL'`).
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { userAgentFamily, userAgentOf } from '../../http/client.js';
@@ -28,8 +31,20 @@ export const SALE_REFUSAL_MESSAGES: Readonly<Record<SaleRefusal, string>> = Obje
   NOT_AUTHENTIC: 'This code did not verify as a registered ORBES piece. Do not sell it; contact ORBES.',
   WARRANTY_ACTIVE: 'The warranty of this piece has already started: it has been sold before.',
   WARRANTY_VOID: 'The warranty of this piece has been voided. Contact ORBES before selling it.',
+  ALREADY_REGISTERED: 'This piece is registered to a client: it has been sold. Contact ORBES.',
   NOT_FOR_SALE: 'The status of this piece does not allow a sale. Contact ORBES.',
 });
+
+/**
+ * NOT_AUTHENTIC for a piece the registry knows (reported lost or stolen, revoked, a superseded code,
+ * a seal that does not match its code): the code is ORBES's, so "did not verify" would be untrue.
+ */
+export const SALE_REVIEW_MESSAGE = 'ORBES must review this piece before it can be sold. Do not sell it; contact ORBES.';
+
+/** The sentence under a refusal: the code's, or the review sentence for a known piece that did not verify. */
+export function saleRefusalMessage(refusal: SaleRefusal, pieceKnown: boolean): string {
+  return refusal === 'NOT_AUTHENTIC' && pieceKnown ? SALE_REVIEW_MESSAGE : SALE_REFUSAL_MESSAGES[refusal];
+}
 
 export function saleLookupJson(r: SaleLookup) {
   const p = r.piece;
@@ -52,14 +67,14 @@ export function saleLookupJson(r: SaleLookup) {
         }
       : null,
     sale: r.sale,
-    refusal: r.refusal ? { code: r.refusal, message: SALE_REFUSAL_MESSAGES[r.refusal] } : null,
+    refusal: r.refusal ? { code: r.refusal, message: saleRefusalMessage(r.refusal, p !== null) } : null,
   };
 }
 
 export const adminSaleRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { sale } = ctx.services;
 
-  app.post('/api/admin/sale/lookup', { config: RETAIL }, async (request) => {
+  app.post('/api/admin/sale/lookup', { config: { ...RETAIL, rateGroup: 'verify' } }, async (request) => {
     const input = parse(saleLookupBody, request.body);
     const meta: ScanMeta = { ipHash: request.orbes.ipHash, geo: ctx.geo.resolve(request) };
     const family = userAgentFamily(userAgentOf(request));

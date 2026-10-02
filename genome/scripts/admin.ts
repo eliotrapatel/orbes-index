@@ -5,7 +5,7 @@
  *   ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts list [--json]
  *   tsx scripts/admin.ts totp-setup --email <email>              new TOTP secret + otpauth:// URI (nothing stored yet)
- *   tsx scripts/admin.ts totp-enable --email <email> --secret <base32> --code <6 digits>
+ *   tsx scripts/admin.ts totp-enable --email <email> --secret <base32> --code <6 digits>   (ends the sessions opened without it)
  *   tsx scripts/admin.ts reset-totp --email <email> --yes        lost device: remove the enrolment, end the sessions
  *   tsx scripts/admin.ts role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts disable --email <email> --yes           a departure: sign-in refused, every session ends
@@ -42,7 +42,8 @@ Commands
   list                              List console users (role, second factor, lock state)
   totp-setup --email <email>        Generate a TOTP secret and its otpauth:// URI (nothing is stored)
   totp-enable --email <email> --secret <base32> --code <digits>
-                                    Enrol the secret after checking a current code from the app
+                                    Enrol the secret after checking a current code from the app;
+                                    that admin's sessions, opened without it, end
   reset-totp --email <email> --yes  Remove a lost second factor; that admin's sessions end
   role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
                                     Change a console user's role (the only way to grant ADMIN)
@@ -159,8 +160,13 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
       }
       if (cmd === 'totp-enable') {
         const secret = (values.secret as string).replace(/[\s=]/g, '').toUpperCase();
-        await auth.enableTotp(admin.id, { secret, code: (values.code as string).replace(/\s/g, '') }, actor);
-        io.out(json ? JSON.stringify({ enabled: true, adminId: admin.id }) : `Two-factor authentication enabled for ${admin.email}.`);
+        // The sessions opened with the password alone end with the enrolment (AuthService.enableTotp).
+        const { sessionsRevoked } = await auth.enableTotp(admin.id, { secret, code: (values.code as string).replace(/\s/g, '') }, actor);
+        io.out(
+          json
+            ? JSON.stringify({ enabled: true, adminId: admin.id, sessionsRevoked })
+            : `Two-factor authentication enabled for ${admin.email}; ${sessionsRevoked} session(s) opened without it ended.`,
+        );
         return EXIT.OK;
       }
       if (cmd === 'role') {

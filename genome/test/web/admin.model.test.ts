@@ -26,7 +26,7 @@ import {
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
-import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, retailerLabel, retailerOptions, saleVerdict } from '../../src/web/admin/model/sale.js';
+import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, saleVerdict } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
@@ -165,10 +165,13 @@ describe('sale mode view model (A-08)', () => {
 
   it('says what to do with a looked-up piece', () => {
     const ready = saleVerdict({ state: 'AUTHENTIC', piece, sale: { token: 't', expiresAt: '2026-10-02T10:10:00.000Z' }, refusal: null });
-    expect(ready).toMatchObject({ label: 'READY TO SELL', tone: 'solid', canActivate: true });
+    expect(ready).toMatchObject({ label: 'READY TO SELL', tone: 'solid', canActivate: true, message: READY_TO_SELL });
+    // Only what the lookup proved (BRAND §4.1): never "registered" or "never sold" beside "Client account".
+    expect(READY_TO_SELL).not.toMatch(/registered|never sold/i);
     const refused = (code: web.SaleRefusal, state: web.VerificationState = 'AUTHENTIC') =>
       saleVerdict({ state, piece: code === 'NOT_AUTHENTIC' ? null : piece, sale: null, refusal: { code, message: SALE_REFUSAL_MESSAGES[code] } });
     expect(refused('WARRANTY_ACTIVE')).toMatchObject({ label: 'ALREADY SOLD', canActivate: false, message: SALE_REFUSAL_MESSAGES.WARRANTY_ACTIVE });
+    expect(refused('ALREADY_REGISTERED')).toMatchObject({ label: 'ALREADY SOLD', tone: 'outline', canActivate: false, message: SALE_REFUSAL_MESSAGES.ALREADY_REGISTERED });
     expect(refused('WARRANTY_VOID')).toMatchObject({ label: 'WARRANTY VOID', tone: 'alert', canActivate: false });
     expect(refused('NOT_FOR_SALE').label).toBe('NOT FOR SALE');
     expect(refused('NOT_AUTHENTIC', 'INVALID_SIGNATURE')).toMatchObject({ label: 'INVALID SIGNATURE', tone: 'critical', canActivate: false });
@@ -435,6 +438,11 @@ describe('product view model (spec §22)', () => {
       const d = detail({ warranty: null, lifecycle: { status: s, allowed: [], returnTo: null, canReinstate: false } });
       expect(productActions(d, 'OPERATOR').canActivateWarranty, s).toBe(ACTIVATABLE_STATUSES.includes(s));
     }
+    // A pre-sale service (SERVICED, returning to ISSUED) is closed before the sale (409 WARRANTY_ACTIVATION_NOT_ALLOWED).
+    const inspected = detail({ warranty: null, lifecycle: { status: 'SERVICED', allowed: ['ISSUED'], returnTo: 'ISSUED', canReinstate: false } });
+    expect(productActions(inspected, 'OPERATOR').canActivateWarranty).toBe(false);
+    const repaired = detail({ warranty: null, lifecycle: { status: 'SERVICED', allowed: ['OWNED'], returnTo: 'OWNED', canReinstate: false } });
+    expect(productActions(repaired, 'OPERATOR').canActivateWarranty).toBe(true);
     const stolen = detail({ lifecycle: { status: 'STOLEN', allowed: ['OWNED', 'RETIRED'], returnTo: 'OWNED', canReinstate: false } });
     expect(productActions(stolen, 'OPERATOR').canReissue).toBe(false);
     const maxed = detail();

@@ -774,6 +774,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       const phone = await mobileContext(phoneBrowser, { reducedMotion: 'reduce' });
       const p = await phone.newPage();
       await watch(p);
+      /** The computed font size of the first match, in px: iOS Safari zooms into a field under 16 px (BRAND §3.1). */
+      const fontPx = (sel: string) => p.locator(sel).first().evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+      await p.goto(`${origin}/admin`);
+      await p.waitForSelector('[data-testid=login-form]');
+      for (const sel of ['input[name=email]', 'input[name=password]']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(16);
       await signIn(p, seller.email, temporary);
       // The first sign-in: the new password, framed by the sale shell (no console sidebar).
       await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('New password');
@@ -781,6 +786,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect(await p.locator('.side').count()).toBe(0);
       expect(await p.locator('[data-testid=change-password]').count()).toBe(0);
       expect(await p.isVisible('[data-testid=sign-out]')).toBe(true);
+      for (const sel of ['input[name=currentPassword]', 'input[name=newPassword]', 'input[name=confirmPassword]']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(16);
+      for (const sel of ['[data-testid=password-save]', '.saleshell .cfield__label']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(10);
       await p.fill('input[name=currentPassword]', temporary);
       await p.fill('input[name=newPassword]', seller.password);
       await p.fill('input[name=confirmPassword]', seller.password);
@@ -807,6 +814,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       for (const id of ['sale-scan', 'sale-upload', 'sale-retailer', 'sign-out', 'change-password']) {
         expect((await p.locator(`[data-testid=${id}]`).boundingBox())!.height, id).toBeGreaterThanOrEqual(44);
       }
+      // Read at arm's length: the point of sale at 16 px (no zoom when it is focused), buttons and labels at the 10 px floor.
+      expect(await fontPx('[data-testid=sale-retailer]')).toBeGreaterThanOrEqual(16);
+      for (const sel of ['[data-testid=sale-scan]', '[data-testid=sale-upload]', '.saleshell .cfield__label']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(10);
 
       // The sale (acceptance: under 20 s from the phone): the point of sale, the scan, the piece, one gesture.
       const started = Date.now();

@@ -2070,6 +2070,18 @@ a.bar__label:hover {
   height: 48px;
 }
 
+/* Read and acted on at a phone's distance: buttons and field labels at the 10 px floor (BRAND §3.8),
+   fields at 16 px so iOS Safari does not zoom into them (the point of sale, the new password, the
+   second-factor code). */
+.saleshell .cbtn,
+.saleshell .cfield__label {
+  font-size: var(--fs-micro);
+}
+
+.saleshell .cinput {
+  font-size: var(--fs-input);
+}
+
 .saleshell .cbtn--ghost {
   height: 44px;
 }
@@ -2345,6 +2357,13 @@ a.bar__label:hover {
   }
   .bar__share {
     display: none;
+  }
+}
+
+/* The sign-in a seller opens on a phone: its fields at 16 px too, so the page does not zoom. */
+@media (max-width: 599px) {
+  .login .cinput {
+    font-size: var(--fs-input);
   }
 }
 

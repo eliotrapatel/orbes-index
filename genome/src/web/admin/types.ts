@@ -501,7 +501,7 @@ export interface Retailer {
   updatedAt: Iso;
 }
 
-export const SALE_REFUSALS = ['NOT_AUTHENTIC', 'WARRANTY_ACTIVE', 'WARRANTY_VOID', 'NOT_FOR_SALE'] as const;
+export const SALE_REFUSALS = ['NOT_AUTHENTIC', 'WARRANTY_ACTIVE', 'WARRANTY_VOID', 'ALREADY_REGISTERED', 'NOT_FOR_SALE'] as const;
 export type SaleRefusal = (typeof SALE_REFUSALS)[number];
 
 /** POST /api/admin/sale/lookup: the piece behind a scanned code and, when it can be sold, a 10-minute token. */

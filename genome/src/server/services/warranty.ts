@@ -30,7 +30,7 @@ import { SERVICE_TYPES, type ProductRow, type ProductStatus, type ServiceType, t
 import { DomainError, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
-import { actorLabel, cleanReason, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { actorLabel, cleanReason, isPreSaleService, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { requireActiveRetailer } from './retailers.js';
 
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
@@ -185,7 +185,9 @@ export class WarrantyService {
 
   /**
    * Retailer/admin activation: start the warranty on the purchase date for
-   * the category's warranty months. An ISSUED product moves to ACTIVATED.
+   * the category's warranty months. An ISSUED product moves to ACTIVATED; a
+   * product in a pre-sale service (ISSUED → SERVICED) is refused until the
+   * service is closed (409 WARRANTY_ACTIVATION_NOT_ALLOWED).
    * `opts.tx` runs it inside the caller's transaction (the sale mode uses up
    * its scan token in the same one); `opts.saleScanId`, the staff scan that
    * token came from, is recorded in the audit entry.
@@ -217,6 +219,14 @@ export class WarrantyService {
       if (!ACTIVATABLE_STATUSES.includes(product.status)) {
         throw new DomainError('WARRANTY_ACTIVATION_NOT_ALLOWED', 409, 'The warranty of this product cannot be activated.', {
           detail: `status ${product.status}`,
+        });
+      }
+      // A pre-sale service (ISSUED → SERVICED: inspection, quality control) is not a sale: the piece
+      // would stay SERVICED with ISSUED as its return target, so closing the service would bring it
+      // back to ISSUED with a started warranty. The service is closed first, then the piece is sold.
+      if (await isPreSaleService(tx, product)) {
+        throw new DomainError('WARRANTY_ACTIVATION_NOT_ALLOWED', 409, 'The warranty of this product cannot be activated.', {
+          detail: 'pre-sale service: complete or cancel the service first',
         });
       }
 

@@ -45,13 +45,19 @@ export interface SaleVerdict {
   canActivate: boolean;
 }
 
+/**
+ * Under READY TO SELL: only what the lookup proved (BRAND §4.1), a code signed by ORBES for a piece of
+ * its registry whose warranty has not started; the server gives no token to a piece a client holds.
+ */
+export const READY_TO_SELL = 'Signed by ORBES and in its registry; its warranty has not started. Choose the point of sale, then activate its warranty.';
+
 /** What the screen says about a looked-up piece. */
 export function saleVerdict(r: Pick<SaleLookup, 'state' | 'piece' | 'sale' | 'refusal'>): SaleVerdict {
   if (r.sale && r.piece) {
-    return { label: 'READY TO SELL', tone: 'solid', message: 'Issued and signed by ORBES, registered, never sold. Choose the point of sale, then activate its warranty.', canActivate: true };
+    return { label: 'READY TO SELL', tone: 'solid', message: READY_TO_SELL, canActivate: true };
   }
   const code = r.refusal?.code;
-  if (code === 'WARRANTY_ACTIVE') return { label: 'ALREADY SOLD', tone: 'outline', message: r.refusal!.message, canActivate: false };
+  if (code === 'WARRANTY_ACTIVE' || code === 'ALREADY_REGISTERED') return { label: 'ALREADY SOLD', tone: 'outline', message: r.refusal!.message, canActivate: false };
   if (code === 'WARRANTY_VOID') return { label: 'WARRANTY VOID', tone: 'alert', message: r.refusal!.message, canActivate: false };
   if (code === 'NOT_FOR_SALE') return { label: 'NOT FOR SALE', tone: 'alert', message: r.refusal!.message, canActivate: false };
   return {

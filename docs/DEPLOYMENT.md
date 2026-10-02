@@ -804,7 +804,7 @@ Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `
 docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role ADMIN
 docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, active/locked/disabled/temporary password
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email ops@theorbes.com
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>
+docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>   # ends that admin's sessions
 docker compose exec app node --import tsx scripts/admin.ts reset-totp --email ops@theorbes.com --yes   # lost device
 docker compose exec app node --import tsx scripts/admin.ts role --email ops@theorbes.com --role ADMIN  # the only way to grant ADMIN
 docker compose exec app node --import tsx scripts/admin.ts disable --email ops@theorbes.com --yes      # sign-in refused, sessions end
@@ -814,6 +814,7 @@ docker compose exec app node --import tsx scripts/admin.ts enable --email ops@th
 - **The last active ADMIN** can be neither demoted nor disabled, from the console or the shell (`LAST_ADMIN`); create or promote another ADMIN first. Keep two.
 - **A lost authenticator:** after an identity check, an ADMIN resets it from the console (Team page, *Reset two-factor*, typed confirmation; `POST /api/admin/admins/:id/totp/reset`) or with `reset-totp` above. The reset removes the enrolment and ends every session of that admin; they sign in with the password and enrol again. If no ADMIN with a working second factor is left, use the shell command.
 - **Lockout as denial of service:** anyone who knows an admin's email can keep that admin locked out with wrong passwords (10 per 15 minutes suffice). Keep admin emails private and, ideally, put `/admin` and `/api/admin` behind an IP allow-list or VPN at the edge (SECURITY-MODEL §3.3).
+- **Enrolling a second factor ends the sessions opened without it**, from the shell (every session of that admin) as in the console (every session but the one that enrolled): none is left with the password alone. Once enrolled, the console's *Change password* needs a session that passed the second factor when MFA is enforced.
 - **A forgotten password** has no reset yet, neither in the console nor in the shell: disable the account and create a new one under another address (the old account and its history stay). Once signed in, anyone can change their own password (*Change password*).
 
 ---

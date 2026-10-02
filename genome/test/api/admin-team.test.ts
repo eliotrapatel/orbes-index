@@ -311,4 +311,34 @@ describe('Team: the forced change before enrolment when MFA is enforced (A-02)',
     expect((await staff.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), h.clock.now().getTime()) })).statusCode).toBe(200);
     expect((await staff.get('/api/admin/dashboard')).statusCode).toBe(200);
   });
+
+  it('once a second factor is enrolled, a password-only session can no longer change the password; enrolling ends those sessions', async () => {
+    const creds = await createAdmin(h.ctx, 'OPERATOR');
+    // Two sessions opened with the password alone, before enrolment (say, one of them by whoever learnt the password).
+    const owner = await signIn(h, creds.email, creds.password);
+    const other = await signIn(h, creds.email, creds.password);
+    const { secret } = safeJson(await owner.post('/api/admin/auth/totp/setup')) as { secret: string };
+    expect((await owner.post('/api/admin/auth/totp/enable', { secret, code: totp(base32Decode(secret), h.clock.now().getTime()) })).statusCode).toBe(200);
+    // The enrolment ended the other one, in the same transaction, audited.
+    expect((await other.post('/api/admin/auth/password', { currentPassword: creds.password, newPassword: 'taken over passphrase 2026' })).statusCode).toBe(401);
+    const entry = (await h.ctx.audit.list({ action: 'admin.totp.enable', targetId: creds.id })).items[0];
+    expect(entry.details).toEqual({ sessionsRevoked: 1 });
+
+    // A password-only session of an enrolled admin (one that survived an enrolment from elsewhere): MFA_REQUIRED.
+    const late = await createAdmin(h.ctx, 'AUDITOR');
+    const kept = await signIn(h, late.email, late.password);
+    const gone = await signIn(h, late.email, late.password);
+    const lateSecret = (await h.ctx.services.auth.createTotpEnrollment(late.id)).secret;
+    const r = await h.ctx.services.auth.enableTotp(late.id, { secret: lateSecret, code: totp(base32Decode(lateSecret), h.clock.now().getTime()) }, { type: 'system', id: 'test' }, { keepToken: kept.cookies.get('orbes_admin') });
+    expect(r).toEqual({ sessionsRevoked: 1 });
+    expect((await gone.get('/api/admin/auth/me')).statusCode).toBe(401);
+    const refused = await kept.post('/api/admin/auth/password', { currentPassword: late.password, newPassword: 'taken over passphrase 2026' });
+    expect(refused.statusCode).toBe(403);
+    expect(errorOf(refused).code).toBe('MFA_REQUIRED');
+    // Nothing changed: the password still signs in (with the code now).
+    expect((await h.client().post('/api/admin/auth/login', { email: late.email, password: late.password, totp: totp(base32Decode(lateSecret), h.clock.now().getTime() + 30_000) })).statusCode).toBe(200);
+
+    // The session that enrolled passed the factor: its own change still works, and ends no one else's.
+    expect((await owner.post('/api/admin/auth/password', { currentPassword: creds.password, newPassword: 'enrolled passphrase 2026' })).statusCode).toBe(200);
+  });
 });

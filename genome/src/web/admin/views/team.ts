@@ -34,7 +34,9 @@ const ROLE_OPTIONS = STAFF_ROLES.map((r) => ({ value: r, label: humanize(r) }));
 export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
   const list = await ctx.api.admins();
   const selfId = ctx.session.admin.id;
-  const secret = h('div', { class: 'team__secret', attrs: { 'aria-live': 'polite' } });
+  // No live region here: a screen reader would read the secret aloud the moment it appears. A toast
+  // says, without it, that the panel is there (as the generator's claim-code panel, read on demand).
+  const secret = h('div', { class: 'team__secret' });
 
   const create = button('New staff account', { kind: 'primary', testId: 'team-create' });
   create.addEventListener('click', () => {
@@ -59,6 +61,7 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
     }).then((r) => {
       if (!r || !created) return;
       showTemporaryPassword(created.email, created.temporaryPassword);
+      notify(`Account created for ${created.email}. Its temporary password is shown below, once.`);
       void refresh();
     });
   });

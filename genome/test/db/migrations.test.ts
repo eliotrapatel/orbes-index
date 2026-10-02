@@ -134,7 +134,7 @@ describe('migrations', () => {
 
     const m = MIGRATIONS['0008_retail_mode']!;
     expect(m.down).toBeTypeOf('function');
-    // A warranty named by its point of sale keeps the name as text; a seller goes with its sessions, never promoted.
+    // A warranty named by its point of sale keeps the name as text; a seller's sessions end, the account stays, disabled.
     const shop = (await sql<{ id: string }>`SELECT id FROM retailers WHERE name = 'ORBES Paris'`.execute(t.db)).rows[0];
     await sql`INSERT INTO categories (id, code, name) VALUES (30, 'Q', 'Down test')`.execute(t.db);
     const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (30, 'M', 'RING', 'DOWN') RETURNING id`.execute(t.db)).rows[0];
@@ -145,9 +145,15 @@ describe('migrations', () => {
     await sql`INSERT INTO warranties (product_id, duration_months, start_date, retailer_id) VALUES (${product.id}, 24, '2026-10-01', ${shop.id})`.execute(t.db);
     await sql`INSERT INTO sessions (id_hash, subject_type, subject_id, csrf_token, expires_at) VALUES (decode(repeat('ab', 32), 'hex'), 'admin', ${admin.id}, 'c', now() + interval '1 hour')`.execute(t.db);
     await t.db.transaction().execute(async (tx) => {
+      // Another table pointing to the seller with ON DELETE RESTRICT, as 0004 scan_reports.handled_by and
+      // 0005 account_recovery_codes.created_by do on the integration branch: the rollback must not trip on it.
+      await sql`CREATE TABLE down_test_ref (admin_id uuid NOT NULL REFERENCES admin_users (id) ON DELETE RESTRICT)`.execute(tx);
+      await sql`INSERT INTO down_test_ref (admin_id) VALUES (${admin.id})`.execute(tx);
       await m.down!(tx);
-      expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(tx)).rows[0].n).toBe(0);
+      const seller = (await sql<{ role: string; disabled: boolean }>`SELECT role, disabled_at IS NOT NULL AS disabled FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(tx)).rows;
+      expect(seller).toEqual([{ role: 'AUDITOR', disabled: true }]);
       expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM sessions`.execute(tx)).rows[0].n).toBe(0);
+      await sql`DROP TABLE down_test_ref`.execute(tx);
       expect((await sql<{ retailer: string | null }>`SELECT retailer FROM warranties WHERE product_id = ${product.id}`.execute(tx)).rows[0].retailer).toBe('ORBES Paris');
       expect(await roleCheck(tx)).toBe("CHECK ((role = ANY (ARRAY['ADMIN'::text, 'OPERATOR'::text, 'AUDITOR'::text])))");
       // As 0001 wrote it (PostgreSQL normalises a one-value IN to an equality).
@@ -160,6 +166,7 @@ describe('migrations', () => {
     expect(await roleCheck()).toContain("'RETAIL'::text");
     expect(await tables()).toContain('retailers');
     await sql`DELETE FROM scan_events`.execute(t.db);
+    await sql`DELETE FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(t.db);
   });
 
   it('roll back cleanly and re-apply', async () => {

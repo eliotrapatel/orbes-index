@@ -16,8 +16,9 @@
  * console and never leave this module in the response.
  *
  * `staffScan` (A-08, the console's sale mode) runs the same steps 1–8 for a
- * console user and records an ADMIN_TEST scan naming that user, without the
- * history, ownership and anomaly steps and without any public wording.
+ * console user and records an ADMIN_TEST scan naming that user, with the
+ * code's own findings of steps 6–7 (marked `staffScan`) but without the
+ * history, ownership and unsold steps and without any public wording.
  * `verify` with a console session (S-07: `ScanMeta.adminId`) is a staff scan
  * too: ADMIN_TEST, outside UNSOLD_PIECE_SCAN and the history rules (the code's
  * own findings of steps 6–7 are still recorded, marked `staffScan`), no
@@ -302,8 +303,9 @@ export class VerificationService {
    * would see) and earns no registration token. The findings of steps 6–7 describe the code, not
    * who scanned it (VALID_SIGNATURE_UNREGISTERED and CODE_MISMATCH page on a possible key
    * compromise): a staff scan records them too, with `staffScan: true` in their details. A public
-   * scan of a piece ORBES has not sold yet (ISSUED, or in a pre-sale service) records
-   * UNSOLD_PIECE_SCAN, once per piece and per UTC day, with weight 0: the state shown does not change.
+   * scan of a piece ORBES has not sold yet (ISSUED, or in a pre-sale service, its warranty not
+   * started) records UNSOLD_PIECE_SCAN, once per piece and per UTC day, with weight 0: the state
+   * shown does not change.
    */
   async verify(input: VerifyInput, meta: ScanMeta = {}): Promise<VerifyOutcome> {
     const started = performance.now();
@@ -358,8 +360,11 @@ export class VerificationService {
         const preSaleService = await isPreSaleService(trx, { id: reg.productUuid, status: reg.status });
 
         // S-07: the code of a piece ORBES has not sold yet, scanned outside the maison (no console session).
-        // Every such scan says so in its reasons; the finding itself is recorded once per piece and per UTC day.
-        if (!staff && (reg.status === 'ISSUED' || preSaleService)) {
+        // Sold means its warranty started (the sale mode or the console): a started warranty is never
+        // "unsold", whatever the status says. Every such scan says so in its reasons; the finding itself
+        // is recorded once per piece and per UTC day.
+        const unsold = (reg.status === 'ISSUED' || preSaleService) && !reg.warranty?.start_date;
+        if (!staff && unsold) {
           w.reasons.push('ANOMALY:UNSOLD_PIECE_SCAN');
           await this.anomaly.recordFinding(this.unsoldPieceFinding(w, now, scanId, m.country, preSaleService), trx, { oncePerUtcDay: true });
         }
@@ -427,10 +432,14 @@ export class VerificationService {
    * A staff scan: the sale mode's lookup (A-08). The code is judged by steps 1–8 exactly as by
    * verify() (structure, key, signature, revoked-key trust, genome version, registry, genome
    * cross-check, code and product status), then ONE scan event is written with the type
-   * ADMIN_TEST and the console user's id, with its authentication event. Nothing else of verify()
-   * runs: no anomaly is evaluated or recorded (ADMIN_TEST scans are outside every history rule),
-   * no registration token is issued, no public wording is built. `then` runs in the same
-   * transaction, so whatever the caller records about this scan (the sale token) commits with it.
+   * ADMIN_TEST and the console user's id, with its authentication event. The code's own findings
+   * of steps 6–7 (VALID_SIGNATURE_UNREGISTERED, CODE_MISMATCH, GENOME_MISMATCH) are recorded with
+   * `staffScan: true`, as verify() records them for a staff scan: they describe the code, not who
+   * scanned it, and a forged but validly signed code shown at the counter must page as anywhere
+   * else. Nothing else of verify() runs: no history rule is evaluated (ADMIN_TEST scans are outside
+   * every one, so a busy counter never makes a piece look suspicious), no UNSOLD_PIECE_SCAN, no
+   * registration token, no public wording. `then` runs in the same transaction, so whatever the
+   * caller records about this scan (the sale token) commits with it.
    */
   async staffScan<T>(input: VerifyInput, opts: { adminId: string; meta?: ScanMeta }, then: (trx: Db, scan: StaffScan) => Promise<T>): Promise<T> {
     if (typeof opts?.adminId !== 'string' || !UUID_RE.test(opts.adminId)) throw new TypeError('staffScan: adminId must be an admin_users.id uuid');
@@ -442,7 +451,7 @@ export class VerificationService {
 
     const w: Work = { reasons: [], signatureValid: false, trusted: false, genomeCheck: 'NOT_PROVIDED', riskScore: 0, isOwner: false };
     await this.decide(w, input?.code, genomeReading);
-    // No history, ownership or anomaly step: what steps 1–8 did not refuse is the registry's own piece.
+    // No history, ownership or unsold step: what steps 1–8 did not refuse is the registry's own piece.
     const state: VerificationState = w.state ?? 'AUTHENTIC';
 
     return inTransaction(this.db, async (trx) => {
@@ -468,6 +477,8 @@ export class VerificationService {
         })
         .returning('id')
         .executeTakeFirstOrThrow();
+      // Steps 6–7 judge the code itself, at the counter as on /verify (S-07): recorded, marked staffScan.
+      if (w.serviceFinding) await this.anomaly.recordFinding(this.serviceFinding(w, now, true), trx);
       await this.recordAuthentication(trx, w, scan.id, state, now);
       const reg = w.reg;
       const piece: StaffScanPiece | null =

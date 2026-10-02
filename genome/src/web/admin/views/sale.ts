@@ -30,15 +30,22 @@ import type { ViewContext } from './context.js';
 
 /** The open sale screen, so main.ts can stop its camera when the console moves elsewhere or signs out. */
 let current: SaleFlow | null = null;
+/** Bumped by every disposal: a sale screen whose points of sale arrive after one was never shown. */
+let screens = 0;
 
 /** Stop the camera and forget the sale token of the sale screen, if one is open. */
 export function disposeSaleView(): void {
+  screens++;
   current?.dispose();
   current = null;
 }
 
 export async function saleView(ctx: ViewContext): Promise<HTMLElement> {
+  const asked = screens;
   const retailers = (await ctx.api.retailers({ activeOnly: true })).items;
+  // The console moved on (or opened the sale mode again) while the list was on its way: this screen is
+  // stale. Neither a camera, a decoder worker nor listeners for it, and the one now open is left alone.
+  if (asked !== screens) return h('div', { class: 'view view--sale' });
   disposeSaleView();
   const flow = new SaleFlow(ctx, retailers);
   current = flow;
@@ -92,7 +99,8 @@ class SaleFlow {
       this.where.setAttribute('data-testid', 'sale-retailer');
       this.where.addEventListener('change', () => {
         remember(this.where!.value);
-        this.stage.querySelector<HTMLButtonElement>('[data-testid=sale-activate]')?.toggleAttribute('disabled', !this.where!.value);
+        // A scan that can no longer be used (data-dead) stays off: the way forward is a new scan.
+        this.stage.querySelector<HTMLButtonElement>('[data-testid=sale-activate]:not([data-dead])')?.toggleAttribute('disabled', !this.where!.value);
       });
       whereField = field('Point of sale', this.where, { hint: 'Remembered on this phone for the next sale.', wide: true });
     }
@@ -388,8 +396,11 @@ class SaleFlow {
       btn.textContent = label;
       if (e instanceof ApiError && e.status === 401) return;
       error.textContent = e instanceof ApiError ? e.message : 'The warranty could not be started. Try again.';
-      // A scan that can no longer be used: the way forward is a new one.
-      if (e instanceof ApiError && /^SALE_TOKEN_/.test(e.code)) btn.disabled = true;
+      // A scan that can no longer be used: the way forward is a new one, whatever point of sale is chosen next.
+      if (e instanceof ApiError && /^SALE_TOKEN_/.test(e.code)) {
+        btn.disabled = true;
+        btn.setAttribute('data-dead', '');
+      }
     }
   }
 }

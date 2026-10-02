@@ -66,6 +66,8 @@
   --fs-mono: 11.5px;
   --fs-mono-lg: 12.5px;
   --fs-sub: 14px;
+  /* A field a phone focuses: under 16 px, iOS Safari zooms the page into it. */
+  --fs-input: 16px;
   --fs-heading: 17px;
   --fs-heading-lg: 18px;
   --fs-code: 19px;
@@ -573,7 +575,7 @@ a {
   border-bottom: 1px solid var(--hairline-strong);
   border-radius: 0;
   background: transparent;
-  font-size: 16px; /* 16 px: iOS does not zoom into the field */
+  font-size: var(--fs-input); /* 16 px: iOS does not zoom into the field */
   letter-spacing: 0.04em;
   outline: none;
   transition: border-color var(--t-med) var(--ease);
