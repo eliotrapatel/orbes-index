@@ -101,14 +101,15 @@ body {
   color: var(--ink-soft);
 }
 
-/* The ADMIN's sidebar, its longest (five groups, sixteen links, a two-line foot), fits a 900 px screen: SIGN OUT stays in view. */
+/* The ADMIN's sidebar, its longest (five groups, eighteen links, a two-line foot), fits a 900 px screen: SIGN OUT and
+   CHANGE PASSWORD stay in view (5 px above and under each link, 10 px above a group, 4 px under it). */
 .side__nav {
   flex: 1;
-  padding: 14px 0 18px;
+  padding: 8px 0 12px;
 }
 
 .side__group {
-  padding: 10px 32px 6px;
+  padding: 10px 32px 4px;
 }
 
 .side__group-title {
@@ -126,7 +127,7 @@ body {
 .side__link {
   position: relative;
   display: block;
-  padding: 6px 0;
+  padding: 5px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;
