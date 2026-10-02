@@ -17,6 +17,17 @@
  */
 import { renderOrbesCodeSvg, type OrbesCodeModel } from '../../core/code/encoder.js';
 import { CODE01_SIZE } from '../../core/code/profile.js';
+import {
+  ARTIFACT_LABEL_HEIGHT_U,
+  artifactCellMm,
+  layoutSheet,
+  SHEET_FOOTER_MM,
+  SHEET_PAGES,
+  type SheetLayout,
+  type SheetLayoutOptions,
+  type SheetPageSize,
+  type SheetPlacement,
+} from '../../core/render/sheet-layout.js';
 import { primitivesToSvg } from '../../core/render/svg.js';
 import { measureText, textRun, type TextRun } from './label-font.js';
 import { ARTIFACT_THEMES, type ArtifactScene, type ArtifactTheme, type StrokePath, type ViewBox } from './scene.js';
@@ -25,8 +36,8 @@ const HALF = CODE01_SIZE / 2;
 
 /** Label geometry in code units, below the code's quiet zone. */
 export const LABEL_LAYOUT = Object.freeze({
-  /** Height added under the code. */
-  height: 7.5,
+  /** Height added under the code (the core's ARTIFACT_LABEL_HEIGHT_U, which sheet layouts use). */
+  height: ARTIFACT_LABEL_HEIGHT_U,
   idCapHeight: 2.0,
   idTracking: 0.32,
   idBaseline: HALF + 3.0,
@@ -76,10 +87,12 @@ export function buildArtifactScene(model: OrbesCodeModel, opts: SceneOptions): A
     h += LABEL_LAYOUT.height;
   }
   const viewBox: ViewBox = { x: -HALF, y: -HALF, w: CODE01_SIZE, h };
+  // The same size the sheet layouts (and the console's preview) compute from the core.
+  const cell = artifactCellMm(opts.widthMm, opts.label);
   return {
     viewBox,
-    widthMm: opts.widthMm,
-    heightMm: (opts.widthMm * h) / CODE01_SIZE,
+    widthMm: cell.widthMm,
+    heightMm: cell.heightMm,
     ink: colors.ink,
     paper: colors.paper,
     primitives: model.primitives,
@@ -109,65 +122,10 @@ export function sceneToSvg(model: OrbesCodeModel, scene: ArtifactScene, decor: b
 
 // ── Multi-up sheets ────────────────────────────────────────────────────────
 
-export type SheetPageSize = 'A4' | 'A3' | 'LETTER';
-export const SHEET_PAGES: Readonly<Record<SheetPageSize, readonly [number, number]>> = Object.freeze({
-  A4: [210, 297] as const,
-  A3: [297, 420] as const,
-  LETTER: [215.9, 279.4] as const,
-});
+// The grid itself (page sizes, cell size, placement) is in the core, shared with the console's preview.
+export { ARTIFACT_LABEL_HEIGHT_U, artifactCellMm, layoutSheet, SHEET_FOOTER_MM, SHEET_PAGES };
+export type { SheetLayout, SheetLayoutOptions, SheetPageSize, SheetPlacement };
 
-export interface SheetLayoutOptions {
-  page?: SheetPageSize;
-  /** Page margin (default 12 mm). The bottom margin also holds the footer. */
-  marginMm?: number;
-  /** Space between artifacts, where crop marks go (default 8 mm). */
-  gutterMm?: number;
-}
-
-export interface SheetPlacement {
-  /** Index into the item list. */
-  index: number;
-  xMm: number;
-  yMm: number;
-}
-
-export interface SheetLayout {
-  pageWidthMm: number;
-  pageHeightMm: number;
-  columns: number;
-  rows: number;
-  pages: SheetPlacement[][];
-}
-
-/** Grid placement of `count` cells of `cellW × cellH` mm on as many pages as needed, centred horizontally. */
-export function layoutSheet(cellWmm: number, cellHmm: number, count: number, opts: SheetLayoutOptions = {}): SheetLayout {
-  const [pw, ph] = SHEET_PAGES[opts.page ?? 'A4'] ?? SHEET_PAGES.A4;
-  const margin = opts.marginMm ?? 12;
-  const gutter = opts.gutterMm ?? 8;
-  const footer = SHEET_FOOTER_MM;
-  if (!(cellWmm > 0 && cellHmm > 0)) throw new RangeError('cell size must be positive');
-  if (!Number.isInteger(count) || count < 1) throw new RangeError('count must be a positive integer');
-  const usableW = pw - 2 * margin;
-  const usableH = ph - 2 * margin - footer;
-  const columns = Math.floor((usableW + gutter) / (cellWmm + gutter));
-  const rows = Math.floor((usableH + gutter) / (cellHmm + gutter));
-  if (columns < 1 || rows < 1) throw new RangeError('the artifact does not fit on the page');
-  const gridW = columns * cellWmm + (columns - 1) * gutter;
-  const x0 = (pw - gridW) / 2;
-  const perPage = columns * rows;
-  const pages: SheetPlacement[][] = [];
-  for (let i = 0; i < count; i++) {
-    const slot = i % perPage;
-    if (slot === 0) pages.push([]);
-    const col = slot % columns;
-    const row = Math.floor(slot / columns);
-    pages[pages.length - 1].push({ index: i, xMm: x0 + col * (cellWmm + gutter), yMm: margin + row * (cellHmm + gutter) });
-  }
-  return { pageWidthMm: pw, pageHeightMm: ph, columns, rows, pages };
-}
-
-/** Height reserved at the bottom of a sheet for the footer line and scale bar. */
-export const SHEET_FOOTER_MM = 10;
 /** Crop and cut marks: 3 mm ticks starting 1 mm from the edge, 0.1 mm wide. */
 const MARK_LEN_MM = 3;
 const MARK_GAP_MM = 1;

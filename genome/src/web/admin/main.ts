@@ -19,7 +19,7 @@ import { notifyError } from './ui/toast.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { catalogueView } from './views/catalogue.js';
-import { codesView } from './views/codes.js';
+import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
 import { dashboardView } from './views/dashboard.js';
 import { generatorView } from './views/generator.js';
@@ -184,6 +184,7 @@ function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
   resetProductViewState();
+  resetCodesViewState();
   setTitle('Sign in');
   mount(
     app,

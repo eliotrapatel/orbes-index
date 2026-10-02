@@ -224,6 +224,22 @@ export interface CodeJson {
   createdAt: Iso;
 }
 
+/** Filters of the codes registry (GET /api/admin/codes and /api/admin/codes/ids). Dates are UTC days, both included. */
+export interface CodeFilters {
+  productionBatch?: string;
+  modelId?: string;
+  status?: string;
+  issuedFrom?: string;
+  issuedTo?: string;
+}
+
+/** GET /api/admin/codes/ids: the printable (ACTIVE) codes of a filter, at most 1 000, in identity order. */
+export interface CodeIds {
+  ids: string[];
+  total: number;
+  truncated: boolean;
+}
+
 /** OPERATOR responses (issue, re-issue) carry the scannable base64url data once. */
 export interface IssuedCodeJson extends CodeJson {
   data: string;

@@ -355,7 +355,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | POST | `/api/admin/models` | Creates a model. |
 | GET | `/api/admin/collections` | Lists collections. |
 | POST | `/api/admin/collections` | Creates a collection. |
-| GET | `/api/admin/products?status&category&q&page` | Product list. |
+| GET | `/api/admin/products?status&category&q&productionBatch&page` | Product list (`productionBatch`: exact, extension). |
 | POST | `/api/admin/products` | Issues a product (the generator). |
 | GET | `/api/admin/products/:productId` | Full detail: product, genome, codes, signature validity (re-verified live), scan count, ownership + history, warranty + services, anomalies, status history, allowed transitions. |
 | POST | `/api/admin/products/:productId/transitions` | Body `{ to, reason }`. |
@@ -370,7 +370,8 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/codes/:codeId/artifact.(svg\|png\|pdf)?widthMm&theme&decor&label&dpi&kOnly` | Downloads the code artifact (`theme`: classic \| inverted \| ivory; `black` = deprecated alias). |
 | POST | `/api/admin/codes/:codeId/revoke` | Body `{ reason }`. |
 | GET | `/api/admin/genomes?page` | — |
-| GET | `/api/admin/codes?page` | — |
+| GET | `/api/admin/codes?productionBatch&modelId&status&issuedFrom&issuedTo&page` | Filters by the product's batch and model, the code's status and its UTC issue days (extension). |
+| GET | `/api/admin/codes/ids?productionBatch&modelId&status&issuedFrom&issuedTo` | `{ ids, total, truncated }`: the printable (ACTIVE) codes of the filters, at most 1 000, for a print sheet (extension). |
 | GET | `/api/admin/scans?productId&state&page` | Scan and authentication events. |
 | GET | `/api/admin/owners?page` | Accounts with product counts. |
 | GET | `/api/admin/warranties?status&page` | — |
@@ -386,6 +387,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/audit/verify` | Verifies the audit hash chain. |
 | POST | `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable` | TOTP enrolment (extension); enable rotates the session token. |
 | POST | `/api/admin/codes/print-sheet` | Multi-up PDF of ACTIVE codes (extension). |
+| POST | `/api/admin/codes/print-sheet/manifest` | The sheet's manifest, CSV `page, row, column, productId, sku, variant, material, codeId` in the PDF's order (one plan for both), audited `code.sheet_manifest` (extension). |
 | POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every card and every file name, the CSV's included, says PROOF until the brand validates the layout; checks stop at the first wrong code, one request in progress per admin (extension). |
 | GET | `/api/admin/admins` | ADMIN. Console users (extension). |
 | POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). |

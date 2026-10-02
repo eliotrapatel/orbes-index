@@ -1,6 +1,7 @@
 /**
  * Products registry: search (product id, SKU, model, genome fingerprint),
- * status and category filters, paginated.
+ * status, category and production batch filters, paginated. A batch's list
+ * links to its codes, where the whole batch prints as one sheet.
  */
 import { h } from '../../shared/dom.js';
 import { formatDate, humanize } from '../format.js';
@@ -15,19 +16,20 @@ export async function productsView(ctx: ViewContext): Promise<HTMLElement> {
   const q = ctx.route.query;
   const page = pageParam(ctx);
   const [list, cats] = await Promise.all([
-    ctx.api.products({ status: q.status, category: q.category, q: q.q, page, pageSize: 50 }),
+    ctx.api.products({ status: q.status, category: q.category, q: q.q, productionBatch: q.productionBatch, page, pageSize: 50 }),
     ctx.api.categories(),
   ]);
 
   const search = input('q', { value: q.q ?? '', placeholder: 'O26-J-00184, SKU, model, G1-…', maxlength: 64 });
   const status = select('status', [{ value: '', label: 'All statuses' }, ...PRODUCT_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], q.status ?? '');
   const category = select('category', [{ value: '', label: 'All categories' }, ...cats.items.map((c) => ({ value: c.code, label: `${humanize(c.name)} · ${c.code}` }))], q.category ?? '');
+  const batch = input('productionBatch', { value: q.productionBatch ?? '', placeholder: 'e.g. B-2026-09-A', maxlength: 100, mono: true });
   const form = h('form', { class: 'filters__form', attrs: { role: 'search' } },
-    filterBar(field('Search', search), field('Status', status), field('Category', category), button('Apply', { type: 'submit', kind: 'secondary' })),
+    filterBar(field('Search', search), field('Status', status), field('Category', category), field('Production batch', batch), button('Apply', { type: 'submit', kind: 'secondary' })),
   );
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    ctx.setQuery({ q: search.value.trim(), status: status.value, category: category.value, page: undefined });
+    ctx.setQuery({ q: search.value.trim(), status: status.value, category: category.value, productionBatch: batch.value.trim(), page: undefined });
   });
   status.addEventListener('change', () => form.requestSubmit());
   category.addEventListener('change', () => form.requestSubmit());
@@ -39,7 +41,11 @@ export async function productsView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Registry',
       title: 'Products',
       lead: 'Every issued identity, its genome and the code in force.',
-      actions: can(ctx.session.admin.role, 'issue') ? [linkButton('Issue a product', href('generator'), 'primary')] : [],
+      actions: [
+        // A batch's products, then its codes: the print sheet of the whole batch is one click away.
+        ...(q.productionBatch && can(ctx.session.admin.role, 'download') ? [linkButton('Print this batch', href('codes', {}, { productionBatch: q.productionBatch }))] : []),
+        ...(can(ctx.session.admin.role, 'issue') ? [linkButton('Issue a product', href('generator'), 'primary')] : []),
+      ],
     }),
     form,
     table(
@@ -55,7 +61,7 @@ export async function productsView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Created', cell: (r) => formatDate(r.createdAt), kind: ['nowrap'] },
       ],
       list.items,
-      { empty: q.q || q.status || q.category ? 'No product matches these filters.' : 'No product issued yet.', onRow: (r) => productHref(r.productId), caption: 'Products' },
+      { empty: q.q || q.status || q.category || q.productionBatch ? 'No product matches these filters.' : 'No product issued yet.', onRow: (r) => productHref(r.productId), caption: 'Products' },
     ),
     pager(list, (p) => ctx.setQuery({ page: p })),
   );

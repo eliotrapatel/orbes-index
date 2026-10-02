@@ -13,6 +13,7 @@ import { z } from 'zod';
 import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
+  CODE_STATUSES,
   PRODUCT_STATUSES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
@@ -85,6 +86,13 @@ const isoDateTime = z
   .max(40)
   .refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.test(s) && !Number.isNaN(Date.parse(s)), 'Must be an ISO 8601 date-time with a time zone')
   .transform((s) => new Date(s));
+
+/** A query value where an empty or blank string means "not given" (filter forms send empty fields). */
+const queryOptional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema.optional());
+
+/** A production batch as recorded at issuance (trimmed, ≤ 100 characters), matched exactly. */
+const productionBatch = queryOptional(text(100));
 
 const country = z
   .string()
@@ -220,6 +228,7 @@ export const productListQuery = z.object({
     .transform((s) => s.toUpperCase())
     .optional(),
   q: z.string().trim().max(64, 'At most 64 characters').optional(),
+  productionBatch,
 });
 
 export const transitionBody = body({
@@ -259,6 +268,22 @@ export const serviceParams = z.object({ id: uuid });
 // ── Admin: codes, artifacts, revocations ───────────────────────────────────
 
 export const codeParams = z.object({ codeId: uuid });
+
+/**
+ * Filters of the codes registry (GET /api/admin/codes and /api/admin/codes/ids): the product's
+ * production batch (exact) and model, the code's status, and the UTC days it was issued in
+ * (`issuedFrom` to `issuedTo`, both included).
+ */
+export const codeListQuery = z
+  .object({
+    productionBatch,
+    modelId: queryOptional(uuid),
+    status: queryOptional(z.enum(CODE_STATUSES)),
+    issuedFrom: queryOptional(isoDate),
+    issuedTo: queryOptional(isoDate),
+  })
+  .refine((q) => !q.issuedFrom || !q.issuedTo || q.issuedFrom <= q.issuedTo, { message: 'issuedFrom must not be after issuedTo', path: ['issuedTo'] });
+export type CodeListQuery = z.infer<typeof codeListQuery>;
 
 export const artifactParams = z.object({ codeId: uuid, format: z.enum(['svg', 'png', 'pdf']) });
 

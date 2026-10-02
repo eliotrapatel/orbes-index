@@ -280,11 +280,11 @@ describe('certificate sheet', () => {
     expect([l.pageWidthMm, l.pageHeightMm]).toEqual([210, 297]);
     expect(l.pages.map((p) => p.length)).toEqual([10, 10, 3]);
     const first = l.pages[0];
-    expect(first[0]).toEqual({ index: 0, xMm: 20, yMm: 11 });
-    expect(first[1]).toEqual({ index: 1, xMm: 105, yMm: 11 });
-    expect(first[9]).toEqual({ index: 9, xMm: 105, yMm: 231 });
+    expect(first[0]).toEqual({ index: 0, xMm: 20, yMm: 11, row: 0, column: 0 });
+    expect(first[1]).toEqual({ index: 1, xMm: 105, yMm: 11, row: 0, column: 1 });
+    expect(first[9]).toEqual({ index: 9, xMm: 105, yMm: 231, row: 4, column: 1 });
     expect(first[9].yMm + CERTIFICATE_CARD.heightMm).toBe(297 - CERTIFICATE_SHEET.marginYmm);
-    expect(l.pages[2][0]).toEqual({ index: 20, xMm: 20, yMm: 11 });
+    expect(l.pages[2][0]).toEqual({ index: 20, xMm: 20, yMm: 11, row: 0, column: 0 });
     expect(() => layoutCertificateSheet(0)).toThrow(CertificateInputError);
   });
 

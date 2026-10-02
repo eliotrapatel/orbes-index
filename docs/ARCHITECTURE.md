@@ -95,7 +95,7 @@ genome/
     code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
     decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
     verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
-    render/              shared vector primitives → SVG paths; the brand monogram's outlines
+    render/              shared vector primitives → SVG paths; the brand monogram's outlines; print-sheet grid
   src/server/          Fastify service (Node only)
     config.ts            environment → AppConfig (zod; fail fast; production hardening)
     context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping

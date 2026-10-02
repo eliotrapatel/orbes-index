@@ -116,7 +116,7 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 | Role | May |
 |---|---|
 | AUDITOR | Read every admin resource. Manage its own session and second factor. |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). |
 | ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, and console users (list, TOTP reset). |
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
@@ -371,9 +371,11 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/admin/products/:productId/ownership/confirm` | OPERATOR | yes | admin | 14.10 |
 | GET | `/api/admin/codes/:codeId/artifact.:format` | **OPERATOR** | — | admin | 15.2 |
 | POST | `/api/admin/codes/print-sheet` | OPERATOR | yes | admin | 15.3 |
+| POST | `/api/admin/codes/print-sheet/manifest` | OPERATOR | yes | admin | 15.8 |
 | POST | `/api/admin/certificates` | **OPERATOR** | yes | admin | 15.7 |
 | POST | `/api/admin/codes/:codeId/revoke` | **ADMIN** | yes | admin | 15.4 |
 | GET | `/api/admin/codes` | AUDITOR | — | admin | 15.5 |
+| GET | `/api/admin/codes/ids` | AUDITOR | — | admin | 15.9 |
 | GET | `/api/admin/genomes` | AUDITOR | — | admin | 15.6 |
 | GET | `/api/admin/scans` | AUDITOR | — | admin | 16.1 |
 | GET | `/api/admin/owners` | AUDITOR | — | admin | 16.2 |
@@ -391,7 +393,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1190,6 +1192,7 @@ AUDITOR. Paginated, newest first, from the `product_overview` view.
 | `status` | One of the 12 product statuses. |
 | `category` | One letter (case-insensitive). |
 | `q` | ≤ 64 characters. Case-insensitive substring of the product id, SKU, model name or genome fingerprint (`%` and `_` match literally). |
+| `productionBatch` | ≤ 100 characters, trimmed; empty or blank counts as absent. The production batch recorded at issuance, matched exactly (case-sensitive, not a prefix). Indexed (migration `0007_print_batch_indexes`). |
 | `page`, `pageSize` | §6 |
 
 Item:
@@ -1572,7 +1575,9 @@ OPERATOR. One PDF with many labelled codes, crop marks, a 10 mm scale bar and a 
 
 **200** — `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="ORBES-sheet-<YYYY-MM-DD>-<count>-<theme>-<widthMm>mm[-K].pdf"`, `Cache-Control: no-store`.
 
-In the console, the codes list (CODES) lets an OPERATOR select ACTIVE codes and download them as one sheet.
+**Layout.** Codes are placed in the order of `codeIds` (duplicates removed, first occurrence kept), row by row from the top-left corner of each page, in a grid centred horizontally inside 12 mm margins with 8 mm gutters, above a 10 mm footer. The grid comes from `planPrintSheet` (`genome/src/server/render/artifact.ts`) and the core's `layoutSheet` (`genome/src/core/render/sheet-layout.ts`); the manifest (§15.8) and the console's preview use the same functions, so the three always agree. With the console's default (30 mm, labelled), an A4 page holds 30 codes (5 × 6): a batch of 120 prints on 4 pages.
+
+In the console, the codes list (CODES) lets an OPERATOR select ACTIVE codes, page after page (the selection is kept while the filters stay the same), or every printable code of the filters at once (*Select the 120 codes of this batch*, §15.9). Before rendering it shows the layout (*30 per A4 · 4 pages*). Over 200 codes, it requests the sheet in parts of 200 and saves each as `…-part-<n>-of-<total>.pdf`; *Download manifest* saves the matching CSV parts. Printing a batch from its filtered list takes two clicks: select the batch, download the sheet.
 
 Errors: `400 VALIDATION_FAILED` (including "The artifact is too large for this page size."), `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE`, `409 PRODUCT_NOT_PRINTABLE`, `409 CODE_INTEGRITY`.
 
@@ -1586,7 +1591,22 @@ Errors: `400 VALIDATION_FAILED`, `404 CODE_NOT_FOUND`, `409 CODE_ALREADY_REVOKED
 
 ### 15.5 `GET /api/admin/codes`
 
-AUDITOR. Paginated list of every code, newest first; read view (no `data`).
+AUDITOR. Paginated list of codes, newest first (`createdAt`); read view (no `data`). Filters (all optional, combined with AND; an empty or blank value counts as absent):
+
+| Query | Rules |
+|---|---|
+| `productionBatch` | ≤ 100 characters, trimmed. The product's production batch, matched exactly. |
+| `modelId` | uuid. The product's model. |
+| `status` | `ACTIVE`, `SUPERSEDED` or `REVOKED` (the code's status). |
+| `issuedFrom` | `YYYY-MM-DD`. Codes issued on or after this UTC day (`createdAt`; the day is the item's `issuedAt`). |
+| `issuedTo` | `YYYY-MM-DD`. Codes issued on or before this UTC day (the whole day is included). Not before `issuedFrom`. |
+| `page`, `pageSize` | §6 |
+
+The batch and the issue days are indexed (migration `0007_print_batch_indexes`). Errors: `400 VALIDATION_FAILED` (a malformed value, `issuedFrom` after `issuedTo`).
+
+```
+GET /api/admin/codes?productionBatch=B-2026-09-A&status=ACTIVE&issuedFrom=2026-09-01&issuedTo=2026-09-30
+```
 
 ### 15.6 `GET /api/admin/genomes`
 
@@ -1632,6 +1652,49 @@ Audited: `certificate.render` with `{ productIds, count, format, layout, layoutS
 In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
 
 Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`, `429 RATE_LIMITED` (a request of the same admin still in progress, or the `admin` group's limit).
+
+### 15.8 `POST /api/admin/codes/print-sheet/manifest` (extension of the contract)
+
+OPERATOR. The **manifest** of a print sheet: a CSV that tells the workshop which label goes on which piece, so that the label of a ring in size 52 never goes on a size 54. Same body as §15.3 (`codeIds` and the sheet options; the options that change the layout are `widthMm`, `label` and `page`), the same checks in the same order (every code exists, is ACTIVE, belongs to a printable product and passes the integrity check, with the same errors), and the same plan as the PDF (`planPrintSheet`): its rows are in the exact order in which the PDF made from the same request draws the codes. Nothing is rendered. Audited (`code.sheet_manifest`, with the same details as `code.render_sheet`: `codeIds`, `productIds` and the options). No scannable data and no claim code: the manifest is safe to send to a print shop.
+
+**200**, `Cache-Control: no-store`, `Content-Type: text/csv; charset=utf-8; header=present`, `Content-Disposition: attachment; filename="ORBES-sheet-<YYYY-MM-DD>-<count>-<theme>-<widthMm>mm[-K]-manifest.csv"` (the sheet's name with `-manifest.csv`).
+
+The CSV is written as the certificate CSV (§15.7: RFC 4180, UTF-8 without BOM, CRLF, a header row, every field quoted, formulas neutralised with a leading apostrophe). Columns:
+
+| Column | Value |
+|---|---|
+| `page` | Page of the PDF, from 1. |
+| `row` | Row on that page, from 1 (top). |
+| `column` | Column on that page, from 1 (left). |
+| `productId` | Canonical product id, also printed on the label. |
+| `sku` | The product's SKU. |
+| `variant` | The product's variant (size, colour…), empty when none. |
+| `material` | The product's material. |
+| `codeId` | The code's id. |
+
+Example (30 mm, labelled, A4: 5 columns × 6 rows):
+
+```
+"page","row","column","productId","sku","variant","material","codeId"
+"1","1","1","O26-J-00184","MNL-RG-SIZE-52","Size 52","925 STERLING SILVER","5dbf5b2c-2bab-4fd1-8177-a07e2eb37f4c"
+"1","1","2","O26-J-00185","MNL-RG-SIZE-54","Size 54","925 STERLING SILVER","8a0e6f3d-41c2-4f7e-9d55-0c3b2a7e1f90"
+```
+
+Errors: as §15.3.
+
+### 15.9 `GET /api/admin/codes/ids` (extension of the contract)
+
+AUDITOR (a read: the ids are those of the codes list). The ids of the **printable** codes among those the filters of §15.5 select (`productionBatch`, `modelId`, `status`, `issuedFrom`, `issuedTo`; `page` and `pageSize` do not apply): ACTIVE codes of products that may still be printed (not RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN), the ones a print sheet accepts. In identity order (year, category, serial), at most **1 000**. The console uses it for *Select the N codes of this batch*.
+
+**200**
+
+```json
+{ "ids": ["5dbf5b2c-2bab-4fd1-8177-a07e2eb37f4c", "…"], "total": 120, "truncated": false }
+```
+
+`total` counts every printable code of the filters; `truncated` is `true` when it exceeds 1 000, in which case `ids` holds the first 1 000 (narrow the filters, by issue days for instance, to reach the others). A `status` other than `ACTIVE` gives an empty list. Not audited (a read).
+
+Errors: `400 VALIDATION_FAILED` (as §15.5).
 
 ---
 

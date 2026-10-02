@@ -23,6 +23,8 @@ import type {
   AuditEntry,
   Category,
   ChainVerification,
+  CodeFilters,
+  CodeIds,
   CodeJson,
   Collection,
   DashboardData,
@@ -326,7 +328,7 @@ export class AdminApi {
 
   // ── Products ─────────────────────────────────────────────────────────────
 
-  products(q: { status?: string; category?: string; q?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ProductOverview>> {
+  products(q: { status?: string; category?: string; q?: string; productionBatch?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ProductOverview>> {
     return this.get('/api/admin/products', q);
   }
 
@@ -397,6 +399,12 @@ export class AdminApi {
     return toDownload(res, 'orbes-print-sheet.pdf');
   }
 
+  /** The sheet's manifest (CSV): page, row and column of each code, in the order of the PDF made from the same request. */
+  async printSheetManifest(codeIds: readonly string[], opts: PrintSheetOptions = {}): Promise<Download> {
+    const res = await this.request<Response>('POST', '/api/admin/codes/print-sheet/manifest', { raw: true, body: { codeIds: [...codeIds], ...opts } });
+    return toDownload(res, 'orbes-print-sheet-manifest.csv');
+  }
+
   /**
    * Certificate cards carrying claim codes (POST: the codes travel in the body, never in a URL).
    * The server checks each code against its product's hash and audits product ids only.
@@ -415,8 +423,13 @@ export class AdminApi {
     return this.get('/api/admin/genomes', { page, pageSize });
   }
 
-  codes(page = 1, pageSize = 50): Promise<Paged<CodeJson>> {
-    return this.get('/api/admin/codes', { page, pageSize });
+  codes(filters: CodeFilters = {}, page = 1, pageSize = 50): Promise<Paged<CodeJson>> {
+    return this.get('/api/admin/codes', { ...filters, page, pageSize });
+  }
+
+  /** Ids of the printable codes of a filter (a production batch), for a print sheet. */
+  codeIds(filters: CodeFilters): Promise<CodeIds> {
+    return this.get('/api/admin/codes/ids', { ...filters });
   }
 
   // ── Registries ───────────────────────────────────────────────────────────

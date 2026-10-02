@@ -1,19 +1,42 @@
 /**
- * Codes and genomes: artifact downloads, revocation, registry lists.
+ * Codes and genomes: artifact downloads, print sheets and their manifests,
+ * revocation, registry lists.
  *
  * Artifact downloads are GETs but produce printable, verifying codes, so
  * they need OPERATOR (not AUDITOR) and every download is audited by the
  * issuance service. Artifacts are sent as attachments with `no-store`, and
  * SVG additionally under a sandboxing CSP so it can never run as a document
  * on this origin.
+ *
+ * The codes registry filters by production batch, model, code status and
+ * issue day (codeListQuery); /api/admin/codes/ids answers the ids of the
+ * printable codes among them, so the console can print a whole batch.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { artifactParams, artifactQuery, codeParams, pageOf, parse, printSheetBody, requiredReasonBody } from '../../http/schemas.js';
+import { artifactParams, artifactQuery, codeListQuery, codeParams, pageOf, parse, printSheetBody, requiredReasonBody, type CodeListQuery } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
-import { toCodeRecord, toGenomeRecord } from '../../services/issuance.js';
+import type { Db } from '../../db/connection.js';
+import { NOT_PRINTABLE, toCodeRecord, toGenomeRecord } from '../../services/issuance.js';
 import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
 import { codeJson, genomeJson } from './serialize.js';
+
+/** At most this many ids per GET /api/admin/codes/ids (five print sheets of 200). */
+export const MAX_CODE_IDS = 1000;
+
+const DAY_MS = 86_400_000;
+
+/** The codes (joined to their products) that match the registry filters. */
+export function filteredCodes(db: Db, f: CodeListQuery) {
+  let q = db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id');
+  if (f.productionBatch !== undefined) q = q.where('p.production_batch', '=', f.productionBatch);
+  if (f.modelId !== undefined) q = q.where('p.model_id', '=', f.modelId);
+  if (f.status !== undefined) q = q.where('c.status', '=', f.status);
+  // Issue days are UTC days (as `issuedAt`); both ends are included.
+  if (f.issuedFrom !== undefined) q = q.where('c.created_at', '>=', new Date(`${f.issuedFrom}T00:00:00.000Z`));
+  if (f.issuedTo !== undefined) q = q.where('c.created_at', '<', new Date(Date.parse(`${f.issuedTo}T00:00:00.000Z`) + DAY_MS));
+  return q;
+}
 
 const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
 
@@ -62,6 +85,16 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     return reply.send(typeof body === 'string' ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength));
   });
 
+  // The sheet's manifest (CSV): which label is where, in the PDF's order. Same body and checks as the sheet; audited.
+  app.post('/api/admin/codes/print-sheet/manifest', async (request, reply) => {
+    const { codeIds, ...options } = parse(printSheetBody, request.body);
+    const manifest = await issuance.printSheetManifest(codeIds, options, adminActor(request));
+    reply.header('content-type', manifest.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(manifest.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    return reply.send(manifest.body);
+  });
+
   app.post('/api/admin/codes/:codeId/revoke', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { codeId } = parse(codeParams, request.params);
     const b = parse(requiredReasonBody, request.body);
@@ -69,8 +102,9 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   });
 
   app.get('/api/admin/codes', async (request) => {
+    const f = parse(codeListQuery, request.query);
     const page = pageOf(request.query);
-    const base = db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id');
+    const base = filteredCodes(db, f);
     const total = await base.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await base
       .selectAll('c')
@@ -85,6 +119,18 @@ export const adminCodeRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
       Number(total.n),
       page,
     );
+  });
+
+  // Every printable code of a filter (a production batch, typically), for a print sheet: ACTIVE codes of
+  // products that may still be printed, in identity order (year, category, serial), at most MAX_CODE_IDS.
+  app.get('/api/admin/codes/ids', async (request) => {
+    const f = parse(codeListQuery, request.query);
+    const base = filteredCodes(db, f)
+      .where('c.status', '=', 'ACTIVE')
+      .where('p.status', 'not in', [...NOT_PRINTABLE]);
+    const total = Number((await base.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n);
+    const rows = await base.select('c.id').orderBy('p.year').orderBy('p.category_id').orderBy('p.serial').limit(MAX_CODE_IDS).execute();
+    return { ids: rows.map((r) => r.id), total, truncated: total > rows.length };
   });
 
   app.get('/api/admin/genomes', async (request) => {

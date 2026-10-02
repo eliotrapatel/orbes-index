@@ -517,6 +517,104 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await shot(page, 'audit');
   }, STEP_TIMEOUT);
 
+  it('prints a production batch of 120 codes in two clicks: the layout before, the manifest after', async () => {
+    const batch = 'B-2026-10-120';
+    const pieces: IssueResult[] = [];
+    for (let i = 0; i < 120; i++) {
+      pieces.push(
+        await ctx.services.issuance.issueProduct(
+          { categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: `Size ${44 + (i % 16)}`, productionBatch: batch, productionDate: '2026-10-01' },
+          SYSTEM_ACTOR,
+        ),
+      );
+    }
+    const pick = page.locator('[data-testid=sheet-select-batch]');
+    const count = page.locator('[data-testid=sheet-count]');
+    const preview = page.locator('[data-testid=sheet-preview]');
+
+    // From the batch's products to its codes.
+    await go(page, `#/products?productionBatch=${batch}`, 'Products');
+    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    await page.click('a.cbtn:has-text("Print this batch")');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Codes');
+    expect(await page.inputValue('input[name=productionBatch]')).toBe(batch);
+    await expect.poll(() => pick.textContent()).toBe('Select the 120 codes of this batch');
+    expect(await count.textContent()).toBe('No code selected');
+    expect(await preview.textContent()).toBe('30 per A4');
+
+    // Click 1: the whole batch, across the list's three pages; the layout shows before anything renders.
+    await pick.click();
+    await expect.poll(() => count.textContent()).toBe('120 codes selected');
+    expect(await preview.textContent()).toBe('30 per A4 · 4 pages');
+    expect(await page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
+    // Counts and the preview read in Helvetica Neue, the button's count too (BRAND §3.1).
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.click('.pager button:has-text("Next")');
+    await expect.poll(() => page.locator('.pager__page').textContent()).toBe('2 / 3');
+    await expect.poll(() => page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
+    expect(await count.textContent()).toBe('120 codes selected');
+
+    // Click 2: one PDF of 120 labelled codes on 4 A4 pages.
+    const [sheet] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-sheet]')]);
+    expect(sheet.suggestedFilename()).toMatch(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-120-classic-30mm\.pdf$/);
+    const pdf = readFileSync((await sheet.path())!).toString('latin1');
+    expect(pdf.startsWith('%PDF-')).toBe(true);
+    expect(pdf).toMatch(/\/Count 4\b/);
+
+    // The manifest: which label is where, in serial order, page by page.
+    const [manifest] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-manifest]')]);
+    expect(manifest.suggestedFilename()).toBe(sheet.suggestedFilename().replace(/\.pdf$/, '-manifest.csv'));
+    const rows = readFileSync((await manifest.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(rows).toHaveLength(121);
+    expect(rows[0]).toBe('"page","row","column","productId","sku","variant","material","codeId"');
+    expect(rows[1]).toBe(`"1","1","1","${pieces[0].product.productId}","${pieces[0].product.sku}","Size 44","925 STERLING SILVER","${pieces[0].code.id}"`);
+    expect(rows[120]).toMatch(new RegExp(`^"4","6","5","${pieces[119].product.productId}",`));
+
+    // Other filters, from the filter bar: the batch's selection is dropped.
+    await page.fill('input[name=productionBatch]', 'B-2026-09-A');
+    await page.fill('input[name=issuedFrom]', '2026-01-01');
+    expect(await page.getAttribute('input[name=issuedTo]', 'min')).toBe('2026-01-01');
+    await page.click('[data-testid=codes-apply]');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/codes?productionBatch=B-2026-09-A&issuedFrom=2026-01-01');
+    await expect.poll(() => count.textContent()).toBe('No code selected');
+    await expect.poll(() => pick.textContent()).toMatch(/^Select the \d+ codes of this batch$/);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('prints a selection over 200 codes as PDFs of 200, named by part', async () => {
+    const batch = 'B-2026-10-201';
+    for (let i = 0; i < 201; i++) {
+      await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, productionBatch: batch }, SYSTEM_ACTOR);
+    }
+    const count = page.locator('[data-testid=sheet-count]');
+    await go(page, `#/codes?productionBatch=${batch}`, 'Codes');
+    await page.click('[data-testid=sheet-select-batch]');
+    await expect.poll(() => count.textContent()).toBe('201 codes selected');
+    // 200 codes on 7 pages of 30, then 1 on a last page.
+    expect(await page.locator('[data-testid=sheet-preview]').textContent()).toBe('30 per A4 · 8 pages · 2 PDFs of up to 200 codes');
+    const files: string[] = [];
+    const saved = new Promise<void>((resolve) => {
+      page.on('download', async (d) => {
+        files.push(d.suggestedFilename());
+        if (files.length === 2) resolve();
+      });
+    });
+    await page.click('[data-testid=download-sheet]');
+    await saved;
+    expect(files).toEqual([
+      expect.stringMatching(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-200-classic-30mm-part-1-of-2\.pdf$/),
+      expect.stringMatching(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-1-classic-30mm-part-2-of-2\.pdf$/),
+    ]);
+    page.removeAllListeners('download');
+    await expect.poll(() => page.locator('[data-testid=download-sheet]').textContent()).toBe('Download print sheet');
+
+    // A selection the next test expects the sign-out to forget.
+    await go(page, '#/codes', 'Codes');
+    await page.locator('[data-testid=sheet-select]').first().check();
+    await expect.poll(() => count.textContent()).toBe('1 code selected');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
   it('signs out', async () => {
     await page.click('[data-testid=sign-out]');
     await page.waitForSelector('[data-testid=login-form]');
@@ -529,6 +627,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
     await go(page, `#/products/${issuedProductId}`, issuedProductId);
     expect(await page.locator('#fresh-code').count()).toBe(0);
+    // So is a print-sheet selection.
+    await go(page, '#/codes', 'Codes');
+    expect(await page.locator('[data-testid=sheet-count]').textContent()).toBe('No code selected');
     await page.click('[data-testid=sign-out]');
     await page.waitForSelector('[data-testid=login-form]');
     expect(await cspViolations(page)).toEqual([]);

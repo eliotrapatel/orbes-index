@@ -112,6 +112,18 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
       const r = await op.get(url);
       expect(r.statusCode, `${url} ${r.body.slice(0, 200)}`).toBe(200);
     }
+    // ── Printing a production batch on pg: filters, ids, manifest ──
+    const batched = safeJson(await op.post('/api/admin/products', { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', productionBatch: 'B-PG-1', variant: 'Size 52' })) as any;
+    const day = batched.code.issuedAt;
+    const filtered = safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&modelId=${model.id}&status=ACTIVE&issuedFrom=${day}&issuedTo=${day}`)) as any;
+    expect(filtered.items.map((c: any) => c.id)).toEqual([batched.code.id]);
+    expect((safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&issuedTo=2000-01-01`)) as any).total).toBe(0);
+    expect(safeJson(await op.get('/api/admin/codes/ids?productionBatch=B-PG-1'))).toEqual({ ids: [batched.code.id], total: 1, truncated: false });
+    expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-1')) as any).total).toBe(1);
+    const manifest = await op.post('/api/admin/codes/print-sheet/manifest', { codeIds: [batched.code.id] });
+    expect(manifest.statusCode, manifest.body).toBe(200);
+    expect(manifest.body.split('\r\n')[1]).toBe(`"1","1","1","${batched.product.productId}","${batched.product.sku}","Size 52","925 STERLING SILVER","${batched.code.id}"`);
+
     const detail = safeJson(await op.get(`/api/admin/products/${p.product.productId}`)) as any;
     expect(detail.codes[0].verification.valid).toBe(true);
     expect(detail.scans.count).toBeGreaterThanOrEqual(26);

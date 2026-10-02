@@ -1,16 +1,19 @@
 /**
  * Code artifacts: options, defaults and limits, and the one entry point that
  * turns framed code data + genome into SVG, PNG or PDF (contract §2.3
- * renderCode). Also multi-up print sheets for batch production.
+ * renderCode). Also multi-up print sheets for batch production, and their
+ * manifest (which label goes on which piece), both from one plan.
  *
  * All formats come from one CODE-01 model and one scene, so they share their
  * geometry exactly; only the back end differs.
  */
 import { encodeOrbesCode } from '../../core/code/encoder.js';
 import { CODE01_SIZE } from '../../core/code/profile.js';
+import { csvDocument, CSV_CONTENT_TYPE } from './csv.js';
 import { renderPdf, sceneToPdf, type PdfPage } from './pdf.js';
 import { pixelsFor, svgToPng } from './png.js';
 import {
+  artifactCellMm,
   buildArtifactScene,
   cropMarks,
   layoutSheet,
@@ -18,6 +21,7 @@ import {
   sceneToSvg,
   sheetFooter,
   SHEET_PAGES,
+  type SheetLayout,
   type SheetPageSize,
 } from './print-sheet.js';
 import { ARTIFACT_THEME_NAMES, normalizeArtifactTheme, type ArtifactScene, type ArtifactTheme, type ArtifactThemeInput } from './scene.js';
@@ -214,17 +218,42 @@ export interface PrintSheetOptions {
 // Bounds one request: ~55 KB of PDF and ~30 ms of rendering per code.
 export const MAX_SHEET_ITEMS = 200;
 
-/** Multi-up PDF of labeled artifacts with crop marks and a 10 mm scale bar. */
-export async function renderPrintSheet(
-  items: readonly PrintSheetItem[],
-  options: PrintSheetOptions,
-  meta: { createdAt: Date; caption?: string },
-): Promise<RenderedArtifact> {
-  if (items.length < 1 || items.length > MAX_SHEET_ITEMS) {
+/** One code's place on a print sheet. Page, row and column count from 1, as the workshop reads them. */
+export interface PrintSheetSlot {
+  /** Index into the item list. */
+  index: number;
+  page: number;
+  row: number;
+  column: number;
+  /** Top-left corner of the cell on its page, in millimetres. */
+  xMm: number;
+  yMm: number;
+}
+
+/** Where every code of a print sheet goes, before anything is drawn. */
+export interface PrintSheetPlan {
+  options: ResolvedArtifactOptions;
+  page: SheetPageSize;
+  /** Size of one cell (code + label), mm. */
+  cellWmm: number;
+  cellHmm: number;
+  layout: SheetLayout;
+  /** One slot per item, in item order (the PDF's drawing order). */
+  slots: PrintSheetSlot[];
+}
+
+/**
+ * Validate a print sheet's options and lay out `count` codes. The PDF
+ * (renderPrintSheet) and its manifest (printSheetManifestCsv) are both drawn
+ * from this one plan, so the manifest's page, row and column are where the
+ * PDF puts each code. Throws ArtifactOptionsError.
+ */
+export function planPrintSheet(count: number, options: PrintSheetOptions): PrintSheetPlan {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SHEET_ITEMS) {
     throw new ArtifactOptionsError(`A print sheet holds 1 to ${MAX_SHEET_ITEMS} codes.`);
   }
   const page = options.page ?? 'A4';
-  if (!(page in SHEET_PAGES)) throw new ArtifactOptionsError('Page must be A4, A3 or LETTER.');
+  if (!Object.hasOwn(SHEET_PAGES, page)) throw new ArtifactOptionsError('Page must be A4, A3 or LETTER.');
   const o = resolveArtifactOptions('pdf', {
     widthMm: options.widthMm ?? 25,
     theme: options.theme ?? 'classic',
@@ -232,6 +261,33 @@ export async function renderPrintSheet(
     label: options.label ?? true,
     kOnly: options.kOnly ?? false,
   });
+  const cell = artifactCellMm(o.widthMm, o.label);
+  let layout: SheetLayout;
+  try {
+    layout = layoutSheet(cell.widthMm, cell.heightMm, count, { page });
+  } catch {
+    throw new ArtifactOptionsError('The artifact is too large for this page size.');
+  }
+  const slots = layout.pages.flatMap((placements, p) =>
+    placements.map((pl) => ({ index: pl.index, page: p + 1, row: pl.row + 1, column: pl.column + 1, xMm: pl.xMm, yMm: pl.yMm })),
+  );
+  return { options: o, page, cellWmm: cell.widthMm, cellHmm: cell.heightMm, layout, slots };
+}
+
+/** `ORBES-sheet-<day>-<count>-<theme>-<width>mm[-K]`, the base name of a sheet and of its manifest. */
+function sheetBasename(plan: PrintSheetPlan, createdAt: Date): string {
+  const o = plan.options;
+  return `ORBES-sheet-${createdAt.toISOString().slice(0, 10)}-${plan.slots.length}-${o.theme}-${o.widthMm}mm${o.kOnly ? '-K' : ''}`;
+}
+
+/** Multi-up PDF of labeled artifacts with crop marks and a 10 mm scale bar. */
+export async function renderPrintSheet(
+  items: readonly PrintSheetItem[],
+  options: PrintSheetOptions,
+  meta: { createdAt: Date; caption?: string },
+): Promise<RenderedArtifact> {
+  const plan = planPrintSheet(items.length, options);
+  const o = plan.options;
   const scenes: ArtifactScene[] = items.map((it) =>
     buildArtifactScene(encodeOrbesCode({ data: it.data, genomeGlyphs: it.genomeGlyphs }, { decor: o.decor }), {
       widthMm: o.widthMm,
@@ -240,14 +296,7 @@ export async function renderPrintSheet(
       productId: it.productId,
     }),
   );
-  const cellW = scenes[0].widthMm;
-  const cellH = scenes[0].heightMm;
-  let layout;
-  try {
-    layout = layoutSheet(cellW, cellH, scenes.length, { page });
-  } catch {
-    throw new ArtifactOptionsError('The artifact is too large for this page size.');
-  }
+  const { layout, cellWmm: cellW, cellHmm: cellH } = plan;
   const day = meta.createdAt.toISOString().slice(0, 10);
   const caption = meta.caption ?? `ORBES PRINT SHEET · ${day} · ${items.length} CODES`;
   const pages: PdfPage[] = layout.pages.map((placements, pageIndex) => ({
@@ -262,6 +311,38 @@ export async function renderPrintSheet(
     creationDate: meta.createdAt,
     ...(o.kOnly ? { colorMode: 'k-only' as const } : {}),
   });
-  const filename = `ORBES-sheet-${day}-${items.length}-${o.theme}-${o.widthMm}mm${o.kOnly ? '-K' : ''}.pdf`;
-  return { contentType: CONTENT_TYPES.pdf, body, filename };
+  return { contentType: CONTENT_TYPES.pdf, body, filename: `${sheetBasename(plan, meta.createdAt)}.pdf` };
+}
+
+// ── Print-sheet manifest ───────────────────────────────────────────────────
+
+/** What the workshop needs to put each label on the right piece. */
+export interface PrintSheetManifestItem {
+  productId: string;
+  sku: string;
+  variant: string | null;
+  material: string;
+  codeId: string;
+}
+
+export const PRINT_SHEET_MANIFEST_COLUMNS = ['page', 'row', 'column', 'productId', 'sku', 'variant', 'material', 'codeId'] as const;
+
+/**
+ * The manifest of a print sheet: one CSV row per code, in the exact order of
+ * the PDF made from the same items and options (same plan), saying on which
+ * page, row and column (from 1, top-left first) each piece's label is. So a
+ * ring in size 52 never gets the label of a size 54. RFC 4180 as the
+ * certificate CSV, formulas neutralised.
+ */
+export function printSheetManifestCsv(items: readonly PrintSheetManifestItem[], options: PrintSheetOptions, meta: { createdAt: Date }): RenderedArtifact {
+  const plan = planPrintSheet(items.length, options);
+  const rows = plan.slots.map((slot) => {
+    const it = items[slot.index];
+    return [String(slot.page), String(slot.row), String(slot.column), it.productId, it.sku, it.variant ?? '', it.material, it.codeId];
+  });
+  return {
+    contentType: CSV_CONTENT_TYPE,
+    body: csvDocument([[...PRINT_SHEET_MANIFEST_COLUMNS], ...rows]),
+    filename: `${sheetBasename(plan, meta.createdAt)}-manifest.csv`,
+  };
 }

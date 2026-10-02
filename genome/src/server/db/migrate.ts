@@ -14,12 +14,14 @@ import { Migrator, type Migration, type MigrationProvider, type MigrationResultS
 import * as m0001 from './migrations/0001_initial.js';
 import * as m0002 from './migrations/0002_platform_guards.js';
 import * as m0003 from './migrations/0003_authentication_events_default.js';
+import * as m0007 from './migrations/0007_print_batch_indexes.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0001_initial': m0001,
   '0002_platform_guards': m0002,
   '0003_authentication_events_default': m0003,
+  '0007_print_batch_indexes': m0007,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

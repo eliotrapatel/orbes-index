@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
+import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 
 const EXPECTED_TABLES = [
   'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
@@ -75,6 +76,22 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX .* ON public\.ownership .*\(product_id\) WHERE \(ended_at IS NULL\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.ownership_transfers .*\(product_id\) WHERE \(status = 'PENDING'::text\)/)).toBe(true);
     expect(has(/UNIQUE INDEX .* ON public\.anomalies .*\(product_id, type\) WHERE \(status = ANY/)).toBe(true);
+    // 0007: printing by production batch, codes by issue day.
+    expect(has(/INDEX products_production_batch_idx ON public\.products USING btree \(production_batch\)$/)).toBe(true);
+    expect(has(/INDEX codes_created_at_idx ON public\.codes USING btree \(created_at\)$/)).toBe(true);
+  });
+
+  it('0007: adds the two print-batch indexes, and its down step drops exactly them', async () => {
+    const indexes = async () =>
+      (await sql<{ name: string; def: string }>`SELECT indexname AS name, indexdef AS def FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname`.execute(t.db)).rows;
+    const added = ['codes_created_at_idx', 'products_production_batch_idx'];
+    const before = await indexes();
+    expect(before.map((i) => i.name)).toEqual(expect.arrayContaining(added));
+    await m0007.down(t.db);
+    expect((await indexes()).map((i) => i.name)).toEqual(before.map((i) => i.name).filter((n) => !added.includes(n)));
+    await m0007.up(t.db);
+    expect(await indexes()).toEqual(before);
+    expect(MIGRATIONS['0007_print_batch_indexes']).toBe(m0007);
   });
 
   it('roll back cleanly and re-apply', async () => {

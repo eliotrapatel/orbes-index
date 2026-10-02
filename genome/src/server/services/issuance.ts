@@ -44,6 +44,7 @@ import { actorLabel, isKeyTrustedAt, type ActiveSigner, type KeyService } from '
 import {
   ArtifactOptionsError,
   MAX_SHEET_ITEMS,
+  printSheetManifestCsv,
   renderArtifact,
   renderPrintSheet,
   type ArtifactFormat,
@@ -434,15 +435,8 @@ export class IssuanceService {
 
   /** Multi-up PDF print sheet of ACTIVE codes (labeled, with crop marks). With `actor`, audited. */
   async renderPrintSheet(codeIds: readonly string[], opts: PrintSheetOptions = {}, actor?: Actor): Promise<RenderedArtifact> {
-    if (!Array.isArray(codeIds) || codeIds.length < 1 || codeIds.length > MAX_SHEET_ITEMS) {
-      throw validationError(`Select 1 to ${MAX_SHEET_ITEMS} codes.`);
-    }
-    const ids = [...new Set(codeIds)];
-    const items = [];
-    for (const id of ids) {
-      const c = await this.loadVerifiedCode(id);
-      items.push({ data: c.data, genomeGlyphs: c.glyphs, productId: c.productId });
-    }
+    const { ids, codes } = await this.loadSheetCodes(codeIds);
+    const items = codes.map((c) => ({ data: c.data, genomeGlyphs: c.glyphs, productId: c.productId }));
     let sheet: RenderedArtifact;
     try {
       sheet = await renderPrintSheet(items, opts, { createdAt: this.clock() });
@@ -460,6 +454,45 @@ export class IssuanceService {
       });
     }
     return sheet;
+  }
+
+  /**
+   * The manifest of the print sheet the same codes and options make (CSV:
+   * page, row, column, productId, sku, variant, material, codeId), in the
+   * PDF's order: the same checks as the sheet (every code ACTIVE, printable
+   * and intact) and the same plan (planPrintSheet). With `actor`, audited.
+   */
+  async printSheetManifest(codeIds: readonly string[], opts: PrintSheetOptions = {}, actor?: Actor): Promise<RenderedArtifact> {
+    const { ids, codes } = await this.loadSheetCodes(codeIds);
+    const items = codes.map((c, i) => ({ productId: c.productId, sku: c.sku, variant: c.variant, material: c.material, codeId: ids[i] }));
+    let manifest: RenderedArtifact;
+    try {
+      manifest = printSheetManifestCsv(items, opts, { createdAt: this.clock() });
+    } catch (e) {
+      if (e instanceof ArtifactOptionsError) throw validationError(e.message);
+      throw e;
+    }
+    if (actor) {
+      await this.audit.record({
+        actor,
+        action: 'code.sheet_manifest',
+        targetType: 'code',
+        targetId: null,
+        details: { codeIds: ids, productIds: items.map((i) => i.productId), ...opts },
+      });
+    }
+    return manifest;
+  }
+
+  /** The codes of a print sheet, duplicates removed (first occurrence kept), each checked as for a download. */
+  private async loadSheetCodes(codeIds: readonly string[]): Promise<{ ids: string[]; codes: Awaited<ReturnType<IssuanceService['loadVerifiedCode']>>[] }> {
+    if (!Array.isArray(codeIds) || codeIds.length < 1 || codeIds.length > MAX_SHEET_ITEMS) {
+      throw validationError(`Select 1 to ${MAX_SHEET_ITEMS} codes.`);
+    }
+    const ids = [...new Set(codeIds)];
+    const codes = [];
+    for (const id of ids) codes.push(await this.loadVerifiedCode(id));
+    return { ids, codes };
   }
 
   // ── Transactions ─────────────────────────────────────────────────────────
@@ -748,6 +781,10 @@ export class IssuanceService {
     productId: string;
     issue: number;
     createdAt: Date;
+    /** The product's descriptive fields, for a print sheet's manifest. */
+    sku: string;
+    variant: string | null;
+    material: string;
   }> {
     if (typeof codeId !== 'string' || !UUID_RE.test(codeId)) throw notFound('Code', 'CODE_NOT_FOUND');
     const row = await this.db
@@ -769,6 +806,9 @@ export class IssuanceService {
         'p.product_id as canonical_id',
         'p.packed_identity',
         'p.status as product_status',
+        'p.sku',
+        'p.variant',
+        'p.material',
         'g.genome_version',
         'g.glyphs',
         'g.product_id as genome_product',
@@ -818,6 +858,9 @@ export class IssuanceService {
       productId: row.canonical_id,
       issue: row.issue,
       createdAt: row.created_at,
+      sku: row.sku,
+      variant: row.variant,
+      material: row.material,
     };
   }
 }

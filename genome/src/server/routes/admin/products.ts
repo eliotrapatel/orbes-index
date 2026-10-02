@@ -122,6 +122,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     let q = db.selectFrom('product_overview');
     if (f.status) q = q.where('status', '=', f.status);
     if (f.category) q = q.where('category_code', '=', f.category);
+    if (f.productionBatch !== undefined) q = q.where('production_batch', '=', f.productionBatch);
     if (f.q) {
       const like = `%${escapeLike(f.q)}%`;
       q = q.where((eb) =>

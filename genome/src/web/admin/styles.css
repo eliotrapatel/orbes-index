@@ -1469,6 +1469,33 @@ a.bar__label:hover {
   margin-bottom: 48px;
 }
 
+/* Print sheet: the whole batch in one click, and the layout before rendering ("35 per A4 · 4 pages"). */
+.sheet__batch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 28px;
+}
+
+.sheet__batch-note {
+  margin-bottom: 28px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.sheet__batch .sheet__batch-note {
+  margin-bottom: 0;
+}
+
+.sheet__preview {
+  margin-right: auto;
+  font-size: var(--fs-line);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Generator ─────────────────────────────────────────────────────────── */
 
 .gen__aside {
@@ -1981,6 +2008,11 @@ a.bar__label:hover {
 
 /* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label. */
 .cfield__phrase {
+  font-family: var(--font);
+}
+
+/* So does a count inside a display-face button (SELECT THE 120 CODES OF THIS BATCH). */
+.cbtn__figure {
   font-family: var(--font);
 }
 

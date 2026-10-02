@@ -171,6 +171,34 @@ describe('AdminApi', () => {
     expect(sheet.blob.size).toBe(4);
   });
 
+  it('filters codes, lists a batch\'s ids and downloads a sheet\'s manifest (POST, CSRF, blob)', async () => {
+    const csv = new Response('"page"\r\n', {
+      status: 200,
+      headers: { 'content-type': 'text/csv; charset=utf-8; header=present', 'content-disposition': 'attachment; filename="ORBES-sheet-2026-10-02-2-classic-30mm-manifest.csv"' },
+    });
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { items: [], page: 2, pageSize: 50, total: 0 }),
+      json(200, { ids: ['c1'], total: 1, truncated: false }),
+      csv,
+      json(200, { items: [], page: 1, pageSize: 50, total: 0 }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.codes({ productionBatch: 'B 1', status: 'ACTIVE', modelId: '', issuedFrom: '2026-09-01' }, 2);
+    expect(calls[1].url).toBe('/api/admin/codes?productionBatch=B%201&status=ACTIVE&issuedFrom=2026-09-01&page=2&pageSize=50');
+    expect(await api.codeIds({ productionBatch: 'B-2026-09-A', issuedTo: '2026-09-30' })).toEqual({ ids: ['c1'], total: 1, truncated: false });
+    expect(calls[2].url).toBe('/api/admin/codes/ids?productionBatch=B-2026-09-A&issuedTo=2026-09-30');
+    const manifest = await api.printSheetManifest(['c1', 'c2'], { widthMm: 30, page: 'A4' });
+    expect(calls[3].url).toBe('/api/admin/codes/print-sheet/manifest');
+    expect(calls[3].init.method).toBe('POST');
+    expect(header(calls[3], 'x-csrf-token')).toBe('tok-1');
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ codeIds: ['c1', 'c2'], widthMm: 30, page: 'A4' });
+    expect(manifest).toMatchObject({ filename: 'ORBES-sheet-2026-10-02-2-classic-30mm-manifest.csv', contentType: 'text/csv; charset=utf-8; header=present' });
+    await api.products({ productionBatch: 'B-2026-09-A' });
+    expect(calls[4].url).toBe('/api/admin/products?productionBatch=B-2026-09-A');
+  });
+
   it('downloads certificate cards: claim codes in a POST body, never in the URL', async () => {
     const pdf = new Response(new Uint8Array([37, 80, 68, 70]), {
       status: 200,

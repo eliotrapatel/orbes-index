@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as serverSchema from '../../src/server/db/schema.js';
 import { ROLE_RANK as SERVER_ROLE_RANK } from '../../src/server/http/sessions.js';
-import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS } from '../../src/server/render/artifact.js';
+import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS, MAX_SHEET_ITEMS, planPrintSheet } from '../../src/server/render/artifact.js';
+import { SHEET_PAGES } from '../../src/server/render/print-sheet.js';
+import { MAX_CODE_IDS } from '../../src/server/routes/admin/codes.js';
 import { ARTIFACT_THEME_NAMES as SERVER_THEME_NAMES } from '../../src/server/render/scene.js';
 import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
 import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
@@ -12,9 +14,16 @@ import {
   ARTIFACT_SIZE_ADVICE,
   artifactSizeAdvice,
   buildArtifactOptions,
+  batchSelectLabel,
   buildPrintSheetOptions,
+  codeFilterKey,
+  codeFiltersFrom,
+  hasCodeFilters,
   isSheetSelectable,
+  printSheetPreview,
   PRINT_SHEET_LIMITS,
+  sheetChunks,
+  sheetPartFilename,
   type PrintSheetForm,
   buildIssueInput,
   cellPitchNote,
@@ -468,18 +477,75 @@ describe('generator view model', () => {
     expect(!ivory.ok && ivory.errors).toMatchObject({ kOnly: expect.stringMatching(/classic or inverted/) });
   });
 
-  it('builds print-sheet options for 1 to 200 selected ACTIVE codes', () => {
-    expect(PRINT_SHEET_LIMITS).toEqual({ maxCodes: 200, pages: ['A4', 'A3', 'LETTER'] });
+  it('builds print-sheet options for 1 to 1 000 selected ACTIVE codes (printed as PDFs of 200)', () => {
+    expect(PRINT_SHEET_LIMITS).toEqual({ maxCodes: 200, maxSelection: 1000, pages: ['A4', 'A3', 'LETTER'] });
+    expect(PRINT_SHEET_LIMITS.maxCodes).toBe(MAX_SHEET_ITEMS);
+    expect(PRINT_SHEET_LIMITS.maxSelection).toBe(MAX_CODE_IDS);
+    expect([...PRINT_SHEET_LIMITS.pages]).toEqual(Object.keys(SHEET_PAGES));
     const f: PrintSheetForm = { widthMm: '', theme: 'classic', label: true, decor: true, dpi: '', testPrint: false, kOnly: false, page: 'A4' };
     expect(buildPrintSheetOptions(f, 2)).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: true, decor: true, page: 'A4' } });
     expect(buildPrintSheetOptions({ ...f, kOnly: true, page: 'A3' }, 2)).toEqual({ ok: true, value: { widthMm: 30, theme: 'classic', label: true, decor: true, page: 'A3', kOnly: true } });
     const none = buildPrintSheetOptions(f, 0);
-    expect(!none.ok && none.errors).toMatchObject({ codes: expect.stringMatching(/Select/) });
-    expect(buildPrintSheetOptions(f, 201).ok).toBe(false);
+    expect(!none.ok && none.errors).toMatchObject({ codes: 'Select 1 to 1\u2009000 active codes.' });
+    expect(buildPrintSheetOptions(f, 201).ok).toBe(true);
+    expect(buildPrintSheetOptions(f, 1000).ok).toBe(true);
+    expect(buildPrintSheetOptions(f, 1001).ok).toBe(false);
     expect(buildPrintSheetOptions({ ...f, page: 'B5' }, 1).ok).toBe(false);
     expect(buildPrintSheetOptions({ ...f, widthMm: '12' }, 1).ok).toBe(false); // test-print rule applies to sheets too
     expect(isSheetSelectable({ status: 'ACTIVE' })).toBe(true);
     for (const status of ['SUPERSEDED', 'REVOKED'] as const) expect(isSheetSelectable({ status })).toBe(false);
+  });
+
+  it('previews the layout before rendering ("35 per A4 · 4 pages") with the grid the server prints', () => {
+    const f: PrintSheetForm = { widthMm: '25', theme: 'classic', label: true, decor: true, dpi: '', testPrint: false, kOnly: false, page: 'A4' };
+    // 25 mm labelled: 5 columns × 7 rows on A4.
+    expect(printSheetPreview(f, 0)).toEqual({ ok: true, perPage: 35, columns: 5, rows: 7, pages: 0, files: 0, text: '35 per A4' });
+    expect(printSheetPreview(f, 1).text).toBe('35 per A4 · 1 page');
+    expect(printSheetPreview(f, 120)).toMatchObject({ perPage: 35, pages: 4, files: 1, text: '35 per A4 · 4 pages' });
+    // The console's default, 30 mm: 30 per A4, so a batch of 120 is four full pages.
+    expect(printSheetPreview({ ...f, widthMm: '' }, 120).text).toBe('30 per A4 · 4 pages');
+    expect(printSheetPreview({ ...f, widthMm: '30', label: false }, 10).text).toBe('35 per A4 · 1 page');
+    expect(printSheetPreview({ ...f, widthMm: '30', page: 'A3' }, 120).text).toBe('63 per A3 · 2 pages');
+    // Over 200 codes: PDFs of 200, pages summed (200 = 6 pages of 35, then 1 for the last 10).
+    expect(printSheetPreview(f, 210)).toMatchObject({ pages: 7, files: 2, text: '35 per A4 · 7 pages · 2 PDFs of up to 200 codes' });
+    expect(printSheetPreview(f, 1000)).toMatchObject({ pages: 30, files: 5 });
+    // Nothing to show for an unusable width; a refusal when the code does not fit the page.
+    expect(printSheetPreview({ ...f, widthMm: 'abc' }, 3)).toEqual({ ok: false, text: '' });
+    expect(printSheetPreview({ ...f, widthMm: '5' }, 3)).toEqual({ ok: false, text: '' });
+    expect(printSheetPreview({ ...f, page: 'B5' }, 3)).toEqual({ ok: false, text: '' });
+    expect(printSheetPreview({ ...f, widthMm: '250' }, 3)).toEqual({ ok: false, text: 'The code does not fit on this page size.' });
+    // Exactly what the server lays out for the same options.
+    for (const [widthMm, label, page, count] of [['25', true, 'A4', 120], ['30', false, 'LETTER', 77], ['42.25', true, 'A3', 200], ['60', true, 'A4', 13]] as const) {
+      const preview = printSheetPreview({ widthMm, label, page }, count);
+      const plan = planPrintSheet(count, { widthMm: Number(widthMm), label, page });
+      expect(preview).toMatchObject({ ok: true, columns: plan.layout.columns, rows: plan.layout.rows, pages: plan.layout.pages.length });
+    }
+  });
+
+  it('splits a selection into PDFs of 200 and names the parts', () => {
+    const ids = Array.from({ length: 450 }, (_, i) => `c${i}`);
+    const parts = sheetChunks(ids);
+    expect(parts.map((p) => p.length)).toEqual([200, 200, 50]);
+    expect(parts.flat()).toEqual(ids);
+    expect(sheetChunks([])).toEqual([]);
+    expect(sheetChunks(ids.slice(0, 120))).toEqual([ids.slice(0, 120)]);
+    expect(sheetPartFilename('ORBES-sheet-2026-10-02-200-classic-30mm.pdf', 1, 1)).toBe('ORBES-sheet-2026-10-02-200-classic-30mm.pdf');
+    expect(sheetPartFilename('ORBES-sheet-2026-10-02-200-classic-30mm.pdf', 2, 3)).toBe('ORBES-sheet-2026-10-02-200-classic-30mm-part-2-of-3.pdf');
+    expect(sheetPartFilename('ORBES-sheet-2026-10-02-50-classic-30mm-K-manifest.csv', 3, 3)).toBe('ORBES-sheet-2026-10-02-50-classic-30mm-K-part-3-of-3-manifest.csv');
+  });
+
+  it('reads the codes filters from the route and keys a selection to them (not to the page)', () => {
+    const f = codeFiltersFrom({ productionBatch: ' B-2026-09-A ', status: 'ACTIVE', page: '3', modelId: '', issuedFrom: '2026-09-01' });
+    expect(f).toEqual({ productionBatch: 'B-2026-09-A', status: 'ACTIVE', issuedFrom: '2026-09-01' });
+    expect(codeFilterKey(f)).toBe(codeFilterKey(codeFiltersFrom({ productionBatch: 'B-2026-09-A', status: 'ACTIVE', issuedFrom: '2026-09-01', page: '1' })));
+    expect(codeFilterKey(f)).not.toBe(codeFilterKey({ ...f, status: 'REVOKED' }));
+    expect(codeFilterKey({ productionBatch: 'A', status: '' })).not.toBe(codeFilterKey({ productionBatch: '', status: 'A' }));
+    expect(hasCodeFilters({})).toBe(false);
+    expect(hasCodeFilters(codeFiltersFrom({ page: '2' }))).toBe(false);
+    expect(hasCodeFilters(f)).toBe(true);
+    expect(batchSelectLabel(f, 120)).toEqual(['Select the ', '120', ' codes of this batch']);
+    expect(batchSelectLabel({ status: 'ACTIVE' }, 1000).join('')).toBe('Select the 1\u2009000 codes that match');
+    expect(batchSelectLabel(f, 1).join('')).toBe('Select the 1 code of this batch');
   });
 
   it('only an ADMIN manages console users', () => {

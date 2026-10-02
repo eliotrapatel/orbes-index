@@ -1,13 +1,17 @@
 /**
  * Code generator view model: the issue form (raw strings from inputs → the
  * POST /api/admin/products body) and the artifact options (width, theme,
- * label, dpi, K-only black) for downloads, with the print-size advice.
+ * label, dpi, K-only black) for downloads, with the print-size advice; the
+ * print sheet (options, layout preview, PDFs of 200) and the codes
+ * registry's filters, which select a production batch to print.
  *
  * The client checks shapes and bounds to give immediate feedback; the
  * server re-validates everything with its own strict schema.
  */
+import { artifactCellMm, layoutSheet } from '../../../core/render/sheet-layout.js';
 import type { ArtifactOptions, PrintSheetOptions } from '../api.js';
-import { AUTH_POLICY_KINDS, ARTIFACT_THEMES, type ArtifactFormat, type ArtifactTheme, type CodeJson, type IssueInput, type Model } from '../types.js';
+import { formatCount } from '../format.js';
+import { AUTH_POLICY_KINDS, ARTIFACT_THEMES, type ArtifactFormat, type ArtifactTheme, type CodeFilters, type CodeJson, type IssueInput, type Model } from '../types.js';
 
 export interface IssueForm {
   categoryCode: string;
@@ -209,8 +213,11 @@ export function buildArtifactOptions(f: ArtifactForm, format: ArtifactFormat): {
 
 // ── Print sheets ───────────────────────────────────────────────────────────
 
-/** Mirrors the server's print-sheet bounds (MAX_SHEET_ITEMS, SHEET_PAGES). */
-export const PRINT_SHEET_LIMITS = Object.freeze({ maxCodes: 200, pages: ['A4', 'A3', 'LETTER'] as const });
+/**
+ * Mirrors the server's print-sheet bounds: `maxCodes` codes per PDF (MAX_SHEET_ITEMS), `maxSelection`
+ * codes in one selection (MAX_CODE_IDS, what a batch selection may hold), the pages of SHEET_PAGES.
+ */
+export const PRINT_SHEET_LIMITS = Object.freeze({ maxCodes: 200, maxSelection: 1000, pages: ['A4', 'A3', 'LETTER'] as const });
 export type SheetPage = (typeof PRINT_SHEET_LIMITS.pages)[number];
 
 export interface PrintSheetForm extends ArtifactForm {
@@ -227,7 +234,7 @@ export function buildPrintSheetOptions(
   selected: number,
 ): { ok: true; value: PrintSheetOptions } | { ok: false; errors: ArtifactErrors & { codes?: string; page?: string } } {
   const errors: ArtifactErrors & { codes?: string; page?: string } = {};
-  if (selected < 1 || selected > PRINT_SHEET_LIMITS.maxCodes) errors.codes = `Select 1 to ${PRINT_SHEET_LIMITS.maxCodes} active codes.`;
+  if (selected < 1 || selected > PRINT_SHEET_LIMITS.maxSelection) errors.codes = `Select 1 to ${formatCount(PRINT_SHEET_LIMITS.maxSelection)} active codes.`;
   const page = (f.page || 'A4') as SheetPage;
   if (!PRINT_SHEET_LIMITS.pages.includes(page)) errors.page = 'Page must be A4, A3 or LETTER.';
   const artifact = buildArtifactOptions(f, 'pdf');
@@ -235,6 +242,88 @@ export function buildPrintSheetOptions(
   if (!artifact.ok || Object.keys(errors).length > 0) return { ok: false, errors };
   const { widthMm, theme, label, decor, kOnly } = artifact.value;
   return { ok: true, value: { widthMm, theme, label, decor, page, ...(kOnly ? { kOnly } : {}) } };
+}
+
+/** A selection as the PDFs it prints as: `size` codes each (the server's 200), in selection order. */
+export function sheetChunks<T>(items: readonly T[], size: number = PRINT_SHEET_LIMITS.maxCodes): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * The file name of one part of a selection printed as several PDFs (and
+ * manifests): `…-30mm-part-2-of-3.pdf`, `…-30mm-part-2-of-3-manifest.csv`.
+ * A selection that fits one PDF keeps the server's name.
+ */
+export function sheetPartFilename(filename: string, part: number, parts: number): string {
+  if (parts <= 1) return filename;
+  const m = /(?:-manifest)?\.[A-Za-z0-9]+$/.exec(filename);
+  const at = m ? m.index : filename.length;
+  return `${filename.slice(0, at)}-part-${part}-of-${parts}${filename.slice(at)}`;
+}
+
+export type SheetPreview =
+  | { ok: true; perPage: number; columns: number; rows: number; pages: number; files: number; text: string }
+  | { ok: false; text: string };
+
+/**
+ * The layout preview shown before rendering ("35 per A4 · 4 pages"), from
+ * the core's layoutSheet and cell size: the server lays out the PDF with the
+ * same functions, so the preview is what prints. A selection over 200 codes
+ * prints as several PDFs of 200 (sheetChunks): its pages are summed.
+ */
+export function printSheetPreview(f: Pick<PrintSheetForm, 'widthMm' | 'label' | 'page'>, count: number): SheetPreview {
+  const raw = Number((f.widthMm ?? '').trim() || ARTIFACT_DEFAULTS.widthMm);
+  if (!Number.isFinite(raw) || raw < ARTIFACT_LIMITS.minWidthMm || raw > ARTIFACT_LIMITS.maxWidthMm) return { ok: false, text: '' };
+  const page = (f.page || 'A4') as SheetPage;
+  if (!PRINT_SHEET_LIMITS.pages.includes(page)) return { ok: false, text: '' };
+  const cell = artifactCellMm(Math.round(raw * 100) / 100, !!f.label);
+  let grid;
+  try {
+    grid = layoutSheet(cell.widthMm, cell.heightMm, 1, { page });
+  } catch {
+    return { ok: false, text: 'The code does not fit on this page size.' };
+  }
+  const perPage = grid.columns * grid.rows;
+  const sizes = sheetChunks(Array.from({ length: Math.max(0, count) }), PRINT_SHEET_LIMITS.maxCodes).map((c) => c.length);
+  const pages = sizes.reduce((sum, n) => sum + layoutSheet(cell.widthMm, cell.heightMm, n, { page }).pages.length, 0);
+  const files = sizes.length;
+  let text = `${formatCount(perPage)} per ${page}`;
+  if (count > 0) text += ` · ${formatCount(pages)} ${pages === 1 ? 'page' : 'pages'}`;
+  if (files > 1) text += ` · ${files} PDFs of up to ${PRINT_SHEET_LIMITS.maxCodes} codes`;
+  return { ok: true, perPage, columns: grid.columns, rows: grid.rows, pages, files, text };
+}
+
+// ── Codes registry filters ─────────────────────────────────────────────────
+
+/** The filters of the codes list, from the route query. */
+export function codeFiltersFrom(query: Readonly<Record<string, string | undefined>>): CodeFilters {
+  const out: CodeFilters = {};
+  for (const k of ['productionBatch', 'modelId', 'status', 'issuedFrom', 'issuedTo'] as const) {
+    const v = query[k]?.trim();
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
+/** One string per set of filters: a print-sheet selection belongs to the filters it was made under. */
+export function codeFilterKey(f: CodeFilters): string {
+  return JSON.stringify([f.productionBatch ?? '', f.modelId ?? '', f.status ?? '', f.issuedFrom ?? '', f.issuedTo ?? '']);
+}
+
+export function hasCodeFilters(f: CodeFilters): boolean {
+  return codeFilterKey(f) !== codeFilterKey({});
+}
+
+/**
+ * The label of the button that selects every printable code of the filters
+ * ("Select the 120 codes of this batch"), in three parts: the count in the
+ * middle reads in the reading face inside the display-face button (BRAND §3.1).
+ */
+export function batchSelectLabel(f: CodeFilters, n: number): readonly [string, string, string] {
+  const rest = `${n === 1 ? 'code' : 'codes'} ${f.productionBatch ? 'of this batch' : 'that match'}`;
+  return ['Select the ', formatCount(n), ` ${rest}`];
 }
 
 /**
