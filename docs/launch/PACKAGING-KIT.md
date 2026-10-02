@@ -27,6 +27,8 @@ The kit says only what the software does. Its sources:
 
 On the box, sleeve or pouch, or on the insert placed with the piece. The same three steps as the certificate card, in the same order.
 
+Sur la boîte, le fourreau ou la pochette, ou sur la notice glissée avec la pièce. Les trois mêmes étapes que la carte certificat, dans le même ordre.
+
 ### EN
 
 Printed, in the house voice (uppercase, tracked), word for word the card's lines:
@@ -76,7 +78,7 @@ Forme longue (encart, site, e-mail) :
 | **English words on screen.** `/verify` is in English. The French copy keeps the names the customer will read there: ORBES CODE, CLAIM CODE, SCAN ORBES CODE. | **Les mots de l'écran restent en anglais.** `/verify` est en anglais. Le texte français garde les noms que le client y lira : ORBES CODE, CLAIM CODE, SCAN ORBES CODE. |
 | **Step 2 names the ORBES CODE**, what the customer scans, not the ORBES SEAL, which is only its centre (BRAND §2.1). The brief said "scan the seal"; the card and this kit say ORBES CODE. | **L'étape 2 nomme l'ORBES CODE**, ce que le client scanne, et non l'ORBES SEAL, qui n'en est que le centre (BRAND §2.1). Le brief disait « scanner le sceau » ; la carte et ce kit disent ORBES CODE. |
 | **Step 3 needs an ORBES account.** After the scan, `/verify` offers to sign in or to create one; registration follows that scan. | **L'étape 3 demande un compte ORBES.** Après le scan, `/verify` propose de se connecter ou d'en créer un ; l'enregistrement suit ce scan. |
-| **Capitals.** The printed lines set the address in capitals. Before printing, type THEORBES.COM/VERIFY in capitals on a phone and check that it reaches the scanner (§6). If it does not, the address is set in lower case, on the card as on the packaging. | **Capitales.** Les lignes imprimées composent l'adresse en capitales. Avant impression, tapez THEORBES.COM/VERIFY en capitales sur un téléphone et vérifiez que le scanner s'ouvre (§6). Sinon, l'adresse passe en minuscules, sur la carte comme sur l'emballage. |
+| **Capitals.** The printed lines set the address in capitals. Before printing, type THEORBES.COM/VERIFY in capitals on a phone and check that it reaches the scanner (§6). If it does not, the packaging sets the address in lower case, and no card is printed until the redirect accepts capitals or the card's lettering can draw lower case: its stroked capitals (`genome/src/server/render/label-font.ts`) have none, so the card cannot simply switch. | **Capitales.** Les lignes imprimées composent l'adresse en capitales. Avant impression, tapez THEORBES.COM/VERIFY en capitales sur un téléphone et vérifiez que le scanner s'ouvre (§6). Sinon, l'emballage passe l'adresse en minuscules, et aucune carte n'est imprimée tant que la redirection n'accepte pas les capitales ou que le lettrage de la carte ne sait pas tracer de minuscules : ses capitales gravées (`genome/src/server/render/label-font.ts`) n'en ont pas, la carte ne peut donc pas simplement changer. |
 
 ---
 
@@ -199,6 +201,8 @@ COMPLIANCE §7 demande de revoir H1 (le serveur partagé) et H2 (le traitement h
 
 Rules (BRAND §4.6): state what is checked, say plainly what it does not cover, offer a human. No exclamation marks, no urgency. Visuals never show a readable ORBES CODE (the code of a piece seen by thousands would be scanned by thousands, and its pattern of scans would read UNUSUAL ACTIVITY for that piece) and never a claim code. `[DATE]` is the first day pieces ship with their ORBES CODE.
 
+Règles (BRAND §4.6) : dire ce qui est vérifié, dire clairement ce qui ne l'est pas, proposer un interlocuteur. Pas de point d'exclamation, pas d'urgence. Les visuels ne montrent jamais un ORBES CODE lisible (le code d'une pièce vu par des milliers de personnes serait scanné par des milliers, et ces scans feraient lire UNUSUAL ACTIVITY pour cette pièce), ni jamais un claim code. `[DATE]` est le premier jour où les pièces sont livrées avec leur ORBES CODE.
+
 ### Website · Site
 
 **EN**
@@ -279,12 +283,12 @@ The address stays plain text, never a link: the message teaches the habit it ask
 
 Nothing is printed or published while a line it depends on is open. · Rien n'est imprimé ni publié tant qu'une ligne dont il dépend reste ouverte.
 
-| Item | By | Before | Status |
+| Item · Élément | By · Par | Before · Avant | Status · État |
 |---|---|---|---|
-| Packaging text, FR and EN (§1) | Brand | printing packaging | Open |
-| Capitals check: THEORBES.COM/VERIFY typed in capitals on a phone reaches the scanner (§1, Capitals) | Brand and operator | printing packaging or cards | Open |
-| Card recto: the specimen of BRAND §7 and a physical print proof from the chosen press (the monogram's 0.077 mm hairlines, BRAND §3.9), then `CERTIFICATE_LAYOUT_STATUS` set to `VALIDATED` and the specimens regenerated (BRAND §8 item 20) | Brand | printing cards | Open |
-| Card verso, or insert (§2), with its line for a piece resold before its first registration (§3) | Brand | printing cards | Open |
-| Second-hand sentence (§3) | Legal | printing or publishing it | Open |
-| French lexicon (§4) | Brand and legal | any French copy | Open |
-| Announcement (§5): brand, legal review (LAUNCH §10), privacy policy online, H1/H2 review of COMPLIANCE §7 | Brand, legal, owner | publishing | Open |
+| Packaging text, FR and EN (§1) · Texte d'emballage, FR et EN (§1) | Brand · Marque | printing packaging · impression de l'emballage | Open · Ouvert |
+| Capitals check: THEORBES.COM/VERIFY typed in capitals on a phone reaches the scanner (§1, Capitals); if it does not, the packaging switches to lower case and cards wait for capitals to work or for lower-case card lettering · Contrôle des capitales : THEORBES.COM/VERIFY tapé en capitales sur un téléphone ouvre le scanner (§1, Capitales) ; sinon, l'emballage passe en minuscules et les cartes attendent que les capitales fonctionnent ou un lettrage de carte en minuscules | Brand and operator · Marque et opérateur | printing packaging or cards · impression de l'emballage ou des cartes | Open · Ouvert |
+| Card recto: the specimen of BRAND §7 and a physical print proof from the chosen press (the monogram's 0.077 mm hairlines, BRAND §3.9), then `CERTIFICATE_LAYOUT_STATUS` set to `VALIDATED` and the specimens regenerated (BRAND §8 item 20) · Recto de la carte : le spécimen de BRAND §7 et une épreuve imprimée par l'imprimeur choisi (les filets de 0,077 mm du monogramme, BRAND §3.9), puis `CERTIFICATE_LAYOUT_STATUS` passé à `VALIDATED` et les spécimens régénérés (BRAND §8 point 20) | Brand · Marque | printing cards · impression des cartes | Open · Ouvert |
+| Card verso, or insert (§2), with its line for a piece resold before its first registration (§3) · Verso de la carte, ou notice (§2), avec sa ligne pour une pièce revendue avant son premier enregistrement (§3) | Brand · Marque | printing cards · impression des cartes | Open · Ouvert |
+| Second-hand sentence (§3) · Phrase sur l'achat d'occasion (§3) | Legal · Juridique | printing or publishing it · son impression ou sa publication | Open · Ouvert |
+| French lexicon (§4) · Lexique FR (§4) | Brand and legal · Marque et juridique | any French copy · tout texte en français | Open · Ouvert |
+| Announcement (§5): brand, legal review (LAUNCH §10), privacy policy online, H1/H2 review of COMPLIANCE §7 · Annonce (§5) : marque, relecture juridique (LAUNCH §10), politique de confidentialité en ligne, revue H1/H2 de COMPLIANCE §7 | Brand, legal, owner · Marque, juridique, propriétaire | publishing · publication | Open · Ouvert |

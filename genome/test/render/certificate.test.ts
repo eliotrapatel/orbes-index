@@ -437,12 +437,22 @@ describe('certificate CSV for variable-data printing', () => {
   it('productId, model, material, code: quoted, CRLF, values as recorded', () => {
     const r = renderCertificateCsv([item(184), item(185, { material: 'Or jaune 18 carats, « Soleil »', claimCode: '0000-1111-2222' })], { createdAt: DATE });
     expect(r.contentType).toBe('text/csv; charset=utf-8; header=present');
-    expect(r.filename).toBe('ORBES-certificates-2026-10-02-2.csv');
+    // Until the brand validates the layout, the print shop's file says PROOF in its name, as the PDFs do.
+    expect(r.filename).toBe('ORBES-certificates-2026-10-02-2-PROOF.csv');
     expect(r.body).toBe(
       '"productId","model","material","code"\r\n' +
         '"O26-J-00184","MONOLITHE · RING","925 STERLING SILVER","7KQ2-M4TD-9XWH"\r\n' +
         '"O26-J-00185","MONOLITHE · RING","Or jaune 18 carats, « Soleil »","0000-1111-2222"\r\n',
     );
+  });
+
+  it('names the file PROOF until the layout is VALIDATED, its columns unchanged either way', () => {
+    const proof = renderCertificateCsv([item(184)], { createdAt: DATE, status: 'PROOF' });
+    const validated = renderCertificateCsv([item(184)], { createdAt: DATE, status: 'VALIDATED' });
+    expect(proof.filename).toBe('ORBES-certificates-2026-10-02-1-PROOF.csv');
+    expect(validated.filename).toBe('ORBES-certificates-2026-10-02-1.csv');
+    expect(renderCertificateCsv([item(184)], { createdAt: DATE }).filename).toBe(CERTIFICATE_LAYOUT_STATUS === 'PROOF' ? proof.filename : validated.filename);
+    expect(proof.body).toBe(validated.body);
   });
 
   it('defuses spreadsheet formulas and escapes quotes', () => {

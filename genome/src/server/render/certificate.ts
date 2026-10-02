@@ -36,7 +36,7 @@
  * except the GENOME, which a print shop cannot typeset.
  *
  * Until the brand validates the layout (BRAND-DESIGN-SYSTEM §7), every card,
- * sheet and PDF file name carries the mention PROOF: CERTIFICATE_LAYOUT_STATUS
+ * sheet and file name (PDF and CSV) carries the mention PROOF: CERTIFICATE_LAYOUT_STATUS
  * moves to 'VALIDATED' on the brand's sign-off, and only then.
  */
 import { genomeLayout } from '../../core/genome/render.js';
@@ -440,14 +440,18 @@ export function certificatesCsv(items: readonly CertificateItem[]): string {
   return rows.map((r) => r.map(csvField).join(',')).join('\r\n') + '\r\n';
 }
 
-/** The CSV as a download. */
-export function renderCertificateCsv(items: readonly CertificateItem[], opts: Pick<CertificateOptions, 'createdAt'>): RenderedCertificates {
+/**
+ * The CSV as a download. Its columns stay those of the print shop's
+ * template, so the PROOF mention is in its file name, as for the PDFs.
+ */
+export function renderCertificateCsv(items: readonly CertificateItem[], opts: Pick<CertificateOptions, 'createdAt' | 'status'>): RenderedCertificates {
   if (items.length < 1 || items.length > MAX_CERTIFICATE_ITEMS) throw new CertificateInputError(`1 to ${MAX_CERTIFICATE_ITEMS} cards per file`);
   for (const it of items) {
     if (!PRODUCT_ID_RE.test(it.productId) || !CLAIM_CODE_RE.test(it.claimCode)) throw new CertificateInputError('invalid certificate item');
   }
   const day = opts.createdAt.toISOString().slice(0, 10);
-  return { contentType: CSV_TYPE, body: certificatesCsv(items), filename: `ORBES-certificates-${day}-${items.length}.csv` };
+  const suffix = (opts.status ?? CERTIFICATE_LAYOUT_STATUS) === 'PROOF' ? '-PROOF' : '';
+  return { contentType: CSV_TYPE, body: certificatesCsv(items), filename: `ORBES-certificates-${day}-${items.length}${suffix}.csv` };
 }
 
 // ── Specimen ───────────────────────────────────────────────────────────────

@@ -116,7 +116,7 @@ docker compose ps                                                # caddy, app, p
    - **PDF** for print, **SVG** for engraving or foil vendors, **PNG** for previews.
    - Recommended minimum size: **30 mm**, or **20 mm** for small tags if customers can zoom.
    - Leave the 2 u quiet zone around the code.
-4. **Claim code:** it is shown **once**. While it is on screen, click **Download certificate card**: the server checks the code against its hash and returns the card (PDF, 85 × 55 mm) with the code under its scratch-off panel. Nobody copies the 12 characters by hand. For a print run, `POST /api/admin/certificates` also gives A4 sheets of ten and a CSV for the print shop's variable-data printing (API §15.7). Ask the shop to lay the scratch-off ink on the **ORBES SCRATCH-OFF** spot plate. Until the brand validates the card layout (BRAND §7), every card says **PROOF**: do not print final cards before that.
+4. **Claim code:** it is shown **once**. While it is on screen, click **Download certificate card**: the server checks the code against its hash and returns the card (PDF, 85 × 55 mm) with the code under its scratch-off panel. Nobody copies the 12 characters by hand. For a print run, `POST /api/admin/certificates` also gives A4 sheets of ten and a CSV for the print shop's variable-data printing (API §15.7). Ask the shop to lay the scratch-off ink on the **ORBES SCRATCH-OFF** spot plate. Until the brand validates the card layout (BRAND §7), every card says **PROOF**, and so does every file name, the print shop's CSV included: do not print final cards before that, and do not send a file whose name says PROOF for a production run.
 
 ## 8. Validate on real phones before the public launch
 
