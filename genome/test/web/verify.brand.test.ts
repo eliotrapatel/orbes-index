@@ -360,7 +360,7 @@ describe('verify app: the monogram beside the word ORBES (BRAND-DESIGN-SYSTEM §
     expect(landing).toContain("import { monogramSvg } from '../../shared/monogram.js';");
     // brand.css draws it as a block that keeps the ratio of its ink box; the landing sizes it and gives it its clear space.
     expect(rule(brand, '.monogram')).toMatchObject({ display: 'block', height: 'auto', 'aspect-ratio': `${MONOGRAM_BOUNDS.w} / ${MONOGRAM_BOUNDS.h}` });
-    expect(rule(styles, '.landing__monogram').width).toBe('clamp(64px, 19.5vw, 84px)');
+    expect(rule(styles, '.landing__monogram').width).toBe('min(clamp(64px, 19.5vw, 84px), var(--orbit) * 0.3)');
   });
 
   it('keeps the word ORBES typed, in the display face, wherever it was: the emblem never replaces it', () => {

@@ -222,6 +222,23 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(mono.y).toBeGreaterThan(emblem.y);
     await page.screenshot({ path: join(OUT_DIR, 'verify-landing.png') });
     await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO']);
+    // A phone held sideways, and a short portrait phone: the heading (monogram, word, AUTHENTICATION) stays inside
+    // the emblem, whose size follows the height there, so it never reaches the resting orbit's ring.
+    for (const viewport of [
+      { width: 844, height: 390 },
+      { width: 667, height: 375 },
+      { width: 320, height: 568 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const box = (await page.locator('.landing__emblem').boundingBox())!;
+      const heading = (await page.locator('h1.landing__title').boundingBox())!;
+      const where = `${viewport.width} × ${viewport.height}`;
+      expect(heading.y, where).toBeGreaterThanOrEqual(box.y - 0.5);
+      expect(heading.y + heading.height, where).toBeLessThanOrEqual(box.y + box.height + 0.5);
+      expect((await monogram.boundingBox())!.width, where).toBeGreaterThan(30);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    expect((await monogram.boundingBox())!.width).toBeCloseTo(0.195 * MOBILE_VIEWPORT.width, 0);
 
     await uploadPhoto(page, writeCodePng(srv.workDir, 'plain.png', plain));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
