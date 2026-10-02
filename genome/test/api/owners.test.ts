@@ -378,6 +378,23 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(UUID_RE.test(id)).toBe(true);
     });
 
+    it('names the status a loss withdrawn by its owner returned the piece to (PIECE FOUND, F-01)', async () => {
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const { productId } = await ownedPiece(owner.client);
+      expect((await owner.client.post('/api/v1/ownership/incidents', { productId, type: 'LOST' })).statusCode).toBe(201);
+      h.clock.advance(1_000);
+      expect((await owner.client.post('/api/v1/ownership/incidents/resolve', { productId })).statusCode).toBe(200);
+      const x = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`)) as Record<string, any>;
+      expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.status]).slice(-4)).toEqual([
+        ['product.transition', 'account', productId, 'LOST'],
+        ['ownership.incident', 'account', productId, 'LOST'],
+        ['product.transition', 'account', productId, 'REGISTERED'],
+        ['ownership.incident.resolve', 'account', productId, 'REGISTERED'],
+      ]);
+      expect(x.pieces).toEqual([expect.objectContaining({ productId, status: 'REGISTERED' })]);
+    });
+
     it('gives no current status for a piece owned before, and no internal flag for a piece owned now', async () => {
       const seller = await accountClient(h);
       const id = await accountIdOf(seller.email);

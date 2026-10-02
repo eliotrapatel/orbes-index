@@ -234,7 +234,7 @@ export interface AccountExport {
     productId: string | null;
     /** The scan the entry was about, by its REF (never its whole id). */
     reference: string | null;
-    /** The status the entry gave the piece: LOST or STOLEN for a declared incident, the new one for a change of status. */
+    /** The status the entry gave the piece: LOST or STOLEN for a declared incident, the one it returned to for a loss withdrawn by its owner, the new one for a change of status. */
     status: string | null;
   }[];
   /** Lists cut at EXPORT_LIST_LIMIT entries (empty when complete). */
@@ -477,6 +477,7 @@ export class OwnerService {
           sql<string | null>`CASE
             WHEN target_type = 'product' AND action IN ('product.transition', 'product.reinstate') THEN details->>'to'
             WHEN target_type = 'product' AND action = 'ownership.incident' THEN details->>'type'
+            WHEN target_type = 'product' AND action = 'ownership.incident.resolve' THEN details->>'to'
           END`.as('status'),
         ])
         .where((eb) =>

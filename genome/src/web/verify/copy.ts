@@ -212,14 +212,16 @@ export const CONTACT = Object.freeze({
   verified: 'VERIFIED',
   /** Subject of the email under FORGOTTEN PASSWORD? (C-04). */
   recoverySubject: 'ORBES — FORGOTTEN PASSWORD',
+  /** The piece an email from MY PIECES is about (F-01). */
+  piece: 'PIECE',
 });
 
 /**
- * The password of an ORBES account (C-04, API §10.7 and §10.8), in the OWNERSHIP panel. There is no email
- * channel: a customer who forgot it contacts ORBES Client Services, who check their identity and give a
- * one-time recovery code (30 minutes); the new password then ends every session of the account, cancels
- * its pending transfers and pauses new ones for 72 hours. CHANGE PASSWORD sits beside SIGN OUT for now
- * (it moves to the customer's pieces with F-01).
+ * The password of an ORBES account (C-04, API §10.7 and §10.8). There is no email channel: a customer who
+ * forgot it contacts ORBES Client Services (FORGOTTEN PASSWORD?, under every sign-in form), who check their
+ * identity and give a one-time recovery code (30 minutes); the new password then ends every session of the
+ * account, cancels its pending transfers and pauses new ones for 72 hours. Signed in, CHANGE PASSWORD is in
+ * MY PIECES (F-01), on the account line at the foot of the page, beside SIGN OUT.
  */
 export const ACCOUNT_PASSWORD = Object.freeze({
   forgotten: 'FORGOTTEN PASSWORD?',
@@ -243,6 +245,71 @@ export const ACCOUNT_PASSWORD = Object.freeze({
   changeLead: 'Enter your current password, then a new one. Your other sessions will end; you stay signed in here.',
   cancel: 'CANCEL',
   changed: 'Your password has been changed. Your other sessions have ended.',
+});
+
+/**
+ * MY PIECES (F-01, /verify/pieces, API §10.5–§10.6 and §11.5–§11.6): the signed-in owner's pieces, each on its
+ * ivory plate with its GENOME, then OWNERSHIP · WARRANTY · SERVICE. An owner whose piece is gone declares it
+ * here without scanning it (REPORT LOST / STOLEN, confirmed); a loss they declared themselves, they withdraw
+ * (PIECE FOUND); a theft, or a loss ORBES Client Services recorded, Client Services withdraw once they have
+ * checked the piece. The words LOST and STOLEN name the owner's own declaration, on their own account's
+ * page: never a word of a public result, which says UNUSUAL ACTIVITY (BRAND §4.5).
+ */
+export const PIECES = Object.freeze({
+  title: 'MY PIECES',
+  /** The link of the landing and of the OWNERSHIP panel's account line. */
+  link: 'MY PIECES',
+  lead: 'The pieces registered to your ORBES account.',
+  signInLead: 'Sign in to see the pieces registered to your ORBES account. A piece lost or stolen can be reported here, without scanning it.',
+  empty: 'No piece is registered to your ORBES account yet. Scan a piece, then register it from the OWNERSHIP tab of its result.',
+  loading: 'ONE MOMENT…',
+  loadFailed: 'Your pieces could not be shown just now.',
+  retry: 'TRY AGAIN',
+  scan: 'SCAN ORBES CODE',
+  tabs: Object.freeze({ ownership: 'OWNERSHIP', warranty: 'WARRANTY', service: 'SERVICE' }),
+  status: Object.freeze({ yours: 'REGISTERED TO YOU', lost: 'REPORTED LOST', stolen: 'REPORTED STOLEN', transfer: 'TRANSFER PENDING', service: 'IN SERVICE' }),
+  acquired: Object.freeze({ FIRST_REGISTRATION: 'FIRST REGISTRATION', TRANSFER: 'TRANSFER', RESALE: 'RESALE', ADMIN: 'ORBES CLIENT SERVICES' }),
+  verified: 'VERIFIED',
+  unverified: 'NOT YET VERIFIED',
+  unverifiedNote: 'ORBES Client Services may ask for a proof of purchase to verify your ownership.',
+  transferPending: (until: string) =>
+    until ? `A transfer of this piece is pending until ${until}. You may cancel it at any time before it is accepted.` : 'A transfer of this piece is pending. You may cancel it at any time before it is accepted.',
+  cancelTransfer: 'CANCEL TRANSFER',
+  transferCancelled: 'The transfer has been cancelled.',
+  inService: 'This piece is with ORBES for a service. Its history is under SERVICE.',
+  report: 'REPORT LOST / STOLEN',
+  reportLead: 'If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.',
+  reportTitle: 'REPORT LOST / STOLEN',
+  /** Accessible name of the LOST · STOLEN choice. */
+  reportChoice: 'What happened to this piece',
+  lost: 'LOST',
+  stolen: 'STOLEN',
+  reportHow: Object.freeze({
+    LOST: 'Once you find it, you withdraw the report yourself, here: PIECE FOUND.',
+    STOLEN: 'Once it is recovered, ORBES Client Services check the piece and withdraw the report.',
+  }),
+  reportEffect: 'Every scan of its code will show UNUSUAL ACTIVITY to whoever checks it, and any pending transfer of this piece is cancelled.',
+  chooseFirst: 'Choose LOST or STOLEN.',
+  confirmReport: 'CONFIRM REPORT',
+  reported: Object.freeze({
+    LOST: 'This piece is now reported lost. Every scan of its code shows UNUSUAL ACTIVITY.',
+    STOLEN: 'This piece is now reported stolen. Every scan of its code shows UNUSUAL ACTIVITY.',
+  }),
+  lostByYou: 'Every scan of its code shows UNUSUAL ACTIVITY until you tell ORBES that it has been found.',
+  found: 'PIECE FOUND',
+  foundTitle: 'PIECE FOUND',
+  foundLead: 'Confirm that this piece is back with you. Its scans will read as before, and it can be transferred again.',
+  confirmFound: 'CONFIRM',
+  resolved: 'This piece is no longer reported lost.',
+  withClientServices: Object.freeze({
+    LOST: 'ORBES Client Services recorded this piece as lost: every scan of its code shows UNUSUAL ACTIVITY. They withdraw the report once they have checked the piece.',
+    STOLEN: 'Every scan of its code shows UNUSUAL ACTIVITY. Once the piece is recovered, ORBES Client Services check it and withdraw the report.',
+  }),
+  cancel: 'CANCEL',
+  services: 'SERVICE HISTORY',
+  noService: 'No service has been recorded for this piece.',
+  serviceFailed: 'The service history could not be shown just now.',
+  serviceStatus: Object.freeze({ OPEN: 'IN PROGRESS', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED' }),
 });
 
 /**

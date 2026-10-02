@@ -1,10 +1,11 @@
 /**
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
- * rows, the contact of ORBES Client Services and the view shell.
+ * rows, the contact of ORBES Client Services, the link to MY PIECES and the
+ * view shell.
  */
 import { h, s } from '../../shared/dom.js';
-import { CONTACT } from '../copy.js';
+import { CONTACT, PIECES } from '../copy.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
 
 /** A <main> view root with its modifier class. */
@@ -93,4 +94,27 @@ export function contactBlock(c: ContactModel): HTMLElement {
 /** A small uppercase section heading. */
 export function sectionLabel(text: string, id?: string): HTMLHeadingElement {
   return h('h3', { class: 'section-label', id, text });
+}
+
+/** The app's own paths (static.ts serves the shell at /verify and /verify/*; main.ts routes them). */
+export const LANDING_PATH = '/verify';
+export const PIECES_PATH = '/verify/pieces';
+
+/**
+ * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the
+ * history entry is the router's); a click that opens a new tab or window is left to the browser.
+ */
+export function piecesLink(onOpen?: () => void, extraClass?: string): HTMLAnchorElement {
+  return h('a', {
+    class: ['textlink', extraClass],
+    attrs: { href: PIECES_PATH },
+    on: {
+      click: (ev) => {
+        if (!onOpen || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        ev.preventDefault();
+        onOpen();
+      },
+    },
+    text: PIECES.link,
+  });
 }

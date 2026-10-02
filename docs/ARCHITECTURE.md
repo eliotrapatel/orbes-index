@@ -115,7 +115,7 @@ genome/
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
-    verify/              mobile scanner: camera capture, decoder worker, result views
+    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)

@@ -56,14 +56,19 @@ export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {
   return svg;
 }
 
-/** The GENOME block: label, product id, the glyphs in their orbit around the SEAL, fingerprint. */
-export function genomeBlock(m: GenomeModel): HTMLElement {
+/**
+ * The GENOME block: label, product id, the glyphs in their orbit around the SEAL, fingerprint. On a result the
+ * label GENOME is the block's heading; in MY PIECES (`titleId`), where each piece has its plate, the product id
+ * is (an h2 with that id, which names the piece), and GENOME stays its label.
+ */
+export function genomeBlock(m: GenomeModel, opts: { titleId?: string } = {}): HTMLElement {
   const figure = genomeRow(m, { layout: 'orbit' });
+  const titled = opts.titleId !== undefined;
   return h(
     'section',
-    { class: 'genome', attrs: { 'aria-labelledby': 'genome-label' } },
-    h('h2', { class: 'genome__label micro', id: 'genome-label', text: 'GENOME' }),
-    h('p', { class: 'genome__id', text: m.id }),
+    { class: 'genome', attrs: { 'aria-labelledby': titled ? opts.titleId : 'genome-label' } },
+    titled ? h('p', { class: 'genome__label micro', text: 'GENOME' }) : h('h2', { class: 'genome__label micro', id: 'genome-label', text: 'GENOME' }),
+    titled ? h('h2', { class: 'genome__id', id: opts.titleId, text: m.id }) : h('p', { class: 'genome__id', text: m.id }),
     figure ? h('div', { class: 'genome__glyphs' }, figure) : null,
     h('p', { class: 'genome__meta micro soft' }, h('span', { text: m.fingerprint }), h('span', { class: 'sep', attrs: { 'aria-hidden': 'true' }, text: '·' }), h('span', { text: m.version })),
   );

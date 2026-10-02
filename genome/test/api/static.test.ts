@@ -39,6 +39,7 @@ describe('static web apps', () => {
     for (const [url, title] of [
       ['/verify', 'VERIFY'],
       ['/verify/', 'VERIFY'],
+      ['/verify/pieces', 'VERIFY'],
       ['/verify/result/abc', 'VERIFY'],
       ['/admin', 'ADMIN'],
       ['/admin/products/O26-J-00001', 'ADMIN'],

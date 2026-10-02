@@ -3,7 +3,7 @@
  * of scripts/build-web.ts:
  *
  *   /                → 302 /verify
- *   /verify, /verify/*  → dist/web/verify/index.html   (client-side routes)
+ *   /verify, /verify/*  → dist/web/verify/index.html   (client-side routes: /verify/pieces is MY PIECES)
  *   /admin,  /admin/*   → dist/web/admin/index.html
  *   /assets/*        → dist/web/assets/*
  *

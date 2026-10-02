@@ -216,7 +216,7 @@ Authentication and authorisation:
 | `PASSWORD_CHANGE_REQUIRED` | 403 | The admin signed in with a temporary password and must choose its own first (§2.4, §12.5). |
 | `CURRENT_PASSWORD_INVALID` | 400 | (Password change, §10.7 and §12.5) the current password is wrong, or, for a customer, the account is throttled (§10.2). A 400, never a 401: the caller is signed in, and the web apps end the session on any 401. It counts as a failed sign-in: in the customer's login throttle (§10.2), in an admin's lockout (§12.1). |
 | `FORBIDDEN` | 403 | Role too low; or a non-owner asking for a service history (also for an unknown product id, so ids cannot be enumerated); or an OPERATOR revoking or retiring a product; or an account that is not active. |
-| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a password change, a transfer, a registration, a transfer's acceptance or a LOST / STOLEN declaration begun just before the lock (§10.7, §11.1–§11.3, §11.5). 429: admin locked for 15 minutes after 10 consecutive failures. |
+| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a password change, a transfer, a registration, a transfer's acceptance, a LOST / STOLEN declaration or the withdrawal of a loss begun just before the lock (§10.7, §11.1–§11.3, §11.5, §11.6). 429: admin locked for 15 minutes after 10 consecutive failures. |
 | `RECOVERY_CODE_INVALID` | 400 | (§10.8) Unknown email, wrong, malformed, expired, used or replaced recovery code, or a code refused after 5 wrong guesses within the hour. One answer for all. |
 | `ACCOUNT_NOT_FOUND` | 404 | (§16.10–16.13) No customer account with this id. |
 | `ACCOUNT_NOT_ACTIVE` | 409 | (§16.10, §16.12) A recovery code is issued, and a lock applied, only for an ACTIVE account. |
@@ -266,6 +266,8 @@ Ownership:
 | `CANNOT_ACCEPT_OWN_TRANSFER` | 409 | The recipient already owns the product. |
 | `TRANSFER_STALE` | 409 | The sender no longer owns the product. |
 | `NO_PENDING_TRANSFER` | 404 | Nothing to cancel. |
+| `NO_INCIDENT` | 409 | (§11.6) The piece is not reported lost: there is nothing to withdraw. |
+| `INCIDENT_NOT_RESOLVABLE` | 409 | (§11.6) A STOLEN, or a LOST that ORBES Client Services recorded: only Client Services withdraw it, once they have checked the piece. |
 | `NO_OWNER` | 409 | (Admin) the product has no owner to confirm. |
 | `ALREADY_VERIFIED` | 409 | (Admin) the ownership is already verified. |
 
@@ -383,6 +385,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/ownership/transfers/accept` | Account | yes | auth | 11.3 |
 | POST | `/api/v1/ownership/transfers/cancel` | Account (sender) | yes | api | 11.4 |
 | POST | `/api/v1/ownership/incidents` | Account (current owner) | yes | api | 11.5 |
+| POST | `/api/v1/ownership/incidents/resolve` | Account (current owner) | yes | api | 11.6 |
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
 | POST | `/api/admin/auth/logout` | RETAIL (optional) | yes | admin | 12.2 |
 | GET | `/api/admin/auth/me` | RETAIL | — | admin | 12.3 |
@@ -458,7 +461,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` of `GET /api/v1/account/products`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -1023,6 +1026,7 @@ The caller's current products, newest acquisition first.
       "since": "2026-10-01T08:13:21.929Z",
       "transfer": { "pending": false },
       "incident": null,
+      "incidentResolvable": false,
       "inService": false,
       "genome": {
         "id": "O26-J-00002",
@@ -1043,11 +1047,14 @@ The caller's current products, newest acquisition first.
 | `acquiredVia` | `FIRST_REGISTRATION` or `TRANSFER`. |
 | `verified` | Ownership proven by claim code or confirmed by client services. |
 | `transfer` | `{ "pending": true, "expiresAt": … }` while an unexpired transfer offer is pending. |
-| `incident` | `"LOST"` or `"STOLEN"` while the product is reported, else `null`. |
+| `incident` | `"LOST"` or `"STOLEN"` while the product is reported (by its owner, §11.5, or by ORBES Client Services), else `null`. |
+| `incidentResolvable` | Extension (F-01). `true` for a `LOST` the owner reported themselves, which they may withdraw (§11.6); `false` otherwise: a `STOLEN`, or a `LOST` recorded by ORBES Client Services, is theirs to withdraw. Read from the status history (the move to `LOST` was made by this account). |
 | `inService` | The product is currently in after-sales service. |
 | `genome.version` | Integer here (1), unlike the `"GENOME-01"` label of the verification response. |
 
 Errors: `401 UNAUTHORIZED`.
+
+In the verify app, this list is **MY PIECES** (`/verify/pieces`, F-01; BRAND-DESIGN-SYSTEM §5): each piece on its ivory plate with its GENOME in orbit (drawn from `glyphs`, checked against `fingerprint`; the glyph ids are `pattern` split at `·`), the product lines, then the tabs OWNERSHIP (since when, how it was acquired, whether the ownership is verified, a pending transfer, which CANCEL TRANSFER withdraws, §11.4, and REPORT LOST / STOLEN or PIECE FOUND, §11.5–§11.6), WARRANTY and SERVICE (§10.6). Signed out, the page offers the sign-in first: an owner whose piece is lost or stolen reaches it without scanning the piece. The landing links to it, and so does the signed-in account line of a result's OWNERSHIP tab.
 
 ### 10.6 `GET /api/v1/products/:productId/service-history`
 
@@ -1067,6 +1074,8 @@ Owner-only view of the after-sales history. Staff notes and technician names are
 
 Errors: `400 VALIDATION_FAILED` (malformed product id), `401 UNAUTHORIZED`, `403 FORBIDDEN` (not the current owner), `404 PRODUCT_NOT_FOUND`.
 
+In the verify app, the SERVICE tab of a piece in MY PIECES (§10.5) reads it when it is first opened: one row per service, its type, its dates (or IN PROGRESS SINCE …, or CANCELLED …) and its place.
+
 ### 10.7 `POST /api/v1/account/password`
 
 The signed-in customer changes their password (C-04). Body `{ "currentPassword": string (1–1024), "newPassword": string (1–1024) }`; unknown fields are refused. Account session and CSRF rules. Rate group `auth`.
@@ -1078,7 +1087,7 @@ The signed-in customer changes their password (C-04). Body `{ "currentPassword":
 
 **200** `{ "ok": true }`. Errors: `400 VALIDATION_FAILED`, `400 CURRENT_PASSWORD_INVALID`, `401 UNAUTHORIZED`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
 
-In the verify app, signed in: CHANGE PASSWORD beside SIGN OUT in the OWNERSHIP panel (it moves to the customer's pieces with F-01). A wrong current password is said on its field, and the page stays signed in.
+In the verify app, signed in: CHANGE PASSWORD on the account line at the foot of MY PIECES (§10.5), beside SIGN OUT (F-01 moved it there from the OWNERSHIP panel, whose account line now leads to MY PIECES). A wrong current password is said on its field, and the page stays signed in.
 
 ### 10.8 `POST /api/v1/account/recover`
 
@@ -1195,13 +1204,34 @@ The sender withdraws a pending offer. Body `{ "productId": string }`.
 
 ### 11.5 `POST /api/v1/ownership/incidents`
 
-The current owner reports the product lost or stolen. Body `{ "productId": string, "type": "LOST" | "STOLEN" }`. Any pending transfer is cancelled. From then on, verifications of the product answer `SUSPICIOUS_ACTIVITY` and its codes can no longer be printed. Recovery is done by client services (admin transition back to the previous status).
+The current owner reports the product lost or stolen. Body `{ "productId": string, "type": "LOST" | "STOLEN" }`. Any pending transfer is cancelled. From then on, verifications of the product answer `SUSPICIOUS_ACTIVITY` and its codes can no longer be printed. A loss the owner reported themselves, the owner withdraws (§11.6); a theft, and a loss recorded by ORBES Client Services, are withdrawn by Client Services once they have checked the piece (a transition back to the previous status, §14.4).
+
+In the verify app: **REPORT LOST / STOLEN** in MY PIECES (§10.5), with no scan (an owner whose piece is gone cannot scan it), confirmed: LOST or STOLEN, then CONFIRM REPORT.
 
 A declaration that was already on its way when ORBES Client Services locked the account (§16.12) is refused with `403 ACCOUNT_LOCKED`, as a transfer is (§11.2): the account row is re-read under its lock.
 
 **201** `{ "productId": "O26-J-00002", "type": "LOST", "reportedAt": "2026-10-01T08:15:21.929Z" }`
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSITION_NOT_ALLOWED` (e.g. already reported).
+
+### 11.6 `POST /api/v1/ownership/incidents/resolve` (extension of the contract)
+
+The current owner withdraws a loss they reported themselves: the piece has been found (F-01). Body `{ "productId": string }` (canonical id or uuid; unknown fields are refused).
+
+- **Only the current owner**, checked first: a stranger, and an unknown id, get the same `403 NOT_OWNER`, so the route reveals neither whether a piece exists nor whether it is reported.
+- **Only a `LOST` the owner declared** (§11.5): the last move of the piece's status history, into `LOST`, was made by this account. A `STOLEN`, or a `LOST` recorded by ORBES Client Services, answers `409 INCIDENT_NOT_RESOLVABLE` (*Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.*): a theft is withdrawn by staff once they have checked the recovered piece, so whoever takes over an account after a theft cannot make the stolen piece read as clean. A piece that is not reported answers `409 NO_INCIDENT`.
+- In **one transaction**, under the piece's row lock: the piece returns to the status it held before the loss (`returnTargetOf`, the lifecycle's return rule, applied by `applyForService`, audited `product.transition` with `via: "ownership.resolveIncident"` and the reason *found by owner*), and the withdrawal is audited `ownership.incident.resolve` with `details: { type: "LOST", to }`. Verifications then answer as they did before the loss, and the piece can be transferred again.
+- A withdrawal already on its way when ORBES Client Services locked the account (§16.12) is refused with `403 ACCOUNT_LOCKED`, as a declaration is: the account row is re-read under its lock before the piece.
+
+**200**:
+
+```json
+{ "productId": "O26-J-00002", "type": "LOST", "resolvedAt": "2026-10-03T09:12:41.118Z" }
+```
+
+Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `409 NO_INCIDENT`, `409 INCIDENT_NOT_RESOLVABLE`.
+
+In the verify app: **PIECE FOUND** in MY PIECES (§10.5), under a loss the owner reported, confirmed (CONFIRM). Under a theft, or a loss Client Services recorded, the page offers their contact instead (an email titled `ORBES — {product id} — REPORTED STOLEN` that names the piece, the phone, the hours).
 
 ---
 
@@ -2264,7 +2294,7 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `scans` | Every scan made while signed in, oldest first: `reference` (the REF), time, event, result, piece, `country`, `region`, `lat`/`lon` (rounded to 0.1°, §4), `userAgentFamily` (the browser family, e.g. `Safari/iOS`; the whole user agent of a scan is never stored), `clientMetrics` (what the app measured while decoding, as stored: corrections, module size, decode time, camera or upload; or `null`), and the customer's `report` on it (§8.5: `channel`, `place`, `note`, `createdAt`) or `null`. The scan's whole id is never given, only its REF. |
 | `sessions` | The account's sessions still stored: `createdAt`, `lastSeenAt`, `expiresAt`, `userAgent`. |
 | `recoveryCodes` | The recovery codes issued (§16.10): `createdAt`, `expiresAt`, `usedAt`, `revokedAt`. |
-| `activity` | Every audit entry that names the account, oldest first: those **about** it (target: `account.register`, `account.login`, `account.login_failed`, `account.password_change`, `account.recover`, `account.recover_failed`, `account.lock`, …) and those it **made** (actor: `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `.accept`, `.cancel`, `ownership.incident`, `product.transition`, `scan.report`, …). Each gives `occurredAt`, `action`, `by` (`account`, `admin` or `system`; never the staff member's identity), what it was about (`productId`, the piece's canonical id, or `reference`, a scan's REF, never its whole id; else `null`) and `status`, the status it gave the piece (`LOST` or `STOLEN` for a declared incident, the new status for a change of status) or `null`. Nothing else of an entry's details, which can name staff or other accounts. The audit log has no index on the actor, so the second half reads the whole log: accepted for this rare ADMIN request (DATABASE §5.21). A transfer the account offered and another account accepted is in `transfers`; its `ownership.transfer.accept` entry names the buyer as actor. |
+| `activity` | Every audit entry that names the account, oldest first: those **about** it (target: `account.register`, `account.login`, `account.login_failed`, `account.password_change`, `account.recover`, `account.recover_failed`, `account.lock`, …) and those it **made** (actor: `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `.accept`, `.cancel`, `ownership.incident`, `ownership.incident.resolve`, `product.transition`, `scan.report`, …). Each gives `occurredAt`, `action`, `by` (`account`, `admin` or `system`; never the staff member's identity), what it was about (`productId`, the piece's canonical id, or `reference`, a scan's REF, never its whole id; else `null`) and `status`, the status it gave the piece (`LOST` or `STOLEN` for a declared incident, the status it returned to for a loss withdrawn by its owner, `ownership.incident.resolve`, §11.6, the new status for a change of status) or `null`. Nothing else of an entry's details, which can name staff or other accounts. The audit log has no index on the actor, so the second half reads the whole log: accepted for this rare ADMIN request (DATABASE §5.21). A transfer the account offered and another account accepted is in `transfers`; its `ownership.transfer.accept` entry names the buyer as actor. |
 | `truncated` | The lists cut at 50 000 entries (`scans`, `activity`); empty when the export is complete. |
 | `notIncluded` | What the registry holds but cannot give back readably: the password and recovery codes (one-way scrypt hashes), and the IP and device pseudonyms of scans, sessions and audit entries (keyed one-way hashes; no IP address or device cookie is stored). |
 
@@ -2591,7 +2621,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | Path | Serves | Caching |
 |---|---|---|
 | `/` | `302` redirect to `/verify` | |
-| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`) | `no-cache` |
+| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan) and `/verify/pieces` (MY PIECES, §10.5); any other path shows the landing, its address put back to `/verify` | `no-cache` |
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/assets/*` | Bundles and stylesheets | Content-hashed names: `public, max-age=31536000, immutable`; others `no-cache`. Dotfiles are never served. |
 

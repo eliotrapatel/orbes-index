@@ -458,6 +458,89 @@ describe('OwnershipService', () => {
     });
   });
 
+  describe('resolveIncident (PIECE FOUND, F-01)', () => {
+    it('the owner withdraws a LOST they reported: back to the status before the loss, in one audited transaction', async () => {
+      const code = generateClaimCode();
+      const { p, owner } = await owned({ claimCode: code });
+      await ownership.reportIncident(owner.id, p.productId, 'LOST', owner.actor);
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ productId: p.productId, incident: 'LOST', incidentResolvable: true });
+      clock.advance(MIN);
+      const change = await ownership.resolveIncident(owner.id, p.productId, owner.actor);
+      expect(change).toMatchObject({ productId: p.productId, from: 'LOST', to: 'OWNED' });
+      expect(await productRow(p.id)).toMatchObject({ status: 'OWNED', ownership_state: 'OWNED' });
+      const history = await lifecycle.history(p.productId);
+      expect(history.at(-1)).toMatchObject({ from: 'LOST', to: 'OWNED', reason: 'found by owner', actorType: 'account', actorId: owner.id });
+      const entry = (await audit.list({ action: 'ownership.incident.resolve', targetId: p.productId })).items[0];
+      expect(entry).toMatchObject({ actorType: 'account', actorId: owner.id, details: { type: 'LOST', to: 'OWNED' } });
+      expect((await audit.list({ action: 'product.transition', targetId: p.productId })).items[0].details).toMatchObject({ from: 'LOST', to: 'OWNED', via: 'ownership.resolveIncident' });
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: null, incidentResolvable: false });
+      // The piece is the owner's again in every way: it can be transferred, and reported again.
+      expect((await ownership.initiateTransfer(owner.id, p.productId, owner.actor)).transferCode).toMatch(/^[0-9A-Z]{4}-/);
+      await ownership.cancelTransfer(owner.id, p.productId, owner.actor);
+      // Nothing left to withdraw.
+      await expectDomainError(ownership.resolveIncident(owner.id, p.productId, owner.actor), 'NO_INCIDENT', 409);
+      expect((await audit.verifyChain()).ok).toBe(true);
+    });
+
+    it('returns to the status held before the loss, whatever it was (REGISTERED, TRANSFERRED)', async () => {
+      const { p, owner } = await owned();
+      await ownership.reportIncident(owner.id, p.productId, 'LOST', owner.actor);
+      expect((await ownership.resolveIncident(owner.id, p.productId, owner.actor)).to).toBe('REGISTERED');
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      await ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor);
+      await ownership.reportIncident(buyer.id, p.productId, 'LOST', buyer.actor);
+      expect((await ownership.resolveIncident(buyer.id, p.productId, buyer.actor)).to).toBe('TRANSFERRED');
+      expect(await productRow(p.id)).toMatchObject({ status: 'TRANSFERRED', ownership_state: 'REGISTERED' });
+    });
+
+    it('refuses a STOLEN: a theft stays with ORBES Client Services', async () => {
+      const { p, owner } = await owned();
+      await ownership.reportIncident(owner.id, p.productId, 'STOLEN', owner.actor);
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: 'STOLEN', incidentResolvable: false });
+      const e = await expectDomainError(ownership.resolveIncident(owner.id, p.productId, owner.actor), 'INCIDENT_NOT_RESOLVABLE', 409);
+      expect(e.publicMessage).toMatch(/ORBES Client Services can assist you/);
+      expect(await productRow(p.id)).toMatchObject({ status: 'STOLEN' });
+      expect((await audit.list({ action: 'ownership.incident.resolve', targetId: p.productId })).total).toBe(0);
+      // Client Services withdraw it (a staff return to the status before the theft).
+      expect((await lifecycle.transition(p.productId, 'REGISTERED', { reason: 'recovered, checked' }, admin)).to).toBe('REGISTERED');
+    });
+
+    it('refuses a LOST that ORBES Client Services recorded, not the owner', async () => {
+      const { p, owner } = await owned();
+      await lifecycle.transition(p.productId, 'LOST', { reason: 'reported by phone' }, admin);
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: 'LOST', incidentResolvable: false });
+      await expectDomainError(ownership.resolveIncident(owner.id, p.productId, owner.actor), 'INCIDENT_NOT_RESOLVABLE', 409);
+      expect(await productRow(p.id)).toMatchObject({ status: 'LOST' });
+    });
+
+    it('only the current owner: a stranger, or an unknown piece, answers NOT_OWNER (nothing revealed)', async () => {
+      const { p, owner } = await owned();
+      await ownership.reportIncident(owner.id, p.productId, 'LOST', owner.actor);
+      const stranger = await account();
+      await expectDomainError(ownership.resolveIncident(stranger.id, p.productId, stranger.actor), 'NOT_OWNER', 403);
+      await expectDomainError(ownership.resolveIncident(stranger.id, 'O26-J-99999', stranger.actor), 'NOT_OWNER', 403);
+      // An unowned piece, reported or not, is no one's to withdraw either.
+      const unowned = await product({ path: ['ACTIVATED', 'LOST'] });
+      await expectDomainError(ownership.resolveIncident(owner.id, unowned.productId, owner.actor), 'NOT_OWNER', 403);
+      await expectDomainError(ownership.resolveIncident('nope', p.productId, owner.actor), 'VALIDATION_FAILED', 400);
+      expect(await productRow(p.id)).toMatchObject({ status: 'LOST' });
+    });
+
+    it('a piece that is not reported answers NO_INCIDENT', async () => {
+      const { p, owner } = await owned();
+      await expectDomainError(ownership.resolveIncident(owner.id, p.productId, owner.actor), 'NO_INCIDENT', 409);
+    });
+
+    it('refuses an account locked by ORBES Client Services (A-06)', async () => {
+      const { p, owner } = await owned();
+      await ownership.reportIncident(owner.id, p.productId, 'LOST', owner.actor);
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', owner.id).execute();
+      await expectDomainError(ownership.resolveIncident(owner.id, p.productId, owner.actor), 'ACCOUNT_LOCKED', 403);
+      expect(await productRow(p.id)).toMatchObject({ status: 'LOST' });
+    });
+  });
+
   describe('reads', () => {
     it('listForAccount returns current products with genome, warranty and flags', async () => {
       const code = generateClaimCode();
@@ -492,6 +575,7 @@ describe('OwnershipService', () => {
         verified: true,
         transfer: { pending: true },
         incident: null,
+        incidentResolvable: false,
         inService: false,
         genome: { id: p.productId, version: 1, glyphs: [1, 2, 3, 4, 10, 11, 12, 13] },
         warranty: { status: 'ACTIVE', startDate: '2026-06-01', endDate: '2028-06-01' },

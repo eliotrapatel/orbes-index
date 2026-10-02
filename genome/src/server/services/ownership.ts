@@ -1,6 +1,6 @@
 /**
  * OwnershipService — first registration, transfers, confirmation and
- * incident reports (contract §2.7).
+ * incident reports, and their withdrawal by the owner (contract §2.7).
  *
  * Ownership is bookkeeping about a product; it never touches cryptographic
  * identity (products' identity columns, genomes and codes are untouched).
@@ -15,9 +15,10 @@
  *   is exact under concurrency.
  * - One current owner per product (also a partial UNIQUE index) and one
  *   pending transfer per product (likewise).
- * - Only the current owner can start, cancel or report; the recipient of a
- *   transfer cannot be the current owner; expired transfers cannot be
- *   accepted.
+ * - Only the current owner can start, cancel or report, and withdraw a loss
+ *   they reported themselves (a theft stays with ORBES Client Services); the
+ *   recipient of a transfer cannot be the current owner; expired transfers
+ *   cannot be accepted.
  *
  * Transfer codes are 12 Crockford base32 characters (60 bits), shown once
  * as XXXX-XXXX-XXXX; only HMAC-SHA256 of the canonical form under a server
@@ -39,7 +40,7 @@ import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
-import { findProduct, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { consumeScanToken, inspectScanToken, type ScanTokenFailure } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -109,8 +110,13 @@ export interface OwnedProduct {
   verified: boolean;
   since: Date;
   transfer: { pending: boolean; expiresAt?: Date };
-  /** The owner's own incident report, if the product is currently reported. */
+  /** LOST or STOLEN while the product is currently reported (by its owner or by ORBES Client Services), else null. */
   incident: IncidentType | null;
+  /**
+   * The owner may withdraw the report (`resolveIncident`, PIECE FOUND in MY PIECES): a LOST they declared
+   * themselves. A STOLEN, or a LOST recorded by ORBES Client Services, stays with Client Services.
+   */
+  incidentResolvable: boolean;
   inService: boolean;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: WarrantySummary;
@@ -202,6 +208,20 @@ const alreadyRegistered = () => new DomainError('ALREADY_REGISTERED', 409, 'This
 const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
 const notOwner = () => new DomainError('NOT_OWNER', 403, 'Only the current owner can do this.');
+const noIncident = () => new DomainError('NO_INCIDENT', 409, 'This piece is not reported lost.');
+const incidentNotResolvable = () =>
+  new DomainError('INCIDENT_NOT_RESOLVABLE', 409, 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.');
+
+/**
+ * Whether the product's LOST status is `accountId`'s own declaration (`reportIncident`): the last step of its
+ * status history moved it to LOST, by that account. A LOST recorded by ORBES Client Services (a staff
+ * transition) is not, nor is a STOLEN: those are withdrawn by staff, once they have checked the piece.
+ */
+async function lostDeclaredBy(db: Db, product: Pick<ProductRow, 'id' | 'status'>, accountId: string): Promise<boolean> {
+  if (product.status !== 'LOST') return false;
+  const last = (await loadStatusHistory(db, product.id)).at(-1);
+  return last !== undefined && last.to === 'LOST' && last.actorType === 'account' && last.actorId === accountId;
+}
 
 /**
  * Lock a product for an owner-only customer action. An unknown id answers exactly like a product
@@ -594,6 +614,42 @@ export class OwnershipService {
     });
   }
 
+  /**
+   * The owner found a piece they had reported LOST (PIECE FOUND, MY PIECES): the piece returns to the status it
+   * held before the loss (`returnTargetOf`, applied by `applyForService` in this transaction), so its scans read
+   * as before and it can be transferred again. Only the current owner, and only a LOST they declared
+   * themselves (`lostDeclaredBy`): a STOLEN, or a LOST recorded by ORBES Client Services, stays with Client
+   * Services (409 INCIDENT_NOT_RESOLVABLE), so whoever takes over an account after a theft cannot make the
+   * stolen piece read as clean. A piece that is not reported answers 409 NO_INCIDENT. Strangers learn nothing:
+   * ownership is checked first, and an unknown id answers as a piece of someone else (NOT_OWNER).
+   */
+  async resolveIncident(accountId: string, productId: string, actor: Actor): Promise<StatusChange> {
+    assertAccountId(accountId);
+    return inTransaction(this.db, async (tx) => {
+      // Locked by ORBES Client Services while this request was on its way (A-06): refused, as a declaration is.
+      await readActingAccount(tx, accountId);
+      const p = await lockForOwnerAction(tx, productId);
+      const current = await this.currentOwnership(tx, p.id);
+      if (!current || current.account_id !== accountId) throw notOwner();
+      if (p.status !== 'LOST' && p.status !== 'STOLEN') throw noIncident();
+      if (!(await lostDeclaredBy(tx, p, accountId))) throw incidentNotResolvable();
+      const target = await returnTargetOf(tx, p);
+      if (target === null) throw incidentNotResolvable();
+      const change = await this.lifecycle.applyForService(
+        tx,
+        p,
+        target,
+        { reason: 'found by owner', via: 'ownership.resolveIncident', ownershipState: ownershipStateFor(current, false) },
+        actor,
+      );
+      await this.audit.record(
+        { actor, action: 'ownership.incident.resolve', targetType: 'product', targetId: p.product_id, details: { type: 'LOST', to: target } },
+        tx,
+      );
+      return change;
+    });
+  }
+
   /** The current owner of a product, or null (used by verification to recognise the owner). */
   async currentOwner(productId: string): Promise<CurrentOwner | null> {
     const p = await requireProduct(this.db, productId);
@@ -643,6 +699,12 @@ export class OwnershipService {
         .where('expires_at', '>', now)
         .execute(),
     ]);
+    // A loss the owner declared themselves is theirs to withdraw (PIECE FOUND): read from the status history.
+    const resolvable = new Set(
+      (await Promise.all(rows.map(async (r) => ((await lostDeclaredBy(this.db, { id: r.uuid, status: r.status }, accountId)) ? r.uuid : null)))).filter(
+        (x): x is string => x !== null,
+      ),
+    );
     const today = utcDate(now);
     return rows.map((r) => {
       const g = genomes.find((x) => x.product_id === r.uuid);
@@ -663,6 +725,7 @@ export class OwnershipService {
         since: r.started_at,
         transfer: t ? { pending: true, expiresAt: t.expires_at } : { pending: false },
         incident: r.status === 'LOST' || r.status === 'STOLEN' ? r.status : null,
+        incidentResolvable: resolvable.has(r.uuid),
         inService: r.status === 'SERVICED',
         genome: g ? { id: g.genome_id, version: g.genome_version, fingerprint: g.fingerprint, glyphs: g.glyphs, pattern: g.pattern } : null,
         warranty: {

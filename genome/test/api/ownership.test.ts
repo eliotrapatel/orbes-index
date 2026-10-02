@@ -136,6 +136,50 @@ describe('ownership API', () => {
     expect((safeJson(after) as any).state).toBe('SUSPICIOUS_ACTIVITY');
   });
 
+  it('MY PIECES (F-01): the owner lists, reports LOST, then withdraws it (PIECE FOUND); a STOLEN stays with Client Services', async () => {
+    const lost = await sellable(true);
+    const stolen = await sellable(true);
+    const owner = (await accountClient(h)).client;
+    const stranger = (await accountClient(h)).client;
+    for (const p of [lost, stolen]) {
+      const reg = await scanForToken(owner, p.code.data);
+      expect((await owner.post('/api/v1/ownership/register', { registrationToken: reg.token, claimCode: p.claimCode })).statusCode).toBe(201);
+    }
+
+    expect((await owner.post('/api/v1/ownership/incidents', { productId: lost.product.productId, type: 'LOST' })).statusCode).toBe(201);
+    expect((await owner.post('/api/v1/ownership/incidents', { productId: stolen.product.productId, type: 'STOLEN' })).statusCode).toBe(201);
+    const listed = (safeJson(await owner.get('/api/v1/account/products')) as { products: any[] }).products;
+    const byId = new Map(listed.map((p) => [p.productId, p]));
+    expect(byId.get(lost.product.productId)).toMatchObject({ incident: 'LOST', incidentResolvable: true });
+    expect(byId.get(stolen.product.productId)).toMatchObject({ incident: 'STOLEN', incidentResolvable: false });
+    // A stranger's scan of the lost piece: UNUSUAL ACTIVITY.
+    expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('SUSPICIOUS_ACTIVITY');
+
+    // Only the owner; an unknown id answers alike; the body is the one of a transfer cancel.
+    expect(errorOf(await stranger.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId })).code).toBe('NOT_OWNER');
+    expect((await stranger.post('/api/v1/ownership/incidents/resolve', { productId: 'O26-J-99999' })).statusCode).toBe(403);
+    expect((await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId, type: 'LOST' })).statusCode).toBe(400);
+    expect((await owner.post('/api/v1/ownership/incidents/resolve', {})).statusCode).toBe(400);
+
+    const theft = await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId });
+    expect(theft.statusCode).toBe(409);
+    expect(errorOf(theft)).toEqual({ code: 'INCIDENT_NOT_RESOLVABLE', message: 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.' });
+
+    const found = await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId });
+    expect(found.statusCode).toBe(200);
+    const body = safeJson(found) as { productId: string; type: string; resolvedAt: string };
+    expect(body).toEqual({ productId: lost.product.productId, type: 'LOST', resolvedAt: expect.any(String) });
+    expect(found.body).not.toMatch(/OWNED|REGISTERED|status/); // no internal statuses
+    expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('AUTHENTIC_REGISTERED');
+    const again = await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId });
+    expect(again.statusCode).toBe(409);
+    expect(errorOf(again).code).toBe('NO_INCIDENT');
+
+    // A session and the CSRF token, like every ownership mutation.
+    expect((await h.client().post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId })).statusCode).toBe(401);
+    expect(errorOf(await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+  });
+
   it('every ownership mutation needs a session and the CSRF token', async () => {
     const anon = h.client();
     expect((await anon.post('/api/v1/ownership/transfers', { productId: 'O26-J-00001' })).statusCode).toBe(401);

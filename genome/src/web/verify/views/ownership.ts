@@ -3,13 +3,14 @@
  * registration (scan token + claim code), create or cancel a transfer code,
  * and receive a piece with a transfer code. The same panel, in its register
  * mode alone, is the certificate-card section of an UNUSUAL ACTIVITY result
- * (`underReview`: the claim code is required).
+ * (`underReview`: the claim code is required), and, in its account mode, the
+ * sign-in of MY PIECES when signed out (F-01).
  *
  * The password (C-04): under SIGN IN, FORGOTTEN PASSWORD? leads to ORBES
  * Client Services (the contact of C-02), who check the customer's identity
  * and give a one-time recovery code; then I HAVE A RECOVERY CODE opens the
- * form (email, code, new password). Signed in, CHANGE PASSWORD sits beside
- * SIGN OUT (until F-01 moves it to the customer's pieces).
+ * form (email, code, new password). Signed in, the account line reads
+ * SIGNED IN AS … · MY PIECES · SIGN OUT: CHANGE PASSWORD is in MY PIECES.
  *
  *   SIGN IN form ── FORGOTTEN PASSWORD? ──▶ FORGOTTEN PASSWORD (contact)
  *        ▲                                     │ I HAVE A RECOVERY CODE
@@ -26,8 +27,11 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, REQUEST_ERRORS, STAFF_SCAN_NOTE } from '../copy.js';
-import { contactBlock, sectionLabel } from './common.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, PIECES, STAFF_SCAN_NOTE } from '../copy.js';
+import { contactBlock, piecesLink, sectionLabel } from './common.js';
+import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
+
+export { MIN_PASSWORD } from './forms.js';
 
 export interface OwnershipDeps {
   api: ApiClient;
@@ -38,11 +42,10 @@ export interface OwnershipDeps {
   onRefresh?(): void;
   /** ORBES Client Services under FORGOTTEN PASSWORD? (absent when not configured). */
   contact?: ContactModel;
+  /** MY PIECES, from the account line (F-01); without it the link loads the page. */
+  onPieces?(): void;
   now?: () => number;
 }
-
-/** Minimum password length (PLATFORM-CONTRACTS §2.9). */
-export const MIN_PASSWORD = 12;
 
 
 type AuthTab = 'signin' | 'create';
@@ -54,8 +57,6 @@ interface PanelState {
   authTab: AuthTab;
   /** Signed out: the steps of FORGOTTEN PASSWORD?, instead of the sign-in switch. */
   recover: RecoverStep | null;
-  /** Signed in: CHANGE PASSWORD is open, instead of the block of the mode. */
-  changing: boolean;
   /** The email of a recovered account, put back in the sign-in form (never a password). */
   signInEmail: string;
   offer: TransferOffer | null;
@@ -63,17 +64,6 @@ interface PanelState {
   error: string | null;
   notice: string | null;
   busy: boolean;
-}
-
-function messageOf(e: unknown): string {
-  if (e instanceof ApiError) {
-    if (e.isNetwork) return REQUEST_ERRORS.network;
-    if (e.status === 429) return REQUEST_ERRORS.rateLimited;
-    if (e.status === 401) return 'Your session has ended. Please sign in again.';
-    if (e.status >= 500) return 'This could not be completed just now. Please try again in a moment.';
-    return e.message;
-  }
-  return 'This could not be completed. Please try again.';
 }
 
 function timeOf(iso: string): string {
@@ -96,7 +86,7 @@ export class OwnershipPanel {
     private readonly deps: OwnershipDeps,
   ) {
     this.now = deps.now ?? (() => Date.now());
-    this.state = { mode, authTab: 'signin', recover: null, changing: false, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
+    this.state = { mode, authTab: 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
     this.root = h('div', { class: 'ownership' });
     this.unsubscribe = deps.session.subscribe(() => this.render());
@@ -119,13 +109,11 @@ export class OwnershipPanel {
 
   private render(): void {
     const s = this.deps.session.state;
-    // CHANGE PASSWORD belongs to a session, FORGOTTEN PASSWORD? to its absence: a sign-in or sign-out elsewhere closes them.
+    // FORGOTTEN PASSWORD? belongs to the absence of a session: a sign-in elsewhere closes it.
     if (s.status === 'signed-in') this.state.recover = null;
-    else this.state.changing = false;
     const hadFocus = typeof document !== 'undefined' && this.root.contains(document.activeElement);
     const children: (HTMLElement | null)[] = [];
-    if (s.status === 'signed-in' && this.state.changing) children.push(...this.changeBlock());
-    else if (this.state.confirmation) children.push(...this.confirmationBlock());
+    if (this.state.confirmation) children.push(...this.confirmationBlock());
     else {
       const m = this.state.mode;
       switch (m.kind) {
@@ -141,12 +129,16 @@ export class OwnershipPanel {
         case 'staff':
           children.push(this.status('STAFF SCAN'), this.text(STAFF_SCAN_NOTE));
           break;
+        case 'account':
+          // MY PIECES signed out: the sign-in alone. Signed in, the page lists the pieces and has its own account line.
+          if (s.status !== 'signed-in') children.push(...this.authBlock(PIECES.signInLead));
+          break;
         default:
           children.push(this.status('NOT YET DELIVERED'), this.text(NOT_DELIVERED_NOTE));
       }
     }
     if (this.state.notice) children.push(h('p', { class: 'form__notice', attrs: { role: 'status' }, text: this.state.notice }));
-    if (s.status === 'signed-in') children.push(this.accountLine(s.account.email));
+    if (s.status === 'signed-in' && this.state.mode.kind !== 'account') children.push(this.accountLine(s.account.email));
     this.root.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
     // A re-render replaces the focused control; keep keyboard and screen-reader users in the panel.
     if (hadFocus) (this.root.querySelector<HTMLElement>('input, button:not([disabled])') ?? this.root).focus({ preventScroll: true });
@@ -268,18 +260,16 @@ export class OwnershipPanel {
     return out;
   }
 
-  /** SIGNED IN AS …, then CHANGE PASSWORD (while its form is closed) and SIGN OUT, which wrap under it when the line is short. */
+  /**
+   * SIGNED IN AS …, then MY PIECES (F-01: the owner's pieces, where CHANGE PASSWORD now is) and SIGN OUT, which wrap
+   * under it when the line is short.
+   */
   private accountLine(email: string): HTMLElement {
     return h(
       'div',
       { class: 'ownership__account' },
       h('p', { class: 'ownership__who micro soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
-      h(
-        'div',
-        { class: 'ownership__links' },
-        this.state.changing ? null : this.textButton(ACCOUNT_PASSWORD.change, () => this.openChange()),
-        this.textButton('SIGN OUT', () => this.signOut()),
-      ),
+      h('div', { class: 'ownership__links' }, piecesLink(this.deps.onPieces), this.textButton('SIGN OUT', () => this.signOut())),
     );
   }
 
@@ -355,65 +345,12 @@ export class OwnershipPanel {
     ];
   }
 
-  /** CHANGE PASSWORD, signed in: the current password, then the new one. This session stays. */
-  private changeBlock(): HTMLElement[] {
-    return [
-      h('p', { class: 'ownership__status', text: ACCOUNT_PASSWORD.change }),
-      this.text(ACCOUNT_PASSWORD.changeLead),
-      this.changeForm(),
-      h('div', { class: 'ownership__actions' }, this.textButton(ACCOUNT_PASSWORD.cancel, () => this.closeChange())),
-    ];
-  }
-
-  private openChange(): void {
-    this.state.changing = true;
-    this.state.error = null;
-    this.state.notice = null;
-    this.render();
-    this.root.querySelector<HTMLInputElement>('input')?.focus();
-  }
-
-  private closeChange(notice: string | null = null): void {
-    this.state.changing = false;
-    this.state.notice = notice;
-    this.render();
-  }
-
   private field(id: string, label: string, input: HTMLInputElement, hint?: string): HTMLElement {
-    input.id = id;
-    input.classList.add('field__input');
-    const hintEl = hint ? h('span', { class: 'field__hint', id: `${id}-hint`, text: hint }) : null;
-    if (hintEl) input.setAttribute('aria-describedby', hintEl.id);
-    return h('div', { class: 'field' }, h('label', { class: 'field__label', attrs: { for: id }, text: label }), input, hintEl);
+    return field(id, label, input, hint);
   }
 
   private form(name: string, fields: HTMLElement[], submitLabel: string, onSubmit: () => Promise<void>): HTMLFormElement {
-    const error = h('p', { class: 'form__error', attrs: { role: 'alert', hidden: true } });
-    const submit = h('button', { class: 'btn btn--block', attrs: { type: 'submit', 'aria-busy': 'false' }, text: submitLabel });
-    const form = h('form', { class: `form form--${name}`, attrs: { novalidate: true, 'aria-label': submitLabel.toLowerCase() } }, ...fields, error, submit);
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      if (submit.disabled) return;
-      void (async () => {
-        error.hidden = true;
-        error.textContent = '';
-        for (const f of Array.from(form.querySelectorAll('[aria-invalid]'))) f.removeAttribute('aria-invalid');
-        submit.disabled = true;
-        submit.setAttribute('aria-busy', 'true');
-        try {
-          await onSubmit();
-        } catch (e) {
-          this.deps.session.noteError(e);
-          error.textContent = e instanceof FormError ? e.message : messageOf(e);
-          error.hidden = false;
-          (form.querySelector<HTMLElement>('[aria-invalid="true"]') ?? submit).focus();
-        } finally {
-          submit.disabled = false;
-          submit.setAttribute('aria-busy', 'false');
-        }
-      })();
-    });
-    return form;
+    return accountForm(this.deps.session, name, fields, submitLabel, onSubmit);
   }
 
   private signInForm(): HTMLFormElement {
@@ -465,42 +402,6 @@ export class OwnershipPanel {
         this.state.notice = ACCOUNT_PASSWORD.recovered(formatDateTimeLong(r.transfersPausedUntil, -new Date(r.transfersPausedUntil).getTimezoneOffset()));
         this.render();
         this.root.querySelector<HTMLInputElement>('input[name="password"]')?.focus();
-      },
-    );
-  }
-
-  /** CHANGE PASSWORD: a wrong current password is a 400 (never a 401), shown on its field; the session stays. */
-  private changeForm(): HTMLFormElement {
-    const current = h('input', { attrs: { type: 'password', name: 'current-password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
-    const next = h('input', { attrs: { type: 'password', name: 'new-password', autocomplete: 'new-password', required: true, minlength: MIN_PASSWORD, maxlength: 1024 } });
-    return this.form(
-      'password',
-      [
-        this.field('current-password', ACCOUNT_PASSWORD.currentPassword, current),
-        this.field('new-password', ACCOUNT_PASSWORD.newPassword, next, `At least ${MIN_PASSWORD} characters.`),
-      ],
-      ACCOUNT_PASSWORD.change,
-      async () => {
-        if (!current.value) {
-          current.setAttribute('aria-invalid', 'true');
-          throw new FormError('Enter your current password.');
-        }
-        if (next.value.length < MIN_PASSWORD) {
-          next.setAttribute('aria-invalid', 'true');
-          throw new FormError(`Choose a password of at least ${MIN_PASSWORD} characters.`);
-        }
-        try {
-          await this.deps.api.changePassword(current.value, next.value);
-        } catch (e) {
-          if (e instanceof ApiError && e.code === 'CURRENT_PASSWORD_INVALID') {
-            current.value = '';
-            current.setAttribute('aria-invalid', 'true');
-          }
-          throw e;
-        }
-        current.value = '';
-        next.value = '';
-        this.closeChange(ACCOUNT_PASSWORD.changed);
       },
     );
   }
@@ -625,11 +526,8 @@ export class OwnershipPanel {
         await this.deps.api.logout();
       } finally {
         this.state.offer = null;
-        this.state.changing = false;
         this.deps.session.signedOut();
       }
     });
   }
 }
-
-class FormError extends Error {}

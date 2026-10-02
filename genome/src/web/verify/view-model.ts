@@ -44,20 +44,27 @@ export type OwnershipMode =
    * Open for its first registration, but this scan earned no token: the browser is signed in to the
    * ORBES console, so the server recorded a staff scan (S-07, API §9.2: `staffScan`), never a buyer's.
    */
-  | { kind: 'staff' };
+  | { kind: 'staff' }
+  /**
+   * Not a scan: MY PIECES (F-01) signed out. The panel offers its sign-in forms (and FORGOTTEN PASSWORD?) alone,
+   * so an owner whose piece is gone reaches the account without scanning it; signed in, the page lists the pieces.
+   */
+  | { kind: 'account' };
 
 /**
  * ORBES Client Services, offered where the result asks the customer to contact it: under the
  * help line of every caution and void result, and in the WARRANTY tab when the warranty no
- * longer applies; and under FORGOTTEN PASSWORD? in the OWNERSHIP panel, where Client Services
- * gives the one-time recovery code (C-04). Built from GET /api/v1/client-services; absent when
- * neither a usable email nor a usable phone is configured.
+ * longer applies; under FORGOTTEN PASSWORD? in the OWNERSHIP panel, where Client Services
+ * gives the one-time recovery code (C-04); and in MY PIECES, under a report only Client
+ * Services can withdraw (a theft, or a loss they recorded: F-01). Built from GET
+ * /api/v1/client-services; absent when neither a usable email nor a usable phone is configured.
  */
 export interface ContactModel {
-  placement: 'help' | 'warranty' | 'recovery';
+  placement: 'help' | 'warranty' | 'recovery' | 'piece';
   /**
    * mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and
-   * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference.
+   * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference; for a piece of
+   * MY PIECES, the subject "ORBES — {product id} — {status}" and the piece.
    */
   mailto?: string;
   /** The number as configured, and its tel: link. */
@@ -224,8 +231,27 @@ const ASSURANCE_LABEL = Object.freeze({
   CODE_AND_HARDWARE: 'PRINTED CODE AND SECURE HARDWARE',
 });
 
-function upper(s: string | undefined | null): string {
+export function upper(s: string | undefined | null): string {
   return (s ?? '').trim().toUpperCase();
+}
+
+/** Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED (the variant belongs to the rows), as a result and MY PIECES show them. */
+export function productLines(p: { model: string; type: string; category?: { name: string } | null; material: string; createdYear?: number | null }): string[] {
+  return [upper(p.model), upper(p.type), upper(p.category?.name), upper(p.material), p.createdYear ? `CREATED ${p.createdYear}` : ''].filter((x) => x.length > 0);
+}
+
+/** The WARRANTY rows and their sentence, on a result and in MY PIECES; undefined for a status the app does not know. */
+export function warrantyModel(w: { status: WarrantyStatus; startDate?: string; endDate?: string } | undefined | null): { status: string; rows: Row[]; note: string } | undefined {
+  if (!w || !WARRANTY_STATUS[w.status]) return undefined;
+  const rows: Row[] = [['STATUS', WARRANTY_STATUS[w.status]]];
+  if (w.startDate) rows.push(['FROM', formatDate(w.startDate)]);
+  if (w.endDate) rows.push(['UNTIL', formatDate(w.endDate)]);
+  return { status: WARRANTY_STATUS[w.status], rows, note: warrantyNote(w.status, formatDateLong(w.endDate)) };
+}
+
+/** Eight glyph indices of 0 to 15, as GENOME-01 defines them: anything else is not drawn. */
+export function validGlyphs(glyphs: unknown): glyphs is number[] {
+  return Array.isArray(glyphs) && glyphs.length === 8 && glyphs.every((x) => Number.isInteger(x) && x >= 0 && x <= 15);
 }
 
 function genomeVersionNumber(version: string): number {
@@ -263,7 +289,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
 
   // GENOME: shown whenever the server sends it (authentic, suspicious, revoked).
   const g = outcome.genome;
-  if (g && Array.isArray(g.glyphs) && g.glyphs.length === 8 && g.glyphs.every((x) => Number.isInteger(x) && x >= 0 && x <= 15)) {
+  if (g && validGlyphs(g.glyphs)) {
     vm.genome = {
       id: g.id,
       version: g.version,
@@ -276,9 +302,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
 
   const p = outcome.product;
   if (authentic && p) {
-    // Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED; the variant belongs to the PRODUCT tab.
-    vm.productLines = [upper(p.model), upper(p.type), upper(p.category?.name), upper(p.material), p.createdYear ? `CREATED ${p.createdYear}` : '']
-      .filter((x) => x.length > 0);
+    vm.productLines = productLines(p);
     const rows: Row[] = [['PRODUCT ID', p.productId]];
     if (p.collection) rows.push(['COLLECTION', upper(p.collection)]);
     rows.push(['MODEL', upper(p.model)], ['TYPE', upper(p.type)]);
@@ -305,13 +329,8 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
   }
 
   if (authentic) {
-    const w = outcome.warranty;
-    if (w && WARRANTY_STATUS[w.status]) {
-      const rows: Row[] = [['STATUS', WARRANTY_STATUS[w.status]]];
-      if (w.startDate) rows.push(['FROM', formatDate(w.startDate)]);
-      if (w.endDate) rows.push(['UNTIL', formatDate(w.endDate)]);
-      vm.warranty = { status: WARRANTY_STATUS[w.status], rows, note: warrantyNote(w.status, formatDateLong(w.endDate)) };
-    }
+    const warranty = warrantyModel(outcome.warranty);
+    if (warranty) vm.warranty = warranty;
     vm.ownership = ownershipMode(outcome);
     vm.footnote = ASSURANCE_NOTE;
   } else if (state === 'SUSPICIOUS_ACTIVITY') {
@@ -398,6 +417,15 @@ function contactModel(cs: ClientServices, vm: ResultViewModel, placement: Contac
 export function recoveryContactModel(cs: ClientServices | undefined, reference: string): ContactModel | null {
   const lines = cs ? contactLines(cs) : null;
   return lines ? contactOf(lines, 'recovery', CONTACT.recoverySubject, [[CONTACT.reference, reference]]) : null;
+}
+
+/**
+ * ORBES Client Services for a piece of MY PIECES whose report only they withdraw (a theft, or a loss they recorded,
+ * F-01): the email's subject names the piece and its status line, its body the piece. Null when nothing is configured.
+ */
+export function pieceContactModel(cs: ClientServices | undefined, productId: string, status: string): ContactModel | null {
+  const lines = cs ? contactLines(cs) : null;
+  return lines ? contactOf(lines, 'piece', ['ORBES', productId, status].filter((x) => x.length > 0).join(' — '), [[CONTACT.piece, productId]]) : null;
 }
 
 function ownershipMode(o: VerifyOutcome): OwnershipMode {

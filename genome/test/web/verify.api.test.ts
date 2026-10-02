@@ -173,6 +173,41 @@ describe('ApiClient', () => {
     await expect(api.recoverAccount('a@example.com', 'ZZZZ-ZZZZ-ZZZZ', 'a brand new passphrase')).rejects.toMatchObject({ status: 400, code: 'RECOVERY_CODE_INVALID' });
   });
 
+  it('MY PIECES (F-01): lists the pieces and a service history (GET), reports and withdraws an incident with the CSRF token', async () => {
+    const piece = { productId: 'O26-J-00184', incident: null, incidentResolvable: false };
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(200, { products: [piece] }),
+      () => json(200, { productId: 'O26-J-00184', services: [{ id: 's1', type: 'POLISH', status: 'COMPLETED', location: null, openedAt: 'a', closedAt: 'b' }] }),
+      () => json(201, { productId: 'O26-J-00184', type: 'LOST', reportedAt: '2026-10-03T09:00:00.000Z' }),
+      () => json(200, { productId: 'O26-J-00184', type: 'LOST', resolvedAt: '2026-10-03T10:00:00.000Z' }),
+      () => json(409, { error: { code: 'INCIDENT_NOT_RESOLVABLE', message: 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.' } }),
+      () => json(200, { unexpected: true }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect(await api.products()).toEqual([piece]);
+    expect(f.calls[1]).toMatchObject({ url: '/api/v1/account/products', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect((await api.serviceHistory('O26-J-00184')).map((s) => s.type)).toEqual(['POLISH']);
+    expect(f.calls[2]).toMatchObject({ url: '/api/v1/products/O26-J-00184/service-history', method: 'GET' });
+    expect(await api.reportIncident('O26-J-00184', 'LOST')).toMatchObject({ type: 'LOST' });
+    expect(f.calls[3]).toMatchObject({ url: '/api/v1/ownership/incidents', method: 'POST', body: { productId: 'O26-J-00184', type: 'LOST' } });
+    expect(f.calls[3].headers['x-csrf-token']).toBe('t1');
+    expect(await api.resolveIncident('O26-J-00184')).toMatchObject({ resolvedAt: '2026-10-03T10:00:00.000Z' });
+    expect(f.calls[4]).toMatchObject({ url: '/api/v1/ownership/incidents/resolve', method: 'POST', body: { productId: 'O26-J-00184' } });
+    expect(f.calls[4].headers['x-csrf-token']).toBe('t1');
+    // A theft: the server's sentence, as it is written for the owner.
+    await expect(api.resolveIncident('O26-J-00184')).rejects.toMatchObject({ status: 409, code: 'INCIDENT_NOT_RESOLVABLE' });
+    // A list that is not one is a bad response, never an empty list.
+    await expect(api.products()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
+  it('puts a product id in the service-history path encoded', async () => {
+    const f = fakeFetch([() => json(200, { productId: 'x', services: [] })]);
+    await new ApiClient({ fetch: f.impl }).serviceHistory('a/../b?c');
+    expect(f.calls[0].url).toBe('/api/v1/products/a%2F..%2Fb%3Fc/service-history');
+  });
+
   it('omits an empty claim code and display name', async () => {
     const f = fakeFetch([() => json(201, SESSION('t')), () => json(201, { productId: 'p', verified: false, since: 's' })]);
     const api = new ApiClient({ fetch: f.impl });

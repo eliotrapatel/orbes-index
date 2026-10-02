@@ -9,8 +9,10 @@
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
  * the scan, the password (FORGOTTEN PASSWORD? through ORBES Client Services
- * and a recovery code, then CHANGE PASSWORD beside SIGN OUT), and the
- * problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * and a recovery code, then CHANGE PASSWORD in MY PIECES), MY PIECES (F-01:
+ * sign-in, the list, its tabs from the keyboard, a piece reported stolen
+ * then scanned by a stranger, a loss withdrawn; a direct link, a reload and
+ * the back button), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -375,7 +377,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('recovers a forgotten password with the code of ORBES Client Services, then changes it beside SIGN OUT', async () => {
+  it('recovers a forgotten password with the code of ORBES Client Services, then changes it in MY PIECES', async () => {
     // An owner who forgot the password scans their piece, signed out.
     const email = 'helene.martin@example.com';
     const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
@@ -446,31 +448,250 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
     await textOf(page.locator('.ownership__email'), email);
 
-    // Signed in: CHANGE PASSWORD beside SIGN OUT, both on one line at every phone width.
-    await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT']);
+    // Signed in: MY PIECES beside SIGN OUT (F-01: CHANGE PASSWORD has moved there), both on one line at every phone width.
+    await countOf(panel.getByRole('button', { name: 'CHANGE PASSWORD' }), 0);
+    await keepsFloors(page, ['MY PIECES', 'SIGN OUT']);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
-      await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT']);
+      await keepsFloors(page, ['MY PIECES', 'SIGN OUT']);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
-    await page.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
-    await textOf(panel.locator('.ownership__status'), 'CHANGE PASSWORD');
+    await attrOf(panel.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');
+    await panel.getByRole('link', { name: 'MY PIECES' }).click();
+    await textOf(page.locator('h1'), 'MY PIECES');
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    // The account line at the foot of MY PIECES: CHANGE PASSWORD beside SIGN OUT, both on one line at every phone width.
+    const account = page.locator('.pieces__account');
+    await textOf(account.locator('.ownership__email'), email);
+    await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await account.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(account.locator('.ownership__status'), 'CHANGE PASSWORD');
+    // Keyboard focus moves into the form, on the current password.
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('current-password');
     await keepsFloors(page, ['CHANGE PASSWORD', 'CANCEL', 'SIGN OUT']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-change-password.png'), fullPage: true });
+    // CANCEL closes it, focus back on CHANGE PASSWORD; then open it again.
+    await account.getByRole('button', { name: 'CANCEL' }).click();
+    await countOf(account.locator('form'), 0);
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('CHANGE PASSWORD');
+    await account.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
     // A wrong current password is said on its field; the page stays signed in (a 400, never a 401).
-    await panel.getByLabel('CURRENT PASSWORD', { exact: true }).fill('not my password at all');
-    await panel.getByLabel('NEW PASSWORD', { exact: true }).fill('another new passphrase');
-    await panel.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
-    await textOf(panel.getByRole('alert'), 'The current password is not correct.');
-    await attrOf(panel.getByLabel('CURRENT PASSWORD', { exact: true }), 'aria-invalid', 'true');
-    await textOf(page.locator('.ownership__email'), email);
-    await panel.getByLabel('CURRENT PASSWORD', { exact: true }).fill('a brand new passphrase');
-    await panel.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
-    await textOf(page.locator('.form__notice'), 'Your password has been changed. Your other sessions have ended.');
-    await textOf(page.locator('.ownership__email'), email);
+    await account.getByLabel('CURRENT PASSWORD', { exact: true }).fill('not my password at all');
+    await account.getByLabel('NEW PASSWORD', { exact: true }).fill('another new passphrase');
+    await account.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(account.getByRole('alert'), 'The current password is not correct.');
+    await attrOf(account.getByLabel('CURRENT PASSWORD', { exact: true }), 'aria-invalid', 'true');
+    await textOf(account.locator('.ownership__email'), email);
+    await account.getByLabel('CURRENT PASSWORD', { exact: true }).fill('a brand new passphrase');
+    await account.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(account.locator('.form__notice'), 'Your password has been changed. Your other sessions have ended.');
+    await textOf(account.locator('.ownership__email'), email);
+    // Still the owner's page: the piece is listed.
+    await textOf(page.locator('.piece .genome__id'), issued.product.productId);
     expect((await srv.ctx.services.auth.login({ email, password: 'another new passphrase' }, {})).account.email).toBe(email);
+    // Back leaves MY PIECES (it took the result's place in the history) for the landing.
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).first().waitFor();
+    await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    expect(new URL(page.url()).pathname).toBe('/verify');
     expect(problems).toEqual([]);
     await page.context().close();
+  }, 120_000);
+
+  /** A piece sold (warranty started) and registered to `accountId` with its claim code, as the owner's scan would. */
+  async function ownedPiece(accountId: string): Promise<IssueResult> {
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, { type: 'account', id: accountId });
+    return issued;
+  }
+
+  it('MY PIECES: signs in without a scan, lists the pieces, reports one stolen, which a stranger then scans as UNUSUAL ACTIVITY', async () => {
+    const email = 'claire.bernard@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    const older = await ownedPiece(owner.account.id);
+    const polish = await srv.ctx.services.warranty.openService(older.product.id, { type: 'POLISH', location: 'Paris atelier', notes: 'staff note' }, SYSTEM_ACTOR);
+    await srv.ctx.services.warranty.completeService(polish.id, {}, SYSTEM_ACTOR);
+    const newer = await ownedPiece(owner.account.id);
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+
+    // The landing offers MY PIECES once the session is known, signed out too: the owner of a piece that is gone cannot scan it.
+    const link = page.getByRole('link', { name: 'MY PIECES' });
+    await visible(link);
+    await attrOf(link, 'href', '/verify/pieces');
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'MY PIECES']);
+    await link.click();
+    await textOf(page.locator('h1'), 'MY PIECES');
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+
+    // Signed out: the OWNERSHIP panel's sign-in alone, FORGOTTEN PASSWORD? under it.
+    const signIn = page.locator('.pieces__signin');
+    await textOf(signIn.locator('.ownership__text').first(), /^Sign in to see the pieces registered to your ORBES account\. A piece lost or stolen can be reported here, without scanning it\.$/);
+    await visible(signIn.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }));
+    await countOf(page.locator('article.piece'), 0);
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE']);
+    await signIn.getByLabel('EMAIL').fill(email);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+
+    // The pieces, newest acquisition first, each on its ivory plate; keyboard focus on the page's title above them.
+    const pieces = page.locator('article.piece');
+    await countOf(pieces, 2);
+    await textsOf(page.locator('.piece .genome__id'), [newer.product.productId, older.product.productId]);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id), POLL).toBe('pieces-title');
+    await textOf(page.locator('.pieces__lead'), 'The pieces registered to your ORBES account.');
+    const card = page.getByRole('article', { name: older.product.productId });
+    const other = page.getByRole('article', { name: newer.product.productId });
+    expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    await countOf(card.locator('.genome__glyphs .genome-svg--orbit g[data-layer="genome"]'), 8);
+    await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
+    await textOf(card.locator('.genome__meta'), `${older.genome.fingerprint} · GENOME-01`);
+    await textsOf(card.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE']);
+    await attrOf(card.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(card.locator('.piece__ownership .rows'), /^SINCE \d{1,2} [A-Z]{3} \d{4} ACQUIRED FIRST REGISTRATION OWNERSHIP VERIFIED$/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    const listControls = ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'REPORT LOST / STOLEN', 'CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE'];
+    await keepsFloors(page, listControls);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces.png'), fullPage: true });
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, listControls);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // The tabs of a piece from the keyboard (the result's tablist): arrows, Home and End, one tab in the tab order.
+    const tab = (name: string) => card.getByRole('tab', { name });
+    await tab('OWNERSHIP').focus();
+    await page.keyboard.press('ArrowRight');
+    await attrOf(tab('WARRANTY'), 'aria-selected', 'true');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('WARRANTY');
+    expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1]);
+    await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty until 20 September 2028\./);
+    await page.keyboard.press('ArrowRight');
+    await attrOf(tab('SERVICE'), 'aria-selected', 'true');
+    // The service history, without staff notes.
+    await textOf(card.getByRole('tabpanel').locator('.rows'), /^POLISH \d{1,2} [A-Z]{3} \d{4} · PARIS ATELIER$/);
+    await countOf(card.getByText('staff note'), 0);
+    await page.keyboard.press('ArrowRight');
+    await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
+    await page.keyboard.press('End');
+    await attrOf(tab('SERVICE'), 'aria-selected', 'true');
+    await page.keyboard.press('Home');
+    await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('OWNERSHIP');
+    // Each piece has its own tablist: the other one did not move.
+    await attrOf(other.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await countOf(other.getByRole('tabpanel'), 1);
+
+    // A reload stays on MY PIECES, signed in.
+    await page.reload();
+    await textOf(page.locator('h1'), 'MY PIECES');
+    await countOf(pieces, 2);
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+
+    // REPORT LOST / STOLEN, confirmed: LOST or STOLEN first, then CONFIRM REPORT.
+    await card.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
+    await textOf(card.locator('.section-label'), 'REPORT LOST / STOLEN');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORT LOST / STOLEN');
+    await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
+    await textOf(card.getByRole('alert'), 'Choose LOST or STOLEN.');
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', older.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'OWNED' });
+    const choice = card.getByRole('group', { name: 'What happened to this piece' });
+    await choice.getByRole('button', { name: 'STOLEN' }).click();
+    await attrOf(choice.getByRole('button', { name: 'STOLEN' }), 'aria-pressed', 'true');
+    await attrOf(choice.getByRole('button', { name: 'LOST' }), 'aria-pressed', 'false');
+    await textOf(card.locator('.piece__ownership'), /Once it is recovered, ORBES Client Services check the piece and withdraw the report\./);
+    await keepsFloors(page, ['LOST', 'STOLEN', 'CONFIRM REPORT', 'CANCEL']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-report.png'), fullPage: true });
+    await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
+    await textOf(card.locator('.ownership__status'), 'REPORTED STOLEN');
+    await textOf(card.getByRole('status'), 'This piece is now reported stolen. Every scan of its code shows UNUSUAL ACTIVITY.');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORTED STOLEN');
+    // A theft is ORBES Client Services' to withdraw: nothing to press, their contact instead.
+    await countOf(card.getByRole('button', { name: 'PIECE FOUND' }), 0);
+    await countOf(card.getByRole('button', { name: 'REPORT LOST / STOLEN' }), 0);
+    const contact = card.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
+    const href = new URL((await contact.getAttribute('href'))!);
+    expect(href.searchParams.get('subject')).toBe(`ORBES — ${older.product.productId} — REPORTED STOLEN`);
+    expect(href.searchParams.get('body')).toBe(`\r\n\r\nPIECE: ${older.product.productId}`);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SIGN OUT']);
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', older.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'STOLEN' });
+
+    // The other piece: reported LOST, then found again by its owner (PIECE FOUND, confirmed).
+    await other.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
+    await other.getByRole('button', { name: 'LOST', exact: true }).click();
+    await textOf(other.locator('.piece__ownership'), /Once you find it, you withdraw the report yourself, here: PIECE FOUND\./);
+    await other.getByRole('button', { name: 'CONFIRM REPORT' }).click();
+    await textOf(other.locator('.ownership__status'), 'REPORTED LOST');
+    await textOf(other.locator('.piece__ownership'), /Every scan of its code shows UNUSUAL ACTIVITY until you tell ORBES that it has been found\./);
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'LOST' });
+    await other.getByRole('button', { name: 'PIECE FOUND' }).click();
+    await textOf(other.locator('.section-label'), 'PIECE FOUND');
+    await keepsFloors(page, ['CONFIRM', 'CANCEL']);
+    await other.getByRole('button', { name: 'CONFIRM', exact: true }).click();
+    await textOf(other.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(other.getByRole('status'), 'This piece is no longer reported lost.');
+    await visible(other.getByRole('button', { name: 'REPORT LOST / STOLEN' }));
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'OWNED' });
+    const audit = await srv.ctx.audit.list({ action: 'ownership.incident.resolve', targetId: newer.product.productId });
+    expect(audit.items.map((e) => [e.actorType, e.actorId, e.details])).toEqual([['account', owner.account.id, { type: 'LOST', to: 'OWNED' }]]);
+
+    // Back returns to the landing (MY PIECES sat in one entry above it).
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).first().waitFor();
+    await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    expect(new URL(page.url()).pathname).toBe('/verify');
+    expect(problems).toEqual([]);
+    await page.context().close();
+
+    // A stranger scans the stolen piece: UNUSUAL ACTIVITY. The piece found again reads as it did before its loss.
+    const stranger = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(stranger.page, writeCodePng(srv.workDir, 'reported-stolen.png', older));
+    expect(await resultTitle(stranger.page)).toBe('UNUSUAL ACTIVITY DETECTED');
+    await attrOf(stranger.page.locator('.view--result'), 'data-tone', 'caution');
+    await countOf(stranger.page.getByRole('tab'), 0);
+    await stranger.page.goBack();
+    await stranger.page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(stranger.page, writeCodePng(srv.workDir, 'found-again.png', newer));
+    expect(await resultTitle(stranger.page)).toBe('AUTHENTIC REGISTERED');
+    expect(stranger.problems).toEqual([]);
+    await stranger.page.context().close();
+  }, 180_000);
+
+  it('MY PIECES from a direct link: the sign-in, then back to the landing rather than out of the app', async () => {
+    const ctx = await mobileContext(browser, { reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const problems: string[] = [];
+    page.on('console', (m) => {
+      if (!isExpectedConsole(m) || /Content Security Policy/i.test(m.text())) problems.push(`console ${m.type()}: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    const res = await page.goto(`${srv.origin}/verify/pieces`);
+    expect(res?.status()).toBe(200);
+    await textOf(page.locator('h1'), 'MY PIECES');
+    await visible(page.locator('.pieces__signin').getByRole('button', { name: 'SIGN IN' }).first());
+    // The app put its landing under MY PIECES (after the new tab's blank page): back stays in the app.
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(new URL(page.url()).pathname).toBe('/verify');
+    await page.goForward();
+    await textOf(page.locator('h1'), 'MY PIECES');
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    // An address the app does not know opens the landing, at /verify.
+    await page.goto(`${srv.origin}/verify/somewhere/else`);
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(new URL(page.url()).pathname).toBe('/verify');
+    expect(problems).toEqual([]);
+    await ctx.close();
   }, 120_000);
 
   it('scans as staff in a browser signed in to the console (S-07): no registration offered, the scan recorded under the console user', async () => {

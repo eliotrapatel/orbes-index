@@ -25,7 +25,8 @@
  *   verify, last (its scans would change the console's figures)
  *     UNUSUAL ACTIVITY with DO YOU HOLD THE CERTIFICATE CARD? (O26-L-00014,
  *     sold and unregistered, with a claim code, after a burst of scans of
- *     copies of its code from 22 sources)
+ *     copies of its code from 22 sources) · MY PIECES (F-01) of the demo
+ *     owner Camille Martin, signed in
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -78,6 +79,8 @@ const CARD_SECTION = 'O26-L-00014'; // sold (ACTIVATED), unregistered, ships wit
 const CARD_BURST = 22;
 
 const ADMIN = { email: 'console@example.com', password: 'capture-ui-demo-password' };
+/** The demo owner whose pieces MY PIECES shows (the demo accounts take this password for the capture). */
+const OWNER = { email: 'camille.martin@example.com', password: 'capture-ui-owner-password' };
 const MOBILE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1440, height: 900 } as const;
 const IPHONE_UA =
@@ -148,7 +151,7 @@ async function startStage(workDir: string): Promise<Stage> {
   const config = testConfig({ publicOrigin: origin, host: '127.0.0.1', port, bootstrapAdmin: ADMIN });
   const ctx = await createContext(config, { db, clock, log: noopLogger, keyProvider: new MemoryKeyProvider({ env: 'test' }), migrate: true });
   const t1 = Date.now();
-  const seeded = await seedDemo(ctx, { clock: seedClock, now: new Date(), log: noopLogger });
+  const seeded = await seedDemo(ctx, { clock: seedClock, now: new Date(), log: noopLogger, accountPassword: OWNER.password });
   live = true;
   log(`demo dataset: ${seeded.products} products, ${seeded.scans} scans, ${seeded.anomalies.open} open anomalies (${Date.now() - t1} ms)`);
 
@@ -442,6 +445,32 @@ async function captureVerifyCard(stage: Stage, shots: Shots): Promise<void> {
   }
 }
 
+/** MY PIECES (F-01): a demo owner's pieces, each on its ivory plate, signed in through the account API. */
+async function captureVerifyPieces(stage: Stage, shots: Shots): Promise<void> {
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await mobileContext(browser);
+    const page = await context.newPage();
+    watchPage(page, 'verify-pieces');
+    await page.goto(`${stage.origin}/verify`);
+    await page.waitForSelector('.landing__scan');
+    const status = await page.evaluate(
+      async (c) => (await fetch('/api/v1/account/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) })).status,
+      OWNER,
+    );
+    if (status !== 200) throw new Error(`${OWNER.email} could not sign in (${status})`);
+    await page.goto(`${stage.origin}/verify/pieces`);
+    await page.waitForSelector('article.piece .genome-svg', { timeout: 20_000 });
+    await page.evaluate(() => document.fonts.ready);
+    await hideGrain(page);
+    await sleep(1400); // view rise (1.1 s)
+    await shots.viewport(page, 'verify-12-my-pieces');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 // ── Admin console ──────────────────────────────────────────────────────────
 
 async function captureAdmin(stage: Stage, shots: Shots): Promise<void> {
@@ -634,6 +663,8 @@ async function main(): Promise<void> {
     await captureAdmin(stage, shots);
     log('verify, certificate-card section:');
     await captureVerifyCard(stage, shots);
+    log('verify, my pieces:');
+    await captureVerifyPieces(stage, shots);
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);

@@ -124,3 +124,56 @@ export interface TransferOffer {
   transferCode: string;
   expiresAt: string;
 }
+
+/** What an owner declares in MY PIECES (POST /api/v1/ownership/incidents). */
+export type IncidentType = 'LOST' | 'STOLEN';
+
+export const INCIDENT_TYPES: readonly IncidentType[] = ['LOST', 'STOLEN'];
+
+/** One piece of GET /api/v1/account/products (API §10.5): the signed-in owner's own view, no internal status. */
+export interface OwnedPiece {
+  productId: string;
+  category: { code: string; name: string };
+  collection: string | null;
+  model: string;
+  type: string;
+  variant: string | null;
+  material: string;
+  createdYear: number;
+  acquiredVia: 'FIRST_REGISTRATION' | 'TRANSFER' | 'RESALE' | 'ADMIN';
+  verified: boolean;
+  since: string;
+  transfer: { pending: boolean; expiresAt?: string };
+  /** LOST or STOLEN while the piece is reported, else null. */
+  incident: IncidentType | null;
+  /** A LOST its owner reported: PIECE FOUND withdraws it (POST /api/v1/ownership/incidents/resolve). */
+  incidentResolvable: boolean;
+  inService: boolean;
+  /** `version` is an integer here (1), `pattern` the glyph ids joined by "·". */
+  genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
+  warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
+}
+
+/** One after-sales service of a piece (GET /api/v1/products/:productId/service-history), without staff notes. */
+export interface ServiceRecord {
+  id: string;
+  type: string;
+  status: 'OPEN' | 'COMPLETED' | 'CANCELLED';
+  location: string | null;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+/** POST /api/v1/ownership/incidents. */
+export interface IncidentReport {
+  productId: string;
+  type: IncidentType;
+  reportedAt: string;
+}
+
+/** POST /api/v1/ownership/incidents/resolve: a loss withdrawn by the owner who reported it. */
+export interface IncidentResolution {
+  productId: string;
+  type: 'LOST';
+  resolvedAt: string;
+}

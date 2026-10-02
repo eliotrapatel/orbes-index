@@ -1,6 +1,7 @@
 /**
  * Ownership routes (contract §3, cookie `orbes_session`): first registration
- * with a scan token (+ claim code), transfers, incident reports.
+ * with a scan token (+ claim code), transfers, incident reports and the
+ * withdrawal of a loss the owner reported (PIECE FOUND, MY PIECES).
  *
  * All are account-authenticated mutations, so the scope guard enforces the
  * session, CSRF token and same-origin checks. Registration and transfer
@@ -61,5 +62,13 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
     const change = await ownership.reportIncident(account.id, b.productId, b.type, accountActor(request));
     reply.code(201);
     return { productId: change.productId, type: b.type, reportedAt: change.at };
+  });
+
+  // PIECE FOUND (MY PIECES, F-01): the owner withdraws a loss they reported themselves; a theft stays with ORBES Client Services.
+  app.post('/api/v1/ownership/incidents/resolve', async (request) => {
+    const { account } = requireAccount(request);
+    const b = parse(productRefBody, request.body);
+    const change = await ownership.resolveIncident(account.id, b.productId, accountActor(request));
+    return { productId: change.productId, type: 'LOST', resolvedAt: change.at };
   });
 };

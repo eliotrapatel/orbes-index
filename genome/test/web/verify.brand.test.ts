@@ -68,6 +68,19 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
   });
 
+  it('sets each piece of MY PIECES in its écrin: the GENOME plate of a result (ivory, the same margins), the same orbit (F-01)', () => {
+    const plate = rule(styles, '.piece__plate');
+    const genome = rule(styles, '.result__genome');
+    for (const k of ['background', 'color', 'padding', 'text-align']) expect(plate[k], k).toBe(genome[k]);
+    expect(rule(styles, '.piece__plate .bracket').color).toBe(rule(styles, '.result__genome .bracket').color);
+    const pieces = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
+    expect(pieces).toContain("bracket(\n");
+    expect(pieces).toContain("genomeBlock(this.model.genome, { titleId })");
+    // The column of a result.
+    expect(rule(styles, '.view--pieces')['max-width']).toBe(rule(styles, '.view--result')['max-width']);
+    expect(rule(styles, '.view--pieces').padding).toBe(rule(styles, '.view--result').padding);
+  });
+
   it('sets the customer-quotable reference (VERIFIED · REF) at ≥ 10 px in a readable tone', () => {
     const meta = rule(styles, '.result__meta');
     const px = Number.parseFloat(resolve(meta['font-size']));
@@ -217,7 +230,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.genome__meta')['font-size'])).toBeGreaterThanOrEqual(10);
     // The views set these lines with the 10 px .micro class: the closing time of registration, the
     // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
-    const views = ['views/ownership.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
+    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
     const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
     for (const line of ['ownership__meta', 'transfer-code__label', 'ownership__who', 'genome__meta']) {
       const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
@@ -290,7 +303,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).

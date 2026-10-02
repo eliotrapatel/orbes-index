@@ -2,13 +2,24 @@
  * ORBES verification app (PLATFORM-CONTRACTS §4, spec §19–20).
  *
  *   landing ──SCAN──▶ scanner ──code read──▶ VERIFYING… ──▶ result
- *      └──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
+ *      ├──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
+ *      └──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
  * The page only reads the code; the server verifies it. Nothing secret lives
- * here: no keys, no thresholds. History: the landing screen is the base
- * entry and every other screen shares one entry above it, so the back button
- * (or CLOSE) always returns to the landing screen and releases the camera.
+ * here: no keys, no thresholds.
+ *
+ * Paths (a small router; static.ts serves the shell at /verify and /verify/*):
+ *   /verify          the landing, and every screen of a scan (one URL);
+ *   /verify/pieces   MY PIECES, which a link, a reload or a bookmark opens directly;
+ *   anything else    the landing, its address put back to /verify.
+ *
+ * History: the landing screen is the base entry and every other screen shares
+ * one entry above it, MY PIECES included (with its own URL), so the back
+ * button (or CLOSE) always returns to the landing screen and releases the
+ * camera. Opened directly, MY PIECES puts a landing entry under itself, so
+ * back still leads to the landing rather than out of the app; a reload keeps
+ * the entry it is on.
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
@@ -20,13 +31,25 @@ import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError
 import { SessionStore } from './session.js';
 import type { ClientServices, VerifyInput } from './types.js';
 import { resultViewModel } from './view-model.js';
+import { LANDING_PATH, PIECES_PATH } from './views/common.js';
 import { landingView } from './views/landing.js';
 import { messageView } from './views/message.js';
-import { resultView, type ResultView } from './views/result.js';
+import { piecesView } from './views/pieces.js';
+import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces';
+
+/** What a history entry of the app holds: the landing, a screen of a scan, or MY PIECES. */
+type Entry = 'landing' | 'app' | 'pieces';
+
+/** The route of a path under /verify: MY PIECES, or the landing (also for a path the app does not know). */
+function routeOf(pathname: string): 'landing' | 'pieces' {
+  return pathname.replace(/\/+$/, '') === PIECES_PATH ? 'pieces' : 'landing';
+}
+
+const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
 /** Minimum time VERIFYING… stays visible, so a fast answer never reads as a flicker. */
 const MIN_VERIFYING_MS = 650;
@@ -51,7 +74,8 @@ class App {
   private readonly camera = new Camera();
   private decoder: DecoderClient | null = null;
   private scan: { view: ScanView; session: ScanSession } | null = null;
-  private result: ResultView | null = null;
+  /** The screen on show that holds listeners (a result, MY PIECES): released when another takes its place. */
+  private live: { dispose(): void } | null = null;
   private screen: Screen = 'landing';
   /** Bumped on every navigation; async work started under an older value is dropped. */
   private generation = 0;
@@ -70,15 +94,27 @@ class App {
       this.photoInput.value = '';
       if (file) void this.verifyPhoto(file);
     });
-    window.addEventListener('popstate', () => {
-      if (this.screen !== 'landing') this.showLanding();
+    window.addEventListener('popstate', (ev) => {
+      // Back or forward onto MY PIECES shows it again; onto the landing, or onto a scan's entry (its screen is gone), the landing.
+      if (entryOf(ev.state) === 'pieces' || routeOf(location.pathname) === 'pieces') {
+        if (this.screen !== 'pieces') void this.showPieces();
+      } else if (this.screen !== 'landing') this.showLanding();
     });
     document.addEventListener('visibilitychange', () => this.onVisibility());
     window.addEventListener('pagehide', () => this.stopCamera());
 
     document.body.prepend(viewportCorners());
-    history.replaceState({ screen: 'landing' }, '');
-    this.showLanding(false);
+    if (routeOf(location.pathname) === 'pieces') {
+      // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES.
+      if (entryOf(history.state) !== 'pieces') {
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+      }
+      void this.showPieces(false);
+    } else {
+      history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
+      this.showLanding(false);
+    }
     // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen.
     const warm = () => void this.decoderClient()?.warm();
     const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
@@ -88,9 +124,19 @@ class App {
 
   // ── Screens ──────────────────────────────────────────────────────────────
 
-  /** Leave the landing entry (once) so back returns to it. */
+  /** Leave the landing entry (once) so back returns to it; from MY PIECES, the scan takes MY PIECES' entry, at /verify. */
   private enter(): void {
-    if ((history.state as { screen?: string } | null)?.screen !== 'app') history.pushState({ screen: 'app' }, '');
+    const entry = entryOf(history.state);
+    if (entry === 'pieces') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
+    else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
+  }
+
+  /** MY PIECES, from the landing (an entry above it) or from a result (in the scan's entry): back returns to the landing. */
+  private openPieces(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'app' || entry === 'pieces') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+    else history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+    void this.showPieces();
   }
 
   private async swap(next: HTMLElement, screen: Screen, focus = true): Promise<boolean> {
@@ -101,8 +147,8 @@ class App {
       await sleep(LEAVE_MS);
       if (gen !== this.generation) return false;
     }
-    this.result?.dispose();
-    this.result = null;
+    this.live?.dispose();
+    this.live = null;
     document.body.dataset.screen = screen;
     this.host.replaceChildren(next);
     this.screen = screen;
@@ -114,7 +160,17 @@ class App {
   private showLanding(focus = true): void {
     this.generation++;
     this.stopCamera();
-    void this.swap(landingView({ onScan: () => void this.startScan(), onUpload: () => this.pickPhoto() }), 'landing', focus);
+    const view = landingView({ onScan: () => void this.startScan(), onUpload: () => this.pickPhoto(), session: this.session, onPieces: () => this.openPieces() });
+    void this.swap(view, 'landing', focus);
+  }
+
+  /** MY PIECES (F-01): the signed-in owner's pieces, or the sign-in when signed out. */
+  private async showPieces(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = piecesView({ api: this.api, session: this.session, onScan: () => void this.startScan(), clientServices: () => this.contactDetails() });
+    if (await this.swap(view.root, 'pieces', focus)) this.live = view;
+    else view.dispose();
   }
 
   private showProblem(kind: ProblemKind): void {
@@ -133,7 +189,8 @@ class App {
   }
 
   private goHome(): void {
-    if ((history.state as { screen?: string } | null)?.screen === 'app') history.back();
+    const entry = entryOf(history.state);
+    if (entry === 'app' || entry === 'pieces') history.back();
     else this.showLanding();
   }
 
@@ -321,10 +378,10 @@ class App {
       const view = resultView(vm, {
         onScanAgain: () => void this.startScan(),
         onRefresh: () => void this.retryVerify(input),
-        ownership: { api: this.api, session: this.session },
+        ownership: { api: this.api, session: this.session, onPieces: () => this.openPieces() },
         report: { api: this.api },
       });
-      if (await this.swap(view.root, 'result')) this.result = view;
+      if (await this.swap(view.root, 'result')) this.live = view;
       else view.dispose();
     } catch (e) {
       if (gen === this.generation) this.showProblem(problemForApiError(e));

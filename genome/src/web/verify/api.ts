@@ -13,7 +13,21 @@
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
  */
-import type { ClientServices, OwnershipConfirmation, RecoveryResult, ReportInput, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
+import type {
+  ClientServices,
+  IncidentReport,
+  IncidentResolution,
+  IncidentType,
+  OwnedPiece,
+  OwnershipConfirmation,
+  RecoveryResult,
+  ReportInput,
+  ServiceRecord,
+  SessionInfo,
+  TransferOffer,
+  VerifyInput,
+  VerifyOutcome,
+} from './types.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -184,6 +198,32 @@ export class ApiClient {
 
   async cancelTransfer(productId: string): Promise<void> {
     await this.request('POST', '/api/v1/ownership/transfers/cancel', { productId }, { csrf: true });
+  }
+
+  // ── My pieces (F-01) ─────────────────────────────────────────────────────
+
+  /** The signed-in owner's pieces, newest acquisition first (GET /account/products; a 401 when signed out). */
+  async products(): Promise<OwnedPiece[]> {
+    const r = await this.request<{ products?: unknown }>('GET', '/api/v1/account/products');
+    if (!Array.isArray(r?.products)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.products as OwnedPiece[];
+  }
+
+  /** The after-sales services of one of the owner's pieces, oldest first; staff notes stay internal. */
+  async serviceHistory(productId: string): Promise<ServiceRecord[]> {
+    const r = await this.request<{ services?: unknown }>('GET', `/api/v1/products/${encodeURIComponent(productId)}/service-history`);
+    if (!Array.isArray(r?.services)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.services as ServiceRecord[];
+  }
+
+  /** REPORT LOST / STOLEN: from then on every scan of the piece shows UNUSUAL ACTIVITY, and a pending transfer is cancelled. */
+  reportIncident(productId: string, type: IncidentType): Promise<IncidentReport> {
+    return this.request<IncidentReport>('POST', '/api/v1/ownership/incidents', { productId, type }, { csrf: true });
+  }
+
+  /** PIECE FOUND: withdraws a loss the owner reported themselves (a theft stays with ORBES Client Services). */
+  resolveIncident(productId: string): Promise<IncidentResolution> {
+    return this.request<IncidentResolution>('POST', '/api/v1/ownership/incidents/resolve', { productId }, { csrf: true });
   }
 
   // ── Transport ────────────────────────────────────────────────────────────

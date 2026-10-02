@@ -4,18 +4,46 @@
  * faint, behind them; it becomes the live reticle once scanning starts. The
  * heading reads ORBES AUTHENTICATION, from its typed words: the monogram
  * beside them is decorative (shared/monogram.ts).
+ *
+ * Under UPLOAD A PHOTO, MY PIECES (F-01), a second discreet link, once the
+ * session is known (`session.ensure()`): signed in, it opens the owner's
+ * pieces; signed out, the same page signs in first, so an owner whose piece
+ * is lost or stolen reaches it without scanning it. Its place is kept while
+ * the session is asked for, so nothing moves when it appears; it stays
+ * hidden if the account service cannot be reached.
  */
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
-import { orbitReticle, viewRoot } from './common.js';
+import type { SessionStore } from '../session.js';
+import { orbitReticle, piecesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
   onUpload(): void;
+  /** Asked once for the session, before MY PIECES shows. */
+  session?: Pick<SessionStore, 'ensure'>;
+  onPieces?(): void;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
   const root = viewRoot('landing', 'landing-title');
+  const pieces = handlers.session ? piecesLink(handlers.onPieces, 'landing__pieces') : null;
+  if (pieces && handlers.session) {
+    // Kept out of sight and out of the tab order until the session is known.
+    pieces.classList.add('is-pending');
+    pieces.setAttribute('aria-hidden', 'true');
+    pieces.tabIndex = -1;
+    handlers.session.ensure().then(
+      () => {
+        pieces.classList.remove('is-pending');
+        pieces.removeAttribute('aria-hidden');
+        pieces.removeAttribute('tabindex');
+      },
+      () => {
+        // Offline: no way to the account from here; the link stays hidden.
+      },
+    );
+  }
   root.append(
     h(
       'div',
@@ -37,6 +65,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
         { class: 'landing__actions' },
         h('button', { class: 'btn landing__scan', attrs: { type: 'button' }, data: { autofocus: '' }, on: { click: () => handlers.onScan() }, text: 'SCAN ORBES CODE' }),
         h('button', { class: 'textlink landing__upload', attrs: { type: 'button' }, on: { click: () => handlers.onUpload() }, text: 'UPLOAD A PHOTO' }),
+        pieces,
       ),
     ),
     h(

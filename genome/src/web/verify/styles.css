@@ -59,9 +59,11 @@ body[data-screen="scan"] .corners {
 
 /* Headings receive focus programmatically on screen changes (for screen readers), as does the thanks
    that replaces a sent report; no ring for that (BRAND §3.8). The section labels a panel opens with
-   (FORGOTTEN PASSWORD, C-04) are such headings too. */
+   (FORGOTTEN PASSWORD, C-04; REPORT LOST / STOLEN and PIECE FOUND, F-01) are such headings too, and
+   so is the status line of a piece in MY PIECES once a report is made or withdrawn. */
 h1[tabindex="-1"]:focus,
 .section-label[tabindex="-1"]:focus,
+.ownership__status[tabindex="-1"]:focus,
 .report__status[tabindex="-1"]:focus {
   outline: none;
 }
@@ -201,6 +203,11 @@ h1[tabindex="-1"]:focus,
   gap: 12px;
   margin-top: clamp(40px, 8vh, 72px);
   animation: brand-rise 1.6s var(--ease) 0.6s both;
+}
+
+/* MY PIECES (F-01): its place is kept while the session is asked for, so nothing moves when it appears. */
+.landing__pieces.is-pending {
+  visibility: hidden;
 }
 
 .landing__meta {
@@ -1164,9 +1171,11 @@ h1[tabindex="-1"]:focus,
   -webkit-user-select: all;
 }
 
-/* SIGNED IN AS …, then CHANGE PASSWORD and SIGN OUT (C-04). When the line is
-   too short for the three, the two links wrap under the account, kept to the
-   right; a long email wraps inside its line rather than squeezing them. */
+/* SIGNED IN AS …, then two links: MY PIECES and SIGN OUT in the OWNERSHIP
+   tab, CHANGE PASSWORD (C-04) and SIGN OUT at the foot of MY PIECES (F-01).
+   When the line is too short for the three, the two links wrap under the
+   account, kept to the right; a long email wraps inside its line rather than
+   squeezing them. */
 .ownership__account {
   display: flex;
   flex-wrap: wrap;
@@ -1243,6 +1252,137 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
+/* ── My pieces (F-01) ──────────────────────────────────────────────────── */
+
+/* The owner's pieces, each in its écrin: the ivory plate of the result's
+   GENOME (§2.5: 34 / 22 / 28 px, hairline brackets), the product lines, then
+   OWNERSHIP · WARRANTY · SERVICE; the account line and SCAN ORBES CODE at
+   the foot. The column of a result: 560 px at most, 32 px margins. */
+.view--pieces {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
+}
+
+.pieces__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.pieces__wordmark {
+  margin-bottom: 52px;
+}
+
+.pieces__title {
+  font-size: var(--fs-title);
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+}
+
+.pieces__lead {
+  max-width: 32ch;
+  margin-top: 22px;
+  text-wrap: balance;
+}
+
+.pieces__lead[hidden] {
+  display: none;
+}
+
+.pieces__body {
+  margin-top: 52px;
+}
+
+.pieces__waiting {
+  text-align: center;
+}
+
+.pieces__empty {
+  max-width: 34ch;
+  margin: 0 auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* Signed out: the OWNERSHIP panel's sign-in, at the width of a tab panel. */
+.pieces__signin .ownership {
+  padding-top: 0;
+}
+
+/* One piece after another: a hairline and room between them. */
+.piece + .piece {
+  margin-top: 72px;
+  padding-top: 56px;
+  border-top: 1px solid var(--hairline);
+}
+
+.piece__plate {
+  padding: 34px 22px 28px;
+  background: var(--ivory);
+  color: var(--ink);
+  text-align: center;
+}
+
+.piece__plate .bracket {
+  color: var(--hairline-strong);
+}
+
+.piece__plate .bracket--tl { top: 10px; left: 10px; }
+.piece__plate .bracket--tr { top: 10px; right: 10px; }
+.piece__plate .bracket--bl { bottom: 10px; left: 10px; }
+.piece__plate .bracket--br { bottom: 10px; right: 10px; }
+
+.piece__lines {
+  margin-top: 40px;
+  text-align: center;
+}
+
+.piece .rows + .ownership__text {
+  margin-top: 18px;
+}
+
+.piece__choice {
+  justify-content: center;
+}
+
+/* LOST is barely 37 px wide in 10 px type: its zone keeps the floor, as OTHER's does. */
+.piece__choice .auth__option {
+  min-width: 44px;
+}
+
+.pieces__account {
+  margin-top: 72px;
+}
+
+.pieces__account:empty {
+  display: none;
+}
+
+/* The account line opens the account section: its hairline is the one above it. */
+.pieces__account .ownership__account {
+  margin-top: 0;
+}
+
+.pieces__password {
+  margin-top: 30px;
+}
+
+.pieces__password .ownership__status {
+  font-weight: 400;
+}
+
+.pieces__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 60px;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles, status lines and tracked-capital labels in the display face
@@ -1259,6 +1399,7 @@ h1[tabindex="-1"]:focus,
 .verifying__status,
 .message__title,
 .result__title,
+.pieces__title,
 .genome__label,
 .tabs__tab,
 .tabs__dot,
@@ -1286,7 +1427,8 @@ h1[tabindex="-1"]:focus,
 /* ── Small screens & reduced motion ────────────────────────────────────── */
 
 @media (max-width: 350px) {
-  .view--result {
+  .view--result,
+  .view--pieces {
     padding-left: 22px;
     padding-right: 22px;
   }
