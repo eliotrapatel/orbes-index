@@ -233,7 +233,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.dialog__eyebrow', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__title', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -258,14 +258,15 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 
   it('sets a figure in the reading face where a display role may show one (Gravesend\'s one is its capital I)', () => {
     // The overrides come after the display rule of their stylesheet, so they win at equal specificity.
-    for (const [css, selector] of [[styles, '.scan__zoom'], [adminStyles, '.page-head__title--id']] as const) {
+    for (const [css, selector] of [[styles, '.scan__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id']] as const) {
       const all = rules(css);
       const at = all.findIndex((r) => r.selectors.includes(selector));
       expect(all[at]?.decls['font-family'], selector).toBe('var(--font)');
       expect(at, selector).toBeGreaterThan(all.findIndex((r) => r.decls['font-family'] === 'var(--font-display)'));
     }
-    // The zoom control (1×, 2×) and every console page titled with a product id use them.
+    // The zoom control (1×, 2×), the phone of ORBES Client Services and every console page titled with a product id use them.
     expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toContain("class: 'scan__control scan__zoom'");
+    expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).toContain("class: 'textlink contact__phone'");
     for (const view of ['product', 'generator']) {
       const src = readFileSync(join(WEB, `admin/views/${view}.ts`), 'utf8');
       const titled = (src.match(/title: p\.productId,/g) ?? []).length;

@@ -75,6 +75,9 @@ describe('.env.example', () => {
     expect(c.sessionTtlHours).toEqual({ account: 720, admin: 8 });
     expect(c.trustProxy).toBe('uniquelocal');
     expect(c.anomaly).toEqual(DEFAULT_ANOMALY_CONFIG);
+    // The Client Services contact is the brand's to supply: empty in the template, so no contact is shown.
+    for (const name of ['CLIENT_SERVICES_EMAIL', 'CLIENT_SERVICES_PHONE', 'CLIENT_SERVICES_HOURS']) expect(example.active.get(name), name).toBe('');
+    expect(c.clientServices).toEqual({});
     // The commented anomaly defaults match the code's defaults.
     const text = read('.env.example');
     for (const [, name, value] of [...text.matchAll(/^#\s*(ANOMALY_[A-Z_]+)=(\d+)/gm)]) {

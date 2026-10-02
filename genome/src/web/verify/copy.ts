@@ -196,6 +196,22 @@ export const FALLBACK_TITLES: Readonly<Record<VerificationState, string>> = Obje
   MALFORMED_CODE: 'UNREADABLE CODE',
 });
 
+/**
+ * ORBES Client Services, where a result asks the customer to contact it (BRAND-DESIGN-SYSTEM
+ * §4.2): the one button opens an email prefilled with the facts Client Services needs, the
+ * scan reference first. Never "Contact support" (§4.5).
+ */
+export const CONTACT = Object.freeze({
+  action: 'CONTACT ORBES CLIENT SERVICES',
+  /** Accessible name of the phone link, ahead of the number. */
+  call: 'Call ORBES Client Services,',
+  /** Labels of the facts under the customer's own words in the prefilled email. */
+  reference: 'REFERENCE',
+  result: 'RESULT',
+  warranty: 'WARRANTY',
+  verified: 'VERIFIED',
+});
+
 /** The honest limit of a code-based verification, shown under every positive result. */
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';

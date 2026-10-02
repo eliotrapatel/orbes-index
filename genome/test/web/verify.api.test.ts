@@ -50,6 +50,23 @@ describe('ApiClient', () => {
     expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
   });
 
+  it('reads the ORBES Client Services contact with a GET the browser may answer from its cache (public, 5 minutes)', async () => {
+    const caches: (RequestCache | undefined)[] = [];
+    const f = fakeFetch([() => json(200, { email: 'clientservices@theorbes.com' }), () => json(200, { state: 'AUTHENTIC' })]);
+    const api = new ApiClient({
+      fetch: (input, init) => {
+        caches.push(init?.cache);
+        return f.impl(input, init);
+      },
+    });
+    expect(await api.clientServices()).toEqual({ email: 'clientservices@theorbes.com' });
+    expect(f.calls[0]).toMatchObject({ url: '/api/v1/client-services', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    // Every other request stays out of the cache.
+    await api.verify({ code: 'abc' });
+    expect(caches).toEqual(['default', 'no-store']);
+  });
+
   it('learns the CSRF token from /me and sends it on account mutations', async () => {
     const f = fakeFetch([() => json(200, SESSION('t1')), () => json(201, { productId: 'O26-J-00184', verified: true, since: '2026-10-01' })]);
     const api = new ApiClient({ fetch: f.impl });

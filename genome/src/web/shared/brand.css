@@ -432,6 +432,7 @@ a {
   letter-spacing: var(--track-label);
   text-indent: var(--track-label);
   text-transform: uppercase;
+  text-decoration: none;
   line-height: 1;
   cursor: pointer;
   user-select: none;

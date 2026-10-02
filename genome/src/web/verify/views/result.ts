@@ -14,8 +14,11 @@
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP
  *
  * Other results show no product lines and no tabs, only a line for ORBES
- * Client Services; UNUSUAL ACTIVITY adds, when the server offers it, the
- * section DO YOU HOLD THE CERTIFICATE CARD? (registration with the claim code).
+ * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
+ * (an email prefilled with the reference and the result), its phone and
+ * hours; UNUSUAL ACTIVITY adds, when the server offers it, the section DO
+ * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code). A
+ * warranty that no longer applies offers the same contact in its tab.
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
@@ -23,7 +26,7 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { genomeBlock } from '../genome-view.js';
 import type { ResultViewModel, TabId } from '../view-model.js';
-import { toneMark, viewRoot } from './common.js';
+import { contactBlock, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { tabsView } from './tabs.js';
@@ -91,11 +94,13 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     };
     sections.push(tabsView(vm.tabs, build, vm.ownership.kind === 'register' ? 'ownership' : 'product').root);
   } else if (vm.tone !== 'authentic') {
+    // The help line, then (when Client Services is configured) the prefilled email, the phone and the hours.
     sections.push(
       h(
         'section',
         { class: 'result__help' },
         h('p', { class: 'prose', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
+        vm.contact?.placement === 'help' ? contactBlock(vm.contact) : null,
       ),
     );
     // UNUSUAL ACTIVITY with a registration token (the server's step 10 exception): the buyer holding

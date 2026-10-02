@@ -64,6 +64,38 @@ describe('public API', () => {
     });
   });
 
+  describe('GET /api/v1/client-services', () => {
+    it('answers {} when nothing is configured (the app then shows no contact), cacheable for 5 minutes', async () => {
+      const res = await h.client().get('/api/v1/client-services');
+      expect(res.statusCode).toBe(200);
+      expect(safeJson(res)).toEqual({});
+      expect(res.headers['cache-control']).toBe('public, max-age=300');
+    });
+
+    it('serves the configured email, phone and hours, and nothing else of the configuration', async () => {
+      const cs = await createHarness({
+        config: { clientServices: { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' } },
+      });
+      try {
+        const res = await cs.client().get('/api/v1/client-services');
+        expect(res.statusCode).toBe(200);
+        expect(safeJson(res)).toEqual({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' });
+        expect(res.headers['cache-control']).toBe('public, max-age=300');
+        // A public route of the api group: no session needed, rate-limited like the other reads.
+        expect(res.headers['x-ratelimit-limit']).toBeDefined();
+        // Only what was set: a phone alone is served alone.
+        const phoneOnly = await createHarness({ config: { clientServices: { phone: '+33 1 23 45 67 89' } } });
+        try {
+          expect(safeJson(await phoneOnly.client().get('/api/v1/client-services'))).toEqual({ phone: '+33 1 23 45 67 89' });
+        } finally {
+          await phoneOnly.close();
+        }
+      } finally {
+        await cs.close();
+      }
+    });
+  });
+
   describe('POST /api/v1/verify', () => {
     it('verifies an issued code (happy path) and sets the device cookie', async () => {
       const p = await issue(h.ctx, catalog);

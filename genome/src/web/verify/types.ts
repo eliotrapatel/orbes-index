@@ -74,6 +74,13 @@ export interface VerifyOutcome {
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
 }
 
+/** GET /api/v1/client-services: how ORBES Client Services is reached; `{}` when nothing is configured. */
+export interface ClientServices {
+  email?: string;
+  phone?: string;
+  hours?: string;
+}
+
 export interface AccountInfo {
   email: string;
   displayName: string | null;

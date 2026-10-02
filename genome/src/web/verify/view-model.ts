@@ -5,12 +5,13 @@
  * title and message; this module only arranges them: which sections appear,
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
- * registration token, the certificate-card section). It never infers
+ * registration token, the certificate-card section), and where ORBES Client
+ * Services is offered, with its prefilled email. It never infers
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
-import { ASSURANCE_NOTE, DEFAULT_CARE, FALLBACK_TITLES } from './copy.js';
-import { VERIFICATION_STATES, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES } from './copy.js';
+import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
 export type TabId = 'product' | 'warranty' | 'care' | 'ownership';
@@ -37,6 +38,21 @@ export type OwnershipMode =
   | { kind: 'registered'; productId: string; transferPending: boolean }
   /** No owner and registration is not open (e.g. not yet delivered by a retailer). */
   | { kind: 'unregistered' };
+
+/**
+ * ORBES Client Services, offered where the result asks the customer to contact it: under the
+ * help line of every caution and void result, and in the WARRANTY tab when the warranty no
+ * longer applies. Built from GET /api/v1/client-services; absent when neither a usable email
+ * nor a usable phone is configured.
+ */
+export interface ContactModel {
+  placement: 'help' | 'warranty';
+  /** mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and the time. */
+  mailto?: string;
+  /** The number as configured, and its tel: link. */
+  phone?: { label: string; href: string };
+  hours?: string;
+}
 
 export interface GenomeModel {
   id: string;
@@ -71,6 +87,8 @@ export interface ResultViewModel {
   verifiedAt: string;
   /** Short scan reference for Client Services. */
   reference: string;
+  /** How to reach ORBES Client Services, where the result asks for it (and Client Services is configured). */
+  contact?: ContactModel;
 }
 
 const AUTHENTIC: ReadonlySet<VerificationState> = new Set([
@@ -173,8 +191,11 @@ function genomeVersionNumber(version: string): number {
   return m ? Number(m[1]) : 1;
 }
 
-/** Build the result screen from a verification outcome. */
-export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: number } = {}): ResultViewModel {
+/**
+ * Build the result screen from a verification outcome. `clientServices` (GET /api/v1/client-services)
+ * adds the contact of ORBES Client Services where the result asks for it.
+ */
+export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: number; clientServices?: ClientServices } = {}): ResultViewModel {
   const state: VerificationState = VERIFICATION_STATES.includes(outcome.state) ? outcome.state : 'MALFORMED_CODE';
   const authentic = AUTHENTIC.has(state);
   const title = splitTitle(outcome.title || FALLBACK_TITLES[state]);
@@ -255,7 +276,49 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     // The holder of the certificate card may still register (no tabs, no product data): see ownershipMode.
     vm.ownership = ownershipMode(outcome);
   }
+
+  // Wherever the copy sends the customer to ORBES Client Services: every caution and void result, and
+  // a warranty that no longer applies. Nothing when Client Services is not configured.
+  const placement = !authentic ? 'help' : vm.warranty && outcome.warranty?.status === 'VOID' ? 'warranty' : null;
+  if (placement && opts.clientServices) {
+    const contact = contactModel(opts.clientServices, vm, placement);
+    if (contact) vm.contact = contact;
+  }
   return vm;
+}
+
+/** The same rules as the server's CLIENT_SERVICES_* (config.ts), checked again before anything becomes a link. */
+const MAILBOX = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+const PHONE = /^\+[1-9](?:[ .-]?[0-9]){6,14}$/;
+const HOURS = /^[^\p{Cc}]{1,120}$/u;
+
+function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement']): ContactModel | null {
+  const text = (v: unknown, re: RegExp, max: number): string | undefined => {
+    if (typeof v !== 'string') return undefined;
+    const t = v.trim();
+    return t.length <= max && re.test(t) ? t : undefined;
+  };
+  const email = text(cs.email, MAILBOX, 254);
+  const phone = text(cs.phone, PHONE, 32);
+  if (!email && !phone) return null;
+  const contact: ContactModel = { placement };
+  if (email) {
+    const title = vm.titleSub ? `${vm.titleMain} — ${vm.titleSub}` : vm.titleMain;
+    const subject = ['ORBES', vm.reference ? `REF ${vm.reference}` : '', title].filter((x) => x.length > 0).join(' — ');
+    // The customer writes above the facts; RFC 6068 wants CRLF line breaks in a mailto body.
+    const facts: [string, string][] = [
+      [CONTACT.reference, vm.reference],
+      [CONTACT.result, title],
+      [CONTACT.warranty, placement === 'warranty' ? (vm.warranty?.status ?? '') : ''],
+      [CONTACT.verified, vm.verifiedAt],
+    ];
+    const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
+    contact.mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+  if (phone) contact.phone = { label: phone, href: `tel:+${phone.replace(/\D/g, '')}` };
+  const hours = text(cs.hours, HOURS, 120);
+  if (hours) contact.hours = hours;
+  return contact;
 }
 
 function ownershipMode(o: VerifyOutcome): OwnershipMode {

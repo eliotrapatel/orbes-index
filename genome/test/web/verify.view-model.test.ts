@@ -5,6 +5,7 @@ import {
   ACTION_LABELS,
   ASSURANCE_NOTE,
   classifyCameraError,
+  CONTACT,
   DEFAULT_CARE,
   FALLBACK_TITLES,
   HINTS,
@@ -321,6 +322,85 @@ describe('verify view-model: assurance and warranty notes', () => {
     const vm = resultViewModel(outcome('AUTHENTIC'));
     const text = JSON.stringify(vm).toLowerCase();
     for (const word of ['risk', 'score', 'threshold', 'anomal', 'reason']) expect(text).not.toContain(word);
+  });
+});
+
+describe('verify view-model: ORBES Client Services contact', () => {
+  const CS = { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' };
+  /** The subject and body of a mailto: link, decoded. */
+  const mail = (href: string) => {
+    const m = /^mailto:([^?]+)\?subject=([^&]*)&body=([^&]*)$/.exec(href);
+    expect(m, href).not.toBeNull();
+    return { to: m![1], subject: decodeURIComponent(m![2]), body: decodeURIComponent(m![3]) };
+  };
+
+  it.each(['SUSPICIOUS_ACTIVITY', 'MALFORMED_CODE', 'REVOKED', 'UNKNOWN', 'INVALID_SIGNATURE'] as const)('%s (caution or void) offers it under the help line', (state) => {
+    const vm = resultViewModel(outcome(state), { offsetMinutes: 120, clientServices: CS });
+    expect(vm.tone).not.toBe('authentic');
+    expect(vm.contact).toMatchObject({ placement: 'help', phone: { label: '+33 1 23 45 67 89', href: 'tel:+33123456789' }, hours: CS.hours });
+    const { to, subject, body } = mail(vm.contact!.mailto!);
+    expect(to).toBe('clientservices@theorbes.com');
+    const title = VERIFICATION_COPY[state].title;
+    expect(subject).toBe(`ORBES — REF 4515B884 — ${title}`);
+    // The customer writes above the facts Client Services needs: the reference, the result, the time shown.
+    expect(body).toBe(`\r\n\r\nREFERENCE: 4515B884\r\nRESULT: ${title}\r\nVERIFIED: 1 OCT 2026 · 10:30`);
+  });
+
+  it('encodes the subject and body for a mailto: link (no raw spaces, dashes or line breaks)', () => {
+    const href = resultViewModel(outcome('INVALID_SIGNATURE'), { clientServices: CS }).contact!.mailto!;
+    expect(href).toMatch(/^mailto:clientservices@theorbes\.com\?subject=ORBES%20%E2%80%94%20REF%204515B884%20%E2%80%94%20INVALID%20SIGNATURE&body=%0D%0A%0D%0AREFERENCE%3A%204515B884/);
+    expect(href).not.toMatch(/[\s\r\n]/);
+  });
+
+  it('on an authentic result, appears only in the WARRANTY tab of a warranty that no longer applies', () => {
+    for (const status of ['NOT_STARTED', 'ACTIVE', 'EXPIRED'] as const) {
+      expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { warranty: { status } }), { clientServices: CS }).contact, status).toBeUndefined();
+    }
+    expect(resultViewModel(outcome('AUTHENTIC', { warranty: undefined }), { clientServices: CS }).contact).toBeUndefined();
+    const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { warranty: { status: 'VOID' } }), { offsetMinutes: 120, clientServices: CS });
+    expect(vm.warranty?.status).toBe('NO LONGER VALID');
+    expect(vm.contact?.placement).toBe('warranty');
+    const { subject, body } = mail(vm.contact!.mailto!);
+    expect(subject).toBe('ORBES — REF 4515B884 — AUTHENTIC — REGISTERED');
+    expect(body).toBe('\r\n\r\nREFERENCE: 4515B884\r\nRESULT: AUTHENTIC — REGISTERED\r\nWARRANTY: NO LONGER VALID\r\nVERIFIED: 1 OCT 2026 · 10:30');
+  });
+
+  it('shows nothing without configuration, or with neither a usable email nor a usable phone', () => {
+    for (const state of VERIFICATION_STATES) {
+      expect(resultViewModel(outcome(state)).contact, state).toBeUndefined();
+      expect(resultViewModel(outcome(state), { clientServices: {} }).contact, state).toBeUndefined();
+    }
+    expect(resultViewModel(outcome('REVOKED'), { clientServices: { hours: CS.hours } }).contact).toBeUndefined();
+    // Never a link from something the server rules would have refused.
+    const odd = { email: 'x@y.z?cc=a@b.c', phone: 'javascript:alert(1)', hours: CS.hours } as const;
+    expect(resultViewModel(outcome('REVOKED'), { clientServices: odd }).contact).toBeUndefined();
+    const loose = { email: 42, phone: ['+33 1 23 45 67 89'] } as unknown as typeof CS;
+    expect(resultViewModel(outcome('REVOKED'), { clientServices: loose }).contact).toBeUndefined();
+  });
+
+  it('offers what is configured: the email alone, or the phone (with the hours) alone', () => {
+    expect(resultViewModel(outcome('UNKNOWN'), { clientServices: { email: CS.email } }).contact).toEqual({
+      placement: 'help',
+      mailto: expect.stringMatching(/^mailto:clientservices@theorbes\.com\?/),
+    });
+    expect(resultViewModel(outcome('UNKNOWN'), { clientServices: { phone: '+1-212-555-0100', hours: CS.hours } }).contact).toEqual({
+      placement: 'help',
+      phone: { label: '+1-212-555-0100', href: 'tel:+12125550100' },
+      hours: CS.hours,
+    });
+  });
+
+  it('leaves the reference out of the subject when the scan id gives none', () => {
+    const vm = resultViewModel(outcome('UNKNOWN', { scanId: 'not-a-scan-id' }), { clientServices: CS });
+    expect(vm.reference).toBe('');
+    const { subject, body } = mail(vm.contact!.mailto!);
+    expect(subject).toBe('ORBES — UNKNOWN ORBES CODE');
+    expect(body).not.toMatch(/REFERENCE/);
+  });
+
+  it('names ORBES Client Services in full, never the forbidden "Contact support" (BRAND §4.5)', () => {
+    expect(CONTACT.action).toBe('CONTACT ORBES CLIENT SERVICES');
+    expect(Object.values(CONTACT).join(' ')).not.toMatch(/support|product/i);
   });
 });
 

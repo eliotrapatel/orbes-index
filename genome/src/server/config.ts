@@ -60,6 +60,22 @@ export interface AppConfig {
    * production then logs a warning. Never shorter than the anomaly look-back (scanLookbackDays).
    */
   scanRetentionDays: number | null;
+  /**
+   * CLIENT_SERVICES_EMAIL / _PHONE / _HOURS: how ORBES Client Services is reached, served publicly by
+   * GET /api/v1/client-services for the contact of non-authentic results. Each is optional; with neither
+   * an email nor a phone set (the default), the verification app shows no contact at all.
+   */
+  clientServices: ClientServicesConfig;
+}
+
+/** Public contact details of ORBES Client Services (all optional, validated at start). */
+export interface ClientServicesConfig {
+  /** A mailbox safe to put in a mailto: link as it is. */
+  email?: string;
+  /** International format, e.g. "+33 1 23 45 67 89" (digits, spaces, dots or hyphens after the +). */
+  phone?: string;
+  /** Opening hours as the brand writes them, one line of plain text. */
+  hours?: string;
 }
 
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -157,6 +173,21 @@ const zEmail = z
   .string()
   .max(254)
   .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'must be an email address');
+/** A public mailbox for a mailto: link: none of the characters URL syntax gives a meaning (? & # % / :). */
+const zMailbox = z
+  .string()
+  .max(254)
+  .regex(/^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/, 'must be an email address (letters, digits and . _ + - only)');
+/** An international number (E.164 digits, at most 15), with optional single spaces, dots or hyphens between digits. */
+const zPhone = z
+  .string()
+  .max(32)
+  .regex(/^\+[1-9](?:[ .-]?[0-9]){6,14}$/, 'must be an international number such as +33 1 23 45 67 89');
+/** One line of plain text. */
+const zHours = z
+  .string()
+  .max(120, 'must be at most 120 characters')
+  .regex(/^[^\p{Cc}]+$/u, 'must be one line of plain text');
 
 // ── loadConfig ─────────────────────────────────────────────────────────────
 
@@ -348,6 +379,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     issues.push(`SCAN_RETENTION_DAYS: must be at least the anomaly look-back of ${scanLookbackDays(anomaly)} days (longest ANOMALY_*_WINDOW / ANOMALY_DECAY_DAYS)`);
   }
 
+  // ORBES Client Services contact (public; supplied by the brand). Hours alone would offer no way to reach anyone.
+  const clientServices: ClientServicesConfig = {};
+  const csEmail = field('CLIENT_SERVICES_EMAIL', zMailbox, e.CLIENT_SERVICES_EMAIL);
+  const csPhone = field('CLIENT_SERVICES_PHONE', zPhone, e.CLIENT_SERVICES_PHONE);
+  const csHours = field('CLIENT_SERVICES_HOURS', zHours, e.CLIENT_SERVICES_HOURS);
+  if (csEmail !== undefined) clientServices.email = csEmail;
+  if (csPhone !== undefined) clientServices.phone = csPhone;
+  if (csHours !== undefined) {
+    if (e.CLIENT_SERVICES_EMAIL === undefined && e.CLIENT_SERVICES_PHONE === undefined) {
+      issues.push('CLIENT_SERVICES_HOURS: set it together with CLIENT_SERVICES_EMAIL or CLIENT_SERVICES_PHONE');
+    } else {
+      clientServices.hours = csHours;
+    }
+  }
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -369,6 +415,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel,
     adminRequireMfa,
     scanRetentionDays,
+    clientServices,
   };
 
   if (prod) {
@@ -491,6 +538,12 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
     logLevel: c.logLevel,
     adminRequireMfa: c.adminRequireMfa,
     scanRetentionDays: c.scanRetentionDays,
+    // Public once served, but kept out of the log like any value an operator types.
+    clientServices: {
+      email: c.clientServices.email ? '[set]' : undefined,
+      phone: c.clientServices.phone ? '[set]' : undefined,
+      hours: c.clientServices.hours ? '[set]' : undefined,
+    },
   };
 }
 

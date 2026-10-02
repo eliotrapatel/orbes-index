@@ -267,6 +267,35 @@ describe('loadConfig — operations settings', () => {
     expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: '395' }))).toEqual([]);
   });
 
+  it('CLIENT_SERVICES_*: optional, none by default, each validated, hours only beside an email or a phone', () => {
+    expect(loadConfig({}).clientServices).toEqual({});
+    expect(loadConfig(PROD).clientServices).toEqual({});
+    const c = loadConfig({
+      ...PROD,
+      CLIENT_SERVICES_EMAIL: 'clientservices@theorbes.com',
+      CLIENT_SERVICES_PHONE: ' +33 1 23 45 67 89 ',
+      CLIENT_SERVICES_HOURS: 'Monday to Saturday, 10:00–19:00 (Paris)',
+    });
+    expect(c.clientServices).toEqual({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' });
+    expect(Object.isFrozen(c.clientServices)).toBe(true);
+    // Each alone is accepted; an empty value is unset.
+    expect(loadConfig({ CLIENT_SERVICES_PHONE: '+33.1.23.45.67.89' }).clientServices).toEqual({ phone: '+33.1.23.45.67.89' });
+    expect(loadConfig({ CLIENT_SERVICES_EMAIL: 'care@theorbes.com', CLIENT_SERVICES_PHONE: '' }).clientServices).toEqual({ email: 'care@theorbes.com' });
+    expect(loadConfig({ CLIENT_SERVICES_PHONE: '+1-212-555-0100' }).clientServices.phone).toBe('+1-212-555-0100');
+    // The mailbox goes into a mailto: link as it is, so URL syntax is refused (? & # % / : and spaces).
+    for (const bad of ['not-an-email', 'care@theorbes', 'care@theorbes.com?cc=x@y.z', 'a&b@theorbes.com', 'care#1@theorbes.com', 'c%40@theorbes.com', 'care @theorbes.com', 'a/b@theorbes.com']) {
+      expect(issues({ CLIENT_SERVICES_EMAIL: bad }).map((i) => i.split(':')[0]), bad).toEqual(['CLIENT_SERVICES_EMAIL']);
+    }
+    // International format only: a leading +, then 7 to 15 digits with single separators.
+    for (const bad of ['01 23 45 67 89', '+33 (0)1 23 45 67 89', '+0 123 456 789', '+33', '+33 1 23 45 67 89 01 23 45', '+33  1 23 45 67 89', 'tel:+33123456789', '+33 1 23 45 67 8a']) {
+      expect(issues({ CLIENT_SERVICES_PHONE: bad }).map((i) => i.split(':')[0]), bad).toEqual(['CLIENT_SERVICES_PHONE']);
+    }
+    // Hours: one line of at most 120 characters, and never alone (they would offer no way to reach anyone).
+    expect(issues({ CLIENT_SERVICES_HOURS: '10:00–19:00' })).toEqual(['CLIENT_SERVICES_HOURS: set it together with CLIENT_SERVICES_EMAIL or CLIENT_SERVICES_PHONE']);
+    expect(issues({ CLIENT_SERVICES_PHONE: '+33 1 23 45 67 89', CLIENT_SERVICES_HOURS: 'x'.repeat(121) })).toEqual(['CLIENT_SERVICES_HOURS: must be at most 120 characters']);
+    expect(issues({ CLIENT_SERVICES_PHONE: '+33 1 23 45 67 89', CLIENT_SERVICES_HOURS: 'Monday\nto Saturday' })).toEqual(['CLIENT_SERVICES_HOURS: must be one line of plain text']);
+  });
+
   it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {
     const c = loadConfig({ RATE_LIMIT_API_PER_MINUTE: '42', RATE_LIMIT_ADMIN_PER_MINUTE: '500' });
     expect(c.rateLimits).toMatchObject({ apiPerMinute: 42, adminPerMinute: 500 });
@@ -299,5 +328,13 @@ describe('testConfig / redactConfig', () => {
     for (const secret of [COOKIE, PEPPER, RANDOMISH_KEY, 'bootstrap-password-123', ':pw@']) expect(text).not.toContain(secret);
     expect(text).not.toContain('suspiciousThreshold');
     expect(redactConfig(c)).toMatchObject({ database: 'postgres://orbes:***@db:5432/orbes', keys: { provider: 'local', encryptionKey: '[set]' } });
+  });
+
+  it('redactConfig masks the Client Services details, saying only which are set', () => {
+    const c = loadConfig({ CLIENT_SERVICES_EMAIL: 'clientservices@theorbes.com', CLIENT_SERVICES_PHONE: '+33 1 23 45 67 89' });
+    const text = JSON.stringify(redactConfig(c));
+    for (const value of ['clientservices@theorbes.com', '+33 1 23 45 67 89']) expect(text).not.toContain(value);
+    expect(redactConfig(c).clientServices).toEqual({ email: '[set]', phone: '[set]', hours: undefined });
+    expect(redactConfig(loadConfig({})).clientServices).toEqual({ email: undefined, phone: undefined, hours: undefined });
   });
 });

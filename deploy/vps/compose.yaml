@@ -116,6 +116,10 @@ services:
       KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?set KEY_ENCRYPTION_KEY in deploy/vps/.env}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      # ORBES Client Services, public contact of non-authentic results; unset = no contact shown.
+      CLIENT_SERVICES_EMAIL: ${CLIENT_SERVICES_EMAIL:-}
+      CLIENT_SERVICES_PHONE: ${CLIENT_SERVICES_PHONE:-}
+      CLIENT_SERVICES_HOURS: ${CLIENT_SERVICES_HOURS:-}
       # Optional tunables (genome/.env.example); unset = the app's defaults.
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ADMIN_REQUIRE_MFA: ${ADMIN_REQUIRE_MFA:-}

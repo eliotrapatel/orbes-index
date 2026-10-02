@@ -1,5 +1,6 @@
 /**
- * Public routes (contract §3): health, public keys, categories, verify.
+ * Public routes (contract §3): health, public keys, categories, Client
+ * Services contact, verify.
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, sets the `orbes_device` cookie, and passes
@@ -74,6 +75,14 @@ export const publicRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, li
     reply.header('cache-control', 'public, max-age=60');
     const list = await ctx.categories.list({ activeOnly: true });
     return list.map((c) => ({ code: c.code, index: c.index, name: c.name }));
+  });
+
+  // How ORBES Client Services is reached (CLIENT_SERVICES_*), for the contact the verification app offers on
+  // non-authentic results and on a warranty that no longer applies. `{}` when nothing is configured: no contact shown.
+  app.get('/api/v1/client-services', async (_request, reply) => {
+    reply.header('cache-control', 'public, max-age=300');
+    const { email, phone, hours } = ctx.config.clientServices;
+    return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
   });
 
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {

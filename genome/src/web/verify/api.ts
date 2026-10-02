@@ -13,7 +13,7 @@
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
  */
-import type { OwnershipConfirmation, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
+import type { ClientServices, OwnershipConfirmation, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -48,6 +48,8 @@ interface RequestOptions {
   csrf?: boolean;
   /** Internal: this is the retry after a CSRF refresh. */
   retried?: boolean;
+  /** HTTP cache mode (default no-store; a public, cacheable read may use the browser's cache). */
+  cache?: RequestCache;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -81,6 +83,11 @@ export class ApiClient {
 
   verify(input: VerifyInput): Promise<VerifyOutcome> {
     return this.request<VerifyOutcome>('POST', '/api/v1/verify', input);
+  }
+
+  /** How ORBES Client Services is reached (`{}` when nothing is configured); the browser may keep it 5 minutes. */
+  clientServices(): Promise<ClientServices> {
+    return this.request<ClientServices>('GET', '/api/v1/client-services', undefined, { cache: 'default' });
   }
 
   // ── Account ──────────────────────────────────────────────────────────────
@@ -166,7 +173,7 @@ export class ApiClient {
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: 'same-origin',
-        cache: 'no-store',
+        cache: opts.cache ?? 'no-store',
         redirect: 'error',
         signal: controller.signal,
       });

@@ -10,8 +10,10 @@
  *    app's TRUST_PROXY to Caddy's fixed address (outside the dynamic range);
  *  - the app environment built by compose from deploy/vps/.env.example (with
  *    secrets filled in) is a valid production configuration (GEO_MODE=mmdb);
- *  - every app setting of genome/.env.example reaches the app, and every
- *    variable compose interpolates is documented in deploy/vps/.env.example;
+ *  - every app setting of genome/.env.example reaches the app (the ORBES
+ *    Client Services contact included, empty until the brand supplies it),
+ *    and every variable compose interpolates is documented in
+ *    deploy/vps/.env.example;
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
  *    trusts no proxy in direct mode, strips query strings and headers from the
  *    access log and leaves HSTS to the app;
@@ -241,6 +243,31 @@ describe('deploy/vps/compose.yaml', () => {
     expect(c.databaseUrl).toMatch(/^postgres:\/\/orbes_app:[0-9a-f]{48}@postgres:5432\/orbes$/);
     expect(c.databaseUrl).not.toContain(vars.get('POSTGRES_PASSWORD')!);
     expect(example.active.get('POSTGRES_APP_USER')).not.toBe(example.active.get('POSTGRES_USER'));
+    // ORBES Client Services: empty in the template, so the app shows no contact until the brand's details are set.
+    expect(c.clientServices).toEqual({});
+  });
+
+  it('hands the ORBES Client Services details from .env to the app, empty meaning unset', () => {
+    const appEnv = environment(svc.get('app')!);
+    for (const name of ['CLIENT_SERVICES_EMAIL', 'CLIENT_SERVICES_PHONE', 'CLIENT_SERVICES_HOURS']) {
+      expect(appEnv.get(name), name).toBe(`\${${name}:-}`);
+      expect(example.active.get(name), name).toBe('');
+    }
+    const vars = new Map(example.active);
+    vars.set('POSTGRES_APP_PASSWORD', randomBytes(24).toString('hex'));
+    vars.set('COOKIE_SECRET', randomBytes(48).toString('base64url'));
+    vars.set('IP_HASH_PEPPER', randomBytes(48).toString('base64url'));
+    vars.set('KEY_ENCRYPTION_KEY', randomBytes(32).toString('base64url'));
+    vars.set('CLIENT_SERVICES_EMAIL', 'clientservices@theorbes.com');
+    vars.set('CLIENT_SERVICES_PHONE', '+33 1 23 45 67 89');
+    vars.set('CLIENT_SERVICES_HOURS', 'Monday to Saturday, 10:00–19:00 (Paris)');
+    const env: Record<string, string> = {};
+    for (const [k, v] of appEnv) env[k] = interpolate(v, vars);
+    expect(loadConfig(env).clientServices).toEqual({
+      email: 'clientservices@theorbes.com',
+      phone: '+33 1 23 45 67 89',
+      hours: 'Monday to Saturday, 10:00–19:00 (Paris)',
+    });
   });
 
   it('migrates as the schema owner and grants the app role DML only (scripts)', () => {

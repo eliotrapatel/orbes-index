@@ -18,7 +18,7 @@ import { buildWeb } from '../../scripts/build-web.js';
 import { fromBase64Url } from '../../src/core/bytes.js';
 import { encodeOrbesCode, renderOrbesCodeSvg } from '../../src/core/code/encoder.js';
 import { buildApp } from '../../src/server/app.js';
-import { testConfig } from '../../src/server/config.js';
+import { testConfig, type AppConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import type { IssueProductInput, IssueResult } from '../../src/server/services/issuance.js';
@@ -56,8 +56,11 @@ async function freePort(): Promise<number> {
   });
 }
 
-/** Build the web apps into a temp dir and start the API + static server on 127.0.0.1. */
-export async function startVerifyServer(opts: { rateLimits?: { verifyPerMinute?: number } } = {}): Promise<VerifyServer> {
+/**
+ * Build the web apps into a temp dir and start the API + static server on 127.0.0.1.
+ * `clientServices`: the ORBES Client Services contact the server publishes (none by default).
+ */
+export async function startVerifyServer(opts: { rateLimits?: { verifyPerMinute?: number }; clientServices?: AppConfig['clientServices'] } = {}): Promise<VerifyServer> {
   const workDir = mkdtempSync(join(tmpdir(), 'orbes-verify-e2e-'));
   const webDir = join(workDir, 'web');
   await buildWeb({ outDir: webDir, mode: 'production' });
@@ -69,7 +72,13 @@ export async function startVerifyServer(opts: { rateLimits?: { verifyPerMinute?:
   let app: FastifyInstance | undefined;
   try {
     t = await createTestDb();
-    const config = testConfig({ publicOrigin: origin, host: '127.0.0.1', port, rateLimits: { verifyPerMinute: opts.rateLimits?.verifyPerMinute ?? 600 } });
+    const config = testConfig({
+      publicOrigin: origin,
+      host: '127.0.0.1',
+      port,
+      rateLimits: { verifyPerMinute: opts.rateLimits?.verifyPerMinute ?? 600 },
+      ...(opts.clientServices ? { clientServices: opts.clientServices } : {}),
+    });
     ctx = await createContext(config, { db: t.db, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
     const c = ctx;
     if (!(await c.categories.getByCode('J'))) await c.categories.create({ code: 'J', name: 'Jewelry', warrantyMonths: 24 }, SYSTEM_ACTOR);

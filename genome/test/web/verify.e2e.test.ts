@@ -5,7 +5,9 @@
  * fake capture device fed with a simulated phone clip of a real issued
  * code), first registration with a claim code through the OWNERSHIP tab, the
  * same registration from an UNUSUAL ACTIVITY result (a burst of scans of
- * copies, then the holder of the certificate card), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * copies, then the holder of the certificate card), the contact of ORBES
+ * Client Services (an INVALID SIGNATURE result, a warranty that no longer
+ * applies), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -17,7 +19,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, ConsoleMessage, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
+import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -26,6 +30,8 @@ import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVer
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 const PASSWORD = 'correct horse battery staple';
+/** The ORBES Client Services contact this server publishes (CLIENT_SERVICES_*). */
+const CLIENT_SERVICES = { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' };
 
 // playwright-core ships no assertion library: these poll a locator with vitest's expect.poll.
 const POLL = { timeout: 15_000, interval: 100 };
@@ -114,7 +120,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
   let plain: IssueResult;
 
   beforeAll(async () => {
-    srv = await startVerifyServer();
+    srv = await startVerifyServer({ clientServices: CLIENT_SERVICES });
     plain = await srv.issue({ serial: 184 });
     browser = await launchChromium();
     mkdirSync(OUT_DIR, { recursive: true });
@@ -353,6 +359,70 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.locator('.result__card'), 0);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('offers CONTACT ORBES CLIENT SERVICES on an INVALID SIGNATURE result: the reference in the email, then the phone and the hours', async () => {
+    // A code ORBES did not sign: one bit of an issued code's signature flipped, the frame still valid.
+    const issued = await srv.issue();
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[10] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'forged.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await attrOf(page.locator('.view--result'), 'data-tone', 'void');
+
+    // Under the help line: the one button, an email to Client Services that quotes this scan's reference.
+    const help = page.locator('.result__help');
+    const email = help.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
+    await visible(email);
+    const scan = await srv.ctx.db.selectFrom('scan_events').select(['id', 'result_state']).orderBy('occurred_at', 'desc').executeTakeFirstOrThrow();
+    expect(scan.result_state).toBe('INVALID_SIGNATURE');
+    const ref = scan.id.split('-')[0].toUpperCase();
+    await textOf(page.locator('.result__meta'), new RegExp(`REF ${ref}$`));
+    const href = new URL((await email.getAttribute('href'))!);
+    expect(href.protocol).toBe('mailto:');
+    expect(href.pathname).toBe(CLIENT_SERVICES.email);
+    expect(href.searchParams.get('subject')).toBe(`ORBES — REF ${ref} — INVALID SIGNATURE`);
+    expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d$`));
+    // One line, inside the column (never wider than the page).
+    expect((await email.boundingBox())!.height).toBe(52);
+    // Then the phone, a tel: link read in Helvetica Neue (figures), and the hours.
+    const phone = help.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` });
+    await attrOf(phone, 'href', 'tel:+33123456789');
+    await textOf(phone, CLIENT_SERVICES.phone);
+    expect(await phone.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    await textOf(help.locator('.contact__hours'), CLIENT_SERVICES.hours.toUpperCase());
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-contact.png'), fullPage: true });
+    // On the smallest phone in use, the button keeps its one line (a text link's tracking) and nothing scrolls sideways.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
+    expect((await email.boundingBox())!.height).toBe(52);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('offers the same contact in the WARRANTY tab of an authentic piece whose warranty no longer applies, and nowhere else', async () => {
+    const issued = await srv.issue();
+    await srv.ctx.services.warranty.void(issued.product.id, 'unauthorised modification', SYSTEM_ACTOR);
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'void-warranty.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    await countOf(page.locator('.contact'), 0);
+    await page.getByRole('tab', { name: 'WARRANTY' }).click();
+    const panel = page.getByRole('tabpanel');
+    await textOf(panel.locator('.rows'), /NO LONGER VALID/);
+    const email = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
+    await visible(email);
+    const href = new URL((await email.getAttribute('href'))!);
+    expect(href.searchParams.get('subject')).toMatch(/^ORBES — REF [0-9A-F]{8} — AUTHENTIC$/);
+    expect(href.searchParams.get('body')).toMatch(/\r\nRESULT: AUTHENTIC\r\nWARRANTY: NO LONGER VALID\r\n/);
+    await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
+    await countOf(page.locator('.contact'), 1);
     expect(problems).toEqual([]);
   }, 120_000);
 
