@@ -19,7 +19,9 @@
  * console user and records an ADMIN_TEST scan naming that user, without the
  * history, ownership and anomaly steps and without any public wording.
  * `verify` with a console session (S-07: `ScanMeta.adminId`) is a staff scan
- * too: ADMIN_TEST, no anomaly, no registration token, the public wording.
+ * too: ADMIN_TEST, outside UNSOLD_PIECE_SCAN and the history rules (the code's
+ * own findings of steps 6–7 are still recorded, marked `staffScan`), no
+ * registration token, the public wording.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -295,11 +297,13 @@ export class VerificationService {
   /**
    * The public verification. A request that carries a console session (`meta.adminId`, S-07) is a
    * staff scan: the same decision, recorded as ADMIN_TEST under that console user without the
-   * device, session or account pseudonyms; it records no anomaly, takes no part in the scoring of
-   * step 9 (which still reads the public history, so the state is the one a customer would see) and
-   * earns no registration token. A public scan of a piece ORBES has not sold yet (ISSUED, or in a
-   * pre-sale service) records UNSOLD_PIECE_SCAN, once per piece and per UTC day, with weight 0:
-   * the state shown does not change.
+   * device, session or account pseudonyms; it raises no UNSOLD_PIECE_SCAN, takes no part in the
+   * scoring of step 9 (which still reads the public history, so the state is the one a customer
+   * would see) and earns no registration token. The findings of steps 6–7 describe the code, not
+   * who scanned it (VALID_SIGNATURE_UNREGISTERED and CODE_MISMATCH page on a possible key
+   * compromise): a staff scan records them too, with `staffScan: true` in their details. A public
+   * scan of a piece ORBES has not sold yet (ISSUED, or in a pre-sale service) records
+   * UNSOLD_PIECE_SCAN, once per piece and per UTC day, with weight 0: the state shown does not change.
    */
   async verify(input: VerifyInput, meta: ScanMeta = {}): Promise<VerifyOutcome> {
     const started = performance.now();
@@ -341,8 +345,10 @@ export class VerificationService {
         .executeTakeFirstOrThrow();
       const scanId = scan.id;
 
-      // A staff scan records no anomaly (ADMIN_TEST scans are outside every finding, as the sale mode's).
-      if (w.serviceFinding && !staff) await this.anomaly.recordFinding(this.serviceFinding(w, now), trx);
+      // Steps 6–7 judge the code itself, whoever scans it: a staff scan records these findings too
+      // (Client Services checking a suspicious piece is how a forged but validly signed code reaches
+      // ORBES), marked staffScan. Only the unsold rule and the history rules leave staff scans out.
+      if (w.serviceFinding) await this.anomaly.recordFinding(this.serviceFinding(w, now, staff), trx);
 
       if (w.trusted && w.reg?.code) {
         const reg = w.reg;
@@ -781,7 +787,8 @@ export class VerificationService {
     return out;
   }
 
-  private serviceFinding(w: Work, now: Date): AnomalyFinding {
+  /** A finding of steps 6–7; `staffScan` (S-07): the scan carried a console session, and its details say so. */
+  private serviceFinding(w: Work, now: Date, staffScan: boolean): AnomalyFinding {
     const f = w.serviceFinding!;
     const { severity, weight } = ANOMALY_WEIGHTS[f.type];
     return {
@@ -793,7 +800,7 @@ export class VerificationService {
       // CODE_MISMATCH: the scanned code is not the registered one, but the registered code is the one at risk.
       codeId: w.reg?.code?.id ?? null,
       at: now,
-      details: f.details,
+      details: staffScan ? { ...f.details, staffScan: true } : f.details,
     };
   }
 

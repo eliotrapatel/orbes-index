@@ -883,19 +883,52 @@ describe('S-07: public scans of a piece ORBES has not sold yet, and staff scans'
     expect(await scanEvent(w, pub.scanId)).toMatchObject({ event_type: 'VERIFY', admin_id: null, device_hash: 'x' });
   });
 
-  it('a staff scan earns no registration token and leaves no finding, even on an altered genome', async () => {
+  it('a staff scan earns no registration token', async () => {
     const r = await issueActivated(w, { withClaimSecret: true });
     const out = await verify(w, r.code.data, { adminId: seller, geo: { country: 'FR' } });
     // The state a buyer would see, without the token that would let the console user register the piece.
     expect(out.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
     expect(out.registration).toBeUndefined();
     expect(await w.t.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', r.product.id).execute()).toEqual([]);
-
-    const glyphs = [...r.genome.glyphs].map((g, i) => (i < 3 ? (g + 1) % 16 : g));
-    const altered = await verify(w, { code: r.code.data, genome: { glyphs } }, { adminId: seller });
-    expect(altered.state).toBe('SUSPICIOUS_ACTIVITY');
-    expect((await authEvent(w, altered.scanId)).reasons).toEqual(['GENOME_MISMATCH']);
     expect(await findingsOf(r)).toEqual([]);
+  });
+
+  it('a staff scan still records the code’s own findings (steps 6–7), marked staffScan, and never UNSOLD_PIECE_SCAN', async () => {
+    // An altered genome on a piece not sold yet: GENOME_MISMATCH as for any scan, and no unsold finding.
+    const r = await issue(w);
+    const glyphs = [...r.genome.glyphs].map((g, i) => (i < 3 ? (g + 1) % 16 : g));
+    const altered = await verify(w, { code: r.code.data, genome: { glyphs } }, { adminId: seller, geo: { country: 'FR' } });
+    expect(altered.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(altered.registration).toBeUndefined();
+    expect((await authEvent(w, altered.scanId)).reasons).toEqual(['GENOME_MISMATCH']);
+    expect(await scanEvent(w, altered.scanId)).toMatchObject({ event_type: 'ADMIN_TEST', admin_id: seller });
+    const [genome, ...others] = await findingsOf(r);
+    expect(others).toEqual([]);
+    expect(genome).toMatchObject({ type: 'GENOME_MISMATCH', severity: 'HIGH', status: 'OPEN', details: { staffScan: true } });
+
+    // Client Services checking a suspicious piece: a validly signed code ORBES never registered pages as for any scan.
+    const forged = await signedCode(w, { serial: 77_501 });
+    const unknown = await verify(w, forged, { adminId: seller, geo: { country: 'FR' } });
+    expect(unknown.state).toBe('UNKNOWN');
+    expect(await scanEvent(w, unknown.scanId)).toMatchObject({ event_type: 'ADMIN_TEST', admin_id: seller });
+    const packed = packIdentity({ year: 2026, categoryIndex: 1, serial: 77_501 });
+    const critical = (await anomalies(w)).filter((x) => x.type === 'VALID_SIGNATURE_UNREGISTERED' && x.details.packedIdentity === packed);
+    expect(critical).toHaveLength(1);
+    expect(critical[0]).toMatchObject({ severity: 'CRITICAL', risk_score: 100, product_id: null, details: { reason: 'PRODUCT_NOT_REGISTERED', staffScan: true } });
+
+    // A valid signature over a payload that differs from the registered code: CODE_MISMATCH, CRITICAL.
+    const s = await issue(w);
+    const nonce = unframeCodeData(fromBase64Url(s.code.data)).payloadBytes.slice(9, 13);
+    nonce[0] ^= 0xff;
+    const mismatch = await verify(w, await signedCode(w, { serial: s.product.serial, issue: 1, nonce }), { adminId: seller });
+    expect(mismatch.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(await findingsOf(s)).toEqual([expect.objectContaining({ type: 'CODE_MISMATCH', severity: 'CRITICAL', code_id: s.code.id, details: expect.objectContaining({ staffScan: true }) })]);
+
+    // A public scan's findings carry no such mark.
+    const p = await issue(w);
+    await verify(w, { code: p.code.data, genome: { glyphs: [...p.genome.glyphs].map((g, i) => (i < 3 ? (g + 1) % 16 : g)) } }, { deviceHash: 'stranger' });
+    const pub = (await findingsOf(p)).find((a) => a.type === 'GENOME_MISMATCH');
+    expect(pub?.details).not.toHaveProperty('staffScan');
   });
 
   it('a staff scan reads the public history: a customer’s state, without adding to the findings', async () => {

@@ -3,7 +3,8 @@
  * records UNSOLD_PIECE_SCAN (with the country, once per piece and per UTC day)
  * and answers exactly what it answered before; a request that carries a
  * console session the console would let in is a staff scan: ADMIN_TEST under
- * that console user, no finding, no registration token.
+ * that console user, no UNSOLD_PIECE_SCAN (the code's own findings of steps
+ * 6–7 are still recorded, marked staffScan), no registration token.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';

@@ -304,8 +304,10 @@ describe('admin products, codes and records', () => {
       const v = safeJson(await h.client().post('/api/v1/verify', { code: p.code.data, genome: { glyphs: wrong } })) as any;
       expect(v.state).toBe('SUSPICIOUS_ACTIVITY');
       const list = safeJson(await auditor.get('/api/admin/anomalies?status=OPEN')) as any;
-      const anomaly = list.items.find((a: any) => a.productId === p.product.productId);
+      // The piece is still ISSUED, so the same scan also records UNSOLD_PIECE_SCAN (S-07), at the same instant.
+      const anomaly = list.items.find((a: any) => a.productId === p.product.productId && a.type === 'GENOME_MISMATCH');
       expect(anomaly).toMatchObject({ type: 'GENOME_MISMATCH', status: 'OPEN' });
+      expect(list.items.filter((a: any) => a.productId === p.product.productId).map((a: any) => a.type).sort()).toEqual(['GENOME_MISMATCH', 'UNSOLD_PIECE_SCAN']);
       expect((await auditor.patch(`/api/admin/anomalies/${anomaly.id}`, { status: 'ACKNOWLEDGED' })).statusCode).toBe(403);
       const patched = await operator.patch(`/api/admin/anomalies/${anomaly.id}`, { status: 'RESOLVED', note: 'scanner glare' });
       expect(patched.statusCode).toBe(200);

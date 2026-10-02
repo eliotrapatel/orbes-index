@@ -77,7 +77,7 @@ export interface EvaluateOptions {
   /**
    * A staff scan (ADMIN_TEST, S-07): score the public history as it stands, without the scan
    * `scanEventId` taking part, and record nothing. The console user sees the state a customer would
-   * see now, and a staff scan never adds to a finding.
+   * see now, and a staff scan never adds to a history finding.
    */
   observeOnly?: boolean;
 }
@@ -86,9 +86,10 @@ export interface EvaluateOptions {
 export interface RecordFindingOptions {
   /**
    * At most one occurrence per product and UTC day (S-07, UNSOLD_PIECE_SCAN): the finding is
-   * dropped when one of its type was already seen for this product on the day of `f.at`, in any
-   * status (a finding dismissed this morning is not raised again before tomorrow). `occurrences`
-   * then counts days. Product findings only.
+   * dropped when one of its type was already seen for this product on the day of `f.at`
+   * (`last_seen_at` that day), whatever its status: a finding seen today and dismissed is not raised
+   * again before tomorrow, while one last seen yesterday and dismissed today is raised again by
+   * today's first scan. `occurrences` then counts days. Product findings only.
    */
   oncePerUtcDay?: boolean;
 }

@@ -4,8 +4,8 @@
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, and the console cookie only to tell a staff
- * scan (S-07: recorded as ADMIN_TEST under that console user, outside the
- * anomaly findings, without a registration token); it sets the
+ * scan (S-07: recorded as ADMIN_TEST under that console user, outside
+ * UNSOLD_PIECE_SCAN and the history rules, without a registration token); it sets the
  * `orbes_device` cookie and passes pseudonymous request metadata (hashed IP
  * and device, coarse geo and user agent family) to the verification service.
  * The response is the service's public outcome as is: it is built from an
