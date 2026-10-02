@@ -1,7 +1,8 @@
 /**
  * Products: list, issue (the generator: one product, or a batch of up to 50
  * sharing a template), full detail, lifecycle moves, code re-issue, warranty
- * and service records, ownership confirmation.
+ * and service records, ownership confirmation. A piece's photograph has its
+ * own routes (media.ts: an image body, not JSON).
  *
  * Roles: reads AUDITOR; mutations OPERATOR; revoking (a transition to
  * REVOKED) and reinstating ADMIN. The services own the business rules and
@@ -39,6 +40,7 @@ import {
 import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import { toCodeRecord, toGenomeRecord, toProductRecord, type IssueProductInput } from '../../services/issuance.js';
 import { requireProduct } from '../../services/lifecycle.js';
+import { mediaUrl } from '../../services/media.js';
 import type { AppContext } from '../../context.js';
 import { makePage, pageOffset } from '../../types.js';
 import type { AdminRouteDeps } from './index.js';
@@ -150,7 +152,11 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { productId } = parse(productParams, request.params);
     const product = await requireProduct(db, productId);
     const overview = await db.selectFrom('product_overview').selectAll().where('id', '=', product.id).executeTakeFirstOrThrow();
-    const model = await db.selectFrom('models').select(['id', 'name', 'type', 'sku_prefix', 'care_instructions']).where('id', '=', product.model_id).executeTakeFirstOrThrow();
+    const model = await db
+      .selectFrom('models')
+      .select(['id', 'name', 'type', 'sku_prefix', 'care_instructions', 'image_sha256'])
+      .where('id', '=', product.model_id)
+      .executeTakeFirstOrThrow();
     const genomeRows = await db.selectFrom('genomes').selectAll().where('product_id', '=', product.id).orderBy('genome_version').execute();
     const codeRows = await db.selectFrom('codes').selectAll().where('product_id', '=', product.id).orderBy('issue').execute();
     const packed = Number(product.packed_identity);
@@ -169,8 +175,10 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       product: {
         ...productJson(toProductRecord(product, overview.category_code.trim())),
         category: { index: product.category_id, code: overview.category_code.trim(), name: overview.category },
-        model: { id: model.id, name: model.name, type: model.type, skuPrefix: model.sku_prefix, care: model.care_instructions },
+        model: { id: model.id, name: model.name, type: model.type, skuPrefix: model.sku_prefix, care: model.care_instructions, imageUrl: mediaUrl(model.image_sha256) },
         collection: overview.collection,
+        // The piece's own photograph (F-04, §14.12); the model's reference photograph is `model.imageUrl`.
+        photoUrl: mediaUrl(product.photo_sha256),
       },
       genome: genomes[genomes.length - 1] ?? null,
       genomes,

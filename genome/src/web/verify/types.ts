@@ -67,6 +67,10 @@ export interface VerifyOutcome {
     createdYear: number;
     productionDate?: string;
     care?: string;
+    /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`. Authentic results only. */
+    imageUrl?: string;
+    /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`. Authentic results only. */
+    photoUrl?: string;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };

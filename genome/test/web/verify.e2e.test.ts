@@ -8,7 +8,7 @@
  * copies, then the holder of the certificate card), the contact of ORBES
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
- * the scan, the password (FORGOTTEN PASSWORD? through ORBES Client Services
+ * the scan, the photographs of an authentic piece above its GENOME (F-04), the password (FORGOTTEN PASSWORD? through ORBES Client Services
  * and a recovery code, then CHANGE PASSWORD beside SIGN OUT), and the
  * problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
@@ -28,6 +28,7 @@ import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { CLAIM_HELD, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
 
@@ -848,6 +849,70 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
     await countOf(page.getByRole('tab'), 0);
     await countOf(page.locator('.result__footnote'), 0);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('shows the photographs of an authentic piece above its GENOME (F-04): its own, then its model\'s, with their alternative text; none on an invalid signature', async () => {
+    // A model of its own, so that no other result of this suite shows a photograph.
+    const category = (await srv.ctx.categories.getByCode('J'))!;
+    const model = await srv.ctx.db
+      .insertInto('models')
+      .values({ category_id: category.index, name: 'ECLIPSE', type: 'PENDANT', sku_prefix: 'ECL-PD', default_material: '18K YELLOW GOLD' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model.id, material: '18K YELLOW GOLD', year: 2026 }, SYSTEM_ACTOR);
+    const { media } = srv.ctx.services;
+    await media.setModelImage(model.id, { mime: 'image/jpeg', bytes: withJpegSegments(jpegPhoto(640, 480), [SEGMENTS.exif()]) }, SYSTEM_ACTOR);
+    await media.setProductPhoto(issued.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    const plate = page.getByRole('region', { name: 'Photographs of this piece' });
+    await visible(plate);
+    const images = plate.locator('img.photo__img');
+    await countOf(images, 2);
+    expect(await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt')))).toEqual([
+      `This piece, ${issued.product.productId}, photographed by ORBES at issuance`,
+      'The ECLIPSE PENDANT model, photographed by ORBES',
+    ]);
+    await textsOf(plate.locator('.photo__caption'), ['THIS PIECE', 'THE MODEL']);
+    await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare them with the piece in your hands.');
+    // Both decoded by the browser from the stripped files, side by side in square frames on the ivory plate.
+    await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
+      [true, 480],
+      [true, 640],
+    ]);
+    const [own, ref] = [(await images.nth(0).boundingBox())!, (await images.nth(1).boundingBox())!];
+    expect(own.width).toBeCloseTo(own.height, 0);
+    expect(Math.abs(own.y - ref.y)).toBeLessThan(1);
+    expect(own.x + own.width).toBeLessThan(ref.x);
+    expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    // At the head of the result: under the title and its sentence, above the GENOME.
+    const plateBox = (await plate.boundingBox())!;
+    expect(plateBox.y).toBeGreaterThan((await page.locator('.result__message').boundingBox())!.y);
+    expect(plateBox.y + plateBox.height).toBeLessThan((await page.locator('.result__genome').boundingBox())!.y);
+    expect(await plate.locator('.photo__caption').first().evaluate((el) => [getComputedStyle(el).fontFamily, getComputedStyle(el).fontSize])).toEqual([
+      expect.stringMatching(/^"?Gravesend Sans"?,/),
+      '10px',
+    ]);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-result-photographs.png'), fullPage: true });
+    // The same frames on the smallest phone in use, without scrolling sideways.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // The same piece's code with its signature altered: no photograph, nothing of the piece.
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[3] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed-forged.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await countOf(page.locator('.result__photos, img'), 0);
     expect(problems).toEqual([]);
   }, 120_000);
 

@@ -11,16 +11,20 @@
  * them: each dialog says how many issued pieces it touches before anything
  * is saved (a category's, that its issued pieces keep verifying as before),
  * and the model's shows its care block as the client reads it on /verify.
- * A model's category and SKU prefix never change.
+ * A model's category and SKU prefix never change. Its reference photograph
+ * (Photo, on its row; F-04) is shown above the GENOME on the authentic
+ * results of its pieces: the dialog says how many first.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
 import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact, type ModelForm } from '../model/catalogue.js';
 import { can } from '../model/permissions.js';
+import { modelPhotoImpact } from '../model/photo.js';
 import { toneOf } from '../model/tone.js';
 import type { Category, Collection, Model } from '../types.js';
 import { button, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
+import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
@@ -29,6 +33,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   const role = ctx.session.admin.role;
   const canEdit = can(role, 'editCatalog');
   const canToggle = can(role, 'activateCategory');
+  const canPhotograph = can(role, 'photograph');
   const done = (msg: string) => (r: unknown) => {
     if (!r) return;
     notify(msg);
@@ -149,6 +154,22 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     }).then(done('Model saved.'));
   };
 
+  // The reference photograph: chosen, previewed as it will be sent, saved; or removed.
+  const modelPhoto = (m: Model) =>
+    void photoDialog({
+      title: 'Reference photograph',
+      eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
+      impact: modelPhotoImpact(m.products),
+      current: m.imageUrl,
+      currentAlt: `${humanize(m.name)} ${humanize(m.type)}: the current reference photograph`,
+      save: async (photo) => {
+        await ctx.api.setModelImage(m.id, photo);
+      },
+      remove: async () => {
+        await ctx.api.removeModelImage(m.id);
+      },
+    }).then((r) => done(r === 'removed' ? 'Photograph removed.' : 'Photograph saved.')(r));
+
   const categoryColumns: Column<Category>[] = [
     { label: 'Index', cell: (c) => mono(String(c.index).padStart(2, '0')), kind: ['num'] },
     { label: 'Letter', cell: (c) => mono(c.code), kind: ['nowrap'] },
@@ -167,6 +188,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   }
 
   const modelColumns: Column<Model>[] = [
+    { label: 'Photo', cell: (m) => photoThumb(m.imageUrl, `${humanize(m.name)} ${humanize(m.type)}: reference photograph`), kind: ['nowrap'] },
     { label: 'Model', cell: (m) => humanize(m.name) },
     { label: 'Type', cell: (m) => humanize(m.type) },
     { label: 'Category', cell: (m) => `${humanize(m.category.name)} · ${m.category.code}`, kind: ['nowrap'] },
@@ -176,8 +198,18 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Status', cell: (m) => activeMark(m.active), kind: ['nowrap'] },
     { label: 'Issued', cell: (m) => formatCount(m.products), kind: ['num'] },
   ];
-  if (canEdit) {
-    modelColumns.push({ label: 'Action', kind: ['actions'], cell: (m) => button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) });
+  if (canEdit || canPhotograph) {
+    modelColumns.push({
+      label: 'Action',
+      kind: ['actions'],
+      cell: (m) =>
+        h(
+          'span',
+          { class: 'row-actions' },
+          canEdit ? button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) : null,
+          canPhotograph ? button('Photo', { kind: 'ghost', testId: 'model-photo', onClick: () => modelPhoto(m) }) : null,
+        ),
+    });
   }
 
   const collectionColumns: Column<Collection>[] = [
@@ -196,7 +228,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Registry',
       title: 'Catalogue',
-      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions and collection, and a collection’s name, read on the result of every piece issued with them.',
+      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them.',
     }),
     section('Categories', table(categoryColumns, cats.items, { empty: 'No category.', caption: 'Categories' }), {
       id: 'categories',

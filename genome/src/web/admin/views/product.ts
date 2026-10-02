@@ -4,6 +4,10 @@
  *   PRODUCT O26-J-00184 · GENOME [visual] · CODE STATUS · SIGNATURE ·
  *   SCAN COUNT · OWNERSHIP · WARRANTY · ANOMALIES
  *
+ * Photographs (F-04): the piece's own (added or replaced here by an
+ * OPERATOR, as at issuance) and its model's reference photograph (set in
+ * the Catalogue), both shown above the GENOME of its authentic results.
+ *
  * The signature line is the server's live re-verification of the stored
  * code (payload fields, hash, key trust and Ed25519), not a stored flag.
  * Actions are offered according to the lifecycle snapshot and the admin's
@@ -11,6 +15,8 @@
  */
 import { h } from '../../shared/dom.js';
 import { anomalyName, formatDate, formatDateTime, humanize, isoDay, shortHash, summarizeDetails, versionLabel } from '../format.js';
+import { can } from '../model/permissions.js';
+import { PIECE_PHOTO_IMPACT } from '../model/photo.js';
 import { openAnomalies, productActions, productAttributes, productSheet, type ProductActions } from '../model/product.js';
 import { confirmationPhrase } from '../model/registry.js';
 import { retailerOptions } from '../model/sale.js';
@@ -21,6 +27,7 @@ import { artifactPanel } from '../ui/artifacts.js';
 import { anomalyStatus, button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { genomeFigure } from '../ui/figures.js';
+import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
@@ -114,6 +121,7 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
   }
 
   parts.push(section('Product', defList(productAttributes(d).map((a) => ({ label: a.label, value: a.mono ? mono(a.value) : a.value })), 'deflist--cols'), { id: 'attributes' }));
+  parts.push(photographsPanel(ctx, d));
   parts.push(codesPanel(d, actions));
   parts.push(ownershipPanel(d));
   parts.push(warrantyPanel(d));
@@ -139,6 +147,51 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
   );
 
   return h('div', { class: 'view view--product', data: { product: p.productId } }, ...parts);
+}
+
+// ── Photographs ────────────────────────────────────────────────────────────
+
+/** The piece's own photograph and its model's reference photograph, as /verify shows them on an authentic result. */
+function photographsPanel(ctx: ViewContext, d: ProductDetail): HTMLElement {
+  const p = d.product;
+  const canPhotograph = can(ctx.session.admin.role, 'photograph');
+  const label = p.photoUrl ? 'Replace the photo of this piece' : 'Add a photo of this piece';
+  const piece = h(
+    'figure',
+    { class: 'photo-pair__item', data: { testid: 'product-photo' } },
+    photoThumb(p.photoUrl, `${p.productId}: the photograph of this piece`, 'lg'),
+    h('figcaption', { class: 'photo-pair__caption' }, 'This piece'),
+    canPhotograph
+      ? button(label, {
+          kind: 'ghost',
+          testId: 'product-photo-edit',
+          onClick: () =>
+            void photoDialog({
+              title: label,
+              eyebrow: p.productId,
+              impact: PIECE_PHOTO_IMPACT,
+              current: p.photoUrl,
+              currentAlt: `${p.productId}: the current photograph`,
+              save: async (photo) => {
+                await ctx.api.setProductPhoto(p.productId, photo);
+              },
+              remove: async () => {
+                await ctx.api.removeProductPhoto(p.productId);
+              },
+            }).then((r) => {
+              if (r) done(ctx, r === 'removed' ? 'Photograph removed.' : 'Photograph saved.');
+            }),
+        })
+      : null,
+  );
+  const model = h(
+    'figure',
+    { class: 'photo-pair__item', data: { testid: 'model-photo' } },
+    photoThumb(p.model.imageUrl, `${humanize(p.model.name)} ${humanize(p.model.type)}: reference photograph`, 'lg'),
+    h('figcaption', { class: 'photo-pair__caption' }, 'The model'),
+    linkButton('Catalogue', href('catalogue'), 'ghost'),
+  );
+  return section('Photographs', h('div', { class: 'photo-pair' }, piece, model), { id: 'photographs', note: 'Shown on its authentic results on /verify' });
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────

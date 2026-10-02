@@ -55,6 +55,7 @@ import type {
   Paged,
   RecoveryCode,
   ProductDetail,
+  ProductPhoto,
   ProductOverview,
   ProductStatus,
   Retailer,
@@ -132,6 +133,8 @@ const NO_SESSION_PATHS = ['/api/admin/auth/login', '/api/admin/auth/me'];
 interface RequestOptions {
   query?: Query;
   body?: unknown;
+  /** A body that is not JSON: a photograph sent as itself (F-04), with its own Content-Type. */
+  upload?: { type: string; data: Blob };
   /** Return the raw Response (artifacts). */
   raw?: boolean;
   /** Made by a timer, not by the admin: a 401 is thrown to the caller without calling `onUnauthorized`. */
@@ -204,8 +207,11 @@ export class AdminApi {
   async request<T>(method: string, path: string, opts: RequestOptions = {}, retried = false): Promise<T> {
     const m = method.toUpperCase();
     const headers: Record<string, string> = { accept: opts.raw ? '*/*' : 'application/json' };
-    let body: string | undefined;
-    if (opts.body !== undefined) {
+    let body: string | Blob | undefined;
+    if (opts.upload) {
+      headers['content-type'] = opts.upload.type;
+      body = opts.upload.data;
+    } else if (opts.body !== undefined) {
       headers['content-type'] = 'application/json';
       body = JSON.stringify(opts.body);
     }
@@ -403,6 +409,24 @@ export class AdminApi {
 
   updateModel(id: string, change: ModelChange): Promise<Model> {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
+  }
+
+  /** The model's reference photograph (F-04): the image itself (JPEG or WebP, ≤ 1 MiB), not JSON. */
+  setModelImage(id: string, photo: Blob): Promise<Model> {
+    return this.request('POST', `/api/admin/models/${encodeURIComponent(id)}/image`, { upload: { type: photo.type || 'image/jpeg', data: photo } });
+  }
+
+  removeModelImage(id: string): Promise<Model> {
+    return this.del(`/api/admin/models/${encodeURIComponent(id)}/image`);
+  }
+
+  /** The photograph of one piece (F-04), offered at issuance and on the product page. */
+  setProductPhoto(productId: string, photo: Blob): Promise<ProductPhoto> {
+    return this.request('POST', `/api/admin/products/${encodeURIComponent(productId)}/photo`, { upload: { type: photo.type || 'image/jpeg', data: photo } });
+  }
+
+  removeProductPhoto(productId: string): Promise<ProductPhoto> {
+    return this.del(`/api/admin/products/${encodeURIComponent(productId)}/photo`);
   }
 
   // ── Products ─────────────────────────────────────────────────────────────

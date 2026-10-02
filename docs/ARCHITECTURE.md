@@ -108,7 +108,8 @@ genome/
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          certificate cards, scan tokens, scan reports (Cases), scan-history retention,
                          daily scan statistics, account recovery and the owner's sheet (Client Services),
-                         points of sale and the sale mode
+                         points of sale and the sale mode, photographs of models and pieces (media)
+    media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin

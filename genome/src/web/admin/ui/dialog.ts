@@ -231,7 +231,8 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     });
 
     dlg.showModal();
-    const first = dlg.querySelector<HTMLElement>('input, select, textarea') ?? confirm;
+    // A hidden control (the photograph dialog's file input, opened by its button) is never focused.
+    const first = dlg.querySelector<HTMLElement>('input:not([hidden]), select, textarea') ?? confirm;
     first.focus();
   });
 }

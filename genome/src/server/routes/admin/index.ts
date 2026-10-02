@@ -7,7 +7,8 @@
  * categories, console users, a customer's recovery code, lock and export); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
- * hashed client IP as the actor. RETAIL (A-08, a seller's account) reaches
+ * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
+ * photograph routes (media.ts: an image of at most 1 MiB, F-04). RETAIL (A-08, a seller's account) reaches
  * only the routes that declare it: the sale mode, the list of points of sale
  * and its own session, password and second factor.
  */
@@ -24,6 +25,7 @@ import { adminCertificateRoutes } from './certificates.js';
 import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminKeyRoutes } from './keys.js';
+import { adminMediaRoutes } from './media.js';
 import { adminOwnerRoutes } from './owners.js';
 import { adminProductRoutes } from './products.js';
 import { adminRecordRoutes } from './records.js';
@@ -46,6 +48,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminAnalyticsRoutes, deps);
   await app.register(adminCatalogRoutes, deps);
   await app.register(adminProductRoutes, deps);
+  await app.register(adminMediaRoutes, deps);
   await app.register(adminCodeRoutes, deps);
   await app.register(adminCertificateRoutes, deps);
   await app.register(adminRecordRoutes, deps);

@@ -299,6 +299,23 @@ export const NOT_DELIVERED_NOTE =
 export const STAFF_SCAN_NOTE =
   'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered. To register a piece of your own, scan it in a browser that is not signed in to the console.';
 
+/**
+ * The photographs above the GENOME of an authentic result (F-04): the piece's own, taken by ORBES at issuance, then
+ * its model's reference photograph. They show what ORBES registered under this identity, for the customer to compare
+ * with the piece in hand: a code copied onto another object would not match them. Nothing here says the object is
+ * genuine (§4.6).
+ */
+export const PHOTOS = Object.freeze({
+  /** The section's accessible name. */
+  label: 'Photographs of this piece',
+  piece: 'THIS PIECE',
+  model: 'THE MODEL',
+  pieceAlt: (productId: string) => `This piece, ${productId}, photographed by ORBES at issuance`,
+  modelAlt: (model: string, type: string) => `The ${[model, type].filter((x) => x.length > 0).join(' ')} model, photographed by ORBES`,
+  note: (count: number) =>
+    count > 1 ? 'Photographed by ORBES. Compare them with the piece in your hands.' : 'Photographed by ORBES. Compare it with the piece in your hands.',
+});
+
 /** The honest limit of a code-based verification, shown under every positive result. */
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';

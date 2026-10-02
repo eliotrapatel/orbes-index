@@ -13,6 +13,8 @@ import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 import { issueBatchBody } from '../../src/server/http/schemas.js';
 import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
 import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
+import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
+import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
 import {
   ANALYTICS_RANGES,
   analyticsKpis,
@@ -167,6 +169,41 @@ describe('admin enums mirror the server', () => {
     for (const k of Object.keys(ARTIFACT_LIMITS) as (keyof typeof ARTIFACT_LIMITS)[]) expect(ARTIFACT_LIMITS[k], k).toBe(SERVER_ARTIFACT_LIMITS[k]);
     expect(ARTIFACT_DEFAULTS).toMatchObject({ widthMm: SERVER_ARTIFACT_DEFAULTS.widthMm, theme: SERVER_ARTIFACT_DEFAULTS.theme, dpi: SERVER_ARTIFACT_DEFAULTS.dpi });
     expect([...web.ARTIFACT_THEMES]).toEqual([...SERVER_THEME_NAMES]);
+  });
+});
+
+describe('photographs (F-04)', () => {
+  it('mirror the server: JPEG or WebP, 1 MiB at most', () => {
+    expect(PHOTO_MAX_BYTES).toBe(SERVER_MAX_IMAGE_BYTES);
+    expect([...PHOTO_MIME_TYPES]).toEqual([...SERVER_IMAGE_MIME_TYPES]);
+    // What the console sends always fits the server's side limit.
+    expect(PHOTO_MAX_SIDE).toBeLessThanOrEqual(SERVER_MAX_IMAGE_SIDE);
+    expect([...PHOTO_QUALITIES]).toEqual([...PHOTO_QUALITIES].sort((a, b) => b - a));
+  });
+
+  it('scales a photograph down to 2 000 px on its longer side, never up', () => {
+    expect(fitWithin(4032, 3024)).toEqual({ width: 2000, height: 1500 });
+    expect(fitWithin(3024, 4032)).toEqual({ width: 1500, height: 2000 });
+    expect(fitWithin(1200, 800)).toEqual({ width: 1200, height: 800 });
+    expect(fitWithin(8000, 3)).toEqual({ width: 2000, height: 1 });
+    expect(fitWithin(0, 10)).toEqual({ width: 0, height: 0 });
+  });
+
+  it('says what will be sent, and what a photograph reaches before it is saved', () => {
+    // Thousands set with the brand's thin space (formatCount).
+    expect(photoFacts(1600, 1200, 319_488)).toBe(`${formatCount(1600)} × ${formatCount(1200)} PX · 312 KB`);
+    expect(photoFacts(10, 10, 900)).toBe('10 × 10 PX · 900 B');
+    expect(modelPhotoImpact(9)).toBe('Shown at once on the 9 issued pieces of this model above the GENOME of every authentic result on /verify, beside the photograph of the piece when it has one.');
+    expect(modelPhotoImpact(1)).toMatch(/^Shown at once on the 1 issued piece of this model/);
+    expect(modelPhotoImpact(0)).toMatch(/^No piece has been issued with this model yet/);
+    expect(PIECE_PHOTO_IMPACT).toMatch(/compares it with the piece in hand/);
+  });
+
+  it('is an OPERATOR\'s to set or remove', () => {
+    expect(can('OPERATOR', 'photograph')).toBe(true);
+    expect(can('ADMIN', 'photograph')).toBe(true);
+    expect(can('AUDITOR', 'photograph')).toBe(false);
+    expect(can('RETAIL', 'photograph')).toBe(false);
   });
 });
 
@@ -437,8 +474,9 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
       createdAt: '2026-09-02T10:00:00.000Z',
       updatedAt: '2026-09-02T10:00:00.000Z',
       category: { index: 1, code: 'J', name: 'Jewelry' },
-      model: { id: '22222222-2222-4222-8222-222222222222', name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', care: null },
+      model: { id: '22222222-2222-4222-8222-222222222222', name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', care: null, imageUrl: null },
       collection: 'ORBIT',
+      photoUrl: null,
     },
     genome: {
       id: 'g',

@@ -36,6 +36,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   createCatalog: 'OPERATOR',
   /** Edit a model (name, material, care, collection, active) or rename a collection: read live by /verify (A-10). */
   editCatalog: 'OPERATOR',
+  /** Set or remove a model's reference photograph or the photograph of a piece (F-04): shown on /verify. */
+  photograph: 'OPERATOR',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',

@@ -11,6 +11,7 @@ import {
   FALLBACK_TITLES,
   HINTS,
   NOT_DELIVERED_NOTE,
+  PHOTOS,
   PROBLEMS,
   problemForApiError,
   REPORT,
@@ -26,6 +27,7 @@ import {
   formatDateTimeLong,
   isAuthenticState,
   normalizeCodeInput,
+  photoModels,
   recoveryContactModel,
   registrationOpen,
   resultViewModel,
@@ -340,6 +342,45 @@ describe('verify view-model: assurance and warranty notes', () => {
     const vm = resultViewModel(outcome('AUTHENTIC'));
     const text = JSON.stringify(vm).toLowerCase();
     for (const word of ['risk', 'score', 'threshold', 'anomal', 'reason']) expect(text).not.toContain(word);
+  });
+});
+
+describe('verify view-model: the photographs of an authentic piece (F-04)', () => {
+  const MODEL_URL = `/api/v1/media/${'a1'.repeat(32)}`;
+  const PIECE_URL = `/api/v1/media/${'b2'.repeat(32)}`;
+  const withPhotos = (state: VerificationState) =>
+    outcome(state, state.startsWith('AUTHENTIC') ? { product: { ...PRODUCT, imageUrl: MODEL_URL, photoUrl: PIECE_URL } } : {});
+
+  it('shows the piece\'s own photograph first, then its model\'s, each with its caption and alternative text', () => {
+    for (const state of ['AUTHENTIC', 'AUTHENTIC_FIRST_REGISTRATION', 'AUTHENTIC_REGISTERED', 'AUTHENTIC_OWNERSHIP_VERIFIED'] as const) {
+      expect(resultViewModel(withPhotos(state)).photos, state).toEqual([
+        { kind: 'piece', src: PIECE_URL, alt: 'This piece, O26-J-00184, photographed by ORBES at issuance', caption: 'THIS PIECE' },
+        { kind: 'model', src: MODEL_URL, alt: 'The MONOLITHE RING model, photographed by ORBES', caption: 'THE MODEL' },
+      ]);
+    }
+    expect(PHOTOS.note(2)).toBe('Photographed by ORBES. Compare them with the piece in your hands.');
+    expect(PHOTOS.note(1)).toBe('Photographed by ORBES. Compare it with the piece in your hands.');
+  });
+
+  it('shows only what the server sent: one photograph, or none', () => {
+    expect(resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, imageUrl: MODEL_URL } })).photos.map((p) => p.kind)).toEqual(['model']);
+    expect(resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, photoUrl: PIECE_URL } })).photos.map((p) => p.kind)).toEqual(['piece']);
+    expect(resultViewModel(outcome('AUTHENTIC')).photos).toEqual([]);
+  });
+
+  it('never on a result that is not authentic, even if a product block came with it', () => {
+    for (const state of VERIFICATION_STATES.filter((s) => !s.startsWith('AUTHENTIC'))) {
+      const vm = resultViewModel(outcome(state, { product: { ...PRODUCT, imageUrl: MODEL_URL, photoUrl: PIECE_URL } }));
+      expect(vm.photos, state).toEqual([]);
+    }
+  });
+
+  it('takes a photograph only from this origin\'s media route', () => {
+    for (const url of ['https://evil.example/x.jpg', '//evil.example/x.jpg', 'javascript:alert(1)', 'data:image/png;base64,AAAA', `/api/v1/media/${'A1'.repeat(32)}`, `/api/v1/media/${'a1'.repeat(31)}`, `/api/v1/media/${'a1'.repeat(32)}?x=1`]) {
+      expect(photoModels({ productId: 'O26-J-00184', model: 'M', type: 'T', imageUrl: url, photoUrl: url }), url).toEqual([]);
+    }
+    // The owner's list of pieces sends null for a missing photograph.
+    expect(photoModels({ productId: 'O26-J-00184', model: 'M', type: 'T', imageUrl: null, photoUrl: null })).toEqual([]);
   });
 });
 

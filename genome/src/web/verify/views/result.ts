@@ -1,10 +1,14 @@
 /**
- * Result: the state, then the GENOME, the product lines and the four tabs.
+ * Result: the state, then the photographs (authentic results, F-04), the
+ * GENOME, the product lines and the four tabs.
  *
  *          ◯                    tone mark (seal / moon / empty orbit)
  *      A U T H E N T I C        state title, tracked
  *      FIRST REGISTRATION       sub-title when the server title has one
  *   one sentence from the server
+ *   ┌                      ┐
+ *     [ this piece ] [ model ]  photographs on ivory, when ORBES has them
+ *   └                      ┘
  *   ┌                      ┐
  *     GENOME  O26-J-00184
  *     ◔ · ◯ · ◕ · …            core renderGenomeSvg row
@@ -32,6 +36,7 @@ import type { ResultViewModel, TabId } from '../view-model.js';
 import { contactBlock, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
+import { photoPlate } from './photos.js';
 import { reportSection, type ReportDeps } from './report.js';
 import { tabsView } from './tabs.js';
 
@@ -73,6 +78,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   );
 
   const sections: (HTMLElement | null)[] = [];
+  // At the head of an authentic result, above the GENOME: what the customer compares with the piece in hand.
+  sections.push(photoPlate(vm.photos));
   if (vm.genome) sections.push(bracket(h('div', { class: 'result__genome' }, genomeBlock(vm.genome))));
   if (vm.productLines.length > 0) {
     sections.push(

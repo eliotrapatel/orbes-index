@@ -36,7 +36,8 @@ genome/
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
-                         the sale mode
+                         the sale mode, photographs of models and pieces (media)
+    media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/

@@ -290,11 +290,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.photos__note', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -414,6 +414,33 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
     // The ivory plate keeps its margins (§2.5: 34 / 22 / 28 px).
     expect(rule(styles, '.result__genome').padding).toBe('34px 22px 28px');
     expect(rule(styles, '.result__genome')['margin-top']).toBe('52px');
+  });
+});
+
+describe('verify app: the photographs of an authentic piece (F-04)', () => {
+  const photosView = readFileSync(join(WEB, 'verify/views/photos.ts'), 'utf8');
+
+  it('sets them at the head of the result, above the GENOME, on an ivory plate framed like it', () => {
+    const at = (needle: string) => resultView.indexOf(needle);
+    expect(at('sections.push(photoPlate(vm.photos));')).toBeGreaterThan(0);
+    expect(at('sections.push(photoPlate(vm.photos));')).toBeLessThan(at("class: 'result__genome'"));
+    expect(rule(styles, '.photos__plate').background).toBe('var(--ivory)');
+    expect(rule(styles, '.result__photos')['margin-top']).toBe(rule(styles, '.result__genome')['margin-top']);
+    expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
+  });
+
+  it('never crops a photograph, gives each its alternative text, and hides one that cannot be loaded', () => {
+    expect(rule(styles, '.photo__img')).toMatchObject({ width: '100%', 'aspect-ratio': '1', 'object-fit': 'contain' });
+    expect(photosView).toContain("attrs: { src: p.src, alt: p.alt, decoding: 'async' }");
+    expect(photosView).toContain("addEventListener(\n      'error',");
+    // [hidden] must win over the plate's own display.
+    expect(rule(styles, '.photo[hidden],\n.result__photos[hidden]').display).toBe('none');
+  });
+
+  it('captions them at 10 px in the display face, and says the sentence under them in the reading face', () => {
+    expect(Number.parseFloat(resolve(rule(styles, '.photo__caption')['font-size']))).toBeGreaterThanOrEqual(10);
+    expect(rule(styles, '.photo__caption').color).toBe('var(--ink-soft)');
+    expect(rule(styles, '.photos__note')).toMatchObject({ 'font-size': 'var(--fs-line)', color: 'var(--ink-soft)' });
   });
 });
 

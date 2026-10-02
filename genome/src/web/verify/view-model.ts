@@ -3,6 +3,7 @@
  *
  * Pure (no DOM) and unit-tested. The server decides the state and writes the
  * title and message; this module only arranges them: which sections appear,
+ * the photographs of an authentic piece (F-04: its own, then its model's),
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
  * registration token, the certificate-card section), where ORBES Client
@@ -12,7 +13,7 @@
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -76,6 +77,17 @@ export interface ReportModel {
   reference: string;
 }
 
+/**
+ * A photograph shown above the GENOME of an authentic result (F-04), on its ivory plate: the piece's own (taken by
+ * ORBES at issuance) or its model's reference photograph. `src` is always a path of this origin's media route.
+ */
+export interface PhotoModel {
+  kind: 'piece' | 'model';
+  src: string;
+  alt: string;
+  caption: string;
+}
+
 export interface GenomeModel {
   id: string;
   version: string;
@@ -93,6 +105,8 @@ export interface ResultViewModel {
   message: string;
   /** Extra line for the owner when unusual activity was recorded elsewhere. */
   notice?: string;
+  /** The photographs of an authentic piece (F-04): its own first, then its model's; empty otherwise. */
+  photos: PhotoModel[];
   genome?: GenomeModel;
   /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
   productLines: string[];
@@ -246,6 +260,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     tone: toneOf(state),
     titleMain: title.main,
     message: outcome.message || '',
+    photos: [],
     productLines: [],
     tabs: [],
     productRows: [],
@@ -288,6 +303,8 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     vm.productRows = rows;
     if (p.care && p.care.trim()) vm.care = p.care.trim();
     vm.tabs = ['product', 'warranty', 'care', 'ownership'];
+    // The server sends them on authentic results only; the client shows them nowhere else either.
+    vm.photos = photoModels(p);
   }
 
   const v = outcome.verification;
@@ -424,6 +441,26 @@ function ownershipMode(o: VerifyOutcome): OwnershipMode {
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };
   if (own?.registered) return { kind: 'registered', productId, transferPending: own.transferPending === true };
   return { kind: 'unregistered' };
+}
+
+/** The only URLs a photograph may come from: this origin's media route, named by a SHA-256. */
+const MEDIA_URL = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
+
+/**
+ * The photographs of a piece (F-04), its own first (what the customer compares with the piece in hand), then its
+ * model's reference photograph; each with the alternative text a screen reader says. Shared with the owner's list of
+ * pieces, whose items carry the same two URLs (null there when absent). A URL that is not this origin's media route
+ * is dropped.
+ */
+export function photoModels(p: { productId: string; model: string; type: string; imageUrl?: string | null; photoUrl?: string | null }): PhotoModel[] {
+  const out: PhotoModel[] = [];
+  if (typeof p.photoUrl === 'string' && MEDIA_URL.test(p.photoUrl)) {
+    out.push({ kind: 'piece', src: p.photoUrl, alt: PHOTOS.pieceAlt(p.productId), caption: PHOTOS.piece });
+  }
+  if (typeof p.imageUrl === 'string' && MEDIA_URL.test(p.imageUrl)) {
+    out.push({ kind: 'model', src: p.imageUrl, alt: PHOTOS.modelAlt(upper(p.model), upper(p.type)), caption: PHOTOS.model });
+  }
+  return out;
 }
 
 /** Whether a registration window (ISO expiry) is still open at `now` (ms). */

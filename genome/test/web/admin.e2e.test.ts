@@ -7,8 +7,11 @@
  * block as the client reads it), a collection and a category → issue a product with the
  * generator (claim code shown once, its certificate card, code preview) → download the SVG and
  * decode it with the core decoder after rasterising it with resvg, then
- * verify the decoded data through the public API → product page (spec §22)
- * → warranty activation and code re-issue → key rotation → audit chain
+ * verify the decoded data through the public API → the photograph of the
+ * piece, added at issuance (F-04) → product page (spec §22) → warranty
+ * activation and code re-issue → a model's reference photograph from the
+ * catalogue, both photographs on the product page and on /verify, the
+ * piece's removed → key rotation → audit chain
  * verification → a batch of 120 products from a CSV (preview, requests of
  * 50, results piece by piece, the page held until the claim codes are saved,
  * certificate cards) and a quantity → sign out. Also: a customer's report
@@ -30,13 +33,14 @@
  * the generator result and the product page to genome/out/.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWeb } from '../../scripts/build-web.js';
 import { equalBytes, fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
@@ -78,6 +82,22 @@ async function freePort(): Promise<number> {
 }
 
 const hex = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/** A colour photograph of `width` × `height` (a smooth gradient) written as a PNG, for the console's photograph chooser. */
+function writePhotoPng(path: string, width: number, height: number): string {
+  const png = new PNG({ width, height });
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      png.data[i] = Math.round((x / width) * 255);
+      png.data[i + 1] = Math.round((y / height) * 255);
+      png.data[i + 2] = 150;
+      png.data[i + 3] = 255;
+    }
+  }
+  writeFileSync(path, PNG.sync.write(png));
+  return path;
+}
 
 /**
  * Visible text set in Gravesend Sans that holds a one or a zero: none should (its one is its capital I, its
@@ -480,6 +500,25 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const outcome = (await verify.json()) as { state: string; product?: { productId: string } };
     expect(outcome.state).toMatch(/^AUTHENTIC/);
     expect(outcome.product?.productId).toBe(issuedProductId);
+
+    // The photograph of this piece, proposed at issuance (F-04): chosen, re-encoded and previewed as it will be sent, saved.
+    const photoPanel = page.locator('#piece-photo');
+    expect(await photoPanel.locator('.photo-thumb--empty').count()).toBe(1);
+    await page.click('[data-testid=add-piece-photo]');
+    await page.waitForSelector('dialog [data-testid=photo-impact]');
+    expect(await page.locator('dialog .dialog__eyebrow').textContent()).toBe(issuedProductId);
+    expect(await page.locator('dialog input[name=remove]').count()).toBe(0);
+    await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'piece.png'), 900, 900));
+    await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: 900 × 900 PX · \d+ KB$/);
+    expect(await page.locator('dialog [data-testid=photo-current] img').getAttribute('src')).toMatch(/^blob:/);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Photograph saved.")');
+    await expect.poll(() => photoPanel.locator('img.photo-thumb').getAttribute('src')).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+    expect(await page.locator('[data-testid=add-piece-photo]').textContent()).toBe('Replace the photo of this piece');
+    const photographed = await ctx.db.selectFrom('products').select('photo_sha256').where('product_id', '=', issuedProductId).executeTakeFirstOrThrow();
+    const sent = await ctx.db.selectFrom('media_objects').selectAll().where('sha256', '=', photographed.photo_sha256!).executeTakeFirstOrThrow();
+    expect([sent.mime, sent.width, sent.height]).toEqual(['image/jpeg', 900, 900]);
+    expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
   it('opens the product page (spec §22) and runs product actions', async () => {
@@ -525,6 +564,60 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => row('code').textContent()).toContain('Issue 2');
     expect(await page.locator('#codes tbody tr').count()).toBe(2);
     expect(await page.locator('#codes tbody tr').nth(1).textContent()).toContain('SUPERSEDED');
+  }, STEP_TIMEOUT);
+
+  it('sets a model\'s reference photograph in the catalogue (F-04): shown, with the piece\'s own, on the product page and on /verify', async () => {
+    await go(page, '#/catalogue', 'Catalogue');
+    const row = page.locator('#models tbody tr', { hasText: 'MNL-RG' });
+    expect(await row.locator('.photo-thumb--empty').count()).toBe(1);
+    await row.locator('[data-testid=model-photo]').click();
+    // Before anything is saved: the results it reaches.
+    await expect.poll(() => page.locator('dialog [data-testid=photo-impact]').textContent()).toMatch(/^Shown at once on the 10 issued pieces of this model above the GENOME/);
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Choose a photograph first.');
+    // A large photograph is sent at 2 000 px on its longer side.
+    await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'model.png'), 2400, 1600));
+    await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: 2\s000 × 1\s333 PX · \d+ KB$/);
+    expect(await page.locator('dialog .dialog__error').textContent()).toBe('');
+    await shot(page, 'catalogue-photo-dialog');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Photograph saved.")');
+    await expect.poll(() => row.locator('img.photo-thumb').count()).toBe(1);
+    const model = await ctx.services.catalog.getModel(modelId);
+    const stored = await ctx.db.selectFrom('media_objects').selectAll().where('sha256', '=', model.imageUrl!.split('/').pop()!).executeTakeFirstOrThrow();
+    expect([stored.mime, stored.width, stored.height]).toEqual(['image/jpeg', 2000, 1333]);
+    expect(stored.bytes.length).toBeLessThanOrEqual(1024 * 1024);
+
+    // The product page: the piece's own photograph and the model's.
+    await go(page, `#/products/${issuedProductId}`, issuedProductId);
+    const photos = page.locator('#photographs');
+    await expect.poll(() => photos.locator('img.photo-thumb').count()).toBe(2);
+    expect(await photos.locator('[data-testid=model-photo] img').getAttribute('src')).toBe(model.imageUrl);
+    const pieceUrl = await photos.locator('[data-testid=product-photo] img').getAttribute('src');
+    await expect.poll(() => photos.locator('img.photo-thumb').evaluateAll((els) => els.map((el) => (el as HTMLImageElement).naturalWidth > 0))).toEqual([true, true]);
+    await photos.scrollIntoViewIfNeeded();
+    if (SCREENSHOTS) await page.screenshot({ path: join(OUT_DIR, 'admin-product-photographs.png') });
+    // /verify shows both on the piece's authentic result (its ACTIVE code, re-issued above).
+    const active = await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select(['c.payload', 'c.signature']).where('p.product_id', '=', issuedProductId).where('c.status', '=', 'ACTIVE').executeTakeFirstOrThrow();
+    const verified = (await (
+      await fetch(`${origin}/api/v1/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: toBase64Url(frameCodeData(active.payload, active.signature)) }) })
+    ).json()) as { state: string; product?: { imageUrl?: string; photoUrl?: string } };
+    expect(verified.state).toMatch(/^AUTHENTIC/);
+    expect(verified.product).toMatchObject({ imageUrl: model.imageUrl, photoUrl: pieceUrl });
+
+    // Removed from the product page: the box marks the dialog destructive; the piece then shows its model's alone.
+    await page.click('[data-testid=product-photo-edit]');
+    await page.locator('dialog label.ccheck', { hasText: 'Remove the current photograph' }).click();
+    expect(await page.locator('dialog input[name=remove]').isChecked()).toBe(true);
+    expect(await page.locator('dialog.dialog--danger').count()).toBe(1);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Photograph removed.")');
+    await expect.poll(() => page.locator('#photographs img.photo-thumb').count()).toBe(1);
+    const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', '%.photo.%').orderBy('id').execute();
+    expect(audited.map((a) => a.action)).toEqual(['product.photo.set', 'product.photo.remove']);
+    expect((await ctx.db.selectFrom('audit_logs').select('action').where('action', '=', 'model.image.set').execute()).length).toBe(1);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
   it('downloads a print sheet of codes selected in the codes list', async () => {

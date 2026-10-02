@@ -1,7 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
  * mutates (the catalogue's models and collections included, created or
- * edited), ADMIN for keys, revocations, reinstatement, categories (created,
+ * edited, and the photographs of models and pieces, F-04), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08) and a customer's recovery code, lock and export;
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
@@ -17,10 +17,14 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AdminRole } from '../../src/server/db/schema.js';
+import { jpegPhoto } from '../support/images.js';
 import { adminClient, createHarness, errorOf, type Client, type Harness } from './support.js';
 
-/** `min`: the rank the route needs; `roles`, when given, the exact roles it lets in instead (the sale mode). */
-type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; min: AdminRole; roles?: readonly AdminRole[]; group: string };
+/**
+ * `min`: the rank the route needs; `roles`, when given, the exact roles it lets in instead (the sale mode). `headers`:
+ * a body that is not JSON (the photographs of F-04 take the image itself).
+ */
+type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; headers?: Record<string, string>; min: AdminRole; roles?: readonly AdminRole[]; group: string };
 const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
 const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
@@ -28,6 +32,8 @@ const RANK: Record<AdminRole, number> = { RETAIL: 1, AUDITOR: 2, OPERATOR: 3, AD
 const PID = 'O26-J-00001';
 const UUID = randomUUID();
 const INVALID = { definitelyNotAField: true };
+/** A real photograph: the image routes check the type before the target, so an allowed probe ends in 404. */
+const PHOTO = { body: Buffer.from(jpegPhoto(8, 8)), headers: { 'content-type': 'image/jpeg' } };
 
 const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
@@ -40,6 +46,10 @@ const PROBES: Probe[] = [
   { group: 'models', method: 'GET', url: '/api/admin/models', min: 'AUDITOR' },
   { group: 'models', method: 'POST', url: '/api/admin/models', body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'PATCH', url: `/api/admin/models/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'media', method: 'POST', url: `/api/admin/models/${UUID}/image`, ...PHOTO, min: 'OPERATOR' },
+  { group: 'media', method: 'DELETE', url: `/api/admin/models/${UUID}/image`, min: 'OPERATOR' },
+  { group: 'media', method: 'POST', url: `/api/admin/products/${PID}/photo`, ...PHOTO, min: 'OPERATOR' },
+  { group: 'media', method: 'DELETE', url: `/api/admin/products/${PID}/photo`, min: 'OPERATOR' },
   { group: 'collections', method: 'GET', url: '/api/admin/collections', min: 'AUDITOR' },
   { group: 'collections', method: 'POST', url: '/api/admin/collections', body: INVALID, min: 'OPERATOR' },
   { group: 'collections', method: 'PATCH', url: `/api/admin/collections/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -151,6 +161,7 @@ describe('admin role enforcement', () => {
       'password',
       'retailers',
       'sale',
+      'media',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -159,7 +170,7 @@ describe('admin role enforcement', () => {
   for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) {
     it(`${role}: allowed exactly where its rank reaches (or where the route names it)`, async () => {
       for (const p of PROBES) {
-        const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
+        const res = await clients[role].request(p.method, p.url, { ...(p.body !== undefined ? { body: p.body } : {}), ...(p.headers ? { headers: p.headers } : {}) });
         const label = `${role} ${p.method} ${p.url} → ${res.statusCode} ${res.body.slice(0, 120)}`;
         if (allows(p, role)) {
           expect([200, 201, 400, 404], label).toContain(res.statusCode);
@@ -175,7 +186,7 @@ describe('admin role enforcement', () => {
   it('anonymous callers get 401 on every admin route', async () => {
     const anon = h.client();
     for (const p of PROBES) {
-      const res = await anon.request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
+      const res = await anon.request(p.method, p.url, { ...(p.body !== undefined ? { body: p.body } : {}), ...(p.headers ? { headers: p.headers } : {}) });
       expect(res.statusCode, `${p.method} ${p.url}`).toBe(401);
     }
   });

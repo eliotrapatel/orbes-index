@@ -217,9 +217,17 @@ export interface Model {
   careInstructions: string | null;
   /** Offered for new products (the generator hides an inactive model; the server refuses it, 409 MODEL_INACTIVE). */
   active: boolean;
+  /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, shown on the authentic results of its pieces; null without one. */
+  imageUrl: string | null;
   /** Pieces issued with this model: their public result reads its name, care instructions and collection. */
   products: number;
   createdAt: Iso;
+}
+
+/** POST and DELETE /api/admin/products/:productId/photo (F-04): the piece and the URL of its photograph. */
+export interface ProductPhoto {
+  productId: string;
+  photoUrl: string | null;
 }
 
 /** PATCH /api/admin/models/:id: never the category nor the SKU prefix. '' clears the material, the care or the collection. */
@@ -564,8 +572,10 @@ export interface AnomalyContext {
 export interface ProductDetail {
   product: ProductJson & {
     category: { index: number; code: string; name: string };
-    model: { id: string; name: string; type: string; skuPrefix: string; care: string | null };
+    model: { id: string; name: string; type: string; skuPrefix: string; care: string | null; imageUrl: string | null };
     collection: string | null;
+    /** The piece's own photograph (F-04), taken at issuance; null without one. */
+    photoUrl: string | null;
   };
   genome: GenomeJson | null;
   genomes: GenomeJson[];

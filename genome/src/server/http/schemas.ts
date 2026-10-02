@@ -174,6 +174,14 @@ export const reportBody = body({
   note: optionalText(500),
 });
 
+/** GET /api/v1/media/:sha256 (§8.6): a stored photograph, named by the hex SHA-256 of its bytes. */
+export const mediaParams = z.object({
+  sha256: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'Must be a SHA-256 in hexadecimal')
+    .transform((s) => s.toLowerCase()),
+});
+
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
 const email = z.string().trim().min(3, 'Required').max(254, 'At most 254 characters');

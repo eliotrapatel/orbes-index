@@ -40,6 +40,7 @@ import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, requireProduct, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { mediaUrl } from './media.js';
 import { consumeScanToken, inspectScanToken, type ScanTokenFailure } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -114,6 +115,9 @@ export interface OwnedProduct {
   inService: boolean;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: WarrantySummary;
+  /** The model's reference photograph and the piece's own (F-04): `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+  photoUrl: string | null;
 }
 
 export interface OwnershipHistoryEntry {
@@ -622,6 +626,7 @@ export class OwnershipService {
       .select([
         'p.id as uuid', 'p.product_id', 'p.status', 'p.variant', 'p.material', 'p.year',
         'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.type as model_type', 'col.name as collection_name',
+        'm.image_sha256', 'p.photo_sha256',
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
@@ -670,6 +675,8 @@ export class OwnershipService {
           ...(w?.start_date ? { startDate: w.start_date } : {}),
           ...(w?.end_date ? { endDate: w.end_date } : {}),
         },
+        imageUrl: mediaUrl(r.image_sha256),
+        photoUrl: mediaUrl(r.photo_sha256),
       };
     });
   }

@@ -16,7 +16,9 @@
  *    deploy/vps/.env.example;
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
  *    trusts no proxy in direct mode, strips query strings and headers from the
- *    access log and leaves HSTS to the app;
+ *    access log, leaves HSTS to the app, and limits every request body to
+ *    64 KB except the console's two photograph uploads (F-04: 1 200 KB, over
+ *    the app's 1 MiB);
  *  - the scripts are strict bash with --help, and the destructive ones have
  *    --dry-run; the systemd units point at scripts that exist;
  *  - whatever the operator's umask, the image's sources and Caddy's
@@ -34,6 +36,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/server/config.js';
+import { MEDIA_BODY_LIMIT_BYTES, MEDIA_UPLOAD_ROUTES } from '../../src/server/routes/admin/media.js';
+import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 
 const GENOME = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REPO = join(GENOME, '..');
@@ -337,12 +341,55 @@ describe('deploy/vps/Caddyfile', () => {
   it('leaves security headers to the app, limits bodies, compresses, and supports tls internal and an admin allowlist', () => {
     const d = directives(caddyfile);
     expect(d).not.toMatch(/Strict-Transport-Security|Content-Security-Policy/i);
-    expect(d).toMatch(/request_body \{\s*max_size \d+KB\s*\}/);
     expect(d).toMatch(/encode zstd gzip/);
     expect(d).toMatch(/import tls_\{\$TLS_MODE:acme\}/);
     expect(d).toMatch(/\(tls_internal\) \{\s*tls internal\s*\}/);
     expect(d).toMatch(/not client_ip \{\$ADMIN_ALLOWED_IPS:0\.0\.0\.0\/0 ::\/0\}/);
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
+  });
+
+  it('limits every body to 64 KB, except the two photograph uploads of the console (F-04): 1 200 KB, over the app\'s 1 MiB', () => {
+    const d = directives(caddyfile);
+    // Caddy reads KB as 1 000 bytes.
+    const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
+    const limits = [...d.matchAll(/request_body (\S+) \{\s*max_size (\S+)\s*\}/g)].map((m) => [m[1], m[2]]);
+    expect(limits).toEqual([
+      ['@photo_upload', '1200KB'],
+      ['@not_photo_upload', '64KB'],
+    ]);
+    // No request_body without a matcher: exactly one of the two applies to any request.
+    expect([...d.matchAll(/request_body/g)]).toHaveLength(2);
+    expect(kb('1200KB')).toBeGreaterThan(MEDIA_BODY_LIMIT_BYTES);
+    expect(kb('64KB')).toBeGreaterThan(BODY_LIMIT_BYTES);
+    expect(kb('64KB')).toBeLessThan(MEDIA_BODY_LIMIT_BYTES);
+    // The exception is a POST to one of the two upload paths; its complement is the very same pair, negated.
+    const upload = /@photo_upload \{\n\t\tmethod POST\n\t\tpath_regexp (\S+)\n\t\}/.exec(d);
+    expect(upload, 'the @photo_upload matcher').not.toBeNull();
+    const pattern = upload![1];
+    expect(d).toContain(`@not_photo_upload {\n\t\tnot {\n\t\t\tmethod POST\n\t\t\tpath_regexp ${pattern}\n\t\t}\n\t}`);
+    // The pattern is RE2 and JavaScript alike here: it matches the app's two routes, with or without a trailing slash…
+    const re = new RegExp(pattern);
+    const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
+    expect(MEDIA_UPLOAD_ROUTES).toHaveLength(2);
+    for (const route of MEDIA_UPLOAD_ROUTES) {
+      expect(re.test(sample(route)), route).toBe(true);
+      expect(re.test(`${sample(route)}/`), route).toBe(true);
+    }
+    // …and nothing else of the API.
+    for (const path of [
+      '/api/admin/models',
+      '/api/admin/models/73c68b47-012d-4569-a59a-fd2effa613c1',
+      '/api/admin/products/O26-J-00184',
+      '/api/admin/products/batch',
+      '/api/admin/products/O26-J-00184/photo/extra',
+      '/api/admin/models//image',
+      '/api/admin/x/models/1/image',
+      '/api/v1/verify',
+      '/api/v1/media/' + 'ab'.repeat(32),
+      '/admin/api/admin/models/1/image',
+    ]) {
+      expect(re.test(path), path).toBe(false);
+    }
   });
 });
 
