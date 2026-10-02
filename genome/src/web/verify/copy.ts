@@ -212,6 +212,15 @@ export const CONTACT = Object.freeze({
   verified: 'VERIFIED',
 });
 
+/**
+ * A 429 when a piece is registered with its claim code: too many claim codes tried for this piece
+ * (by anyone, within the hour, SECURITY-MODEL §3.8), or too many requests from this connection.
+ * Either way the wait can be up to an hour, longer than the scan's registration window, so the
+ * line says so and names who helps.
+ */
+export const CLAIM_HELD =
+  'Too many claim codes have been tried for this piece. Registration is held for up to an hour: please try again later. ORBES Client Services can assist you.';
+
 /** The honest limit of a code-based verification, shown under every positive result. */
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';

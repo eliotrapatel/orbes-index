@@ -657,7 +657,9 @@ export class OwnershipService {
         .where('action', '=', CLAIM_FAILED_ACTION)
         .where('occurred_at', '>', since)
         .executeTakeFirstOrThrow();
-      if (Number(recent.n) >= CLAIM_ATTEMPT_LIMIT) throw tooManyRequests('Too many claim code attempts for this product. Please try again later.');
+      if (Number(recent.n) >= CLAIM_ATTEMPT_LIMIT) {
+        throw tooManyRequests('Too many claim codes have been tried for this piece within the hour. Please try again later. ORBES Client Services can assist you.');
+      }
       if (p.claim_secret_hash !== null && (await verifyClaimCode(claimCode, p.claim_secret_hash))) return false;
       await this.audit.record(
         { actor, action: CLAIM_FAILED_ACTION, targetType: 'product', targetId: p.product_id, details: { attempt: Number(recent.n) + 1 } },

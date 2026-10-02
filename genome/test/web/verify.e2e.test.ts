@@ -23,6 +23,7 @@ import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { CLAIM_HELD } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
@@ -385,8 +386,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
     await page.setViewportSize(MOBILE_VIEWPORT);
 
-    // Sign-in first (an account is created), then the CLAIM CODE, which is required.
+    // Sign-in first (an account is created), then the CLAIM CODE, which is required: no claim form before it.
+    await countOf(page.getByLabel('CLAIM CODE'), 0);
     await card.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await countOf(page.getByLabel('CLAIM CODE'), 0);
     await page.getByLabel('EMAIL').fill('card-holder@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await card.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
@@ -399,6 +402,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
     await textOf(page.getByRole('alert'), 'The claim code does not match this product.');
     expect(await srv.ctx.services.ownership.currentOwner(issued.product.id)).toBeFalsy();
+    // Registration held (too many claim codes tried for this piece, by anyone, within the hour): the line says how
+    // long, and who helps, since the hold can outlast this scan's window.
+    await page.route('**/api/v1/ownership/register', (route) =>
+      route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests.' } }) }),
+    );
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(page.getByRole('alert'), CLAIM_HELD);
+    expect(CLAIM_HELD).toMatch(/up to an hour.*ORBES Client Services can assist you\.$/);
+    await page.unroute('**/api/v1/ownership/register');
     // The code of the card: REGISTERED TO YOU.
     await page.getByLabel('CLAIM CODE').fill(issued.claimCode!);
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
@@ -415,6 +427,61 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('points a closed registration window of the certificate-card section to the one SCAN AGAIN of the page', async () => {
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    for (let i = 0; i < 22; i++) {
+      await srv.ctx.services.verification.verify({ code: issued.code.data }, { deviceHash: `late-device-${i}`, ipHash: `late-ip-${i}`, geo: { country: 'FR' } });
+    }
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'late.png', issued));
+    expect(await resultTitle(page)).toBe('UNUSUAL ACTIVITY DETECTED');
+    const card = page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' });
+    await visible(card);
+    await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
+    // The visitor takes longer than the 15 minutes of the scan's registration window, then acts in the section.
+    await page.clock.setFixedTime(Date.now() + 16 * 60_000);
+    await card.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await textOf(card.locator('.ownership__text'), /registration window of this scan has closed\. Scan the code again, then register this piece with the claim code of its certificate card\./);
+    await countOf(card.getByRole('button'), 0);
+    await countOf(page.getByLabel('CLAIM CODE'), 0);
+    // One SCAN AGAIN: the foot's.
+    await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
+    await countOf(page.locator('.result__foot').getByRole('button', { name: 'SCAN AGAIN' }), 1);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('keeps an UNUSUAL ACTIVITY result without registration as it was: no certificate-card section, the help line and the contact', async () => {
+    // A piece reported STOLEN (a status finding), and a piece issued without a claim code whose history alone is
+    // suspicious: the server offers no registration token for either.
+    const stolen = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.lifecycle.transition(stolen.product.id, 'STOLEN', { reason: 'Reported by its owner' }, SYSTEM_ACTOR);
+    const plain = await srv.issue({ withClaimSecret: false });
+    await srv.ctx.services.warranty.activate(plain.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    for (let i = 0; i < 22; i++) {
+      await srv.ctx.services.verification.verify({ code: plain.code.data }, { deviceHash: `plain-device-${i}`, ipHash: `plain-ip-${i}`, geo: { country: 'FR' } });
+    }
+    for (const [name, piece] of [
+      ['stolen.png', stolen],
+      ['no-claim-code.png', plain],
+    ] as const) {
+      const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+      await uploadPhoto(page, writeCodePng(srv.workDir, name, piece));
+      expect(await resultTitle(page), name).toBe('UNUSUAL ACTIVITY DETECTED');
+      await attrOf(page.locator('.view--result'), 'data-tone', 'caution');
+      await visible(page.locator('.result__help'));
+      await countOf(page.locator('.result__card'), 0);
+      await countOf(page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' }), 0);
+      await countOf(page.getByLabel('CLAIM CODE'), 0);
+      await countOf(page.getByRole('tab'), 0);
+      await visible(page.locator('.result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+      await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
+      await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+      expect(problems, name).toEqual([]);
+      await page.context().close();
+    }
   }, 120_000);
 
   it('offers CONTACT ORBES CLIENT SERVICES on an INVALID SIGNATURE result: the reference in the email, then the phone and the hours', async () => {

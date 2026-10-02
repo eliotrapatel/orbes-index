@@ -16,6 +16,7 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, normalizeCodeInput, registrationOpen, registrationStatus, type OwnershipMode } from '../view-model.js';
+import { CLAIM_HELD } from '../copy.js';
 import { sectionLabel } from './common.js';
 
 export interface OwnershipDeps {
@@ -30,6 +31,7 @@ export interface OwnershipDeps {
 
 /** Minimum password length (PLATFORM-CONTRACTS §2.9). */
 export const MIN_PASSWORD = 12;
+
 
 type AuthTab = 'signin' | 'create';
 
@@ -142,6 +144,11 @@ export class OwnershipPanel {
     const now = this.now();
     const out: (HTMLElement | null)[] = [this.status(registrationStatus(m.expiresAt, now))];
     if (!registrationOpen(m.expiresAt, now)) {
+      // On an UNUSUAL ACTIVITY result the foot already offers SCAN AGAIN: the sentence points to it, no second button.
+      if (m.underReview) {
+        out.push(this.text('The registration window of this scan has closed. Scan the code again, then register this piece with the claim code of its certificate card.'));
+        return out;
+      }
       out.push(
         this.text('The registration window of this scan has closed. Scan the code again to register this piece.'),
         h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
@@ -377,7 +384,13 @@ export class OwnershipPanel {
         this.render();
         return;
       }
-      const r: OwnershipConfirmation = await this.deps.api.registerProduct(m.token, claim ? claim.value : undefined);
+      let r: OwnershipConfirmation;
+      try {
+        r = await this.deps.api.registerProduct(m.token, claim ? claim.value : undefined);
+      } catch (e) {
+        if (claim && e instanceof ApiError && e.status === 429) throw new FormError(CLAIM_HELD);
+        throw e;
+      }
       this.state.confirmation = { verified: r.verified, via: 'register', productId: r.productId };
       this.state.mode = { kind: 'yours', productId: r.productId, transferPending: false };
       this.render();

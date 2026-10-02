@@ -22,6 +22,10 @@
  *     stolen) · INVALID SIGNATURE (a demo code with one signature bit flipped)
  *   admin (1440 × 900 CSS px at 1×)
  *     dashboard · product page O26-J-00184 · generator result
+ *   verify, last (its scans would change the console's figures)
+ *     UNUSUAL ACTIVITY with DO YOU HOLD THE CERTIFICATE CARD? (O26-L-00014,
+ *     sold and unregistered, with a claim code, after a burst of scans of
+ *     copies of its code from 22 sources)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -47,6 +51,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { PNG } from 'pngjs';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { encodeOrbesCode, ORBES_CODE_STYLES, renderOrbesCodeSvg } from '../src/core/code/encoder.js';
+import { toBase64Url } from '../src/core/bytes.js';
 import { frameCodeData } from '../src/core/payload.js';
 import { buildApp } from '../src/server/app.js';
 import { testConfig } from '../src/server/config.js';
@@ -68,6 +73,9 @@ const CHROMIUM_PATH = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1
 const FIRST_REGISTRATION = DEMO_FIRST_REGISTRATION_PRODUCT_ID; // O26-J-00184, ACTIVATED, unregistered
 const UNUSUAL_ACTIVITY = 'O26-J-00193'; // reported STOLEN, scanned by a stranger
 const FORGERY_BASE = 'O26-J-00186'; // in stock; its signature gets one flipped bit
+const CARD_SECTION = 'O26-L-00014'; // sold (ACTIVATED), unregistered, ships with a claim code
+/** Scans of copies of its code, from this many distinct sources within a minute: velocity ⊕ diversity. */
+const CARD_BURST = 22;
 
 const ADMIN = { email: 'console@example.com', password: 'capture-ui-demo-password' };
 const MOBILE = { width: 390, height: 844 } as const;
@@ -401,6 +409,39 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
   }
 }
 
+/**
+ * The certificate-card section of an UNUSUAL ACTIVITY result: a sold, unregistered piece with a
+ * claim code whose code has been scanned from many places at once (copies), so the next scan is
+ * unusual from its history alone and still offers registration with the claim code. Run after the
+ * console captures: the burst adds scans and an anomaly to the demo registry.
+ */
+async function captureVerifyCard(stage: Stage, shots: Shots): Promise<void> {
+  const code = await codeOf(stage.db, CARD_SECTION);
+  const data = toBase64Url(code.data);
+  for (let i = 0; i < CARD_BURST; i++) {
+    await stage.ctx.services.verification.verify({ code: data }, { deviceHash: `capture-copy-device-${i}`, ipHash: `capture-copy-ip-${i}`, geo: { country: 'FR' } });
+  }
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await mobileContext(browser);
+    const page = await context.newPage();
+    watchPage(page, 'verify-card');
+    await page.goto(`${stage.origin}/verify`);
+    await page.waitForSelector('.landing__scan');
+    await hideGrain(page);
+    await page.setInputFiles('#photo-input', { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(code) });
+    await page.waitForSelector('.view--result .result__title', { timeout: 20_000 });
+    await page.waitForSelector('.result__card .ownership .auth__switch', { timeout: 10_000 });
+    await sleep(2600);
+    const state = await page.getAttribute('.view--result', 'data-state');
+    if (state !== 'SUSPICIOUS_ACTIVITY') throw new Error(`${CARD_SECTION} verified as ${state}`);
+    await shots.full(page, 'verify-10b-unusual-activity-card');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 // ── Admin console ──────────────────────────────────────────────────────────
 
 async function captureAdmin(stage: Stage, shots: Shots): Promise<void> {
@@ -591,6 +632,8 @@ async function main(): Promise<void> {
     await captureVerify(stage, shots, workDir);
     log('admin:');
     await captureAdmin(stage, shots);
+    log('verify, certificate-card section:');
+    await captureVerifyCard(stage, shots);
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);

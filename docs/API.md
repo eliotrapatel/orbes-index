@@ -976,7 +976,7 @@ Example request:
 
 `verified` is `true` when a claim code matched (the product becomes OWNED) and `false` otherwise (REGISTERED, until client services confirm it).
 
-Claim-code guessing is limited to **5 failed attempts per product per rolling hour**, across all accounts and server instances; further attempts answer `429 RATE_LIMITED`. A malformed claim code is refused without counting as an attempt.
+Claim-code guessing is limited to **5 failed attempts per product per rolling hour**, across all accounts and server instances; further attempts answer `429 RATE_LIMITED` (*Too many claim codes have been tried for this piece within the hour. Please try again later. ORBES Client Services can assist you.*), the right code included, until the oldest failure is an hour old. A malformed claim code is refused without counting as an attempt. The verification app answers any 429 on registration with a claim code by saying that registration is held for up to an hour and that ORBES Client Services can assist (`CLAIM_HELD`, `genome/src/web/verify/copy.ts`); the hold can outlast the scan's 15-minute token (THREAT-MODEL E).
 
 Errors: `400 VALIDATION_FAILED`, `400 REGISTRATION_TOKEN_INVALID`, `400 CLAIM_CODE_REQUIRED`, `400 CLAIM_CODE_MALFORMED`, `401 UNAUTHORIZED`, `403 CLAIM_CODE_INVALID`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `409 REGISTRATION_TOKEN_USED`, `409 ALREADY_REGISTERED`, `409 REGISTRATION_NOT_ALLOWED`, `409 REGISTRATION_CONFLICT`, `410 REGISTRATION_TOKEN_EXPIRED`, `429 RATE_LIMITED`.
 
