@@ -41,7 +41,7 @@ import { base32Decode, base32Encode, generateTotpSecret, totpUri, verifyTotp } f
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { ADMIN_ROLES, STAFF_ROLES, type AccountRow, type AdminRole, type AdminUserRow, type SessionSubjectType, type StaffRole } from '../db/schema.js';
-import { conflict, DomainError, isDomainError, notFound, validationError } from '../errors.js';
+import { conflict, DomainError, isDomainError, notFound, unauthorized, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { randomCrockford } from './claim-codes.js';
@@ -645,8 +645,10 @@ export class AuthService {
    * A wrong current password answers 400 CURRENT_PASSWORD_INVALID (a 401 would
    * end the caller's session in the web apps). For an admin it also counts as a
    * failed sign-in (the lockout of adminLogin), and a locked admin is refused
-   * before the password is looked at, so a stolen session cookie cannot be used
-   * to guess the password. An admin's change also clears
+   * before the password is looked at and again under the row lock before the
+   * new one is written, so a stolen session cookie cannot be used to guess the
+   * password, not even with a burst of guesses in flight when the lockout
+   * fires. An admin's change also clears
    * `password_change_required` (the temporary password of a staff account).
    */
   async changePassword(
@@ -669,6 +671,13 @@ export class AuthService {
     await inTransaction(this.db, async (tx) => {
       const now = this.clock();
       if (admin) {
+        // Re-check under the row lock, as adminLogin does: a burst of guesses through a stolen session
+        // may have locked the admin (or an ADMIN disabled it) while this attempt was hashing. Without
+        // this, every guess in flight is evaluated and a correct one still changes the password.
+        const fresh = await tx.selectFrom('admin_users').select(['locked_until', 'disabled_at']).where('id', '=', admin.id).forUpdate().executeTakeFirst();
+        // Disabled: its sessions ended with it, so the answer the session guard gives (and the console signs out).
+        if (!fresh || fresh.disabled_at !== null) throw unauthorized();
+        if (fresh.locked_until !== null && fresh.locked_until.getTime() > now.getTime()) throw accountLocked();
         await tx
           .updateTable('admin_users')
           .set({ password_hash: hash, password_change_required: false, failed_logins: 0, locked_until: null, updated_at: now })

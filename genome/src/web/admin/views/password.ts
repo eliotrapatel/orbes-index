@@ -55,7 +55,8 @@ export function passwordView(api: AdminApi, session: AdminSession, onChanged: ()
     { class: 'account-form', attrs: { novalidate: true, 'data-testid': 'password-form' } },
     // The account name for password managers, which file the new password under it.
     h('input', { attrs: { type: 'email', name: 'username', autocomplete: 'username', value: session.admin.email, hidden: true, readonly: true } }),
-    field('Temporary password', current, { hint: 'The password you were given with this account.' }),
+    // Compared exactly, unlike a claim code of the same look: a wrong try counts as a failed sign-in.
+    field('Temporary password', current, { hint: 'The password you were given with this account, typed exactly as shown: capitals and dashes included.' }),
     field('New password', next, { hint: NEW_HINT }),
     field('New password again', again),
     error,

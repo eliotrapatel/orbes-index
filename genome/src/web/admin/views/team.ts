@@ -79,7 +79,7 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
           { class: 'claim', attrs: { 'aria-label': 'Temporary password' } },
           h('p', { class: 'claim__label' }, 'Temporary password · shown once'),
           code,
-          h('p', { class: 'claim__note' }, `For ${email}. It opens the console once, to choose a new password; only its scrypt hash is stored and it cannot be displayed again.`),
+          h('p', { class: 'claim__note' }, `For ${email}. Typed exactly as shown, capitals and dashes included, it signs in only to choose a new password, until replaced. Only its scrypt hash is stored; it cannot be displayed again.`),
           h('div', { class: 'claim__tools' }, copy, hide),
         ),
       ),

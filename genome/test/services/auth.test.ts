@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import {
@@ -329,6 +329,34 @@ describe('AuthService', () => {
         for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
         await expectDomainError(auth.changePassword({ type: 'admin', id: a.id }, { currentPassword: PASSWORD, newPassword: 'another long passphrase' }, system), 'ACCOUNT_LOCKED', 429);
         clock.advance(ADMIN_LOCKOUT_MS);
+      });
+
+      it('checks the lockout and the disabled state again under the row lock, so a guess in flight writes nothing', async () => {
+        const a = await newAdmin();
+        const subject = { type: 'admin' as const, id: a.id };
+        const change = { currentPassword: PASSWORD, newPassword: 'another long passphrase' };
+        const rowOf = () => t.db.selectFrom('admin_users').selectAll().where('id', '=', a.id).executeTakeFirstOrThrow();
+        // The attempt read the admin before the rest of the burst locked it (or an ADMIN disabled it), then hashed.
+        const readBefore = (row: Awaited<ReturnType<typeof rowOf>>) =>
+          vi.spyOn(auth as unknown as { requireAdmin: (...args: unknown[]) => Promise<unknown> }, 'requireAdmin').mockResolvedValueOnce(row);
+        const original = (await rowOf()).password_hash;
+        try {
+          let stale = await rowOf();
+          for (let i = 0; i < ADMIN_LOCKOUT_THRESHOLD; i++) await expectDomainError(auth.adminLogin({ email: a.addr, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+          readBefore(stale);
+          await expectDomainError(auth.changePassword(subject, change, system), 'ACCOUNT_LOCKED', 429);
+          expect((await rowOf()).password_hash).toBe(original);
+
+          clock.advance(ADMIN_LOCKOUT_MS);
+          stale = await rowOf();
+          await t.db.updateTable('admin_users').set({ disabled_at: clock.now() }).where('id', '=', a.id).execute();
+          readBefore(stale);
+          await expectDomainError(auth.changePassword(subject, change, system), 'UNAUTHORIZED', 401);
+          expect((await rowOf()).password_hash).toBe(original);
+          expect((await audit.list({ action: 'admin.password_change', targetId: a.id })).total).toBe(0);
+        } finally {
+          vi.restoreAllMocks();
+        }
       });
 
       it('changes roles (audited), never on one\'s own account', async () => {

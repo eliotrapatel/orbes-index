@@ -102,7 +102,7 @@ The admin console requires 2-factor authentication in production.
 
 6. Staff accounts (workshop, client services, auditors) are created in the console, on the **TEAM** page (Security group of the sidebar, ADMIN only):
    - **NEW STAFF ACCOUNT**: their email and the role, OPERATOR (issues and maintains pieces) or AUDITOR (reads only);
-   - the console shows a **temporary password once**: copy it, hand it over in person or over a trusted channel, then click *I have handed it over — hide*;
+   - the console shows a **temporary password once**: copy it, hand it over in person or over a trusted channel (it is typed exactly as shown, capitals and dashes included), then click *I have handed it over — hide*;
    - at their first sign-in they must choose their own password before anything else, then enrol their authenticator app (the console asks for it in production);
    - check that their row no longer says TEMPORARY PASSWORD.
 

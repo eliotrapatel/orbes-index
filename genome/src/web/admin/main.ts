@@ -90,7 +90,8 @@ const app = byId('app');
 const api = new AdminApi();
 let session: AdminSession | null = null;
 let renderSeq = 0;
-let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement } | null = null;
+/** `forced`: built for the NEW PASSWORD screen of a temporary password, without CHANGE PASSWORD. */
+let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement; forced: boolean } | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
 
 function setTitle(t: string): void {
@@ -130,13 +131,25 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
   );
   const signOut = h('button', { class: 'side__signout', attrs: { type: 'button', 'data-testid': 'sign-out' } }, 'Sign out');
   signOut.addEventListener('click', () => void logout());
-  // Every role, at any time (A-02); the forced change after a temporary password is a screen of its own.
-  const password = h('button', { class: 'side__small', attrs: { type: 'button', 'data-testid': 'change-password' } }, 'Change password');
-  password.addEventListener('click', () => {
-    void openPasswordDialog(api, s).then((changed) => {
-      if (changed) notify('Password changed. Your other sessions have ended.');
+  // Every role, at any time (A-02), except on the NEW PASSWORD screen of a temporary password: that
+  // screen is the change itself, and a change made beside it would leave the console on a form that
+  // asks for the temporary password, which no longer works.
+  const forced = s.admin.passwordChangeRequired;
+  let password: HTMLElement | null = null;
+  if (!forced) {
+    password = h('button', { class: 'side__small', attrs: { type: 'button', 'data-testid': 'change-password' } }, 'Change password');
+    password.addEventListener('click', () => {
+      void openPasswordDialog(api, s).then((changed) => {
+        if (!changed) return;
+        notify('Password changed. Your other sessions have ended.');
+        // Whatever the screen, a changed password is no longer a temporary one.
+        if (session?.admin.passwordChangeRequired) {
+          session.admin.passwordChangeRequired = false;
+          enrolled(href('dashboard'))();
+        }
+      });
     });
-  });
+  }
   const clock = h('span', { class: 'topbar__clock' });
   const tick = () => (clock.textContent = formatDateTime(new Date()));
   tick();
@@ -171,7 +184,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { root, view, nav, crumb };
+  return { root, view, nav, crumb, forced };
 }
 
 function ensureShell(s: AdminSession): NonNullable<typeof shell> {
@@ -264,6 +277,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
 
   // A temporary password (a staff account created on the Team page): its own password comes first.
   if (s.admin.passwordChangeRequired) {
+    if (shell && !shell.forced) shell = null; // a 403 PASSWORD_CHANGE_REQUIRED under a full shell: drop its CHANGE PASSWORD
     const sh = ensureShell(s);
     markNav(null);
     sh.crumb.textContent = 'Account · Password';

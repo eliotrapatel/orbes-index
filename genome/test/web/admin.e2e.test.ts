@@ -625,6 +625,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(s);
     await signIn(s, staffEmail, temporary);
     await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('New password');
+    // The screen is the change itself: no CHANGE PASSWORD beside it, whose dialog would leave this form asking for a temporary password that no longer works.
+    expect(await s.locator('[data-testid=change-password]').count()).toBe(0);
+    expect(await s.isVisible('[data-testid=sign-out]')).toBe(true);
+    expect(await s.locator('[data-testid=password-form]').textContent()).toContain('capitals and dashes included');
     await shot(s, 'password');
     await go(s, '#/products', 'New password');
     await s.fill('input[name=currentPassword]', 'not the temporary password');
