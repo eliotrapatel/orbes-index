@@ -48,6 +48,12 @@ export const ANOMALY_WEIGHTS: Readonly<Record<AnomalyType, { severity: AnomalySe
   VALID_SIGNATURE_UNREGISTERED: { severity: 'CRITICAL', weight: 100 },
 });
 
+/**
+ * Every type the service can record, in the order of ANOMALY_WEIGHTS. Derived from it, so a type
+ * added there reaches the console's type filter (the list's query schema and its select) by itself.
+ */
+export const ANOMALY_TYPES = Object.freeze(Object.keys(ANOMALY_WEIGHTS)) as unknown as readonly [AnomalyType, ...AnomalyType[]];
+
 /** One past scan of the code, as the rules see it. */
 export interface ScanRecord {
   id: string;

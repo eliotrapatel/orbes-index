@@ -34,11 +34,23 @@ export const VERIFICATION_STATES = [
 ] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
 
+/** The scans the daily statistics count (server: SCAN_STAT_EVENT_TYPES): staff scans (ADMIN_TEST) never. */
+export const SCAN_STAT_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER'] as const;
+export type ScanStatEventType = (typeof SCAN_STAT_EVENT_TYPES)[number];
+
+/** Counterfeit signals: the states of a code ORBES did not issue, or not for this scan (server: services/scan-stats.ts). */
+export const SIGNAL_STATES = ['INVALID_SIGNATURE', 'UNKNOWN', 'MALFORMED_CODE', 'SUSPICIOUS_ACTIVITY'] as const;
+export type SignalState = (typeof SIGNAL_STATES)[number];
+
 export const ANOMALY_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 export type AnomalySeverity = (typeof ANOMALY_SEVERITIES)[number];
 
 export const ANOMALY_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED'] as const;
 export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
+
+/** Orders of the anomalies list (server: ANOMALY_SORTS); the types themselves come from GET /api/admin/anomalies/summary. */
+export const ANOMALY_SORTS = ['severity', 'risk', 'lastSeen'] as const;
+export type AnomalySort = (typeof ANOMALY_SORTS)[number];
 
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
@@ -119,6 +131,33 @@ export interface DashboardData {
     productId: string | null;
     country: string | null;
   }[];
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+
+/** GET /api/admin/analytics: the daily scan statistics of a window of complete UTC days (API §16.16). */
+export interface AnalyticsData {
+  /** `YYYY-MM-DD`, both included. */
+  from: string;
+  to: string;
+  days: number;
+  /** The last day the statistics cover (yesterday, UTC). */
+  through: string;
+  total: number;
+  byState: Record<VerificationState, number>;
+  byEventType: Record<ScanStatEventType, number>;
+  signals: Record<SignalState, number> & { total: number };
+  /** Every day of the window, oldest first. */
+  daily: { day: string; total: number; byState: Record<VerificationState, number> }[];
+  /** Countries with scans, most first; `ZZ` when the location is unknown. */
+  countries: AnalyticsCountry[];
+}
+
+export interface AnalyticsCountry {
+  country: string;
+  total: number;
+  signals: number;
+  byState: Record<VerificationState, number>;
 }
 
 // ── Catalogue ──────────────────────────────────────────────────────────────
@@ -247,6 +286,24 @@ export interface CodeJson {
   revokedAt: Iso | null;
   revocationReason: string | null;
   createdAt: Iso;
+  /** In the codes registry only (GET /api/admin/codes): a print sheet accepts it (ACTIVE, of a product that may still be printed). */
+  printable?: boolean;
+}
+
+/** Filters of the codes registry (GET /api/admin/codes and /api/admin/codes/ids). Dates are UTC days, both included. */
+export interface CodeFilters {
+  productionBatch?: string;
+  modelId?: string;
+  status?: string;
+  issuedFrom?: string;
+  issuedTo?: string;
+}
+
+/** GET /api/admin/codes/ids: the printable (ACTIVE) codes of a filter, at most 1 000, in identity order. */
+export interface CodeIds {
+  ids: string[];
+  total: number;
+  truncated: boolean;
 }
 
 /** OPERATOR responses (issue, re-issue) carry the scannable base64url data once. */
@@ -276,6 +333,25 @@ export interface IssueInput {
   serial?: number;
   withClaimSecret?: boolean;
   authPolicy?: string;
+}
+
+/** POST /api/admin/products/batch: what every piece shares (an issue body without variant, SKU and serial). */
+export type IssueBatchTemplate = Omit<IssueInput, 'variant' | 'sku' | 'serial'>;
+
+/** What changes from one piece of a batch to the next. */
+export type IssueBatchItem = Pick<IssueInput, 'variant' | 'sku' | 'serial'>;
+
+/** One piece of a batch, in the order sent: signed (its claim code shown once), refused, or never attempted. */
+export type IssueBatchLine =
+  | { index: number; status: 'ISSUED'; productId: string; codeId: string; serial: number; sku: string; variant: string | null; claimCode?: string }
+  | { index: number; status: 'FAILED'; error: { code: string; message: string } }
+  | { index: number; status: 'SKIPPED' };
+
+export interface IssueBatchResponse {
+  issued: number;
+  failed: number;
+  skipped: number;
+  items: IssueBatchLine[];
 }
 
 export interface StatusHistoryEntry {
@@ -405,6 +481,53 @@ export interface CaseRecord extends ReportSummary {
   resolutionNote: string | null;
   scan: { occurredAt: Iso; state: string; productId: string | null; country: string | null; region: string | null };
   anomaly: { id: string; type: string; severity: AnomalySeverity; status: AnomalyStatus } | null;
+}
+
+/** Filters and order of GET /api/admin/anomalies, as kept in the view's URL. */
+export interface AnomalyFilters {
+  /** One anomaly (a case's link to the anomaly its scan took part in). */
+  id?: string;
+  status?: string;
+  severity?: string;
+  type?: string;
+  productId?: string;
+  sort?: string;
+}
+
+/** GET /api/admin/anomalies/summary. */
+export interface AnomalySummary {
+  /** OPEN findings by severity. */
+  open: Record<AnomalySeverity, number>;
+  /** OPEN HIGH + CRITICAL: the badge on Anomalies. */
+  attention: number;
+  /** Every type the server can record. */
+  types: string[];
+}
+
+export interface AnomalyScan {
+  id: string;
+  occurredAt: Iso;
+  eventType: string;
+  state: string;
+  country: string | null;
+  region: string | null;
+  deviceHash: string | null;
+  userAgentFamily: string | null;
+  riskScore: number | null;
+  /** The scan that last raised the finding (details.scanEventId). */
+  trigger: boolean;
+}
+
+/** GET /api/admin/anomalies/:id/context: the scans around one finding. */
+export interface AnomalyContext {
+  anomaly: AnomalyRecord;
+  window: { from: Iso; to: Iso };
+  scans: { total: number; truncated: boolean; items: AnomalyScan[] };
+  countries: { country: string | null; scans: number }[];
+  devices: number;
+  trigger: AnomalyScan | null;
+  code: { id: string; issue: number; status: CodeStatus } | null;
+  product: { productId: string; lifecycle: LifecycleSnapshot } | null;
 }
 
 export interface ProductDetail {

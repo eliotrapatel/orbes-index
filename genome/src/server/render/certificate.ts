@@ -44,6 +44,7 @@ import type { Genome } from '../../core/genome/genome.js';
 import { MONOGRAM_BOUNDS, monogramPathData } from '../../core/render/monogram.js';
 import { primitiveToPathData } from '../../core/render/svg.js';
 import { measureText, textRun, toLabelText, type TextRun } from './label-font.js';
+import { csvDocument, csvField, CSV_CONTENT_TYPE } from './csv.js';
 import { renderPdf, type PdfPage, type PdfPlacement, type PdfSpotColor } from './pdf.js';
 import { gridCutMarks, sheetFooter, SHEET_PAGES, type SheetLayout, type SheetPlacement } from './print-sheet.js';
 import type { ArtifactScene, StrokePath } from './scene.js';
@@ -367,7 +368,9 @@ export function layoutCertificateSheet(count: number): SheetLayout {
   for (let i = 0; i < count; i++) {
     const slot = i % perPage;
     if (slot === 0) pages.push([]);
-    pages[pages.length - 1].push({ index: i, xMm: x0 + (slot % columns) * w, yMm: marginYmm + Math.floor(slot / columns) * h });
+    const column = slot % columns;
+    const row = Math.floor(slot / columns);
+    pages[pages.length - 1].push({ index: i, xMm: x0 + column * w, yMm: marginYmm + row * h, row, column });
   }
   return { pageWidthMm: pw, pageHeightMm: ph, columns, rows, pages };
 }
@@ -375,7 +378,6 @@ export function layoutCertificateSheet(count: number): SheetLayout {
 // ── Outputs ────────────────────────────────────────────────────────────────
 
 const PDF_TYPE = 'application/pdf';
-const CSV_TYPE = 'text/csv; charset=utf-8; header=present';
 
 /** Cards as a vector PDF: one 85 × 55 mm page per card, or A4 sheets of ten with cut marks and a scale bar. */
 export async function renderCertificatePdf(items: readonly CertificateItem[], opts: CertificateOptions): Promise<RenderedCertificates> {
@@ -424,20 +426,11 @@ export async function renderCertificatePdf(items: readonly CertificateItem[], op
   return { contentType: PDF_TYPE, body, filename };
 }
 
-/**
- * One CSV field: always quoted (RFC 4180), and a value a spreadsheet would
- * read as a formula (= + - @, tab, carriage return) is prefixed with an
- * apostrophe, so opening the file never runs anything.
- */
-export function csvField(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
+export { csvField };
 
 /** Variable-data file for a print shop: productId, model, material, code; UTF-8, CRLF, a header row. */
 export function certificatesCsv(items: readonly CertificateItem[]): string {
-  const rows = [['productId', 'model', 'material', 'code'], ...items.map((it) => [it.productId, it.model, it.material, it.claimCode])];
-  return rows.map((r) => r.map(csvField).join(',')).join('\r\n') + '\r\n';
+  return csvDocument([['productId', 'model', 'material', 'code'], ...items.map((it) => [it.productId, it.model, it.material, it.claimCode])]);
 }
 
 /**
@@ -451,7 +444,7 @@ export function renderCertificateCsv(items: readonly CertificateItem[], opts: Pi
   }
   const day = opts.createdAt.toISOString().slice(0, 10);
   const suffix = (opts.status ?? CERTIFICATE_LAYOUT_STATUS) === 'PROOF' ? '-PROOF' : '';
-  return { contentType: CSV_TYPE, body: certificatesCsv(items), filename: `ORBES-certificates-${day}-${items.length}${suffix}.csv` };
+  return { contentType: CSV_CONTENT_TYPE, body: certificatesCsv(items), filename: `ORBES-certificates-${day}-${items.length}${suffix}.csv` };
 }
 
 // ── Specimen ───────────────────────────────────────────────────────────────

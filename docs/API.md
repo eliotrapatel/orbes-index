@@ -71,7 +71,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 1.3 Responses
 
-- JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
+- JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`, from year 0001: PostgreSQL has no year 0000, so a date or a date-time before `0001-01-01` (UTC) is `400 VALIDATION_FAILED`, never sent to the database. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
 - Wherever a path or body takes a product reference (`productId`), both the canonical id (case-insensitive) and the product's row UUID are accepted.
 - API responses carry `Cache-Control: no-store` unless an endpoint states otherwise.
 - Security headers on every response include: the Content-Security-Policy `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `Permissions-Policy: camera=(self)`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (except the public key list), and in production `Strict-Transport-Security: max-age=63072000; includeSubDomains`. `X-Powered-By` is removed.
@@ -116,7 +116,7 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 | Role | May |
 |---|---|
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2). Manage its own session and second factor. |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
 | ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
@@ -193,7 +193,7 @@ Transport and framework:
 | `NOT_FOUND` | 404 | Unknown route or method. |
 | `PAYLOAD_TOO_LARGE` | 413 | Body over 16 KB. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Body not sent as `application/json`. |
-| `RATE_LIMITED` | 429 | Rate limit exceeded (§3), or too many claim-code attempts for a product. |
+| `RATE_LIMITED` | 429 | Rate limit exceeded (§3), too many claim-code attempts for a product, or a certificate request or batch of the same admin still in progress (§15.7, §14.11). |
 | `INTERNAL_ERROR` | 500 | Unexpected failure. Details go to the server log only. |
 | `SERVICE_UNAVAILABLE` | 503 | The server is shutting down; retry (another instance will answer). |
 
@@ -380,6 +380,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | PATCH | `/api/admin/models/:id` | OPERATOR | yes | admin | 13.4 |
 | GET | `/api/admin/products` | AUDITOR | — | admin | 14.1 |
 | POST | `/api/admin/products` | OPERATOR | yes | admin | 14.2 |
+| POST | `/api/admin/products/batch` | OPERATOR | yes | admin | 14.11 |
 | GET | `/api/admin/products/:productId` | AUDITOR | — | admin | 14.3 |
 | POST | `/api/admin/products/:productId/transitions` | OPERATOR (**ADMIN** for `to: REVOKED` or `RETIRED`) | yes | admin | 14.4 |
 | POST | `/api/admin/products/:productId/reinstate` | **ADMIN** | yes | admin | 14.5 |
@@ -392,9 +393,11 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/admin/products/:productId/ownership/confirm` | OPERATOR | yes | admin | 14.10 |
 | GET | `/api/admin/codes/:codeId/artifact.:format` | **OPERATOR** | — | admin | 15.2 |
 | POST | `/api/admin/codes/print-sheet` | OPERATOR | yes | admin | 15.3 |
+| POST | `/api/admin/codes/print-sheet/manifest` | OPERATOR | yes | admin | 15.8 |
 | POST | `/api/admin/certificates` | **OPERATOR** | yes | admin | 15.7 |
 | POST | `/api/admin/codes/:codeId/revoke` | **ADMIN** | yes | admin | 15.4 |
 | GET | `/api/admin/codes` | AUDITOR | — | admin | 15.5 |
+| GET | `/api/admin/codes/ids` | AUDITOR | — | admin | 15.9 |
 | GET | `/api/admin/genomes` | AUDITOR | — | admin | 15.6 |
 | GET | `/api/admin/scans` | AUDITOR | — | admin | 16.1 |
 | GET | `/api/admin/owners` | AUDITOR | — | admin | 16.2 |
@@ -405,6 +408,9 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/owners/:id/export` | **ADMIN** | — | admin | 16.13 |
 | GET | `/api/admin/warranties` | AUDITOR | — | admin | 16.3 |
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
+| GET | `/api/admin/anomalies/summary` | AUDITOR | — | admin | 16.14 |
+| GET | `/api/admin/anomalies/:id/context` | AUDITOR | — | admin | 16.15 |
+| GET | `/api/admin/analytics` | AUDITOR | — | admin | 16.16 |
 | PATCH | `/api/admin/anomalies/:id` | OPERATOR | yes | admin | 16.5 |
 | GET | `/api/admin/reports` | AUDITOR | — | admin | 16.8 |
 | PATCH | `/api/admin/reports/:id` | OPERATOR | yes | admin | 16.9 |
@@ -419,7 +425,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
 
 ---
 
@@ -1234,7 +1240,7 @@ AUDITOR. Landing counts.
 }
 ```
 
-`anomalies.open` counts OPEN and ACKNOWLEDGED anomalies. `activeKey` is `null` when no key is ACTIVE. `recentEvents` holds the 10 most recent scans.
+`anomalies.open` counts OPEN and ACKNOWLEDGED anomalies. `activeKey` is `null` when no key is ACTIVE. `recentEvents` holds the 10 most recent scans. `scans` counts the stored scan history, live; the trends by day, result and country, which survive a purge, are those of §16.16.
 
 ### 13.2 Categories
 
@@ -1333,6 +1339,7 @@ AUDITOR. Paginated, newest first, from the `product_overview` view.
 | `status` | One of the 12 product statuses. |
 | `category` | One letter (case-insensitive). |
 | `q` | ≤ 64 characters. Case-insensitive substring of the product id, SKU, model name or genome fingerprint (`%` and `_` match literally). |
+| `productionBatch` | ≤ 100 characters, trimmed; empty or blank counts as absent. The production batch recorded at issuance, matched exactly (case-sensitive, not a prefix). Indexed (migration `0007_print_batch_indexes`). |
 | `page`, `pageSize` | §6 |
 
 Item:
@@ -1376,12 +1383,12 @@ OPERATOR. In one transaction: allocates the serial, creates the product (ISSUED)
 |---|---|---|---|
 | `categoryCode` | string | yes | One letter (case-insensitive). The category must exist and be active. |
 | `modelId` | uuid | yes | Must exist, belong to that category and be active (§13.4). |
-| `material` | string | yes | 1–200 characters, no control characters. |
+| `material` | string | yes | 1–200 characters, no control character (C0, DEL, C1) and no U+FFFD, the replacement character a wrong decoding leaves for a lost letter. |
 | `year` | integer | no | 2000–2099; default the current UTC year. |
 | `collectionId` | uuid | no | Must exist. Without it, the model's collection applies in admin and owner views. |
 | `sku` | string | no | ≤ 64 characters: letters, digits, space, `.`, `_`, `-`, `/`, starting with a letter or digit. Default: model SKU prefix + slug of the variant (e.g. `MNL-RG-SIZE-52`). |
-| `variant` | string | no | 1–100 characters |
-| `productionBatch` | string | no | 1–100 characters |
+| `variant` | string | no | 1–100 characters, as `material` (no control character, no U+FFFD) |
+| `productionBatch` | string | no | 1–100 characters, as `material` |
 | `productionDate` | date | no | `YYYY-MM-DD`, a real date, not after tomorrow (UTC). |
 | `serial` | integer | no | 1–999 999. Default: next free serial for (year, category). |
 | `withClaimSecret` | boolean | no | Generate a claim code for proof of ownership at first registration. |
@@ -1463,6 +1470,7 @@ Example request:
 - `code.data` is the base64url of the 79-byte framed data: exactly what a scanner reads and what `POST /api/v1/verify` takes. Anyone holding it can print a code that verifies, so it is returned only to OPERATOR responses that produce codes (issuance and re-issue), never in read views.
 - `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it under the scratch-off panel of the certificate card supplied with the product: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
 - `code.nonce` and `code.payloadHash` are hexadecimal; `issuedDay` counts days since 2024-01-01 UTC.
+- Several pieces that share a template (a production run, a collection in sizes): §14.11 issues up to 50 per request, one result per piece.
 
 Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `404 REFERENCE_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 MODEL_INACTIVE`, `409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`.
 
@@ -1510,7 +1518,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
 
 - `codes[].verification` re-verifies each stored code live (payload fields against the row, payload hash, Ed25519 signature, key trust). It is `{ "valid": true, "keyStatus" }` or `{ "valid": false, "reason", "keyStatus" }` with `reason` one of `UNKNOWN_KEY`, `PAYLOAD_INVALID`, `PAYLOAD_MISMATCH`, `PAYLOAD_HASH_MISMATCH`, `SIGNATURE_INVALID`, `KEY_REVOKED`. A row tampered with in the database shows up here as invalid. Read views never include `data`.
 - `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email (masked for an AUDITOR, §16.2) and display name; each account opens its sheet in the console (§16.11); `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
-- `anomalies` lists up to 100 anomalies of the product (shape in §16.4); `services` the service records (§14.8).
+- `anomalies` lists up to 100 anomalies of the product, most severe first (shape and order of §16.4); `services` the service records (§14.8).
 - `lifecycle.allowed` lists the statuses `transitions` accepts now; `returnTo` is where a return, recovery or reinstatement would lead; `canReinstate` is true for a REVOKED product whose previous status is known.
 
 Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`.
@@ -1641,6 +1649,64 @@ OPERATOR. Client services reviewed a proof of purchase: the current owner become
 
 Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 NO_OWNER`, `409 ALREADY_VERIFIED`.
 
+### 14.11 `POST /api/admin/products/batch` — issue a batch (extension of the contract)
+
+OPERATOR. Up to **50 pieces that share a template**, one result per piece. Each piece is issued exactly as by §14.2 (`IssuanceService.issueProduct`): its own serial, product, GENOME-01, code signed with the ACTIVE key, warranty row and `product.issue` audit entry, **in its own transaction**. **The pieces that name their `serial` are signed first**, then those whose serial is allocated (the highest + 1), each group in the order given: an allocated serial so never takes a serial that a later piece of the batch names (`[{}, {}, { "serial": 14 }]` with 12 the highest: 14, then 15 and 16). Why 50: requests are limited to 16 KB (§1.2) and each claim code costs one scrypt; the console sends a larger batch as several requests, one after the other (*In the console*, below).
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `template` | object | yes | What every piece shares: the fields of §14.2 except `variant`, `sku` and `serial`, with the same rules (`categoryCode`, `modelId`, `material` required; `collectionId`, `productionBatch`, `productionDate`, `year`, `authPolicy`, `withClaimSecret` optional; `""` and `null` count as absent). Unknown fields → `400`. |
+| `items` | object[] | yes | 1–50 pieces, each `{ variant?, sku?, serial? }` with the rules of §14.2 (`{}` is a piece with an allocated serial and the model's SKU). Unknown fields → `400`. |
+
+**Before anything is signed**, the whole request is refused and nothing is issued when: the body breaks a shape or a bound (`400`, the message names the piece, e.g. `items.2.sku: …`); the template or a piece breaks an issuance rule (`400`, e.g. `template: Material contains invalid characters.`, `items.1: Variant contains invalid characters.`); two pieces name the same `serial` (`400`, `items.2.serial: the same serial as items.0.`); a named serial leaves no serial for the pieces allocated after it, since they come above it (`400`, `items.0.serial: serial 999999 leaves no serial for the 2 pieces allocated after it. Sign it apart, or name their serials.`); or the template's category, model or collection is wrong (`404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `400` for a model of another category or a production date after tomorrow).
+
+**Then piece by piece.** A piece refused at signing time (its explicit serial taken meanwhile, a concurrent change, the serials of its year and category exhausted) fails **alone**: the other pieces are issued. A piece already signed is **never undone**. A failure that is not the piece's own (`503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, an unexpected error) stops the batch there: the pieces not yet attempted are `SKIPPED`.
+
+**One batch at a time per admin**: each claim code is one scrypt on the server's small worker pool, which customers' sign-ins and claim-code registrations share (as for certificate cards, §15.7). A second batch sent by the same admin before the first is done answers `429 RATE_LIMITED` (*A batch is already being signed. Wait for it to finish, then try again.*), with nothing signed. The route also draws on the `admin` rate-limit group.
+
+Example request:
+
+```json
+{
+  "template": {
+    "categoryCode": "J",
+    "modelId": "73c68b47-012d-4569-a59a-fd2effa613c1",
+    "material": "925 STERLING SILVER",
+    "productionBatch": "B-2026-10-A",
+    "productionDate": "2026-10-01",
+    "withClaimSecret": true
+  },
+  "items": [{ "variant": "Size 52" }, { "variant": "Size 54", "sku": "MNL-RG-54-POLI" }, { "serial": 7 }]
+}
+```
+
+**200** (`Cache-Control: no-store`), **even when pieces failed**: read each result. One per piece, in the order of `items` whatever the order of signing; `index` is the piece's position in `items` (from 0).
+
+```json
+{
+  "issued": 2,
+  "failed": 1,
+  "skipped": 0,
+  "items": [
+    { "index": 0, "status": "ISSUED", "productId": "O26-J-00012", "codeId": "0b8e3c1e-…", "serial": 12, "sku": "MNL-RG-SIZE-52", "variant": "Size 52", "claimCode": "7KQ2-M4TD-9XWH" },
+    { "index": 1, "status": "ISSUED", "productId": "O26-J-00013", "codeId": "5d1f0a77-…", "serial": 13, "sku": "MNL-RG-54-POLI", "variant": "Size 54", "claimCode": "Q3VN-8RJC-2PYE" },
+    { "index": 2, "status": "FAILED", "error": { "code": "SERIAL_TAKEN", "message": "This serial number is already used." } }
+  ]
+}
+```
+
+- `ISSUED`: `productId`, `codeId` (the ACTIVE code, issue 1), `serial`, `sku`, `variant` (`null` when none), and `claimCode` with `withClaimSecret: true`, **returned once** as in §14.2 (only its scrypt hash is stored). No scannable `data`: print the batch's codes from the codes registry (§15.9, §15.3) and its certificate cards with §15.7.
+- `FAILED`: `error` is the public `{ code, message }` the piece would have got from §14.2 (`409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `409 CATEGORY_INACTIVE`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`), or `INTERNAL_ERROR` (*This piece could not be issued.*) for an unexpected failure, logged on the server.
+- `SKIPPED`: never attempted, because the batch stopped at an earlier piece.
+
+If the answer is lost (a network failure, a timeout), the server may have issued some or all of the pieces: find them in Products by their production batch (§14.1) before signing them again. Their claim codes cannot be shown again.
+
+Audited: `product.issue` for every piece issued (as §14.2), then `product.issue_batch` with `{ count, issued, failed, skipped, productIds, failures: [{ index, code }], category, modelId, productionBatch, claimSecret }` (`target_id` null). **No claim code in either.** The batch's entry is written after its pieces; if it cannot be written, the failure is logged and the results are still returned, since the pieces are already signed and audited and their claim codes exist nowhere else.
+
+**In the console** (Generator → BATCH, `#/generator?mode=batch`): the template, then *Pieces from* a CSV file or a quantity. The CSV holds one row per piece, its first line naming the columns `variant`, `sku` and `serial` (each optional, any order, case-insensitive; no other column); comma or semicolon (the one the first line that is not blank uses most), a byte-order mark and CRLF are accepted, blank lines skipped, at most 1 000 pieces and 1 MB. A first line that names one column holds no delimiter: each line is then one value, so `7,5 ML` stays one variant. The file is read as UTF-8; a file that is not UTF-8 is read as Windows-1252, the encoding of Excel's plain *CSV* (in France *CSV (séparateur : point-virgule)*), and the console says so above the preview, where its accents can be checked. A value that still holds U+FFFD (a letter lost before the file reached the console) is refused on its line. The browser checks the file and every piece with the single form's rules before anything is signed (control characters as the server counts them, C1 included), each problem with its line (*Line 4 · SKU: …*), then shows the plan (*120 pieces · 3 requests of up to 50*) and the first ten rows; a named serial that would leave the allocated pieces none is refused there too. **SIGN 120 PRODUCTS** sends the pieces that name their serial first, as the server signs a request, so an allocated serial never takes one a later request names, in requests one after the other (at most 50 pieces and 15 000 bytes each), and stops at the first request that fails; the result gives every piece its outcome, in the file's order: ISSUED, NOT SIGNED, NOT ATTEMPTED, NOT SENT (an earlier request failed), or NO ANSWER (look in Products before signing again). While the batch's claim codes are on screen, the page offers the **certificate cards** (§15.7, in requests of 50: cards, A4 sheets or the print shop's CSV) and a **results file** (CSV: line, piece, status, productId, sku, variant, serial, codeId, claimCode, message), and *"I have recorded them — hide"*; until one is saved or the codes are hidden, closing the tab (`beforeunload`), navigating in the console or signing out asks first. The codes are held in the page's memory only, as for one product. **A session that ends** (`401`) while the batch is being signed or its codes are on screen does not take the page: the console says the session has ended and keeps it, the pieces already signed and their codes included (a request refused for the session is NOT SIGNED: *the session ended before this request*); the results file, made in the browser, can still be saved, and leaving the page (which asks first) signs in again.
+
+Errors (the whole request; nothing signed): `400 VALIDATION_FAILED`, `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `413 PAYLOAD_TOO_LARGE`, `429 RATE_LIMITED` (a batch of the same admin still in progress, or the `admin` group's limit).
+
 ---
 
 ## 15. Admin: codes and artifacts
@@ -1696,7 +1762,7 @@ File name: `ORBES-<productId>-I<issue>-<theme>-<widthMm>mm[-label][-<dpi>dpi][-K
 
 **K-only black: limitations.** The file carries no ICC profile or output intent (it is not PDF/X): ask the print shop to print it as is, without colour conversion. K 100 % alone is a dense dark grey rather than a deep black on uncoated stock (no rich black, by design). The decor tones become halftone screens, which may look dotted at small sizes; they are decorative and never read by the decoder. Overprint is not set. Ivory has no K-only rendition (its paper colour is not neutral): print the ivory colourway on ivory stock in K-only `classic` instead.
 
-Errors: `400 VALIDATION_FAILED` (format, query values, size limits), `403 FORBIDDEN` (AUDITOR), `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE`, `409 PRODUCT_NOT_PRINTABLE`, `409 CODE_INTEGRITY`.
+Errors: `400 VALIDATION_FAILED` (format, query values, size limits), `403 FORBIDDEN` (AUDITOR), `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE` (*Only the active code of a product can be rendered: issue 1 of O26-J-00184 is SUPERSEDED.*), `409 PRODUCT_NOT_PRINTABLE` (*Codes of O26-J-00184 cannot be printed in its current state (STOLEN).*), `409 CODE_INTEGRITY`. Each refusal names the piece, so a print sheet (§15.3) says which code to leave out.
 
 ### 15.3 `POST /api/admin/codes/print-sheet` (extension of the contract)
 
@@ -1715,7 +1781,9 @@ OPERATOR. One PDF with many labelled codes, crop marks, a 10 mm scale bar and a 
 
 **200** — `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="ORBES-sheet-<YYYY-MM-DD>-<count>-<theme>-<widthMm>mm[-K].pdf"`, `Cache-Control: no-store`.
 
-In the console, the codes list (CODES) lets an OPERATOR select ACTIVE codes and download them as one sheet.
+**Layout.** Codes are placed in the order of `codeIds` (duplicates removed, first occurrence kept), row by row from the top-left corner of each page, in a grid centred horizontally inside 12 mm margins with 8 mm gutters, above a 10 mm footer. The grid comes from `planPrintSheet` (`genome/src/server/render/artifact.ts`) and the core's `layoutSheet` (`genome/src/core/render/sheet-layout.ts`); the manifest (§15.8) and the console's preview use the same functions, so the three always agree. With the console's default (30 mm, labelled), an A4 page holds 30 codes (5 × 6): a batch of 120 prints on 4 pages.
+
+In the console, the codes list (CODES) lets an OPERATOR select printable codes (`printable`, §15.5), page after page (the selection is kept while the filters stay the same), or every printable code of the filters at once (*Select the 120 codes of this batch*, §15.9). Before rendering it shows the layout (*30 per A4 · 4 pages*). Over 200 codes, it requests the sheet in parts of 200 and saves each as `…-part-<n>-of-<total>.pdf`; *Download manifest* saves the matching CSV parts. Printing a batch from its filtered list takes two clicks: select the batch, download the sheet.
 
 Errors: `400 VALIDATION_FAILED` (including "The artifact is too large for this page size."), `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 CODE_NOT_FOUND`, `409 CODE_NOT_ACTIVE`, `409 PRODUCT_NOT_PRINTABLE`, `409 CODE_INTEGRITY`.
 
@@ -1729,7 +1797,24 @@ Errors: `400 VALIDATION_FAILED`, `404 CODE_NOT_FOUND`, `409 CODE_ALREADY_REVOKED
 
 ### 15.5 `GET /api/admin/codes`
 
-AUDITOR. Paginated list of every code, newest first; read view (no `data`).
+AUDITOR. Paginated list of codes, newest first (`createdAt`); read view (no `data`). Filters (all optional, combined with AND; an empty or blank value counts as absent):
+
+| Query | Rules |
+|---|---|
+| `productionBatch` | ≤ 100 characters, trimmed. The product's production batch, matched exactly. |
+| `modelId` | uuid. The product's model. |
+| `status` | `ACTIVE`, `SUPERSEDED` or `REVOKED` (the code's status). |
+| `issuedFrom` | `YYYY-MM-DD`. Codes issued on or after this UTC day (`createdAt`; the day is the item's `issuedAt`). |
+| `issuedTo` | `YYYY-MM-DD`. Codes issued on or before this UTC day (the whole day is included). Not before `issuedFrom`. |
+| `page`, `pageSize` | §6 |
+
+Days run from 0001-01-01 to 9999-12-31 (PostgreSQL has no year 0000; `issuedTo=9999-12-31` holds every code). Each item is the code object with **`printable`** (boolean): the code is ACTIVE and its product may still be printed (not RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN), so a print sheet accepts it (§15.3, the codes §15.9 selects); the console offers a sheet's tick box for those only.
+
+The batch and the issue days are indexed (migration `0007_print_batch_indexes`). Errors: `400 VALIDATION_FAILED` (a malformed value, a year 0000, `issuedFrom` after `issuedTo`).
+
+```
+GET /api/admin/codes?productionBatch=B-2026-09-A&status=ACTIVE&issuedFrom=2026-09-01&issuedTo=2026-09-30
+```
 
 ### 15.6 `GET /api/admin/genomes`
 
@@ -1772,9 +1857,52 @@ Example:
 
 Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus }`; each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). Both carry canonical product ids, also for a product the request named by its uuid; only a product that was not found keeps the reference given. No claim code in either.
 
-In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
+In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code. A batch's result (§14.11) offers the cards of all its pieces, sent in requests of 50, one after the other.
 
 Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`, `429 RATE_LIMITED` (a request of the same admin still in progress, or the `admin` group's limit).
+
+### 15.8 `POST /api/admin/codes/print-sheet/manifest` (extension of the contract)
+
+OPERATOR. The **manifest** of a print sheet: a CSV that tells the workshop which label goes on which piece, so that the label of a ring in size 52 never goes on a size 54. Same body as §15.3 (`codeIds` and the sheet options; the options that change the layout are `widthMm`, `label` and `page`), the same checks in the same order (every code exists, is ACTIVE, belongs to a printable product and passes the integrity check, with the same errors), and the same plan as the PDF (`planPrintSheet`): its rows are in the exact order in which the PDF made from the same request draws the codes. Nothing is rendered. Audited (`code.sheet_manifest`, with the same details as `code.render_sheet`: `codeIds`, `productIds` and the options). No scannable data and no claim code: the manifest is safe to send to a print shop.
+
+**200**, `Cache-Control: no-store`, `Content-Type: text/csv; charset=utf-8; header=present`, `Content-Disposition: attachment; filename="ORBES-sheet-<YYYY-MM-DD>-<count>-<theme>-<widthMm>mm[-K]-manifest.csv"` (the sheet's name with `-manifest.csv`).
+
+The CSV is written as the certificate CSV (§15.7: RFC 4180, UTF-8 without BOM, CRLF, a header row, every field quoted, formulas neutralised with a leading apostrophe). Columns:
+
+| Column | Value |
+|---|---|
+| `page` | Page of the PDF, from 1. |
+| `row` | Row on that page, from 1 (top). |
+| `column` | Column on that page, from 1 (left). |
+| `productId` | Canonical product id, also printed on the label. |
+| `sku` | The product's SKU. |
+| `variant` | The product's variant (size, colour…), empty when none. |
+| `material` | The product's material. |
+| `codeId` | The code's id. |
+
+Example (30 mm, labelled, A4: 5 columns × 6 rows):
+
+```
+"page","row","column","productId","sku","variant","material","codeId"
+"1","1","1","O26-J-00184","MNL-RG-SIZE-52","Size 52","925 STERLING SILVER","5dbf5b2c-2bab-4fd1-8177-a07e2eb37f4c"
+"1","1","2","O26-J-00185","MNL-RG-SIZE-54","Size 54","925 STERLING SILVER","8a0e6f3d-41c2-4f7e-9d55-0c3b2a7e1f90"
+```
+
+Errors: as §15.3.
+
+### 15.9 `GET /api/admin/codes/ids` (extension of the contract)
+
+AUDITOR (a read: the ids are those of the codes list). The ids of the **printable** codes among those the filters of §15.5 select (`productionBatch`, `modelId`, `status`, `issuedFrom`, `issuedTo`; `page` and `pageSize` do not apply): ACTIVE codes of products that may still be printed (not RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN), the ones a print sheet accepts. In identity order (year, category, serial), at most **1 000**. The console uses it for *Select the N codes of this batch*.
+
+**200**
+
+```json
+{ "ids": ["5dbf5b2c-2bab-4fd1-8177-a07e2eb37f4c", "…"], "total": 120, "truncated": false }
+```
+
+`total` counts every printable code of the filters; `truncated` is `true` when it exceeds 1 000, in which case `ids` holds the first 1 000 (narrow the filters, by issue days for instance, to reach the others). A `status` other than `ACTIVE` gives an empty list. Not audited (a read).
+
+Errors: `400 VALIDATION_FAILED` (as §15.5).
 
 ---
 
@@ -1791,6 +1919,9 @@ AUDITOR. Paginated scan events with their authentication record, newest first.
 | `productId` | Canonical id or uuid. An unknown product gives an empty page. |
 | `state` | One of the 9 verification states. |
 | `scanId` | One scan (uuid): a case's link to its scan (§16.8). |
+| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone or a bound outside `0001-01-01` to `9999-12-31` (UTC): `9999-12-31T23:00:00-05:00` is already year 10000. The console opens an anomaly's window (§16.15) and its triggering scan (the second it was made in, the scan marked) this way. |
+
+An empty value (`?state=&from=`) means the filter is not given, as a filter form sends it.
 
 Item:
 
@@ -1869,7 +2000,18 @@ AUDITOR. Paginated warranty records (shape of §14.6), newest first. Query `stat
 
 ### 16.4 `GET /api/admin/anomalies`
 
-AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `DISMISSED`), `severity` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and `id` (one anomaly, uuid: a case's link to the anomaly its scan took part in).
+AUDITOR. Paginated, the most severe first.
+
+| Query | Rules |
+|---|---|
+| `status` | `OPEN`, `ACKNOWLEDGED`, `RESOLVED` or `DISMISSED`. |
+| `severity` | `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. |
+| `type` | One of the types below (extension). The list is `ANOMALY_TYPES`, derived from the weights table of `anomaly-rules.ts`: a type added there is accepted here, listed by §16.14 and offered by the console's Type filter without further change. Anything else, lower case included, is `400 VALIDATION_FAILED`. |
+| `productId` | Canonical id (any case) or uuid (extension). An unknown product gives an empty page. |
+| `sort` | `severity` (default): CRITICAL, HIGH, MEDIUM, LOW, then the highest `riskScore` within a severity. `risk`: the highest `riskScore` first, then the most severe. `lastSeen`: the most recently seen first (the order before 2026-10-02). Ties end on the most recently seen, then the id, so pages never overlap (extension). |
+| `id` | One anomaly (uuid): a case's link to the anomaly its scan took part in (§16.8; extension). |
+
+An empty value (`?type=&sort=`) means the filter is not given. The console keeps every filter and the order in the view's URL (`#/anomalies?productId=O26-J-00003&type=IMPOSSIBLE_TRAVEL&sort=risk`), a finding's detail in `id` and the one finding a case links to in `finding` (the list narrowed to it, with *Show all*); a product page's TRIAGE link opens the list filtered by that product. Its Product field takes a full id or a uuid only: anything else is said on the field (*Enter a full product id (O26-J-00184).*) and the URL does not change. Filters the server refuses (a URL typed by hand) keep the filter form on screen with the refusal and *Clear filters*, instead of a failed page. The decision dialog (§16.5) wears the destructive marks, the oxblood rule and a danger confirm, while its boxes revoke the code or flag the piece COUNTERFEIT; while its steps run, Confirm stays disabled whatever is typed, and a second submission is ignored.
 
 ```json
 {
@@ -1893,13 +2035,15 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
 }
 ```
 
-`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). In the console, the Reports column shows the number of cases (a link to them in Cases), how many are open, and the latest report's channel, place and note, as Verification events shows a scan's. Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). In the console, the Reports column shows the number of cases (a link to them in Cases), how many are open, and the latest report's channel, place and note, as Verification events shows a scan's. Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `details.scanEventId` names the scan that last raised the finding, for the rule findings and, since 2026-10-02, for the three service findings too (a service finding recorded before has none until it occurs again: its detail then says the triggering scan was not recorded). `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
 OPERATOR. Triage. Body `{ "status": AnomalyStatus, "note"?: string | null (≤ 2000) }`. RESOLVED and DISMISSED record who and when; OPEN or ACKNOWLEDGED clears them.
 
 **200** — the updated anomaly. Errors: `400 VALIDATION_FAILED`, `404 ANOMALY_NOT_FOUND`, `409 ANOMALY_ALREADY_OPEN`.
+
+**The console's decision dialog** can act on the piece in the same gesture. For a finding that can be resolved it offers, as tick boxes, the marks `COUNTERFEIT_FLAGGED` and `STOLEN` its product's lifecycle allows (§16.15 `product.lifecycle.allowed`; OPERATOR, one mark at a time) and the revocation of its code while ACTIVE (ADMIN, with the typed phrase `REVOKE ISSUE <n>` of the product page). Acting on the piece resolves the finding. The dialog calls the existing routes, in this order, each audited by its own service: the transition (§14.4), the code's revocation (§15.4), then this route with `RESOLVED` and the note. The reason of the first two cites the finding, `Anomaly <id> (<TYPE>): <note>` (cut to the route's limit: 1 000 and 500 characters), so the status history, the revocation register and the audit log lead back to it. A step that fails stops the chain: the dialog lists each step as done, failed or not done, and confirming again runs only what was not done. Nothing is ever chained without the admin's tick.
 
 ### 16.6 `GET /api/admin/revocations`
 
@@ -2048,6 +2192,99 @@ Audited `account.export` with the account as target and the number of entries of
 Errors: `400 VALIDATION_FAILED`, `403 FORBIDDEN` (AUDITOR, OPERATOR), `404 ACCOUNT_NOT_FOUND`.
 
 In the console: *Export data* on the owner's sheet saves the file.
+
+### 16.14 `GET /api/admin/anomalies/summary` (extension of the contract)
+
+AUDITOR. What waits for triage:
+
+```json
+{
+  "open": { "LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 1 },
+  "attention": 3,
+  "types": ["IMPOSSIBLE_TRAVEL", "SCAN_VELOCITY", "DEVICE_DIVERSITY", "GEO_DISPERSION", "LOST_STOLEN_SCAN",
+            "POST_REVOCATION_SCAN", "GENOME_MISMATCH", "CODE_MISMATCH", "VALID_SIGNATURE_UNREGISTERED"]
+}
+```
+
+`open` counts the **OPEN** findings by severity (an ACKNOWLEDGED finding has been seen; the dashboard's `anomalies.open`, §13.1, counts both). `attention` is `open.HIGH + open.CRITICAL`: the console shows it as a badge on the ANOMALIES link (`99+` beyond 99, nothing at 0) and prefixes it to the tab title, `(3) Dashboard — ORBES Genome Console`. The console asks on every navigation and every 60 s while its tab is visible; a hidden tab stops asking and asks again when it is shown; the Anomalies view, which reads the summary itself, gives the badge its count instead. These are background requests: a `401` never signs the admin out or replaces the page on screen (a batch's claim codes, a single product's), it only stops the refresh; the admin's next action meets the ended session. `types` is every type the server records (§16.4), for the list's Type filter.
+
+### 16.15 `GET /api/admin/anomalies/:id/context` (extension of the contract)
+
+AUDITOR. The scans around one finding, for the console's detail panel (`#/anomalies?id=<id>`):
+
+```json
+{
+  "anomaly": { "id": "1dd3573b-…", "type": "IMPOSSIBLE_TRAVEL", "severity": "HIGH", "status": "OPEN", "…": "shape of §16.4" },
+  "window": { "from": "2026-09-30T08:14:21.929Z", "to": "2026-10-01T09:15:21.929Z" },
+  "scans": {
+    "total": 3,
+    "truncated": false,
+    "items": [
+      { "id": "b9f87d9b-…", "occurredAt": "2026-10-01T08:15:21.929Z", "eventType": "VERIFY", "state": "SUSPICIOUS_ACTIVITY",
+        "country": "JP", "region": null, "deviceHash": "ZoczF36E…", "userAgentFamily": "Mobile Safari", "riskScore": 60, "trigger": true }
+    ]
+  },
+  "countries": [{ "country": "FR", "scans": 2 }, { "country": "JP", "scans": 1 }],
+  "devices": 2,
+  "trigger": { "id": "b9f87d9b-…", "…": "the scan named by details.scanEventId" },
+  "code": { "id": "c7dda4b5-…", "issue": 1, "status": "ACTIVE" },
+  "product": { "productId": "O26-J-00003", "lifecycle": { "status": "OWNED", "allowed": ["TRANSFERRED", "…", "COUNTERFEIT_FLAGGED", "LOST", "STOLEN", "REVOKED"], "returnTo": null, "canReinstate": false } }
+}
+```
+
+- `window` runs from 24 h before the finding's first occurrence (or its rule's window, `details.windowMin` / `details.windowDays`, when longer) to 1 h after its last.
+- `scans` are the product's scans in the window (for a finding without a product, `VALID_SIGNATURE_UNREGISTERED`, those of the scanned identity, `details.packedIdentity`), ADMIN_TEST scans left out as the rules leave them out: `total` counts them all, `items` holds the latest 100, oldest first (`truncated` when there are more). `riskScore` is the verification's (null without an authentication record); `trigger` marks the scan named by `details.scanEventId`.
+- `countries` counts the window's scans per country (null: unknown), most first; `devices` counts the distinct device pseudonyms. Only pseudonyms leave the database: never an IP pseudonym, an account or a coordinate.
+- `trigger` is the scan named by `details.scanEventId` wherever it falls, or null (none recorded, or purged by retention).
+- `code` is the code the finding names (null for none); `product` its canonical id and lifecycle snapshot (§14.3), null without a product. The console offers only the marks `lifecycle.allowed` holds and revokes only an ACTIVE code (§16.5).
+
+Errors: `400 VALIDATION_FAILED` (an id that is not a uuid), `404 ANOMALY_NOT_FOUND`.
+
+### 16.16 `GET /api/admin/analytics` (extension of the contract)
+
+AUDITOR. The daily scan statistics of a window of complete UTC days, for the console's Analytics view (`#/analytics`, the last 30 or 90 days): where the pieces are scanned, with which result, and where the counterfeit signals appear.
+
+| Query | Meaning |
+|---|---|
+| `from`, `to` | UTC days (`YYYY-MM-DD`), both included. `to` defaults to the last complete day (`through` below). |
+| `days` | Without `from`: the window is the `days` days (1–366, default 30) that end on `to`. Refused together with `from`. |
+
+The window is at most **366 days**. Every figure comes from `scan_daily_stats` ([DATABASE §5.22](DATABASE.md#522-scan_daily_stats) and [§10](DATABASE.md#10-housekeeping-and-retention)), never from the scan history:
+
+- **complete days only:** housekeeping counts a UTC day once it is over and ten minutes old, so yesterday's scans are in the figures from 00:10 UTC (within the next pass, every 10 minutes); today's are not yet;
+- **staff scans never:** `ADMIN_TEST` scans are not counted;
+- **the same after a purge:** the counts are written before the scan history is purged (`SCAN_RETENTION_DAYS`) and are never rewritten, so a window reads the same before and after;
+- **anonymous:** counts by day, country, state and event type, nothing about a scan, a piece, an account or a device.
+
+```json
+{
+  "from": "2026-09-02", "to": "2026-10-01", "days": 30, "through": "2026-10-01",
+  "total": 6,
+  "byState": { "AUTHENTIC": 2, "AUTHENTIC_FIRST_REGISTRATION": 0, "AUTHENTIC_REGISTERED": 0, "AUTHENTIC_OWNERSHIP_VERIFIED": 1,
+               "SUSPICIOUS_ACTIVITY": 1, "REVOKED": 0, "UNKNOWN": 1, "INVALID_SIGNATURE": 1, "MALFORMED_CODE": 0 },
+  "byEventType": { "VERIFY": 6, "REGISTER": 0, "TRANSFER": 0 },
+  "signals": { "INVALID_SIGNATURE": 1, "UNKNOWN": 1, "MALFORMED_CODE": 0, "SUSPICIOUS_ACTIVITY": 1, "total": 3 },
+  "daily": [
+    { "day": "2026-09-02", "total": 0, "byState": { "AUTHENTIC": 0, "…": 0 } },
+    { "day": "2026-10-01", "total": 4, "byState": { "AUTHENTIC": 2, "UNKNOWN": 1, "INVALID_SIGNATURE": 1, "…": 0 } }
+  ],
+  "countries": [
+    { "country": "FR", "total": 2, "signals": 0, "byState": { "AUTHENTIC": 2, "…": 0 } },
+    { "country": "CN", "total": 1, "signals": 1, "byState": { "INVALID_SIGNATURE": 1, "…": 0 } },
+    { "country": "ZZ", "total": 1, "signals": 1, "byState": { "UNKNOWN": 1, "…": 0 } }
+  ]
+}
+```
+
+- `through` is the last day the statistics cover: yesterday, or the day before in the first ten minutes after midnight UTC.
+- `byState` and every `byState` below it carry the nine states of §9.3, zeros included; `byEventType` the three counted types.
+- `signals` sums the four states that signal a code ORBES did not issue, or did not issue for this scan: `INVALID_SIGNATURE`, `UNKNOWN`, `MALFORMED_CODE` and `SUSPICIOUS_ACTIVITY`. A signal is a reason to look, not a verdict: a damaged print reads as MALFORMED CODE.
+- `daily` holds one entry per day of the window, oldest first, days without scans included.
+- `countries` holds every country with scans in the window, most scans first, then by code; `ZZ` is a scan whose location is unknown (`GEO_MODE=none`, or no country for its address). `signals` counts that country's scans in the four states.
+
+The console shows four figures (scans, authentic, counterfeit signals, countries), every scan per day as one curve whose cursor reads a day (pointer, or the arrow keys once the curve has focus), one small curve per state scaled to its busiest day and linked to its scans in Verification events (§16.1, while the history keeps them) over the window's whole days (`from` the first day's `T00:00:00.000Z`, `to` the last day's `T23:59:59.999Z`), the ten countries with the most scans and the ten with the most signals as hairline bars (oxblood where a signature did not verify), the signals by country and state, and the days with scans as a table. No map: the CSP admits no external tiles, and the volume does not call for one.
+
+Errors: `400 VALIDATION_FAILED` (a day that is not `YYYY-MM-DD` or does not exist, a day of year 0000, `days` outside 1–366 or not a whole number, `from` with `days`, `from` after `to`, a window over 366 days, `days` that would start the window before `0001-01-01`).
 
 ---
 

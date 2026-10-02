@@ -95,7 +95,7 @@ genome/
     code/                CODE-01 profile (single source of truth), encoder, colourways, SVG renderer
     decoder/             camera image → decoded payload (runs in a Web Worker in the browser)
     verify/              isomorphic Ed25519 verification (@noble, strict RFC 8032)
-    render/              shared vector primitives → SVG paths; the brand monogram's outlines
+    render/              shared vector primitives → SVG paths; the brand monogram's outlines; print-sheet grid; workshop CSV
   src/server/          Fastify service (Node only)
     config.ts            environment → AppConfig (zod; fail fast; production hardening)
     context.ts           wiring: database, migrations, services, bootstrap admin, key self-test, housekeeping
@@ -107,7 +107,7 @@ genome/
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          certificate cards, scan tokens, scan reports (Cases), scan-history retention,
-                         account recovery and the owner's sheet (Client Services)
+                         daily scan statistics, account recovery and the owner's sheet (Client Services)
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin
@@ -115,7 +115,7 @@ genome/
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
-    admin/               admin console: catalogue, generator, keys, anomalies, audit
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)

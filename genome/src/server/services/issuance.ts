@@ -12,6 +12,11 @@
  * Any failure rolls everything back: a signed code never exists without its
  * product, genome and audit trail.
  *
+ * issueBatch issues up to 50 pieces that share a template, one issueProduct
+ * (one transaction) each, the pieces that name their serial first: lines are
+ * checked before anything is signed, a piece refused at signing time fails
+ * alone, and signed pieces stay signed.
+ *
  * The signing key row is read FOR SHARE inside the transaction, so a code is
  * never committed under a key that a concurrent rotation/revocation has
  * already retired; issuance then retries with the new active key.
@@ -39,11 +44,12 @@ import { verifyEd25519Node } from '../crypto/ed25519-node.js';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isCheckViolation, isForeignKeyViolation, isRetryableTxError, isUniqueViolation } from '../db/pg-errors.js';
 import type { CodeRow, CodeStatus, GenomeRow, OwnershipState, ProductRow, ProductStatus } from '../db/schema.js';
-import { conflict, DomainError, notFound, validationError } from '../errors.js';
+import { conflict, DomainError, notFound, tooManyRequests, validationError } from '../errors.js';
 import { actorLabel, isKeyTrustedAt, type ActiveSigner, type KeyService } from '../keys/key-service.js';
 import {
   ArtifactOptionsError,
   MAX_SHEET_ITEMS,
+  printSheetManifestCsv,
   renderArtifact,
   renderPrintSheet,
   type ArtifactFormat,
@@ -149,6 +155,33 @@ export interface IssueResult {
   claimCode?: string;
 }
 
+/**
+ * Pieces in one batch (POST /api/admin/products/batch). Each claim code costs one scrypt, and 50 pieces
+ * keep the request under the 16 KB body limit; the console sends a larger batch as several requests.
+ */
+export const MAX_ISSUE_BATCH = 50;
+export const ISSUE_BATCH_ACTION = 'product.issue_batch';
+
+/** What every piece of a batch shares: an issue input without variant, SKU and serial. */
+export type IssueBatchTemplate = Omit<IssueProductInput, 'variant' | 'sku' | 'serial'>;
+
+/** What changes from one piece of a batch to the next. */
+export type IssueBatchItem = Pick<IssueProductInput, 'variant' | 'sku' | 'serial'>;
+
+/** One piece of a batch: signed, refused at signing time, or never attempted (the batch stopped before it). */
+export type IssueBatchLine =
+  | { index: number; status: 'ISSUED'; result: IssueResult }
+  | { index: number; status: 'FAILED'; error: { code: string; message: string } }
+  | { index: number; status: 'SKIPPED' };
+
+export interface IssueBatchResult {
+  /** One per item, in the order given. */
+  lines: IssueBatchLine[];
+  issued: number;
+  failed: number;
+  skipped: number;
+}
+
 export interface RenderCodeOptions extends ArtifactOptions {}
 
 export interface IssuanceServiceDeps {
@@ -180,13 +213,18 @@ const PRODUCT_ID_RE = /^O\d{2}-[A-Z]-(\d{5}|[1-9]\d{5})$/;
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' || v === null ? undefined : v), schema.optional());
 
+/**
+ * Bounded text, signed for good with the piece: no control character (C0, DEL, C1) and no U+FFFD, the
+ * replacement character a wrong decoding leaves (a Windows-1252 CSV read as UTF-8), which would stand
+ * for a lost letter in the public result.
+ */
 const text = (max: number, label: string) =>
   z
     .string()
     .trim()
     .min(1, `${label} is required.`)
     .max(max, `${label} is too long.`)
-    .regex(/^[^\p{Cc}]+$/u, `${label} contains invalid characters.`);
+    .regex(/^[^\p{Cc}�]+$/u, `${label} contains invalid characters.`);
 
 const isoDate = z
   .string()
@@ -222,6 +260,20 @@ const issueSchema = z.strictObject({
 });
 
 type ParsedIssueInput = z.infer<typeof issueSchema>;
+
+/** An issue input checked, with what it refers to read: everything issueProduct needs before it signs. */
+interface PreparedIssue {
+  p: ParsedIssueInput;
+  authPolicy: string;
+  year: number;
+  categoryIndex: number;
+  categoryCode: string;
+  warrantyMonths: number;
+  sku: string;
+}
+
+/** The key of an actor's batches in progress (one at a time per admin). */
+const actorKey = (actor: Actor) => `${actor.type}:${actor.id ?? ''}`;
 
 function parseOrThrow<T>(schema: z.ZodType<T>, input: unknown): T {
   const r = schema.safeParse(input);
@@ -285,6 +337,8 @@ export class IssuanceService {
   private readonly categories: CategoryRegistry;
   private readonly clock: Clock;
   private readonly log: Logger;
+  /** Actors with a batch in progress: a second concurrent one is refused, so one session signs one batch at a time. */
+  private readonly batchesInProgress = new Set<string>();
 
   constructor(deps: IssuanceServiceDeps) {
     this.db = deps.db;
@@ -297,6 +351,157 @@ export class IssuanceService {
 
   /** Issue a product with its genome, first signed code (issue 1) and warranty. */
   async issueProduct(input: IssueProductInput, actor: Actor): Promise<IssueResult> {
+    const a = await this.prepareIssue(input);
+
+    // scrypt runs on the thread pool OUTSIDE the transaction, which then stays short.
+    const claimCode = a.p.withClaimSecret ? generateClaimCode() : undefined;
+    const claimHash = claimCode ? await hashClaimCode(claimCode) : null;
+
+    const result = await this.withRetries(
+      (signer) => inTransaction(this.db, (trx) => this.issueIn(trx, signer, actor, { ...a, claimHash })),
+      a.p.serial !== undefined ? 'explicit-serial' : 'auto-serial',
+    );
+    return claimCode ? { ...result, claimCode } : result;
+  }
+
+  /**
+   * Issue the pieces of a batch (POST /api/admin/products/batch): up to MAX_ISSUE_BATCH items
+   * that share a template, one issueProduct each, each in its own transaction: the pieces that
+   * name their serial first, then those whose serial is allocated (max+1), each group in the
+   * order given. An allocated serial so never takes a serial a later piece of the batch names.
+   *
+   * Before anything is signed, the whole request is refused (nothing issued) when a line is
+   * invalid (the template merged with the line, against the issue schema), when two lines name
+   * the same serial, when a named serial leaves no serial for the pieces allocated after it
+   * (999 999 reached), or when the template's category, model or collection is wrong. Then a piece
+   * refused at signing time (its serial taken meanwhile, a concurrent change) fails alone and the
+   * others are issued: a piece already signed is never undone. A failure that is not the piece's
+   * own (signing unavailable, an unexpected error) stops the batch, and the pieces not yet
+   * attempted are SKIPPED. The results are given in the order of `items`.
+   *
+   * Audit: `product.issue` for each piece (in its transaction, as for one product), then
+   * `product.issue_batch` with the product ids and the failures' codes. No claim code in either.
+   * One batch at a time per admin: each claim code is one scrypt on the thread pool customers'
+   * sign-ins share (as for certificate cards), so a second batch answers 429 until the first ends.
+   */
+  async issueBatch(template: IssueBatchTemplate, items: readonly IssueBatchItem[], actor: Actor): Promise<IssueBatchResult> {
+    if (!Array.isArray(items) || items.length < 1 || items.length > MAX_ISSUE_BATCH) {
+      throw validationError(`Add 1 to ${MAX_ISSUE_BATCH} pieces per batch.`);
+    }
+    if (!template || typeof template !== 'object' || Array.isArray(template)) throw validationError('The batch needs a template.');
+    // The template never carries a piece's own fields: a variant, SKU or serial comes from its line only.
+    const { variant: _v, sku: _s, serial: _n, ...shared } = template as IssueProductInput;
+    // The template's own errors are named as such, not as the first piece's.
+    try {
+      parseOrThrow(issueSchema, shared);
+    } catch (e) {
+      if (e instanceof DomainError) throw validationError(`template: ${e.publicMessage}`, e.internal?.detail);
+      throw e;
+    }
+    const inputs: IssueProductInput[] = [];
+    const serials = new Map<number, number>();
+    const named: number[] = [];
+    const allocated: number[] = [];
+    items.forEach((item, i) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw validationError(`items.${i}: a piece must be an object.`);
+      const input = {
+        ...shared,
+        ...(item.variant !== undefined ? { variant: item.variant } : {}),
+        ...(item.sku !== undefined ? { sku: item.sku } : {}),
+        ...(item.serial !== undefined ? { serial: item.serial } : {}),
+      } as IssueProductInput;
+      let p: ParsedIssueInput;
+      try {
+        p = parseOrThrow(issueSchema, input);
+      } catch (e) {
+        if (e instanceof DomainError) throw validationError(`items.${i}: ${e.publicMessage}`, e.internal?.detail);
+        throw e;
+      }
+      if (p.serial !== undefined) {
+        const first = serials.get(p.serial);
+        if (first !== undefined) throw validationError(`items.${i}.serial: the same serial as items.${first}.`);
+        serials.set(p.serial, i);
+        named.push(i);
+      } else allocated.push(i);
+      inputs.push(input);
+    });
+    // The named serials are signed first: the allocated ones then start above the highest of them at least.
+    if (allocated.length > 0 && serials.size > 0) {
+      const top = Math.max(...serials.keys());
+      if (top + allocated.length > SERIAL_MAX) {
+        throw validationError(
+          `items.${serials.get(top)}.serial: serial ${top} leaves no serial for the ${allocated.length} ${allocated.length === 1 ? 'piece' : 'pieces'} allocated after it. Sign it apart, or name their serials.`,
+        );
+      }
+    }
+    const order = [...named, ...allocated];
+
+    // Claimed before the first await, so two concurrent batches of one admin cannot both pass.
+    const key = actorKey(actor);
+    if (this.batchesInProgress.has(key)) throw tooManyRequests('A batch is already being signed. Wait for it to finish, then try again.');
+    this.batchesInProgress.add(key);
+    try {
+      // The template's own checks (category active, model of that category, collection, dates), once.
+      const t = await this.prepareIssue(shared);
+      // One result per piece, at its index, whatever the order of signing.
+      const lines: IssueBatchLine[] = inputs.map((_, i) => ({ index: i, status: 'SKIPPED' }));
+      let stopped = false;
+      for (const i of order) {
+        if (stopped) continue; // SKIPPED: never attempted
+        try {
+          lines[i] = { index: i, status: 'ISSUED', result: await this.issueProduct(inputs[i], actor) };
+        } catch (e) {
+          if (e instanceof DomainError) {
+            lines[i] = { index: i, status: 'FAILED', error: { code: e.code, message: e.publicMessage } };
+            if (e.httpStatus >= 500) stopped = true;
+          } else {
+            this.log.error({ index: i, err: errorFields(e) }, 'a piece of a batch failed unexpectedly; the rest of the batch is skipped');
+            lines[i] = { index: i, status: 'FAILED', error: { code: 'INTERNAL_ERROR', message: 'This piece could not be issued.' } };
+            stopped = true;
+          }
+        }
+      }
+      const result: IssueBatchResult = {
+        lines,
+        issued: lines.filter((l) => l.status === 'ISSUED').length,
+        failed: lines.filter((l) => l.status === 'FAILED').length,
+        skipped: lines.filter((l) => l.status === 'SKIPPED').length,
+      };
+      try {
+        await this.audit.record({
+          actor,
+          action: ISSUE_BATCH_ACTION,
+          targetType: 'product',
+          targetId: null,
+          details: {
+            count: lines.length,
+            issued: result.issued,
+            failed: result.failed,
+            skipped: result.skipped,
+            productIds: lines.flatMap((l) => (l.status === 'ISSUED' ? [l.result.product.productId] : [])),
+            failures: lines.flatMap((l) => (l.status === 'FAILED' ? [{ index: l.index, code: l.error.code }] : [])),
+            category: t.categoryCode,
+            modelId: t.p.modelId,
+            productionBatch: t.p.productionBatch ?? null,
+            claimSecret: t.p.withClaimSecret === true,
+          },
+        });
+      } catch (e) {
+        // Every piece is already audited in its own transaction; failing here would lose the claim codes of the
+        // pieces just signed (they are shown once), so the summary's failure is logged and the results returned.
+        this.log.error({ err: errorFields(e) }, 'the summary audit entry of a batch could not be written');
+      }
+      return result;
+    } finally {
+      this.batchesInProgress.delete(key);
+    }
+  }
+
+  /**
+   * Check an issue input and read what it refers to, before anything is signed. Reads happen
+   * before the transaction: PGlite has a single connection, and these give precise errors.
+   */
+  private async prepareIssue(input: IssueProductInput): Promise<PreparedIssue> {
     const p = parseOrThrow(issueSchema, input);
     const authPolicy = normalizeAuthPolicy(p.authPolicy);
     const now = this.clock();
@@ -305,8 +510,7 @@ export class IssuanceService {
       throw validationError('Production date cannot be in the future.');
     }
 
-    // Reads before the transaction: PGlite has a single connection, and these give precise errors. The transaction
-    // reads the model's and the category's `active` again under a share lock (issueIn).
+    // The transaction reads the model's and the category's `active` again under a share lock (issueIn).
     const category = await this.categories.getByCode(p.categoryCode);
     if (!category) throw notFound('Category', 'CATEGORY_NOT_FOUND');
     if (!category.active) throw categoryInactive();
@@ -321,29 +525,15 @@ export class IssuanceService {
       const col = await this.db.selectFrom('collections').select('id').where('id', '=', p.collectionId).executeTakeFirst();
       if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
     }
-    const sku = p.sku ?? deriveSku(model.sku_prefix, p.variant);
-
-    // scrypt runs on the thread pool OUTSIDE the transaction, which then stays short.
-    const claimCode = p.withClaimSecret ? generateClaimCode() : undefined;
-    const claimHash = claimCode ? await hashClaimCode(claimCode) : null;
-
-    const result = await this.withRetries(
-      (signer) =>
-        inTransaction(this.db, (trx) =>
-          this.issueIn(trx, signer, actor, {
-            p,
-            year,
-            categoryIndex: category.index,
-            categoryCode: category.code,
-            warrantyMonths: category.warrantyMonths,
-            sku,
-            authPolicy,
-            claimHash,
-          }),
-        ),
-      p.serial !== undefined ? 'explicit-serial' : 'auto-serial',
-    );
-    return claimCode ? { ...result, claimCode } : result;
+    return {
+      p,
+      authPolicy,
+      year,
+      categoryIndex: category.index,
+      categoryCode: category.code,
+      warrantyMonths: category.warrantyMonths,
+      sku: p.sku ?? deriveSku(model.sku_prefix, p.variant),
+    };
   }
 
   /**
@@ -437,15 +627,8 @@ export class IssuanceService {
 
   /** Multi-up PDF print sheet of ACTIVE codes (labeled, with crop marks). With `actor`, audited. */
   async renderPrintSheet(codeIds: readonly string[], opts: PrintSheetOptions = {}, actor?: Actor): Promise<RenderedArtifact> {
-    if (!Array.isArray(codeIds) || codeIds.length < 1 || codeIds.length > MAX_SHEET_ITEMS) {
-      throw validationError(`Select 1 to ${MAX_SHEET_ITEMS} codes.`);
-    }
-    const ids = [...new Set(codeIds)];
-    const items = [];
-    for (const id of ids) {
-      const c = await this.loadVerifiedCode(id);
-      items.push({ data: c.data, genomeGlyphs: c.glyphs, productId: c.productId });
-    }
+    const { ids, codes } = await this.loadSheetCodes(codeIds);
+    const items = codes.map((c) => ({ data: c.data, genomeGlyphs: c.glyphs, productId: c.productId }));
     let sheet: RenderedArtifact;
     try {
       sheet = await renderPrintSheet(items, opts, { createdAt: this.clock() });
@@ -463,6 +646,45 @@ export class IssuanceService {
       });
     }
     return sheet;
+  }
+
+  /**
+   * The manifest of the print sheet the same codes and options make (CSV:
+   * page, row, column, productId, sku, variant, material, codeId), in the
+   * PDF's order: the same checks as the sheet (every code ACTIVE, printable
+   * and intact) and the same plan (planPrintSheet). With `actor`, audited.
+   */
+  async printSheetManifest(codeIds: readonly string[], opts: PrintSheetOptions = {}, actor?: Actor): Promise<RenderedArtifact> {
+    const { ids, codes } = await this.loadSheetCodes(codeIds);
+    const items = codes.map((c, i) => ({ productId: c.productId, sku: c.sku, variant: c.variant, material: c.material, codeId: ids[i] }));
+    let manifest: RenderedArtifact;
+    try {
+      manifest = printSheetManifestCsv(items, opts, { createdAt: this.clock() });
+    } catch (e) {
+      if (e instanceof ArtifactOptionsError) throw validationError(e.message);
+      throw e;
+    }
+    if (actor) {
+      await this.audit.record({
+        actor,
+        action: 'code.sheet_manifest',
+        targetType: 'code',
+        targetId: null,
+        details: { codeIds: ids, productIds: items.map((i) => i.productId), ...opts },
+      });
+    }
+    return manifest;
+  }
+
+  /** The codes of a print sheet, duplicates removed (first occurrence kept), each checked as for a download. */
+  private async loadSheetCodes(codeIds: readonly string[]): Promise<{ ids: string[]; codes: Awaited<ReturnType<IssuanceService['loadVerifiedCode']>>[] }> {
+    if (!Array.isArray(codeIds) || codeIds.length < 1 || codeIds.length > MAX_SHEET_ITEMS) {
+      throw validationError(`Select 1 to ${MAX_SHEET_ITEMS} codes.`);
+    }
+    const ids = [...new Set(codeIds)];
+    const codes = [];
+    for (const id of ids) codes.push(await this.loadVerifiedCode(id));
+    return { ids, codes };
   }
 
   // ── Transactions ─────────────────────────────────────────────────────────
@@ -507,16 +729,7 @@ export class IssuanceService {
     trx: Db,
     signer: ActiveSigner,
     actor: Actor,
-    a: {
-      p: ParsedIssueInput;
-      year: number;
-      categoryIndex: number;
-      categoryCode: string;
-      warrantyMonths: number;
-      sku: string;
-      authPolicy: string;
-      claimHash: string | null;
-    },
+    a: PreparedIssue & { claimHash: string | null },
   ): Promise<Omit<IssueResult, 'claimCode'>> {
     const { p, year, categoryIndex } = a;
     const now = this.clock();
@@ -763,6 +976,10 @@ export class IssuanceService {
     productId: string;
     issue: number;
     createdAt: Date;
+    /** The product's descriptive fields, for a print sheet's manifest. */
+    sku: string;
+    variant: string | null;
+    material: string;
   }> {
     if (typeof codeId !== 'string' || !UUID_RE.test(codeId)) throw notFound('Code', 'CODE_NOT_FOUND');
     const row = await this.db
@@ -784,6 +1001,9 @@ export class IssuanceService {
         'p.product_id as canonical_id',
         'p.packed_identity',
         'p.status as product_status',
+        'p.sku',
+        'p.variant',
+        'p.material',
         'g.genome_version',
         'g.glyphs',
         'g.product_id as genome_product',
@@ -792,12 +1012,17 @@ export class IssuanceService {
       .where('c.id', '=', codeId)
       .executeTakeFirst();
     if (!row) throw notFound('Code', 'CODE_NOT_FOUND');
+    // Each refusal names the piece: in a print sheet of up to 200 codes, the operator then knows which one to leave out.
     if (row.status !== 'ACTIVE') {
-      throw conflict('CODE_NOT_ACTIVE', 'Only the active code of a product can be rendered.', `status ${row.status}`);
+      throw conflict('CODE_NOT_ACTIVE', `Only the active code of a product can be rendered: issue ${row.issue} of ${row.canonical_id} is ${row.status}.`, `status ${row.status}`);
     }
     // New prints of a code would only help copy it: none for products that are out of circulation or under incident.
     if (NOT_PRINTABLE.has(row.product_status)) {
-      throw conflict('PRODUCT_NOT_PRINTABLE', 'Codes of this product cannot be printed in its current state.', `status ${row.product_status}`);
+      throw conflict(
+        'PRODUCT_NOT_PRINTABLE',
+        `Codes of ${row.canonical_id} cannot be printed in its current state (${row.product_status.replace(/_/g, ' ')}).`,
+        `status ${row.product_status}`,
+      );
     }
 
     const fail = (detail: string): never => {
@@ -833,6 +1058,9 @@ export class IssuanceService {
       productId: row.canonical_id,
       issue: row.issue,
       createdAt: row.created_at,
+      sku: row.sku,
+      variant: row.variant,
+      material: row.material,
     };
   }
 }
@@ -851,6 +1079,16 @@ function mapDbError(e: unknown, kind: WorkKind): unknown {
   if (isForeignKeyViolation(e)) return notFound('Referenced record', 'REFERENCE_NOT_FOUND');
   if (isCheckViolation(e)) return validationError('The product data was rejected.', 'check constraint');
   return e;
+}
+
+/** An unexpected error as a log gets it: its name, a bounded message and a driver code, nothing a request submitted. */
+function errorFields(e: unknown): Record<string, unknown> {
+  const x = e as { name?: unknown; message?: unknown; code?: unknown };
+  return {
+    name: typeof x?.name === 'string' ? x.name : 'Error',
+    message: typeof x?.message === 'string' ? x.message.slice(0, 500) : String(e).slice(0, 500),
+    ...(typeof x?.code === 'string' ? { code: x.code } : {}),
+  };
 }
 
 function sha256(b: Uint8Array): Uint8Array {

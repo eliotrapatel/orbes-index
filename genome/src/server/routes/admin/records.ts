@@ -1,6 +1,7 @@
 /**
  * Registry views for the console: scan & authentication events, warranties
- * and anomalies (with triage). Owners have their own routes (owners.ts).
+ * and anomalies (with triage: filters, the badge's summary and the scans
+ * around one finding). Owners have their own routes (owners.ts).
  *
  * These are the only places internal verification facts (reasons, risk
  * scores, authenticator results) leave the database, and only to an
@@ -17,7 +18,7 @@ import type { AdminRouteDeps } from './index.js';
 
 export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { db } = ctx;
-  const { warranty, anomaly, reports } = ctx.services;
+  const { warranty, anomaly, lifecycle, reports } = ctx.services;
 
   app.get('/api/admin/scans', async (request) => {
     const f = parse(scanListQuery, request.query);
@@ -34,6 +35,8 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
     }
     if (f.state !== undefined) q = q.where('s.result_state', '=', f.state);
     if (f.scanId !== undefined) q = q.where('s.id', '=', f.scanId);
+    if (f.from !== undefined) q = q.where('s.occurred_at', '>=', f.from);
+    if (f.to !== undefined) q = q.where('s.occurred_at', '<=', f.to);
     const total = await q.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await q
       .select([
@@ -123,14 +126,22 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
   });
 
   app.get('/api/admin/anomalies', async (request) => {
-    const f = parse(anomalyListQuery, request.query);
-    const list = await anomaly.list(
-      { ...(f.id ? { id: f.id } : {}), ...(f.status ? { status: f.status } : {}), ...(f.severity ? { severity: f.severity } : {}) },
-      pageOf(request.query),
-    );
+    const { sort, ...filters } = parse(anomalyListQuery, request.query);
+    const list = await anomaly.list(filters, pageOf(request.query), sort);
     // What customers said about the scans that took part in each finding (count, open cases, the latest).
     const byAnomaly = await reports.forAnomalies(list.items.map((a) => a.id));
     return { ...list, items: list.items.map((a) => ({ ...a, reports: byAnomaly.get(a.id) ?? null })) };
+  });
+
+  // The console's badge (OPEN HIGH + CRITICAL), polled every minute while a console tab is visible.
+  app.get('/api/admin/anomalies/summary', async () => anomaly.summary());
+
+  app.get('/api/admin/anomalies/:id/context', async (request) => {
+    const { id } = parse(anomalyParams, request.params);
+    const c = await anomaly.context(id);
+    // The product's lifecycle, so the console offers only the marks its status allows.
+    const product = c.anomaly.productUuid ? { productId: c.anomaly.productId, lifecycle: await lifecycle.snapshot(c.anomaly.productUuid) } : null;
+    return { ...c, product };
   });
 
   app.patch('/api/admin/anomalies/:id', async (request) => {

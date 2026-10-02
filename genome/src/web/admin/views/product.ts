@@ -523,7 +523,8 @@ function anomaliesPanel(d: ProductDetail): HTMLElement {
       d.anomalies,
       { empty: 'No anomaly recorded for this product.' },
     ),
-    { id: 'anomalies', note: open ? `${open} open` : 'None open', tools: [linkButton('Triage', href('anomalies', {}, { status: 'OPEN' }), 'ghost')] },
+    // Triage this product's findings: the list filtered by the product, most severe first.
+    { id: 'anomalies', note: open ? `${open} open` : 'None open', tools: [linkButton('Triage', href('anomalies', {}, { productId: d.product.productId }), 'ghost')] },
   );
 }
 

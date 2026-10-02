@@ -32,6 +32,17 @@ export function formatDateTime(v: string | Date | null | undefined, opts: { seco
   return `${formatDate(d)} · ${time} UTC`;
 }
 
+/**
+ * One end of a scans window as the server reads it (http/schemas.ts `windowBound`), to the second: a UTC
+ * day (`YYYY-MM-DD`) stands for its first second as a start and its last as an end
+ * (`01 OCT 2026 · 23:59:59 UTC`); an instant is shown as it is; `…` when the end is open.
+ */
+export function formatWindowBound(v: string | null | undefined, end: 'from' | 'to'): string {
+  if (!v) return '…';
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(v);
+  return formatDateTime(day ? `${v}T${end === 'to' ? '23:59:59.999' : '00:00:00.000'}Z` : v, { seconds: true });
+}
+
 /** Short relative age (`JUST NOW`, `12 MIN AGO`, `3 H AGO`, `5 D AGO`), falling back to the date after 30 days. */
 export function formatAge(v: string | Date | null | undefined, now: Date): string {
   const d = toDate(v);

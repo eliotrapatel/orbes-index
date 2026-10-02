@@ -290,7 +290,7 @@ export class VerificationService {
         .executeTakeFirstOrThrow();
       const scanId = scan.id;
 
-      if (w.serviceFinding) await this.anomaly.recordFinding(this.serviceFinding(w, now), trx);
+      if (w.serviceFinding) await this.anomaly.recordFinding(this.serviceFinding(w, now, scanId), trx);
 
       if (w.trusted && w.reg?.code) {
         const reg = w.reg;
@@ -642,7 +642,8 @@ export class VerificationService {
     return out;
   }
 
-  private serviceFinding(w: Work, now: Date): AnomalyFinding {
+  /** The service-level finding of this scan; like a rule finding, its details name the scan that raised it. */
+  private serviceFinding(w: Work, now: Date, scanEventId: string): AnomalyFinding {
     const f = w.serviceFinding!;
     const { severity, weight } = ANOMALY_WEIGHTS[f.type];
     return {
@@ -654,7 +655,7 @@ export class VerificationService {
       // CODE_MISMATCH: the scanned code is not the registered one, but the registered code is the one at risk.
       codeId: w.reg?.code?.id ?? null,
       at: now,
-      details: f.details,
+      details: { ...f.details, scanEventId },
     };
   }
 }

@@ -250,7 +250,7 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 | Variable | Default | Rules |
 |---|---|---|
-| `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events, scan tokens and customers' reports on them (DATABASE §10). Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
+| `SCAN_RETENTION_DAYS` | unset (keep) | Whole days 30–3650, never below the anomaly look-back (the longest `ANOMALY_*_WINDOW` / `ANOMALY_DECAY_DAYS`: 30 days by default). Housekeeping (every 10 min) deletes scan events older than this, with their authentication events, scan tokens and customers' reports on them (DATABASE §10), always after counting every complete day into the anonymous daily statistics the console's Analytics view reads (DATABASE §5.24), which the purge never touches. Unset keeps scan history indefinitely and logs a `risky configuration` warning in production. The period is a legal decision: set the one agreed with counsel. |
 
 **ORBES Client Services** (public contact, supplied by the brand; served by `GET /api/v1/client-services`, API §8.4)
 
@@ -851,9 +851,9 @@ docker compose exec app node --import tsx scripts/admin.ts reset-totp --email op
 | `signing key self-test failed or no ACTIVE key` | Log (error, at start) | Page: issuance is down |
 | `signature failed verify-after-sign; refused`, `signing failed`, `key generation failed` | Log (error) | Page: custody problem |
 | `startup failed`, `uncaught exception`, `unhandled rejection`, `graceful shutdown timed out` | Log (error) | Page |
-| New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` | Page: possible key compromise |
+| New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` (`GET /api/admin/anomalies/summary`: `open.CRITICAL`). In the console, the badge on ANOMALIES and the `(n)` of the tab title count the OPEN HIGH and CRITICAL findings | Page: possible key compromise |
 | `verification flagged` (SUSPICIOUS ACTIVITY) | Log (warn) | Ticket / dashboard |
-| `housekeeping job failed`, `health check: database unavailable` | Log (error) | Ticket |
+| `housekeeping job failed`, `health check: database unavailable` | Log (error; `job: scanStats` also holds back that pass's scan-history purge) | Ticket |
 | Audit chain broken | `GET /api/admin/audit/verify` (daily job) returns `ok: false` | Page |
 | Spikes of `429` | Request logs | Dashboard (abuse or a misconfigured `TRUST_PROXY`) |
 
@@ -903,7 +903,7 @@ The service is stateless apart from a few per-process pieces. Sessions, scan tok
 |---|---|---|
 | Rate limits | In-process LRU stores (`@fastify/rate-limit`), per group | With N instances behind round-robin, a client gets up to N × the configured budget. Divide the limits by N, or enforce a global limit at the edge (CDN or nginx `limit_req`). |
 | Public-key cache | 30 s TTL (5 s for unknown key ids), per process | Rotations and revocations made on another instance or by the CLI take up to 30 s to apply everywhere. Restart for immediate effect (§7.5). Issuance is never affected: it re-checks the key row in its own transaction. |
-| Housekeeping | Every 10 min per process (expired sessions, scan tokens, stale transfers) | Idempotent, so running it on every instance is harmless. |
+| Housekeeping | Every 10 min per process (expired sessions, scan tokens, stale transfers, the daily scan statistics, then the scan-history purge) | Idempotent, so running it on every instance is harmless: two instances counting the same day write the same counts. |
 | Migrations | Advisory lock | Safe if several instances start with `--migrate`, but prefer one migration step per release (§6.2). |
 | Database connections | 10 per process | Size `max_connections`. Prefer PostgreSQL directly over transaction-mode poolers (§6.3). |
 | CPU | Node is single-threaded. Verification is cheap (Ed25519 verification plus a few indexed queries; p95 target < 300 ms excluding network, see [docs/reports/performance.md](reports/performance.md)). Rendering PNG/PDF artifacts in the admin console is the heaviest work. | Scale out with one process per vCPU. |

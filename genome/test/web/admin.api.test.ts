@@ -156,6 +156,18 @@ describe('AdminApi', () => {
     for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
   });
 
+  it('reads the daily scan statistics of a window with a GET (no CSRF token)', async () => {
+    const { fetch, calls } = fakeFetch(json(200, { days: 90 }), json(200, { days: 2 }));
+    const api = new AdminApi({ fetch });
+    await api.analytics({ days: 90 });
+    await api.analytics({ from: '2026-09-30', to: '2026-10-01' });
+    expect(calls.map((c) => [c.init.method, c.url])).toEqual([
+      ['GET', '/api/admin/analytics?days=90'],
+      ['GET', '/api/admin/analytics?from=2026-09-30&to=2026-10-01'],
+    ]);
+    expect(header(calls[0], 'x-csrf-token')).toBeUndefined();
+  });
+
   it('downloads artifacts as blobs with a safe file name, dpi only for PNG', async () => {
     const { fetch, calls } = fakeFetch(
       new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"' } }),
@@ -203,6 +215,34 @@ describe('AdminApi', () => {
     expect(JSON.parse(String(calls[2].init.body))).toEqual({ codeIds: ['c1', 'c2'], widthMm: 25, theme: 'classic', label: true, page: 'A4' });
     expect(sheet).toMatchObject({ filename: 'ORBES-sheet-2026-10-01-2-classic-25mm.pdf', contentType: 'application/pdf' });
     expect(sheet.blob.size).toBe(4);
+  });
+
+  it('filters codes, lists a batch\'s ids and downloads a sheet\'s manifest (POST, CSRF, blob)', async () => {
+    const csv = new Response('"page"\r\n', {
+      status: 200,
+      headers: { 'content-type': 'text/csv; charset=utf-8; header=present', 'content-disposition': 'attachment; filename="ORBES-sheet-2026-10-02-2-classic-30mm-manifest.csv"' },
+    });
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { items: [], page: 2, pageSize: 50, total: 0 }),
+      json(200, { ids: ['c1'], total: 1, truncated: false }),
+      csv,
+      json(200, { items: [], page: 1, pageSize: 50, total: 0 }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.codes({ productionBatch: 'B 1', status: 'ACTIVE', modelId: '', issuedFrom: '2026-09-01' }, 2);
+    expect(calls[1].url).toBe('/api/admin/codes?productionBatch=B%201&status=ACTIVE&issuedFrom=2026-09-01&page=2&pageSize=50');
+    expect(await api.codeIds({ productionBatch: 'B-2026-09-A', issuedTo: '2026-09-30' })).toEqual({ ids: ['c1'], total: 1, truncated: false });
+    expect(calls[2].url).toBe('/api/admin/codes/ids?productionBatch=B-2026-09-A&issuedTo=2026-09-30');
+    const manifest = await api.printSheetManifest(['c1', 'c2'], { widthMm: 30, page: 'A4' });
+    expect(calls[3].url).toBe('/api/admin/codes/print-sheet/manifest');
+    expect(calls[3].init.method).toBe('POST');
+    expect(header(calls[3], 'x-csrf-token')).toBe('tok-1');
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ codeIds: ['c1', 'c2'], widthMm: 30, page: 'A4' });
+    expect(manifest).toMatchObject({ filename: 'ORBES-sheet-2026-10-02-2-classic-30mm-manifest.csv', contentType: 'text/csv; charset=utf-8; header=present' });
+    await api.products({ productionBatch: 'B-2026-09-A' });
+    expect(calls[4].url).toBe('/api/admin/products?productionBatch=B-2026-09-A');
   });
 
   it('downloads certificate cards: claim codes in a POST body, never in the URL', async () => {

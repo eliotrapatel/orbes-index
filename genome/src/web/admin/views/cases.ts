@@ -93,7 +93,7 @@ export async function casesView(ctx: ViewContext): Promise<HTMLElement> {
               ? h(
                   'span',
                   null,
-                  h('a', { class: 'idlink', attrs: { href: href('anomalies', {}, { id: c.anomaly.id }), 'data-testid': 'case-anomaly' } }, humanize(c.anomaly.type)),
+                  h('a', { class: 'idlink', attrs: { href: href('anomalies', {}, { finding: c.anomaly.id }), 'data-testid': 'case-anomaly' } }, humanize(c.anomaly.type)),
                   h('span', { class: 'cell-sub' }, `${c.anomaly.severity} · ${humanize(c.anomaly.status)}`),
                 )
               : h('span', { class: 'soft' }, '—'),

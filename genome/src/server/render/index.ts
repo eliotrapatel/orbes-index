@@ -6,8 +6,11 @@ export {
   ArtifactOptionsError,
   CONTENT_TYPES,
   MAX_SHEET_ITEMS,
+  PRINT_SHEET_MANIFEST_COLUMNS,
   artifactFilename,
   isArtifactFormat,
+  planPrintSheet,
+  printSheetManifestCsv,
   renderArtifact,
   renderPrintSheet,
   resolveArtifactOptions,
@@ -16,7 +19,10 @@ export {
   type ArtifactMeta,
   type ArtifactOptions,
   type PrintSheetItem,
+  type PrintSheetManifestItem,
   type PrintSheetOptions,
+  type PrintSheetPlan,
+  type PrintSheetSlot,
   type RenderedArtifact,
   type ResolvedArtifactOptions,
 } from './artifact.js';
@@ -49,9 +55,11 @@ export {
 export { renderPdf, sceneToPdf, type PdfMeta, type PdfPage, type PdfPlacement, type PdfShape, type PdfSpotColor } from './pdf.js';
 export { PNG_SIGNATURE, pixelsFor, readPngDpi, setPngDpi, svgToPng } from './png.js';
 export {
+  ARTIFACT_LABEL_HEIGHT_U,
   LABEL_LAYOUT,
   SHEET_FOOTER_MM,
   SHEET_PAGES,
+  artifactCellMm,
   buildArtifactScene,
   cropMarks,
   gridCutMarks,
@@ -62,7 +70,9 @@ export {
   type SheetFooterOptions,
   type SheetLayout,
   type SheetPageSize,
+  type SheetPlacement,
 } from './print-sheet.js';
+export { CSV_CONTENT_TYPE, csvDocument } from './csv.js';
 export { LABEL_CHARSET, measureText, textRun, toLabelText } from './label-font.js';
 export {
   ARTIFACT_THEMES,

@@ -16,6 +16,8 @@ import * as m0002 from './migrations/0002_platform_guards.js';
 import * as m0003 from './migrations/0003_authentication_events_default.js';
 import * as m0004 from './migrations/0004_scan_reports.js';
 import * as m0005 from './migrations/0005_account_recovery.js';
+import * as m0007 from './migrations/0007_print_batch_indexes.js';
+import * as m0009 from './migrations/0009_scan_daily_stats.js';
 import * as m0010 from './migrations/0010_models_active.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
@@ -25,6 +27,8 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0003_authentication_events_default': m0003,
   '0004_scan_reports': m0004,
   '0005_account_recovery': m0005,
+  '0007_print_batch_indexes': m0007,
+  '0009_scan_daily_stats': m0009,
   '0010_models_active': m0010,
 });
 

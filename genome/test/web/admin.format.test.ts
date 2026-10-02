@@ -4,6 +4,7 @@ import {
   formatCount,
   formatDate,
   formatDateTime,
+  formatWindowBound,
   groupChars,
   humanize,
   isoDay,
@@ -25,6 +26,15 @@ describe('admin formatters', () => {
     expect(formatDateTime('2026-10-01T14:32:09.000Z')).toBe('01 OCT 2026 · 14:32 UTC');
     expect(formatDateTime('2026-10-01T14:32:09.000Z', { seconds: true })).toBe('01 OCT 2026 · 14:32:09 UTC');
     expect(isoDay(new Date(Date.UTC(2026, 8, 5, 23, 59)))).toBe('2026-09-05');
+  });
+
+  it('reads a scans window as the server does: a UTC day from its first second to its last', () => {
+    expect(formatWindowBound('2026-07-04', 'from')).toBe('04 JUL 2026 · 00:00:00 UTC');
+    expect(formatWindowBound('2026-10-01', 'to')).toBe('01 OCT 2026 · 23:59:59 UTC');
+    expect(formatWindowBound('2026-10-01T23:59:59.999Z', 'to')).toBe('01 OCT 2026 · 23:59:59 UTC');
+    expect(formatWindowBound('2026-10-01T10:01:00.000Z', 'from')).toBe('01 OCT 2026 · 10:01:00 UTC');
+    expect(formatWindowBound(undefined, 'from')).toBe('…');
+    expect(formatWindowBound('', 'to')).toBe('…');
   });
 
   it('formats ages relative to an injected clock', () => {

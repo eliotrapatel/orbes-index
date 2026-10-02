@@ -19,6 +19,7 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
+import { addDays, aggregateScanStats, utcDay } from '../../src/server/services/scan-stats.js';
 import { Client, PASSWORD, safeJson } from './support.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -112,6 +113,76 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
       const r = await op.get(url);
       expect(r.statusCode, `${url} ${r.body.slice(0, 200)}`).toBe(200);
     }
+    // ── Triage on pg: a finding's type and product filters and the orders, the badge, its scans and the scans window ──
+    const wrong = p.genome.glyphs.map((g: number) => (g + 1) % 16);
+    const mismatch = safeJson(await client().post('/api/v1/verify', { code: p.code.data, genome: { glyphs: wrong } })) as any;
+    const findings = safeJson(await op.get(`/api/admin/anomalies?productId=${p.product.productId}&type=GENOME_MISMATCH&sort=severity`)) as any;
+    expect(findings.items).toHaveLength(1);
+    expect(findings.items[0].details.scanEventId).toBe(mismatch.scanId);
+    for (const sort of ['risk', 'lastSeen']) expect((await op.get(`/api/admin/anomalies?sort=${sort}`)).statusCode).toBe(200);
+    expect((safeJson(await op.get('/api/admin/anomalies/summary')) as any).attention).toBeGreaterThanOrEqual(1);
+    const context = safeJson(await op.get(`/api/admin/anomalies/${findings.items[0].id}/context`)) as any;
+    expect(context.trigger.id).toBe(mismatch.scanId);
+    expect(context.scans.total).toBeGreaterThanOrEqual(27);
+    expect(context.devices).toBeGreaterThan(1);
+    expect(context.product.lifecycle.allowed).toContain('STOLEN');
+    const windowed = safeJson(await op.get(`/api/admin/scans?productId=${p.product.productId}&from=${context.window.from}&to=${context.window.to}`)) as any;
+    expect(windowed.total).toBe(context.scans.total);
+
+    // ── Printing a production batch on pg: filters, ids, manifest ──
+    const batched = safeJson(await op.post('/api/admin/products', { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', productionBatch: 'B-PG-1', variant: 'Size 52' })) as any;
+    const day = batched.code.issuedAt;
+    const filtered = safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&modelId=${model.id}&status=ACTIVE&issuedFrom=${day}&issuedTo=${day}`)) as any;
+    expect(filtered.items.map((c: any) => c.id)).toEqual([batched.code.id]);
+    expect(filtered.items[0].printable).toBe(true);
+    expect((safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&issuedTo=2000-01-01`)) as any).total).toBe(0);
+    // The last day of year 9999 holds every code; a bound in year 10000 is refused before any query.
+    expect((safeJson(await op.get(`/api/admin/codes?productionBatch=B-PG-1&issuedTo=9999-12-31`)) as any).total).toBe(1);
+    expect((await op.get(`/api/admin/scans?to=9999-12-31T23:00:00-05:00`)).statusCode).toBe(400);
+    expect((await op.get(`/api/admin/scans?productId=${p.product.productId}&to=9999-12-31`)).statusCode).toBe(200);
+    expect(safeJson(await op.get('/api/admin/codes/ids?productionBatch=B-PG-1'))).toEqual({ ids: [batched.code.id], total: 1, truncated: false });
+    expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-1')) as any).total).toBe(1);
+    const manifest = await op.post('/api/admin/codes/print-sheet/manifest', { codeIds: [batched.code.id] });
+    expect(manifest.statusCode, manifest.body).toBe(200);
+    expect(manifest.body.split('\r\n')[1]).toBe(`"1","1","1","${batched.product.productId}","${batched.product.sku}","Size 52","925 STERLING SILVER","${batched.code.id}"`);
+
+    // ── A batch on pg: a transaction per piece, a serial already taken failing its piece alone ──
+    const lot = await op.post('/api/admin/products/batch', {
+      template: { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', productionBatch: 'B-PG-2', withClaimSecret: true },
+      items: [{ variant: 'Size 50' }, { serial: batched.product.serial }, { variant: 'Size 54' }],
+    });
+    expect(lot.statusCode, lot.body).toBe(200);
+    const lotBody = safeJson(lot) as any;
+    expect(lotBody.items.map((i: any) => i.status)).toEqual(['ISSUED', 'FAILED', 'ISSUED']);
+    expect(lotBody.items[1].error.code).toBe('SERIAL_TAKEN');
+    expect(lotBody.items[0].claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect((safeJson(await op.get('/api/admin/products?productionBatch=B-PG-2')) as any).total).toBe(2);
+
+    // ── Daily scan statistics on pg: concurrent passes count each scan once, the route reads them ──
+    const statsDay = addDays(utcDay(new Date()), -2);
+    const at = new Date(`${statsDay}T12:00:00.000Z`);
+    await ctx.db
+      .insertInto('scan_events')
+      .values([
+        ...Array.from({ length: 3 }, () => ({ occurred_at: at, event_type: 'VERIFY' as const, result_state: 'AUTHENTIC', country: 'BR' })),
+        { occurred_at: at, event_type: 'VERIFY', result_state: 'INVALID_SIGNATURE', country: 'BR' },
+        { occurred_at: at, event_type: 'VERIFY', result_state: 'MALFORMED_CODE', country: null },
+        { occurred_at: at, event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC', country: 'BR' },
+      ])
+      .execute();
+    await Promise.all(Array.from({ length: 4 }, () => aggregateScanStats(ctx.db, new Date())));
+    expect(await ctx.db.selectFrom('scan_daily_stats').select(['day', 'country', 'result_state', 'event_type', 'n']).orderBy('country').orderBy('result_state').execute()).toEqual([
+      { day: statsDay, country: 'BR', result_state: 'AUTHENTIC', event_type: 'VERIFY', n: 3 },
+      { day: statsDay, country: 'BR', result_state: 'INVALID_SIGNATURE', event_type: 'VERIFY', n: 1 },
+      { day: statsDay, country: 'ZZ', result_state: 'MALFORMED_CODE', event_type: 'VERIFY', n: 1 },
+    ]);
+    const stats = safeJson(await op.get('/api/admin/analytics?days=7')) as any;
+    expect(stats).toMatchObject({ days: 7, total: 5, signals: { INVALID_SIGNATURE: 1, MALFORMED_CODE: 1, total: 2 } });
+    expect(stats.countries.map((c: any) => [c.country, c.total, c.signals])).toEqual([
+      ['BR', 4, 1],
+      ['ZZ', 1, 1],
+    ]);
+
     const detail = safeJson(await op.get(`/api/admin/products/${p.product.productId}`)) as any;
     expect(detail.codes[0].verification.valid).toBe(true);
     expect(detail.scans.count).toBeGreaterThanOrEqual(26);

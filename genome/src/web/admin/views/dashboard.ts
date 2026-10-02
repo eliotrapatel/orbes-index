@@ -54,7 +54,7 @@ export async function dashboardView(ctx: ViewContext): Promise<HTMLElement> {
       d.recentEvents,
       { empty: 'No verification yet.', onRow: (r) => (r.productId ? productHref(r.productId) : null), caption: 'Recent verification events' },
     ),
-    { tools: [linkButton('All events', href('scans'), 'ghost')] },
+    { tools: [linkButton('Analytics', href('analytics'), 'ghost'), linkButton('All events', href('scans'), 'ghost')] },
   );
 
   return h(

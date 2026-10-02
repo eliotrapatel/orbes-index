@@ -6,21 +6,38 @@
  * `orbes_admin` cookie; this script only holds the profile and the CSRF
  * token returned by GET /api/admin/auth/me. When the server enforces MFA
  * and this admin has not enrolled, the only reachable screen is enrolment.
+ *
+ * While signed in, the Anomalies link carries a badge, the count of OPEN
+ * HIGH and CRITICAL findings (GET /api/admin/anomalies/summary), also
+ * prefixed to the tab title as `(3)`: asked on every navigation and every
+ * minute while the tab is visible (ui/attention.ts), only by a role that
+ * sees the link; the Anomalies view gives the count it reads itself. The
+ * refresh is a background request: it never signs the admin out.
+ *
+ * A view may hold its page (ui/leave-guard.ts: a batch's claim codes not yet
+ * saved): navigating away or signing out then asks first. A session that
+ * ends while the page is held (a 401) leaves the page on screen, so what it
+ * holds can still be saved (the batch's results file is made in the
+ * browser); the sign-in comes once the page is left.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
 import { monogramSvg } from '../shared/monogram.js';
 import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
+import { badgeText, consoleTitle } from './model/anomalies.js';
 import { can, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
+import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
-import { notifyError } from './ui/toast.js';
+import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
+import { notify, notifyError } from './ui/toast.js';
+import { analyticsView } from './views/analytics.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
-import { codesView } from './views/codes.js';
+import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
 import { dashboardView } from './views/dashboard.js';
 import { generatorView } from './views/generator.js';
@@ -59,6 +76,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'scans', label: 'Verification events' },
       { route: 'anomalies', label: 'Anomalies' },
       { route: 'cases', label: 'Cases' },
+      { route: 'analytics', label: 'Analytics' },
     ],
   },
   { group: 'Clients', items: [{ route: 'owners', label: 'Owners' }, { route: 'warranties', label: 'Warranties' }] },
@@ -81,6 +99,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   codes: { view: codesView, title: 'Codes', nav: 'codes' },
   catalogue: { view: catalogueView, title: 'Catalogue', nav: 'catalogue' },
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
+  analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
@@ -95,11 +114,63 @@ const app = byId('app');
 const api = new AdminApi();
 let session: AdminSession | null = null;
 let renderSeq = 0;
-let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement } | null = null;
+let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement; badge: HTMLElement } | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
+let pageTitle = 'Orbes';
+/** OPEN HIGH + CRITICAL findings, as last read (0 when signed out). */
+let attention = 0;
+let attentionPoll: AttentionPoll | null = null;
+/** The session ended while a page was held: that page stays until it is left, then the sign-in says why. */
+let endedWhileHeld = false;
+/** The notice that said so: taken down with the page. */
+let endedNotice: HTMLElement | null = null;
+
+const SESSION_ENDED = 'Your session has ended. Sign in again.';
+const SESSION_ENDED_HELD =
+  'Your session has ended. This page stays open so that you can save what it holds: Download results (CSV) needs no session. Then leave the page to sign in again.';
 
 function setTitle(t: string): void {
-  document.title = `${t} — ORBES Genome Console`;
+  pageTitle = t;
+  document.title = consoleTitle(pageTitle, attention);
+}
+
+/** Show the count on the Anomalies link and in the tab title. */
+function showAttention(count: number): void {
+  attention = count;
+  const text = badgeText(count);
+  if (shell) {
+    shell.badge.hidden = text === '';
+    shell.badge.querySelector('.side__badge-count')!.textContent = text;
+  }
+  document.title = consoleTitle(pageTitle, attention);
+}
+
+/**
+ * Start the badge's refresh once signed in (and past MFA), or ask again after a navigation. `viewReads`:
+ * the view about to render reads the count itself (Anomalies), so nothing is asked twice.
+ */
+function watchAttention(viewReads: boolean): void {
+  if (attentionPoll) {
+    if (!viewReads) void attentionPoll.refresh();
+    return;
+  }
+  const poll: AttentionPoll = startAttentionPoll({
+    load: async () => (await api.anomalySummary({ background: true })).attention,
+    apply: showAttention,
+    immediate: !viewReads,
+    // The session ended: the refresh stopped itself; the next navigation starts it again, or meets the ended session.
+    onEnded: () => {
+      if (attentionPoll === poll) attentionPoll = null;
+    },
+  });
+  attentionPoll = poll;
+}
+
+/** Stop the badge's refresh and clear the count it shows (signed out, or back to enrolment). */
+function forgetAttention(): void {
+  attentionPoll?.stop();
+  attentionPoll = null;
+  showAttention(0);
 }
 
 /** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
@@ -119,6 +190,13 @@ function enrolled(next: string): () => void {
 // ── Shell ──────────────────────────────────────────────────────────────────
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
+  // The count reads in Helvetica Neue inside the display-face link; screen readers hear what it counts.
+  const badge = h(
+    'span',
+    { class: 'side__badge', attrs: { hidden: true, 'data-testid': 'anomaly-badge' } },
+    h('span', { class: 'side__badge-count' }),
+    h('span', { class: 'visually-hidden' }, ' open HIGH or CRITICAL'),
+  );
   const nav = h(
     'nav',
     { class: 'side__nav', attrs: { 'aria-label': 'Console' } },
@@ -129,7 +207,11 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         'div',
         { class: 'side__group' },
         h('p', { class: 'side__group-title' }, g.group),
-        h('ul', { class: 'side__list' }, ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label)))),
+        h(
+          'ul',
+          { class: 'side__list' },
+          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, i.route === 'anomalies' ? badge : null))),
+        ),
       );
     }),
   );
@@ -168,13 +250,14 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { root, view, nav, crumb };
+  return { root, view, nav, crumb, badge };
 }
 
 function ensureShell(s: AdminSession): NonNullable<typeof shell> {
   if (!shell || !app.contains(shell.root)) {
     shell = buildShell(s);
     mount(app, shell.root);
+    showAttention(attention);
   }
   return shell;
 }
@@ -194,7 +277,14 @@ function markNav(active: RouteName | null): void {
 function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
+  endedWhileHeld = false;
+  endedNotice?.remove();
+  endedNotice = null;
+  // Whatever a view held (a batch's claim codes) left with it.
+  releasePage();
+  forgetAttention();
   resetProductViewState();
+  resetCodesViewState();
   setTitle('Sign in');
   mount(
     app,
@@ -211,10 +301,14 @@ function showLogin(notice?: string): void {
 }
 
 async function logout(): Promise<void> {
-  try {
-    await api.logout();
-  } catch (e) {
-    notifyError(e);
+  if (!(await confirmLeave())) return;
+  // A session that has already ended has nothing to close on the server.
+  if (session) {
+    try {
+      await api.logout();
+    } catch (e) {
+      notifyError(e);
+    }
   }
   session = null;
   // An explicit sign-out starts the next session on the dashboard (an expired session resumes where it was).
@@ -222,10 +316,24 @@ async function logout(): Promise<void> {
   showLogin();
 }
 
+/**
+ * A request answered 401: the session has ended. A held page (a batch's claim codes not yet saved, or
+ * a batch being signed) is not replaced: the console says so once and keeps it, so its codes can still
+ * be saved with the results file, which the browser makes without the server. Leaving it then asks as
+ * ever, and the next view is the sign-in (route()). A request after it is released signs in at once.
+ */
 api.onUnauthorized = () => {
-  if (!session) return;
+  if (!session && !endedWhileHeld) return;
   session = null;
-  showLogin('Your session has ended. Sign in again.');
+  if (heldMessage() !== null) {
+    if (!endedWhileHeld) {
+      endedWhileHeld = true;
+      forgetAttention();
+      endedNotice = notify(SESSION_ENDED_HELD, 'error');
+    }
+    return;
+  }
+  showLogin(SESSION_ENDED);
 };
 
 // ── Routing ────────────────────────────────────────────────────────────────
@@ -240,6 +348,10 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
       location.hash = hash.startsWith('#') ? hash.slice(1) : hash;
     },
     reload: () => void route({ keepScroll: true }),
+    attention: (count) => {
+      if (attentionPoll) attentionPoll.set(count);
+      else showAttention(count);
+    },
     setQuery: (q) => {
       const merged: Record<string, string> = { ...r.query };
       for (const [k, v] of Object.entries(q)) {
@@ -257,11 +369,13 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
 async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const r = parseHash(location.hash);
   const s = session;
-  if (!s) return showLogin();
+  if (!s) return showLogin(endedWhileHeld ? SESSION_ENDED : undefined);
 
   // MFA enforced and not passed: an enrolled admin signs in again with the code; others enrol first.
   if (s.mfaRequired && !s.mfaPassed) {
     if (s.admin.totpEnabled) return showLogin('Two-factor authentication is required. Sign in with your code.');
+    // Enrolment comes first: the badge's refresh would only be refused (MFA_REQUIRED) meanwhile.
+    forgetAttention();
     const sh = ensureShell(s);
     markNav(null);
     sh.crumb.textContent = 'Account · Security';
@@ -278,6 +392,8 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const sh = ensureShell(s);
   const seq = ++renderSeq;
   const scrollY = opts.keepScroll ? window.scrollY : 0;
+  // Only a role that sees the Anomalies link asks for its count (the Anomalies view reads it itself).
+  if (sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
 
   if (r.name === 'security') {
     markNav(null);
@@ -322,7 +438,18 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   }
 }
 
-window.addEventListener('hashchange', () => void route());
+/**
+ * A navigation away from a held page (a batch's claim codes not yet saved) is put back until the
+ * admin chooses: staying keeps the page as it was; leaving releases it and goes where they asked.
+ */
+async function navigated(ev: HashChangeEvent): Promise<void> {
+  if (heldMessage() === null) return route();
+  const target = location.hash;
+  history.replaceState(null, '', ev.oldURL);
+  if (await confirmLeave()) location.hash = target;
+}
+
+window.addEventListener('hashchange', (ev) => void navigated(ev));
 
 async function boot(): Promise<void> {
   mount(app, loading('Orbes'));

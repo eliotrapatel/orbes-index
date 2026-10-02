@@ -13,6 +13,7 @@ import { z } from 'zod';
 import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
+  CODE_STATUSES,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
@@ -21,6 +22,9 @@ import {
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
+import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
+import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -75,19 +79,37 @@ export const productRef = z
   .refine((s) => CANONICAL_PRODUCT_ID_RE.test(s) || UUID_RE.test(s), 'Invalid product id')
   .transform((s) => (UUID_RE.test(s) ? s.toLowerCase() : s.toUpperCase()));
 
+/** A calendar day, YYYY-MM-DD, from year 0001: JavaScript reads year 0000, PostgreSQL has none. */
 const isoDate = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a date (YYYY-MM-DD)')
+  .regex(/^(?!0000)\d{4}-\d{2}-\d{2}$/, 'Must be a date (YYYY-MM-DD)')
   .refine((s) => {
     const d = new Date(`${s}T00:00:00.000Z`);
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   }, 'Not a valid date');
 
+/** The first instant PostgreSQL stores as one of the common era (0001-01-01, UTC). */
+const FIRST_INSTANT_MS = Date.parse('0001-01-01T00:00:00.000Z');
+/**
+ * The last instant of a four-digit year (9999-12-31, UTC). A later one (`9999-12-31T23:00:00-05:00`)
+ * is in year 10000, which PGlite sends as `+010000-…` and PostgreSQL refuses: refused here (400).
+ */
+const LAST_INSTANT_MS = Date.parse('9999-12-31T23:59:59.999Z');
+
 const isoDateTime = z
   .string()
   .max(40)
   .refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.test(s) && !Number.isNaN(Date.parse(s)), 'Must be an ISO 8601 date-time with a time zone')
+  .refine((s) => !(Date.parse(s) < FIRST_INSTANT_MS), 'Must be on or after 0001-01-01 (UTC)')
+  .refine((s) => !(Date.parse(s) > LAST_INSTANT_MS), 'Must be on or before 9999-12-31 (UTC)')
   .transform((s) => new Date(s));
+
+/** A query value where an empty or blank string means "not given" (filter forms send empty fields). */
+const queryOptional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema.optional());
+
+/** A production batch as recorded at issuance (trimmed, ≤ 100 characters), matched exactly. */
+const productionBatch = queryOptional(text(100));
 
 const country = z
   .string()
@@ -282,6 +304,49 @@ export const productListQuery = z.object({
     .transform((s) => s.toUpperCase())
     .optional(),
   q: z.string().trim().max(64, 'At most 64 characters').optional(),
+  productionBatch,
+});
+
+/** An optional field where '' and null mean "not given" (admin forms send empty fields). */
+const formOptional = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === '' || v === null ? undefined : v), schema.optional());
+
+/**
+ * A batch of pieces to issue (POST /api/admin/products/batch): the fields they share, then 1 to
+ * MAX_ISSUE_BATCH lines of what changes from one piece to the next. The shapes and bounds of
+ * POST /api/admin/products; the issuance service applies its rules to every line before it signs any.
+ */
+export const issueBatchBody = body({
+  template: z.strictObject({
+    categoryCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]$/, 'Must be a single letter A–Z')
+      .transform((s) => s.toUpperCase()),
+    modelId: uuid,
+    collectionId: formOptional(uuid),
+    material: text(200),
+    productionBatch: optionalText(100),
+    productionDate: formOptional(isoDate),
+    year: formOptional(z.number().int('Must be a whole year').min(2000, 'Must be 2000–2099').max(2099, 'Must be 2000–2099')),
+    authPolicy: formOptional(z.string().trim().max(200, 'At most 200 characters')),
+    withClaimSecret: formOptional(z.boolean()),
+  }),
+  items: z
+    .array(
+      z.strictObject({
+        variant: optionalText(100),
+        sku: formOptional(
+          z
+            .string()
+            .trim()
+            .max(64, 'At most 64 characters')
+            .regex(/^[A-Za-z0-9][A-Za-z0-9._\-/ ]*$/, 'Letters, digits, space, dot, underscore, hyphen and slash only'),
+        ),
+        serial: formOptional(z.number().int('Must be a whole number').min(1, 'Must be 1–999999').max(999_999, 'Must be 1–999999')),
+      }),
+    )
+    .min(1, 'Add at least one piece')
+    .max(MAX_ISSUE_BATCH, `At most ${MAX_ISSUE_BATCH} pieces per request`),
 });
 
 export const transitionBody = body({
@@ -321,6 +386,22 @@ export const serviceParams = z.object({ id: uuid });
 // ── Admin: codes, artifacts, revocations ───────────────────────────────────
 
 export const codeParams = z.object({ codeId: uuid });
+
+/**
+ * Filters of the codes registry (GET /api/admin/codes and /api/admin/codes/ids): the product's
+ * production batch (exact) and model, the code's status, and the UTC days it was issued in
+ * (`issuedFrom` to `issuedTo`, both included).
+ */
+export const codeListQuery = z
+  .object({
+    productionBatch,
+    modelId: queryOptional(uuid),
+    status: queryOptional(z.enum(CODE_STATUSES)),
+    issuedFrom: queryOptional(isoDate),
+    issuedTo: queryOptional(isoDate),
+  })
+  .refine((q) => !q.issuedFrom || !q.issuedTo || q.issuedFrom <= q.issuedTo, { message: 'issuedFrom must not be after issuedTo', path: ['issuedTo'] });
+export type CodeListQuery = z.infer<typeof codeListQuery>;
 
 export const artifactParams = z.object({ codeId: uuid, format: z.enum(['svg', 'png', 'pdf']) });
 
@@ -374,18 +455,45 @@ export const createRevocationBody = body({
 
 // ── Admin: scans, anomalies, warranties, audit ─────────────────────────────
 
-export const scanListQuery = z.object({
-  productId: productRef.optional(),
-  state: z.enum(VERIFICATION_STATES).optional(),
-  /** One scan (a case's link to its scan). */
-  scanId: uuid.optional(),
-});
+const DAY_MS = 86_400_000;
 
+/**
+ * One end of a time window: an ISO 8601 date-time with its zone, or a UTC day (`YYYY-MM-DD`), which
+ * stands for its first millisecond as a start (`from`) and its last as an end (`to`). Both ends are included.
+ */
+const windowBound = (end: 'from' | 'to') =>
+  z.union([
+    isoDate.transform((d) => new Date(Date.parse(`${d}T00:00:00.000Z`) + (end === 'to' ? DAY_MS - 1 : 0))),
+    isoDateTime,
+  ]);
+
+/**
+ * Filters of the scans registry (GET /api/admin/scans): the product, the result, one scan (a case's link to
+ * its scan), and the window `from`–`to` the scans were made in (both included), e.g. the window of an anomaly.
+ */
+export const scanListQuery = z
+  .object({
+    productId: queryOptional(productRef),
+    state: queryOptional(z.enum(VERIFICATION_STATES)),
+    /** One scan (a case's link to its scan). */
+    scanId: queryOptional(uuid),
+    from: queryOptional(windowBound('from')),
+    to: queryOptional(windowBound('to')),
+  })
+  .refine((q) => !q.from || !q.to || q.from.getTime() <= q.to.getTime(), { message: 'from must not be after to', path: ['to'] });
+
+/**
+ * Filters and order of the anomalies list (GET /api/admin/anomalies). `type` is one of the types the
+ * service can record (ANOMALY_TYPES, derived from ANOMALY_WEIGHTS); `sort` defaults to severity.
+ */
 export const anomalyListQuery = z.object({
-  status: z.enum(ANOMALY_STATUSES).optional(),
-  severity: z.enum(ANOMALY_SEVERITIES).optional(),
+  status: queryOptional(z.enum(ANOMALY_STATUSES)),
+  severity: queryOptional(z.enum(ANOMALY_SEVERITIES)),
+  type: queryOptional(z.enum(ANOMALY_TYPES)),
+  productId: queryOptional(productRef),
+  sort: queryOptional(z.enum(ANOMALY_SORTS)),
   /** One anomaly (a case's link to the anomaly its scan took part in). */
-  id: uuid.optional(),
+  id: queryOptional(uuid),
 });
 
 export const anomalyParams = z.object({ id: uuid });
@@ -423,6 +531,31 @@ export const reportPatchBody = body({
   status: z.literal('CLOSED'),
   note: text(2000),
 });
+
+/**
+ * The window of the daily scan statistics (GET /api/admin/analytics): the UTC days `from` to `to`, both
+ * included, at most ANALYTICS_MAX_DAYS (366). Without `from`, the window is the `days` days (default 30)
+ * that end on `to`; `to` defaults to the last complete day (scan-stats.ts `analyticsWindow`). `from` and
+ * `days` are exclusive.
+ */
+export const analyticsQuery = z
+  .object({
+    from: queryOptional(isoDate),
+    to: queryOptional(isoDate),
+    days: queryOptional(
+      z.preprocess(
+        (v) => (typeof v === 'string' && /^\s*\d{1,4}\s*$/.test(v) ? Number(v) : v),
+        z.number().int('Must be a whole number of days').min(1, 'At least 1 day').max(ANALYTICS_MAX_DAYS, `At most ${ANALYTICS_MAX_DAYS} days`),
+      ),
+    ),
+  })
+  .refine((q) => q.from === undefined || q.days === undefined, { message: 'Give either from or days, not both', path: ['days'] })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'from must not be after to', path: ['to'] })
+  .refine((q) => !q.from || !q.to || daySpan(q.from, q.to) <= ANALYTICS_MAX_DAYS, {
+    message: `The window is at most ${ANALYTICS_MAX_DAYS} days`,
+    path: ['to'],
+  });
+export type AnalyticsQuery = z.infer<typeof analyticsQuery>;
 
 export const warrantyListQuery = z.object({
   status: z.enum(['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID']).optional(),

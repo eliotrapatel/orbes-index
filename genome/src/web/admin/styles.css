@@ -159,6 +159,24 @@ body {
   width: 40px;
 }
 
+/* OPEN HIGH + CRITICAL findings on the Anomalies link: an inverted count, in Helvetica Neue (main.ts). */
+.side__badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 10px;
+  padding: 1px 5px;
+  font-family: var(--font);
+  font-size: var(--fs-nano);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-align: center;
+  vertical-align: 1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--white);
+  background: var(--ink);
+}
+
 .side__foot {
   padding: 22px 32px 26px;
   border-top: 1px solid var(--hairline);
@@ -746,6 +764,16 @@ a.bar__label:hover {
   background: var(--ivory);
 }
 
+/* The row the page is about (the anomaly whose detail is open). */
+.table tbody tr.is-current {
+  background: var(--ivory);
+}
+
+.cell-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .cell-sub {
   display: block;
   margin-top: 2px;
@@ -883,6 +911,17 @@ a.bar__label:hover {
   align-items: center;
   gap: 14px;
   min-height: 38px;
+}
+
+/* The time window of the scans list (from an anomaly), with its Clear link. */
+.filters__window {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: -8px 0 22px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */
@@ -1044,6 +1083,17 @@ a.bar__label:hover {
 
 .cfield.is-invalid .cfield__hint {
   color: var(--critical);
+}
+
+/* A tick box in a dialog, its hint under its label. */
+.cfield--check {
+  margin-bottom: 14px;
+}
+
+.cfield--check .cfield__hint {
+  min-height: 0;
+  margin-top: 4px;
+  padding-left: 24px;
 }
 
 .cfield--checks {
@@ -1403,6 +1453,28 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* An anomaly's scans, oldest first: the filled dot is the scan that raised the finding. */
+.timeline--scans .timeline__item::before {
+  background: var(--white);
+}
+
+.timeline--scans .timeline__item--trigger::before {
+  background: var(--ink);
+}
+
+.panel--finding {
+  margin-bottom: 48px;
+}
+
+.panel__subtitle {
+  margin-top: 30px;
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 /* ── Artifacts ─────────────────────────────────────────────────────────── */
 
 .artifact {
@@ -1487,6 +1559,33 @@ a.bar__label:hover {
 
 .panel--sheet {
   margin-bottom: 48px;
+}
+
+/* Print sheet: the whole batch in one click, and the layout before rendering ("35 per A4 · 4 pages"). */
+.sheet__batch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 28px;
+}
+
+.sheet__batch-note {
+  margin-bottom: 28px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.sheet__batch .sheet__batch-note {
+  margin-bottom: 0;
+}
+
+.sheet__preview {
+  margin-right: auto;
+  font-size: var(--fs-line);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Generator ─────────────────────────────────────────────────────────── */
@@ -1613,6 +1712,152 @@ a.bar__label:hover {
 
 .claim.is-hidden .claim__code {
   color: var(--ink-soft);
+}
+
+/* The generator's two modes, SINGLE PIECE · BATCH, and the Analytics windows,
+   LAST 30 DAYS · LAST 90 DAYS: links in the page head, the current one
+   underlined, as the verification app's tabs (BRAND §3.1, §6). */
+.gen__modes,
+.range {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.gen__mode,
+.range__tab {
+  position: relative;
+  padding: 10px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink-soft);
+  transition: color var(--t-med) var(--ease);
+}
+
+.gen__mode::after,
+.range__tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0.24em;
+  bottom: 2px;
+  height: 1px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--t-med) var(--ease);
+}
+
+.gen__mode:hover,
+.gen__mode:focus-visible,
+.gen__mode[aria-current="page"],
+.range__tab:hover,
+.range__tab:focus-visible,
+.range__tab[aria-current="page"] {
+  color: var(--ink);
+}
+
+.gen__mode[aria-current="page"]::after,
+.range__tab[aria-current="page"]::after {
+  transform: scaleX(1);
+}
+
+/* The separator between the modes: a 3 px disc in --metal, decoration only (BRAND §3.5). */
+.gen__modes-dot,
+.range__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--metal);
+}
+
+/* Batch: the CSV of the pieces, what is wrong with it, and its first rows before signing. */
+.cinput--file {
+  height: auto;
+  padding: 10px 0 12px;
+  font-size: var(--fs-line);
+  cursor: pointer;
+}
+
+.cinput--file::file-selector-button {
+  margin-right: 16px;
+  padding: 9px 16px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.cinput--file::file-selector-button:hover {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.batch__problems {
+  list-style: none;
+}
+
+.batch__problem {
+  padding: 8px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.batch__preview {
+  margin-top: 18px;
+}
+
+.batch__more {
+  margin-top: 10px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+/* Batch result: the claim codes' panel holds no code itself (they are in the table, piece by
+   piece): its label, note and what was saved on the left, its tools stacked on the right. */
+.claim--batch {
+  grid-template-rows: auto auto 1fr;
+  align-items: start;
+}
+
+.claim--batch .claim__label {
+  grid-column: 1;
+}
+
+.claim--batch .claim__note {
+  max-width: 640px;
+  margin-top: 14px;
+  line-height: 1.7;
+}
+
+.claim--batch .claim__tools {
+  grid-row: 1 / span 3;
+  align-items: stretch;
+  width: 260px;
+}
+
+.claim--batch .claim__tools .cfield {
+  margin-bottom: 6px;
+}
+
+.batch__saved {
+  grid-column: 1;
+  min-height: 16px;
+  margin-top: 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink);
 }
 
 /* ── Enrolment ─────────────────────────────────────────────────────────── */
@@ -1860,6 +2105,41 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* The decision dialog's report, step by step (mark, revoke, resolve). */
+.steps {
+  list-style: none;
+  margin-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.steps__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.steps__state {
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-soft);
+}
+
+.steps__item[data-state="done"] .steps__state {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.steps__item[data-state="failed"] .steps__label,
+.steps__item[data-state="failed"] .steps__state {
+  font-weight: 700;
+  color: var(--critical);
+}
+
 .dialog__error {
   min-height: 18px;
   font-size: var(--fs-micro);
@@ -2012,6 +2292,260 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* ── Analytics (A-09) ──────────────────────────────────────────────────── */
+
+/* Every scan per day: a 1.5 px ink curve on hairlines, its ceiling and half
+   labelled on the left, five days below, all labels in HTML (the SVG stretches,
+   its strokes do not). The cursor, its dot and its readout are placed by
+   --x / --y, set through the CSSOM (ui/charts.ts). */
+.trend {
+  margin-top: 16px;
+}
+
+.trend__frame {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 0 16px;
+}
+
+.trend__yaxis,
+.trend__plot {
+  position: relative;
+  height: 200px;
+}
+
+.trend__ylabel {
+  --y: 0;
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--y) * 100%);
+  transform: translateY(50%);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.trend__plot {
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.trend__plot:focus {
+  outline: none;
+}
+
+.trend__plot:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 8px;
+}
+
+.trend__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.trend__grid,
+.trend__base,
+.spark__base {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend__base {
+  stroke: var(--hairline-strong);
+}
+
+.trend__line,
+.spark__line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend__cursor {
+  --x: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--x) * 100%);
+  width: 1px;
+  background: var(--hairline-strong);
+  pointer-events: none;
+}
+
+/* The day's point, ringed in paper so it reads over the curve. */
+.trend__dot {
+  --x: 0;
+  --y: 0;
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  bottom: calc(var(--y) * 100%);
+  width: 9px;
+  height: 9px;
+  margin: 0 0 -4.5px -4.5px;
+  border: 2px solid var(--white);
+  border-radius: 50%;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+/* The readout opens 16 px beside the cursor, on the side with room; --dx
+   (model/analytics.ts readoutPlacement) is its left edge from the cursor, so
+   it never leaves the plot. Its own width wherever it opens, never squeezed by
+   the plot's edge. Over the cursor on a phone, it keeps clear of the day's
+   point (--low: at the foot of the plot). */
+.trend__tip {
+  --x: 0;
+  --dx: 16px;
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: calc(var(--x) * 100%);
+  transform: translateX(var(--dx));
+  width: max-content;
+  min-width: 200px;
+  padding: 12px 16px 14px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--white);
+  pointer-events: none;
+}
+
+.trend__tip--low {
+  top: auto;
+  bottom: 0;
+}
+
+.trend__tip-total {
+  font-size: var(--fs-line);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend__tip-day {
+  margin-top: 2px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.trend__tip-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 8px;
+  font-size: var(--fs-micro);
+}
+
+.trend__tip-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.trend__axis {
+  position: relative;
+  height: 20px;
+  margin: 12px 0 0 64px;
+}
+
+.trend__tick {
+  --x: 0;
+  position: absolute;
+  top: 0;
+  left: calc(var(--x) * 100%);
+  transform: translateX(-50%);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.trend__tick--first {
+  transform: none;
+}
+
+.trend__tick--last {
+  transform: translateX(-100%);
+}
+
+/* By result: one row per verification state, as the hairline bars: its mark and
+   name (a link to its scans), its curve scaled to its busiest day, its total and share.
+   INVALID SIGNATURE draws in oxblood, MALFORMED CODE in metal; a state without
+   scans keeps only its baseline and recedes to --ink-soft. */
+.srows {
+  list-style: none;
+}
+
+.srow {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 64px 48px;
+  align-items: center;
+  gap: 20px;
+  min-height: 46px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.srow__label {
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.srow__label:hover .status__text,
+.srow__label:focus-visible .status__text {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+
+.srow__curve {
+  display: block;
+  height: 26px;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.spark--critical .spark__line {
+  stroke: var(--critical);
+}
+
+.spark--muted .spark__line {
+  stroke: var(--metal);
+}
+
+.srow__value {
+  text-align: right;
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.srow__share {
+  text-align: right;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.srow--zero .status__text,
+.srow--zero .srow__value {
+  color: var(--ink-soft);
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
@@ -2032,6 +2566,7 @@ a.bar__label:hover {
 .page-head__eyebrow,
 .page-head__title,
 .panel__title,
+.panel__subtitle,
 .kpi__label,
 .deflist__label,
 .table th,
@@ -2044,6 +2579,8 @@ a.bar__label:hover {
 .actions__title,
 .artifact__downloads-label,
 .gen__identity-label,
+.gen__mode,
+.range__tab,
 .gen__notes-title,
 .care-preview__label,
 .care-preview__tab,
@@ -2064,6 +2601,12 @@ a.bar__label:hover {
 
 /* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label. */
 .cfield__phrase {
+  font-family: var(--font);
+}
+
+/* So does a count inside a display-face button (SELECT THE 120 CODES OF THIS BATCH), or tab (LAST 90 DAYS). */
+.cbtn__figure,
+.range__figure {
   font-family: var(--font);
 }
 
@@ -2123,6 +2666,52 @@ a.bar__label:hover {
     grid-template-columns: 120px minmax(0, 1fr) 48px;
   }
   .bar__share {
+    display: none;
+  }
+  /* A state's name over its curve, its total beside the name. */
+  .srow {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 6px 14px;
+    padding: 12px 0 10px;
+  }
+  .srow__label {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .srow__value {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .srow__curve {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .srow__share {
+    display: none;
+  }
+  .trend__frame {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 0 10px;
+  }
+  .trend__axis {
+    margin-left: 42px;
+  }
+  /* A batch's claim codes: the tools under the note, the width of the panel. */
+  .claim--batch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .claim--batch .claim__tools {
+    grid-column: 1;
+    grid-row: auto;
+    width: auto;
+    margin-top: 14px;
+  }
+}
+
+/* A phone: three day labels under the curve, the first, the middle and the last. */
+@media (max-width: 560px) {
+  .trend__tick:nth-child(2),
+  .trend__tick:nth-child(4) {
     display: none;
   }
 }

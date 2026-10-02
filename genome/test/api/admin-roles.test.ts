@@ -23,6 +23,9 @@ const INVALID = { definitelyNotAField: true };
 
 const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics?from=2025-10-01&to=2026-10-01', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics?days=367', min: 'AUDITOR' },
   { group: 'categories', method: 'GET', url: '/api/admin/categories', min: 'AUDITOR' },
   { group: 'categories', method: 'POST', url: '/api/admin/categories', body: INVALID, min: 'ADMIN' },
   { group: 'categories', method: 'POST', url: '/api/admin/categories/J/active', body: INVALID, min: 'ADMIN' },
@@ -34,6 +37,7 @@ const PROBES: Probe[] = [
   { group: 'collections', method: 'PATCH', url: `/api/admin/collections/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: '/api/admin/products', min: 'AUDITOR' },
   { group: 'products', method: 'POST', url: '/api/admin/products', body: INVALID, min: 'OPERATOR' },
+  { group: 'products', method: 'POST', url: '/api/admin/products/batch', body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: `/api/admin/products/${PID}`, min: 'AUDITOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/transitions`, body: INVALID, min: 'OPERATOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/reinstate`, body: INVALID, min: 'ADMIN' },
@@ -47,10 +51,15 @@ const PROBES: Probe[] = [
   { group: 'codes', method: 'GET', url: `/api/admin/codes/${UUID}/artifact.svg`, min: 'OPERATOR' },
   { group: 'codes', method: 'POST', url: `/api/admin/codes/${UUID}/revoke`, body: INVALID, min: 'ADMIN' },
   { group: 'codes', method: 'POST', url: '/api/admin/codes/print-sheet', body: INVALID, min: 'OPERATOR' },
+  { group: 'codes', method: 'POST', url: '/api/admin/codes/print-sheet/manifest', body: INVALID, min: 'OPERATOR' },
   { group: 'certificates', method: 'POST', url: '/api/admin/certificates', body: INVALID, min: 'OPERATOR' },
   { group: 'genomes', method: 'GET', url: '/api/admin/genomes', min: 'AUDITOR' },
   { group: 'codes', method: 'GET', url: '/api/admin/codes', min: 'AUDITOR' },
+  { group: 'codes', method: 'GET', url: '/api/admin/codes?productionBatch=B-2026-09-A&status=ACTIVE&issuedFrom=2026-09-01', min: 'AUDITOR' },
+  { group: 'codes', method: 'GET', url: '/api/admin/codes/ids?productionBatch=B-2026-09-A', min: 'AUDITOR' },
+  { group: 'products', method: 'GET', url: '/api/admin/products?productionBatch=B-2026-09-A', min: 'AUDITOR' },
   { group: 'scans', method: 'GET', url: '/api/admin/scans', min: 'AUDITOR' },
+  { group: 'scans', method: 'GET', url: `/api/admin/scans?productId=${PID}&from=2026-10-01&to=2026-10-01T12:00:00Z`, min: 'AUDITOR' },
   { group: 'owners', method: 'GET', url: '/api/admin/owners', min: 'AUDITOR' },
   { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/recovery-code`, body: INVALID, min: 'ADMIN' },
   { group: 'owners', method: 'GET', url: '/api/admin/owners?email=client%40example.com', min: 'AUDITOR' },
@@ -61,6 +70,9 @@ const PROBES: Probe[] = [
   { group: 'owners', method: 'GET', url: `/api/admin/owners/${UUID}/export`, min: 'ADMIN' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
+  { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
+  { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies/summary', min: 'AUDITOR' },
+  { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies/${UUID}/context`, min: 'AUDITOR' },
   { group: 'anomalies', method: 'PATCH', url: `/api/admin/anomalies/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'reports', method: 'GET', url: '/api/admin/reports', min: 'AUDITOR' },
   { group: 'reports', method: 'PATCH', url: `/api/admin/reports/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -88,7 +100,7 @@ describe('admin role enforcement', () => {
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'reports', 'revocations', 'keys', 'audit', 'admins']) {
+    for (const g of ['dashboard', 'analytics', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'reports', 'revocations', 'keys', 'audit', 'admins']) {
       expect(groups.has(g)).toBe(true);
     }
   });

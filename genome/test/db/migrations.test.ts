@@ -2,11 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
+import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
+import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
   'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_transfers', 'product_status_history',
-  'products', 'revocations', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records', 'sessions', 'warranties',
+  'products', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records', 'sessions',
+  'warranties',
 ];
 
 describe('migrations', () => {
@@ -85,6 +88,9 @@ describe('migrations', () => {
     ).toBe(true);
     expect(has(/INDEX account_recovery_codes_account_idx ON public\.account_recovery_codes USING btree \(account_id, created_at\)/)).toBe(true);
     expect(has(/INDEX account_recovery_codes_created_by_idx ON public\.account_recovery_codes USING btree \(created_by\)/)).toBe(true);
+    // 0007: printing by production batch, codes by issue day.
+    expect(has(/INDEX products_production_batch_idx ON public\.products USING btree \(production_batch\)$/)).toBe(true);
+    expect(has(/INDEX codes_created_at_idx ON public\.codes USING btree \(created_at\)$/)).toBe(true);
   });
 
   /**
@@ -150,6 +156,56 @@ describe('migrations', () => {
     expect(withReports.filter((o) => !o.includes('scan_reports'))).toEqual(before);
     expect((await migrateToLatest(t.db)).applied[0]).toBe('0004_scan_reports');
     expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0007: adds the two print-batch indexes, and its down step drops exactly them', async () => {
+    const indexes = async () =>
+      (await sql<{ name: string; def: string }>`SELECT indexname AS name, indexdef AS def FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname`.execute(t.db)).rows;
+    const added = ['codes_created_at_idx', 'products_production_batch_idx'];
+    const before = await indexes();
+    expect(before.map((i) => i.name)).toEqual(expect.arrayContaining(added));
+    await m0007.down(t.db);
+    expect((await indexes()).map((i) => i.name)).toEqual(before.map((i) => i.name).filter((n) => !added.includes(n)));
+    await m0007.up(t.db);
+    expect(await indexes()).toEqual(before);
+    expect(MIGRATIONS['0007_print_batch_indexes']).toBe(m0007);
+  });
+
+  it('0009: creates scan_daily_stats keyed by day, country, state and event type, and its down step drops exactly it', async () => {
+    const columns = async () =>
+      (
+        await sql<{ table: string; column: string; type: string; nullable: string }>`
+          SELECT table_name AS table, column_name AS column, data_type AS type, is_nullable AS nullable
+          FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position`.execute(t.db)
+      ).rows;
+    const before = await columns();
+    expect(before.filter((c) => c.table === 'scan_daily_stats').map((c) => [c.column, c.type, c.nullable])).toEqual([
+      ['day', 'date', 'NO'],
+      ['country', 'character', 'NO'],
+      ['result_state', 'text', 'NO'],
+      ['event_type', 'text', 'NO'],
+      ['n', 'integer', 'NO'],
+    ]);
+    const pk = await sql<{ def: string }>`
+      SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'scan_daily_stats'::regclass AND contype = 'p'`.execute(t.db);
+    expect(pk.rows.map((r) => r.def)).toEqual(['PRIMARY KEY (day, country, result_state, event_type)']);
+    // n ≥ 0, a two-letter country, never a staff scan.
+    const insert = (v: Record<string, unknown>) =>
+      sql`INSERT INTO scan_daily_stats (day, country, result_state, event_type, n)
+          VALUES (${v.day ?? '2026-10-01'}, ${v.country ?? 'FR'}, ${v.state ?? 'AUTHENTIC'}, ${v.type ?? 'VERIFY'}, ${v.n ?? 1})`.execute(t.db);
+    await expect(insert({ n: -1 })).rejects.toThrow(/check/i);
+    await expect(insert({ country: 'fr' })).rejects.toThrow(/check/i);
+    await expect(insert({ type: 'ADMIN_TEST' })).rejects.toThrow(/check/i);
+    await expect(insert({ state: 'PENDING' })).rejects.toThrow(/check/i);
+    await insert({ n: 0 });
+    await expect(insert({ n: 2 })).rejects.toThrow(/duplicate key/i);
+    await sql`DELETE FROM scan_daily_stats`.execute(t.db);
+
+    await m0009.down(t.db);
+    expect(await columns()).toEqual(before.filter((c) => c.table !== 'scan_daily_stats'));
+    await m0009.up(t.db);
+    expect(await columns()).toEqual(before);
+    expect(MIGRATIONS['0009_scan_daily_stats']).toBe(m0009);
   });
 
   it('roll back cleanly and re-apply', async () => {

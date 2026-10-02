@@ -10,24 +10,36 @@
  *   first attempt cannot have had an effect.
  * - Errors are always `ApiError(status, code, message)`; the message is the
  *   server's public message (never a stack trace).
+ * - A 401 ends the session through `onUnauthorized`, except for a request
+ *   made in the background (the Anomalies badge's refresh): a timer never
+ *   decides what happens to the page on screen; the admin's next action does.
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
   AdminProfile,
   AdminSession,
   AdminUser,
+  AnalyticsData,
+  AnomalyContext,
+  AnomalyFilters,
   AnomalyRecord,
   AnomalyStatus,
+  AnomalySummary,
   ArtifactFormat,
   ArtifactTheme,
   AuditEntry,
   CaseRecord,
   Category,
   ChainVerification,
+  CodeFilters,
+  CodeIds,
   CodeJson,
   Collection,
   DashboardData,
   GenomeJson,
+  IssueBatchItem,
+  IssueBatchResponse,
+  IssueBatchTemplate,
   IssueInput,
   IssueResponse,
   IssuedCodeJson,
@@ -116,6 +128,8 @@ interface RequestOptions {
   body?: unknown;
   /** Return the raw Response (artifacts). */
   raw?: boolean;
+  /** Made by a timer, not by the admin: a 401 is thrown to the caller without calling `onUnauthorized`. */
+  background?: boolean;
 }
 
 export interface ArtifactOptions {
@@ -229,7 +243,7 @@ export class AdminApi {
     }
     if (err.status === 401 && !NO_SESSION_PATHS.includes(pathOnly)) {
       this.csrf = null;
-      this.onUnauthorized?.();
+      if (!opts.background) this.onUnauthorized?.();
     }
     throw err;
   }
@@ -297,6 +311,11 @@ export class AdminApi {
     return this.get('/api/admin/dashboard');
   }
 
+  /** Daily scan statistics: the `days` complete days to yesterday (UTC), or the days `from` to `to` (at most 366). */
+  analytics(q: { days?: number; from?: string; to?: string } = {}): Promise<AnalyticsData> {
+    return this.get('/api/admin/analytics', q);
+  }
+
   categories(): Promise<Items<Category>> {
     return this.get('/api/admin/categories');
   }
@@ -344,7 +363,7 @@ export class AdminApi {
 
   // ── Products ─────────────────────────────────────────────────────────────
 
-  products(q: { status?: string; category?: string; q?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ProductOverview>> {
+  products(q: { status?: string; category?: string; q?: string; productionBatch?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ProductOverview>> {
     return this.get('/api/admin/products', q);
   }
 
@@ -354,6 +373,11 @@ export class AdminApi {
 
   issue(input: IssueInput): Promise<IssueResponse> {
     return this.post('/api/admin/products', input);
+  }
+
+  /** Up to 50 pieces sharing a template, one result each; pieces already signed stay signed whatever happens to the others. */
+  issueBatch(template: IssueBatchTemplate, items: readonly IssueBatchItem[]): Promise<IssueBatchResponse> {
+    return this.post('/api/admin/products/batch', { template, items: [...items] });
   }
 
   transition(productId: string, to: ProductStatus, reason?: string): Promise<{ statusChange: StatusChange; lifecycle: LifecycleSnapshot }> {
@@ -415,6 +439,12 @@ export class AdminApi {
     return toDownload(res, 'orbes-print-sheet.pdf');
   }
 
+  /** The sheet's manifest (CSV): page, row and column of each code, in the order of the PDF made from the same request. */
+  async printSheetManifest(codeIds: readonly string[], opts: PrintSheetOptions = {}): Promise<Download> {
+    const res = await this.request<Response>('POST', '/api/admin/codes/print-sheet/manifest', { raw: true, body: { codeIds: [...codeIds], ...opts } });
+    return toDownload(res, 'orbes-print-sheet-manifest.csv');
+  }
+
   /**
    * Certificate cards carrying claim codes (POST: the codes travel in the body, never in a URL).
    * The server checks each code against its product's hash and audits product ids only.
@@ -433,13 +463,21 @@ export class AdminApi {
     return this.get('/api/admin/genomes', { page, pageSize });
   }
 
-  codes(page = 1, pageSize = 50): Promise<Paged<CodeJson>> {
-    return this.get('/api/admin/codes', { page, pageSize });
+  codes(filters: CodeFilters = {}, page = 1, pageSize = 50): Promise<Paged<CodeJson>> {
+    return this.get('/api/admin/codes', { ...filters, page, pageSize });
+  }
+
+  /** Ids of the printable codes of a filter (a production batch), for a print sheet. */
+  codeIds(filters: CodeFilters): Promise<CodeIds> {
+    return this.get('/api/admin/codes/ids', { ...filters });
   }
 
   // ── Registries ───────────────────────────────────────────────────────────
 
-  scans(q: { productId?: string; state?: string; scanId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ScanRecord>> {
+  /** `from` / `to`: ISO 8601 instants or UTC days, both included (the window of an anomaly); `scanId`: one scan (a case's). */
+  scans(
+    q: { productId?: string; state?: string; scanId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
+  ): Promise<Paged<ScanRecord>> {
     return this.get('/api/admin/scans', q);
   }
 
@@ -478,8 +516,18 @@ export class AdminApi {
     return this.get('/api/admin/warranties', q);
   }
 
-  anomalies(q: { id?: string; status?: string; severity?: string; page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
-    return this.get('/api/admin/anomalies', q);
+  anomalies(q: AnomalyFilters & { page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
+    return this.get('/api/admin/anomalies', { ...q });
+  }
+
+  /** OPEN findings by severity, the badge count (OPEN HIGH + CRITICAL) and the known types. */
+  anomalySummary(opts: { background?: boolean } = {}): Promise<AnomalySummary> {
+    return this.request('GET', '/api/admin/anomalies/summary', { background: opts.background === true });
+  }
+
+  /** The scans around one finding, its code and what its product's lifecycle allows. */
+  anomalyContext(id: string): Promise<AnomalyContext> {
+    return this.get(`/api/admin/anomalies/${encodeURIComponent(id)}/context`);
   }
 
   /** The Cases queue: customers' reports on scans that were not authentic. */

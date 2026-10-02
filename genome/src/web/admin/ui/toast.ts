@@ -14,13 +14,15 @@ function ensureRegion(): HTMLElement {
   return region;
 }
 
-export function notify(message: string, kind: 'ok' | 'error' = 'ok'): void {
+/** Show a notice; returns it, so a notice that stops being true can be taken down. */
+export function notify(message: string, kind: 'ok' | 'error' = 'ok'): HTMLElement {
   const r = ensureRegion();
   const close = h('button', { class: 'toast__close', attrs: { type: 'button', 'aria-label': 'Dismiss' } }, '×');
   const t = h('div', { class: ['toast', `toast--${kind}`], attrs: { role: kind === 'error' ? 'alert' : 'status' } }, h('span', { class: 'toast__text' }, message), close);
   close.addEventListener('click', () => t.remove());
   r.appendChild(t);
   if (kind === 'ok') setTimeout(() => t.remove(), 4200);
+  return t;
 }
 
 /** Notify an error from any failure; server messages are already public-safe. */

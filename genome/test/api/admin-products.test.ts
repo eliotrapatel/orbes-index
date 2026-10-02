@@ -208,6 +208,113 @@ describe('admin products, codes and records', () => {
     });
   });
 
+  describe('batches', () => {
+    const BATCH = 'B-2026-10-LOT';
+    const template = (extra: Record<string, unknown> = {}) => ({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', productionBatch: BATCH, productionDate: '2026-10-01', withClaimSecret: true, ...extra });
+    const batchOf = async (productionBatch: string) => (safeJson(await auditor.get(`/api/admin/products?productionBatch=${productionBatch}&pageSize=200`)) as any).items as any[];
+
+    it('issues a batch of 3: one result per piece, unique codes, claim codes shown once and never audited', async () => {
+      const res = await operator.post('/api/admin/products/batch', { template: template(), items: [{ variant: 'Size 52' }, { variant: 'Size 54', sku: 'MNL-RG-54-POLI' }, {}] });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      const b = safeJson(res) as any;
+      expect(b).toMatchObject({ issued: 3, failed: 0, skipped: 0 });
+      expect(b.items.map((i: any) => [i.index, i.status])).toEqual([[0, 'ISSUED'], [1, 'ISSUED'], [2, 'ISSUED']]);
+      for (const i of b.items) {
+        expect(i).toMatchObject({ productId: expect.stringMatching(/^O\d{2}-J-\d{5}$/), codeId: expect.stringMatching(/^[0-9a-f-]{36}$/), claimCode: expect.stringMatching(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/) });
+        expect(Object.keys(i).sort()).toEqual(['claimCode', 'codeId', 'index', 'productId', 'serial', 'sku', 'status', 'variant']);
+      }
+      expect(b.items.map((i: any) => [i.variant, i.sku])).toEqual([
+        ['Size 52', 'MNL-RG-SIZE-52'],
+        ['Size 54', 'MNL-RG-54-POLI'],
+        [null, 'MNL-RG'],
+      ]);
+      // Unique identities, codes and claim codes; consecutive serials.
+      for (const k of ['productId', 'codeId', 'claimCode', 'serial']) expect(new Set(b.items.map((i: any) => i[k])).size, k).toBe(3);
+      expect(b.items[1].serial - b.items[0].serial).toBe(1);
+      expect(b.items[2].serial - b.items[1].serial).toBe(1);
+
+      // All three in Products under the batch, each with its own active code that verifies.
+      const listed = await batchOf(BATCH);
+      expect(listed.map((p) => p.productId).sort()).toEqual(b.items.map((i: any) => i.productId).sort());
+      expect(listed.every((p) => p.productionBatch === BATCH && p.codeId && p.status === 'ISSUED')).toBe(true);
+      // The claim codes are the products' own: the certificate route checks each against its hash.
+      const cards = await operator.post('/api/admin/certificates', { items: b.items.map((i: any) => ({ productId: i.productId, claimCode: i.claimCode })), format: 'csv' });
+      expect(cards.statusCode, cards.body.slice(0, 200)).toBe(200);
+
+      // Audited: one product.issue per piece and the batch's summary, with the admin and hashed IP; no claim code anywhere.
+      const summary = await h.ctx.db.selectFrom('audit_logs').selectAll().where('action', '=', 'product.issue_batch').execute();
+      expect(summary).toHaveLength(1);
+      expect(summary[0]).toMatchObject({ actor_type: 'admin', target_type: 'product', target_id: null, ip_hash: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+      expect(summary[0].details).toEqual({
+        count: 3,
+        issued: 3,
+        failed: 0,
+        skipped: 0,
+        productIds: b.items.map((i: any) => i.productId),
+        failures: [],
+        category: 'J',
+        modelId,
+        productionBatch: BATCH,
+        claimSecret: true,
+      });
+      const perPiece = await h.ctx.db.selectFrom('audit_logs').select('target_id').where('action', '=', 'product.issue').where('target_id', 'in', b.items.map((i: any) => i.productId)).execute();
+      expect(perPiece).toHaveLength(3);
+      const log = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select('details').execute());
+      for (const i of b.items) expect(log).not.toContain(i.claimCode.replace(/-/g, '').slice(0, 8));
+    });
+
+    it('refuses 51 pieces, an invalid line or an unknown model (400 / 404) with nothing signed; AUDITOR and a missing CSRF token get 403', async () => {
+      const before = (safeJson(await auditor.get('/api/admin/products?pageSize=1')) as any).total;
+      const tooMany = await operator.post('/api/admin/products/batch', { template: template(), items: Array.from({ length: 51 }, () => ({})) });
+      expect(tooMany.statusCode).toBe(400);
+      expect(errorOf(tooMany)).toEqual({ code: 'VALIDATION_FAILED', message: 'items: At most 50 pieces per request.' });
+      expect((await operator.post('/api/admin/products/batch', { template: template(), items: [] })).statusCode).toBe(400);
+      expect((await operator.post('/api/admin/products/batch', { items: [{}] })).statusCode).toBe(400);
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template({ price: 1 }), items: [{}] })).message).toMatch(/unknown fields in template: price/);
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, { variant: '52', size: 'L' }] })).message).toMatch(/unknown fields in items\.1: size/);
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, {}, { sku: '-bad' }] })).message).toMatch(/^items\.2\.sku: /);
+      // The service checks each line with the issue rules too (a tab is a control character there).
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, { variant: 'a\tb' }] })).message).toBe('items.1: Variant contains invalid characters.');
+      // A letter lost by a wrong decoding (U+FFFD) is never signed.
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{ variant: 'Pi\uFFFDce' }] })).message).toBe('items.0: Variant contains invalid characters.');
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{ serial: 4242 }, { serial: 4242 }] })).message).toBe('items.1.serial: the same serial as items.0.');
+      const unknownModel = await operator.post('/api/admin/products/batch', { template: template({ modelId: '00000000-0000-4000-8000-000000000000' }), items: [{}] });
+      expect(unknownModel.statusCode).toBe(404);
+      expect(errorOf(unknownModel).code).toBe('MODEL_NOT_FOUND');
+
+      const asAuditor = await auditor.post('/api/admin/products/batch', { template: template(), items: [{}] });
+      expect(asAuditor.statusCode).toBe(403);
+      expect(errorOf(asAuditor).code).toBe('FORBIDDEN');
+      expect((await operator.post('/api/admin/products/batch', { template: template(), items: [{}] }, { noCsrf: true })).statusCode).toBe(403);
+      expect((safeJson(await auditor.get('/api/admin/products?pageSize=1')) as any).total).toBe(before);
+    });
+
+    it('a serial conflict fails its piece alone; the other pieces are issued', async () => {
+      const taken = (await issueViaApi()).product.serial;
+      const res = await operator.post('/api/admin/products/batch', { template: template({ productionBatch: 'B-2026-10-CONFLICT' }), items: [{ variant: '50' }, { serial: taken }, { variant: '56' }] });
+      expect(res.statusCode, res.body).toBe(200);
+      const b = safeJson(res) as any;
+      expect(b).toMatchObject({ issued: 2, failed: 1, skipped: 0 });
+      expect(b.items[1]).toEqual({ index: 1, status: 'FAILED', error: { code: 'SERIAL_TAKEN', message: 'This serial number is already used.' } });
+      expect([b.items[0].status, b.items[2].status]).toEqual(['ISSUED', 'ISSUED']);
+      expect((await batchOf('B-2026-10-CONFLICT')).map((p) => p.variant).sort()).toEqual(['50', '56']);
+      const summary = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'product.issue_batch').orderBy('id', 'desc').executeTakeFirstOrThrow();
+      expect(summary.details).toMatchObject({ issued: 2, failed: 1, failures: [{ index: 1, code: 'SERIAL_TAKEN' }] });
+    });
+
+    it('signs one batch at a time per admin: a second one sent meanwhile answers 429', async () => {
+      const [a, b] = await Promise.all([
+        operator.post('/api/admin/products/batch', { template: template({ productionBatch: 'B-2026-10-TWICE' }), items: [{}, {}] }),
+        operator.post('/api/admin/products/batch', { template: template({ productionBatch: 'B-2026-10-TWICE' }), items: [{}] }),
+      ]);
+      expect([a.statusCode, b.statusCode].sort()).toEqual([200, 429]);
+      const refused = a.statusCode === 429 ? a : b;
+      expect(errorOf(refused)).toEqual({ code: 'RATE_LIMITED', message: 'A batch is already being signed. Wait for it to finish, then try again.' });
+      expect((await batchOf('B-2026-10-TWICE')).length).toBe(a.statusCode === 200 ? 2 : 1);
+    });
+  });
+
   describe('code artifacts', () => {
     it('downloads SVG, PNG and PDF as audited attachments', async () => {
       const p = await issueViaApi();

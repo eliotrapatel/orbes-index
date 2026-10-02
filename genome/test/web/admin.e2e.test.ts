@@ -9,12 +9,18 @@
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
- * verification → sign out. Also: a customer's report followed from the
- * Cases queue to its scan, anomaly and piece, then closed; a one-time
- * recovery code issued from an owner's row (C-04); a client found by email
- * and by REF, the owner's sheet, its lock, unlock and export (A-06); TOTP
- * enrolment + two-step sign-in, and the read-only AUDITOR console (emails
- * masked). No CSP violation or page error is tolerated.
+ * verification → a batch of 120 products from a CSV (preview, requests of
+ * 50, results piece by piece, the page held until the claim codes are saved,
+ * certificate cards) and a quantity → sign out. Also: a customer's report
+ * followed from the Cases queue to its scan, anomaly and piece, then closed;
+ * a one-time recovery code issued from an owner's row (C-04); a client found
+ * by email and by REF, the owner's sheet, its lock, unlock and export (A-06);
+ * the Analytics view (90 and 30 days, its cursor, the countries of the
+ * counterfeit signals), anomaly triage (the badge and the tab title, the
+ * filters, a finding's scans, one dialog that marks the piece, revokes its
+ * code and resolves the finding), TOTP enrolment + two-step sign-in, and the
+ * read-only AUDITOR console (emails masked). No CSP violation or page error
+ * is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -37,7 +43,9 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { svgToGray } from '../support/raster.js';
@@ -140,6 +148,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   let modelId: string;
   const problems: string[] = [];
   let issuedProductId = '';
+  /** The pieces seedRegistry issued: the first one travelled from France to Japan in seconds. */
+  let seeded: IssueResult[] = [];
 
   async function watch(p: Page): Promise<void> {
     p.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
@@ -222,7 +232,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     modelId = model.id;
-    await seedRegistry(ctx, modelId);
+    seeded = await seedRegistry(ctx, modelId);
 
     app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
     await app.listen({ port, host: '127.0.0.1' });
@@ -555,8 +565,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('follows a customer\'s report from the Cases queue to its scan, its anomaly and its piece, then closes it with a note', async () => {
     const rows = page.locator('table.table tbody tr');
     await go(page, '#/cases', 'Cases');
-    // Cases sits in the Activity group of the menu, after Anomalies.
-    expect(await page.locator('.side__group', { hasText: 'Activity' }).locator('.side__link').allTextContents()).toEqual(['Verification events', 'Anomalies', 'Cases']);
+    // Cases sits in the Activity group of the menu, after Anomalies (whose link carries the triage badge); Analytics follows it.
+    const activity = page.locator('.side__group', { hasText: 'Activity' }).locator('.side__link');
+    expect(await activity.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['scans', 'anomalies', 'cases', 'analytics']);
+    expect(await activity.locator('nth=2').textContent()).toBe('Cases');
     await expect.poll(() => rows.count()).toBe(1);
     expect(await rows.first().locator('[data-testid=case-where]').textContent()).toBe('ONLINE · a marketplace listing');
     expect(await rows.first().textContent()).toContain('Offered at a third of the boutique price.');
@@ -736,6 +748,165 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(email);
   }, STEP_TIMEOUT);
 
+  it('resolves an anomaly and revokes its code in one dialog; the badge and the tab title follow', async () => {
+    const piece = seeded[0];
+    const pid = piece.product.productId;
+    const { anomaly } = ctx.services;
+    const travel = (await anomaly.list({ productId: pid, type: 'IMPOSSIBLE_TRAVEL' }, { page: 1, pageSize: 10 })).items[0];
+    const jp = await ctx.db.selectFrom('scan_events').select('id').where('product_id', '=', piece.product.id).where('country', '=', 'JP').executeTakeFirstOrThrow();
+    expect(travel).toMatchObject({ status: 'OPEN', severity: 'HIGH', details: { scanEventId: jp.id } });
+
+    // The badge on Anomalies and the tab title count the OPEN HIGH and CRITICAL findings.
+    const before = (await anomaly.summary()).attention;
+    expect(before).toBeGreaterThanOrEqual(2);
+    const badge = page.locator('.side__link[data-route=anomalies] [data-testid=anomaly-badge]');
+    await go(page, `#/products/${pid}`, pid);
+    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before));
+    expect(await badge.isVisible()).toBe(true);
+    expect(await badge.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    await expect.poll(() => page.title()).toBe(`(${before}) ${pid} — ORBES Genome Console`);
+
+    // Triage from the product page: the list of this piece's findings, with every type the server records.
+    await page.click('#anomalies a.cbtn:has-text("Triage")');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}`);
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Anomalies');
+    expect(await page.title()).toBe(`(${before}) Anomalies — ORBES Genome Console`);
+    expect(await page.inputValue('input[name=productId]')).toBe(pid);
+    const ofPiece = (await anomaly.list({ productId: pid }, { page: 1, pageSize: 50 })).total;
+    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(ofPiece);
+    expect(await page.locator('select[name=type] option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['', ...ANOMALY_TYPES]);
+    expect(await page.locator('select[name=sort] option').allTextContents()).toEqual(['Severity, then risk', 'Risk', 'Last seen']);
+    await page.selectOption('select[name=type]', 'IMPOSSIBLE_TRAVEL');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL`);
+    await page.selectOption('select[name=sort]', 'risk');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL&sort=risk`);
+    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+
+    // The detail: the piece's scans in the finding's window, their countries, the devices, the scan that raised it.
+    await page.click('[data-testid=anomaly-details]');
+    await page.waitForSelector('#finding [data-testid=anomaly-timeline]');
+    expect(await page.locator('table.table tbody tr.is-current').count()).toBe(1);
+    const scans = page.locator('[data-testid=anomaly-timeline] .timeline__item');
+    expect(await scans.count()).toBe(3);
+    expect(await page.locator('.timeline__item--trigger').getAttribute('data-scan')).toBe(jp.id);
+    expect(await page.locator('.timeline__item--trigger .timeline__who').textContent()).toMatch(/^JP/);
+    const fact = (label: string) => page.locator('#finding .deflist__row', { has: page.locator('.deflist__label', { hasText: label }) }).locator('.deflist__value');
+    expect(await fact('Countries').textContent()).toBe('FR 1 · GB 1 · JP 1');
+    expect(await fact('Distinct devices').textContent()).toBe('2');
+    expect(await fact('Code').textContent()).toBe('Issue 1ACTIVE');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+
+    // The triggering scan opens in Verification events, marked, within the second it was made in.
+    await page.click('[data-testid=trigger-scan]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await page.waitForSelector('[data-testid=scans-window]');
+    await expect.poll(() => page.locator('table.table tbody tr.is-current').count()).toBe(1);
+    expect(await page.locator('table.table tbody tr.is-current').getAttribute('aria-current')).toBe('true');
+    await page.goBack();
+    await page.waitForSelector('#finding [data-testid=anomaly-timeline]');
+
+    // One dialog: mark the piece, revoke its code, resolve the finding. The code's revocation asks for its phrase.
+    await page.click('[data-testid=detail-triage]');
+    await page.waitForSelector('dialog.dialog');
+    const phrase = page.locator('[data-testid=dialog-phrase]');
+    const confirmButton = page.locator('[data-testid=dialog-confirm]');
+    const destructive = () => page.locator('dialog.dialog').evaluate((d) => d.classList.contains('dialog--danger'));
+    expect(await phrase.isVisible()).toBe(false);
+    await page.selectOption('dialog select[name=status]', 'RESOLVED');
+    // Resolving alone is not destructive: no oxblood rule, the primary confirm.
+    expect(await destructive()).toBe(false);
+    expect(await confirmButton.getAttribute('class')).toContain('cbtn--primary');
+    // The boxes are ticked through their labels, as a pointer does (the drawn mark covers the input).
+    await page.locator('dialog label.ccheck', { hasText: 'Mark the piece COUNTERFEIT FLAGGED' }).click();
+    // Flagging the piece is (BRAND §6, as on the product page): the 3 px oxblood rule and a danger confirm.
+    expect(await destructive()).toBe(true);
+    expect(await confirmButton.getAttribute('class')).toContain('cbtn--danger');
+    expect(await page.locator('dialog.dialog').evaluate((d) => getComputedStyle(d).borderTopWidth)).toBe('3px');
+    await page.locator('dialog label.ccheck', { hasText: 'Revoke the code (issue 1)' }).click();
+    expect(await page.getByLabel('Mark the piece COUNTERFEIT FLAGGED').isChecked()).toBe(true);
+    expect(await page.getByLabel('Mark the piece STOLEN').isChecked()).toBe(false);
+    expect(await page.getByLabel('Revoke the code (issue 1)').isChecked()).toBe(true);
+    expect(await phrase.isVisible()).toBe(true);
+    expect(await page.locator('dialog.dialog .cfield__phrase').textContent()).toBe('REVOKE ISSUE 1');
+    expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await page.fill('dialog textarea[name=note]', 'Seized at a market stall in Lyon');
+    await page.fill('[data-testid=dialog-phrase]', 'REVOKE ISSUE 1');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+
+    // A step that fails stops the chain and the dialog says which steps were done.
+    const revokeUrl = `**/api/admin/codes/${piece.code.id}/revoke`;
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    await page.route(revokeUrl, async (r) => {
+      await answered;
+      await r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'The server is busy.' } }) });
+    });
+    const transitions: string[] = [];
+    const onTransition = (r: { url(): string; method(): string }) => {
+      if (r.method() === 'POST' && r.url().endsWith('/transitions')) transitions.push(r.url());
+    };
+    page.on('request', onTransition);
+    await page.click('[data-testid=dialog-confirm]');
+    // While a step is in flight, typing in the note never makes Confirm pressable, and a second submission is ignored.
+    await expect.poll(() => confirmButton.getAttribute('aria-busy')).toBe('true');
+    await page.focus('dialog textarea[name=note]');
+    await page.keyboard.type(' x');
+    expect(await confirmButton.isDisabled()).toBe(true);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.locator('dialog form').evaluate((f) => (f as HTMLFormElement).requestSubmit());
+    expect(await confirmButton.isDisabled()).toBe(true);
+    answer();
+    await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/^Revoke the code: The server is busy\. The steps done stay done/);
+    page.off('request', onTransition);
+    expect(transitions).toHaveLength(1);
+    const report = page.locator('[data-testid=decision-steps] .steps__item');
+    expect(await report.evaluateAll((items) => items.map((i) => `${i.querySelector('.steps__label')?.textContent} ${(i as HTMLElement).dataset.state}`))).toEqual([
+      'Mark the piece COUNTERFEIT FLAGGED done',
+      'Revoke the code failed',
+      'Record the finding RESOLVED pending',
+    ]);
+    expect((await ctx.services.lifecycle.snapshot(piece.product.id)).status).toBe('COUNTERFEIT_FLAGGED');
+    expect((await anomaly.get(travel.id)).status).toBe('OPEN');
+
+    // Confirming again runs the rest only: the piece is not marked twice.
+    await page.unroute(revokeUrl);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Finding RESOLVED · piece COUNTERFEIT FLAGGED · code revoked.")');
+    const marks = (await ctx.services.lifecycle.history(pid)).filter((e) => e.to === 'COUNTERFEIT_FLAGGED');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].reason).toBe(`Anomaly ${travel.id} (IMPOSSIBLE TRAVEL): Seized at a market stall in Lyon`);
+    const code = await ctx.db.selectFrom('codes').select(['status', 'revocation_reason']).where('id', '=', piece.code.id).executeTakeFirstOrThrow();
+    expect(code).toEqual({ status: 'REVOKED', revocation_reason: `Anomaly ${travel.id} (IMPOSSIBLE TRAVEL): Seized at a market stall in Lyon` });
+    expect(await anomaly.get(travel.id)).toMatchObject({ status: 'RESOLVED', resolutionNote: 'Seized at a market stall in Lyon' });
+
+    // The finding has left the badge and the title.
+    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before - 1));
+    await expect.poll(() => page.title()).toBe(`(${before - 1}) Anomalies — ORBES Genome Console`);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('keeps the anomaly filters on screen: a partial product id is said on its field, a refused filter keeps the form', async () => {
+    await go(page, '#/anomalies', 'Anomalies');
+    await page.fill('input[name=productId]', 'O26-J');
+    await page.click('[data-testid=anomalies-apply]');
+    await expect.poll(() => page.locator('.cfield[data-field=productId] .cfield__hint').textContent()).toBe('Enter a full product id (O26-J-00184).');
+    expect(await page.evaluate(() => location.hash)).toBe('#/anomalies');
+    expect(await page.getAttribute('input[name=productId]', 'aria-invalid')).toBe('true');
+    expect(await page.locator('table.table').count()).toBe(1);
+
+    // A filter the server refuses (a URL typed by hand): the form, the refusal, and the way back.
+    await go(page, '#/anomalies?type=NOT_A_TYPE', 'Anomalies');
+    await page.waitForSelector('[data-testid=anomalies-refused]');
+    expect(await page.locator('[data-testid=anomalies-refused] .failure__text').textContent()).toMatch(/^type: /);
+    expect(await page.inputValue('select[name=type]')).toBe('NOT_A_TYPE');
+    expect(await page.locator('form[aria-label="Filter anomalies"]').count()).toBe(1);
+    await page.click('[data-testid=anomalies-refused] a.cbtn:has-text("Clear filters")');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/anomalies');
+    await page.waitForSelector('table.table');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
   it('rotates the signing key with a typed confirmation', async () => {
     await go(page, '#/keys', 'Signing keys');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
@@ -790,6 +961,491 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await shot(page, 'audit');
   }, STEP_TIMEOUT);
 
+  it('reads the scans of 90 days by result and the countries of the counterfeit signals on one page (Analytics)', async () => {
+    // A history the daily statistics count: complete days, several countries, staff scans left out.
+    const midnight = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    const at = (daysAgo: number) => new Date(midnight - daysAgo * 86_400_000 + 12 * 3_600_000);
+    const history: [number, string | null, string, number, ('VERIFY' | 'ADMIN_TEST')?][] = [
+      [3, 'FR', 'AUTHENTIC', 5],
+      [3, 'GB', 'AUTHENTIC_OWNERSHIP_VERIFIED', 2],
+      [3, 'CN', 'INVALID_SIGNATURE', 2],
+      [3, null, 'UNKNOWN', 1],
+      [3, 'FR', 'AUTHENTIC', 4, 'ADMIN_TEST'],
+      [20, 'IT', 'SUSPICIOUS_ACTIVITY', 1],
+      [20, 'FR', 'AUTHENTIC', 3],
+      [60, 'JP', 'MALFORMED_CODE', 1],
+      [60, 'US', 'AUTHENTIC', 2],
+      [120, 'BR', 'AUTHENTIC', 7],
+    ];
+    for (const [daysAgo, country, state, n, type] of history) {
+      for (let i = 0; i < n; i++) {
+        await ctx.db.insertInto('scan_events').values({ occurred_at: at(daysAgo), event_type: type ?? 'VERIFY', country, result_state: state }).execute();
+      }
+    }
+    await aggregateScanStats(ctx.db, new Date());
+
+    await page.click('.side__link[data-route=analytics]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Analytics');
+    expect(await page.locator('.side__link.is-active').textContent()).toBe('Analytics');
+    // Ninety days by default: four figures, the curve of every day, one curve per state.
+    expect(await page.locator('[data-testid=range-90]').getAttribute('aria-current')).toBe('page');
+    const kpis = page.locator('.view--analytics .kpi');
+    expect(await kpis.locator('.kpi__value').allTextContents()).toEqual(['17', '12', '5', '6']);
+    expect(await kpis.nth(2).getAttribute('class')).toContain('kpi--critical');
+    const trend = page.locator('[data-testid=analytics-trend]');
+    expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(90);
+    expect(await page.locator('.trend__tick').count()).toBe(5);
+    const states = page.locator('[data-testid=analytics-states] .srow');
+    expect(await states.count()).toBe(9);
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] svg.spark').getAttribute('class')).toBe('spark spark--critical');
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] .srow__value').textContent()).toBe('2');
+    expect(await page.locator('.srow.srow--zero').count()).toBe(3);
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] a.srow__label').getAttribute('href')).toMatch(
+      /^#\/scans\?state=INVALID_SIGNATURE&from=\d{4}-\d{2}-\d{2}T00%3A00%3A00\.000Z&to=\d{4}-\d{2}-\d{2}T23%3A59%3A59\.999Z$/,
+    );
+    // The countries: France first (its staff scans not counted); the signals, China first, in oxblood (its signatures did not verify).
+    const countries = page.locator('.panel--countries .bar');
+    expect(await countries.first().locator('.bar__label').textContent()).toBe('FR · France');
+    expect(await countries.first().locator('.bar__value').textContent()).toBe('8');
+    expect(await countries.count()).toBe(7);
+    const signals = page.locator('.panel--signals');
+    expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'JP · Japan', 'Unknown location']);
+    expect(await signals.locator('.bar').first().locator('.bar__fill').getAttribute('class')).toContain('bar__fill--critical');
+    const breakdown = page.locator('.panel--signal-table table.table tbody tr');
+    expect(await breakdown.count()).toBe(4);
+    expect(await breakdown.first().locator('td').allTextContents()).toEqual(['CN · China', '2', '0', '0', '0', '2', '2']);
+    expect(await breakdown.nth(1).locator('td').allTextContents()).toEqual(['IT · Italy', '0', '0', '0', '1', '1', '1']);
+    // The cursor reads a day from the keyboard: three days ago, its ten scans, state by state.
+    await trend.focus();
+    await page.keyboard.press('End');
+    const back = daySpan(utcDay(at(3)), lastCompleteDay(new Date())) - 1;
+    for (let i = 0; i < back; i++) await page.keyboard.press('ArrowLeft');
+    const tip = page.locator('[data-testid=analytics-tip]');
+    await expect.poll(() => tip.isVisible()).toBe(true);
+    expect(await tip.locator('.trend__tip-total').textContent()).toBe('10 SCANS');
+    expect(await tip.locator('.trend__tip-line').allTextContents()).toEqual(['AUTHENTIC5', 'AUTHENTIC OWNERSHIP VERIFIED2', 'UNKNOWN1', 'INVALID SIGNATURE2']);
+    expect(await trend.getAttribute('aria-valuetext')).toContain('10 SCANS');
+    // And from the pointer, over the last day.
+    const box = (await trend.boundingBox())!;
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
+    await expect.poll(() => tip.locator('.trend__tip-total').textContent()).toBe('0 SCANS');
+    expect(await page.locator('table.table caption', { hasText: 'Scans per day' }).count()).toBe(1);
+    // Counts and dates read in Helvetica Neue, as everywhere in the console.
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'analytics', { full: true });
+
+    // On a phone, the readout stays on the screen whatever the day: beside the cursor where the plot has room, over it
+    // near the middle, clear of the day's point; the page never scrolls sideways.
+    await page.mouse.move(0, 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await trend.focus();
+      await page.keyboard.press('Home');
+      const misplaced: string[] = [];
+      for (let day = 0; day < 90; day++) {
+        if (day > 0) await page.keyboard.press('ArrowRight');
+        const m = await page.evaluate(() => {
+          const de = document.documentElement;
+          const readout = document.querySelector<HTMLElement>('[data-testid=analytics-tip]')!;
+          const t = readout.getBoundingClientRect();
+          const d = document.querySelector('.trend__dot')!.getBoundingClientRect();
+          const cx = d.left + d.width / 2;
+          const cy = d.top + d.height / 2;
+          return {
+            hidden: readout.hidden,
+            overflow: de.scrollWidth - de.clientWidth,
+            left: Math.round(t.left),
+            right: Math.round(t.right),
+            viewport: de.clientWidth,
+            coversPoint: cx > t.left && cx < t.right && cy > t.top && cy < t.bottom,
+          };
+        });
+        if (m.hidden || m.overflow !== 0 || m.left < 0 || m.right > m.viewport || m.coversPoint) misplaced.push(`day ${day}: ${JSON.stringify(m)}`);
+      }
+      expect(misplaced).toEqual([]);
+      expect(await trend.getAttribute('aria-valuenow')).toBe('89');
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+
+    // Thirty days: Japan and the United States fall out of the window.
+    await page.click('[data-testid=range-30]');
+    await expect.poll(() => kpis.first().locator('.kpi__value').textContent()).toBe('14');
+    expect(await page.evaluate(() => location.hash)).toBe('#/analytics?days=30');
+    expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(30);
+    expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'Unknown location']);
+    // A state's scans open in Verification events over the window's whole days, its last day to 23:59:59.
+    await page.click('.srow[data-state=INVALID_SIGNATURE] a.srow__label');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    expect(await page.locator('[data-testid=scans-window]').textContent()).toMatch(/^Window \d{2} [A-Z]{3} \d{4} · 00:00:00 UTC → \d{2} [A-Z]{3} \d{4} · 23:59:59 UTC/);
+    expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('prints a production batch of 120 codes in two clicks: the layout before, the manifest after', async () => {
+    const batch = 'B-2026-10-120';
+    const pieces: IssueResult[] = [];
+    for (let i = 0; i < 120; i++) {
+      pieces.push(
+        await ctx.services.issuance.issueProduct(
+          { categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: `Size ${44 + (i % 16)}`, productionBatch: batch, productionDate: '2026-10-01' },
+          SYSTEM_ACTOR,
+        ),
+      );
+    }
+    const pick = page.locator('[data-testid=sheet-select-batch]');
+    const count = page.locator('[data-testid=sheet-count]');
+    const preview = page.locator('[data-testid=sheet-preview]');
+
+    // From the batch's products to its codes.
+    await go(page, `#/products?productionBatch=${batch}`, 'Products');
+    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    await page.click('a.cbtn:has-text("Print this batch")');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Codes');
+    expect(await page.inputValue('input[name=productionBatch]')).toBe(batch);
+    await expect.poll(() => pick.textContent()).toBe('Select the 120 codes of this batch');
+    expect(await count.textContent()).toBe('No code selected');
+    expect(await preview.textContent()).toBe('30 per A4');
+
+    // Click 1: the whole batch, across the list's three pages; the layout shows before anything renders.
+    await pick.click();
+    await expect.poll(() => count.textContent()).toBe('120 codes selected');
+    expect(await preview.textContent()).toBe('30 per A4 · 4 pages');
+    expect(await page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
+    // Counts and the preview read in Helvetica Neue, the button's count too (BRAND §3.1).
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.click('.pager button:has-text("Next")');
+    await expect.poll(() => page.locator('.pager__page').textContent()).toBe('2 / 3');
+    await expect.poll(() => page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
+    expect(await count.textContent()).toBe('120 codes selected');
+
+    // Click 2: one PDF of 120 labelled codes on 4 A4 pages.
+    const [sheet] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-sheet]')]);
+    expect(sheet.suggestedFilename()).toMatch(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-120-classic-30mm\.pdf$/);
+    const pdf = readFileSync((await sheet.path())!).toString('latin1');
+    expect(pdf.startsWith('%PDF-')).toBe(true);
+    expect(pdf).toMatch(/\/Count 4\b/);
+
+    // The manifest: which label is where, in serial order, page by page.
+    const [manifest] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-manifest]')]);
+    expect(manifest.suggestedFilename()).toBe(sheet.suggestedFilename().replace(/\.pdf$/, '-manifest.csv'));
+    const rows = readFileSync((await manifest.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(rows).toHaveLength(121);
+    expect(rows[0]).toBe('"page","row","column","productId","sku","variant","material","codeId"');
+    expect(rows[1]).toBe(`"1","1","1","${pieces[0].product.productId}","${pieces[0].product.sku}","Size 44","925 STERLING SILVER","${pieces[0].code.id}"`);
+    expect(rows[120]).toMatch(new RegExp(`^"4","6","5","${pieces[119].product.productId}",`));
+
+    // Other filters, from the filter bar: the batch's selection is dropped.
+    await page.fill('input[name=productionBatch]', 'B-2026-09-A');
+    await page.fill('input[name=issuedFrom]', '2026-01-01');
+    expect(await page.getAttribute('input[name=issuedTo]', 'min')).toBe('2026-01-01');
+    await page.click('[data-testid=codes-apply]');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/codes?productionBatch=B-2026-09-A&issuedFrom=2026-01-01');
+    await expect.poll(() => count.textContent()).toBe('No code selected');
+    await expect.poll(() => pick.textContent()).toMatch(/^Select the \d+ codes of this batch$/);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('prints a selection over 200 codes as PDFs of 200, named by part', async () => {
+    const batch = 'B-2026-10-201';
+    for (let i = 0; i < 201; i++) {
+      await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, productionBatch: batch }, SYSTEM_ACTOR);
+    }
+    const count = page.locator('[data-testid=sheet-count]');
+    await go(page, `#/codes?productionBatch=${batch}`, 'Codes');
+    await page.click('[data-testid=sheet-select-batch]');
+    await expect.poll(() => count.textContent()).toBe('201 codes selected');
+    // 200 codes on 7 pages of 30, then 1 on a last page.
+    expect(await page.locator('[data-testid=sheet-preview]').textContent()).toBe('30 per A4 · 8 pages · 2 PDFs of up to 200 codes');
+    const files: string[] = [];
+    const saved = new Promise<void>((resolve) => {
+      page.on('download', async (d) => {
+        files.push(d.suggestedFilename());
+        if (files.length === 2) resolve();
+      });
+    });
+    await page.click('[data-testid=download-sheet]');
+    await saved;
+    expect(files).toEqual([
+      expect.stringMatching(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-200-classic-30mm-part-1-of-2\.pdf$/),
+      expect.stringMatching(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-1-classic-30mm-part-2-of-2\.pdf$/),
+    ]);
+    page.removeAllListeners('download');
+    await expect.poll(() => page.locator('[data-testid=download-sheet]').textContent()).toBe('Download print sheet');
+
+    // A selection the next test expects the sign-out to forget.
+    await go(page, '#/codes', 'Codes');
+    await page.locator('[data-testid=sheet-select]').first().check();
+    await expect.poll(() => count.textContent()).toBe('1 code selected');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('issues 120 products from a CSV in one gesture: the preview, requests of 50, the results piece by piece, the batch in Products', async () => {
+    const batch = 'B-2026-10-CSV';
+    // A spreadsheet's export: byte-order mark, semicolons, CRLF; a size per piece, the SKU of the first ten given.
+    const lines = ['variant;sku', ...Array.from({ length: 120 }, (_, i) => `Size ${44 + (i % 16)};${i < 10 ? `MNL-RG-${44 + i}-P` : ''}`)];
+    const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+    const results = page.locator('[data-testid=batch-results] tbody tr');
+    const unloadPrevented = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+
+    // The two modes, as links in the page head.
+    await go(page, '#/generator', 'Issue a product');
+    expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Single piece');
+    await page.click('[data-testid=mode-batch]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    expect(await page.evaluate(() => location.hash)).toBe('#/generator?mode=batch');
+    expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Batch');
+    expect(await page.locator('.gen__mode').first().evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?,/);
+
+    // The template: what every piece shares.
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    expect(await page.inputValue('input[name=material]')).toBe('925 STERLING SILVER');
+    await page.fill('input[name=productionBatch]', batch);
+    await page.fill('input[name=year]', '2026');
+    expect(await page.isChecked('input[name=withClaimSecret]')).toBe(true);
+
+    // A file with a wrong line is refused, line by line, before anything is signed.
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'wrong.csv', mimeType: 'text/csv', buffer: Buffer.from('variant;sku\nSize 52;-bad\nSize 54;MNL\n') });
+    await expect.poll(() => page.locator('[data-testid=batch-problems] li').allTextContents()).toEqual(['Line 2 · SKU: Letters, digits, space, . _ - / only (64 max).']);
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(() => page.locator('[data-testid=batch-form] .form-error').textContent()).toBe('Fix the pieces listed above.');
+
+    // Excel's plain CSV is Windows-1252: read as such, its accents whole, and said above the preview.
+    const legacy = Buffer.concat([Buffer.from('variant;sku\r\n', 'latin1'), Buffer.from([0xc9]), Buffer.from('crin 7,5 cm;\r\n', 'latin1')]);
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'excel.csv', mimeType: 'text/csv', buffer: legacy });
+    await page.waitForSelector('[data-testid=batch-encoding]');
+    expect(await page.locator('[data-testid=batch-preview] tbody tr td').nth(1).textContent()).toBe('Écrin 7,5 cm');
+    expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
+
+    // The production file: its first rows and the plan, before anything is signed.
+    await page.setInputFiles('[data-testid=batch-file]', { name: 'batch.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('120 pieces · 3 requests of up to 50');
+    expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
+    expect(await page.locator('[data-testid=batch-count]').textContent()).toBe('120');
+    expect(await page.locator('[data-testid=batch-encoding]').count()).toBe(0); // UTF-8 this time
+    const preview = page.locator('[data-testid=batch-preview] tbody tr');
+    expect(await preview.count()).toBe(10);
+    expect(await preview.first().textContent()).toBe('2Size 44MNL-RG-44-PNext');
+    expect(await page.locator('[data-testid=batch-submit]').textContent()).toBe('Sign 120 products');
+    // The count in the button and the plan read in Helvetica Neue (BRAND §3.1).
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'generator-batch', { full: true });
+
+    // One gesture: the browser sends three requests, of 50, 50 and 20 pieces, one after the other.
+    const sent: number[] = [];
+    const onRequest = (r: { url(): string; postData(): string | null }) => {
+      if (r.url().endsWith('/api/admin/products/batch')) sent.push((JSON.parse(r.postData() ?? '{}') as { items: unknown[] }).items.length);
+    };
+    page.on('request', onRequest);
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 120_000 }).toBe('Batch signed');
+    page.off('request', onRequest);
+    expect(sent).toEqual([50, 50, 20]);
+    expect(await page.locator('.page-head__lead').textContent()).toBe(`120 of 120 pieces signed. Production batch ${batch}.`);
+    expect(await results.count()).toBe(120);
+    expect(new Set(await page.locator('[data-testid=batch-results] .status__text').allTextContents())).toEqual(new Set(['ISSUED']));
+    const first = await results.first().locator('td').allTextContents();
+    expect([first[0], first[3], first[4]]).toEqual(['2', 'Size 44', 'MNL-RG-44-P']);
+    expect(first[2]).toMatch(/^O26-J-\d{5}$/);
+    expect(first[6]).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    // A piece without a SKU gets the model's prefix and its variant.
+    expect(await results.nth(10).locator('td').nth(4).textContent()).toBe('MNL-RG-SIZE-54');
+    expect(new Set(await results.locator('td:nth-child(7)').allTextContents()).size).toBe(120);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'generator-batch-result');
+
+    // Until the claim codes are saved, leaving asks first: closing the tab, and the console's own links.
+    expect(await unloadPrevented()).toBe(true);
+    await page.click('.side__link[data-route=products]');
+    await page.waitForSelector('dialog.dialog');
+    expect(await page.locator('dialog.dialog .dialog__title').textContent()).toBe('Leave this page?');
+    expect(await page.locator('dialog.dialog .dialog__text').textContent()).toMatch(/^The 120 claim codes of this batch are on this page and nowhere else\./);
+    await page.click('[data-testid=dialog-cancel]');
+    await page.waitForSelector('dialog.dialog', { state: 'detached' });
+    expect(await page.evaluate(() => location.hash)).toBe('#/generator?mode=batch');
+    expect(await results.count()).toBe(120);
+
+    // The results file, with the claim codes: saved, the page is no longer held.
+    const [resultsFile] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=batch-download-results]')]);
+    expect(resultsFile.suggestedFilename()).toMatch(new RegExp(`^ORBES-batch-${batch}-\\d{4}-\\d{2}-\\d{2}-120-results\\.csv$`));
+    const rows = readFileSync((await resultsFile.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(rows).toHaveLength(121);
+    expect(rows[0]).toBe('"line","piece","status","productId","sku","variant","serial","codeId","claimCode","message"');
+    expect(rows[1]).toBe(`"2","1","ISSUED","${first[2]}","MNL-RG-44-P","Size 44","${first[5]}","${await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select('c.id').where('p.product_id', '=', first[2]).executeTakeFirstOrThrow().then((r) => r.id)}","${first[6]}",""`);
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Results saved, with the claim codes.');
+    expect(await unloadPrevented()).toBe(false);
+
+    // The certificate cards (D-01), A4 sheets in requests of 50: each claim code is checked against its hash by the server.
+    await page.selectOption('select[name=certificateLayout]', 'sheet');
+    const cards: string[] = [];
+    const three = new Promise<void>((resolve) => {
+      page.on('download', (d) => {
+        cards.push(d.suggestedFilename());
+        if (cards.length === 3) resolve();
+      });
+    });
+    await page.click('[data-testid=batch-certificates]');
+    await three;
+    page.removeAllListeners('download');
+    expect(cards).toEqual([
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-1-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-2-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-20-sheet-PROOF-part-3-of-3\.pdf$/),
+    ]);
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Certificate cards saved, in 3 files.');
+
+    // All 120 in Products, under the same production batch.
+    await page.click('a.cbtn:has-text("Open in Products")');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    expect(await page.evaluate(() => location.hash)).toBe(`#/products?productionBatch=${batch}`);
+    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    const stored = await ctx.db.selectFrom('products').select(['variant', 'sku', 'serial', 'claim_secret_hash']).where('production_batch', '=', batch).orderBy('serial').execute();
+    expect(stored).toHaveLength(120);
+    expect(stored[0]).toMatchObject({ variant: 'Size 44', sku: 'MNL-RG-44-P' });
+    expect(stored.every((s) => s.claim_secret_hash !== null)).toBe(true);
+    expect(new Set(stored.map((s) => s.serial)).size).toBe(120);
+    expect(await cspViolations(page)).toEqual([]);
+  }, 240_000);
+
+  it('signs a quantity of identical pieces; hiding the claim codes releases the page', async () => {
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-QTY');
+    await page.selectOption('select[name=source]', 'quantity');
+    expect(await page.isVisible('[data-testid=batch-file]')).toBe(false);
+    await page.fill('input[name=quantity]', '2');
+    await page.fill('input[name=variant]', '50 ML');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('2 pieces · one request');
+    expect(await page.locator('[data-testid=batch-preview] th').first().textContent()).toBe('Piece');
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    expect(await rows.count()).toBe(2);
+    expect(await rows.locator('td:nth-child(4)').allTextContents()).toEqual(['50 ML', '50 ML']);
+    await page.getByRole('button', { name: /I have recorded them/ }).click();
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(['•••• - •••• - ••••', '•••• - •••• - ••••']);
+    expect(await page.locator('[data-testid=batch-certificates]').count()).toBe(0);
+    expect(
+      await page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      }),
+    ).toBe(false);
+    // Nothing held any more: another batch starts without a question.
+    await page.click('[data-testid=batch-again]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    expect(await page.locator('dialog.dialog').count()).toBe(0);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it("keeps a batch's claim codes on screen when the session ends: the badge's refresh never signs out, and the codes can still be saved", async () => {
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    const unloadPrevented = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-HELD');
+    await page.selectOption('select[name=source]', 'quantity');
+    await page.fill('input[name=quantity]', '2');
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    const codes = await rows.locator('td:nth-child(7)').allTextContents();
+    expect(codes.every((c) => /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(c))).toBe(true);
+
+    // The badge's refresh runs on a timer: its 401 never signs the admin out, nor replaces the page.
+    const summaryUrl = '**/api/admin/anomalies/summary';
+    await page.route(summaryUrl, (r) => r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required.' } }) }));
+    await Promise.all([page.waitForResponse(summaryUrl), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
+    await page.unroute(summaryUrl);
+    expect((await title(page).textContent())?.trim()).toBe('Batch signed');
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(codes);
+    expect(await unloadPrevented()).toBe(true);
+
+    // The session ends for good (its absolute lifetime): a request the admin makes meets it, and the page stays.
+    await ctx.db.deleteFrom('sessions').where('subject_type', '=', 'admin').execute();
+    await page.click('[data-testid=batch-certificates]');
+    const ended = page.locator('.toast--error .toast__text', { hasText: 'Your session has ended. This page stays open' });
+    await ended.waitFor();
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+    expect(await rows.locator('td:nth-child(7)').allTextContents()).toEqual(codes);
+    expect(await unloadPrevented()).toBe(true);
+
+    // The results file needs no session: the claim codes are saved, the page released.
+    const [file] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=batch-download-results]')]);
+    const saved = readFileSync((await file.path())!, 'utf8').trimEnd().split('\r\n');
+    expect(saved).toHaveLength(3);
+    expect(saved.slice(1).map((l) => l.split('","')[8])).toEqual(codes);
+    expect(await unloadPrevented()).toBe(false);
+
+    // Leaving it signs in again, saying why; the notice about the page goes with it.
+    await page.click('.side__link[data-route=products]');
+    await page.waitForSelector('[data-testid=login-form]');
+    expect(await page.locator('.login__error').textContent()).toBe('Your session has ended. Sign in again.');
+    expect(await ended.count()).toBe(0);
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('shows the pieces signed before the session ended mid-batch, with their claim codes, and holds the page', async () => {
+    const rows = page.locator('[data-testid=batch-results] tbody tr');
+    await go(page, '#/generator?mode=batch', 'Issue a batch');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    await page.selectOption('select[name=modelId]', modelId);
+    await page.fill('input[name=productionBatch]', 'B-2026-10-ENDED');
+    await page.selectOption('select[name=source]', 'quantity');
+    await page.fill('input[name=quantity]', '51');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('51 pieces · 2 requests of up to 50');
+    // The session ends between the two requests: the second one answers 401.
+    const batchUrl = '**/api/admin/products/batch';
+    let sent = 0;
+    await page.route(batchUrl, async (r) => {
+      if (++sent === 2) await ctx.db.deleteFrom('sessions').where('subject_type', '=', 'admin').execute();
+      await r.continue();
+    });
+    await page.click('[data-testid=batch-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 120_000 }).toBe('Batch partly signed');
+    await page.unroute(batchUrl);
+    expect(sent).toBe(2);
+    expect(await page.locator('.page-head__lead').textContent()).toBe('50 of 51 pieces signed · 1 not signed. Production batch B-2026-10-ENDED.');
+    expect(await rows.count()).toBe(51);
+    const codes = await rows.locator('td:nth-child(7)').allTextContents();
+    expect(codes.slice(0, 50).every((c) => /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(c))).toBe(true);
+    expect(await rows.nth(50).locator('.status__text').textContent()).toBe('NOT SIGNED');
+    expect(await rows.nth(50).locator('td').last().textContent()).toBe('Not signed: the session ended before this request. Sign in again, then sign this piece.');
+    await page.locator('.toast--error .toast__text', { hasText: 'Your session has ended. This page stays open' }).waitFor();
+    expect(await page.locator('[data-testid=login-form]').count()).toBe(0);
+
+    // The 50 claim codes are held: leaving asks first, then signs in again.
+    await page.click('.side__link[data-route=dashboard]');
+    await page.waitForSelector('dialog.dialog');
+    expect(await page.locator('dialog.dialog .dialog__text').textContent()).toMatch(/^The 50 claim codes of this batch are on this page and nowhere else\./);
+    await page.click('[data-testid=dialog-confirm]');
+    await page.waitForSelector('[data-testid=login-form]');
+    expect(await page.locator('.login__error').textContent()).toBe('Your session has ended. Sign in again.');
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    expect(await cspViolations(page)).toEqual([]);
+  }, 240_000);
+
   it('signs out', async () => {
     await page.click('[data-testid=sign-out]');
     await page.waitForSelector('[data-testid=login-form]');
@@ -802,6 +1458,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
     await go(page, `#/products/${issuedProductId}`, issuedProductId);
     expect(await page.locator('#fresh-code').count()).toBe(0);
+    // So is a print-sheet selection.
+    await go(page, '#/codes', 'Codes');
+    expect(await page.locator('[data-testid=sheet-count]').textContent()).toBe('No code selected');
     await page.click('[data-testid=sign-out]');
     await page.waitForSelector('[data-testid=login-form]');
     expect(await cspViolations(page)).toEqual([]);
@@ -870,6 +1529,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('#actions').count()).toBe(0);
     expect(await p.locator('#artifacts').count()).toBe(0);
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
+    // Anomalies: the badge and every finding's detail, no decision.
+    await go(p, '#/anomalies', 'Anomalies');
+    await expect.poll(() => p.locator('[data-testid=anomaly-badge] .side__badge-count').textContent()).toBe(String((await ctx.services.anomaly.summary()).attention));
+    expect(await p.locator('[data-testid=anomaly-details]').count()).toBeGreaterThan(0);
+    expect(await p.locator('[data-testid=triage]').count()).toBe(0);
+    await p.locator('[data-testid=anomaly-details]').first().click();
+    await p.waitForSelector('#finding');
+    expect(await p.locator('[data-testid=detail-triage]').count()).toBe(0);
     await go(p, '#/keys', 'Signing keys');
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
     // Owners read with every email masked, without the recovery code reserved to an ADMIN (A-06).
