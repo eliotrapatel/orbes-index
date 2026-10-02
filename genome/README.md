@@ -35,7 +35,8 @@ genome/
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
-                         account recovery and the owner's sheet (Client Services)
+                         account recovery and the owner's sheet (Client Services), points of sale and
+                         the sale mode
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
