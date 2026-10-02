@@ -211,6 +211,18 @@ a {
   text-indent: 0.55em;
 }
 
+/* The monogram (shared/monogram.ts, BRAND-DESIGN-SYSTEM §3.9): the brand's
+   emblem, beside the typed word, never in its place. Its viewBox is the ink's
+   box (MONOGRAM_BOUNDS, 414.42 × 316.54), so the placing component sets the
+   width and the clear space, and the height follows the ink. One colour: the
+   ink of its context. */
+.monogram {
+  display: block;
+  flex: none;
+  height: auto;
+  aspect-ratio: 414.42 / 316.54;
+}
+
 .prose {
   font-size: var(--fs-body);
   line-height: 1.75;

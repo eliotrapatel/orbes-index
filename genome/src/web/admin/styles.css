@@ -80,6 +80,12 @@ body {
   border-bottom: 1px solid var(--hairline);
 }
 
+/* The monogram over the word, left-aligned with it (brand.css .monogram). */
+.side__monogram {
+  width: 44px;
+  margin-bottom: 18px;
+}
+
 /* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
 .side__wordmark {
   font-size: var(--fs-lead);
@@ -1852,6 +1858,12 @@ a.bar__label:hover {
   align-items: center;
   width: min(420px, calc(100vw - 48px));
   animation: brand-rise var(--t-slow) var(--ease);
+}
+
+/* The monogram over the word, centred like it (brand.css .monogram). */
+.login__monogram {
+  width: 72px;
+  margin-bottom: 26px;
 }
 
 .login__wordmark {

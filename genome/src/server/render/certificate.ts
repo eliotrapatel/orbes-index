@@ -4,9 +4,9 @@
  * sheet of ten cards for print runs. Card millimetres, y down:
  *
  *   ┌───────────────────────────────────────────────┐
- *   │ ORBES                             CERTIFICATE │
- *   │                   PROOF · LAYOUT NOT VALIDATED│  until the brand validates it
- *   │ O26-J-00184                                   │  identity
+ *   │ ORBES                                 ╭─────╮ │  the monogram, from the cap line of ORBES
+ *   │ CERTIFICATE PROOF · LAYOUT NOT VALID… │ ORB │ │  to the identity baseline; PROOF until
+ *   │ O26-J-00184                           ╰─────╯ │  the brand validates the layout
  *   │ ○ · ◠ · ◝ · …       GENOME G1-E1DC-BE52       │  GENOME row, as printed
  *   │ MODEL      MONOLITHE · RING                   │
  *   │ MATERIAL   925 STERLING SILVER                │
@@ -23,9 +23,11 @@
  *
  * Everything is geometry, as on the print label: lettering from
  * ./label-font.ts (stroked, no font in the file), the GENOME from the core
- * genome layout (filled), a hairline rule, and the scratch-off panel as a
- * flat fill in the spot colour ORBES SCRATCH-OFF set to overprint, so the
- * claim code beneath it stays whole on the black plate. Black is K only
+ * genome layout (filled), the brand's monogram as a flat fill of its master
+ * outlines (core/render/monogram.ts; the word ORBES stays lettered beside
+ * it), a hairline rule, and the scratch-off panel as a flat fill in the spot
+ * colour ORBES SCRATCH-OFF set to overprint, so the claim code beneath it
+ * stays whole on the black plate. Black is K only
  * (DeviceCMYK, as the K-only artifacts): no four-colour rich black on
  * hairline lettering. The claim code exists in the PDF only as stroked
  * paths, never as text, so it cannot be searched or copied out of the file.
@@ -39,6 +41,7 @@
  */
 import { genomeLayout } from '../../core/genome/render.js';
 import type { Genome } from '../../core/genome/genome.js';
+import { MONOGRAM_BOUNDS, monogramPathData } from '../../core/render/monogram.js';
 import { primitiveToPathData } from '../../core/render/svg.js';
 import { measureText, textRun, toLabelText, type TextRun } from './label-font.js';
 import { renderPdf, type PdfPage, type PdfPlacement, type PdfSpotColor } from './pdf.js';
@@ -147,8 +150,15 @@ export const CARD_LAYOUT = Object.freeze({
   left: 6,
   right: 79,
   brand: { text: 'ORBES', cap: 2.2, tracking: 0.9, baseline: 8.6 },
-  title: { cap: 1.2, tracking: 0.6, baseline: 8.6 },
-  proof: { cap: 1.0, tracking: 0.45, baseline: 11.2 },
+  /** CERTIFICATE under the word, then the PROOF mention on the same baseline. */
+  title: { cap: 1.2, tracking: 0.6, baseline: 11.2 },
+  proof: { cap: 1.0, tracking: 0.45, baseline: 11.2, gapMm: 3 },
+  /**
+   * The monogram (BRAND §3.9), a flat K fill against the right margin: its ink
+   * from the cap line of ORBES (8.6 − 2.2) down to the identity's baseline,
+   * 11 mm high and so 14.4 mm wide.
+   */
+  monogram: { top: 6.4, bottom: 17.4 },
   id: { cap: 3.0, tracking: 0.3, baseline: 17.4 },
   /** GENOME row: glyph diameter, the top of its box (the row layout keeps a 0.7 R margin), gap to the fingerprint. */
   genome: { glyphMm: 2.6, top: 19.6, gapMm: 3, cap: 1.1, tracking: 0.35 },
@@ -164,6 +174,10 @@ export const CARD_LAYOUT = Object.freeze({
 export interface CertificateCard {
   /** The GENOME row: a scene placed in page millimetres. */
   genome: PdfPlacement;
+  /** The monogram's five outlines, closed paths in page millimetres, filled in ink. */
+  monogram: string[];
+  /** The monogram's ink box, page millimetres. */
+  monogramBox: { x: number; y: number; w: number; h: number };
   /** Lettering and the rule, stroked, in page millimetres. */
   strokes: StrokePath[];
   /** The scratch-off panel: a closed path in page millimetres. */
@@ -236,10 +250,16 @@ export function layoutCertificateCard(item: CertificateItem, status: Certificate
   const line = (text: string, s: LineSpec) =>
     strokes.push(stroked(textRun(text, { capHeight: s.cap, tracking: s.tracking, x: X(s.x), baseline: Y(s.baseline), align: s.align ?? 'start' })));
 
-  // Header.
+  // Header: the word, CERTIFICATE (and PROOF) under it, the monogram at the right margin.
   line(L.brand.text, { cap: L.brand.cap, tracking: L.brand.tracking, x: L.left, baseline: L.brand.baseline });
-  line(CERTIFICATE_COPY.title, { cap: L.title.cap, tracking: L.title.tracking, x: L.right, baseline: L.title.baseline, align: 'end' });
-  if (status === 'PROOF') line(CERTIFICATE_COPY.proof, { cap: L.proof.cap, tracking: L.proof.tracking, x: L.right, baseline: L.proof.baseline, align: 'end' });
+  line(CERTIFICATE_COPY.title, { cap: L.title.cap, tracking: L.title.tracking, x: L.left, baseline: L.title.baseline });
+  if (status === 'PROOF') {
+    const x = L.left + measureText(CERTIFICATE_COPY.title, L.title.tracking) * L.title.cap + L.proof.gapMm;
+    line(CERTIFICATE_COPY.proof, { cap: L.proof.cap, tracking: L.proof.tracking, x, baseline: L.proof.baseline });
+  }
+  const mh = L.monogram.bottom - L.monogram.top;
+  const mw = (mh * MONOGRAM_BOUNDS.w) / MONOGRAM_BOUNDS.h;
+  const monogramBox = { x: X(L.right - mw), y: Y(L.monogram.top), w: mw, h: mh };
 
   // Identity, then the GENOME row: the glyphs of the signed identity in reading order.
   line(item.productId, { cap: L.id.cap, tracking: L.id.tracking, x: L.left, baseline: L.id.baseline });
@@ -309,6 +329,8 @@ export function layoutCertificateCard(item: CertificateItem, status: Certificate
 
   return {
     genome: { scene, xMm: X(gx), yMm: Y(L.genome.top) },
+    monogram: monogramPathData({ x: monogramBox.x, y: monogramBox.y, width: mw }),
+    monogramBox,
     strokes,
     panel: roundedRect(X(P.x), Y(P.y), P.w, P.h, P.r),
     panelBox: { x: X(P.x), y: Y(P.y), w: P.w, h: P.h },
@@ -323,7 +345,11 @@ function cardPage(widthMm: number, heightMm: number, cards: readonly Certificate
     placements: cards.map((c) => c.genome),
     marks: [...cards.flatMap((c) => c.strokes), ...marks],
     markColor: INK,
-    shapes: cards.map((c) => ({ d: c.panel, color: SCRATCH_OFF_SPOT.name, overprint: true })),
+    // The monograms first, as flat ink; the panels last, over the codes they cover.
+    shapes: [
+      ...cards.flatMap((c) => c.monogram.map((d) => ({ d, color: INK }))),
+      ...cards.map((c) => ({ d: c.panel, color: SCRATCH_OFF_SPOT.name, overprint: true })),
+    ],
   };
 }
 
@@ -447,6 +473,9 @@ export function certificateCardSvg(item: CertificateItem, opts: { status?: Certi
     `<rect data-layer="card" x="0.05" y="0.05" width="${fmt(w - 0.1)}" height="${fmt(h - 0.1)}" fill="#FFFFFF" stroke="#C2C2C2" stroke-width="0.1"/>`,
     `<g data-layer="genome" fill="${INK}" transform="matrix(${fmt(k)} 0 0 ${fmt(k)} ${fmt(g.xMm - vb.x * k)} ${fmt(g.yMm - vb.y * k)})">`,
     ...g.scene.primitives.map((p) => `<path d="${primitiveToPathData(p)}"/>`),
+    '</g>',
+    `<g data-layer="monogram" fill="${INK}">`,
+    ...card.monogram.map((d) => `<path d="${d}"/>`),
     '</g>',
     `<g data-layer="lettering" fill="none" stroke="${INK}" stroke-linecap="round" stroke-linejoin="round">`,
     ...card.strokes.map((st) => `<path stroke-width="${fmt(st.width)}" d="${st.d}"/>`),

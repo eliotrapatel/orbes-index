@@ -161,6 +161,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Landing, after its entrance has settled.
     await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
     await page.waitForTimeout(2_400);
+    // The monogram over the typed word, inside the resting orbit: the master's five outlines in ink,
+    // 76 px wide on this 390 px phone, centred, decorative (the heading says ORBES in words, once).
+    const monogram = page.locator('h1 svg.monogram.landing__monogram');
+    await countOf(monogram.locator('path'), 5);
+    await attrOf(monogram, 'aria-hidden', 'true');
+    await countOf(page.getByRole('img', { name: 'ORBES' }), 0);
+    expect(await monogram.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(10, 10, 10)');
+    const mono = (await monogram.boundingBox())!;
+    const word = (await page.locator('.landing__wordmark').boundingBox())!;
+    const emblem = (await page.locator('.landing__emblem').boundingBox())!;
+    expect(mono.width).toBeCloseTo(0.195 * MOBILE_VIEWPORT.width, 0);
+    expect(mono.height / mono.width).toBeCloseTo(316.54 / 414.42, 2);
+    expect(mono.x + mono.width / 2).toBeCloseTo(MOBILE_VIEWPORT.width / 2, 0);
+    expect(mono.y + mono.height + 24).toBeCloseTo(word.y, 0);
+    expect(mono.y).toBeGreaterThan(emblem.y);
     await page.screenshot({ path: join(OUT_DIR, 'verify-landing.png') });
     await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO']);
 

@@ -6,6 +6,7 @@
  */
 import { bracket, viewportCorners } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
+import { monogramSvg } from '../../shared/monogram.js';
 import { ApiError, type AdminApi } from '../api.js';
 import type { AdminSession } from '../types.js';
 import { busy, button, field, input } from '../ui/components.js';
@@ -78,6 +79,7 @@ export function loginView(api: AdminApi, onSuccess: (s: AdminSession) => void, o
     h(
       'main',
       { class: 'login__main' },
+      monogramSvg({ class: 'login__monogram', decorative: true }),
       h('p', { class: 'wordmark login__wordmark' }, 'Orbes'),
       h('p', { class: 'login__subtitle' }, 'Genome console'),
       bracket(h('div', { class: 'login__card' }, h('h1', { class: 'login__title' }, 'Restricted access'), form)),

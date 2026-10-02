@@ -6,7 +6,9 @@
  * What a print shop and a buyer rely on is checked: a valid, deterministic,
  * pure-vector PDF without any font; K-only black; the scratch-off panel as a
  * Separation plate set to overprint and covering the code; every mark inside
- * the card's safe area; the sheet's geometry and cut marks; never the ORBES
+ * the card's safe area; the brand's monogram as a flat ink fill of its
+ * master outlines, clear of the lettering; the sheet's geometry and cut
+ * marks; never the ORBES
  * CODE on the card; the claim code never present as text; PROOF until the
  * brand validates the layout; CSV quoting and formula guards.
  */
@@ -19,6 +21,7 @@ import { CERTIFICATE_SPECIMEN_ITEM, renderCertificateSpecimenFiles } from '../..
 import { computeGenome } from '../../src/core/genome/genome.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { packIdentity } from '../../src/core/identity.js';
+import { MONOGRAM_BOUNDS, MONOGRAM_PATHS, monogramPathData, pathBounds } from '../../src/core/render/monogram.js';
 import {
   CARD_LAYOUT,
   CERTIFICATE_CARD,
@@ -130,7 +133,53 @@ describe('certificate card layout', () => {
       expect(p.x).toBeGreaterThanOrEqual(s);
       expect(p.x + p.w).toBeLessThanOrEqual(w - s);
       expect(p.y + p.h).toBeLessThanOrEqual(h - s);
+      const m = pathBounds(card.monogram);
+      expect(m.x).toBeGreaterThanOrEqual(s);
+      expect(m.y).toBeGreaterThanOrEqual(s);
+      expect(m.x + m.w).toBeLessThanOrEqual(w - s + 1e-3);
+      expect(m.y + m.h).toBeLessThanOrEqual(h - s);
     }
+  });
+
+  it('carries the monogram: the master outlines as a flat fill against the right margin, from the cap line of ORBES to the identity baseline', () => {
+    const L = CARD_LAYOUT;
+    for (const status of ['PROOF', 'VALIDATED'] as const) {
+      const card = layoutCertificateCard(item(184), status);
+      const box = card.monogramBox;
+      expect(box.y).toBeCloseTo(L.brand.baseline - L.brand.cap, 9);
+      expect(box.y + box.h).toBeCloseTo(L.id.baseline, 9);
+      expect(box.x + box.w).toBeCloseTo(L.right, 9);
+      expect(box.w / box.h).toBeCloseTo(MONOGRAM_BOUNDS.w / MONOGRAM_BOUNDS.h, 9);
+      // 11 mm high, 14.4 mm wide; the outlines are the master's, placed on that box (three decimals).
+      expect(box.h).toBeCloseTo(11, 9);
+      expect(box.w).toBeCloseTo(14.4, 2);
+      expect(card.monogram).toEqual(monogramPathData({ x: box.x, y: box.y, width: box.w }));
+      expect(card.monogram).toHaveLength(MONOGRAM_PATHS.length);
+      const ink = pathBounds(card.monogram);
+      expect(ink.x).toBeCloseTo(box.x, 2);
+      expect(ink.y).toBeCloseTo(box.y, 2);
+      expect(ink.w).toBeCloseTo(box.w, 2);
+      expect(ink.h).toBeCloseTo(box.h, 2);
+      // Clear of every other mark by at least 3 mm across and 3 mm down: the CERTIFICATE line and its
+      // PROOF mention end to its left, the GENOME row and its fingerprint start below it.
+      for (const st of card.strokes) {
+        const b = bounds(st.d, st.width / 2);
+        const apart = b.x1 <= box.x - 3 || b.y0 >= box.y + box.h + 3;
+        expect(apart, st.d.slice(0, 40)).toBe(true);
+      }
+      expect(card.genome.yMm).toBeGreaterThanOrEqual(box.y + box.h);
+    }
+  });
+
+  it('sets CERTIFICATE under the word, and PROOF after it on the same line', () => {
+    const L = CARD_LAYOUT;
+    const proof = layoutCertificateCard(item(184), 'PROOF');
+    const [brand, title, mention] = proof.strokes.map((st) => bounds(st.d));
+    expect(Math.abs(brand.x0 - title.x0)).toBeLessThan(0.3); // both start at the left margin (O and C bear differently)
+    expect(title.y1).toBeCloseTo(L.title.baseline, 1);
+    expect(mention.y1).toBeCloseTo(L.proof.baseline, 1);
+    expect(mention.x0 - title.x1).toBeGreaterThan(L.proof.gapMm - 1);
+    expect(title.y0 - brand.y1).toBeGreaterThan(1);
   });
 
   it('centres the claim code inside the panel that covers it, whatever its characters', () => {
@@ -286,7 +335,7 @@ describe('certificate PDF', () => {
     const content = pdfStreams(pdf);
     expect(content).not.toMatch(/\bBT\b|\bTj\b|\bTJ\b|\bBI\b|\bDo\b/);
     expect(content).toMatch(/\bS\n/); // stroked lettering
-    expect(content).toMatch(/\bf\n/); // filled glyphs and panel
+    expect(content).toMatch(/\bf\n/); // filled glyphs, monogram and panel
 
     const three = await renderCertificatePdf([item(1), item(2), item(3)], { createdAt: DATE });
     expect(latin1(three.body)).toMatch(/\/Count 3\b/);
@@ -306,6 +355,18 @@ describe('certificate PDF', () => {
     // Nothing is painted after the panel: it covers the code.
     expect(content.slice(panelAt)).not.toMatch(/\bS\n/);
     expect((content.match(/\/GsOP gs/g) ?? []).length).toBe(1);
+  });
+
+  it('fills the monogram in K, before the panel: five flat outlines beside the GENOME glyphs', async () => {
+    const card = layoutCertificateCard(item(184), 'PROOF');
+    const content = pdfStreams((await renderCertificatePdf([item(184)], { createdAt: DATE })).body as Uint8Array);
+    const beforePanel = content.slice(0, content.indexOf('/GsOP gs'));
+    // Every fill before the panel: one per GENOME primitive, then one per monogram outline.
+    expect((beforePanel.match(/\bf\*?\n/g) ?? []).length).toBe(card.genome.scene.primitives.length + MONOGRAM_PATHS.length);
+    // The first outline starts where the card's path data says (pdfkit writes its M as an m).
+    const [, x, y] = /^M([\d.]+) ([\d.]+)/.exec(card.monogram[0])!;
+    expect(beforePanel).toContain(`${x} ${y} m`);
+    expect(content.slice(content.indexOf('/GsOP gs'))).not.toContain(`${x} ${y} m`);
   });
 
   it('black is K only: no RGB anywhere, every process colour C = M = Y = 0', async () => {
@@ -404,6 +465,10 @@ describe('certificate specimen (BRAND §7)', () => {
     expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="85mm" height="55mm" viewBox="0 0 85 55">/);
     expect(svg).toContain('data-spot="ORBES SCRATCH-OFF" fill="#A6A6A6"');
     expect(certificateCardSvg(CERTIFICATE_SPECIMEN_ITEM, { panel: false })).not.toContain('data-layer="scratch-off"');
+    // The monogram, a flat fill in the card's ink, five outlines.
+    const monogram = /<g data-layer="monogram" fill="#0A0A0A">\n((?:<path d="[^"]+"\/>\n)+)<\/g>/.exec(svg);
+    expect(monogram).not.toBeNull();
+    expect(monogram![1].match(/<path /g)).toHaveLength(5);
     expect(CERTIFICATE_SPECIMEN_ITEM.genome.fingerprint).toBe('G1-E1DC-BE52');
   });
 

@@ -1,9 +1,12 @@
 /**
- * Landing: the wordmark, AUTHENTICATION, one hairline button and a discreet
- * photo-upload link. The orbit reticle rests, very faint, behind the
- * wordmark; it becomes the live reticle once scanning starts.
+ * Landing: the monogram over the wordmark, AUTHENTICATION, one hairline
+ * button and a discreet photo-upload link. The orbit reticle rests, very
+ * faint, behind them; it becomes the live reticle once scanning starts. The
+ * heading reads ORBES AUTHENTICATION, from its typed words: the monogram
+ * beside them is decorative (shared/monogram.ts).
  */
 import { h } from '../../shared/dom.js';
+import { monogramSvg } from '../../shared/monogram.js';
 import { orbitReticle, viewRoot } from './common.js';
 
 export interface LandingHandlers {
@@ -24,6 +27,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
         h(
           'h1',
           { class: 'landing__title', id: 'landing-title' },
+          monogramSvg({ class: 'landing__monogram', decorative: true }),
           h('span', { class: 'wordmark landing__wordmark', text: 'ORBES' }),
           h('span', { class: 'landing__sub micro indent-label', text: 'AUTHENTICATION' }),
         ),

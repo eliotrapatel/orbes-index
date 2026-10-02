@@ -8,6 +8,7 @@
  * and this admin has not enrolled, the only reachable screen is enrolment.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
+import { monogramSvg } from '../shared/monogram.js';
 import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
 import { can, type Capability } from './model/permissions.js';
@@ -137,7 +138,13 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     h(
       'aside',
       { class: 'side' },
-      h('a', { class: 'side__brand', attrs: { href: href('dashboard') } }, h('span', { class: ['wordmark', 'side__wordmark'] }, 'Orbes'), h('span', { class: 'side__product' }, 'Genome console')),
+      h(
+        'a',
+        { class: 'side__brand', attrs: { href: href('dashboard') } },
+        monogramSvg({ class: 'side__monogram', decorative: true }),
+        h('span', { class: ['wordmark', 'side__wordmark'] }, 'Orbes'),
+        h('span', { class: 'side__product' }, 'Genome console'),
+      ),
       nav,
       h(
         'div',

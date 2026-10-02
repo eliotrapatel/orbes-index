@@ -170,6 +170,13 @@ h1[tabindex="-1"]:focus {
   animation: brand-rise 1.8s var(--ease) 0.15s both;
 }
 
+/* The monogram over the word, as the core of the resting orbit: 76 px on a
+   390 px phone, 64 to 84 px elsewhere; 24 px to the word with the title's gap. */
+.landing__monogram {
+  width: clamp(64px, 19.5vw, 84px);
+  margin-bottom: 6px;
+}
+
 .landing__wordmark {
   font-size: clamp(26px, 7.6vw, 34px);
 }

@@ -252,6 +252,15 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     }
     expect(await page.locator('input[name=email]').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
     expect(await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => e.name.endsWith('.woff2')).length)).toBe(1);
+    // The monogram over the typed word, in ink, decorative beside it (BRAND §3.9).
+    const loginMono = page.locator('.login__main > svg.monogram.login__monogram');
+    expect(await loginMono.locator('path').count()).toBe(5);
+    expect(await loginMono.getAttribute('aria-hidden')).toBe('true');
+    expect(await loginMono.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(10, 10, 10)');
+    const [mono, word] = [(await loginMono.boundingBox())!, (await page.locator('.login__wordmark').boundingBox())!];
+    expect(mono.width).toBeCloseTo(72, 0);
+    expect(mono.x + mono.width / 2).toBeCloseTo(word.x + word.width / 2, 0);
+    expect(mono.y + mono.height).toBeLessThan(word.y);
     await shot(page, 'login');
     expect(await page.isVisible('input[name=totp]')).toBe(false);
     await signIn(page, ADMIN.email, 'not the password at all');
@@ -264,6 +273,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Dashboard figures come from the seeded registry.
     expect(await page.locator('.kpi').first().locator('.kpi__value').textContent()).toBe('9');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Dashboard');
+    // The sidebar's monogram, over the word and left-aligned with it; the link is named by its words.
+    const sideMono = page.locator('a.side__brand > svg.monogram.side__monogram');
+    expect(await sideMono.getAttribute('aria-hidden')).toBe('true');
+    expect((await sideMono.boundingBox())!.width).toBeCloseTo(44, 0);
+    expect((await sideMono.boundingBox())!.x).toBeCloseTo((await page.locator('.side__wordmark').boundingBox())!.x, 0);
+    expect(await page.getByRole('link', { name: /^orbes\s*genome console$/i }).count()).toBe(1);
     expect(await page.locator('.bar').count()).toBeGreaterThanOrEqual(8);
     // Counts, the key id and dates read in Helvetica Neue.
     expect(await figuresInDisplayFace(page)).toEqual([]);
