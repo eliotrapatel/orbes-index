@@ -1799,6 +1799,67 @@ a.bar__label:hover {
   margin-top: 24px;
 }
 
+/* A preview drawn from the fields (dialog.ts `live`), under them. */
+.dialog__live {
+  margin-top: 6px;
+}
+
+/* The care block of a model as the client reads it on /verify (catalogue,
+   A-10): the CARE tab, centred over its hairline and underlined in ink as
+   verify's selected tab (.tabs__tab), then the instructions in brand.css
+   .prose, 26 px under it as verify's .panel__care. */
+.care-preview__label {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.care-preview__panel {
+  margin-top: 10px;
+  padding: 0 24px 26px;
+  border: 1px solid var(--hairline);
+  background: var(--white);
+}
+
+.care-preview__tabs {
+  display: flex;
+  justify-content: center;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.care-preview__tab {
+  position: relative;
+  padding: 17px 0 15px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Under the word alone: its trailing tracking is left out. */
+.care-preview__tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0.16em;
+  bottom: -1px;
+  height: 1px;
+  background: var(--ink);
+}
+
+.care-preview__text {
+  margin-top: 26px;
+}
+
+.care-preview__note {
+  margin-top: 8px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
 .dialog__error {
   min-height: 18px;
   font-size: var(--fs-micro);
@@ -1984,6 +2045,8 @@ a.bar__label:hover {
 .artifact__downloads-label,
 .gen__identity-label,
 .gen__notes-title,
+.care-preview__label,
+.care-preview__tab,
 .claim__label,
 .loading__text,
 .failure__title,

@@ -131,6 +131,18 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const exported = await op.get(`/api/admin/owners/${ownerId}/export`);
     expect(exported.statusCode).toBe(200);
     expect((safeJson(exported) as any).account.email).toBe('owner@example.com');
+    // The editable catalogue on pg (A-10): row lock, guard trigger, live public text, counts, an inactive model refused.
+    const edited = await op.patch(`/api/admin/models/${model.id}`, { name: 'MONOLITHE II', careInstructions: 'Wipe with a soft, dry cloth.' });
+    expect(edited.statusCode, edited.body).toBe(200);
+    expect(safeJson(edited)).toMatchObject({ name: 'MONOLITHE II', active: true, products: 1 });
+    expect((await op.patch(`/api/admin/models/${model.id}`, { skuPrefix: 'NEW' })).statusCode).toBe(400);
+    expect((await op.patch(`/api/admin/collections/${col.id}`, { name: 'ORBIT NOIR' })).statusCode).toBe(200);
+    expect((safeJson(await client().post('/api/v1/verify', { code: p.code.data })) as any).product).toMatchObject({ model: 'MONOLITHE II', collection: 'ORBIT NOIR', care: 'Wipe with a soft, dry cloth.' });
+    expect((safeJson(await op.get('/api/admin/collections')) as any).items[0]).toMatchObject({ name: 'ORBIT NOIR', models: 1, products: 1 });
+    expect((await op.patch(`/api/admin/models/${model.id}`, { active: false })).statusCode).toBe(200);
+    expect((await op.post('/api/admin/products', { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER' })).statusCode).toBe(409);
+    expect((await op.post('/api/admin/categories/J/active', { active: false })).statusCode).toBe(200);
+    expect((await op.post('/api/admin/categories/J/active', { active: true })).statusCode).toBe(200);
     expect((safeJson(await op.get('/api/admin/audit/verify')) as any).ok).toBe(true);
   });
 });

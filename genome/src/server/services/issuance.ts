@@ -314,6 +314,8 @@ export class IssuanceService {
     if (model.category_id !== category.index) {
       throw validationError('The model belongs to another category.', `model category ${model.category_id}, requested ${category.index}`);
     }
+    // A model retired from the catalogue (A-10) issues no new piece; its pieces already issued verify as before.
+    if (!model.active) throw conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
     if (p.collectionId !== undefined) {
       const col = await this.db.selectFrom('collections').select('id').where('id', '=', p.collectionId).executeTakeFirst();
       if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');

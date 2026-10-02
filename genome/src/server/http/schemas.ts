@@ -20,6 +20,7 @@ import {
   SERVICE_TYPES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
+import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -234,6 +235,41 @@ export const createModelBody = body({
   defaultMaterial: optionalText(200),
   careInstructions: optionalText(2000),
 });
+
+/** The letter in `/api/admin/categories/:code/active`, any case. */
+export const categoryParams = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z]$/, 'Must be a single letter A–Z')
+    .transform((s) => s.toUpperCase()),
+});
+
+/** ADMIN: a category stops (false) or starts again (true) receiving new products; its pieces verify either way. */
+export const categoryActiveBody = body({ active: z.boolean() });
+
+export const catalogParams = z.object({ id: uuid });
+
+export const updateCollectionBody = body({ name: text(100) });
+
+/** Named here so that sending one says why (the service's own words): a model's identity is written in the pieces already issued. */
+const modelIdentity = z.never({ error: MODEL_IDENTITY_MESSAGE }).optional();
+
+/**
+ * A model's change (A-10): its name, default material, care instructions, collection and `active`, at least one.
+ * `''`/`null` clears the material, the care instructions or the collection. Never `category`, `categoryCode` nor
+ * `skuPrefix` (400); any other field is unknown (400).
+ */
+export const updateModelBody = body({
+  name: text(100).optional(),
+  defaultMaterial: z.preprocess((v) => (v === '' ? null : v), text(200).nullable().optional()),
+  careInstructions: z.preprocess((v) => (v === '' ? null : v), text(2000).nullable().optional()),
+  collectionId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
+  active: z.boolean().optional(),
+  category: modelIdentity,
+  categoryCode: modelIdentity,
+  skuPrefix: modelIdentity,
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change');
 
 // ── Admin: products ────────────────────────────────────────────────────────
 

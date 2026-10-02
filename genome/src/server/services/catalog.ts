@@ -2,10 +2,23 @@
  * CatalogService — collections and models (the catalogue around categories,
  * which have their own registry because their 5-bit index is permanent).
  *
- * Each write is one insert in a transaction with its audit entry. The HTTP
- * layer validates shapes (http/schemas.ts); this service re-checks what it
- * relies on (non-empty bounded names, a known category and collection) so
- * that scripts and seeds calling it directly get the same rules.
+ * Each write is one transaction with its audit entry. The HTTP layer
+ * validates shapes (http/schemas.ts); this service re-checks what it relies
+ * on (non-empty bounded names, a known category and collection, the fields a
+ * change may touch) so that scripts and seeds calling it directly get the
+ * same rules.
+ *
+ * Edits (A-10): a model's name, default material, care instructions,
+ * collection and `active`, and a collection's name, change after issuance.
+ * They are read live by every public result of the pieces issued with them
+ * (/verify: model, collection, care), so each change is audited with the
+ * values before and after and the number of issued pieces it reaches, and a
+ * change that changes nothing writes nothing. A model's category and SKU
+ * prefix never change: the category letter is in the identity of every piece
+ * issued with it and the prefix starts every SKU issued with it (400, and the
+ * database refuses them too: `models_immutable_identity`). An inactive model
+ * is no longer offered for new products (IssuanceService: 409
+ * MODEL_INACTIVE); its pieces verify as before.
  */
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
@@ -26,6 +39,8 @@ export interface CollectionRecord {
   name: string;
   /** Number of models in the collection. */
   models: number;
+  /** Issued pieces whose public result names this collection: their own collection, else their model's (product_overview's rule). */
+  products: number;
   createdAt: Date;
 }
 
@@ -38,8 +53,30 @@ export interface ModelRecord {
   collection: { id: string; name: string } | null;
   defaultMaterial: string | null;
   careInstructions: string | null;
+  /** Offered for new products; an inactive model's pieces verify as before. */
+  active: boolean;
+  /** Pieces issued with this model: a change of its name, care instructions or collection reaches each of their public results. */
+  products: number;
   createdAt: Date;
 }
+
+/** What `updateModel` may change: never the category nor the SKU prefix. Absent = unchanged; null or '' clears an optional text or the collection. */
+export interface UpdateModelInput {
+  name?: string;
+  defaultMaterial?: string | null;
+  careInstructions?: string | null;
+  collectionId?: string | null;
+  active?: boolean;
+}
+
+/** The fields of a model a change may touch, in their API spelling. */
+export const MODEL_EDITABLE_FIELDS = Object.freeze(['name', 'defaultMaterial', 'careInstructions', 'collectionId', 'active'] as const);
+
+/** Refused by `updateModel` (and by the PATCH body): a model's identity, written in the pieces already issued. */
+export const MODEL_IDENTITY_FIELDS = Object.freeze(['category', 'categoryCode', 'skuPrefix'] as const);
+
+export const MODEL_IDENTITY_MESSAGE =
+  'The category and SKU prefix of a model never change: the category letter is in the identity of every piece issued with it, the prefix starts every SKU issued with it.';
 
 export interface CreateModelInput {
   categoryCode: string;
@@ -82,14 +119,14 @@ export class CatalogService {
   // ── Collections ──────────────────────────────────────────────────────────
 
   async listCollections(): Promise<CollectionRecord[]> {
-    const rows = await this.db
-      .selectFrom('collections as c')
-      .leftJoin('models as m', 'm.collection_id', 'c.id')
-      .select((eb) => ['c.id', 'c.name', 'c.created_at', eb.fn.count<number>('m.id').as('models')])
-      .groupBy(['c.id', 'c.name', 'c.created_at'])
-      .orderBy('c.name')
-      .execute();
-    return rows.map((r) => ({ id: r.id, name: r.name, models: Number(r.models), createdAt: r.created_at }));
+    return this.collectionQuery().orderBy('c.name').execute().then((rows) => rows.map(toCollectionRecord));
+  }
+
+  async getCollection(collectionId: string): Promise<CollectionRecord> {
+    if (typeof collectionId !== 'string' || !UUID_RE.test(collectionId)) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+    const row = await this.collectionQuery().where('c.id', '=', collectionId.toLowerCase()).executeTakeFirst();
+    if (!row) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+    return toCollectionRecord(row);
   }
 
   async createCollection(input: { name: string }, actor: Actor): Promise<CollectionRecord> {
@@ -98,12 +135,44 @@ export class CatalogService {
       return await inTransaction(this.db, async (tx) => {
         const r = await tx.insertInto('collections').values({ name, created_at: this.clock() }).returningAll().executeTakeFirstOrThrow();
         await this.audit.record({ actor, action: 'collection.create', targetType: 'collection', targetId: r.id, details: { name: r.name } }, tx);
-        return { id: r.id, name: r.name, models: 0, createdAt: r.created_at };
+        return { id: r.id, name: r.name, models: 0, products: 0, createdAt: r.created_at };
       });
     } catch (e) {
       if (isUniqueViolation(e)) throw conflict('COLLECTION_EXISTS', 'A collection with this name already exists.');
       throw e;
     }
+  }
+
+  /**
+   * Rename a collection (PATCH /api/admin/collections/:id). The name reads on the public result of every piece in it,
+   * so the change is audited `collection.update` with the name before and after and the number of those pieces.
+   */
+  async updateCollection(collectionId: string, input: { name: string }, actor: Actor): Promise<CollectionRecord> {
+    const name = requiredText(input?.name, 'Collection name', 100);
+    if (typeof collectionId !== 'string' || !UUID_RE.test(collectionId)) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+    const id = collectionId.toLowerCase();
+    try {
+      await inTransaction(this.db, async (tx) => {
+        const before = await tx.selectFrom('collections').select(['id', 'name']).where('id', '=', id).forUpdate().executeTakeFirst();
+        if (!before) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+        if (before.name === name) return;
+        await tx.updateTable('collections').set({ name }).where('id', '=', id).execute();
+        await this.audit.record(
+          {
+            actor,
+            action: 'collection.update',
+            targetType: 'collection',
+            targetId: id,
+            details: { before: { name: before.name }, after: { name }, issuedPieces: await issuedInCollection(tx, id) },
+          },
+          tx,
+        );
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) throw conflict('COLLECTION_EXISTS', 'A collection with this name already exists.');
+      throw e;
+    }
+    return this.getCollection(id);
   }
 
   // ── Models ───────────────────────────────────────────────────────────────
@@ -115,7 +184,7 @@ export class CatalogService {
 
   async getModel(modelId: string): Promise<ModelRecord> {
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
-    const row = await this.modelQuery().where('m.id', '=', modelId).executeTakeFirst();
+    const row = await this.modelQuery().where('m.id', '=', modelId.toLowerCase()).executeTakeFirst();
     if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
     return toModelRecord(row);
   }
@@ -171,11 +240,95 @@ export class CatalogService {
     }
   }
 
+  /**
+   * Change what a model shows or offers (PATCH /api/admin/models/:id): its name, default material, care instructions,
+   * collection and `active`. Never its category nor its SKU prefix (400, MODEL_IDENTITY_MESSAGE). Audited `model.update`
+   * with the changed fields before and after and the number of pieces issued with the model; nothing is written when
+   * nothing changes.
+   */
+  async updateModel(modelId: string, input: UpdateModelInput, actor: Actor): Promise<ModelRecord> {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) throw validationError('Send the fields of the model to change.');
+    const given = Object.entries(input).filter(([, v]) => v !== undefined);
+    for (const [key] of given) {
+      if ((MODEL_IDENTITY_FIELDS as readonly string[]).includes(key)) throw validationError(MODEL_IDENTITY_MESSAGE);
+      if (!(MODEL_EDITABLE_FIELDS as readonly string[]).includes(key)) throw validationError(`A model has no field ${key.slice(0, 40)} to change.`);
+    }
+    if (given.length === 0) throw validationError('Send at least one field of the model to change.');
+
+    const after: ModelChange = {};
+    if (input.name !== undefined) after.name = requiredText(input.name, 'Model name', 100);
+    if (input.defaultMaterial !== undefined) after.defaultMaterial = optionalText(input.defaultMaterial, 'Default material', 200);
+    if (input.careInstructions !== undefined) after.careInstructions = optionalText(input.careInstructions, 'Care instructions', 2000);
+    if (input.active !== undefined) {
+      if (typeof input.active !== 'boolean') throw validationError('active must be true or false.');
+      after.active = input.active;
+    }
+    if (input.collectionId !== undefined) {
+      const c = input.collectionId === null || input.collectionId === '' ? null : input.collectionId;
+      if (c !== null && (typeof c !== 'string' || !UUID_RE.test(c))) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+      after.collectionId = c === null ? null : c.toLowerCase();
+    }
+    if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const id = modelId.toLowerCase();
+
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx
+        .selectFrom('models')
+        .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active'])
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      const current: Required<ModelChange> = {
+        name: row.name,
+        defaultMaterial: row.default_material,
+        careInstructions: row.care_instructions,
+        collectionId: row.collection_id,
+        active: row.active,
+      };
+      const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
+      if (changed.length === 0) return;
+      if (changed.includes('collectionId') && after.collectionId) {
+        const col = await tx.selectFrom('collections').select('id').where('id', '=', after.collectionId).executeTakeFirst();
+        if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+      }
+      const set: { name?: string; default_material?: string | null; care_instructions?: string | null; collection_id?: string | null; active?: boolean } = {};
+      for (const k of changed) {
+        if (k === 'name') set.name = after.name;
+        else if (k === 'defaultMaterial') set.default_material = after.defaultMaterial;
+        else if (k === 'careInstructions') set.care_instructions = after.careInstructions;
+        else if (k === 'collectionId') set.collection_id = after.collectionId;
+        else set.active = after.active;
+      }
+      await tx.updateTable('models').set(set).where('id', '=', id).execute();
+      const issued = await tx.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', id).executeTakeFirstOrThrow();
+      await this.audit.record(
+        {
+          actor,
+          action: 'model.update',
+          targetType: 'model',
+          targetId: id,
+          details: {
+            before: Object.fromEntries(changed.map((k) => [k, current[k]])),
+            after: Object.fromEntries(changed.map((k) => [k, after[k]])),
+            issuedPieces: Number(issued.n),
+          },
+        },
+        tx,
+      );
+    });
+    return this.getModel(id);
+  }
+
   private modelQuery() {
     return this.db
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
       .leftJoin('collections as col', 'col.id', 'm.collection_id')
+      .leftJoin(
+        (eb) => eb.selectFrom('products').select((p) => ['model_id', p.fn.countAll<number>().as('n')]).groupBy('model_id').as('issued'),
+        (j) => j.onRef('issued.model_id', '=', 'm.id'),
+      )
       .select([
         'm.id',
         'm.name',
@@ -183,14 +336,60 @@ export class CatalogService {
         'm.sku_prefix',
         'm.default_material',
         'm.care_instructions',
+        'm.active',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
         'c.name as category_name',
         'col.id as collection_id',
         'col.name as collection_name',
+        'issued.n as products',
       ]);
   }
+
+  private collectionQuery() {
+    return this.db
+      .selectFrom('collections as c')
+      .select((eb) => [
+        'c.id',
+        'c.name',
+        'c.created_at',
+        eb.selectFrom('models as m').select((m) => m.fn.countAll<number>().as('n')).whereRef('m.collection_id', '=', 'c.id').as('models'),
+        // product_overview's rule: the piece's own collection, else its model's.
+        eb
+          .selectFrom('products as p')
+          .innerJoin('models as pm', 'pm.id', 'p.model_id')
+          .select((p) => p.fn.countAll<number>().as('n'))
+          .where((w) => w(w.fn.coalesce('p.collection_id', 'pm.collection_id'), '=', w.ref('c.id')))
+          .as('products'),
+      ]);
+  }
+}
+
+/** The editable fields of a model, in their API spelling (`updateModel`). */
+interface ModelChange {
+  name?: string;
+  defaultMaterial?: string | null;
+  careInstructions?: string | null;
+  collectionId?: string | null;
+  active?: boolean;
+}
+
+/** Issued pieces whose public result names the collection (their own collection, else their model's). */
+async function issuedInCollection(db: Db, collectionId: string): Promise<number> {
+  const r = await db
+    .selectFrom('products as p')
+    .innerJoin('models as m', 'm.id', 'p.model_id')
+    .select((eb) => eb.fn.countAll<number>().as('n'))
+    .where((w) => w(w.fn.coalesce('p.collection_id', 'm.collection_id'), '=', collectionId))
+    .executeTakeFirstOrThrow();
+  return Number(r.n);
+}
+
+type CollectionQueryRow = { id: string; name: string; created_at: Date; models: number | string | null; products: number | string | null };
+
+function toCollectionRecord(r: CollectionQueryRow): CollectionRecord {
+  return { id: r.id, name: r.name, models: Number(r.models ?? 0), products: Number(r.products ?? 0), createdAt: r.created_at };
 }
 
 type ModelQueryRow = {
@@ -200,12 +399,14 @@ type ModelQueryRow = {
   sku_prefix: string;
   default_material: string | null;
   care_instructions: string | null;
+  active: boolean;
   created_at: Date;
   category_index: number;
   category_code: string;
   category_name: string;
   collection_id: string | null;
   collection_name: string | null;
+  products: number | string | null;
 };
 
 function toModelRecord(r: ModelQueryRow): ModelRecord {
@@ -218,6 +419,8 @@ function toModelRecord(r: ModelQueryRow): ModelRecord {
     collection: r.collection_id ? { id: r.collection_id, name: r.collection_name ?? '' } : null,
     defaultMaterial: r.default_material,
     careInstructions: r.care_instructions,
+    active: r.active,
+    products: Number(r.products ?? 0),
     createdAt: r.created_at,
   };
 }

@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { AuditService } from '../../src/server/services/audit.js';
-import { CatalogService } from '../../src/server/services/catalog.js';
+import { packIdentity } from '../../src/core/identity.js';
+import { isGuardViolation } from '../../src/server/db/pg-errors.js';
+import { CatalogService, MODEL_IDENTITY_MESSAGE, type ModelRecord, type UpdateModelInput } from '../../src/server/services/catalog.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { createManualClock, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -35,7 +37,7 @@ describe('CatalogService (collections and models)', () => {
 
   it('creates and lists collections, audited, with unique names', async () => {
     const c = await catalog.createCollection({ name: '  ORBITAL  ' }, admin);
-    expect(c).toEqual({ id: expect.any(String), name: 'ORBITAL', models: 0, createdAt: new Date('2026-04-01T10:00:00.000Z') });
+    expect(c).toEqual({ id: expect.any(String), name: 'ORBITAL', models: 0, products: 0, createdAt: new Date('2026-04-01T10:00:00.000Z') });
     expect((await domainError(catalog.createCollection({ name: 'ORBITAL' }, admin))).code).toBe('COLLECTION_EXISTS');
     expect((await domainError(catalog.createCollection({ name: '   ' }, admin))).code).toBe('VALIDATION_FAILED');
     expect((await audit.list({ action: 'collection.create' })).items[0]).toMatchObject({ targetId: c.id, details: { name: 'ORBITAL' } });
@@ -56,6 +58,8 @@ describe('CatalogService (collections and models)', () => {
       collection: { id: col.id, name: 'ORBITAL' },
       defaultMaterial: '925 STERLING SILVER',
       careInstructions: null,
+      active: true,
+      products: 0,
     });
     expect(await catalog.getModel(m.id)).toEqual(m);
     expect((await catalog.listCollections())[0].models).toBe(1);
@@ -67,5 +71,123 @@ describe('CatalogService (collections and models)', () => {
     expect((await audit.list({ action: 'model.create' })).items[0]).toMatchObject({ targetId: m.id, details: { skuPrefix: 'MNL-RG', category: 'J' } });
     expect((await catalog.listModels()).map((x) => x.id)).toEqual([m.id]);
     expect((await domainError(catalog.getModel('00000000-0000-4000-8000-000000000000'))).code).toBe('MODEL_NOT_FOUND');
+  });
+
+  describe('edits (A-10)', () => {
+    let model: ModelRecord;
+    let orbital: string;
+    let eclipse: string;
+
+    beforeAll(async () => {
+      orbital = (await catalog.listCollections()).find((c) => c.name === 'ORBITAL')!.id;
+      eclipse = (await catalog.createCollection({ name: 'ECLIPSE' }, admin)).id;
+      model = await catalog.createModel(
+        { categoryCode: 'J', collectionId: orbital, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Polish gently.' },
+        admin,
+      );
+      // Two pieces issued with HALO: one in the model's collection, one in a collection of its own.
+      const piece = (serial: number, collectionId: string | null) =>
+        t.db
+          .insertInto('products')
+          .values({
+            product_id: `O26-J-${String(serial).padStart(5, '0')}`,
+            packed_identity: packIdentity({ year: 2026, categoryIndex: 1, serial }),
+            year: 2026,
+            category_id: 1,
+            serial,
+            sku: `HAL-RG-${serial}`,
+            model_id: model.id,
+            collection_id: collectionId,
+            material: '925 STERLING SILVER',
+          })
+          .execute();
+      await piece(1, null);
+      await piece(2, eclipse);
+    });
+
+    it('counts the pieces a change reaches: issued with the model, or shown in the collection (their own, else their model\'s)', async () => {
+      expect((await catalog.getModel(model.id)).products).toBe(2);
+      const cols = Object.fromEntries((await catalog.listCollections()).map((c) => [c.name, c]));
+      expect(cols.ORBITAL).toMatchObject({ models: 2, products: 1 });
+      expect(cols.ECLIPSE).toMatchObject({ models: 0, products: 1 });
+      expect(await catalog.getCollection(eclipse)).toEqual(cols.ECLIPSE);
+    });
+
+    it('changes a model\'s name, material, care, collection and active, audited with the fields before and after', async () => {
+      clock.advance(60_000);
+      const updated = await catalog.updateModel(
+        model.id,
+        { name: ' HALO II ', defaultMaterial: '', careInstructions: 'Wipe with a soft, dry cloth.\nStore it on its own.', collectionId: eclipse, active: false },
+        admin,
+      );
+      expect(updated).toMatchObject({
+        id: model.id,
+        name: 'HALO II',
+        type: 'RING',
+        skuPrefix: 'HAL-RG',
+        category: { code: 'J' },
+        collection: { id: eclipse, name: 'ECLIPSE' },
+        defaultMaterial: null,
+        careInstructions: 'Wipe with a soft, dry cloth.\nStore it on its own.',
+        active: false,
+        products: 2,
+      });
+      const [entry] = (await audit.list({ action: 'model.update' })).items;
+      expect(entry).toMatchObject({ actorId: 'admin-1', targetType: 'model', targetId: model.id });
+      expect(entry.details).toEqual({
+        before: { name: 'HALO', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Polish gently.', collectionId: orbital, active: true },
+        after: { name: 'HALO II', defaultMaterial: null, careInstructions: 'Wipe with a soft, dry cloth.\nStore it on its own.', collectionId: eclipse, active: false },
+        issuedPieces: 2,
+      });
+
+      // Only what changed is recorded; a change that changes nothing writes nothing.
+      await catalog.updateModel(model.id, { name: 'HALO II', active: true }, admin);
+      const entries = (await audit.list({ action: 'model.update' })).items;
+      expect(entries).toHaveLength(2);
+      expect(entries[0].details).toEqual({ before: { active: false }, after: { active: true }, issuedPieces: 2 });
+      await catalog.updateModel(model.id, { name: 'HALO II', careInstructions: ' Wipe with a soft, dry cloth.\nStore it on its own. ', collectionId: eclipse.toUpperCase() }, admin);
+      expect((await audit.list({ action: 'model.update' })).items).toHaveLength(2);
+
+      // The collection is cleared with null (or '').
+      expect((await catalog.updateModel(model.id, { collectionId: null }, admin)).collection).toBeNull();
+      expect((await catalog.updateModel(model.id, { collectionId: orbital }, admin)).collection).toEqual({ id: orbital, name: 'ORBITAL' });
+    });
+
+    it('never changes a model\'s category nor its SKU prefix: a forbidden field is a 400, and nothing is written', async () => {
+      const before = await catalog.getModel(model.id);
+      const audited = (await audit.list({ action: 'model.update' })).items.length;
+      for (const forbidden of [{ skuPrefix: 'NEW-RG' }, { categoryCode: 'L' }, { category: 'L' }, { name: 'X', skuPrefix: 'HAL-RG' }]) {
+        const e = await domainError(catalog.updateModel(model.id, forbidden as UpdateModelInput, admin));
+        expect(e.httpStatus, JSON.stringify(forbidden)).toBe(400);
+        expect(e.code).toBe('VALIDATION_FAILED');
+        expect(e.message).toBe(MODEL_IDENTITY_MESSAGE);
+      }
+      for (const bad of [{ type: 'PENDANT' }, { createdAt: '2020-01-01' }, {}, { name: '   ' }, { name: 'x'.repeat(101) }, { careInstructions: 'x'.repeat(2001) }, { active: 'no' }]) {
+        const e = await domainError(catalog.updateModel(model.id, bad as unknown as UpdateModelInput, admin));
+        expect([e.httpStatus, e.code], JSON.stringify(bad)).toEqual([400, 'VALIDATION_FAILED']);
+      }
+      expect((await domainError(catalog.updateModel(model.id, { collectionId: '00000000-0000-4000-8000-000000000000' }, admin))).code).toBe('COLLECTION_NOT_FOUND');
+      expect((await domainError(catalog.updateModel('00000000-0000-4000-8000-000000000000', { name: 'X' }, admin))).code).toBe('MODEL_NOT_FOUND');
+      expect((await domainError(catalog.updateModel('not-a-uuid', { name: 'X' }, admin))).code).toBe('MODEL_NOT_FOUND');
+      expect(await catalog.getModel(model.id)).toEqual(before);
+      expect((await audit.list({ action: 'model.update' })).items).toHaveLength(audited);
+      // Below the service, the database refuses them too.
+      await expect(t.db.updateTable('models').set({ sku_prefix: 'NEW-RG' }).where('id', '=', model.id).execute()).rejects.toSatisfy(isGuardViolation);
+    });
+
+    it('renames a collection, audited with the name before and after and the pieces it is shown on', async () => {
+      clock.advance(60_000);
+      const renamed = await catalog.updateCollection(eclipse, { name: ' ECLIPSE NOIRE ' }, admin);
+      expect(renamed).toMatchObject({ id: eclipse, name: 'ECLIPSE NOIRE', products: 1 });
+      const [entry] = (await audit.list({ action: 'collection.update' })).items;
+      expect(entry).toMatchObject({ targetType: 'collection', targetId: eclipse, details: { before: { name: 'ECLIPSE' }, after: { name: 'ECLIPSE NOIRE' }, issuedPieces: 1 } });
+      // The same name again writes nothing; another collection's name, an unknown collection and a blank name are refused.
+      await catalog.updateCollection(eclipse, { name: 'ECLIPSE NOIRE' }, admin);
+      expect((await audit.list({ action: 'collection.update' })).items).toHaveLength(1);
+      expect((await domainError(catalog.updateCollection(eclipse, { name: 'ORBITAL' }, admin))).code).toBe('COLLECTION_EXISTS');
+      expect((await domainError(catalog.updateCollection('00000000-0000-4000-8000-000000000000', { name: 'X' }, admin))).code).toBe('COLLECTION_NOT_FOUND');
+      expect((await domainError(catalog.updateCollection(eclipse, { name: '  ' }, admin))).code).toBe('VALIDATION_FAILED');
+      expect((await catalog.getCollection(eclipse)).name).toBe('ECLIPSE NOIRE');
+    });
   });
 });

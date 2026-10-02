@@ -116,8 +116,8 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 | Role | May |
 |---|---|
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2). Manage its own session and second factor. |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
-| ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (list, TOTP reset), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
 
@@ -261,6 +261,7 @@ Catalogue, products and lifecycle:
 | `COLLECTION_NOT_FOUND` | 404 | No collection with this id. |
 | `COLLECTION_EXISTS` | 409 | A collection with this name exists. |
 | `MODEL_NOT_FOUND` | 404 | No model with this id. |
+| `MODEL_INACTIVE` | 409 | The model is no longer offered for new products (§13.4). |
 | `SKU_PREFIX_TAKEN` | 409 | Another model uses this SKU prefix. |
 | `SERIAL_TAKEN` | 409 | The explicit serial is already used for this year and category. |
 | `SERIALS_EXHAUSTED` | 409 | No serial left (999 999) for this year and category. |
@@ -370,10 +371,13 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/dashboard` | AUDITOR | — | admin | 13.1 |
 | GET | `/api/admin/categories` | AUDITOR | — | admin | 13.2 |
 | POST | `/api/admin/categories` | **ADMIN** | yes | admin | 13.2 |
+| POST | `/api/admin/categories/:code/active` | **ADMIN** | yes | admin | 13.2 |
 | GET | `/api/admin/collections` | AUDITOR | — | admin | 13.3 |
 | POST | `/api/admin/collections` | OPERATOR | yes | admin | 13.3 |
+| PATCH | `/api/admin/collections/:id` | OPERATOR | yes | admin | 13.3 |
 | GET | `/api/admin/models` | AUDITOR | — | admin | 13.4 |
 | POST | `/api/admin/models` | OPERATOR | yes | admin | 13.4 |
+| PATCH | `/api/admin/models/:id` | OPERATOR | yes | admin | 13.4 |
 | GET | `/api/admin/products` | AUDITOR | — | admin | 14.1 |
 | POST | `/api/admin/products` | OPERATOR | yes | admin | 14.2 |
 | GET | `/api/admin/products/:productId` | AUDITOR | — | admin | 14.3 |
@@ -415,7 +419,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing an admin's password or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8.
 
 ---
 
@@ -1245,11 +1249,15 @@ AUDITOR. Landing counts.
 
 **201** — the category object. Errors: `400 VALIDATION_FAILED`, `409 CATEGORY_CODE_TAKEN`, `409 CATEGORY_INDEX_EXHAUSTED`.
 
+**`POST /api/admin/categories/:code/active`** (**ADMIN**; extension of the contract) — body `{ "active": boolean }`. `:code` is the category letter (case-insensitive). A deactivated category receives no new product (`POST /api/admin/products` answers `409 CATEGORY_INACTIVE`) and leaves the public list of `GET /api/v1/categories` and the console's generator; its pieces keep verifying exactly as before (the registry still resolves its index), and it can be activated again. Its index and letter never change and are never reused. Audited `category.deactivate` or `category.activate` (target the letter). **200** — the category object. Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`.
+
 ### 13.3 Collections
 
-**`GET /api/admin/collections`** (AUDITOR), by name: `{ "items": [ { "id": uuid, "name": "ORBIT", "models": 1, "createdAt": … } ] }` (`models` = number of models in the collection).
+**`GET /api/admin/collections`** (AUDITOR), by name: `{ "items": [ { "id": uuid, "name": "ORBIT", "models": 1, "products": 184, "createdAt": … } ] }` (`models` = number of models in the collection; `products` = issued pieces whose public result names it: their own collection, else their model's, the rule of `product_overview`).
 
-**`POST /api/admin/collections`** (OPERATOR) — body `{ "name": string (1–100) }`. **201** `{ "id", "name", "models": 0, "createdAt" }`. Errors: `400 VALIDATION_FAILED`, `409 COLLECTION_EXISTS`.
+**`POST /api/admin/collections`** (OPERATOR) — body `{ "name": string (1–100) }`. **201** `{ "id", "name", "models": 0, "products": 0, "createdAt" }`. Errors: `400 VALIDATION_FAILED`, `409 COLLECTION_EXISTS`.
+
+**`PATCH /api/admin/collections/:id`** (OPERATOR; extension of the contract) — renames a collection: body `{ "name": string (1–100) }`. The name is read live by the public result (`product.collection`, §9.2) of every piece shown in the collection, at once: the console says how many (`products`) before saving. Audited `collection.update` with `{ before: { name }, after: { name }, issuedPieces }`; the same name again writes nothing. **200** — the collection object. Errors: `400 VALIDATION_FAILED`, `404 COLLECTION_NOT_FOUND`, `409 COLLECTION_EXISTS`.
 
 ### 13.4 Models
 
@@ -1267,13 +1275,15 @@ AUDITOR. Landing counts.
       "collection": { "id": "8e78d92a-e441-4530-8aac-48ba29d094b2", "name": "ORBIT" },
       "defaultMaterial": "925 STERLING SILVER",
       "careInstructions": "Polish with a soft dry cloth.",
+      "active": true,
+      "products": 184,
       "createdAt": "2026-10-01T08:13:22.220Z"
     }
   ]
 }
 ```
 
-`collection` is `null` when the model has none.
+`collection` is `null` when the model has none. `active`: the model is offered for new products (§13.4, `PATCH`). `products`: the pieces issued with the model, whose public results read its name, type, care instructions and collection.
 
 **`POST /api/admin/models`** (OPERATOR):
 
@@ -1287,7 +1297,21 @@ AUDITOR. Landing counts.
 | `defaultMaterial` | string | no | ≤ 200 characters |
 | `careInstructions` | string | no | ≤ 2 000 characters; shown publicly as `product.care`. |
 
-**201** — the model object. Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 SKU_PREFIX_TAKEN`.
+**201** — the model object (`active: true`, `products: 0`). Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 SKU_PREFIX_TAKEN`.
+
+**`PATCH /api/admin/models/:id`** (OPERATOR; extension of the contract) — changes what a model shows or offers, at least one field:
+
+| Field | Type | Rules |
+|---|---|---|
+| `name` | string | 1–100 characters. Public: `product.model`. |
+| `defaultMaterial` | string \| null | ≤ 200 characters; `""`/`null` clears it. Proposed by the generator; each piece keeps its own `material`. |
+| `careInstructions` | string \| null | ≤ 2 000 characters; `""`/`null` clears them (the CARE tab of /verify then shows its general care text). Public: `product.care`. |
+| `collectionId` | uuid \| null | Must exist; `""`/`null` = none. Public: `product.collection` of the pieces without a collection of their own. |
+| `active` | boolean | `false`: no new product with this model (`POST /api/admin/products` answers `409 MODEL_INACTIVE`, the generator hides it); its pieces keep verifying as before. `true` offers it again. |
+
+**Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once: the console says how many (`products`) before saving, and shows the care block as the client reads it. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`.
+
+The narrative fields of a model (workshop, materials, repairability) are a later phase (A-10 phase 2).
 
 ---
 
@@ -1344,7 +1368,7 @@ OPERATOR. In one transaction: allocates the serial, creates the product (ISSUED)
 | Field | Type | Required | Rules |
 |---|---|---|---|
 | `categoryCode` | string | yes | One letter (case-insensitive). The category must exist and be active. |
-| `modelId` | uuid | yes | Must exist and belong to that category. |
+| `modelId` | uuid | yes | Must exist, belong to that category and be active (§13.4). |
 | `material` | string | yes | 1–200 characters, no control characters. |
 | `year` | integer | no | 2000–2099; default the current UTC year. |
 | `collectionId` | uuid | no | Must exist. Without it, the model's collection applies in admin and owner views. |
@@ -1433,7 +1457,7 @@ Example request:
 - `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it under the scratch-off panel of the certificate card supplied with the product: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
 - `code.nonce` and `code.payloadHash` are hexadecimal; `issuedDay` counts days since 2024-01-01 UTC.
 
-Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `404 REFERENCE_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`.
+Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `404 REFERENCE_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 MODEL_INACTIVE`, `409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`.
 
 ### 14.3 `GET /api/admin/products/:productId`
 

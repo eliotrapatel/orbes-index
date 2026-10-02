@@ -177,6 +177,22 @@ describe('schema', () => {
     );
   });
 
+  it('models: active by default (0010); category and SKU prefix immutable, the shown fields editable', async () => {
+    const { model, product } = await seedProduct(t.db);
+    expect(model.active).toBe(true);
+    await expect(t.db.updateTable('models').set({ sku_prefix: 'OTHER' }).where('id', '=', model.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.updateTable('models').set({ category_id: 1 }).where('id', '=', model.id).execute()).rejects.toSatisfy(isGuardViolation);
+    const updated = await t.db
+      .updateTable('models')
+      .set({ name: 'MONOLITHE II', type: 'RING', default_material: null, care_instructions: 'Wipe with a soft, dry cloth.', collection_id: null, active: false })
+      .where('id', '=', model.id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(updated).toMatchObject({ name: 'MONOLITHE II', active: false, sku_prefix: model.sku_prefix, category_id: model.category_id });
+    // The piece issued with it keeps its model.
+    expect((await t.db.selectFrom('products').select('model_id').where('id', '=', product.id).executeTakeFirstOrThrow()).model_id).toBe(model.id);
+  });
+
   it('foreign keys restrict deletes', async () => {
     const { model } = await seedProduct(t.db);
     const err = await t.db.deleteFrom('models').where('id', '=', model.id).execute().catch((e: unknown) => e);

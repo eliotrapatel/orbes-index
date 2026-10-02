@@ -16,6 +16,7 @@ import * as m0002 from './migrations/0002_platform_guards.js';
 import * as m0003 from './migrations/0003_authentication_events_default.js';
 import * as m0004 from './migrations/0004_scan_reports.js';
 import * as m0005 from './migrations/0005_account_recovery.js';
+import * as m0010 from './migrations/0010_models_active.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -24,6 +25,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0003_authentication_events_default': m0003,
   '0004_scan_reports': m0004,
   '0005_account_recovery': m0005,
+  '0010_models_active': m0010,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

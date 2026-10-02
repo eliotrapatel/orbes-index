@@ -74,7 +74,7 @@ Timestamp convention: every row records when it came into being, named after wha
 |---|---|
 | `categories` | `id smallint PK` (= immutable 5-bit category index 1..31) · `code char(1) UNIQUE CHECK (code ~ '^[A-Z]$')` · `name text` · `warranty_months int NOT NULL DEFAULT 24` · `active boolean DEFAULT true` · `created_at` |
 | `collections` | `id uuid PK` · `name text UNIQUE` · `created_at` |
-| `models` | `id uuid PK` · `collection_id uuid FK NULL` · `category_id smallint FK` · `name text` (e.g. MONOLITHE) · `type text` (e.g. RING) · `sku_prefix text UNIQUE` · `default_material text NULL` · `care_instructions text NULL` · `created_at` |
+| `models` | `id uuid PK` · `collection_id uuid FK NULL` · `category_id smallint FK` · `name text` (e.g. MONOLITHE) · `type text` (e.g. RING) · `sku_prefix text UNIQUE` · `default_material text NULL` · `care_instructions text NULL` · `active boolean NOT NULL DEFAULT true` (offered for new products, migration 0010) · `created_at` · `category_id` and `sku_prefix` immutable (trigger, migration 0010) |
 | `products` | `id uuid PK` · `product_id text UNIQUE` (canonical `O26-J-00184`) · `packed_identity bigint UNIQUE` · `year smallint` · `category_id smallint FK` · `serial int` · `UNIQUE(year, category_id, serial)` · `sku text` · `model_id uuid FK` · `collection_id uuid FK NULL` · `variant text NULL` · `material text` · `production_batch text NULL` · `production_date date NULL` · `status text CHECK in ProductStatus` · `ownership_state text CHECK in ('UNREGISTERED','REGISTERED','OWNED','TRANSFER_PENDING')` · `auth_policy text DEFAULT 'PRINTED_CODE'` · `claim_secret_hash text NULL` · `created_at` · `updated_at` |
 | `product_status_history` | `id uuid PK` · `product_id FK` · `from_status text NULL` · `to_status text` · `reason text NULL` · `actor_type text` · `actor_id text NULL` · `created_at` |
 | `genomes` | `id uuid PK` · `product_id uuid FK` · `genome_version smallint` · `genome_id text` (= canonical product id string) · `value bigint` (u32) · `glyphs smallint[]` (8) · `pattern text` (glyph ids joined by `·`) · `fingerprint text` · `UNIQUE(product_id, genome_version)` · `UNIQUE(genome_version, value)` · `UNIQUE(fingerprint)` · `created_at` |
@@ -357,10 +357,13 @@ AUDITOR is read-only and reads customers' emails masked (`j***@example.com`). Mu
 | GET | `/api/admin/dashboard` | Counts: products by status, scans in the last 24 h / 7 d, open anomalies by severity, active key, recent events. |
 | GET | `/api/admin/categories` | Lists categories. |
 | POST | `/api/admin/categories` | Creates a category. |
-| GET | `/api/admin/models` | Lists models. |
+| POST | `/api/admin/categories/:code/active` | Extension, ADMIN: body `{ active }`. A deactivated category issues no new product (409 CATEGORY_INACTIVE); its pieces verify. Audited `category.deactivate` / `category.activate`. |
+| GET | `/api/admin/models` | Lists models, each with `active` and `products` (pieces issued with it). |
 | POST | `/api/admin/models` | Creates a model. |
-| GET | `/api/admin/collections` | Lists collections. |
+| PATCH | `/api/admin/models/:id` | Extension, OPERATOR: `name`, `defaultMaterial`, `careInstructions`, `collectionId`, `active`; never `category` nor `skuPrefix` (400). Read live by every public result of its pieces. An inactive model issues no new product (409 MODEL_INACTIVE). Audited `model.update` with before and after. |
+| GET | `/api/admin/collections` | Lists collections, each with `models` and `products` (pieces shown in it). |
 | POST | `/api/admin/collections` | Creates a collection. |
+| PATCH | `/api/admin/collections/:id` | Extension, OPERATOR: body `{ name }`. Audited `collection.update` with before and after. |
 | GET | `/api/admin/products?status&category&q&page` | Product list. |
 | POST | `/api/admin/products` | Issues a product (the generator). |
 | GET | `/api/admin/products/:productId` | Full detail: product, genome, codes, signature validity (re-verified live), scan count, ownership + history, warranty + services, anomalies, status history, allowed transitions. |

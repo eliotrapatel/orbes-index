@@ -114,6 +114,18 @@ describe('migrations', () => {
     return { with: withIt!, without: await snapshot() };
   }
 
+  it('0010 down drops models.active and the guard on a model\'s identity, and nothing else; up again restores them', async () => {
+    const latest = await snapshot();
+    // Later migrations (0011…) are rolled back first, then 0010 alone.
+    const { with: withActive, without: before } = await rollBackTo('0010_models_active');
+    // PGlite's PostgreSQL also lists a NOT NULL as a constraint (models_active_not_null); PostgreSQL 16 does not.
+    const added = withActive.filter((o) => !before.includes(o) && o !== 'constraint models models_active_not_null NOT NULL active');
+    expect(added).toEqual(['table models active boolean NO true', 'trigger models models_immutable_identity']);
+    expect(before.filter((o) => !withActive.includes(o))).toEqual([]);
+    expect((await migrateToLatest(t.db)).applied[0]).toBe('0010_models_active');
+    expect(await snapshot()).toEqual(latest);
+  });
+
   it('0005 down restores the schema of 0004 exactly, and up again re-creates the recovery codes and the transfer pause', async () => {
     const latest = await snapshot();
     // Later migrations (0006…) are rolled back first, then 0005 alone.

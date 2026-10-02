@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0005) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0005, 0010) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -141,6 +141,8 @@ export interface ModelsTable {
   sku_prefix: string;
   default_material: string | null;
   care_instructions: string | null;
+  /** Offered for new products (migration 0010); an inactive model's pieces verify as before. category_id and sku_prefix never change. */
+  active: WithDefault<boolean>;
   created_at: TimestampDefault;
 }
 

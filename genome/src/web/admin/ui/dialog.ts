@@ -5,9 +5,11 @@
  * Destructive actions pass a `phrase` the admin must type (e.g.
  * `REVOKE KEY 3`): the confirm button stays disabled until it matches. With
  * `submit`, the request runs while the dialog is open and a refusal from
- * the server is shown inside it, so nothing typed is lost.
+ * the server is shown inside it, so nothing typed is lost. With `live`, a
+ * preview drawn from the values follows the fields and is drawn again at
+ * every input (the catalogue's care block, as the client reads it).
  */
-import { h, type Child } from '../../shared/dom.js';
+import { h, mount, type Child } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
 import { phraseMatches } from '../model/registry.js';
 import { button, field, input, select, textarea } from './components.js';
@@ -21,6 +23,8 @@ export interface DialogField {
   hint?: string;
   maxlength?: number;
   value?: string;
+  /** A textarea's height in lines (3 by default). */
+  rows?: number;
 }
 
 export type DialogValues = Record<string, string>;
@@ -39,6 +43,8 @@ export interface DialogOptions {
   validate?: (values: DialogValues) => string | null;
   /** Performed while the dialog is open; a thrown error is shown in the dialog. */
   submit?: (values: DialogValues) => Promise<void>;
+  /** After the fields: drawn from the values when the dialog opens and again at every input or change. */
+  live?: (values: DialogValues) => Child | Child[];
 }
 
 function readValues(form: HTMLFormElement): DialogValues {
@@ -53,7 +59,7 @@ function readValues(form: HTMLFormElement): DialogValues {
 function controlFor(f: DialogField): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement {
   switch (f.kind) {
     case 'textarea': {
-      const t = textarea(f.name, { maxlength: f.maxlength ?? 1000, rows: 3 });
+      const t = textarea(f.name, { maxlength: f.maxlength ?? 1000, rows: f.rows ?? 3 });
       if (f.value) t.value = f.value;
       return t;
     }
@@ -96,6 +102,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     }
 
     const body = o.body === undefined ? [] : Array.isArray(o.body) ? o.body : [o.body];
+    const live = o.live ? h('div', { class: 'dialog__live' }) : null;
     const form = h(
       'form',
       { class: 'dialog__form', attrs: { method: 'dialog', novalidate: true } },
@@ -103,9 +110,20 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
       h('h2', { class: 'dialog__title' }, o.title),
       body.length ? h('div', { class: 'dialog__body' }, ...body) : null,
       controls.length ? h('div', { class: 'dialog__fields' }, ...controls) : null,
+      live,
       error,
       h('div', { class: 'dialog__actions' }, cancel, confirm),
     );
+    if (live && o.live) {
+      const render = o.live;
+      const draw = () => {
+        const drawn = render(readValues(form));
+        mount(live, ...(Array.isArray(drawn) ? drawn : [drawn]));
+      };
+      form.addEventListener('input', draw);
+      form.addEventListener('change', draw);
+      draw();
+    }
     const dlg = h('dialog', { class: ['dialog', o.danger ? 'dialog--danger' : null], attrs: { 'aria-label': o.title } }, form);
     document.body.appendChild(dlg);
 

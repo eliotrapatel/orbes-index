@@ -35,6 +35,7 @@ import type {
   KeyJson,
   LifecycleSnapshot,
   Model,
+  ModelChange,
   OwnerList,
   OwnerLock,
   OwnerSheet,
@@ -312,6 +313,15 @@ export class AdminApi {
     return this.post('/api/admin/collections', { name });
   }
 
+  renameCollection(id: string, name: string): Promise<Collection> {
+    return this.patch(`/api/admin/collections/${encodeURIComponent(id)}`, { name });
+  }
+
+  /** ADMIN: a category stops (false) or starts again (true) receiving new products. */
+  setCategoryActive(code: string, active: boolean): Promise<Category> {
+    return this.post(`/api/admin/categories/${encodeURIComponent(code)}/active`, { active });
+  }
+
   models(): Promise<Items<Model>> {
     return this.get('/api/admin/models');
   }
@@ -326,6 +336,10 @@ export class AdminApi {
     careInstructions?: string;
   }): Promise<Model> {
     return this.post('/api/admin/models', input);
+  }
+
+  updateModel(id: string, change: ModelChange): Promise<Model> {
+    return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
   }
 
   // ── Products ─────────────────────────────────────────────────────────────

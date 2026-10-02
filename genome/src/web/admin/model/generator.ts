@@ -120,9 +120,9 @@ export const POLICY_OPTIONS: readonly { value: string; label: string; note: stri
   { value: 'PRINTED_CODE+TAMPER_EVIDENT', label: 'Printed code + tamper-evident seal', note: 'Hardware not yet available — verifies as CODE ONLY' },
 ];
 
-/** Models of a category, by name. */
+/** The models offered for new pieces in a category, by name: an inactive model (A-10) is hidden, the server refuses it. */
 export function modelsFor(models: readonly Model[], categoryCode: string): Model[] {
-  return models.filter((m) => m.category.code === categoryCode).sort((a, b) => a.name.localeCompare(b.name));
+  return models.filter((m) => m.active && m.category.code === categoryCode).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ── Artifacts ──────────────────────────────────────────────────────────────

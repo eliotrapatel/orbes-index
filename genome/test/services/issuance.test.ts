@@ -257,6 +257,19 @@ describe('IssuanceService.issueProduct', () => {
     );
   });
 
+  it('refuses an inactive model (A-10), and issues with it again once it is active', async () => {
+    const m = await w.t.db
+      .insertInto('models')
+      .values({ category_id: 1, name: 'HALO', type: 'RING', sku_prefix: 'HAL-RG', active: false })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const input = { categoryCode: 'J', modelId: m.id, material: '925 STERLING SILVER' };
+    const e = await domainError(w.issuance.issueProduct(input, admin));
+    expect([e.httpStatus, e.code]).toEqual([409, 'MODEL_INACTIVE']);
+    await w.t.db.updateTable('models').set({ active: true }).where('id', '=', m.id).execute();
+    expect((await w.issuance.issueProduct(input, admin)).product.sku).toBe('HAL-RG');
+  });
+
   it('treats empty optional form fields as absent', async () => {
     const r = await w.issuance.issueProduct(
       { ...ring(w), variant: '', sku: '', productionBatch: '', productionDate: '', collectionId: '' } as unknown as IssueProductInput,

@@ -38,6 +38,8 @@ const SERVICE: Record<string, Tone> = { OPEN: 'outline', COMPLETED: 'muted', CAN
 const ACCOUNT: Record<string, Tone> = { ACTIVE: 'solid', LOCKED: 'alert', DELETED: 'muted' };
 /** A case of the Cases queue: an open one waits for staff, as an open anomaly does. */
 const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
+/** A category or model of the catalogue: an inactive one issues no new piece, its pieces verify as before. */
+const CATALOGUE: Record<string, Tone> = { ACTIVE: 'solid', INACTIVE: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
   AUTHENTIC: 'solid',
   AUTHENTIC_FIRST_REGISTRATION: 'solid',
@@ -51,7 +53,7 @@ const VERIFICATION: Record<string, Tone> = {
   PENDING: 'outline',
 };
 
-export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account';
+export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account' | 'catalogue';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -65,6 +67,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   verification: VERIFICATION,
   case: CASE,
   account: ACCOUNT,
+  catalogue: CATALOGUE,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

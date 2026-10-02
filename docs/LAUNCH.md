@@ -110,7 +110,7 @@ docker compose ps                                                # caddy, app, p
 
 ## 7. Catalogue and first products (admin console)
 
-1. **Catalogue:** create the categories (e.g. J Jewelry, L Leather Goods, W Watches, F Fragrance, A Accessories). Category letters and indices are permanent. Then create collections and models (e.g. MONOLITHE · RING · 925 STERLING SILVER).
+1. **Catalogue:** create the categories (e.g. J Jewelry, L Leather Goods, W Watches, F Fragrance, A Accessories). Category letters and indices are permanent. Then create collections and models (e.g. MONOLITHE · RING · 925 STERLING SILVER). Later, **Edit** on a model's row changes its name, default material, care instructions, collection and status, and **Rename** a collection's name: every result of the pieces already issued reads them at once, so the dialog says how many pieces it touches and shows the care block as the client reads it. A model's category and SKU prefix never change. A model retired from the range is made **inactive** (the generator stops offering it), and an ADMIN can **Deactivate** a category: no new piece, the pieces already issued verify as before (API §13).
 2. **Generator:** issue a product, choosing category, model, material, batch and production date. Tick "claim code" if the certificate card will carry a scratch-off claim code.
 3. **Download the artifact:**
    - **PDF** for print, **SVG** for engraving or foil vendors, **PNG** for previews.

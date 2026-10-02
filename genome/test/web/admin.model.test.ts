@@ -25,7 +25,11 @@ import {
   type ArtifactForm,
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
+import { formatCount } from '../../src/web/admin/format.js';
+import { carePreview, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
+import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
+import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK } from '../../src/web/admin/model/permissions.js';
 import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
 import {
@@ -93,6 +97,11 @@ describe('permissions', () => {
     expect(can('OPERATOR', 'exportAccount')).toBe(false);
     expect(can('ADMIN', 'lockAccount')).toBe(true);
     expect(can('ADMIN', 'exportAccount')).toBe(true);
+    // The catalogue (A-10): an OPERATOR edits models and collections (PATCH), an ADMIN (de)activates a category.
+    expect(can('AUDITOR', 'editCatalog')).toBe(false);
+    expect(can('OPERATOR', 'editCatalog')).toBe(true);
+    expect(can('OPERATOR', 'activateCategory')).toBe(false);
+    expect(can('ADMIN', 'activateCategory')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
   });
@@ -111,6 +120,7 @@ describe('tones', () => {
     // An open case waits for staff, as an open anomaly does; a closed one recedes.
     expect(toneOf('case', 'OPEN')).toBe(toneOf('anomaly', 'OPEN'));
     expect(toneOf('case', 'CLOSED')).toBe('muted');
+    expect([toneOf('catalogue', 'ACTIVE'), toneOf('catalogue', 'INACTIVE')]).toEqual(['solid', 'muted']);
     // A locked account needs attention; every account status has its tone.
     expect(toneOf('account', 'ACTIVE')).toBe('solid');
     expect(toneOf('account', 'LOCKED')).toBe('alert');
@@ -476,9 +486,10 @@ describe('generator view model', () => {
     expect(normalizePolicy('PRINTED_CODE+QUANTUM')).toBeNull();
   });
 
-  it('filters models by category, sorted by name', () => {
-    const m = (name: string, code: string) => ({ id: name, name, category: { code } }) as unknown as Model;
-    expect(modelsFor([m('ZETA', 'J'), m('ALPHA', 'J'), m('BAG', 'L')], 'J').map((x) => x.name)).toEqual(['ALPHA', 'ZETA']);
+  it('offers the active models of a category, sorted by name: an inactive model is hidden (A-10)', () => {
+    const m = (name: string, code: string, active = true) => ({ id: name, name, category: { code }, active }) as unknown as Model;
+    expect(modelsFor([m('ZETA', 'J'), m('ALPHA', 'J'), m('BAG', 'L'), m('HALO', 'J', false)], 'J').map((x) => x.name)).toEqual(['ALPHA', 'ZETA']);
+    expect(modelsFor([m('HALO', 'J', false)], 'J')).toEqual([]);
   });
 
   it('validates artifact options within the server bounds', () => {
@@ -599,5 +610,60 @@ describe('registry view rules', () => {
     const bad = chainVerdict({ ok: false, checked: 41, firstBadId: 42, head: null });
     expect(bad).toMatchObject({ title: 'Chain broken', tone: 'critical' });
     expect(bad.detail).toContain('#42');
+  });
+});
+
+describe('catalogue edits (A-10)', () => {
+  const model = {
+    id: 'm1',
+    name: 'MONOLITHE',
+    type: 'RING',
+    skuPrefix: 'MNL-RG',
+    category: { index: 1, code: 'J', name: 'Jewelry' },
+    collection: { id: 'c1', name: 'ORBIT' },
+    defaultMaterial: '925 STERLING SILVER',
+    careInstructions: 'Polish with a soft dry cloth.',
+    active: true,
+    products: 184,
+    createdAt: '2026-10-01T08:00:00.000Z',
+  } as Model;
+
+  it('sends only what differs, trimmed; never the category nor the SKU prefix', () => {
+    const f = modelForm(model);
+    expect(f).toEqual({ name: 'MONOLITHE', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Polish with a soft dry cloth.', collectionId: 'c1', status: 'active' });
+    expect(modelChange(model, f)).toEqual({});
+    expect(modelChange(model, { ...f, name: ' MONOLITHE ', careInstructions: ' Polish with a soft dry cloth.\n' })).toEqual({});
+    expect(modelChange(model, { ...f, name: 'MONOLITHE II', defaultMaterial: '  ', careInstructions: 'Wipe it.', collectionId: '', status: 'inactive' })).toEqual({
+      name: 'MONOLITHE II',
+      defaultMaterial: '',
+      careInstructions: 'Wipe it.',
+      collectionId: '',
+      active: false,
+    });
+    const bare = { ...model, collection: null, defaultMaterial: null, careInstructions: null, active: false };
+    expect(modelForm(bare)).toMatchObject({ defaultMaterial: '', careInstructions: '', collectionId: '', status: 'inactive' });
+    expect(modelChange(bare, { ...modelForm(bare), status: 'active', collectionId: 'c2' })).toEqual({ active: true, collectionId: 'c2' });
+    for (const change of [modelChange(model, { ...f, name: 'X' }), modelChange(bare, { ...modelForm(bare), name: 'Y' })]) {
+      expect(Object.keys(change)).not.toEqual(expect.arrayContaining(['skuPrefix']));
+      expect(Object.keys(change)).not.toEqual(expect.arrayContaining(['categoryCode']));
+    }
+    expect(MODEL_STATUS_OPTIONS.map((o) => o.value)).toEqual(['active', 'inactive']);
+  });
+
+  it('says how many issued pieces a change touches before it is saved', () => {
+    expect(modelImpact(184)).toBe('Touches 184 issued pieces: the result of each on /verify reads this model’s name, care instructions and collection as soon as they are saved.');
+    expect(modelImpact(1)).toMatch(/^Touches 1 issued piece: /);
+    expect(modelImpact(12480).startsWith(`Touches ${formatCount(12480)} issued pieces: `)).toBe(true);
+    expect(modelImpact(0)).toMatch(/^Touches no issued piece yet\. /);
+    expect(collectionImpact(2)).toBe('Touches 2 issued pieces: the result of each on /verify reads the new name as soon as it is saved.');
+    expect(collectionImpact(0)).toBe('Touches no issued piece yet.');
+  });
+
+  it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {
+    expect(carePreview('  Wipe with a soft, dry cloth.  ')).toEqual({ text: 'Wipe with a soft, dry cloth.', general: false });
+    expect(carePreview('')).toEqual({ text: VERIFY_CARE, general: true });
+    expect(carePreview(null)).toEqual({ text: VERIFY_CARE, general: true });
+    // One text, shared: the console's fallback is the verification app's.
+    expect(SHARED_CARE).toBe(VERIFY_CARE);
   });
 });

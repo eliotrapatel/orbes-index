@@ -1,7 +1,9 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
- * mutates, ADMIN for keys, revocations, reinstatement, categories, console
- * users and a customer's recovery code, lock and export.
+ * mutates (the catalogue's models and collections included, created or
+ * edited), ADMIN for keys, revocations, reinstatement, categories (created,
+ * activated or deactivated), console users and a customer's recovery code,
+ * lock and export.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -23,10 +25,13 @@ const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
   { group: 'categories', method: 'GET', url: '/api/admin/categories', min: 'AUDITOR' },
   { group: 'categories', method: 'POST', url: '/api/admin/categories', body: INVALID, min: 'ADMIN' },
+  { group: 'categories', method: 'POST', url: '/api/admin/categories/J/active', body: INVALID, min: 'ADMIN' },
   { group: 'models', method: 'GET', url: '/api/admin/models', min: 'AUDITOR' },
   { group: 'models', method: 'POST', url: '/api/admin/models', body: INVALID, min: 'OPERATOR' },
+  { group: 'models', method: 'PATCH', url: `/api/admin/models/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'collections', method: 'GET', url: '/api/admin/collections', min: 'AUDITOR' },
   { group: 'collections', method: 'POST', url: '/api/admin/collections', body: INVALID, min: 'OPERATOR' },
+  { group: 'collections', method: 'PATCH', url: `/api/admin/collections/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: '/api/admin/products', min: 'AUDITOR' },
   { group: 'products', method: 'POST', url: '/api/admin/products', body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: `/api/admin/products/${PID}`, min: 'AUDITOR' },

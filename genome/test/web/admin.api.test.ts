@@ -140,6 +140,22 @@ describe('AdminApi', () => {
     expect(calls[4].url).toBe('/api/admin/anomalies?id=44444444-4444-4444-8444-444444444444');
   });
 
+  it('edits the catalogue: a model and a collection (PATCH), a category\'s activity (POST), all with the CSRF token', async () => {
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { id: 'm' }), json(200, { id: 'c' }), json(200, { code: 'J', active: false }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.updateModel('m/1', { careInstructions: 'Wipe it.', collectionId: '', active: false });
+    await api.renameCollection('c?1', 'ORBIT NOIR');
+    await api.setCategoryActive('J', false);
+    expect([calls[1].init.method, calls[1].url]).toEqual(['PATCH', '/api/admin/models/m%2F1']);
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ careInstructions: 'Wipe it.', collectionId: '', active: false });
+    expect([calls[2].init.method, calls[2].url]).toEqual(['PATCH', '/api/admin/collections/c%3F1']);
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ name: 'ORBIT NOIR' });
+    expect([calls[3].init.method, calls[3].url]).toEqual(['POST', '/api/admin/categories/J/active']);
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ active: false });
+    for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
+  });
+
   it('downloads artifacts as blobs with a safe file name, dpi only for PNG', async () => {
     const { fetch, calls } = fakeFetch(
       new Response('<svg/>', { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-disposition': 'attachment; filename="ORBES-O26-J-00001-I1-classic-30mm.svg"' } }),

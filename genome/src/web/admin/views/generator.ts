@@ -37,7 +37,8 @@ export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
   const root = h('div', { class: 'view view--generator' });
   mount(
     root,
-    ...formScreen(ctx, cats.items.filter((c) => c.active), models.items, cols.items, (r) => {
+    // Only what is offered for new pieces: active categories and models (an inactive one issues nothing: 409).
+    ...formScreen(ctx, cats.items.filter((c) => c.active), models.items.filter((m) => m.active), cols.items, (r) => {
       mount(root, ...resultScreen(ctx, r));
       // The form was long: start the result (claim code first) at the top.
       window.scrollTo(0, 0);
@@ -61,7 +62,7 @@ function formScreen(ctx: ViewContext, categories: Category[], models: Model[], c
         h(
           'div',
           { class: 'stack' },
-          h('p', { class: 'prose' }, 'A product is issued against a category and a model. Create them in the catalogue first.'),
+          h('p', { class: 'prose' }, 'A product is issued against an active category and an active model. Create or reactivate them in the catalogue first.'),
           linkButton('Open the catalogue', href('catalogue'), 'primary'),
         ),
       ),

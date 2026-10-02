@@ -1,10 +1,10 @@
 /**
  * What each admin role may do, mirroring the server guard (contract §3:
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
- * reinstatement, categories, console users and a customer's recovery code,
- * lock and export). The server is the authority; the console
- * only hides controls a role cannot use, so nobody is offered a button that
- * will answer 403.
+ * reinstatement, categories (created, activated, deactivated), console users
+ * and a customer's recovery code, lock and export). The server is the
+ * authority; the console only hides controls a role cannot use, so nobody is
+ * offered a button that will answer 403.
  */
 import type { AdminRole } from '../types.js';
 
@@ -27,6 +27,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   /** Close a case of the Cases queue, with a note (a customer's report on a scan). */
   closeCase: 'OPERATOR',
   createCatalog: 'OPERATOR',
+  /** Edit a model (name, material, care, collection, active) or rename a collection: read live by /verify (A-10). */
+  editCatalog: 'OPERATOR',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',
@@ -34,6 +36,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   createRevocation: 'ADMIN',
   manageKeys: 'ADMIN',
   createCategory: 'ADMIN',
+  /** Deactivate a category (no new piece in it) or activate it again. */
+  activateCategory: 'ADMIN',
   /** Console users: list, reset a lost second factor. */
   manageAdmins: 'ADMIN',
   /** A one-time recovery code for a client who forgot the password (after an identity check). */

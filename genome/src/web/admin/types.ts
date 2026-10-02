@@ -136,6 +136,8 @@ export interface Collection {
   id: string;
   name: string;
   models: number;
+  /** Issued pieces whose public result names this collection (their own, else their model's). */
+  products: number;
   createdAt: Iso;
 }
 
@@ -148,7 +150,20 @@ export interface Model {
   collection: { id: string; name: string | null } | null;
   defaultMaterial: string | null;
   careInstructions: string | null;
+  /** Offered for new products (the generator hides an inactive model; the server refuses it, 409 MODEL_INACTIVE). */
+  active: boolean;
+  /** Pieces issued with this model: their public result reads its name, care instructions and collection. */
+  products: number;
   createdAt: Iso;
+}
+
+/** PATCH /api/admin/models/:id: never the category nor the SKU prefix. '' clears the material, the care or the collection. */
+export interface ModelChange {
+  name?: string;
+  defaultMaterial?: string;
+  careInstructions?: string;
+  collectionId?: string;
+  active?: boolean;
 }
 
 // ── Products, genomes, codes ───────────────────────────────────────────────

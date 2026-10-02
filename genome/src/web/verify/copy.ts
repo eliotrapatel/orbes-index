@@ -278,6 +278,6 @@ export const CLAIM_HELD =
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';
 
-export const DEFAULT_CARE =
-  'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
+/** The CARE tab of a piece whose model has no care instructions (shared with the console's care preview). */
+export { DEFAULT_CARE } from '../shared/care.js';
 

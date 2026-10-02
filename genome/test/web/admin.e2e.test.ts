@@ -3,7 +3,8 @@
  * Fastify app (in-memory PGlite, bootstrap admin from the config, memory key
  * provider) and driven in Chromium through playwright-core.
  *
- * Flow: sign in → create a model in the catalogue → issue a product with the
+ * Flow: sign in → create a model in the catalogue → edit a model (its care
+ * block as the client reads it), a collection and a category → issue a product with the
  * generator (claim code shown once, its certificate card, code preview) → download the SVG and
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
@@ -307,6 +308,81 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.waitForSelector('.toast:has-text("Model created.")');
     await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
     await shot(page, 'catalogue');
+  }, STEP_TIMEOUT);
+
+  it('edits the catalogue (A-10): a model with its care block as the client reads it, a collection, a category', async () => {
+    await go(page, '#/catalogue', 'Catalogue');
+    const model = (sku: string) => page.locator('#models tbody tr', { hasText: sku });
+    const impact = page.locator('dialog [data-testid=catalogue-impact]');
+    await model('MNL-RG').locator('[data-testid=edit-model]').click();
+    const preview = page.locator('dialog [data-testid=care-preview]');
+    await preview.waitFor();
+    // Before anything is saved: the issued pieces the change reaches; the category and SKU prefix are no fields.
+    expect(await impact.textContent()).toMatch(/^Touches 9 issued pieces: the result of each on \/verify reads/);
+    expect(await page.locator('dialog [name=skuPrefix], dialog [name=categoryCode], dialog [name=type]').count()).toBe(0);
+    expect(await preview.locator('.care-preview__text').textContent()).toBe('Wipe with a soft, dry cloth.');
+    // The preview follows the field: the instructions, or the general care text of /verify when there are none.
+    await page.fill('dialog textarea[name=careInstructions]', '   ');
+    await expect.poll(() => preview.getAttribute('data-general')).toBe('true');
+    expect(await preview.locator('.care-preview__text').textContent()).toMatch(/^Store this piece on its own, away from humidity/);
+    const care = 'Wipe with a soft, dry cloth after wearing. Store it on its own, away from perfume.';
+    await page.fill('dialog textarea[name=careInstructions]', care);
+    await expect.poll(() => preview.locator('.care-preview__text').textContent()).toBe(care);
+    expect(await preview.getAttribute('data-general')).toBe('false');
+    // Set as /verify's CARE tab: the tab in the display face, the words in .prose (Helvetica Neue 13 px, line 1.75, --ink-soft).
+    expect(await preview.locator('.care-preview__tab').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?,/);
+    const set = await preview.locator('.care-preview__text').evaluate((el) => {
+      const s = getComputedStyle(el);
+      return [s.fontFamily.split(',')[0].replace(/"/g, ''), s.fontSize, s.lineHeight, s.color];
+    });
+    expect(set).toEqual(['Helvetica Neue', '13px', '22.75px', 'rgb(92, 92, 92)']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Model saved.")');
+    expect(await ctx.services.catalog.getModel(modelId)).toMatchObject({ careInstructions: care, name: 'MONOLITHE', active: true, products: 9 });
+
+    // The model created above leaves the range: inactive, and the generator no longer offers it.
+    await model('ECL-PD').locator('[data-testid=edit-model]').click();
+    await impact.waitFor();
+    expect(await impact.textContent()).toMatch(/^Touches no issued piece yet\./);
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await page.selectOption('dialog select[name=status]', 'inactive');
+    await confirmDialog(page);
+    await expect.poll(() => model('ECL-PD').locator('.status__text').textContent()).toBe('INACTIVE');
+    expect(await model('MNL-RG').locator('.status__text').textContent()).toBe('ACTIVE');
+
+    // A collection renamed, then named again as it was: each time, the pieces it is shown on are said first.
+    const collection = page.locator('#collections tbody tr').first();
+    await collection.locator('[data-testid=rename-collection]').click();
+    await impact.waitFor();
+    expect(await impact.textContent()).toBe('Touches 9 issued pieces: the result of each on /verify reads the new name as soon as it is saved.');
+    await page.fill('dialog input[name=name]', 'ORBIT NOIR');
+    await confirmDialog(page);
+    await expect.poll(() => collection.textContent()).toContain('ORBIT NOIR');
+    expect((await ctx.services.catalog.getModel(modelId)).collection?.name).toBe('ORBIT NOIR');
+    await collection.locator('[data-testid=rename-collection]').click();
+    await page.fill('dialog input[name=name]', 'ORBIT');
+    await confirmDialog(page);
+    await expect.poll(() => collection.textContent()).not.toContain('NOIR');
+
+    // An ADMIN deactivates a category: the generator stops offering it; activated again, it is offered again.
+    const leather = page.locator('#categories tbody tr', { hasText: 'LEATHER GOODS' });
+    await leather.locator('[data-testid=toggle-category]').click();
+    await confirmDialog(page);
+    await expect.poll(() => leather.locator('.status__text').textContent()).toBe('INACTIVE');
+    expect(await leather.locator('[data-testid=toggle-category]').textContent()).toBe('Activate');
+    await go(page, '#/generator', 'Issue a product');
+    expect(await page.locator('select[name=categoryCode] option').allTextContents()).toEqual(['JEWELRY · J']);
+    await page.selectOption('select[name=categoryCode]', 'J');
+    expect(await page.locator('select[name=modelId] option').allTextContents()).toEqual(['MONOLITHE · RING · MNL-RG']);
+    await go(page, '#/catalogue', 'Catalogue');
+    await leather.locator('[data-testid=toggle-category]').click();
+    await confirmDialog(page);
+    await expect.poll(() => leather.locator('.status__text').textContent()).toBe('ACTIVE');
+    const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['model.update', 'collection.update', 'category.activate', 'category.deactivate']).orderBy('id').execute();
+    expect(audited.map((a) => a.action)).toEqual(['model.update', 'model.update', 'collection.update', 'collection.update', 'category.deactivate', 'category.activate']);
+    expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
   it('issues a product with the generator and shows the one-time claim code', async () => {
@@ -790,6 +866,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('#pieces tbody tr').count()).toBe(1);
     for (const action of ['lock-account', 'unlock-account', 'export-account', 'issue-recovery-code']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     for (const email of ['sheet.client@example.com', 'lost.password@example.com']) expect(await p.content()).not.toContain(email);
+    // The catalogue reads, without its edits (A-10).
+    await go(p, '#/catalogue', 'Catalogue');
+    await expect.poll(() => p.locator('#models tbody tr').count()).toBe(2);
+    for (const action of ['edit-model', 'rename-collection', 'toggle-category']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
     await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
