@@ -1599,7 +1599,7 @@ Example:
 { "items": [{ "productId": "O26-J-00184", "claimCode": "7KQ2-M4TD-9XWH" }], "format": "pdf", "layout": "card" }
 ```
 
-Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus }`; each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). No claim code in either.
+Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus }`; each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). Both carry canonical product ids, also for a product the request named by its uuid; only a product that was not found keeps the reference given. No claim code in either.
 
 In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
 

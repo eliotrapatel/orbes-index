@@ -39,6 +39,8 @@ import {
   renderCertificateCsv,
   renderCertificatePdf,
   renderPdf,
+  sheetFooter,
+  textRun,
   toLabelText,
   type CertificateItem,
 } from '../../src/server/render/index.js';
@@ -175,6 +177,29 @@ describe('certificate card layout', () => {
     expect(layoutCertificateCard(item(184, { material: '✓' }), 'PROOF').strokes).toHaveLength(layoutCertificateCard(item(184), 'PROOF').strokes.length - 1);
   });
 
+  it('draws free text that fits once shrunk whole, at the size that fills the column', () => {
+    const { right, rows } = CARD_LAYOUT;
+    const whole = (text: string, cap: number) =>
+      textRun(text, { capHeight: cap, tracking: rows.valueTracking, x: rows.valueX, baseline: rows.baselines[1], align: 'start' }).d;
+    const fit = (text: string) => (right - rows.valueX) / measureText(text, rows.valueTracking);
+    // Fits at 1.22 mm, where width × cap rounds to one ulp above the column: drawn whole, not cut with '...'.
+    const material = toLabelText('Oxidised sterling silver 925 with gold vermeil');
+    expect(fit(material)).toBeGreaterThan(rows.minValueCap);
+    expect(fit(material)).toBeLessThan(rows.valueCap);
+    expect(layoutCertificateCard(item(184, { material }), 'VALIDATED').strokes[7].d).toBe(whole(material, fit(material)));
+    // Every length down to the 1.0 mm floor: never cut, whatever the rounding.
+    const long = 'Oxidised sterling silver 925 with gold vermeil, hand-polished, brushed inner band';
+    let shrunk = 0;
+    for (let n = 1; n <= long.length; n++) {
+      const text = toLabelText(long.slice(0, n));
+      if (fit(text) < rows.minValueCap) break;
+      if (fit(text) < rows.valueCap) shrunk++;
+      const card = layoutCertificateCard(item(184, { material: text }), 'VALIDATED');
+      expect(card.strokes[7].d, text).toBe(whole(text, Math.min(rows.valueCap, fit(text))));
+    }
+    expect(shrunk).toBeGreaterThan(10);
+  });
+
   it('says PROOF until the brand validates the layout', () => {
     expect(CERTIFICATE_LAYOUT_STATUS).toBe('PROOF');
     const proof = layoutCertificateCard(item(184), 'PROOF');
@@ -224,6 +249,25 @@ describe('certificate sheet', () => {
       expect(Math.hypot(x1 - x0, y1 - y0)).toBeCloseTo(3, 9);
     }
     expect(() => gridCutMarks(0, 0, 0, 1, 1, 1)).toThrow(RangeError);
+  });
+
+  it('keeps the footer clear of the cut marks, of the x = 190 mm cut line and of the unprintable bottom edge', () => {
+    const sheet = layoutCertificateSheet(MAX_CERTIFICATE_ITEMS);
+    // The longest caption the renderer writes: PROOF, a two-digit count, the last page.
+    const footer = sheetFooter(sheet, sheet.pages.length - 1, 'ORBES CERTIFICATE CARDS · PROOF · 2026-10-02 · 50 CARDS', CERTIFICATE_SHEET.footer);
+    expect(footer).toHaveLength(3);
+    const [caption, bar, label] = footer.map((st) => bounds(st.d, st.width / 2));
+    const cutMarksEnd = CERTIFICATE_SHEET.marginYmm + CERTIFICATE_SHEET.rows * CERTIFICATE_CARD.heightMm + 1 + 3;
+    for (const b of [caption, bar, label]) {
+      expect(b.y0).toBeGreaterThanOrEqual(cutMarksEnd + 0.8);
+      expect(b.y1).toBeLessThanOrEqual(297 - 3.5);
+    }
+    // One line: the caption, then '10 MM', then the bar, ending short of the right cut line.
+    expect(caption.x1).toBeLessThan(label.x0 - 1);
+    expect(label.x1).toBeLessThan(bar.x0);
+    expect(bar.x1).toBeLessThan(20 + 2 * CERTIFICATE_CARD.widthMm - 1);
+    const unpadded = bounds(footer[1].d);
+    expect(unpadded.x1 - unpadded.x0).toBeCloseTo(10, 9);
   });
 });
 

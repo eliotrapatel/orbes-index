@@ -136,6 +136,13 @@ describe('certificate cards API', () => {
     // Nothing was rendered for the refused requests.
     expect((await h.ctx.audit.list({ action: 'certificate.render', targetId: a.product.productId })).items).toHaveLength(0);
 
+    // Named by its row uuid, a refused product is audited under its canonical id, as a render is.
+    const byUuid = await post(operator, { items: [{ productId: b.product.id, claimCode: wrong }] });
+    expect(byUuid.statusCode).toBe(422);
+    const underId = (await h.ctx.audit.list({ action: 'certificate.render_refused', targetId: b.product.productId })).items;
+    expect(underId).toHaveLength(1);
+    expect(underId[0].details).toMatchObject({ reason: 'CLAIM_CODE_MISMATCH', productIds: [b.product.productId], refused: [b.product.productId] });
+
     // The rejection was logged, without any code.
     expect(lines.some((l) => l.includes('CLAIM_CODE_MISMATCH'))).toBe(true);
     const kept = await everythingTheServerKept();
@@ -151,6 +158,16 @@ describe('certificate cards API', () => {
     const unknown = await post(operator, { items: [{ productId: 'O26-J-99999', claimCode: 'ABCD-EFGH-JKMN' }] });
     expect(unknown.statusCode).toBe(404);
     expect(errorOf(unknown)).toEqual({ code: 'PRODUCT_NOT_FOUND', message: 'Product not found: O26-J-99999.' });
+    // The audit names a product found by its uuid by its canonical id, the unknown one by the reference given.
+    const mixed = await post(operator, {
+      items: [
+        { productId: plain.product.id, claimCode: 'ABCD-EFGH-JKMN' },
+        { productId: 'O26-J-99998', claimCode: 'ABCD-EFGH-JKMN' },
+      ],
+    });
+    expect(mixed.statusCode).toBe(404);
+    const notFound = (await h.ctx.audit.list({ action: 'certificate.render_refused' })).items.find((e) => (e.details.refused as string[]).includes('O26-J-99998'));
+    expect(notFound?.details).toMatchObject({ reason: 'PRODUCT_NOT_FOUND', productIds: [plain.product.productId, 'O26-J-99998'], refused: ['O26-J-99998'] });
 
     // Registered: the claim code has been used, a new card would be worthless.
     const sold = await issue(h.ctx, catalog, { withClaimSecret: true });

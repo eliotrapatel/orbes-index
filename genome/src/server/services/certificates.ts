@@ -111,19 +111,23 @@ export class CertificateService {
     }
     const shape = format === 'pdf' ? { format, layout } : { format };
 
+    const found: string[] = [];
     let cards: CertificateItem[];
     try {
-      cards = await this.checked(items);
+      cards = await this.checked(items, found);
     } catch (e) {
       // Refusals carry the product ids they concern; validation errors (400) are not audited.
       if (e instanceof DomainError && Array.isArray(e.internal?.refused)) {
         const refused = e.internal.refused as string[];
+        // Canonical ids, as certificate.render records them, whether the request named a product by id or by
+        // row uuid: the submitted reference (made safe) only for a product that was not found or not looked up.
+        const productIds = items.map((it, i) => found[i] ?? safeRef(it.productId));
         await this.audit.record({
           actor,
           action: CERTIFICATE_REFUSED_ACTION,
           targetType: 'product',
-          targetId: items.length === 1 ? safeRef(items[0].productId) : null,
-          details: { reason: e.code, productIds: items.map((i) => safeRef(i.productId)), refused, ...shape },
+          targetId: items.length === 1 ? productIds[0] : null,
+          details: { reason: e.code, productIds, refused, ...shape },
         });
       }
       throw e;
@@ -141,8 +145,12 @@ export class CertificateService {
     return file;
   }
 
-  /** The products, each with its verified claim code in display form, or the first refusal. */
-  private async checked(items: readonly CertificateRequestItem[]): Promise<CertificateItem[]> {
+  /**
+   * The products, each with its verified claim code in display form, or the
+   * first refusal. `found` receives each item's canonical product id, in
+   * order, as its product is found (for the refusal's audit entry).
+   */
+  private async checked(items: readonly CertificateRequestItem[], found: string[]): Promise<CertificateItem[]> {
     const rows: { p: ProductRow; code: string }[] = [];
     const seen = new Set<string>();
     for (const it of items) {
@@ -154,6 +162,7 @@ export class CertificateService {
         if (e instanceof DomainError && e.code === 'PRODUCT_NOT_FOUND') throw refusal('PRODUCT_NOT_FOUND', 404, `Product not found: ${ref}.`, [ref]);
         throw e;
       }
+      found.push(p.product_id);
       if (seen.has(p.id)) throw validationError(`${p.product_id} appears more than once.`);
       seen.add(p.id);
       rows.push({ p, code: it.claimCode });

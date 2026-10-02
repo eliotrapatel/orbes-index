@@ -59,6 +59,7 @@ export {
   layoutSheet,
   sceneToSvg,
   sheetFooter,
+  type SheetFooterOptions,
   type SheetLayout,
   type SheetPageSize,
 } from './print-sheet.js';

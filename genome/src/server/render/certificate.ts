@@ -71,14 +71,24 @@ export const CERTIFICATE_SHEET = Object.freeze({
   columns: 2,
   rows: 5,
   marginYmm: 11,
-  /** Centre line of the footer (caption and 10 mm scale bar), below the bottom cut marks. */
-  footerYmm: 291.6,
+  /**
+   * Footer in the 11 mm under the grid, below the cut marks (287 to 290 mm):
+   * the caption, then '10 MM' and the scale bar on the same line, all ink
+   * within 291 to 293 mm, so 4 mm clear of an edge office printers may not
+   * print. The bar ends short of the x = 190 mm cut line: no cut mark points
+   * at it.
+   */
+  footer: Object.freeze({ centerYmm: 292, barRightMm: 186, barLabel: 'before' as const }),
 });
 
 /** The scratch-off ink, on its own plate. The CMYK alternate (a mid grey) is only how viewers and office printers show it. */
 export const SCRATCH_OFF_SPOT: Readonly<PdfSpotColor> = Object.freeze({ name: 'ORBES SCRATCH-OFF', cmyk: [0, 0, 0, 35] as const });
 
-/** The card's fixed copy (house voice: uppercase, tracked). The three steps are those of the packaging kit. */
+/**
+ * The card's fixed copy (house voice: uppercase, tracked). The three steps
+ * are those of the packaging kit, word for word: step 2 names the ORBES CODE,
+ * what the buyer scans, not the SEAL, its finder (BRAND §2.1).
+ */
 export const CERTIFICATE_COPY = Object.freeze({
   title: 'CERTIFICATE',
   proof: 'PROOF · LAYOUT NOT VALIDATED',
@@ -186,9 +196,13 @@ interface LineSpec {
 function fittedRun(text: string, spec: LineSpec & { minCap: number; maxWidth: number }): TextRun {
   const width = (t: string) => measureText(t, spec.tracking);
   let t = text;
-  let cap = spec.cap;
-  if (width(t) * cap > spec.maxWidth) {
-    cap = Math.max(spec.minCap, spec.maxWidth / width(t));
+  // The cap height at which the whole text fills the line. Whether to cut is
+  // decided on it, never by multiplying it back: width × (maxWidth / width)
+  // can round one ulp above maxWidth, and text that fits would lose its end.
+  const fit = spec.maxWidth / width(t);
+  let cap = Math.min(spec.cap, fit);
+  if (fit < spec.minCap) {
+    cap = spec.minCap;
     const chars = [...t];
     while (width(t) * cap > spec.maxWidth && chars.length > 0) {
       chars.pop();
@@ -362,7 +376,7 @@ export async function renderCertificatePdf(items: readonly CertificateItem[], op
         sheet.pageWidthMm,
         sheet.pageHeightMm,
         placements.map((p) => layoutCertificateCard(items[p.index], status, p.xMm, p.yMm)),
-        [cuts, ...sheetFooter(sheet, pageIndex, caption, CERTIFICATE_SHEET.footerYmm)],
+        [cuts, ...sheetFooter(sheet, pageIndex, caption, CERTIFICATE_SHEET.footer)],
       ),
     );
     title = caption;

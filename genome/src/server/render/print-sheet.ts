@@ -218,19 +218,33 @@ export function gridCutMarks(x0: number, y0: number, columns: number, rows: numb
   return { d, width: MARK_WIDTH_MM };
 }
 
+export interface SheetFooterOptions {
+  /** Centre line of the footer (default: inside the SHEET_FOOTER_MM band). */
+  centerYmm?: number;
+  /** Right end of the scale bar (default: 12 mm from the right edge, as the caption is from the left). */
+  barRightMm?: number;
+  /**
+   * '10 MM' under the bar (default), or before it on the caption's baseline:
+   * the footer is then no taller than the bar (2 mm), for a tight margin.
+   */
+  barLabel?: 'below' | 'before';
+}
+
 /**
  * Footer of a sheet page in page millimetres: a caption and a 10 mm scale bar
- * so the printer can confirm the sheet was printed at 100 %. `centerYmm`
- * moves its centre line (default: inside the SHEET_FOOTER_MM band).
+ * so the printer can confirm the sheet was printed at 100 %.
  */
-export function sheetFooter(layout: SheetLayout, pageIndex: number, caption: string, centerYmm?: number): StrokePath[] {
-  const y = centerYmm ?? layout.pageHeightMm - SHEET_FOOTER_MM / 2 - 2;
+export function sheetFooter(layout: SheetLayout, pageIndex: number, caption: string, opts: SheetFooterOptions = {}): StrokePath[] {
+  const y = opts.centerYmm ?? layout.pageHeightMm - SHEET_FOOTER_MM / 2 - 2;
   const left = 12;
   const text = `${caption} · PAGE ${pageIndex + 1}/${layout.pages.length} · PRINT AT ACTUAL SIZE`;
   const run = textRun(text, { capHeight: 1.6, tracking: 0.35, x: left, baseline: y + 0.8, align: 'start' });
-  const barRight = layout.pageWidthMm - left;
+  const barRight = opts.barRightMm ?? layout.pageWidthMm - left;
   const bar = `M${fmt(barRight - 10)} ${fmt(y)}L${fmt(barRight)} ${fmt(y)}M${fmt(barRight - 10)} ${fmt(y - 1)}L${fmt(barRight - 10)} ${fmt(y + 1)}M${fmt(barRight)} ${fmt(y - 1)}L${fmt(barRight)} ${fmt(y + 1)}`;
-  const barLabel = textRun('10 MM', { capHeight: 1.2, tracking: 0.3, x: barRight - 5, baseline: y + 3.2, align: 'middle' });
+  const barLabel =
+    opts.barLabel === 'before'
+      ? textRun('10 MM', { capHeight: 1.2, tracking: 0.3, x: barRight - 11.5, baseline: y + 0.8, align: 'end' })
+      : textRun('10 MM', { capHeight: 1.2, tracking: 0.3, x: barRight - 5, baseline: y + 3.2, align: 'middle' });
   return [
     { d: run.d, width: run.strokeWidth },
     { d: bar, width: 0.15 },
