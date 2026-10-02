@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 
 const EXPECTED_TABLES = [
-  'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
+  'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
   'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_transfers', 'product_status_history',
   'products', 'revocations', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records', 'sessions', 'warranties',
 ];
@@ -79,32 +79,63 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX scan_reports_scan_event_id_key ON public\.scan_reports USING btree \(scan_event_id\)/)).toBe(true);
     expect(has(/INDEX scan_reports_handled_by_idx ON public\.scan_reports USING btree \(handled_by\)/)).toBe(true);
     expect(has(/INDEX scan_reports_status_created_idx ON public\.scan_reports USING btree \(status, created_at\)/)).toBe(true);
+    // 0005: one open recovery code per account, and the full indexes that lead with its foreign keys.
+    expect(
+      has(/UNIQUE INDEX account_recovery_codes_single_open ON public\.account_recovery_codes USING btree \(account_id\) WHERE \(\(used_at IS NULL\) AND \(revoked_at IS NULL\)\)/),
+    ).toBe(true);
+    expect(has(/INDEX account_recovery_codes_account_idx ON public\.account_recovery_codes USING btree \(account_id, created_at\)/)).toBe(true);
+    expect(has(/INDEX account_recovery_codes_created_by_idx ON public\.account_recovery_codes USING btree \(created_by\)/)).toBe(true);
+  });
+
+  /**
+   * Every column, index, constraint and trigger of the public schema. Not the column positions: PostgreSQL
+   * never reuses the number of a dropped column, so a column dropped and added again comes back one further.
+   */
+  const snapshot = async () =>
+    (
+      await sql<{ object: string }>`
+        SELECT 'table ' || table_name || ' ' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS object
+          FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE 'kysely_%'
+        UNION ALL SELECT 'index ' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename NOT LIKE 'kysely_%'
+        UNION ALL SELECT 'constraint ' || conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid)
+          FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+        UNION ALL SELECT 'trigger ' || tgrelid::regclass::text || ' ' || tgname FROM pg_trigger WHERE NOT tgisinternal
+        ORDER BY 1`.execute(t.db)
+    ).rows.map((r) => r.object);
+
+  /** Roll back until `name` is reverted: the schema with it applied, and without it. */
+  async function rollBackTo(name: string): Promise<{ with: string[]; without: string[] }> {
+    let withIt: string[] | undefined;
+    for (let i = 0; i < Object.keys(MIGRATIONS).length && !withIt; i++) {
+      const state = await snapshot();
+      if ((await migrateDown(t.db)).reverted[0] === name) withIt = state;
+    }
+    expect(withIt, name).toBeDefined();
+    return { with: withIt!, without: await snapshot() };
+  }
+
+  it('0005 down restores the schema of 0004 exactly, and up again re-creates the recovery codes and the transfer pause', async () => {
+    const latest = await snapshot();
+    // Later migrations (0006…) are rolled back first, then 0005 alone.
+    const { with: withRecovery, without: before } = await rollBackTo('0005_account_recovery');
+    const added = withRecovery.filter((o) => !before.includes(o));
+    expect(added.some((o) => o.startsWith('table account_recovery_codes '))).toBe(true);
+    expect(added.filter((o) => o.startsWith('table accounts '))).toEqual(['table accounts transfers_frozen_until timestamp with time zone YES ']);
+    // Nothing of 0005 is left, and nothing else changed.
+    expect(before.filter((o) => o.includes('account_recovery_codes') || o.includes('transfers_frozen_until'))).toEqual([]);
+    expect(withRecovery.filter((o) => !o.includes('account_recovery_codes') && !o.includes('transfers_frozen_until'))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied[0]).toBe('0005_account_recovery');
+    expect(await snapshot()).toEqual(latest);
   });
 
   it('0004 down restores the schema of 0003 exactly, and up again re-creates scan_reports', async () => {
-    const snapshot = async () =>
-      (
-        await sql<{ object: string }>`
-          SELECT 'table ' || table_name || ' ' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS object
-            FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE 'kysely_%'
-          UNION ALL SELECT 'index ' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename NOT LIKE 'kysely_%'
-          UNION ALL SELECT 'constraint ' || conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid)
-            FROM pg_constraint WHERE connamespace = 'public'::regnamespace
-          UNION ALL SELECT 'trigger ' || tgrelid::regclass::text || ' ' || tgname FROM pg_trigger WHERE NOT tgisinternal
-          ORDER BY 1`.execute(t.db)
-      ).rows.map((r) => r.object);
     // Later migrations (0005…) are rolled back first, then 0004 alone.
     const latest = await snapshot();
-    let withReports: string[] | undefined;
-    for (let i = 0; i < Object.keys(MIGRATIONS).length && !withReports; i++) {
-      const state = await snapshot();
-      if ((await migrateDown(t.db)).reverted[0] === '0004_scan_reports') withReports = state;
-    }
-    expect(withReports?.some((o) => o.startsWith('table scan_reports '))).toBe(true);
-    const before = await snapshot();
+    const { with: withReports, without: before } = await rollBackTo('0004_scan_reports');
+    expect(withReports.some((o) => o.startsWith('table scan_reports '))).toBe(true);
     expect(before.filter((o) => o.includes('scan_reports'))).toEqual([]);
     // Only scan_reports went: everything else is as 0004 found it.
-    expect(withReports!.filter((o) => !o.includes('scan_reports'))).toEqual(before);
+    expect(withReports.filter((o) => !o.includes('scan_reports'))).toEqual(before);
     expect((await migrateToLatest(t.db)).applied[0]).toBe('0004_scan_reports');
     expect(await snapshot()).toEqual(latest);
   });

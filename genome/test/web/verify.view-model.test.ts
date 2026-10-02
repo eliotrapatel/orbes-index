@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { UNUSUAL_ACTIVITY_OWNER_COPY, VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { ApiError } from '../../src/web/verify/api.js';
 import {
+  ACCOUNT_PASSWORD,
   ACTION_LABELS,
   ASSURANCE_NOTE,
   classifyCameraError,
@@ -20,8 +21,10 @@ import {
   formatDate,
   formatDateLong,
   formatDateTime,
+  formatDateTimeLong,
   isAuthenticState,
   normalizeCodeInput,
+  recoveryContactModel,
   registrationOpen,
   resultViewModel,
   shortReference,
@@ -415,6 +418,54 @@ describe('verify view-model: ORBES Client Services contact', () => {
   it('names ORBES Client Services in full, never the forbidden "Contact support" (BRAND §4.5)', () => {
     expect(CONTACT.action).toBe('CONTACT ORBES CLIENT SERVICES');
     expect(Object.values(CONTACT).join(' ')).not.toMatch(/support|product/i);
+  });
+});
+
+describe('verify view-model: FORGOTTEN PASSWORD? (C-04)', () => {
+  const CS = { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' };
+  const registered = outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false } });
+
+  it('offers ORBES Client Services wherever the OWNERSHIP panel may ask for a sign-in, with an email that says why', () => {
+    const vm = resultViewModel(registered, { offsetMinutes: 120, clientServices: CS });
+    expect(vm.ownership.kind).toBe('registered');
+    expect(vm.recoveryContact).toMatchObject({ placement: 'recovery', phone: { label: CS.phone, href: 'tel:+33123456789' }, hours: CS.hours });
+    const m = /^mailto:([^?]+)\?subject=([^&]*)&body=([^&]*)$/.exec(vm.recoveryContact!.mailto!)!;
+    expect([m[1], decodeURIComponent(m[2]), decodeURIComponent(m[3])]).toEqual(['clientservices@theorbes.com', 'ORBES — FORGOTTEN PASSWORD', '\r\n\r\nREFERENCE: 4515B884']);
+    // The result's own contact is unchanged: an active warranty asks for none.
+    expect(vm.contact).toBeUndefined();
+    const firstRegistration = outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: 't', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true } });
+    expect(resultViewModel(firstRegistration, { clientServices: CS }).recoveryContact?.placement).toBe('recovery');
+    // The certificate-card section of an UNUSUAL ACTIVITY result signs in too.
+    const card = outcome('SUSPICIOUS_ACTIVITY', { registration: { token: 't', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true } });
+    expect(resultViewModel(card, { clientServices: CS }).recoveryContact?.placement).toBe('recovery');
+  });
+
+  it('is absent where no sign-in is offered, and without a usable configuration', () => {
+    expect(resultViewModel(outcome('AUTHENTIC'), { clientServices: CS }).recoveryContact).toBeUndefined();
+    expect(resultViewModel(outcome('INVALID_SIGNATURE'), { clientServices: CS }).recoveryContact).toBeUndefined();
+    expect(resultViewModel(registered).recoveryContact).toBeUndefined();
+    expect(resultViewModel(registered, { clientServices: { hours: CS.hours } }).recoveryContact).toBeUndefined();
+    expect(recoveryContactModel({ email: 'x@y.z?cc=a@b.c', phone: 'javascript:alert(1)' }, '4515B884')).toBeNull();
+    // Without a reference, the email asks for nothing more than the subject says.
+    expect(recoveryContactModel({ email: CS.email }, '')).toEqual({ placement: 'recovery', mailto: 'mailto:clientservices@theorbes.com?subject=ORBES%20%E2%80%94%20FORGOTTEN%20PASSWORD&body=%0D%0A' });
+  });
+
+  it('says who gives the code, how long it lasts, and what a recovery does, without blame or "support" (BRAND §4.5)', () => {
+    expect(ACCOUNT_PASSWORD.forgotten).toBe('FORGOTTEN PASSWORD?');
+    expect(ACCOUNT_PASSWORD.change).toBe('CHANGE PASSWORD');
+    expect(ACCOUNT_PASSWORD.forgottenLead).toMatch(/ORBES Client Services .* identity, .* one-time recovery code, valid for 30 minutes\.$/);
+    expect(ACCOUNT_PASSWORD.recovered('5 October 2026, 11:00')).toBe(
+      'Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until 5 October 2026, 11:00.',
+    );
+    const words = Object.values(ACCOUNT_PASSWORD).map((v) => (typeof v === 'string' ? v : v('5 October 2026, 11:00'))).join(' ');
+    expect(words).not.toMatch(/support|product|fake|counterfeit|!/i);
+    expect(CONTACT.recoverySubject).toBe('ORBES — FORGOTTEN PASSWORD');
+  });
+
+  it('formats the end of the transfer pause for a sentence, in the viewer\'s zone', () => {
+    expect(formatDateTimeLong('2026-10-05T09:00:00.000Z', 120)).toBe('5 October 2026, 11:00');
+    expect(formatDateTimeLong('2026-12-31T23:30:00.000Z', 60)).toBe('1 January 2027, 00:30');
+    expect(formatDateTimeLong('not a date')).toBe('');
   });
 });
 

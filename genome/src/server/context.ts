@@ -21,6 +21,7 @@ import type { AppConfig } from './config.js';
 import { GeoResolver } from './geo/resolver.js';
 import { createKeyProvider, KeyService, type KeyProvider } from './keys/index.js';
 import { AuthenticatorRegistry } from './authenticators/index.js';
+import { AccountRecoveryService } from './services/account-recovery.js';
 import { AnomalyService } from './services/anomaly.js';
 import { AuditService } from './services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
@@ -53,6 +54,8 @@ export interface AppServices {
   certificates: CertificateService;
   /** Customers' reports on scans that were not authentic, and the console's Cases queue. */
   reports: ScanReportService;
+  /** Assisted recovery of a customer account: one-time codes issued by ORBES Client Services. */
+  recovery: AccountRecoveryService;
 }
 
 export interface AppContext {
@@ -128,6 +131,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const certificates = new CertificateService({ db, audit, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const reports = new ScanReportService({ db, audit, clock, log });
+    const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
 
@@ -143,6 +147,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       catalog,
       certificates,
       reports,
+      recovery,
       ...overrides.services,
     };
 

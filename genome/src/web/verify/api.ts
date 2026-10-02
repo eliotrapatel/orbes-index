@@ -13,7 +13,7 @@
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
  */
-import type { ClientServices, OwnershipConfirmation, ReportInput, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
+import type { ClientServices, OwnershipConfirmation, RecoveryResult, ReportInput, SessionInfo, TransferOffer, VerifyInput, VerifyOutcome } from './types.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -138,6 +138,24 @@ export class ApiClient {
     const s = await this.request<SessionInfo>('POST', '/api/v1/account/register', body);
     this.remember(s);
     return s;
+  }
+
+  /**
+   * Change the password with the current one (C-04): this session stays, the others end. A wrong current
+   * password is a 400 CURRENT_PASSWORD_INVALID, never a 401, so the page stays signed in.
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request('POST', '/api/v1/account/password', { currentPassword, newPassword }, { csrf: true });
+  }
+
+  /**
+   * Set a new password with the one-time code of ORBES Client Services (C-04). Session-less (the server checks
+   * the origin): no session is opened, and every session of the account ends, this page's too.
+   */
+  async recoverAccount(email: string, recoveryCode: string, newPassword: string): Promise<RecoveryResult> {
+    const r = await this.request<RecoveryResult>('POST', '/api/v1/account/recover', { email, recoveryCode: recoveryCode.trim(), newPassword });
+    this.forgetSession();
+    return r;
   }
 
   async logout(): Promise<void> {

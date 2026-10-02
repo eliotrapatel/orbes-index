@@ -5,6 +5,16 @@
  * mode alone, is the certificate-card section of an UNUSUAL ACTIVITY result
  * (`underReview`: the claim code is required).
  *
+ * The password (C-04): under SIGN IN, FORGOTTEN PASSWORD? leads to ORBES
+ * Client Services (the contact of C-02), who check the customer's identity
+ * and give a one-time recovery code; then I HAVE A RECOVERY CODE opens the
+ * form (email, code, new password). Signed in, CHANGE PASSWORD sits beside
+ * SIGN OUT (until F-01 moves it to the customer's pieces).
+ *
+ *   SIGN IN form ── FORGOTTEN PASSWORD? ──▶ FORGOTTEN PASSWORD (contact)
+ *        ▲                                     │ I HAVE A RECOVERY CODE
+ *        └──── BACK TO SIGN IN / recovered ◀── SET A NEW PASSWORD (form)
+ *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
  * customers and never carry internal detail. The panel re-renders itself on
@@ -15,9 +25,9 @@ import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
-import { formatDate, normalizeCodeInput, registrationOpen, registrationStatus, type OwnershipMode } from '../view-model.js';
-import { CLAIM_HELD } from '../copy.js';
-import { sectionLabel } from './common.js';
+import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD } from '../copy.js';
+import { contactBlock, sectionLabel } from './common.js';
 
 export interface OwnershipDeps {
   api: ApiClient;
@@ -26,6 +36,8 @@ export interface OwnershipDeps {
   onRescan(): void;
   /** Verify the same code again, so the whole result reflects the new ownership. */
   onRefresh?(): void;
+  /** ORBES Client Services under FORGOTTEN PASSWORD? (absent when not configured). */
+  contact?: ContactModel;
   now?: () => number;
 }
 
@@ -34,10 +46,18 @@ export const MIN_PASSWORD = 12;
 
 
 type AuthTab = 'signin' | 'create';
+/** A forgotten password: first how to reach ORBES Client Services, then the recovery form. */
+type RecoverStep = 'contact' | 'code';
 
 interface PanelState {
   mode: OwnershipMode;
   authTab: AuthTab;
+  /** Signed out: the steps of FORGOTTEN PASSWORD?, instead of the sign-in switch. */
+  recover: RecoverStep | null;
+  /** Signed in: CHANGE PASSWORD is open, instead of the block of the mode. */
+  changing: boolean;
+  /** The email of a recovered account, put back in the sign-in form (never a password). */
+  signInEmail: string;
   offer: TransferOffer | null;
   confirmation: { verified: boolean; via: 'register' | 'transfer'; productId: string } | null;
   error: string | null;
@@ -76,7 +96,7 @@ export class OwnershipPanel {
     private readonly deps: OwnershipDeps,
   ) {
     this.now = deps.now ?? (() => Date.now());
-    this.state = { mode, authTab: 'signin', offer: null, confirmation: null, error: null, notice: null, busy: false };
+    this.state = { mode, authTab: 'signin', recover: null, changing: false, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
     this.root = h('div', { class: 'ownership' });
     this.unsubscribe = deps.session.subscribe(() => this.render());
@@ -99,9 +119,13 @@ export class OwnershipPanel {
 
   private render(): void {
     const s = this.deps.session.state;
+    // CHANGE PASSWORD belongs to a session, FORGOTTEN PASSWORD? to its absence: a sign-in or sign-out elsewhere closes them.
+    if (s.status === 'signed-in') this.state.recover = null;
+    else this.state.changing = false;
     const hadFocus = typeof document !== 'undefined' && this.root.contains(document.activeElement);
     const children: (HTMLElement | null)[] = [];
-    if (this.state.confirmation) children.push(...this.confirmationBlock());
+    if (s.status === 'signed-in' && this.state.changing) children.push(...this.changeBlock());
+    else if (this.state.confirmation) children.push(...this.confirmationBlock());
     else {
       const m = this.state.mode;
       switch (m.kind) {
@@ -244,12 +268,18 @@ export class OwnershipPanel {
     return out;
   }
 
+  /** SIGNED IN AS …, then CHANGE PASSWORD (while its form is closed) and SIGN OUT, which wrap under it when the line is short. */
   private accountLine(email: string): HTMLElement {
     return h(
       'div',
       { class: 'ownership__account' },
       h('p', { class: 'ownership__who micro soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
-      this.textButton('SIGN OUT', () => this.signOut()),
+      h(
+        'div',
+        { class: 'ownership__links' },
+        this.state.changing ? null : this.textButton(ACCOUNT_PASSWORD.change, () => this.openChange()),
+        this.textButton('SIGN OUT', () => this.signOut()),
+      ),
     );
   }
 
@@ -264,6 +294,7 @@ export class OwnershipPanel {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
       return [h('p', { class: 'ownership__meta micro soft', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
+    if (this.state.recover) return this.recoverBlock(this.state.recover);
     const tab = this.state.authTab;
     const switcher = h(
       'div',
@@ -272,7 +303,14 @@ export class OwnershipPanel {
       h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
       h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'create' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('create') }, text: 'CREATE ACCOUNT' }),
     );
-    return [this.text(lead), switcher, tab === 'signin' ? this.signInForm() : this.createForm()];
+    if (tab === 'create') return [this.text(lead), switcher, this.createForm()];
+    // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04).
+    return [
+      this.text(lead),
+      switcher,
+      this.signInForm(),
+      h('div', { class: 'ownership__actions' }, this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'))),
+    ];
   }
 
   private setAuthTab(t: AuthTab): void {
@@ -281,6 +319,64 @@ export class OwnershipPanel {
     this.state.error = null;
     this.render();
     this.root.querySelector<HTMLInputElement>('input')?.focus();
+  }
+
+  /** Move between the steps of FORGOTTEN PASSWORD? (null: back to the sign-in form); keyboard focus follows. */
+  private setRecover(step: RecoverStep | null): void {
+    this.state.recover = step;
+    this.state.error = null;
+    this.state.notice = null;
+    this.render();
+    this.root.querySelector<HTMLElement>(step === 'contact' ? '#recover-title' : 'input')?.focus();
+  }
+
+  /**
+   * FORGOTTEN PASSWORD: how to reach ORBES Client Services (their identity check comes first), then the form
+   * with the code they give, as a section under the status of the piece, where the sign-in form was. The
+   * contact is the one of the result (C-02); without one, the sentence still names who helps.
+   */
+  private recoverBlock(step: RecoverStep): HTMLElement[] {
+    const back = this.textButton(ACCOUNT_PASSWORD.backToSignIn, () => this.setRecover(null));
+    const title = sectionLabel(step === 'contact' ? ACCOUNT_PASSWORD.forgottenTitle : ACCOUNT_PASSWORD.recoverTitle, 'recover-title');
+    title.tabIndex = -1;
+    if (step === 'contact') {
+      return [
+        title,
+        this.text(ACCOUNT_PASSWORD.forgottenLead),
+        this.deps.contact ? contactBlock(this.deps.contact) : null,
+        h('div', { class: 'ownership__actions ownership__actions--stack' }, this.textButton(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code')), back),
+      ].filter((x): x is HTMLElement => x !== null);
+    }
+    return [
+      title,
+      this.text(ACCOUNT_PASSWORD.recoverLead),
+      this.recoverForm(),
+      h('div', { class: 'ownership__actions' }, back),
+    ];
+  }
+
+  /** CHANGE PASSWORD, signed in: the current password, then the new one. This session stays. */
+  private changeBlock(): HTMLElement[] {
+    return [
+      h('p', { class: 'ownership__status', text: ACCOUNT_PASSWORD.change }),
+      this.text(ACCOUNT_PASSWORD.changeLead),
+      this.changeForm(),
+      h('div', { class: 'ownership__actions' }, this.textButton(ACCOUNT_PASSWORD.cancel, () => this.closeChange())),
+    ];
+  }
+
+  private openChange(): void {
+    this.state.changing = true;
+    this.state.error = null;
+    this.state.notice = null;
+    this.render();
+    this.root.querySelector<HTMLInputElement>('input')?.focus();
+  }
+
+  private closeChange(notice: string | null = null): void {
+    this.state.changing = false;
+    this.state.notice = notice;
+    this.render();
   }
 
   private field(id: string, label: string, input: HTMLInputElement, hint?: string): HTMLElement {
@@ -322,13 +418,90 @@ export class OwnershipPanel {
 
   private signInForm(): HTMLFormElement {
     const email = h('input', { attrs: { type: 'email', name: 'email', autocomplete: 'username', inputmode: 'email', required: true, maxlength: 254, spellcheck: 'false', autocapitalize: 'none' } });
+    // After a recovery, the account's email is already there: only the new password is typed.
+    if (this.state.signInEmail) email.value = this.state.signInEmail;
     const password = h('input', { attrs: { type: 'password', name: 'password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
     return this.form('signin', [this.field('auth-email', 'EMAIL', email), this.field('auth-password', 'PASSWORD', password)], 'SIGN IN', async () => {
       if (!email.value.trim() || !password.value) throw new FormError('Enter your email and password.');
       const s = await this.deps.api.login(email.value.trim(), password.value);
       password.value = '';
+      this.state.signInEmail = '';
+      this.state.notice = null;
       this.deps.session.signedIn(s);
     });
+  }
+
+  /** The recovery form (session-less): email, the code of ORBES Client Services, a new password. */
+  private recoverForm(): HTMLFormElement {
+    const email = h('input', { attrs: { type: 'email', name: 'email', autocomplete: 'username', inputmode: 'email', required: true, maxlength: 254, spellcheck: 'false', autocapitalize: 'none' } });
+    const code = this.codeInput('recovery-code');
+    const password = h('input', { attrs: { type: 'password', name: 'new-password', autocomplete: 'new-password', required: true, minlength: MIN_PASSWORD, maxlength: 1024 } });
+    return this.form(
+      'recover',
+      [
+        this.field('recover-email', 'EMAIL', email),
+        this.field('recovery-code', ACCOUNT_PASSWORD.recoveryCode, code, ACCOUNT_PASSWORD.recoveryCodeHint),
+        this.field('recover-password', ACCOUNT_PASSWORD.newPassword, password, `At least ${MIN_PASSWORD} characters.`),
+      ],
+      ACCOUNT_PASSWORD.recover,
+      async () => {
+        if (!email.value.trim()) throw new FormError('Enter the email of your ORBES account.');
+        if (normalizeCodeInput(code.value).length !== 14) {
+          code.setAttribute('aria-invalid', 'true');
+          throw new FormError(ACCOUNT_PASSWORD.codeIncomplete);
+        }
+        if (password.value.length < MIN_PASSWORD) {
+          password.setAttribute('aria-invalid', 'true');
+          throw new FormError(`Choose a password of at least ${MIN_PASSWORD} characters.`);
+        }
+        const r = await this.deps.api.recoverAccount(email.value.trim(), code.value, password.value);
+        password.value = '';
+        code.value = '';
+        // Every session of the account has ended: back to SIGN IN, the email filled in, with what happened.
+        this.state.signInEmail = email.value.trim();
+        this.state.authTab = 'signin';
+        this.state.recover = null;
+        this.state.notice = ACCOUNT_PASSWORD.recovered(formatDateTimeLong(r.transfersPausedUntil, -new Date().getTimezoneOffset()));
+        this.render();
+        this.root.querySelector<HTMLInputElement>('input[name="password"]')?.focus();
+      },
+    );
+  }
+
+  /** CHANGE PASSWORD: a wrong current password is a 400 (never a 401), shown on its field; the session stays. */
+  private changeForm(): HTMLFormElement {
+    const current = h('input', { attrs: { type: 'password', name: 'current-password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
+    const next = h('input', { attrs: { type: 'password', name: 'new-password', autocomplete: 'new-password', required: true, minlength: MIN_PASSWORD, maxlength: 1024 } });
+    return this.form(
+      'password',
+      [
+        this.field('current-password', ACCOUNT_PASSWORD.currentPassword, current),
+        this.field('new-password', ACCOUNT_PASSWORD.newPassword, next, `At least ${MIN_PASSWORD} characters.`),
+      ],
+      ACCOUNT_PASSWORD.change,
+      async () => {
+        if (!current.value) {
+          current.setAttribute('aria-invalid', 'true');
+          throw new FormError('Enter your current password.');
+        }
+        if (next.value.length < MIN_PASSWORD) {
+          next.setAttribute('aria-invalid', 'true');
+          throw new FormError(`Choose a password of at least ${MIN_PASSWORD} characters.`);
+        }
+        try {
+          await this.deps.api.changePassword(current.value, next.value);
+        } catch (e) {
+          if (e instanceof ApiError && e.code === 'CURRENT_PASSWORD_INVALID') {
+            current.value = '';
+            current.setAttribute('aria-invalid', 'true');
+          }
+          throw e;
+        }
+        current.value = '';
+        next.value = '';
+        this.closeChange(ACCOUNT_PASSWORD.changed);
+      },
+    );
   }
 
   private createForm(): HTMLFormElement {
@@ -451,6 +624,7 @@ export class OwnershipPanel {
         await this.deps.api.logout();
       } finally {
         this.state.offer = null;
+        this.state.changing = false;
         this.deps.session.signedOut();
       }
     });

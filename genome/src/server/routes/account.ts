@@ -2,9 +2,15 @@
  * Customer account routes (contract §3, cookie `orbes_session`).
  *
  * The scope's guard (http/sessions.ts) requires a live account session and,
- * for every POST, the CSRF token and a same-origin request. Registration and
- * login are the only session-less routes (same-origin check only) and share
- * the `auth` rate-limit budget with the other credential-guessing surfaces.
+ * for every POST, the CSRF token and a same-origin request. Registration,
+ * login and the assisted recovery are the only session-less routes
+ * (same-origin check only); they and the password change share the `auth`
+ * rate-limit budget with the other credential-guessing surfaces.
+ *
+ * Password (C-04): a signed-in customer changes it with the current one
+ * (keeping this session, ending the others); one who forgot it sets a new
+ * one with the recovery code ORBES Client Services issued
+ * (services/account-recovery.ts).
  *
  * Responses never expose internal ids of other people, product statuses or
  * staff data; the account itself is described by email and display name.
@@ -13,8 +19,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { loginBody, parse, productParams, registerAccountBody } from '../http/schemas.js';
-import { clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
+import { changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
 import type { RouteDeps } from './public.js';
@@ -27,7 +33,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, ownership, warranty } = ctx.services;
+  const { auth, ownership, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -52,6 +58,27 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     if (token && request.orbes.account) await auth.logout(token, 'account', { ipHash: request.orbes.ipHash });
     clearSessionCookie(reply, ctx.config, 'account');
     return { ok: true };
+  });
+
+  // A wrong current password is 400 CURRENT_PASSWORD_INVALID, never a 401 (which signs the app out).
+  app.post('/api/v1/account/password', { config: { rateGroup: 'auth' } }, async (request) => {
+    const { account, token } = requireAccount(request);
+    const b = parse(changePasswordBody, request.body);
+    await auth.changePassword({ type: 'account', id: account.id }, { currentPassword: b.currentPassword, newPassword: b.newPassword }, accountActor(request), {
+      keepToken: token,
+    });
+    return { ok: true };
+  });
+
+  // One answer for an unknown email and a wrong, expired or used code (400 RECOVERY_CODE_INVALID). No session is
+  // opened: every session of the account ends, and the customer signs in with the new password.
+  app.post('/api/v1/account/recover', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request) => {
+    const b = parse(recoverAccountBody, request.body);
+    const r = await recovery.recover(
+      { email: b.email, recoveryCode: b.recoveryCode, newPassword: b.newPassword },
+      { ipHash: request.orbes.ipHash, userAgent: userAgentOf(request) },
+    );
+    return { ok: true, transfersPausedUntil: r.transfersFrozenUntil };
   });
 
   // Session probe for pages that only want to know whether someone is signed in: an anonymous visitor

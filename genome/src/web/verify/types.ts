@@ -106,6 +106,12 @@ export interface SessionInfo {
   csrfToken: string;
 }
 
+/** POST /api/v1/account/recover (C-04): no session is opened; new transfers out of the account are paused until then. */
+export interface RecoveryResult {
+  ok: true;
+  transfersPausedUntil: string;
+}
+
 export interface OwnershipConfirmation {
   productId: string;
   verified: boolean;

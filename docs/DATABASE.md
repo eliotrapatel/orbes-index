@@ -39,14 +39,14 @@ The database is the **registry** of the ORBES GENOME CODE system. It records:
 
 - the catalogue (categories, collections, models);
 - every issued product, its genome and every code ever signed for it, together with the public half of every signing key;
-- customer accounts, staff (admin) users and their login sessions;
+- customer accounts, staff (admin) users and their login sessions, and the one-time codes with which ORBES Client Services lets a customer recover a forgotten password;
 - ownership, ownership transfers, warranties and service records;
 - every verification request (scan) and its authentication decision;
 - customers' reports on scans that were not authentic (where they saw or bought the piece), and the cases staff follow up;
 - anomaly findings and revocations;
 - an append-only, hash-chained audit log of every mutation.
 
-It never holds private signing keys, raw IP addresses, raw device identifiers, plaintext passwords, claim codes, transfer codes, registration tokens or session tokens.
+It never holds private signing keys, raw IP addresses, raw device identifiers, plaintext passwords, claim codes, transfer codes, recovery codes, registration tokens or session tokens.
 
 A successful verification proves that ORBES issued and signed a code and what the registry says about it. It does not prove that the physical object carrying the code is genuine: a printed code can be copied (see [CRYPTOGRAPHY §7](CRYPTOGRAPHY.md#7-what-the-cryptography-does-not-prove)).
 
@@ -186,6 +186,9 @@ erDiagram
   PRODUCTS |o..o{ REVOCATIONS : "target_id when PRODUCT (no FK)"
   CODES |o..o{ REVOCATIONS : "target_id when CODE (no FK)"
   CRYPTOGRAPHIC_KEYS |o..o{ REVOCATIONS : "target_id when KEY (no FK)"
+
+  ACCOUNTS ||--o{ ACCOUNT_RECOVERY_CODES : "account_id"
+  ADMIN_USERS ||--o{ ACCOUNT_RECOVERY_CODES : "created_by"
 
   ACCOUNTS |o..o{ SESSIONS : "subject_id (no FK)"
   ADMIN_USERS |o..o{ SESSIONS : "subject_id (no FK)"
@@ -453,12 +456,13 @@ Customer accounts.
 | `status` | `text` | NOT NULL | `'ACTIVE'` | `CHECK (status IN ('ACTIVE','LOCKED','DELETED'))`. Only ACTIVE accounts can log in or use a session. No code path sets LOCKED or DELETED in this version. |
 | `failed_logins` | `int` | NOT NULL | `0` | `CHECK (failed_logins >= 0)`. Wrong passwords in the current throttle window (migration `0002_platform_guards`). From 10 within 15 minutes, logins to the account are refused with the generic `INVALID_CREDENTIALS` until the window ends; reset to 0 by a successful login. |
 | `failed_logins_since` | `timestamptz` | NULL | — | Start of the throttle window (the first failure); NULL when there is none. A failure after the window has ended starts a new one. |
+| `transfers_frozen_until` | `timestamptz` | NULL | — | Migration `0005_account_recovery`. Set to now + 72 hours by an assisted recovery of the password (§5.23): until then `OwnershipService.initiateTransfer` refuses new transfers out of the account (`409 TRANSFERS_PAUSED`). NULL when no recovery happened; a past value has no effect. |
 | `created_at` | `timestamptz` | NOT NULL | `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL | `now()` | Trigger-maintained. |
 
 - **Indexes:** primary key; unique `email_normalized`.
 - **Triggers:** `accounts_touch_updated_at`.
-- **Written by:** `AuthService.registerAccount` (audit `account.register`), `AuthService.login` (password re-hash; throttle counter, audit `account.login_failed` with `failedLogins`, `account.login_throttled`), `AuthService.changePassword` (service only, no HTTP route).
+- **Written by:** `AuthService.registerAccount` (audit `account.register`), `AuthService.login` (password re-hash; throttle counter, audit `account.login_failed` with `failedLogins`, `account.login_throttled`), `AuthService.changePassword` (`POST /api/v1/account/password`; a wrong current password counts in the throttle, `account.login_failed` with `via: "password_change"`; audit `account.password_change`), `AccountRecoveryService.recover` (`POST /api/v1/account/recover`: the new password, the throttle cleared and `transfers_frozen_until`, in the transaction that uses the recovery code; audit `account.recover`).
 - **Privacy:** `email` and `display_name` are personal data. They are **never written to `audit_logs`**, whose entries name account ids only, so that an erasure request does not collide with the append-only log.
 
 ### 5.10 `admin_users`
@@ -539,7 +543,7 @@ Transfer offers from the current owner to another account.
 | `completed_at` | `timestamptz` | NULL | — | Time of acceptance, cancellation or expiry. |
 
 - **Indexes:** primary key; unique `token_hash`; `ownership_transfers_single_pending`: unique `(product_id) WHERE status = 'PENDING'`; indexes on `product_id`, `from_account_id`, `to_account_id`.
-- **Written by:** `OwnershipService`: `initiateTransfer` (audit `ownership.transfer.initiate`), `acceptTransfer`, `cancelTransfer` (audit `ownership.transfer.cancel`), `reportIncident` (cancels a pending transfer), and expiry (`EXPIRED`, audit `ownership.transfer.expire` by the system actor), which runs lazily when a product is touched and in housekeeping. A PENDING row past `expires_at` is reported as EXPIRED by the read APIs even before it is rewritten.
+- **Written by:** `OwnershipService`: `initiateTransfer` (audit `ownership.transfer.initiate`; refused while the account's `transfers_frozen_until` is in the future), `acceptTransfer`, `cancelTransfer` (audit `ownership.transfer.cancel`), `cancelPendingTransfersFrom` (every PENDING transfer offered by an account, when its password is recovered, §5.23; audit `ownership.transfer.cancel` with `reason: "account_recovery"`), `reportIncident` (cancels a pending transfer), and expiry (`EXPIRED`, audit `ownership.transfer.expire` by the system actor), which runs lazily when a product is touched and in housekeeping. A PENDING row past `expires_at` is reported as EXPIRED by the read APIs even before it is rewritten.
 
 ### 5.14 `warranties`
 
@@ -734,8 +738,8 @@ Hash chain: `hash = SHA-256(prev_hash ‖ UTF-8(canonicalJSON(entry)))`, where `
 - **Indexes:** primary key; unique `hash`; `audit_logs_prev_hash_key`: unique `(prev_hash)` (each entry can be the predecessor of only one entry, so a forked chain fails at insert time); `audit_logs_occurred_at_idx`; `audit_logs_target_idx (target_type, target_id)`.
 - **Triggers:** `audit_logs_append_only` (BEFORE UPDATE OR DELETE, row level) and `audit_logs_no_truncate` (BEFORE TRUNCATE, statement level), both raising `OR001` with "audit_logs is append-only".
 - **Written by:** `AuditService.record` only, under the `AUDIT_CHAIN` advisory lock, normally inside the transaction of the change it describes. `verifyChain()` (`GET /api/admin/audit/verify`) recomputes every hash and link; `head()` returns the newest id and hash for external anchoring. The chain detects edits and deletions inside the log, not the removal of the newest entries; anchor the head outside the database (§11).
-- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`, `scan.report`, `scan.report.close`. Verifications themselves are recorded in `scan_events`, not in the audit log. `scan.report` and `scan.report.close` both target the scan (§5.22) and never carry the customer's words or the resolution note.
-- `ownership.claim_failed` entries double as the counter for the claim-code attempt limit (5 failures per product per rolling hour), so the limit holds across server instances and restarts.
+- **Actions recorded:** `account.register`, `account.login`, `account.login_failed`, `account.logout`, `account.password_change`, `admin.create`, `admin.login`, `admin.login_failed`, `admin.logout`, `admin.password_change`, `admin.totp.enable`, `admin.totp.disable`, `category.create`, `category.activate`, `category.deactivate`, `collection.create`, `model.create`, `product.issue`, `product.transition`, `product.reinstate`, `code.reissue`, `code.revoke`, `code.render`, `code.render_sheet`, `certificate.render`, `certificate.render_refused`, `key.rotate`, `key.retire`, `key.revoke`, `key.revoke.amend`, `warranty.activate`, `warranty.void`, `warranty.extend`, `service.open`, `service.complete`, `service.cancel`, `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `ownership.transfer.accept`, `ownership.transfer.cancel`, `ownership.transfer.expire`, `ownership.confirm`, `ownership.incident`, `anomaly.update`, `scan.report`, `scan.report.close`, `account.recovery_code.issue`, `account.recover`, `account.recover_failed`, `account.recover_throttled`. Verifications themselves are recorded in `scan_events`, not in the audit log. `scan.report` and `scan.report.close` both target the scan (§5.22) and never carry the customer's words or the resolution note. The four `account.recover*` actions target the account (§5.23) and never carry the code or the email.
+- `ownership.claim_failed` entries double as the counter for the claim-code attempt limit (5 failures per product per rolling hour), so the limit holds across server instances and restarts. `account.recover_failed` entries do the same for the recovery-code limit (5 failures per account per rolling hour, §5.23).
 - **Retention:** permanent. The application cannot delete entries.
 
 ### 5.22 `scan_reports`
@@ -760,6 +764,28 @@ A customer's report on a scan that was not authentic: where they saw or bought t
 - **Written by:** `ScanReportService.submit` (`POST /api/v1/reports`: a VERIFY scan whose result was not authentic, less than 24 hours old, no report yet; audit `scan.report`) and `ScanReportService.close` (`PATCH /api/admin/reports/:id`, OPERATOR: OPEN → CLOSED with a note; audit `scan.report.close`). `purgeScanHistory` deletes it with its scan (§10).
 - **Read by:** the Cases queue (`GET /api/admin/reports`), the scans list (`report`) and the anomalies list (`reports`): an admin session only, never a public response.
 - **Privacy:** `place` and `note` are the customer's own words. They live exactly as long as the scan they are attached to, open or closed, and are never copied into `audit_logs` (permanent), whose entries name the scan alone. The resolution note stays with the case for the same reason. The verify app asks the customer to leave out their name and contact details (SECURITY-MODEL §3.6).
+
+### 5.23 `account_recovery_codes`
+
+The one-time code with which a customer who forgot the password sets a new one (C-04; [API §10.8](API.md#108-post-apiv1accountrecover) and [§16.10](API.md#1610-post-apiadminownersidrecovery-code-extension-of-the-contract)). There is no email channel: ORBES Client Services checks the customer's identity, then an ADMIN issues the code in the console and reads it to the customer. Migration `0005_account_recovery`, with `accounts.transfers_frozen_until` (§5.9).
+
+| Column | Type | Null | Default | Constraints / notes |
+|---|---|---|---|---|
+| `id` | `uuid` | NOT NULL | `gen_random_uuid()` | PK. Named in the audit entries instead of the code. |
+| `account_id` | `uuid` | NOT NULL | — | FK → `accounts.id` (`ON DELETE RESTRICT`). |
+| `code_hash` | `text` | NOT NULL | — | `CHECK (code_hash LIKE 'scrypt$%')`. scrypt hash (`scrypt$15$8$1$<salt>$<hash>`, as for claim codes) of the canonical 12-character Crockford base32 code (60 bits). The code (`XXXX-XXXX-XXXX`) is in the issuing response only. |
+| `created_by` | `uuid` | NOT NULL | — | FK → `admin_users.id` (`ON DELETE RESTRICT`): the ADMIN who issued it. |
+| `created_at` | `timestamptz` | NOT NULL | `now()` | Set from the service clock. |
+| `expires_at` | `timestamptz` | NOT NULL | — | `CHECK (expires_at > created_at)`. Creation + 30 minutes (`RECOVERY_CODE_TTL_MS`). |
+| `used_at` | `timestamptz` | NULL | — | `CHECK (used_at IS NULL OR used_at >= created_at)`. Set by the recovery that used it. |
+| `revoked_at` | `timestamptz` | NULL | — | `CHECK (revoked_at IS NULL OR revoked_at >= created_at)`. Set when a newer code is issued for the account. |
+
+- **`account_recovery_codes_used_or_revoked`:** `CHECK (used_at IS NULL OR revoked_at IS NULL)`, never both.
+- **Indexes:** primary key; `account_recovery_codes_single_open`: unique `(account_id) WHERE used_at IS NULL AND revoked_at IS NULL` (one open code per account); `account_recovery_codes_account_idx (account_id, created_at)` and `account_recovery_codes_created_by_idx (created_by)`, which lead with the foreign keys (the partial index does not serve the `RESTRICT` check on every row).
+- **Written by:** `AccountRecoveryService` (`services/account-recovery.ts`). `issue` (`POST /api/admin/owners/:id/recovery-code`, ADMIN; an ACTIVE account only) locks the account row, revokes the open code and inserts the new one (audit `account.recovery_code.issue` with `{ recoveryCodeId, expiresAt, replaced }`). `recover` (`POST /api/v1/account/recover`) locks the account row, counts the account's `account.recover_failed` entries of the last hour (at most 5; then `account.recover_throttled`, the code is not checked), checks the open code against its hash (a failure is committed with its reason, `NO_OPEN_CODE`, `EXPIRED` or `MISMATCH`, before the answer); then, in one transaction, it re-locks the account, sets `used_at` only if the code is still open, writes the new password, clears the login throttle, sets `transfers_frozen_until` to now + 72 hours, deletes every session of the account and cancels its pending transfers (§5.13), and records `account.recover`. A LOCKED account is refused and its code stays open.
+- **Read by:** the owners list (`GET /api/admin/owners`: the expiry of the open code, never the hash).
+- **Retention:** rows are kept, used, revoked or expired, as the record of each recovery beside its audit entries; they hold no code, only its hash. The account and the admin cannot be deleted while their codes exist (`RESTRICT`).
+- **Concurrency:** two attempts with the same code are serialised by the account's row lock and the `used_at IS NULL` condition of the update: one recovery succeeds, the other is refused like a used code.
 
 ---
 
@@ -880,7 +906,7 @@ ISSUED → SERVICED is allowed for pre-sale inspection and quality control: a se
 - An audit entry is written in the same transaction as the change it describes, so both commit or roll back together.
 - The code does not set an isolation level, so transactions run at the server default (READ COMMITTED unless the database was configured otherwise). Correctness relies on row locks, advisory locks and unique constraints.
 - `IssuanceService` retries a whole issuance (up to 5 attempts, fresh transaction each time) on a serialisation failure (`40001`), a deadlock (`40P01`), a stale signing key, or a unique violation on an automatically allocated serial.
-- The claim-code check commits its failure record (audit entry) in its own transaction before the error is returned, so failed attempts count even though the request fails.
+- The claim-code check commits its failure record (audit entry) in its own transaction before the error is returned, so failed attempts count even though the request fails. The recovery-code check does the same (`account.recover_failed`, §5.23).
 
 ### 8.2 Row locks
 
@@ -890,8 +916,10 @@ ISSUED → SERVICED is allowed for pre-sale inspection and quality control: a se
 | `cryptographic_keys … FOR SHARE` | Issuance and re-issue: a code is never committed under a key that a concurrent rotation, retirement or revocation has already changed; issuance then retries with the new active key. |
 | `cryptographic_keys … FOR UPDATE` | Retire and revoke. |
 | `codes`, `service_records`, `ownership_transfers`, `anomalies … FOR UPDATE` | Code revocation, service completion, transfer acceptance, anomaly triage. |
+| `accounts … FOR UPDATE` | Issuing a recovery code, each recovery attempt and the recovery itself (§5.23): attempts on one account run one at a time, so the attempt limit is exact. |
+| `accounts … FOR SHARE` | Transfer initiation, before the product: a transfer started while a recovery commits waits for it, then sees the pause. |
 
-Lock order is **product before code** and **product before service record**, everywhere, so concurrent operations cannot deadlock on these pairs.
+Lock order is **product before code**, **product before service record** and **account before product** (a recovery locks the account, then the products of its pending transfers), everywhere, so concurrent operations cannot deadlock on these pairs.
 
 ### 8.3 Advisory locks
 
@@ -913,7 +941,7 @@ In PostgreSQL, single-key (bigint) and two-key (int4, int4) advisory locks occup
 
 ### 9.1 Layout
 
-- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), `0004_scan_reports` (customers' reports on scans and the Cases queue, §5.22; its down step drops the table and nothing else), and any later entry of `MIGRATIONS`.
+- Migrations are listed statically in `MIGRATIONS` in `db/migrate.ts` (imports, not a directory scan, so they still work when the server is bundled): `0001_initial` (the schema), `0002_platform_guards` (append-only `product_status_history`, no deletion of `genomes` and `cryptographic_keys`, the customer login throttle columns of `accounts`), `0003_authentication_events_default` (`authentication_events.authenticators` defaults to `'{}'`), `0004_scan_reports` (customers' reports on scans and the Cases queue, §5.22; its down step drops the table and nothing else), `0005_account_recovery` (the recovery codes of §5.23 and `accounts.transfers_frozen_until`; its down step drops the column and the table, which restores the schema of `0004` exactly), and any later entry of `MIGRATIONS`.
 - A migration is a list of SQL strings executed one by one: PGlite runs queries through the extended protocol, which refuses multi-statement strings.
 - Value lists for `CHECK` constraints are literal in the migration, so a migration never changes when application constants evolve; a test asserts they still match `schema.ts`.
 - Rules: append new migrations to `MIGRATIONS`; never edit an applied migration.
@@ -972,7 +1000,7 @@ Rows deleted by the application: `sessions`, `scan_tokens`, and, with a retentio
 
 These are operational recommendations; the code does not implement backups.
 
-**What a backup contains.** Product registry, codes and signatures, public keys, accounts (email, display name), staff accounts, password and claim-code hashes, sealed TOTP secrets, pseudonymous scan data and the audit log. It contains **no private signing keys** (they live in the key provider: `KEY_DIR` files encrypted under `KEY_ENCRYPTION_KEY`, or a KMS/HSM) and no usable session, registration or transfer tokens (only their hashes).
+**What a backup contains.** Product registry, codes and signatures, public keys, accounts (email, display name), staff accounts, password, claim-code and recovery-code hashes, sealed TOTP secrets, pseudonymous scan data and the audit log. It contains **no private signing keys** (they live in the key provider: `KEY_DIR` files encrypted under `KEY_ENCRYPTION_KEY`, or a KMS/HSM) and no usable session, registration or transfer tokens (only their hashes).
 
 Recommendations:
 

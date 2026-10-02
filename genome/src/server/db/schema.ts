@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0004) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0005) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -235,8 +235,25 @@ export interface AccountsTable {
   failed_logins: WithDefault<number>;
   /** Start of the current throttle window, null when there is no recent failure. */
   failed_logins_since: TimestampNullable;
+  /** After an assisted recovery, new transfers out of the account are paused until then (migration 0005). */
+  transfers_frozen_until: TimestampNullable;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
+}
+
+/**
+ * A one-time recovery code issued by an ADMIN of ORBES Client Services (migration 0005): scrypt hash only,
+ * 30 minutes, used once; one open (neither used nor revoked) per account.
+ */
+export interface AccountRecoveryCodesTable {
+  id: Generated<string>;
+  account_id: string;
+  code_hash: string;                   // scrypt$15$8$1$<salt>$<hash> of the canonical 12-character code
+  created_by: string;                  // admin_users.id
+  created_at: TimestampDefault;
+  expires_at: Timestamp;
+  used_at: TimestampNullable;
+  revoked_at: TimestampNullable;
 }
 
 export interface AdminUsersTable {
@@ -463,6 +480,7 @@ export interface Database {
   cryptographic_keys: CryptographicKeysTable;
   codes: CodesTable;
   accounts: AccountsTable;
+  account_recovery_codes: AccountRecoveryCodesTable;
   admin_users: AdminUsersTable;
   sessions: SessionsTable;
   ownership: OwnershipTable;
@@ -503,6 +521,8 @@ export type CodeUpdate = Updateable<CodesTable>;
 export type AccountRow = Selectable<AccountsTable>;
 export type NewAccount = Insertable<AccountsTable>;
 export type AccountUpdate = Updateable<AccountsTable>;
+export type AccountRecoveryCodeRow = Selectable<AccountRecoveryCodesTable>;
+export type NewAccountRecoveryCode = Insertable<AccountRecoveryCodesTable>;
 export type AdminUserRow = Selectable<AdminUsersTable>;
 export type NewAdminUser = Insertable<AdminUsersTable>;
 export type AdminUserUpdate = Updateable<AdminUsersTable>;

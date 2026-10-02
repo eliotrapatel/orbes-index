@@ -164,6 +164,19 @@ export const registerAccountBody = body({
 
 export const loginBody = body({ email, password });
 
+/** POST /api/v1/account/password (§10.7): the policy of `newPassword` is the service's (≥ 12 characters…). */
+export const changePasswordBody = body({ currentPassword: password, newPassword: password });
+
+/**
+ * POST /api/v1/account/recover (§10.8): the code given by ORBES Client Services, any accepted spelling
+ * (XXXX-XXXX-XXXX, lower case, spaces); a malformed one is refused like a wrong one, by the service.
+ */
+export const recoverAccountBody = body({
+  email,
+  recoveryCode: z.string().trim().min(1, 'Required').max(32, 'Invalid recovery code'),
+  newPassword: password,
+});
+
 export const adminLoginBody = body({
   email,
   password,
@@ -340,6 +353,9 @@ export const anomalyListQuery = z.object({
 });
 
 export const anomalyParams = z.object({ id: uuid });
+
+/** A customer account (`accounts.id`): the owners list and its recovery code (§16.2, §16.10). */
+export const ownerParams = z.object({ id: uuid });
 
 export const anomalyPatchBody = body({
   status: z.enum(ANOMALY_STATUSES),

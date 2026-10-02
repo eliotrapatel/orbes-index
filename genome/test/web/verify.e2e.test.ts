@@ -8,7 +8,9 @@
  * copies, then the holder of the certificate card), the contact of ORBES
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
- * the scan, and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * the scan, the password (FORGOTTEN PASSWORD? through ORBES Client Services
+ * and a recovery code, then CHANGE PASSWORD beside SIGN OUT), and the
+ * problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -369,6 +371,100 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('recovers a forgotten password with the code of ORBES Client Services, then changes it beside SIGN OUT', async () => {
+    // An owner who forgot the password scans their piece, signed out.
+    const email = 'helene.martin@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(owner.account.id, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, { type: 'account', id: owner.account.id });
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'recover.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    const panel = page.locator('.ownership');
+
+    // Under SIGN IN: FORGOTTEN PASSWORD?, a text link, which leads to ORBES Client Services.
+    await visible(panel.getByLabel('PASSWORD', { exact: true }));
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?']);
+    await page.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }).click();
+    await textOf(panel.locator('#recover-title'), 'FORGOTTEN PASSWORD');
+    // A section under the status of the piece, where the sign-in form was; keyboard focus moves to it.
+    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('recover-title');
+    await textOf(panel, /After checking your identity, they give you a one-time recovery code, valid for 30 minutes\./);
+    const contact = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
+    await visible(contact);
+    const ref = (await page.locator('.result__meta').innerText()).match(/REF ([0-9A-F]{8})/)![1];
+    const href = new URL((await contact.getAttribute('href'))!);
+    expect(href.pathname).toBe(CLIENT_SERVICES.email);
+    expect(href.searchParams.get('subject')).toBe('ORBES — FORGOTTEN PASSWORD');
+    expect(href.searchParams.get('body')).toBe(`\r\n\r\nREFERENCE: ${ref}`);
+    await attrOf(panel.locator('.contact'), 'data-placement', 'recovery');
+    await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
+    const recoverControls = ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'I HAVE A RECOVERY CODE', 'BACK TO SIGN IN'];
+    await keepsFloors(page, recoverControls);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, recoverControls);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-forgotten-password.png'), fullPage: true });
+
+    // The code, given by Client Services after the identity check (an ADMIN, in the console).
+    await page.getByRole('button', { name: 'I HAVE A RECOVERY CODE' }).click();
+    await textOf(panel.locator('#recover-title'), 'SET A NEW PASSWORD');
+    await keepsFloors(page, ['SET NEW PASSWORD', 'BACK TO SIGN IN']);
+    const staff = await srv.ctx.services.auth.createAdmin({ email: 'client.services@orbes.test', password: 'client services passphrase', role: 'ADMIN' }, SYSTEM_ACTOR);
+    const { recoveryCode } = await srv.ctx.services.recovery.issue(owner.account.id, { type: 'admin', id: staff.id });
+    await panel.getByLabel('EMAIL', { exact: true }).fill(email);
+    await panel.getByLabel('RECOVERY CODE', { exact: true }).fill('ZZZZ-ZZZZ-ZZZZ');
+    await panel.getByLabel('NEW PASSWORD', { exact: true }).fill('a brand new passphrase');
+    await page.getByRole('button', { name: 'SET NEW PASSWORD' }).click();
+    // One answer for every refusal, as the server wrote it; the form keeps the email.
+    await textOf(panel.getByRole('alert'), /^This email and recovery code do not match, or the code has expired or was already used\./);
+    await valueOf(panel.getByLabel('EMAIL', { exact: true }), email);
+    // Any spelling of the code is accepted; the field shows it grouped.
+    await panel.getByLabel('RECOVERY CODE', { exact: true }).fill(recoveryCode.replace(/-/g, '').toLowerCase());
+    await valueOf(panel.getByLabel('RECOVERY CODE', { exact: true }), recoveryCode);
+    await panel.getByLabel('NEW PASSWORD', { exact: true }).fill('a brand new passphrase');
+    await page.getByRole('button', { name: 'SET NEW PASSWORD' }).click();
+
+    // Back to SIGN IN, the email filled in, with what the recovery did.
+    await textOf(page.locator('.form__notice'), /^Your password has been changed: sign in with it\. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d\.$/);
+    await valueOf(panel.getByLabel('EMAIL', { exact: true }), email);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill('a brand new passphrase');
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(page.locator('.ownership__email'), email);
+
+    // Signed in: CHANGE PASSWORD beside SIGN OUT, both on one line at every phone width.
+    await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(panel.locator('.ownership__status'), 'CHANGE PASSWORD');
+    await keepsFloors(page, ['CHANGE PASSWORD', 'CANCEL', 'SIGN OUT']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-change-password.png'), fullPage: true });
+    // A wrong current password is said on its field; the page stays signed in (a 400, never a 401).
+    await panel.getByLabel('CURRENT PASSWORD', { exact: true }).fill('not my password at all');
+    await panel.getByLabel('NEW PASSWORD', { exact: true }).fill('another new passphrase');
+    await panel.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(panel.getByRole('alert'), 'The current password is not correct.');
+    await attrOf(panel.getByLabel('CURRENT PASSWORD', { exact: true }), 'aria-invalid', 'true');
+    await textOf(page.locator('.ownership__email'), email);
+    await panel.getByLabel('CURRENT PASSWORD', { exact: true }).fill('a brand new passphrase');
+    await panel.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await textOf(page.locator('.form__notice'), 'Your password has been changed. Your other sessions have ended.');
+    await textOf(page.locator('.ownership__email'), email);
+    expect((await srv.ctx.services.auth.login({ email, password: 'another new passphrase' }, {})).account.email).toBe(email);
+    expect(problems).toEqual([]);
+    await page.context().close();
   }, 120_000);
 
   it('lets the holder of the certificate card register from an UNUSUAL ACTIVITY result, with its claim code', async () => {

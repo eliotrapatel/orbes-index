@@ -29,7 +29,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'issuance', 'lifecycle', 'ownership', 'reports', 'verification', 'warranty'].sort(),
+        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'issuance', 'lifecycle', 'ownership', 'recovery', 'reports', 'verification', 'warranty'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);

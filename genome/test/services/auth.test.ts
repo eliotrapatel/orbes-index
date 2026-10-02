@@ -11,6 +11,9 @@ import {
   normalizeEmail,
 } from '../../src/server/services/auth.js';
 import { SessionService } from '../../src/server/services/sessions.js';
+import { AccountRecoveryService } from '../../src/server/services/account-recovery.js';
+import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { OwnershipService } from '../../src/server/services/ownership.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
 import { testConfig } from '../../src/server/config.js';
 import { DomainError } from '../../src/server/errors.js';
@@ -195,16 +198,63 @@ describe('AuthService', () => {
       const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
       const other = await auth.login({ email: addr, password: PASSWORD }, {});
       const subject = { type: 'account' as const, id: reg.account.id };
+      // A wrong current password is a 400, never a 401 (the apps sign out on any 401), and changes nothing.
       await expectDomainError(
         auth.changePassword(subject, { currentPassword: 'not my password', newPassword: 'a brand new passphrase' }, { type: 'account', id: reg.account.id }),
-        'INVALID_CREDENTIALS',
-        401,
+        'CURRENT_PASSWORD_INVALID',
+        400,
       );
+      expect(await auth.authenticateAccount(other.session.token)).not.toBeNull();
+      // A weak new password is refused before the current one is checked.
+      await expectDomainError(auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'short' }, { type: 'account', id: reg.account.id }), 'VALIDATION_FAILED', 400);
       await auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'a brand new passphrase' }, { type: 'account', id: reg.account.id }, { keepToken: reg.session.token });
       expect(await auth.authenticateAccount(other.session.token)).toBeNull();
       expect(await auth.authenticateAccount(reg.session.token)).not.toBeNull();
       await expectDomainError(auth.login({ email: addr, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
       expect((await auth.login({ email: addr, password: 'a brand new passphrase' }, {})).account.id).toBe(reg.account.id);
+      const entry = (await audit.list({ action: 'account.password_change', targetId: reg.account.id })).items[0];
+      expect(entry).toMatchObject({ actorType: 'account', actorId: reg.account.id });
+    });
+
+    it('counts a wrong current password in the login throttle, and then stops checking it', async () => {
+      const addr = email();
+      const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
+      const subject = { type: 'account' as const, id: reg.account.id };
+      const actor = { type: 'account' as const, id: reg.account.id, ipHash: 'ip-7' };
+      for (let i = 0; i < ACCOUNT_LOGIN_THROTTLE.maxFailures; i++) {
+        await expectDomainError(auth.changePassword(subject, { currentPassword: `wrong password ${i}`, newPassword: 'a brand new passphrase' }, actor), 'CURRENT_PASSWORD_INVALID', 400);
+      }
+      const failures = (await audit.list({ action: 'account.login_failed', targetId: reg.account.id })).items;
+      expect(failures).toHaveLength(ACCOUNT_LOGIN_THROTTLE.maxFailures);
+      expect(failures[0]).toMatchObject({ ipHash: 'ip-7', details: { via: 'password_change', throttled: true } });
+      // Throttled: even the right current password is refused, with the same answer; so is a login.
+      await expectDomainError(auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'a brand new passphrase' }, actor), 'CURRENT_PASSWORD_INVALID', 400);
+      await expectDomainError(auth.login({ email: addr, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+      clock.advance(ACCOUNT_LOGIN_THROTTLE.windowMs);
+      await auth.changePassword(subject, { currentPassword: PASSWORD, newPassword: 'a brand new passphrase' }, actor, { keepToken: reg.session.token });
+      expect(await auth.authenticateAccount(reg.session.token)).not.toBeNull();
+    });
+
+    it('a recovery code from ORBES Client Services ends every session and sets the new password', async () => {
+      const addr = email();
+      const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
+      const other = await auth.login({ email: addr, password: PASSWORD }, {});
+      const lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
+      const ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now });
+      const recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
+      const staff = await auth.createAdmin({ email: email('cs'), password: PASSWORD, role: 'ADMIN' }, system);
+      const { recoveryCode } = await recovery.issue(reg.account.id, { type: 'admin', id: staff.id });
+      // Wrong email, then a code past its 30 minutes: one answer.
+      await expectDomainError(recovery.recover({ email: email('nobody'), recoveryCode, newPassword: 'a brand new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
+      await recovery.recover({ email: addr, recoveryCode, newPassword: 'a brand new passphrase' });
+      expect(await auth.authenticateAccount(reg.session.token)).toBeNull();
+      expect(await auth.authenticateAccount(other.session.token)).toBeNull();
+      expect((await auth.login({ email: addr, password: 'a brand new passphrase' }, {})).account.id).toBe(reg.account.id);
+      // Used once.
+      await expectDomainError(recovery.recover({ email: addr, recoveryCode, newPassword: 'another new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
+      const second = await recovery.issue(reg.account.id, { type: 'admin', id: staff.id });
+      clock.advance(30 * 60_000);
+      await expectDomainError(recovery.recover({ email: addr, recoveryCode: second.recoveryCode, newPassword: 'another new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
     });
   });
 

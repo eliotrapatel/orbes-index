@@ -210,6 +210,39 @@ export const CONTACT = Object.freeze({
   result: 'RESULT',
   warranty: 'WARRANTY',
   verified: 'VERIFIED',
+  /** Subject of the email under FORGOTTEN PASSWORD? (C-04). */
+  recoverySubject: 'ORBES — FORGOTTEN PASSWORD',
+});
+
+/**
+ * The password of an ORBES account (C-04, API §10.7 and §10.8), in the OWNERSHIP panel. There is no email
+ * channel: a customer who forgot it contacts ORBES Client Services, who check their identity and give a
+ * one-time recovery code (30 minutes); the new password then ends every session of the account, cancels
+ * its pending transfers and pauses new ones for 72 hours. CHANGE PASSWORD sits beside SIGN OUT for now
+ * (it moves to the customer's pieces with F-01).
+ */
+export const ACCOUNT_PASSWORD = Object.freeze({
+  forgotten: 'FORGOTTEN PASSWORD?',
+  forgottenTitle: 'FORGOTTEN PASSWORD',
+  forgottenLead:
+    'ORBES Client Services can help you set a new password. After checking your identity, they give you a one-time recovery code, valid for 30 minutes.',
+  haveCode: 'I HAVE A RECOVERY CODE',
+  backToSignIn: 'BACK TO SIGN IN',
+  recoverTitle: 'SET A NEW PASSWORD',
+  recoverLead: 'Enter the email of your ORBES account, the recovery code given by ORBES Client Services and a new password.',
+  recoveryCode: 'RECOVERY CODE',
+  recoveryCodeHint: 'Given by ORBES Client Services. It works once.',
+  codeIncomplete: 'Enter the 12 characters of your recovery code.',
+  newPassword: 'NEW PASSWORD',
+  currentPassword: 'CURRENT PASSWORD',
+  recover: 'SET NEW PASSWORD',
+  /** After a recovery: every session ended, so the customer signs in again; `until` is in their own time zone. */
+  recovered: (until: string) =>
+    `Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until ${until}.`,
+  change: 'CHANGE PASSWORD',
+  changeLead: 'Enter your current password, then a new one. Your other sessions will end; you stay signed in here.',
+  cancel: 'CANCEL',
+  changed: 'Your password has been changed. Your other sessions have ended.',
 });
 
 /**

@@ -37,6 +37,7 @@ import type {
   Model,
   OwnerRecord,
   Paged,
+  RecoveryCode,
   ProductDetail,
   ProductOverview,
   ProductStatus,
@@ -428,6 +429,11 @@ export class AdminApi {
 
   owners(page = 1, pageSize = 50): Promise<Paged<OwnerRecord>> {
     return this.get('/api/admin/owners', { page, pageSize });
+  }
+
+  /** ADMIN: a one-time recovery code for a client who forgot the password (after an identity check). Shown once. */
+  issueRecoveryCode(accountId: string): Promise<RecoveryCode> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/recovery-code`);
   }
 
   warranties(q: { status?: string; page?: number; pageSize?: number } = {}): Promise<Paged<WarrantyRecord>> {

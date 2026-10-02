@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashSessionToken } from '../../src/server/services/sessions.js';
-import { createHarness, errorOf, PASSWORD, safeJson, type Harness } from './support.js';
+import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('account API', () => {
   let h: Harness;
@@ -112,5 +113,230 @@ describe('account API', () => {
     const res = await c.get('/api/v1/account/products');
     expect(res.statusCode).toBe(200);
     expect(safeJson(res)).toEqual({ products: [] });
+  });
+});
+
+describe('password change and assisted recovery (C-04)', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  const NEW_PASSWORD = 'a brand new passphrase';
+
+  beforeAll(async () => {
+    // A distinct budget per group, so x-ratelimit-limit names the group a route draws on.
+    h = await createHarness({ config: { rateLimits: { verifyPerMinute: 9_001, authPerMinute: 9_002, adminPerMinute: 9_003, apiPerMinute: 9_004 } } });
+    catalog = await seedCatalog(h.ctx);
+  });
+  afterAll(() => h?.close());
+
+  const accountIdOf = async (email: string) =>
+    (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+
+  /** An ADMIN of ORBES Client Services, signed in now (the tests move the clock past admin sessions). */
+  const clientServices = (): Promise<Client> => adminClient(h, 'ADMIN');
+
+  /** The recovery code ORBES Client Services reads to the customer (ADMIN, console). */
+  async function issueCode(email: string): Promise<string> {
+    const cs = await clientServices();
+    const res = await cs.post(`/api/admin/owners/${await accountIdOf(email)}/recovery-code`);
+    expect(res.statusCode).toBe(201);
+    return (safeJson(res) as { recoveryCode: string }).recoveryCode;
+  }
+
+  /** A piece registered to the customer behind `c`, through a scan and its registration token. */
+  async function ownedPiece(c: Client): Promise<string> {
+    const p = await issue(h.ctx, catalog);
+    await h.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = safeJson(await c.post('/api/v1/verify', { code: p.code.data })) as { registration: { token: string } };
+    expect((await c.post('/api/v1/ownership/register', { registrationToken: scan.registration.token })).statusCode).toBe(201);
+    return p.product.productId;
+  }
+
+  describe('POST /api/v1/account/password', () => {
+    it('changes the password, keeps this session and ends the others', async () => {
+      const { client, email } = await accountClient(h);
+      const elsewhere = h.client({ ip: '203.0.113.99' });
+      expect((await elsewhere.post('/api/v1/account/login', { email, password: PASSWORD })).statusCode).toBe(200);
+      const res = await client.post('/api/v1/account/password', { currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(res.statusCode).toBe(200);
+      expect(safeJson(res)).toEqual({ ok: true });
+      // An auth-group route: password guessing draws on the login budget.
+      expect(res.headers['x-ratelimit-limit']).toBe('9002');
+      expect((await client.get('/api/v1/account/me')).statusCode).toBe(200);
+      expect((await elsewhere.get('/api/v1/account/me')).statusCode).toBe(401);
+      expect((await h.client().post('/api/v1/account/login', { email, password: PASSWORD })).statusCode).toBe(401);
+      expect((await h.client().post('/api/v1/account/login', { email, password: NEW_PASSWORD })).statusCode).toBe(200);
+    });
+
+    it('answers a wrong current password with 400 CURRENT_PASSWORD_INVALID, never a 401, and keeps the session', async () => {
+      const { client, email } = await accountClient(h);
+      const res = await client.post('/api/v1/account/password', { currentPassword: 'not my password at all', newPassword: NEW_PASSWORD });
+      expect(res.statusCode).toBe(400);
+      expect(errorOf(res)).toEqual({ code: 'CURRENT_PASSWORD_INVALID', message: 'The current password is not correct.' });
+      // The session cookie is not cleared, and the session still works.
+      expect(res.cookies.find((x) => x.name === 'orbes_session')).toBeUndefined();
+      expect((await client.get('/api/v1/account/me')).statusCode).toBe(200);
+      expect((await h.client().post('/api/v1/account/login', { email, password: PASSWORD })).statusCode).toBe(200);
+      const weak = await client.post('/api/v1/account/password', { currentPassword: PASSWORD, newPassword: 'short' });
+      expect(weak.statusCode).toBe(400);
+      expect(errorOf(weak).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('needs a session, the CSRF token and a strict body', async () => {
+      expect((await h.client().post('/api/v1/account/password', { currentPassword: PASSWORD, newPassword: NEW_PASSWORD })).statusCode).toBe(401);
+      const { client } = await accountClient(h);
+      const noCsrf = await client.post('/api/v1/account/password', { currentPassword: PASSWORD, newPassword: NEW_PASSWORD }, { noCsrf: true });
+      expect(noCsrf.statusCode).toBe(403);
+      expect(errorOf(noCsrf).code).toBe('CSRF_FAILED');
+      const extra = await client.post('/api/v1/account/password', { currentPassword: PASSWORD, newPassword: NEW_PASSWORD, email: 'x@example.com' });
+      expect(extra.statusCode).toBe(400);
+      expect(errorOf(extra).code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('POST /api/v1/account/recover', () => {
+    it('sets a new password with the code of ORBES Client Services: sessions end, transfers are cancelled and paused 72 h', async () => {
+      const { client, email } = await accountClient(h);
+      const productId = await ownedPiece(client);
+      const offer = await client.post('/api/v1/ownership/transfers', { productId });
+      expect(offer.statusCode).toBe(201);
+      const code = await issueCode(email);
+
+      const anon = h.client({ ip: '203.0.113.50' });
+      const res = await anon.post('/api/v1/account/recover', { email: email.toUpperCase(), recoveryCode: code.toLowerCase(), newPassword: NEW_PASSWORD });
+      expect(res.statusCode).toBe(200);
+      const body = safeJson(res) as { ok: boolean; transfersPausedUntil: string };
+      expect(body.ok).toBe(true);
+      expect(new Date(body.transfersPausedUntil).getTime()).toBe(h.clock.now().getTime() + 72 * 3_600_000);
+      expect(res.headers['x-ratelimit-limit']).toBe('9002');
+      // No session is opened; the old one has ended.
+      expect(res.cookies.find((x) => x.name === 'orbes_session')).toBeUndefined();
+      expect((await client.get('/api/v1/account/me')).statusCode).toBe(401);
+
+      // Sign in with the new password: the transfer offered before is cancelled, new ones are paused.
+      const again = h.client();
+      expect((await again.post('/api/v1/account/login', { email, password: NEW_PASSWORD })).statusCode).toBe(200);
+      const mine = safeJson(await again.get('/api/v1/account/products')) as { products: { productId: string; transfer: { pending: boolean } }[] };
+      expect(mine.products).toEqual([expect.objectContaining({ productId, transfer: { pending: false } })]);
+      const paused = await again.post('/api/v1/ownership/transfers', { productId });
+      expect(paused.statusCode).toBe(409);
+      expect(errorOf(paused).code).toBe('TRANSFERS_PAUSED');
+      expect(errorOf(paused).message).toMatch(/ORBES Client Services can assist you\.$/);
+      const accept = await h.client().post('/api/v1/ownership/transfers/accept', { transferCode: (safeJson(offer) as { transferCode: string }).transferCode });
+      expect(accept.statusCode).toBe(401); // a session is needed first…
+      const taker = (await accountClient(h)).client;
+      const taken = await taker.post('/api/v1/ownership/transfers/accept', { transferCode: (safeJson(offer) as { transferCode: string }).transferCode });
+      expect(taken.statusCode).toBe(410); // …and the cancelled code no longer completes
+      expect(errorOf(taken).code).toBe('TRANSFER_CANCELLED');
+
+      // 72 hours later, transfers go again.
+      h.clock.advance(72 * 3_600_000);
+      expect((await again.post('/api/v1/ownership/transfers', { productId })).statusCode).toBe(201);
+    });
+
+    it('gives one answer for an unknown email and a wrong, expired or used code', async () => {
+      const { email } = await accountClient(h);
+      const code = await issueCode(email);
+      const answers = [];
+      for (const b of [
+        { email: `nobody-${Math.random().toString(36).slice(2)}@example.com`, recoveryCode: code, newPassword: NEW_PASSWORD },
+        { email, recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: NEW_PASSWORD },
+        { email, recoveryCode: 'not-a-code', newPassword: NEW_PASSWORD },
+      ]) {
+        const res = await h.client().post('/api/v1/account/recover', b);
+        expect(res.statusCode).toBe(400);
+        answers.push(safeJson(res));
+      }
+      expect((await h.client().post('/api/v1/account/recover', { email, recoveryCode: code, newPassword: NEW_PASSWORD })).statusCode).toBe(200);
+      const used = await h.client().post('/api/v1/account/recover', { email, recoveryCode: code, newPassword: 'another passphrase here' });
+      answers.push(safeJson(used));
+      const expiring = await issueCode(email);
+      h.clock.advance(30 * 60_000);
+      answers.push(safeJson(await h.client().post('/api/v1/account/recover', { email, recoveryCode: expiring, newPassword: 'another passphrase here' })));
+      for (const a of answers) expect(a).toEqual(answers[0]);
+      expect(answers[0]).toEqual({ error: { code: 'RECOVERY_CODE_INVALID', message: expect.stringMatching(/ORBES Client Services/) } });
+    });
+
+    it('allows 5 failures per account per hour, then refuses even the right code', async () => {
+      const { email } = await accountClient(h);
+      const code = await issueCode(email);
+      for (let i = 0; i < 5; i++) {
+        expect((await h.client({ ip: `198.51.100.${10 + i}` }).post('/api/v1/account/recover', { email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i}`, newPassword: NEW_PASSWORD })).statusCode).toBe(400);
+      }
+      const held = await h.client({ ip: '198.51.100.99' }).post('/api/v1/account/recover', { email, recoveryCode: code, newPassword: NEW_PASSWORD });
+      expect(held.statusCode).toBe(400);
+      expect(errorOf(held).code).toBe('RECOVERY_CODE_INVALID');
+      expect((await h.client().post('/api/v1/account/login', { email, password: NEW_PASSWORD })).statusCode).toBe(401);
+    });
+
+    it('refuses a LOCKED account with 403 ACCOUNT_LOCKED', async () => {
+      const { email } = await accountClient(h);
+      const code = await issueCode(email);
+      await h.ctx.db.updateTable('accounts').set({ status: 'LOCKED' }).where('email_normalized', '=', email.toLowerCase()).execute();
+      const res = await h.client().post('/api/v1/account/recover', { email, recoveryCode: code, newPassword: NEW_PASSWORD });
+      expect(res.statusCode).toBe(403);
+      expect(errorOf(res).code).toBe('ACCOUNT_LOCKED');
+    });
+
+    it('is session-less but same-origin only, with a strict body', async () => {
+      const cross = await h.client({ origin: 'https://evil.example' }).post('/api/v1/account/recover', { email: 'a@example.com', recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: NEW_PASSWORD });
+      expect(cross.statusCode).toBe(403);
+      expect(errorOf(cross).code).toBe('CSRF_FAILED');
+      const extra = await h.client().post('/api/v1/account/recover', { email: 'a@example.com', recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: NEW_PASSWORD, code: 'x' });
+      expect(extra.statusCode).toBe(400);
+      expect(errorOf(extra).code).toBe('VALIDATION_FAILED');
+      const weak = await h.client().post('/api/v1/account/recover', { email: 'a@example.com', recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: 'short' });
+      expect(weak.statusCode).toBe(400);
+      expect(errorOf(weak).code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('POST /api/admin/owners/:id/recovery-code', () => {
+    it('is ADMIN only, shows the code once and lists its expiry on the owner, never the code', async () => {
+      const cs = await clientServices();
+      const { email } = await accountClient(h);
+      const id = await accountIdOf(email);
+      for (const role of ['AUDITOR', 'OPERATOR'] as const) {
+        const res = await (await adminClient(h, role)).post(`/api/admin/owners/${id}/recovery-code`);
+        expect(res.statusCode, role).toBe(403);
+        expect(errorOf(res).code).toBe('FORBIDDEN');
+      }
+      const res = await cs.post(`/api/admin/owners/${id}/recovery-code`);
+      expect(res.statusCode).toBe(201);
+      expect(res.headers['cache-control']).toBe('no-store');
+      const issued = safeJson(res) as { recoveryCode: string; expiresAt: string };
+      expect(issued.recoveryCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+      expect(new Date(issued.expiresAt).getTime()).toBe(h.clock.now().getTime() + 30 * 60_000);
+
+      const list = safeJson(await (await adminClient(h, 'AUDITOR')).get('/api/admin/owners?pageSize=200')) as { items: Record<string, unknown>[] };
+      const owner = list.items.find((o) => o.id === id)!;
+      expect(owner).toMatchObject({ email, status: 'ACTIVE', recoveryCodeExpiresAt: issued.expiresAt, transfersPausedUntil: null });
+      expect(JSON.stringify(list)).not.toContain(issued.recoveryCode);
+
+      // Used: no open code any more, and transfers are paused.
+      expect((await h.client().post('/api/v1/account/recover', { email, recoveryCode: issued.recoveryCode, newPassword: NEW_PASSWORD })).statusCode).toBe(200);
+      const after = (safeJson(await cs.get('/api/admin/owners?pageSize=200')) as { items: Record<string, unknown>[] }).items.find((o) => o.id === id)!;
+      expect(after.recoveryCodeExpiresAt).toBeNull();
+      expect(after.transfersPausedUntil).toBe(new Date(h.clock.now().getTime() + 72 * 3_600_000).toISOString());
+
+      // The audit log names the account and the code's id, never the code or the email.
+      const audit = await h.ctx.audit.list({ action: 'account.recovery_code.issue', targetId: id });
+      expect(audit.items).toHaveLength(1);
+      expect(JSON.stringify(audit.items)).not.toContain(issued.recoveryCode);
+      expect(JSON.stringify(audit.items)).not.toContain(email);
+    });
+
+    it('answers 404 for an unknown account, 409 for one that is not active, 400 for a body', async () => {
+      const cs = await clientServices();
+      const unknown = await cs.post('/api/admin/owners/5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6/recovery-code');
+      expect(unknown.statusCode).toBe(404);
+      expect(errorOf(unknown).code).toBe('ACCOUNT_NOT_FOUND');
+      expect((await cs.post('/api/admin/owners/not-a-uuid/recovery-code')).statusCode).toBe(400);
+      const { email } = await accountClient(h);
+      expect((await cs.post(`/api/admin/owners/${await accountIdOf(email)}/recovery-code`, { force: true })).statusCode).toBe(400);
+      await h.ctx.db.updateTable('accounts').set({ status: 'LOCKED' }).where('email_normalized', '=', email.toLowerCase()).execute();
+      const locked = await cs.post(`/api/admin/owners/${await accountIdOf(email)}/recovery-code`);
+      expect(locked.statusCode).toBe(409);
+      expect(errorOf(locked).code).toBe('ACCOUNT_NOT_ACTIVE');
+    });
   });
 });

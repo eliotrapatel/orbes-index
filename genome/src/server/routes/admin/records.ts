@@ -1,6 +1,6 @@
 /**
- * Registry views for the console: scan & authentication events, owners,
- * warranties and anomalies (with triage).
+ * Registry views for the console: scan & authentication events, warranties
+ * and anomalies (with triage). Owners have their own routes (owners.ts).
  *
  * These are the only places internal verification facts (reasons, risk
  * scores, authenticator results) leave the database, and only to an
@@ -8,7 +8,6 @@
  * (C-02: channel, place, note and the state of its case), and an anomaly the
  * reports on the scans that took part in it (the Cases queue: reports.ts).
  */
-import { sql } from 'kysely';
 import type { FastifyPluginAsync } from 'fastify';
 import { anomalyListQuery, anomalyParams, anomalyPatchBody, pageOf, parse, scanListQuery, warrantyListQuery } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
@@ -112,44 +111,6 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
               createdAt: r.report_created_at,
             }
           : null,
-      })),
-      Number(total.n),
-      page,
-    );
-  });
-
-  app.get('/api/admin/owners', async (request) => {
-    const page = pageOf(request.query);
-    const total = await db.selectFrom('accounts').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    const rows = await db
-      .selectFrom('accounts as a')
-      .leftJoin('ownership as o', 'o.account_id', 'a.id')
-      .select([
-        'a.id',
-        'a.email',
-        'a.display_name',
-        'a.country',
-        'a.status',
-        'a.created_at',
-        sql<number>`count(o.id) FILTER (WHERE o.ended_at IS NULL)`.as('current_products'),
-        sql<number>`count(o.id)`.as('total_products'),
-      ])
-      .groupBy(['a.id', 'a.email', 'a.display_name', 'a.country', 'a.status', 'a.created_at'])
-      .orderBy('a.created_at', 'desc')
-      .orderBy('a.id')
-      .limit(page.pageSize)
-      .offset(pageOffset(page))
-      .execute();
-    return makePage(
-      rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        displayName: r.display_name,
-        country: r.country?.trim() ?? null,
-        status: r.status,
-        createdAt: r.created_at,
-        products: Number(r.current_products),
-        productsEver: Number(r.total_products),
       })),
       Number(total.n),
       page,

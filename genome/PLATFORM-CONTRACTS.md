@@ -80,7 +80,7 @@ Timestamp convention: every row records when it came into being, named after wha
 | `genomes` | `id uuid PK` · `product_id uuid FK` · `genome_version smallint` · `genome_id text` (= canonical product id string) · `value bigint` (u32) · `glyphs smallint[]` (8) · `pattern text` (glyph ids joined by `·`) · `fingerprint text` · `UNIQUE(product_id, genome_version)` · `UNIQUE(genome_version, value)` · `UNIQUE(fingerprint)` · `created_at` |
 | `cryptographic_keys` | `key_id smallint PK CHECK 1..255` · `kid text UNIQUE` · `algorithm text CHECK = 'Ed25519'` · `public_key bytea CHECK length 32` · `status text CHECK in ('ACTIVE','RETIRED','REVOKED')` · `provider text` · `provider_ref text` (reference, never a secret) · `created_at` · `activated_at NULL` · `retired_at NULL` · `revoked_at NULL` · `compromised_at NULL` · `revocation_reason text NULL` · partial `UNIQUE INDEX ON (status) WHERE status='ACTIVE'` |
 | `codes` | `id uuid PK` · `product_id FK` · `genome_id uuid FK` → `genomes.id` · `key_id smallint FK` · `code_version smallint` · `issue smallint` · `issued_day int` · `nonce bytea` (4) · `payload bytea` (13) · `signature bytea` (64) · `payload_hash bytea UNIQUE` (sha256) · `status text CHECK in ('ACTIVE','SUPERSEDED','REVOKED')` · `revoked_at NULL` · `revocation_reason NULL` · `UNIQUE(product_id, issue)` · `created_at` |
-| `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `failed_logins int NOT NULL DEFAULT 0 CHECK >= 0` · `failed_logins_since NULL` (login throttle, migration 0002) · `created_at` · `updated_at` |
+| `accounts` | `id uuid PK` · `email text` · `email_normalized text UNIQUE` · `password_hash text` · `display_name text NULL` · `country char(2) NULL` · `status text CHECK in ('ACTIVE','LOCKED','DELETED')` · `failed_logins int NOT NULL DEFAULT 0 CHECK >= 0` · `failed_logins_since NULL` (login throttle, migration 0002) · `transfers_frozen_until timestamptz NULL` (72-hour transfer pause after an assisted recovery, migration 0005) · `created_at` · `updated_at` |
 | `admin_users` | `id uuid PK` · `email_normalized text UNIQUE` · `email text` · `password_hash text` · `role text CHECK in ('ADMIN','OPERATOR','AUDITOR')` · `totp_secret_enc text NULL` · `failed_logins int DEFAULT 0` · `locked_until NULL` · `disabled_at NULL` · `created_at` · `updated_at` |
 | `sessions` | `id_hash bytea PK` (sha256 of the random token) · `subject_type text CHECK in ('account','admin')` · `subject_id uuid` · `csrf_token text` · `mfa_passed boolean DEFAULT false` · `created_at` · `expires_at` · `last_seen_at` · `ip_hash text NULL` · `user_agent text NULL` |
 | `ownership` | `id uuid PK` · `product_id FK` · `account_id FK` · `acquired_via text CHECK in ('FIRST_REGISTRATION','TRANSFER','RESALE','ADMIN')` · `verified boolean` (claim secret / retailer proof) · `started_at` · `ended_at NULL` · `ended_reason text NULL` · partial `UNIQUE (product_id) WHERE ended_at IS NULL` |
@@ -92,6 +92,7 @@ Timestamp convention: every row records when it came into being, named after wha
 | `authentication_events` | `id uuid PK` · `scan_event_id FK` · `code_id FK NULL` · `product_id FK NULL` · `key_id smallint NULL` · `signature_valid boolean` · `genome_check text CHECK in ('MATCH','MISMATCH','NOT_PROVIDED','INCONCLUSIVE')` · `state text` · `reasons text[]` · `risk_score int` · `authenticators jsonb` · `created_at` |
 | `anomalies` | `id uuid PK` · `product_id FK NULL` · `code_id FK NULL` · `type text` · `severity text CHECK in ('LOW','MEDIUM','HIGH','CRITICAL')` · `risk_score int` · `details jsonb` · `status text CHECK in ('OPEN','ACKNOWLEDGED','RESOLVED','DISMISSED')` · `occurrences int DEFAULT 1` · `first_seen_at` · `last_seen_at` · `resolved_by text NULL` · `resolved_at NULL` · `resolution_note text NULL` · partial `UNIQUE (product_id, type) WHERE status IN ('OPEN','ACKNOWLEDGED')` (repeat findings increment `occurrences`) |
 | `revocations` | `id uuid PK` · `target_type text CHECK in ('CODE','PRODUCT','KEY')` · `target_id text` · `reason_code text` · `reason text NULL` · `created_by text` · `created_at` · `lifted_at NULL` · `lifted_by NULL` |
+| `account_recovery_codes` | Migration 0005. `id uuid PK` · `account_id uuid FK → accounts` · `code_hash text CHECK LIKE 'scrypt$%'` (scrypt of the 12-character Crockford code; the code itself is never stored) · `created_by uuid FK → admin_users` · `created_at` · `expires_at` (+ 30 min) · `used_at NULL` · `revoked_at NULL` · never both used and revoked · partial `UNIQUE (account_id) WHERE used_at IS NULL AND revoked_at IS NULL` (one open code per account) · both foreign keys indexed. |
 | `scan_reports` | Migration 0004. `id uuid PK` · `scan_event_id uuid FK UNIQUE` (one report per scan) · `channel text CHECK in ('BOUTIQUE','ONLINE','PRIVATE','OTHER')` · `place text NULL` (≤ 200) · `note text NULL` (≤ 500) · `created_at` · `status text CHECK in ('OPEN','CLOSED') DEFAULT 'OPEN'` · `handled_by uuid FK → admin_users NULL` (indexed) · `handled_at NULL` · `resolution_note text NULL` (≤ 2 000). A customer's words: purged with the scan, never audited. |
 | `audit_logs` | `id bigserial PK` · `occurred_at` · `actor_type text CHECK in ('admin','account','system')` · `actor_id text NULL` · `action text` · `target_type text NULL` · `target_id text NULL` · `details jsonb` · `ip_hash text NULL` · `prev_hash bytea` · `hash bytea UNIQUE`. Append-only: a trigger rejects UPDATE and DELETE. |
 
@@ -246,9 +247,10 @@ The service API: `transition(productId, to, { reason }, actor)`, `history(produc
 | Method | Behaviour |
 |---|---|
 | `registerFirst(accountId, { registrationToken, claimCode? }, actor)` | The token is single-use, unexpired and bound to the product. If the product has a claim secret, the claim code must match (constant-time scrypt compare; 5 failed attempts per product per hour, then 429). The product must have no current owner. Creates an `ownership` row (`FIRST_REGISTRATION`, `verified` = claim code matched). Product status becomes `OWNED` if verified, otherwise `REGISTERED`, and `ownership_state` is updated. |
-| `initiateTransfer(accountId, productId, actor)` | The caller must be the current owner and no transfer may be pending. Returns `{ transferCode: 'XXXX-XXXX-XXXX', expiresAt }` (7 days). Only the hash of the code is stored. |
+| `initiateTransfer(accountId, productId, actor)` | The caller must be the current owner and no transfer may be pending. Returns `{ transferCode: 'XXXX-XXXX-XXXX', expiresAt }` (7 days). Only the hash of the code is stored. Refused with `409 TRANSFERS_PAUSED` while the account's `transfers_frozen_until` is in the future (72 hours after an assisted recovery). |
 | `acceptTransfer(accountId, transferCode, actor)` | The recipient cannot be the current owner. Ends the old ownership (`TRANSFERRED_OUT`) and starts the new one (`TRANSFER`, `verified` = previous verified). Product status becomes `TRANSFERRED`. |
 | `cancelTransfer(accountId, productId, actor)` | Cancels the pending transfer. |
+| `cancelPendingTransfersFrom(tx, accountId, actor, reason)` | Inside the caller's transaction (the assisted recovery, which holds the account row): cancels every pending transfer offered by the account, audited `ownership.transfer.cancel` with the reason. |
 | `confirmOwnership(productId, actor /* admin */)` | `REGISTERED` becomes `OWNED` (proof reviewed by client services). |
 | `reportIncident(accountId, productId, 'LOST' \| 'STOLEN', actor)` | Owner only. Moves the product to `LOST` or `STOLEN`. |
 | `listForAccount(accountId)` / `history(productId)` (admin) | — |
@@ -334,6 +336,8 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | GET | `/api/v1/account/session` | Session probe: `{ account: null }` (200) when signed out, else the `me` body. Never 401. |
 | GET | `/api/v1/account/me` | Returns `{ account: { email, displayName }, csrfToken }`. 401 if not logged in. |
 | GET | `/api/v1/account/products` | The caller's current products, each with genome and warranty summary. |
+| POST | `/api/v1/account/password` | Extension: body `{ currentPassword, newPassword }`. `changePassword` keeping this session; a wrong current password is `400 CURRENT_PASSWORD_INVALID`, never a 401. Rate group `auth`. |
+| POST | `/api/v1/account/recover` | Extension: body `{ email, recoveryCode, newPassword }`, session-less (origin check), rate group `auth`. One answer, `400 RECOVERY_CODE_INVALID`, for an unknown email and a wrong, expired or used code; 5 failures per account per hour. In one transaction: new password, every session revoked, pending transfers cancelled, new transfers paused 72 h, code used. Returns `{ ok: true, transfersPausedUntil }`; no session is opened. |
 | POST | `/api/v1/ownership/register` | Body `{ registrationToken, claimCode? }`. |
 | POST | `/api/v1/ownership/transfers` | Body `{ productId }`. Returns `{ transferCode, expiresAt }`. |
 | POST | `/api/v1/ownership/transfers/accept` | Body `{ transferCode }`. |
@@ -343,7 +347,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 
 ### Admin routes (cookie `orbes_admin`, `__Host-` prefixed in production; roles ADMIN > OPERATOR > AUDITOR)
 
-AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories and console users.
+AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation (including transitions to REVOKED and RETIRED), reinstatement, categories, console users and a customer's recovery code.
 
 | Method | Path | Description |
 |---|---|---|
@@ -374,7 +378,8 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/genomes?page` | — |
 | GET | `/api/admin/codes?page` | — |
 | GET | `/api/admin/scans?productId&state&scanId&page` | Scan and authentication events, each with the customer's `report` (or null). |
-| GET | `/api/admin/owners?page` | Accounts with product counts. |
+| GET | `/api/admin/owners?page` | Accounts with product counts, the end of a transfer pause and the expiry of an open recovery code (`routes/admin/owners.ts`). |
+| POST | `/api/admin/owners/:id/recovery-code` | Extension, ADMIN: a one-time recovery code (12 Crockford characters, 30 min, scrypt hash only, one open per account), shown once, after an identity check by ORBES Client Services. Audited `account.recovery_code.issue`, never with the code. |
 | GET | `/api/admin/warranties?status&page` | — |
 | GET | `/api/admin/anomalies?status&severity&id&page` | Each with `reports` (count, open, latest) on the scans that took part in it. |
 | PATCH | `/api/admin/anomalies/:id` | Body `{ status, note }`. |

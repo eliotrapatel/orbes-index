@@ -20,7 +20,8 @@
  * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code); then
  * WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the
  * scan. A warranty that no longer applies offers the same contact in its
- * tab.
+ * tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel offers it to a
+ * customer who needs a recovery code (C-04).
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
@@ -93,7 +94,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         case 'care':
           return carePanel(vm);
         case 'ownership':
-          ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh });
+          ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
           return h('div', { class: 'panel' }, ownership.root);
       }
     };
@@ -111,7 +112,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     // UNUSUAL ACTIVITY with a registration token (the server's step 10 exception): the buyer holding
     // the certificate card may still register, with its claim code. Sign-in, then the claim code; no product data.
     if (vm.ownership.kind === 'register') {
-      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh });
+      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
       sections.push(
         h(
           'section',

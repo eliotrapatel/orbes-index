@@ -442,6 +442,55 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
 
+  it('account_recovery_codes: a scrypt hash, one open code per account, used or revoked but not both; transfers_frozen_until', async () => {
+    const account = await t.db
+      .insertInto('accounts')
+      .values({ email: 'recover@example.com', email_normalized: 'recover@example.com', password_hash: 'scrypt$x' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    // 0005: a nullable pause on the account, null by default.
+    expect(account.transfers_frozen_until).toBeNull();
+    const admin = await t.db
+      .insertInto('admin_users')
+      .values({ email: 'recovery@orbes.test', email_normalized: 'recovery@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const now = new Date('2026-10-02T09:00:00.000Z');
+    const code = (over: Partial<S.NewAccountRecoveryCode> = {}): S.NewAccountRecoveryCode => ({
+      account_id: account.id,
+      code_hash: 'scrypt$15$8$1$salt$hash',
+      created_by: admin.id,
+      created_at: now,
+      expires_at: new Date(now.getTime() + 30 * 60_000),
+      ...over,
+    });
+    const first = await t.db.insertInto('account_recovery_codes').values(code()).returningAll().executeTakeFirstOrThrow();
+    expect(first).toMatchObject({ used_at: null, revoked_at: null, created_by: admin.id });
+    // One open code per account (neither used nor revoked).
+    await expect(t.db.insertInto('account_recovery_codes').values(code()).execute()).rejects.toSatisfy((e) =>
+      isUniqueViolation(e, 'account_recovery_codes_single_open'),
+    );
+    for (const bad of [
+      { code_hash: 'plaintext-code' },
+      { expires_at: now },
+      { used_at: new Date(now.getTime() - 1000), revoked_at: null },
+    ]) {
+      await t.db.updateTable('account_recovery_codes').set({ revoked_at: now }).where('id', '=', first.id).execute();
+      await expect(t.db.insertInto('account_recovery_codes').values(code(bad)).execute(), JSON.stringify(bad)).rejects.toSatisfy((e) => isCheckViolation(e));
+      await t.db.deleteFrom('account_recovery_codes').where('id', '!=', first.id).execute();
+    }
+    await expect(t.db.updateTable('account_recovery_codes').set({ used_at: now }).where('id', '=', first.id).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'account_recovery_codes_used_or_revoked'),
+    );
+    // Revoked, so a second one may be open; the account and the admin cannot go while their codes are there.
+    await t.db.insertInto('account_recovery_codes').values(code()).execute();
+    await expect(t.db.insertInto('account_recovery_codes').values(code({ account_id: '00000000-0000-4000-8000-000000000000' })).execute()).rejects.toSatisfy((e) =>
+      isForeignKeyViolation(e),
+    );
+    await expect(t.db.deleteFrom('accounts').where('id', '=', account.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

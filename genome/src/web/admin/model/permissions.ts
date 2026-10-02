@@ -1,7 +1,7 @@
 /**
  * What each admin role may do, mirroring the server guard (contract §3:
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
- * reinstatement and categories). The server is the authority; the console
+ * reinstatement, categories, console users and recovery codes). The server is the authority; the console
  * only hides controls a role cannot use, so nobody is offered a button that
  * will answer 403.
  */
@@ -33,6 +33,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   createCategory: 'ADMIN',
   /** Console users: list, reset a lost second factor. */
   manageAdmins: 'ADMIN',
+  /** A one-time recovery code for a client who forgot the password (after an identity check). */
+  issueRecoveryCode: 'ADMIN',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;

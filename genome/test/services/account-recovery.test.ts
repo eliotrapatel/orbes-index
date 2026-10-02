@@ -1,0 +1,311 @@
+/**
+ * AccountRecoveryService (C-04): the one-time code ORBES Client Services
+ * issues after an identity check, and the recovery it allows: new password,
+ * every session revoked, pending transfers cancelled, new transfers paused
+ * for 72 hours, the code used once. One answer for an unknown email and a
+ * wrong, expired, used or replaced code; 5 failures per account per hour.
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { testConfig } from '../../src/server/config.js';
+import { verifySecret } from '../../src/server/crypto/scrypt.js';
+import type { ProductStatus } from '../../src/server/db/schema.js';
+import { DomainError } from '../../src/server/errors.js';
+import {
+  AccountRecoveryService,
+  RECOVERY_ATTEMPT_LIMIT,
+  RECOVERY_ATTEMPT_WINDOW_MS,
+  RECOVERY_CODE_TTL_MS,
+  TRANSFER_FREEZE_MS,
+} from '../../src/server/services/account-recovery.js';
+import { AuditService } from '../../src/server/services/audit.js';
+import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
+import { normalizeClaimCode } from '../../src/server/services/claim-codes.js';
+import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { OwnershipService } from '../../src/server/services/ownership.js';
+import { createScanToken } from '../../src/server/services/scan-tokens.js';
+import { SessionService } from '../../src/server/services/sessions.js';
+import { createManualClock, SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { createTestDb, type TestDb } from '../support/db.js';
+
+const PASSWORD = 'correct horse battery staple';
+const NEW_PASSWORD = 'a brand new passphrase';
+const HOUR = 3_600_000;
+
+async function failure(p: Promise<unknown>): Promise<DomainError> {
+  const e = await p.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(e).toBeInstanceOf(DomainError);
+  return e as DomainError;
+}
+
+async function expectDomainError(p: Promise<unknown>, code: string, status: number): Promise<DomainError> {
+  const e = await failure(p);
+  expect(e.code).toBe(code);
+  expect(e.httpStatus).toBe(status);
+  return e;
+}
+
+describe('AccountRecoveryService', () => {
+  let t: TestDb;
+  let audit: AuditService;
+  let sessions: SessionService;
+  let auth: AuthService;
+  let lifecycle: LifecycleService;
+  let ownership: OwnershipService;
+  let recovery: AccountRecoveryService;
+  let admin: Actor;
+  let modelId: string;
+  let serial = 0;
+  let n = 0;
+  const clock = createManualClock('2026-10-02T09:00:00.000Z');
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    audit = new AuditService({ db: t.db, clock: clock.now });
+    sessions = new SessionService({ db: t.db, clock: clock.now, ttlHours: { account: 720, admin: 8 } });
+    auth = new AuthService({ db: t.db, audit, sessions, clock: clock.now, totpKey: deriveTotpEncryptionKey(testConfig()) });
+    lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
+    ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: new Uint8Array(32).fill(7) });
+    recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
+    const a = await auth.createAdmin({ email: 'cs@orbes.test', password: PASSWORD, role: 'ADMIN' }, SYSTEM_ACTOR);
+    admin = { type: 'admin', id: a.id, ipHash: 'ip-admin' };
+    await t.db.insertInto('categories').values({ id: 1, code: 'J', name: 'Jewelry', warranty_months: 24 }).execute();
+    modelId = (
+      await t.db.insertInto('models').values({ category_id: 1, name: 'MONOLITHE', type: 'RING', sku_prefix: 'MON' }).returning('id').executeTakeFirstOrThrow()
+    ).id;
+  });
+  afterAll(() => t.close());
+
+  // ── fixtures ──────────────────────────────────────────────────────────────
+
+  async function customer() {
+    const email = `client.${++n}@Example.com`;
+    const reg = await auth.registerAccount({ email, password: PASSWORD }, {});
+    return { id: reg.account.id, email, session: reg.session, actor: { type: 'account', id: reg.account.id } as Actor };
+  }
+
+  /** A piece owned by `owner` (first registration from a scan token). */
+  async function ownedBy(owner: { id: string; actor: Actor }, path: ProductStatus[] = ['ACTIVATED']) {
+    const s = ++serial;
+    const productId = `O26-J-${String(s).padStart(5, '0')}`;
+    const row = await t.db
+      .insertInto('products')
+      .values({
+        product_id: productId,
+        packed_identity: (26 << 25) | (1 << 20) | s,
+        year: 2026,
+        category_id: 1,
+        serial: s,
+        sku: `MON-${s}`,
+        model_id: modelId,
+        material: '925 STERLING SILVER',
+        created_at: clock.now(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await t.db.insertInto('product_status_history').values({ product_id: row.id, from_status: null, to_status: 'ISSUED', actor_type: 'system', created_at: clock.now() }).execute();
+    for (const step of path) await lifecycle.transition(productId, step, {}, admin);
+    const scan = await t.db
+      .insertInto('scan_events')
+      .values({ product_id: row.id, event_type: 'VERIFY', result_state: 'AUTHENTIC_FIRST_REGISTRATION', occurred_at: clock.now() })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const { token } = await createScanToken(t.db, { productId: row.id, scanEventId: scan.id, now: clock.now() });
+    await ownership.registerFirst(owner.id, { registrationToken: token }, owner.actor);
+    return { id: row.id, productId };
+  }
+
+  const codeRows = (accountId: string) => t.db.selectFrom('account_recovery_codes').selectAll().where('account_id', '=', accountId).orderBy('created_at').execute();
+  const accountRow = (id: string) => t.db.selectFrom('accounts').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+
+  // ── issue ─────────────────────────────────────────────────────────────────
+
+  describe('issue', () => {
+    it('returns a 12-character Crockford code once, valid 30 minutes, and stores only its scrypt hash', async () => {
+      const c = await customer();
+      const issued = await recovery.issue(c.id, admin);
+      expect(issued.recoveryCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+      expect(issued.expiresAt.getTime()).toBe(clock.now().getTime() + RECOVERY_CODE_TTL_MS);
+      expect(RECOVERY_CODE_TTL_MS).toBe(30 * 60_000);
+      const [row] = await codeRows(c.id);
+      expect(row).toMatchObject({ created_by: admin.id, used_at: null, revoked_at: null });
+      expect(row.code_hash).toMatch(/^scrypt\$15\$8\$1\$/);
+      expect(row.code_hash).not.toContain(normalizeClaimCode(issued.recoveryCode)!);
+      expect(await verifySecret(normalizeClaimCode(issued.recoveryCode)!, row.code_hash)).toBe(true);
+      // Audited with the account id and the code's id, never the code or the email.
+      const entry = (await audit.list({ action: 'account.recovery_code.issue', targetId: c.id })).items[0];
+      expect(entry).toMatchObject({ actorType: 'admin', actorId: admin.id, targetType: 'account', details: { recoveryCodeId: row.id, replaced: 0 } });
+      expect(JSON.stringify(entry)).not.toContain(normalizeClaimCode(issued.recoveryCode)!);
+      expect(JSON.stringify(entry)).not.toContain(issued.recoveryCode);
+      expect(JSON.stringify(entry)).not.toMatch(/example\.com/i);
+    });
+
+    it('keeps one open code per account: a new one revokes the previous one, which then fails', async () => {
+      const c = await customer();
+      const first = await recovery.issue(c.id, admin);
+      const second = await recovery.issue(c.id, admin);
+      const rows = await codeRows(c.id);
+      expect(rows.map((r) => r.revoked_at !== null)).toEqual([true, false]);
+      expect((await audit.list({ action: 'account.recovery_code.issue', targetId: c.id })).items[0].details).toMatchObject({ replaced: 1 });
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode: first.recoveryCode, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+      await recovery.recover({ email: c.email, recoveryCode: second.recoveryCode, newPassword: NEW_PASSWORD });
+    });
+
+    it('is for an ADMIN, and an ACTIVE account only', async () => {
+      const c = await customer();
+      await expectDomainError(recovery.issue(c.id, { type: 'account', id: c.id }), 'FORBIDDEN', 403);
+      await expectDomainError(recovery.issue(c.id, SYSTEM_ACTOR), 'FORBIDDEN', 403);
+      await expectDomainError(recovery.issue('5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', admin), 'ACCOUNT_NOT_FOUND', 404);
+      await expectDomainError(recovery.issue('not-a-uuid', admin), 'ACCOUNT_NOT_FOUND', 404);
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', c.id).execute();
+      await expectDomainError(recovery.issue(c.id, admin), 'ACCOUNT_NOT_ACTIVE', 409);
+      expect(await codeRows(c.id)).toEqual([]);
+    });
+  });
+
+  // ── recover ───────────────────────────────────────────────────────────────
+
+  describe('recover', () => {
+    it('sets the new password, revokes every session, cancels pending transfers and uses the code', async () => {
+      const c = await customer();
+      const other = await auth.login({ email: c.email, password: PASSWORD }, {});
+      const piece = await ownedBy(c);
+      const offer = await ownership.initiateTransfer(c.id, piece.productId, c.actor);
+      expect((await t.db.selectFrom('products').select('ownership_state').where('id', '=', piece.id).executeTakeFirstOrThrow()).ownership_state).toBe('TRANSFER_PENDING');
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+
+      clock.advance(5 * 60_000);
+      const r = await recovery.recover({ email: ` ${c.email.toUpperCase()} `, recoveryCode: recoveryCode.toLowerCase().replace(/-/g, ' '), newPassword: NEW_PASSWORD }, { ipHash: 'ip-client' });
+      expect(r).toMatchObject({ accountId: c.id, sessionsRevoked: 2 });
+      expect(r.transfersCancelled).toHaveLength(1);
+      expect(r.transfersFrozenUntil.getTime()).toBe(clock.now().getTime() + TRANSFER_FREEZE_MS);
+
+      // Sessions: both gone. Password: the new one only.
+      expect(await auth.authenticateAccount(c.session.token)).toBeNull();
+      expect(await auth.authenticateAccount(other.session.token)).toBeNull();
+      await expectDomainError(auth.login({ email: c.email, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+
+      // The pending transfer is cancelled and its code no longer completes.
+      const transfer = await t.db.selectFrom('ownership_transfers').selectAll().where('id', '=', r.transfersCancelled[0]).executeTakeFirstOrThrow();
+      expect(transfer.status).toBe('CANCELLED');
+      expect((await t.db.selectFrom('products').select('ownership_state').where('id', '=', piece.id).executeTakeFirstOrThrow()).ownership_state).toBe('REGISTERED');
+      const stranger = await customer();
+      await expectDomainError(ownership.acceptTransfer(stranger.id, offer.transferCode, stranger.actor), 'TRANSFER_CANCELLED', 410);
+
+      // The code is used, once.
+      expect((await codeRows(c.id))[0].used_at?.getTime()).toBe(clock.now().getTime());
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode, newPassword: 'yet another passphrase' }), 'RECOVERY_CODE_INVALID', 400);
+
+      // Audited by the account, without the code or the email.
+      const entry = (await audit.list({ action: 'account.recover', targetId: c.id })).items[0];
+      expect(entry).toMatchObject({ actorType: 'account', actorId: c.id, ipHash: 'ip-client', details: { sessionsRevoked: 2, transfersCancelled: 1 } });
+      expect(JSON.stringify(entry)).not.toContain(normalizeClaimCode(recoveryCode)!);
+      const cancel = (await audit.list({ action: 'ownership.transfer.cancel', targetId: piece.productId })).items[0];
+      expect(cancel.details).toMatchObject({ transferId: transfer.id, reason: 'account_recovery' });
+    });
+
+    it('pauses new transfers out of the account for 72 hours, then lets them go', async () => {
+      const c = await customer();
+      const piece = await ownedBy(c);
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
+      const paused = await expectDomainError(ownership.initiateTransfer(c.id, piece.productId, c.actor), 'TRANSFERS_PAUSED', 409);
+      expect(paused.publicMessage).toMatch(/paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d UTC/);
+      expect((await accountRow(c.id)).transfers_frozen_until?.getTime()).toBe(clock.now().getTime() + TRANSFER_FREEZE_MS);
+      // A transfer offered TO the account is not affected (the pause protects what it holds).
+      const giver = await customer();
+      const gift = await ownedBy(giver);
+      const offer = await ownership.initiateTransfer(giver.id, gift.productId, giver.actor);
+      expect((await ownership.acceptTransfer(c.id, offer.transferCode, c.actor)).accountId).toBe(c.id);
+
+      clock.advance(TRANSFER_FREEZE_MS - 1000);
+      await expectDomainError(ownership.initiateTransfer(c.id, piece.productId, c.actor), 'TRANSFERS_PAUSED', 409);
+      clock.advance(1000);
+      expect((await ownership.initiateTransfer(c.id, piece.productId, c.actor)).transferCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    });
+
+    it('gives one answer, at one cost, for an unknown email and a wrong, malformed, expired or used code', async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      const refusals = [
+        await failure(recovery.recover({ email: 'nobody@example.com', recoveryCode, newPassword: NEW_PASSWORD })),
+        await failure(recovery.recover({ email: c.email, recoveryCode: 'ZZZZ-ZZZZ-ZZZZ', newPassword: NEW_PASSWORD })),
+        await failure(recovery.recover({ email: c.email, recoveryCode: 'not a code', newPassword: NEW_PASSWORD })),
+        await failure(recovery.recover({ email: 'not an email', recoveryCode, newPassword: NEW_PASSWORD })),
+      ];
+      clock.advance(RECOVERY_CODE_TTL_MS);
+      refusals.push(await failure(recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD })));
+      for (const e of refusals) expect(e.toResponse()).toEqual(refusals[0].toResponse());
+      expect(refusals[0]).toMatchObject({ code: 'RECOVERY_CODE_INVALID', httpStatus: 400 });
+      expect(refusals[0].publicMessage).toMatch(/ORBES Client Services/);
+      // The expired code stays unused; its failures are recorded with their reason, for staff.
+      expect((await codeRows(c.id))[0].used_at).toBeNull();
+      const failures = (await audit.list({ action: 'account.recover_failed', targetId: c.id })).items.map((e) => e.details.reason);
+      expect(failures.sort()).toEqual(['EXPIRED', 'MISMATCH']);
+      // Without an open code, a known email is refused alike.
+      await expectDomainError(recovery.recover({ email: (await customer()).email, recoveryCode, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+    });
+
+    it(`stops checking codes after ${RECOVERY_ATTEMPT_LIMIT} failures in an hour, even the right one`, async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      for (let i = 0; i < RECOVERY_ATTEMPT_LIMIT; i++) {
+        await expectDomainError(recovery.recover({ email: c.email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i}`, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+      }
+      const held = await failure(recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }));
+      expect(held.toResponse()).toEqual((await failure(recovery.recover({ email: 'nobody@example.com', recoveryCode, newPassword: NEW_PASSWORD }))).toResponse());
+      expect((await audit.list({ action: 'account.recover_throttled', targetId: c.id })).items[0].details).toMatchObject({ failures: RECOVERY_ATTEMPT_LIMIT });
+      expect((await codeRows(c.id))[0].used_at).toBeNull();
+      await expectDomainError(auth.login({ email: c.email, password: NEW_PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+
+      // An hour later the budget is back; the first code has expired, a new one works.
+      clock.advance(RECOVERY_ATTEMPT_WINDOW_MS);
+      const again = await recovery.issue(c.id, admin);
+      await recovery.recover({ email: c.email, recoveryCode: again.recoveryCode, newPassword: NEW_PASSWORD });
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+      expect(HOUR).toBe(RECOVERY_ATTEMPT_WINDOW_MS);
+    });
+
+    it('refuses a LOCKED account and keeps the code; a weak new password costs no attempt', async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode, newPassword: 'short' }), 'VALIDATION_FAILED', 400);
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode, newPassword: c.email }), 'VALIDATION_FAILED', 400);
+      expect((await audit.list({ action: 'account.recover_failed', targetId: c.id })).items).toEqual([]);
+
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', c.id).execute();
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }), 'ACCOUNT_LOCKED', 403);
+      expect((await codeRows(c.id))[0].used_at).toBeNull();
+      expect(await auth.authenticateAccount(c.session.token)).toBeNull(); // a LOCKED account's sessions stop anyway
+      expect((await accountRow(c.id)).transfers_frozen_until).toBeNull();
+
+      // A DELETED account reads as unknown.
+      await t.db.updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', c.id).execute();
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+    });
+
+    it('clears the login throttle, so the customer signs in at once', async () => {
+      const c = await customer();
+      for (let i = 0; i < 10; i++) await expectDomainError(auth.login({ email: c.email, password: `wrong password ${i}` }, {}), 'INVALID_CREDENTIALS', 401);
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
+      expect(await accountRow(c.id)).toMatchObject({ failed_logins: 0, failed_logins_since: null });
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+    });
+
+    it('lets one of two concurrent attempts with the same code through', async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      const results = await Promise.allSettled([
+        recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }),
+        recovery.recover({ email: c.email, recoveryCode, newPassword: 'the other passphrase' }),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect((refused.reason as DomainError).code).toBe('RECOVERY_CODE_INVALID');
+    });
+  });
+});

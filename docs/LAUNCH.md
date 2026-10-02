@@ -172,6 +172,7 @@ docker compose ps                                                # caddy, app, p
 | Yearly / on staff change | Rotate the signing key: Admin → *Keys* → *Rotate*. Old products stay verifiable. |
 | Suspected key compromise | Admin → *Keys* → *Revoke* with the compromise time, then rotate. See DEPLOYMENT.md, key compromise runbook. |
 | Lost admin authenticator | Another ADMIN resets it in the console, or on the VPS run `node --import tsx scripts/admin.ts reset-totp --email … --yes` |
+| A client forgot the password | After checking the client's identity (the procedure is to finalise with counsel): Admin → *Owners* → *Recovery code* on the client's row (ADMIN). Read the code to the client, who enters it on `/verify` under FORGOTTEN PASSWORD? within 30 minutes, with a new password. Never write it down or send it on. The recovery ends every session of the account and pauses transfers out of it for 72 hours. |
 
 ## 12. Optional
 

@@ -137,6 +137,42 @@ describe('ApiClient', () => {
     await expect(api.report({ scanId, channel: 'OTHER' })).rejects.toMatchObject({ status: 409, code: 'REPORT_ALREADY_SENT', message: 'A report has already been sent for this reference.' });
   });
 
+  it('changes the password with the CSRF token; a wrong current password (400) keeps the session', async () => {
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(400, { error: { code: 'CURRENT_PASSWORD_INVALID', message: 'The current password is not correct.' } }),
+      () => json(200, { ok: true }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    await expect(api.changePassword('wrong one', 'a brand new passphrase')).rejects.toMatchObject({ status: 400, code: 'CURRENT_PASSWORD_INVALID' });
+    expect(api.hasSession).toBe(true);
+    await api.changePassword('correct horse battery', 'a brand new passphrase');
+    expect(f.calls[2]).toMatchObject({ url: '/api/v1/account/password', method: 'POST', body: { currentPassword: 'correct horse battery', newPassword: 'a brand new passphrase' } });
+    expect(f.calls[2].headers['x-csrf-token']).toBe('t1');
+  });
+
+  it('recovers an account without a CSRF header (session-less), and forgets any session: every one has ended', async () => {
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(200, { ok: true, transfersPausedUntil: '2026-10-05T09:00:00.000Z' }),
+      () => json(400, { error: { code: 'RECOVERY_CODE_INVALID', message: 'This email and recovery code do not match.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    const r = await api.recoverAccount('a@example.com', ' abcd-efgh-jkmn ', 'a brand new passphrase');
+    expect(r.transfersPausedUntil).toBe('2026-10-05T09:00:00.000Z');
+    expect(f.calls[1]).toMatchObject({
+      url: '/api/v1/account/recover',
+      method: 'POST',
+      credentials: 'same-origin',
+      body: { email: 'a@example.com', recoveryCode: 'abcd-efgh-jkmn', newPassword: 'a brand new passphrase' },
+    });
+    expect(f.calls[1].headers['x-csrf-token']).toBeUndefined();
+    expect(api.hasSession).toBe(false);
+    await expect(api.recoverAccount('a@example.com', 'ZZZZ-ZZZZ-ZZZZ', 'a brand new passphrase')).rejects.toMatchObject({ status: 400, code: 'RECOVERY_CODE_INVALID' });
+  });
+
   it('omits an empty claim code and display name', async () => {
     const f = fakeFetch([() => json(201, SESSION('t')), () => json(201, { productId: 'p', verified: false, since: 's' })]);
     const api = new ApiClient({ fetch: f.impl });

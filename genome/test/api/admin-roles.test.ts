@@ -1,6 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
- * mutates, ADMIN for keys, revocations, reinstatement and categories.
+ * mutates, ADMIN for keys, revocations, reinstatement, categories, console
+ * users and a customer's recovery code.
  *
  * "Allowed" is probed with a request the guard lets through but validation
  * then rejects (400) or that targets nothing (404), so the probes have no
@@ -46,6 +47,7 @@ const PROBES: Probe[] = [
   { group: 'codes', method: 'GET', url: '/api/admin/codes', min: 'AUDITOR' },
   { group: 'scans', method: 'GET', url: '/api/admin/scans', min: 'AUDITOR' },
   { group: 'owners', method: 'GET', url: '/api/admin/owners', min: 'AUDITOR' },
+  { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/recovery-code`, body: INVALID, min: 'ADMIN' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'PATCH', url: `/api/admin/anomalies/${UUID}`, body: INVALID, min: 'OPERATOR' },

@@ -1162,26 +1162,45 @@ h1[tabindex="-1"]:focus,
   -webkit-user-select: all;
 }
 
+/* SIGNED IN AS …, then CHANGE PASSWORD and SIGN OUT (C-04). When the line is
+   too short for the three, the two links wrap under the account, kept to the
+   right; a long email wraps inside its line rather than squeezing them. */
 .ownership__account {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 4px 16px;
   margin-top: 36px;
   padding-top: 8px;
   border-top: 1px solid var(--hairline);
 }
 
-/* SIGN OUT keeps its one line at any width: the account line gives way
-   instead, and a long email wraps inside it rather than squeezing the link. */
-.ownership__account .textlink {
+.ownership__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 20px;
+  margin-left: auto;
+}
+
+/* Each link keeps its one line at any width: the line gives way instead. */
+.ownership__links .textlink {
   flex: none;
   white-space: nowrap;
 }
 
 .ownership__who {
+  flex: 1 1 14em;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* FORGOTTEN PASSWORD (C-04): I HAVE A RECOVERY CODE over BACK TO SIGN IN,
+   centred under the contact of ORBES Client Services; the 12 px gap keeps
+   their tap zones apart (a text link's zone reaches 4 px past its box). */
+.ownership__actions--stack {
+  gap: 12px;
 }
 
 .ownership__email {

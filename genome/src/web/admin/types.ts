@@ -448,6 +448,17 @@ export interface OwnerRecord {
   createdAt: Iso;
   products: number;
   productsEver: number;
+  /** After an assisted recovery, new transfers out of the account are refused until then (72 hours). */
+  transfersPausedUntil: Iso | null;
+  /** The expiry of the open recovery code, while it can still be used. */
+  recoveryCodeExpiresAt: Iso | null;
+}
+
+/** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */
+export interface RecoveryCode {
+  /** XXXX-XXXX-XXXX (12 Crockford base32 characters). */
+  recoveryCode: string;
+  expiresAt: Iso;
 }
 
 export interface RevocationRecord {

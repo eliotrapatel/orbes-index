@@ -184,6 +184,19 @@ function tokenError(reason: ScanTokenFailure): DomainError {
   }
 }
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** 72 hours after an assisted recovery (TRANSFER_FREEZE_MS), new transfers out of the account are refused. */
+export const transfersPaused = (until: Date) => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const when = `${until.getUTCDate()} ${MONTHS[until.getUTCMonth()]} ${until.getUTCFullYear()}, ${pad(until.getUTCHours())}:${pad(until.getUTCMinutes())} UTC`;
+  return new DomainError(
+    'TRANSFERS_PAUSED',
+    409,
+    `After the recovery of its password, transfers from this account are paused until ${when}. ORBES Client Services can assist you.`,
+  );
+};
+
 const alreadyRegistered = () => new DomainError('ALREADY_REGISTERED', 409, 'This product is already registered to an owner.');
 const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
@@ -290,11 +303,19 @@ export class OwnershipService {
     });
   }
 
-  /** The current owner offers the product to someone else: returns a one-time transfer code (7 days). */
+  /**
+   * The current owner offers the product to someone else: returns a one-time transfer code (7 days).
+   * Refused with 409 TRANSFERS_PAUSED for 72 hours after an assisted recovery of the account
+   * (`accounts.transfers_frozen_until`, AccountRecoveryService). The account row is read FOR SHARE
+   * before the product is locked (lock order account → product, as in the recovery), so a transfer
+   * started while a recovery commits waits for it and sees the pause.
+   */
   async initiateTransfer(accountId: string, productId: string, actor: Actor): Promise<TransferOffer> {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      const account = await tx.selectFrom('accounts').select('transfers_frozen_until').where('id', '=', accountId).forShare().executeTakeFirst();
+      if (account?.transfers_frozen_until && account.transfers_frozen_until.getTime() > now.getTime()) throw transfersPaused(account.transfers_frozen_until);
       const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
       if (!current || current.account_id !== accountId) throw notOwner();
@@ -428,6 +449,45 @@ export class OwnershipService {
         tx,
       );
     });
+  }
+
+  /**
+   * Cancel every pending transfer offered by an account (the assisted recovery of its password, C-04):
+   * a transfer code handed out by whoever held the account must not complete afterwards. Runs inside
+   * the caller's transaction, which already holds the account row; each product is then locked (lock
+   * order account → product) and its pending transfer re-read, so one accepted meanwhile is left as it
+   * is. Audited `ownership.transfer.cancel` with `reason`, like a cancellation by the owner. Returns
+   * the ids of the transfers cancelled.
+   */
+  async cancelPendingTransfersFrom(tx: Db, accountId: string, actor: Actor, reason: string): Promise<string[]> {
+    assertAccountId(accountId);
+    const pending = await tx
+      .selectFrom('ownership_transfers')
+      .select(['id', 'product_id'])
+      .where('from_account_id', '=', accountId)
+      .where('status', '=', 'PENDING')
+      .orderBy('created_at')
+      .execute();
+    const cancelled: string[] = [];
+    for (const t of pending) {
+      const now = this.clock();
+      const p = await requireProduct(tx, t.product_id, { forUpdate: true });
+      const r = await tx
+        .updateTable('ownership_transfers')
+        .set({ status: 'CANCELLED', completed_at: now })
+        .where('id', '=', t.id)
+        .where('status', '=', 'PENDING')
+        .executeTakeFirst();
+      if (Number(r.numUpdatedRows) !== 1) continue;
+      const current = await this.currentOwnership(tx, p.id);
+      await tx.updateTable('products').set({ ownership_state: ownershipStateFor(current, false), updated_at: now }).where('id', '=', p.id).execute();
+      await this.audit.record(
+        { actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason } },
+        tx,
+      );
+      cancelled.push(t.id);
+    }
+    return cancelled;
   }
 
   /** Client services reviewed proof of purchase: the owner becomes verified; REGISTERED → OWNED. */

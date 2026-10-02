@@ -9,7 +9,8 @@
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
  * verification → sign out. Also: a customer's report followed from the
- * Cases queue to its scan, anomaly and piece, then closed; TOTP enrolment +
+ * Cases queue to its scan, anomaly and piece, then closed; a one-time
+ * recovery code issued from an owner's row (C-04); TOTP enrolment +
  * two-step sign-in, and the read-only AUDITOR console. No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
@@ -525,6 +526,40 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('.empty__text').textContent()).toBe('No case matches these filters.');
   }, STEP_TIMEOUT);
 
+  it('issues a one-time recovery code from an owner\'s row, shown once, which the client then uses', async () => {
+    const email = 'lost.password@example.com';
+    const owner = await ctx.services.auth.registerAccount({ email, password: 'correct horse battery staple' }, {});
+    await go(page, '#/owners', 'Owners');
+    const row = page.locator('table.table tbody tr', { hasText: email });
+    await expect.poll(() => row.count()).toBe(1);
+    // An ADMIN, after an identity check: the dialog says what the code does before it exists.
+    await row.locator('[data-testid=issue-recovery-code]').click();
+    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Only after checking the identity of the client\..*expires after 30 minutes.*paused for 72 hours/);
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith(`/api/admin/owners/${owner.account.id}/recovery-code`) && r.request().method() === 'POST'),
+      confirmDialog(page),
+    ]);
+    expect(response.status()).toBe(201);
+    expect(response.headers()['cache-control']).toBe('no-store');
+    const code = page.locator('[data-testid=recovery-code]');
+    await expect.poll(() => code.textContent()).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    const recoveryCode = (await code.textContent())!;
+    expect(await page.locator('.claim--recovery').textContent()).toContain(`For ${email}, valid once until`);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await shot(page, 'owners-recovery-code');
+    // Hidden once given: the console keeps no copy, and the row now says a code is open.
+    await page.click('[data-testid=hide-recovery-code]');
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').count()).toBe(0);
+    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Recovery code open until/);
+    expect(await page.content()).not.toContain(recoveryCode);
+    // The client enters it on /verify: the row then says that transfers are paused.
+    await ctx.services.recovery.recover({ email, recoveryCode, newPassword: 'a brand new passphrase' });
+    await go(page, '#/warranties', 'Warranties');
+    await go(page, '#/owners', 'Owners');
+    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Transfers paused until/);
+    expect(await row.locator('[data-testid=owner-status]').textContent()).not.toMatch(/Recovery code open/);
+  }, STEP_TIMEOUT);
+
   it('rotates the signing key with a typed confirmation', async () => {
     await go(page, '#/keys', 'Signing keys');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
@@ -661,6 +696,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
     await go(p, '#/keys', 'Signing keys');
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
+    // Owners read, without the recovery code reserved to an ADMIN.
+    await go(p, '#/owners', 'Owners');
+    await expect.poll(() => p.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(1);
+    expect(await p.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
     await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);

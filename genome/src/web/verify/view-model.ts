@@ -44,12 +44,16 @@ export type OwnershipMode =
 /**
  * ORBES Client Services, offered where the result asks the customer to contact it: under the
  * help line of every caution and void result, and in the WARRANTY tab when the warranty no
- * longer applies. Built from GET /api/v1/client-services; absent when neither a usable email
- * nor a usable phone is configured.
+ * longer applies; and under FORGOTTEN PASSWORD? in the OWNERSHIP panel, where Client Services
+ * gives the one-time recovery code (C-04). Built from GET /api/v1/client-services; absent when
+ * neither a usable email nor a usable phone is configured.
  */
 export interface ContactModel {
-  placement: 'help' | 'warranty';
-  /** mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and the time. */
+  placement: 'help' | 'warranty' | 'recovery';
+  /**
+   * mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and
+   * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference.
+   */
   mailto?: string;
   /** The number as configured, and its tel: link. */
   phone?: { label: string; href: string };
@@ -101,6 +105,8 @@ export interface ResultViewModel {
   reference: string;
   /** How to reach ORBES Client Services, where the result asks for it (and Client Services is configured). */
   contact?: ContactModel;
+  /** The same contact for a customer who forgot the password (OWNERSHIP panel, FORGOTTEN PASSWORD?), when configured. */
+  recoveryContact?: ContactModel;
   /** Where the piece was seen or bought: results that were not authentic only. */
   report?: ReportModel;
 }
@@ -162,6 +168,15 @@ export function formatDateTime(iso: string, offsetMinutes = 0): string {
   const d = new Date(t + offsetMinutes * 60_000);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** ISO date-time → '5 October 2026, 11:00' at `offsetMinutes` east of UTC, for times inside sentences. */
+export function formatDateTimeLong(iso: string, offsetMinutes = 0): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const d = new Date(t + offsetMinutes * 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCDate()} ${MONTHS_LONG[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
 /** The offset of a time shown at `offsetMinutes` east of UTC, e.g. 'UTC+02:00', 'UTC-03:30'. */
@@ -305,6 +320,11 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     const contact = contactModel(opts.clientServices, vm, placement, opts.offsetMinutes ?? 0);
     if (contact) vm.contact = contact;
   }
+  // Wherever the OWNERSHIP panel may offer sign-in, FORGOTTEN PASSWORD? leads to Client Services (C-04).
+  if (vm.ownership.kind !== 'unregistered') {
+    const recovery = recoveryContactModel(opts.clientServices, vm.reference);
+    if (recovery) vm.recoveryContact = recovery;
+  }
   // The customer may say where the piece was seen or bought, attached to this scan: results that were not authentic.
   if (!authentic && SCAN_ID.test(outcome.scanId ?? '')) vm.report = { scanId: outcome.scanId.toLowerCase(), reference: vm.reference };
   return vm;
@@ -317,7 +337,8 @@ const MAILBOX = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const PHONE = /^\+[1-9](?:[ .-]?[0-9]){6,14}$/;
 const HOURS = /^[^\p{Cc}]{1,120}$/u;
 
-function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement'], offsetMinutes: number): ContactModel | null {
+/** The usable lines of GET /api/v1/client-services; null when neither an email nor a phone is usable. */
+function contactLines(cs: ClientServices): { email?: string; phone?: string; hours?: string } | null {
   const text = (v: unknown, re: RegExp, max: number): string | undefined => {
     if (typeof v !== 'string') return undefined;
     const t = v.trim();
@@ -326,25 +347,47 @@ function contactModel(cs: ClientServices, vm: ResultViewModel, placement: Contac
   const email = text(cs.email, MAILBOX, 254);
   const phone = text(cs.phone, PHONE, 32);
   if (!email && !phone) return null;
-  const contact: ContactModel = { placement };
-  if (email) {
-    const title = vm.titleSub ? `${vm.titleMain} — ${vm.titleSub}` : vm.titleMain;
-    const subject = ['ORBES', vm.reference ? `REF ${vm.reference}` : '', title].filter((x) => x.length > 0).join(' — ');
-    // The customer writes above the facts; RFC 6068 wants CRLF line breaks in a mailto body. The time is
-    // the one on the customer's screen, in their own zone, so the email names its offset from UTC.
-    const facts: [string, string][] = [
-      [CONTACT.reference, vm.reference],
-      [CONTACT.result, title],
-      [CONTACT.warranty, placement === 'warranty' ? (vm.warranty?.status ?? '') : ''],
-      [CONTACT.verified, vm.verifiedAt ? `${vm.verifiedAt} (${utcOffsetLabel(offsetMinutes)})` : ''],
-    ];
-    const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
-    contact.mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  }
-  if (phone) contact.phone = { label: phone, href: `tel:+${phone.replace(/\D/g, '')}` };
   const hours = text(cs.hours, HOURS, 120);
-  if (hours) contact.hours = hours;
+  return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
+}
+
+/**
+ * The contact: an email with `subject`, whose body leaves the customer room to write above the facts that
+ * have a value (RFC 6068 wants CRLF line breaks in a mailto body), then the phone and the hours.
+ */
+function contactOf(lines: { email?: string; phone?: string; hours?: string }, placement: ContactModel['placement'], subject: string, facts: [string, string][]): ContactModel {
+  const contact: ContactModel = { placement };
+  if (lines.email) {
+    const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
+    contact.mailto = `mailto:${lines.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+  if (lines.phone) contact.phone = { label: lines.phone, href: `tel:+${lines.phone.replace(/\D/g, '')}` };
+  if (lines.hours) contact.hours = lines.hours;
   return contact;
+}
+
+function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement'], offsetMinutes: number): ContactModel | null {
+  const lines = contactLines(cs);
+  if (!lines) return null;
+  const title = vm.titleSub ? `${vm.titleMain} — ${vm.titleSub}` : vm.titleMain;
+  const subject = ['ORBES', vm.reference ? `REF ${vm.reference}` : '', title].filter((x) => x.length > 0).join(' — ');
+  // The time is the one on the customer's screen, in their own zone, so the email names its offset from UTC.
+  return contactOf(lines, placement, subject, [
+    [CONTACT.reference, vm.reference],
+    [CONTACT.result, title],
+    [CONTACT.warranty, placement === 'warranty' ? (vm.warranty?.status ?? '') : ''],
+    [CONTACT.verified, vm.verifiedAt ? `${vm.verifiedAt} (${utcOffsetLabel(offsetMinutes)})` : ''],
+  ]);
+}
+
+/**
+ * ORBES Client Services for a customer who forgot the password (C-04): they check the customer's identity,
+ * then give a one-time recovery code. The email's subject says why; its body carries the reference of the
+ * scan on screen, which helps Client Services find the piece and its owner. Null when nothing is configured.
+ */
+export function recoveryContactModel(cs: ClientServices | undefined, reference: string): ContactModel | null {
+  const lines = cs ? contactLines(cs) : null;
+  return lines ? contactOf(lines, 'recovery', CONTACT.recoverySubject, [[CONTACT.reference, reference]]) : null;
 }
 
 function ownershipMode(o: VerifyOutcome): OwnershipMode {

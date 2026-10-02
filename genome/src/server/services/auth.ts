@@ -509,6 +509,14 @@ export class AuthService {
   /**
    * Change a password after re-checking the current one. Every other session
    * of the subject is revoked; pass `keepToken` to keep the caller's.
+   *
+   * A wrong current password answers `400 CURRENT_PASSWORD_INVALID`, never a
+   * 401: the apps sign a user out on any 401. For a customer it also counts
+   * in the login throttle (ACCOUNT_LOGIN_THROTTLE): whoever holds a session
+   * cannot guess the password faster than a login could, and while the
+   * account is throttled the current password is not even looked at (same
+   * answer). The new password is checked against the policy before the
+   * current one, so a weak choice costs no attempt.
    */
   async changePassword(
     subject: { type: SessionSubjectType; id: string },
@@ -517,10 +525,16 @@ export class AuthService {
     opts: { keepToken?: string } = {},
   ): Promise<void> {
     const row = subject.type === 'admin' ? await this.requireAdmin(this.db, subject.id) : await this.requireAccount(this.db, subject.id);
-    if (typeof input?.currentPassword !== 'string' || !(await verifySecret(normalizePassword(input.currentPassword), row.password_hash))) {
-      throw invalidCredentials();
+    const next = checkPasswordPolicy(input?.newPassword, row.email);
+    const current = loginPassword(input?.currentPassword);
+    if (subject.type === 'account' && this.accountThrottled(row as AccountRow)) {
+      await this.burnTime(current);
+      throw currentPasswordInvalid();
     }
-    const next = checkPasswordPolicy(input.newPassword, row.email);
+    if (current === undefined || !(await verifySecret(current, row.password_hash))) {
+      if (subject.type === 'account') await this.recordAccountFailure(row.id, actor.ipHash ? { ipHash: actor.ipHash } : {}, 'password_change');
+      throw currentPasswordInvalid();
+    }
     const hash = await hashSecret(next);
     await inTransaction(this.db, async (tx) => {
       const values = { password_hash: hash, updated_at: this.clock() };
@@ -545,8 +559,11 @@ export class AuthService {
     return this.clock().getTime() - a.failed_logins_since.getTime() < ACCOUNT_LOGIN_THROTTLE.windowMs;
   }
 
-  /** Count a wrong customer password in the current throttle window (a new window once the old one expired). */
-  private async recordAccountFailure(accountId: string, meta: ClientMeta): Promise<void> {
+  /**
+   * Count a wrong customer password in the current throttle window (a new window once the old one expired).
+   * `via`: where it was typed, when not at sign-in (the current password of a password change).
+   */
+  private async recordAccountFailure(accountId: string, meta: ClientMeta, via?: 'password_change'): Promise<void> {
     const now = this.clock();
     const windowStart = new Date(now.getTime() - ACCOUNT_LOGIN_THROTTLE.windowMs);
     await inTransaction(this.db, async (tx) => {
@@ -565,7 +582,7 @@ export class AuthService {
           action: 'account.login_failed',
           targetType: 'account',
           targetId: accountId,
-          details: { failedLogins: r.failed_logins, throttled: r.failed_logins >= ACCOUNT_LOGIN_THROTTLE.maxFailures },
+          details: { failedLogins: r.failed_logins, throttled: r.failed_logins >= ACCOUNT_LOGIN_THROTTLE.maxFailures, ...(via ? { via } : {}) },
         },
         tx,
       );
@@ -628,6 +645,8 @@ export class AuthService {
 // ── Mapping & validation ───────────────────────────────────────────────────
 
 const invalidTotp = () => new DomainError('INVALID_TOTP', 401, 'The authentication code is not valid.');
+/** A 400, never a 401: the apps end the session on any 401 (a wrong current password is not a lost session). */
+const currentPasswordInvalid = () => new DomainError('CURRENT_PASSWORD_INVALID', 400, 'The current password is not correct.');
 const accountLocked = () => new DomainError('ACCOUNT_LOCKED', 429, 'Too many failed attempts. Please try again later.');
 
 function totpAad(adminId: string): string {
