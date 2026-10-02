@@ -45,6 +45,16 @@ async function valueOf(loc: Locator, expected: string): Promise<void> {
 }
 const visible = (loc: Locator) => loc.waitFor({ state: 'visible', timeout: POLL.timeout });
 
+/** Visible text set in Gravesend Sans that holds a one or a zero: there should be none (its one is its capital I, its zero an O). */
+async function figuresInDisplayFace(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter((el) => el.checkVisibility() && /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
+      .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim())
+      .filter((t) => /[01]/.test(t)),
+  );
+}
+
 /**
  * Console noise that is expected: Chromium logs every 4xx API answer as a failed resource
  * (a 403 for a wrong claim code; signed-out visitors no longer cause a 401: /account/session answers 200).
@@ -110,12 +120,31 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const worker = /content="(\/assets\/verify-worker-[A-Z0-9]{8}\.js)"/.exec(html)?.[1];
     expect(js).toBeDefined();
     expect(worker).toBeDefined();
-    for (const path of [js!, worker!]) {
+    const font = /<link rel="preload" href="(\/assets\/gravesend-sans-500-[A-Z0-9]{8}\.woff2)" as="font" type="font\/woff2" crossorigin>/.exec(html)?.[1];
+    expect(font).toBeDefined();
+    for (const path of [js!, worker!, font!]) {
       const res = await fetch(`${srv.origin}${path}`);
       expect(res.status).toBe(200);
       expect(res.headers.get('cache-control')).toMatch(/immutable/);
     }
+    expect((await fetch(`${srv.origin}${font!}`)).headers.get('content-type')).toBe('font/woff2');
   });
+
+  it('sets the wordmark, titles and labels in Gravesend Sans, fetched once through the preload, and reads in Helvetica Neue', async () => {
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => [...document.fonts].filter((f) => f.family.replace(/"/g, '') === 'Gravesend Sans').map((f) => f.status))).toEqual(['loaded']);
+    const family = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontFamily);
+    for (const selector of ['.landing__wordmark', '.landing__sub', '.landing__scan', '.landing__upload']) {
+      expect(await family(selector), selector).toMatch(/^"?Gravesend Sans"?,\s*"?Helvetica Neue"?/);
+    }
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    // The preload and the stylesheet name the same URL: one download, never two.
+    const fetched = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name).filter((n) => n.endsWith('.woff2')));
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]).toMatch(/\/assets\/gravesend-sans-500-[A-Z0-9]{8}\.woff2$/);
+    expect(problems).toEqual([]);
+  }, 120_000);
 
   it('verifies an uploaded photo of an issued code: AUTHENTIC with its product id', async () => {
     const { page, problems } = await openVerify(browser, srv);
@@ -148,6 +177,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(41);
     await textsOf(page.getByRole('tab'), ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    // The id, the fingerprint, the product lines, the rows and the reference read in Helvetica Neue.
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     // Honest limits are stated on every positive result.
     await textOf(page.locator('.result__footnote'), /cannot prove that an object is genuine/);
     // Focus moved to the new screen's heading for screen readers.

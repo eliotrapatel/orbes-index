@@ -218,6 +218,7 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
     pageHeader({
       eyebrow: 'Generator · issued',
       title: p.productId,
+      identifier: true,
       lead: `Signed with key #${c.keyId} on ${formatDate(c.issuedAt)}. ${humanize(p.status)}.`,
       actions: [
         linkButton('Open product page', productHref(p.productId), 'primary'),

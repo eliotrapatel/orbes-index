@@ -6,11 +6,30 @@
  * their own layout. Mirrors the house style of theorbes.com (index.html):
  * white and black, "Helvetica Neue", uppercase micro-type with wide tracking,
  * 1 px rules, hairline corner brackets, film grain and slow
- * cubic-bezier(0.22, 1, 0.36, 1) motion. No gradients, no shadows.
+ * cubic-bezier(0.22, 1, 0.36, 1) motion. No gradients, no shadows. The
+ * wordmark, titles and tracked-capital labels are set in the brand's display
+ * face, Gravesend Sans (--font-display, shipped below); reading text stays in
+ * Helvetica Neue (--font).
  *
  * CSP: style-src 'self' — everything lives in external files; scripts only
  * toggle classes or set custom properties through the CSSOM.
  */
+
+/* The display face (BRAND-DESIGN-SYSTEM §3.1): Gravesend Sans Medium, the one
+   cut the brand supplied, subset to Basic Latin and the brand's punctuation
+   (© · × – — ‘ ’ “ ” • … ← → −), exactly the range below. The build emits it
+   to /assets/ with a content hash (font-src falls under default-src 'self');
+   both shells preload that same file. swap: the fallback paints at once and
+   Gravesend replaces it when it arrives, never invisible text. A glyph
+   outside the subset falls back to --font. */
+@font-face {
+  font-family: "Gravesend Sans";
+  src: url("./fonts/gravesend-sans-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0020-007E, U+00A9, U+00B7, U+00D7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2190, U+2192, U+2212;
+}
 
 :root {
   /* Colour */
@@ -25,8 +44,12 @@
   --hairline-strong: rgba(10, 10, 10, 0.32);
   --paper: var(--white);
 
-  /* Type */
+  /* Type. --font reads: sentences, values, identifiers, codes, inputs (the
+     stack of index.html). --font-display is the brand's voice: the wordmark,
+     titles and tracked-capital labels, falling back to --font. Gravesend has
+     no tabular figures, so numbers that must align stay in --font. */
   --font: "Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif;
+  --font-display: "Gravesend Sans", var(--font);
   --fs-nano: 8px;
   --fs-micro: 10px;
   --fs-label: 11px;
@@ -539,6 +562,18 @@ a {
   font-size: 18px;
   letter-spacing: 0.28em;
   text-transform: uppercase;
+}
+
+/* ── Display type ──────────────────────────────────────────────────────── */
+
+/* The shared primitives that speak in the brand's voice, in the display face.
+   Each app sets its own titles and labels in one rule of the same kind, at
+   the end of its stylesheet (BRAND-DESIGN-SYSTEM §3.1). */
+.wordmark,
+.btn,
+.textlink,
+.field__label {
+  font-family: var(--font-display);
 }
 
 /* ── Focus & accessibility ─────────────────────────────────────────────── */

@@ -12,6 +12,10 @@
  * index.html refers to them by their source names (`./main.ts`,
  * `./styles.css`, `<meta name="orbes-worker" content="./worker.ts">`); any
  * other local file it references (favicon.svg) is copied with a content hash.
+ * A file the stylesheets already load (the display font of shared/fonts/,
+ * which the shells preload) is rewritten to the very file esbuild emitted
+ * for the CSS `url()`, so the preload and the stylesheet fetch one URL; a
+ * shell that preloads a font no stylesheet loads fails the build.
  *
  * Bundles are ESM, minified, content-hashed (`-[A-Z0-9]{8}`, which the
  * static server caches as immutable) and without sourcemaps in production.
@@ -26,7 +30,7 @@
  *   npx tsx scripts/build-web.ts --out DIR  another output directory
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
@@ -176,8 +180,14 @@ function listFiles(dir: string, base = dir): string[] {
   return out;
 }
 
+/** Font files a shell may reference only to preload what a stylesheet loads. */
+const FONT_FILE = /\.(woff2?|ttf|otf)$/i;
+
 export async function buildWeb(opts: BuildWebOptions = {}): Promise<BuildWebResult> {
-  const srcDir = resolve(opts.srcDir ?? DEFAULT_SRC_DIR);
+  // Real path: esbuild reports its inputs with symlinks resolved (macOS /var → /private/var),
+  // and the shells' references are matched against those paths.
+  const requestedSrc = resolve(opts.srcDir ?? DEFAULT_SRC_DIR);
+  const srcDir = existsSync(requestedSrc) ? realpathSync(requestedSrc) : requestedSrc;
   const outDir = resolve(opts.outDir ?? DEFAULT_OUT_DIR);
   const mode: BuildMode = opts.mode ?? 'production';
   const log = opts.log ?? (() => {});
@@ -231,9 +241,16 @@ export async function buildWeb(opts: BuildWebOptions = {}): Promise<BuildWebResu
 
     // entry source path → published URL
     const published = new Map<string, string>();
+    // source path → published URL of a file the bundles reference (file loader: fonts, images)
+    const emitted = new Map<string, string>();
     for (const [outPath, meta] of Object.entries(result.metafile.outputs)) {
-      if (!meta.entryPoint || outPath.endsWith('.map')) continue;
-      published.set(resolve(meta.entryPoint), ASSET_PREFIX + basename(outPath));
+      if (outPath.endsWith('.map')) continue;
+      if (meta.entryPoint) {
+        published.set(resolve(meta.entryPoint), ASSET_PREFIX + basename(outPath));
+        continue;
+      }
+      const inputs = Object.keys(meta.inputs);
+      if (inputs.length === 1) emitted.set(resolve(inputs[0]), ASSET_PREFIX + basename(outPath));
     }
 
     const built: BuiltApp[] = [];
@@ -252,6 +269,13 @@ export async function buildWeb(opts: BuildWebOptions = {}): Promise<BuildWebResu
           return fromEntry;
         }
         if (/\.(ts|tsx|js|mjs|css)$/.test(abs)) throw new WebBuildError(`${app.name}/index.html: "${rel}" is not a build entry`);
+        // Already emitted for a stylesheet's url(): the same hashed file, never a second copy.
+        const fromCss = emitted.get(abs);
+        if (fromCss) {
+          assets[rel] = fromCss;
+          return fromCss;
+        }
+        if (FONT_FILE.test(abs)) throw new WebBuildError(`${app.name}/index.html: "${rel}" is a font no stylesheet of the build loads (a preload must name the font the CSS uses)`);
         const bytes = readFileSync(abs);
         const name = hashName(basename(abs), bytes);
         writeFileSync(join(assetsDir, name), bytes);

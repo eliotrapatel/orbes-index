@@ -30,8 +30,11 @@ export function micro(text: string, extra?: string): HTMLElement {
 
 // ── Layout ─────────────────────────────────────────────────────────────────
 
-/** Page header: eyebrow (section), title, optional lead text and actions on the right. */
-export function pageHeader(opts: { eyebrow: string; title: string; lead?: string; actions?: Child[] }): HTMLElement {
+/**
+ * Page header: eyebrow (section), title, optional lead text and actions on the right.
+ * `identifier`: the title is a record id (a product id), set in the reading face, not the display face.
+ */
+export function pageHeader(opts: { eyebrow: string; title: string; identifier?: boolean; lead?: string; actions?: Child[] }): HTMLElement {
   return h(
     'header',
     { class: 'page-head' },
@@ -39,7 +42,7 @@ export function pageHeader(opts: { eyebrow: string; title: string; lead?: string
       'div',
       { class: 'page-head__text' },
       h('p', { class: 'page-head__eyebrow' }, opts.eyebrow),
-      h('h1', { class: 'page-head__title', attrs: { tabindex: '-1' } }, opts.title),
+      h('h1', { class: ['page-head__title', opts.identifier ? 'page-head__title--id' : null], attrs: { tabindex: '-1' } }, opts.title),
       opts.lead ? h('p', { class: 'page-head__lead' }, opts.lead) : null,
     ),
     opts.actions && opts.actions.length ? h('div', { class: 'page-head__actions' }, ...opts.actions) : null,

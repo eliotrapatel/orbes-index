@@ -1,9 +1,11 @@
 /**
  * Verify app against the authentication design system (docs/BRAND-DESIGN-SYSTEM.md
  * §3 and §8): ink token for the scanner ground, a legible customer reference,
- * the SEAL proportions of the favicon, and type set from brand.css tokens.
+ * the SEAL proportions of the favicon, type set from brand.css tokens, and the
+ * shipped display face (Gravesend Sans) on titles and labels of both apps,
+ * never on what is read.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -14,10 +16,12 @@ import { packIdentity } from '../../src/core/identity.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
+import { parseUnicodeRange, readWoff2, woff2CodePoints, woff2Names, woff2WeightClass } from '../support/woff2.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
 const styles = readFileSync(join(WEB, 'verify/styles.css'), 'utf8');
 const brand = readFileSync(join(WEB, 'shared/brand.css'), 'utf8');
+const adminStyles = readFileSync(join(WEB, 'admin/styles.css'), 'utf8');
 const resultView = readFileSync(join(WEB, 'verify/views/result.ts'), 'utf8');
 const favicon = readFileSync(join(WEB, 'verify/favicon.svg'), 'utf8');
 
@@ -110,6 +114,124 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     for (const t of Object.keys(tokens).filter((k) => k.startsWith('--fs-') || k.startsWith('--track-'))) {
       const used = [brand, styles, admin].some((css) => css.includes(`var(${t})`));
       expect(used, t).toBe(true);
+    }
+  });
+});
+
+/** Every innermost rule of a stylesheet (inside @media too): its selectors and declarations. */
+function rules(css: string): { selectors: string[]; decls: Record<string, string> }[] {
+  const out: { selectors: string[]; decls: Record<string, string> }[] = [];
+  for (const m of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const decls: Record<string, string> = {};
+    for (const decl of m[2].split(';')) {
+      const i = decl.indexOf(':');
+      if (i > 0) decls[decl.slice(0, i).trim()] = decl.slice(i + 1).trim();
+    }
+    out.push({ selectors: m[1].split(',').map((s) => s.trim().replace(/\s+/g, ' ')), decls });
+  }
+  return out;
+}
+
+/** Selectors set in the display face (font-family: var(--font-display)). */
+const displaySelectors = (css: string): string[] => rules(css).filter((r) => r.decls['font-family'] === 'var(--font-display)').flatMap((r) => r.selectors);
+
+const FONT_FILE = join(WEB, 'shared/fonts/gravesend-sans-500.woff2');
+
+describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAND-DESIGN-SYSTEM §3.1, §8 item 18)', () => {
+  const face = rules(brand).find((r) => r.selectors[0] === '@font-face')!.decls;
+  const font = readWoff2(readFileSync(FONT_FILE));
+
+  it('declares the shipped WOFF2 in @font-face: Gravesend Sans, weight 500, font-display swap', () => {
+    expect(face['font-family']).toBe('"Gravesend Sans"');
+    expect(face.src).toBe('url("./fonts/gravesend-sans-500.woff2") format("woff2")');
+    expect(existsSync(join(WEB, 'shared', 'fonts', 'gravesend-sans-500.woff2'))).toBe(true);
+    expect(face['font-display']).toBe('swap');
+    expect(face['font-style']).toBe('normal');
+    // The one cut supplied: Medium. The declared weight is the file's own.
+    expect(face['font-weight']).toBe('500');
+    expect(woff2WeightClass(font)).toBe(500);
+    expect(rules(brand).filter((r) => r.selectors[0] === '@font-face')).toHaveLength(1);
+  });
+
+  it('keeps Helvetica Neue for reading and puts Gravesend first in --font-display, then the same stack', () => {
+    const families = (v: string) => resolve(v).split(',').map((f) => f.trim());
+    // --font is the stack of theorbes.com (index.html), unchanged: reading text, values and inputs.
+    expect(tokens['--font']).toBe('"Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif');
+    expect(families(tokens['--font-display'])).toEqual(['"Gravesend Sans"', ...families(tokens['--font'])]);
+    expect(families(tokens['--font-display']).at(-1)).toBe('sans-serif');
+    // The page default reads; the display face is opted into, role by role.
+    expect(rules(brand).find((r) => r.selectors.includes('body'))?.decls['font-family']).toBe('var(--font)');
+  });
+
+  it('ships exactly the declared subset (Basic Latin and the brand punctuation), with its licence names', () => {
+    expect(font.flavor).toBe('OTTO');
+    const declared = parseUnicodeRange(face['unicode-range']);
+    expect([...woff2CodePoints(font)].sort((a, b) => a - b)).toEqual([...declared].sort((a, b) => a - b));
+    for (let c = 0x20; c <= 0x7e; c++) expect(declared.has(c), `U+${c.toString(16)}`).toBe(true);
+    // The punctuation the interfaces set in titles and labels: · — – … × → ’ © (copy.ts, views).
+    for (const ch of '·—–…×→’©') expect(declared.has(ch.codePointAt(0)!), ch).toBe(true);
+    // The copyright and designer names travel with the file (NOTICE.md).
+    const names = woff2Names(font);
+    expect(names.get(0)).toMatch(/Rian Hughes \/ Device/);
+    expect(names.get(16) ?? names.get(1)).toBe('Gravesend Sans');
+    // A preload on the critical path: kept small.
+    expect(readFileSync(FONT_FILE).length).toBeLessThan(16 * 1024);
+  });
+
+  const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.auth__option'];
+  const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.dialog__eyebrow', '.login__title'];
+  // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
+  // and the lines that can carry a figure (Gravesend's one is its capital I).
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__email'];
+  const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__title', '.page-head__title--id', '.side__who', '.side__role'];
+
+  it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
+    expect(displaySelectors(brand)).toEqual(BRAND_DISPLAY);
+    expect(displaySelectors(styles)).toEqual(expect.arrayContaining(VERIFY_DISPLAY));
+    expect(displaySelectors(adminStyles)).toEqual(expect.arrayContaining(ADMIN_DISPLAY));
+  });
+
+  it('never sets what is read in the display face', () => {
+    const display = new Set([...displaySelectors(brand), ...displaySelectors(styles), ...displaySelectors(adminStyles)]);
+    for (const s of [...VERIFY_READ, ...ADMIN_READ]) expect(display.has(s), s).toBe(false);
+    // Gravesend has proportional figures only and one weight: a display role never asks for
+    // tabular numerals, nor for a bold the browser would have to fake.
+    for (const css of [brand, styles, adminStyles]) {
+      for (const r of rules(css)) {
+        if (!r.selectors.some((s) => display.has(s))) continue;
+        expect(r.decls['font-variant-numeric'] ?? '', r.selectors.join(', ')).not.toMatch(/tabular-nums/);
+        expect(Number(r.decls['font-weight'] ?? 400), r.selectors.join(', ')).toBeLessThan(600);
+      }
+    }
+  });
+
+  it('sets a figure in the reading face where a display role may show one (Gravesend\'s one is its capital I)', () => {
+    // The overrides come after the display rule of their stylesheet, so they win at equal specificity.
+    for (const [css, selector] of [[styles, '.scan__zoom'], [adminStyles, '.page-head__title--id']] as const) {
+      const all = rules(css);
+      const at = all.findIndex((r) => r.selectors.includes(selector));
+      expect(all[at]?.decls['font-family'], selector).toBe('var(--font)');
+      expect(at, selector).toBeGreaterThan(all.findIndex((r) => r.decls['font-family'] === 'var(--font-display)'));
+    }
+    // The zoom control (1×, 2×) and every console page titled with a product id use them.
+    expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toContain("class: 'scan__control scan__zoom'");
+    for (const view of ['product', 'generator']) {
+      const src = readFileSync(join(WEB, `admin/views/${view}.ts`), 'utf8');
+      const titled = (src.match(/title: p\.productId,/g) ?? []).length;
+      expect(titled, view).toBeGreaterThan(0);
+      expect((src.match(/title: p\.productId,\n\s*identifier: true,/g) ?? []).length, view).toBe(titled);
+    }
+  });
+
+  it('names fonts only through the tokens (--font, --font-display, the console --mono)', () => {
+    for (const [name, css] of [['brand.css', brand], ['verify', styles], ['admin', adminStyles]] as const) {
+      const families = rules(css)
+        .filter((r) => r.selectors[0] !== '@font-face')
+        .map((r) => r.decls['font-family'])
+        .filter((v): v is string => v !== undefined);
+      for (const v of families) expect(['var(--font)', 'var(--font-display)', 'var(--mono)'], `${name}: ${v}`).toContain(v);
+      expect(css, name).not.toMatch(/(?<!-)font:\s*[^;]*(Gravesend|Helvetica)/);
     }
   });
 });

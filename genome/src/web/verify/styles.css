@@ -961,6 +961,37 @@ h1[tabindex="-1"]:focus {
   color: var(--ink-soft);
 }
 
+/* ── Display type ──────────────────────────────────────────────────────── */
+
+/* Titles, status lines and tracked-capital labels in the display face
+   (brand.css --font-display, BRAND-DESIGN-SYSTEM §3.1), with the wordmark,
+   buttons, text links and field labels of brand.css. What the customer reads
+   or quotes stays in --font: sentences, the GENOME id and fingerprint, the
+   product lines, row values, the reference, codes, inputs and any figure
+   (Gravesend's one is its capital I, and its figures do not align). */
+.boot-error,
+.landing__sub,
+.landing__meta,
+.scan__status,
+.scan__control,
+.verifying__status,
+.message__title,
+.result__title,
+.genome__label,
+.tabs__tab,
+.tabs__dot,
+.rows__label,
+.section-label,
+.ownership__status,
+.auth__option {
+  font-family: var(--font-display);
+}
+
+/* The zoom control shows a figure (1×, 2×): Gravesend's one is its capital I. */
+.scan__zoom {
+  font-family: var(--font);
+}
+
 /* ── Small screens & reduced motion ────────────────────────────────────── */
 
 @media (max-width: 350px) {

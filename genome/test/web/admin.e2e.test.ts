@@ -60,6 +60,19 @@ async function freePort(): Promise<number> {
 const hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /**
+ * Visible text set in Gravesend Sans that holds a one or a zero: none should (its one is its capital I, its
+ * zero an O). Identifiers, codes and counts read in Helvetica Neue; a fixed label (24 h, SHA-256) may keep its figures.
+ */
+async function figuresInDisplayFace(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter((el) => el.checkVisibility() && /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
+      .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim())
+      .filter((t) => /[01]/.test(t)),
+  );
+}
+
+/**
  * A registry with some history, so the dashboard and lists show real
  * shapes: products across statuses, scans from several countries, an
  * impossible-travel finding, a lost product scanned, and a validly signed
@@ -231,6 +244,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('refuses a wrong password, then signs the bootstrap admin in', async () => {
     await page.goto(`${origin}/admin`);
     await page.waitForSelector('[data-testid=login-form]');
+    // The wordmark and the sign-in labels in the display face, fetched once through the preload; inputs read in Helvetica Neue.
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => [...document.fonts].filter((f) => f.family.replace(/"/g, '') === 'Gravesend Sans').map((f) => f.status))).toEqual(['loaded']);
+    for (const selector of ['.login__wordmark', '.login__title', '.cfield__label', '[data-testid=login-submit]']) {
+      expect(await page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontFamily), selector).toMatch(/^"?Gravesend Sans"?,/);
+    }
+    expect(await page.locator('input[name=email]').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    expect(await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => e.name.endsWith('.woff2')).length)).toBe(1);
     await shot(page, 'login');
     expect(await page.isVisible('input[name=totp]')).toBe(false);
     await signIn(page, ADMIN.email, 'not the password at all');
@@ -244,6 +265,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('.kpi').first().locator('.kpi__value').textContent()).toBe('9');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Dashboard');
     expect(await page.locator('.bar').count()).toBeGreaterThanOrEqual(8);
+    // Counts, the key id and dates read in Helvetica Neue.
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     await shot(page, 'dashboard', { full: true });
   }, STEP_TIMEOUT);
 
@@ -345,6 +368,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row('scans').textContent()).toMatch(/^Scan count1/i);
     expect(await row('warranty').textContent()).toContain('NOT STARTED');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Products');
+    // The title is the product id: it reads in Helvetica Neue, like the crumb and the panel notes.
+    expect(await title(page).evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
 
     await page.click('[data-testid=action-warranty]');
     await confirmDialog(page);

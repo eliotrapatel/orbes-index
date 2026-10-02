@@ -39,7 +39,7 @@ export function scanView(handlers: ScanHandlers): ScanView {
   const status = h('p', { class: 'scan__status micro indent-micro', attrs: { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, text: STATUS.starting });
   const hint = h('p', { class: 'scan__hint', text: SCAN_GUIDE });
   const torch = h('button', { class: 'scan__control', attrs: { type: 'button', 'aria-pressed': 'false', hidden: true }, on: { click: () => handlers.onTorch() }, text: 'LIGHT' });
-  const zoom = h('button', { class: 'scan__control', attrs: { type: 'button', 'aria-pressed': 'false', hidden: true }, on: { click: () => handlers.onZoom() }, text: '2×' });
+  const zoom = h('button', { class: 'scan__control scan__zoom', attrs: { type: 'button', 'aria-pressed': 'false', hidden: true }, on: { click: () => handlers.onZoom() }, text: '2×' });
 
   root.append(
     video,

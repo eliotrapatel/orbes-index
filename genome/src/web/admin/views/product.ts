@@ -92,6 +92,7 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Product',
       title: p.productId,
+      identifier: true,
       lead: [humanize(p.model.name), humanize(p.model.type), humanize(p.category.name), humanize(p.material)].join(' · '),
       actions: [linkButton('All products', href('products'), 'ghost')],
     }),

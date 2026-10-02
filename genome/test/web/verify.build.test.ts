@@ -1,9 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertCspSafeHtml, buildWeb, discoverApps, entryOutName, rewriteHtml, WebBuildError, type BuildWebResult } from '../../scripts/build-web.js';
-import { HASHED_ASSET_RE } from '../../src/server/http/static.js';
+import { cacheControlFor, HASHED_ASSET_RE, IMMUTABLE_CACHE } from '../../src/server/http/static.js';
+
+const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/shared/fonts/gravesend-sans-500.woff2');
+const FONT_REF = '../shared/fonts/gravesend-sans-500.woff2';
 
 describe('build-web: production build of the real apps', () => {
   let dir: string;
@@ -18,9 +22,9 @@ describe('build-web: production build of the real apps', () => {
   const html = () => readFileSync(join(result.outDir, 'verify', 'index.html'), 'utf8');
   const asset = (url: string) => join(result.outDir, url.replace(/^\/assets\//, 'assets/'));
 
-  it('publishes the verify shell, main bundle, worker bundle, stylesheet and favicon', () => {
+  it('publishes the verify shell, main bundle, worker bundle, stylesheet, favicon and preloaded font', () => {
     const app = result.apps.find((a) => a.name === 'verify')!;
-    expect(Object.keys(app.assets).sort()).toEqual(['favicon.svg', 'main.ts', 'styles.css', 'worker.ts']);
+    expect(Object.keys(app.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css', 'worker.ts']);
     expect(app.assets['main.ts']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.js$/);
     expect(app.assets['worker.ts']).toMatch(/^\/assets\/verify-worker-[A-Z0-9]{8}\.js$/);
     expect(app.assets['styles.css']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.css$/);
@@ -36,7 +40,7 @@ describe('build-web: production build of the real apps', () => {
   it('rewrites every source reference in the shell (worker URL included)', () => {
     const page = html();
     expect(page).not.toMatch(/\.ts"/);
-    expect(page).not.toMatch(/"\.\/[^"]+"/);
+    expect(page).not.toMatch(/"\.\.?\/[^"]+"/);
     const app = result.apps.find((a) => a.name === 'verify')!;
     expect(page).toContain(`<script type="module" src="${app.assets['main.ts']}"></script>`);
     expect(page).toContain(`<meta name="orbes-worker" content="${app.assets['worker.ts']}">`);
@@ -94,6 +98,54 @@ describe('build-web: production build of the real apps', () => {
   });
 });
 
+describe('build-web: the display font, preloaded by both shells', () => {
+  let dir: string;
+  let result: BuildWebResult;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'orbes-build-font-'));
+    result = await buildWeb({ outDir: join(dir, 'web'), mode: 'production' });
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const read = (url: string) => readFileSync(join(result.outDir, url.replace(/^\/assets\//, 'assets/')));
+
+  it('publishes one hashed copy of the font, byte for byte, cached as immutable', () => {
+    const copies = readdirSync(join(result.outDir, 'assets')).filter((f) => f.startsWith('gravesend-sans-500'));
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatch(/^gravesend-sans-500-[A-Z0-9]{8}\.woff2$/);
+    const url = `/assets/${copies[0]}`;
+    expect(HASHED_ASSET_RE.test(url)).toBe(true);
+    expect(cacheControlFor(url)).toBe(IMMUTABLE_CACHE);
+    expect(read(url).equals(readFileSync(FONT_SRC))).toBe(true);
+  });
+
+  it('preloads, in each shell, exactly the file its stylesheet loads', () => {
+    expect(result.apps.map((a) => a.name).sort()).toEqual(['admin', 'verify']);
+    const urls = new Set<string>();
+    for (const app of result.apps) {
+      const page = readFileSync(join(result.outDir, app.name, 'index.html'), 'utf8');
+      const links = [...page.matchAll(/<link rel="preload"([^>]*)>/g)].map((m) => m[1]);
+      expect(links, app.name).toHaveLength(1);
+      const href = /\shref="([^"]+)"/.exec(links[0])?.[1];
+      // as=font, the font type, and CORS mode: without crossorigin the browser would fetch the font twice.
+      expect(links[0], app.name).toMatch(/\sas="font"/);
+      expect(links[0], app.name).toMatch(/\stype="font\/woff2"/);
+      expect(links[0], app.name).toMatch(/\scrossorigin(\s|$)/);
+      const css = read(app.assets['styles.css']).toString('utf8');
+      const fontUrls = [...css.matchAll(/url\(\s*"?([^")]+\.woff2)"?\s*\)/g)].map((m) => m[1]);
+      expect(fontUrls, app.name).toEqual([href]);
+      expect(app.assets[FONT_REF], app.name).toBe(href);
+      // The stylesheet of the build declares the face that the preload warms.
+      expect(css).toMatch(/@font-face\{font-family:\s?"?Gravesend Sans"?;src:url\("?\/assets\/gravesend-sans-500-[A-Z0-9]{8}\.woff2"?\) format\("woff2"\)/);
+      expect(css).toMatch(/font-display:\s?swap/);
+      urls.add(href!);
+    }
+    // One URL for both apps: a visitor of /verify and /admin downloads the font once.
+    expect(urls.size).toBe(1);
+  });
+});
+
 describe('build-web: development build', () => {
   it('keeps code readable and links sourcemaps', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'orbes-build-dev-'));
@@ -148,6 +200,34 @@ describe('build-web: discovery and validation', () => {
       expect(readFileSync(join(out, a.assets['styles.css'].slice(1)), 'utf8')).toMatch(/margin:0/);
     } finally {
       rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it('rewrites a preloaded font to the file its stylesheet loads, and refuses a font no stylesheet loads', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orbes-websrc-font-'));
+    const srcDir = join(root, 'src');
+    const out = join(root, 'out');
+    try {
+      mkdirSync(join(srcDir, 'gamma'), { recursive: true });
+      mkdirSync(join(srcDir, 'shared', 'fonts'), { recursive: true });
+      writeFileSync(join(srcDir, 'shared', 'fonts', 'f.woff2'), 'stand-in for a font file');
+      writeFileSync(join(srcDir, 'shared', 'fonts', 'unused.woff2'), 'a font no stylesheet names');
+      writeFileSync(join(srcDir, 'gamma', 'main.ts'), 'console.log(1);');
+      writeFileSync(join(srcDir, 'gamma', 'styles.css'), '@font-face { font-family: F; src: url("../shared/fonts/f.woff2") format("woff2"); } body { font-family: F }');
+      const shell = (font: string) =>
+        `<!doctype html><link rel="preload" href="../shared/fonts/${font}" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="./styles.css"><script type="module" src="./main.ts"></script>`;
+      writeFileSync(join(srcDir, 'gamma', 'index.html'), shell('f.woff2'));
+      const r = await buildWeb({ srcDir, outDir: out });
+      const href = r.apps[0].assets['../shared/fonts/f.woff2'];
+      expect(href).toMatch(/^\/assets\/f-[A-Z0-9]{8}\.woff2$/);
+      expect(readFileSync(join(out, r.apps[0].assets['styles.css'].slice(1)), 'utf8')).toMatch(new RegExp(`url\\("?${href.replace(/[.]/g, '\\.')}"?\\)`));
+      expect(readFileSync(join(out, 'gamma', 'index.html'), 'utf8')).toContain(`href="${href}"`);
+      expect(readdirSync(join(out, 'assets')).filter((f) => f.endsWith('.woff2'))).toEqual([href.slice('/assets/'.length)]);
+
+      writeFileSync(join(srcDir, 'gamma', 'index.html'), shell('unused.woff2'));
+      await expect(buildWeb({ srcDir, outDir: out })).rejects.toThrow(/font no stylesheet of the build loads/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

@@ -2,10 +2,10 @@
  * ORBES GENOME console.
  *
  * An internal instrument in the house style: white and ivory paper, black
- * ink, Helvetica Neue in tracked uppercase, 1 px hairlines and an
- * architectural grid. No shadows, no gradients, no colour except oxblood
- * (#8A1C1C) for the few facts that require immediate action. Monospace is
- * reserved for identifiers and hashes.
+ * ink, titles and labels in Gravesend Sans tracked uppercase, Helvetica Neue
+ * for everything read, 1 px hairlines and an architectural grid. No shadows,
+ * no gradients, no colour except oxblood (#8A1C1C) for the few facts that
+ * require immediate action. Monospace is reserved for identifiers and hashes.
  *
  * Brand tokens and primitives come from ../shared/brand.css.
  */
@@ -1917,6 +1917,55 @@ a.bar__label:hover {
   text-indent: 0.5em;
   text-transform: uppercase;
   color: var(--ink-soft);
+}
+
+/* ── Display type ──────────────────────────────────────────────────────── */
+
+/* Titles and tracked-capital labels in the display face (brand.css
+   --font-display, BRAND-DESIGN-SYSTEM §3.1): navigation, page and panel
+   titles, eyebrows, column heads, field and group labels, buttons, the
+   sign-in page. What the console reports stays in --font: values, statuses,
+   identifiers, counts, dates, codes, hashes and body text, and every line
+   that can carry them (the crumb, panel notes, dialog titles, numbered
+   steps). Gravesend's figure one is its capital I, and its figures do not
+   align. */
+.side__product,
+.side__group-title,
+.side__link,
+.side__small,
+.side__signout,
+.side__place,
+.topbar__env,
+.page-head__eyebrow,
+.page-head__title,
+.panel__title,
+.kpi__label,
+.deflist__label,
+.table th,
+.empty__text,
+.cbtn,
+.cfield__label,
+.form-group,
+.hero__caption-label,
+.sheet__label,
+.actions__title,
+.artifact__downloads-label,
+.gen__identity-label,
+.gen__notes-title,
+.claim__label,
+.loading__text,
+.failure__title,
+.dialog__eyebrow,
+.login__subtitle,
+.login__title,
+.login__foot,
+.login__place {
+  font-family: var(--font-display);
+}
+
+/* A page title that is an identifier (the product page, the generator result) reads in --font. */
+.page-head__title--id {
+  font-family: var(--font);
 }
 
 /* ── Narrow screens ────────────────────────────────────────────────────── */

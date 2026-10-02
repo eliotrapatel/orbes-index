@@ -17,6 +17,7 @@ describe('static web apps', () => {
     writeFileSync(join(dir, 'verify', 'index.html'), '<!doctype html><title>VERIFY</title>');
     writeFileSync(join(dir, 'admin', 'index.html'), '<!doctype html><title>ADMIN</title>');
     writeFileSync(join(dir, 'assets', 'verify-4F2KQ7ZB.js'), 'console.log(1)');
+    writeFileSync(join(dir, 'assets', 'gravesend-sans-500-JQUMMK2Q.woff2'), 'wOF2');
     writeFileSync(join(dir, 'assets', 'brand.css'), 'body{}');
     writeFileSync(join(dir, 'assets', '.env'), 'SECRET=1');
     writeFileSync(join(dir, 'secret.txt'), 'not public');
@@ -57,6 +58,11 @@ describe('static web apps', () => {
     expect(hashed.statusCode).toBe(200);
     expect(hashed.headers['cache-control']).toBe(IMMUTABLE_CACHE);
     expect(hashed.headers['content-type']).toMatch(/javascript/);
+    // The display font the shells preload: its type, and immutable like the bundles.
+    const font = await c.get('/assets/gravesend-sans-500-JQUMMK2Q.woff2');
+    expect(font.statusCode).toBe(200);
+    expect(font.headers['content-type']).toBe('font/woff2');
+    expect(font.headers['cache-control']).toBe(IMMUTABLE_CACHE);
     const css = await c.get('/assets/brand.css');
     expect(css.statusCode).toBe(200);
     expect(css.headers['cache-control']).toBe(REVALIDATE_CACHE);

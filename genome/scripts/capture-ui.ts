@@ -32,8 +32,10 @@
  * before each capture: invisible at documentation scale, it would otherwise
  * roughly triple the size of the set.
  *
- * Chromium on Linux has no Helvetica Neue: the stack resolves to Liberation
- * Sans (metric-compatible with Helvetica/Arial) at weight 400 throughout.
+ * Titles and labels render in the shipped display face, Gravesend Sans,
+ * everywhere (captures wait for document.fonts.ready). Reading text uses the
+ * system stack: Helvetica Neue on macOS; Chromium on Linux has none and
+ * resolves it to Liberation Sans (metric-compatible with Helvetica/Arial).
  */
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
