@@ -171,6 +171,7 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | `npx tsx scripts/genome-symbol-study.ts` | GENOME-01 vocabulary selection → `docs/reports/genome-symbol-study.md` and `docs/assets/genome-01-vocabulary.svg`. |
 | `npx tsx scripts/payload-encodings.ts` | Payload size in the fixed layout vs deterministic CBOR and JSON → the table of CRYPTOGRAPHY §3.1 (`--json` for raw figures). |
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
+| `npx tsx scripts/certificate-specimen.ts` | Certificate card specimen of BRAND §7 (`docs/assets/certificate-card-specimen*.svg` and the production PDF). Re-run after any change to the card; `test/render/certificate.test.ts` fails on stale files. |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.
 

@@ -166,7 +166,8 @@ export const GENOME_VERSION = 1;
 export const CODE_VERSION = 1;
 export const MAX_ISSUE = 255;
 const SERIAL_MAX = 999_999;
-const NOT_PRINTABLE: ReadonlySet<ProductStatus> = new Set(['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
+/** Statuses whose codes (and certificate cards) are never printed again: out of circulation or under incident. */
+export const NOT_PRINTABLE: ReadonlySet<ProductStatus> = new Set(['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
 const MAX_ATTEMPTS = 5;
 const MAX_REASON = 500;
 

@@ -116,7 +116,7 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR**; a role may do everything a lowe
 | Role | May |
 |---|---|
 | AUDITOR | Read every admin resource. Manage its own session and second factor. |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts and print sheets** (a `GET`, but it produces printable codes). |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections, models, anomaly triage) and **downloading code artifacts, print sheets and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). |
 | ADMIN | Additionally: categories, product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, and console users (list, TOTP reset). |
 
 The default rule is AUDITOR for `GET`/`HEAD` and OPERATOR for other methods; the endpoint tables state every exception. Insufficient role: `403 FORBIDDEN` ("Your role does not allow this action."). No session: `401 UNAUTHORIZED`.
@@ -223,7 +223,7 @@ Ownership:
 | `REGISTRATION_TOKEN_INVALID` | 400 | Unknown or malformed registration token, or one bound to another purpose or product. |
 | `REGISTRATION_TOKEN_USED` | 409 | The token was already used. |
 | `REGISTRATION_TOKEN_EXPIRED` | 410 | The token expired (15 minutes after the scan). Distinguishable from "unknown" for 24 hours after expiry. |
-| `ALREADY_REGISTERED` | 409 | The product already has an owner. |
+| `ALREADY_REGISTERED` | 409 | The product already has an owner. Also refuses a certificate card (§15.7): its claim code has been used. |
 | `REGISTRATION_NOT_ALLOWED` | 409 | The product's status does not allow first registration. |
 | `REGISTRATION_CONFLICT` | 409 | The product changed during registration; retry. |
 | `CLAIM_CODE_REQUIRED` | 400 | The product ships with a claim code and none was sent. |
@@ -270,8 +270,10 @@ Codes, artifacts, warranty and service:
 | `CODE_NOT_FOUND` | 404 | No code with this id. |
 | `CODE_ALREADY_REVOKED` | 409 | The code is already revoked. |
 | `CODE_NOT_ACTIVE` | 409 | Only the ACTIVE code of a product can be rendered. |
-| `PRODUCT_NOT_PRINTABLE` | 409 | The product is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN: no new prints. |
+| `PRODUCT_NOT_PRINTABLE` | 409 | The product is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN: no new prints (codes and certificate cards). |
 | `CODE_INTEGRITY` | 409 | The stored code failed its end-to-end integrity check and is never rendered. |
+| `CLAIM_CODE_MISMATCH` | 422 | (Certificate cards, §15.7) a claim code does not match its product's hash, or is malformed. The message names the product ids, never the code. |
+| `NO_CLAIM_SECRET` | 422 | (Certificate cards, §15.7) the product was issued without a claim code. |
 | `PRODUCT_NOT_REISSUABLE` | 409 | A RETIRED or REVOKED product cannot receive a new code. |
 | `NO_CODE` | 409 | The product has no code to replace. |
 | `ISSUES_EXHAUSTED` | 409 | The product reached 255 code issues. |
@@ -368,6 +370,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | POST | `/api/admin/products/:productId/ownership/confirm` | OPERATOR | yes | admin | 14.10 |
 | GET | `/api/admin/codes/:codeId/artifact.:format` | **OPERATOR** | — | admin | 15.2 |
 | POST | `/api/admin/codes/print-sheet` | OPERATOR | yes | admin | 15.3 |
+| POST | `/api/admin/certificates` | **OPERATOR** | yes | admin | 15.7 |
 | POST | `/api/admin/codes/:codeId/revoke` | **ADMIN** | yes | admin | 15.4 |
 | GET | `/api/admin/codes` | AUDITOR | — | admin | 15.5 |
 | GET | `/api/admin/genomes` | AUDITOR | — | admin | 15.6 |
@@ -387,7 +390,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1289,7 +1292,7 @@ Example request:
 ```
 
 - `code.data` is the base64url of the 79-byte framed data: exactly what a scanner reads and what `POST /api/v1/verify` takes. Anyone holding it can print a code that verifies, so it is returned only to OPERATOR responses that produce codes (issuance and re-issue), never in read views.
-- `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it on the certificate or card supplied with the product.
+- `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it under the scratch-off panel of the certificate card supplied with the product: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
 - `code.nonce` and `code.payloadHash` are hexadecimal; `issuedDay` counts days since 2024-01-01 UTC.
 
 Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `404 REFERENCE_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 SERIAL_TAKEN`, `409 SERIALS_EXHAUSTED`, `409 ISSUANCE_CONFLICT`, `503 NO_ACTIVE_KEY`, `503 SIGNING_UNAVAILABLE`, `503 SIGNING_FAILED`.
@@ -1562,6 +1565,45 @@ AUDITOR. Paginated list of every code, newest first; read view (no `data`).
 ### 15.6 `GET /api/admin/genomes`
 
 AUDITOR. Paginated list of genomes, newest first. Item: `{ "id", "productId", "version", "versionLabel": "GENOME-01", "value", "glyphs", "ids", "pattern", "fingerprint", "createdAt" }`.
+
+### 15.7 `POST /api/admin/certificates` (extension of the contract)
+
+**OPERATOR** (never AUDITOR: the response holds claim codes). Renders the **certificate card** delivered with a piece: its identity, its GENOME row, model, material, the three steps of the packaging kit, *VERIFY ONLY AT THEORBES.COM/VERIFY*, and its one-time claim code under a scratch-off panel ([BRAND-DESIGN-SYSTEM §7](BRAND-DESIGN-SYSTEM.md#7-artifact-specimens)). Never the ORBES CODE itself. Also the same data as a CSV for a print shop's variable-data run.
+
+The claim code is shown once at issuance (§14.2) and only its scrypt hash is stored, so the console sends it back here. A `POST` because the codes travel in the body, never in a URL (CSRF-protected). Before anything is drawn, **every code is checked against its product's hash**: a card printed with a mistyped code would lock the buyer out of registration for good. The codes are never stored, logged, audited or repeated in an error.
+
+| Field | Type | Required | Default | Rules |
+|---|---|---|---|---|
+| `items` | `{ productId, claimCode }[]` | yes | — | 1–50 items, one per product (a product listed twice is `400`). `productId`: canonical id or row UUID. `claimCode`: at most 32 characters, any spelling accepted at registration (case, spaces and hyphens are ignored; I and L read as 1, O as 0). |
+| `format` | string | no | `pdf` | `pdf` or `csv` |
+| `layout` | string | no | `card` | PDF only. `card`: one 85 × 55 mm page per card. `sheet`: A4 sheets of ten cards (2 × 5, abutting, 11 mm top and bottom margins) with cut marks outside the grid, a caption and a 10 mm scale bar. |
+
+Checks, in this order (nothing is rendered when one fails): every product exists (`404 PRODUCT_NOT_FOUND`, naming it); every product was issued with a claim code (`422 NO_CLAIM_SECRET`); none is RETIRED, REVOKED, COUNTERFEIT_FLAGGED, LOST or STOLEN (`409 PRODUCT_NOT_PRINTABLE`); none has an owner, whose registration has spent the code (`409 ALREADY_REGISTERED`); every claim code matches its product's hash (`422 CLAIM_CODE_MISMATCH`, naming the products, never the codes). A malformed code is a mismatch. Mismatches are not counted towards the customers' claim-code attempt limit (§11.1): the route needs an OPERATOR session (with TOTP in production) and every refusal is audited.
+
+**200**, `Cache-Control: no-store`, as an attachment:
+
+| `format` / `layout` | `Content-Type` | File name |
+|---|---|---|
+| `pdf` / `card`, one item | `application/pdf` | `ORBES-certificate-<productId>[-PROOF].pdf` |
+| `pdf` / `card`, several | `application/pdf` | `ORBES-certificates-<YYYY-MM-DD>-<count>-card[-PROOF].pdf` |
+| `pdf` / `sheet` | `application/pdf` | `ORBES-certificates-<YYYY-MM-DD>-<count>-sheet[-PROOF].pdf` |
+| `csv` | `text/csv; charset=utf-8; header=present` | `ORBES-certificates-<YYYY-MM-DD>-<count>.csv` |
+
+**The PDF** is pure vector and embeds no font: lettering is stroked geometry (the print label's), the GENOME is filled paths, so the claim code is never text that could be searched or copied out of the file. Black is DeviceCMYK K only (as `kOnly`, §15.2). The scratch-off panel is a flat fill in the spot colour **`ORBES SCRATCH-OFF`** (a Separation colour space; its CMYK alternate, K 35 %, is only how viewers and office printers show it) set to **overprint** (`OP`/`op` true, `OPM 1`), so the claim code printed beneath it stays whole on the black plate. Tell the print shop to lay the scratch-off ink on that plate. Until the brand validates the layout, every card says **PROOF · LAYOUT NOT VALIDATED**, and the sheet caption, the document title and the file name say PROOF (`CERTIFICATE_LAYOUT_STATUS`, `genome/src/server/render/certificate.ts`).
+
+**The CSV** (RFC 4180, UTF-8 without BOM, CRLF, a header row, every field quoted) has the columns `productId`, `model` (`<name> · <type>`), `material` and `code` (`XXXX-XXXX-XXXX`), values as recorded. A value starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe, so opening the file in a spreadsheet never runs a formula. The GENOME row is not in the CSV (a print shop cannot typeset it): the PDF remains the reference.
+
+Example:
+
+```json
+{ "items": [{ "productId": "O26-J-00184", "claimCode": "7KQ2-M4TD-9XWH" }], "format": "pdf", "layout": "card" }
+```
+
+Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus }`; each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). No claim code in either.
+
+In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code.
+
+Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`.
 
 ---
 

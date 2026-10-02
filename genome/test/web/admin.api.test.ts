@@ -171,6 +171,26 @@ describe('AdminApi', () => {
     expect(sheet.blob.size).toBe(4);
   });
 
+  it('downloads certificate cards: claim codes in a POST body, never in the URL', async () => {
+    const pdf = new Response(new Uint8Array([37, 80, 68, 70]), {
+      status: 200,
+      headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="ORBES-certificate-O26-J-00184-PROOF.pdf"' },
+    });
+    const csv = new Response('"productId"\r\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8; header=present' } });
+    const { fetch, calls } = fakeFetch(json(200, SESSION), pdf, csv);
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    const card = await api.certificates([{ productId: 'O26-J-00184', claimCode: '7KQ2-M4TD-9XWH' }], { format: 'pdf', layout: 'card' });
+    expect(calls[1].url).toBe('/api/admin/certificates');
+    expect(calls[1].init.method).toBe('POST');
+    expect(header(calls[1], 'x-csrf-token')).toBe('tok-1');
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ items: [{ productId: 'O26-J-00184', claimCode: '7KQ2-M4TD-9XWH' }], format: 'pdf', layout: 'card' });
+    expect(card).toMatchObject({ filename: 'ORBES-certificate-O26-J-00184-PROOF.pdf', contentType: 'application/pdf' });
+    const sheet = await api.certificates([{ productId: 'O26-J-00184', claimCode: '7KQ2-M4TD-9XWH' }], { format: 'csv' });
+    expect(calls[2].url).not.toContain('7KQ2');
+    expect(sheet.filename).toBe('orbes-certificates.csv');
+  });
+
   it('times out slow requests', async () => {
     vi.useFakeTimers();
     try {

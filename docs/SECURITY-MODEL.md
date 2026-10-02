@@ -68,6 +68,7 @@ None of these layers proves that the scanned object is the original physical ite
 ### 3.5 Response hygiene
 - **Public responses:** never contain risk scores, thresholds, internal statuses, owner identities, retailer data, email addresses or stack traces.
 - **Errors:** a stable `{ error: { code, message } }` shape.
+- **Claim codes:** returned once, at issuance. The certificate card endpoint (`POST /api/admin/certificates`, OPERATOR) takes a code back only to print it: it checks the code against its scrypt hash first, and never stores, logs, audits or repeats it in an error (audit entries carry product ids). The card draws the code as paths, never as text, and every file is a `no-store` attachment.
 - **Security headers:**
   - CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
   - `Permissions-Policy: camera=(self)`
@@ -87,7 +88,7 @@ None of these layers proves that the scanned object is the original physical ite
 - `product_status_history` is append-only as well (UPDATE, DELETE and TRUNCATE raise). `genomes` and `cryptographic_keys` can never be deleted: a key id is a 1-byte value signed into every code, so a deleted key row would let a later key reuse the id. Keys are retired or revoked instead (migration `0002_platform_guards`).
 - Each entry stores `prev_hash` and `hash = SHA-256(prev_hash ‖ canonical JSON(entry))`.
 - `GET /api/admin/audit/verify` recomputes the chain and reports the first inconsistent entry.
-- Audited actions include product issuance, code reissue and revocation, lifecycle transitions, ownership changes, warranty actions, key generation, rotation, retirement and revocation, category, collection and model creation, anomaly status changes, admin logins, admin creation, TOTP enrolment and reset, and customer login failures and throttling.
+- Audited actions include product issuance, code reissue and revocation, artifact and certificate card downloads (with refused card requests), lifecycle transitions, ownership changes, warranty actions, key generation, rotation, retirement and revocation, category, collection and model creation, anomaly status changes, admin logins, admin creation, TOTP enrolment and reset, and customer login failures and throttling.
 
 ### 3.8 Anomaly detection
 - The rules are pure functions over scan history. Thresholds are configuration and are never exposed.

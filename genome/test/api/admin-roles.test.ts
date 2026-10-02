@@ -41,6 +41,7 @@ const PROBES: Probe[] = [
   { group: 'codes', method: 'GET', url: `/api/admin/codes/${UUID}/artifact.svg`, min: 'OPERATOR' },
   { group: 'codes', method: 'POST', url: `/api/admin/codes/${UUID}/revoke`, body: INVALID, min: 'ADMIN' },
   { group: 'codes', method: 'POST', url: '/api/admin/codes/print-sheet', body: INVALID, min: 'OPERATOR' },
+  { group: 'certificates', method: 'POST', url: '/api/admin/certificates', body: INVALID, min: 'OPERATOR' },
   { group: 'genomes', method: 'GET', url: '/api/admin/genomes', min: 'AUDITOR' },
   { group: 'codes', method: 'GET', url: '/api/admin/codes', min: 'AUDITOR' },
   { group: 'scans', method: 'GET', url: '/api/admin/scans', min: 'AUDITOR' },
@@ -72,7 +73,7 @@ describe('admin role enforcement', () => {
 
   it('covers every admin route of the contract', () => {
     const groups = new Set(PROBES.map((p) => p.group));
-    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins']) {
+    for (const g of ['dashboard', 'categories', 'models', 'collections', 'products', 'lifecycle', 'codes', 'certificates', 'warranty', 'services', 'ownership', 'genomes', 'scans', 'owners', 'warranties', 'anomalies', 'revocations', 'keys', 'audit', 'admins']) {
       expect(groups.has(g)).toBe(true);
     }
   });

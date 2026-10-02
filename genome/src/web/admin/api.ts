@@ -133,6 +133,19 @@ export interface PrintSheetOptions {
   cropMarks?: boolean;
 }
 
+/** One certificate card: the claim code shown at issuance, sent back only to be printed. */
+export interface CertificateItem {
+  productId: string;
+  claimCode: string;
+}
+
+export interface CertificateOptions {
+  /** 'pdf' (default) or 'csv' (variable-data file for a print shop). */
+  format?: 'pdf' | 'csv';
+  /** PDF only: 'card' (default, 85 × 55 mm pages) or 'sheet' (A4, ten cards). */
+  layout?: 'card' | 'sheet';
+}
+
 export interface Download {
   blob: Blob;
   filename: string;
@@ -382,6 +395,16 @@ export class AdminApi {
   async printSheet(codeIds: readonly string[], opts: PrintSheetOptions = {}): Promise<Download> {
     const res = await this.request<Response>('POST', '/api/admin/codes/print-sheet', { raw: true, body: { codeIds: [...codeIds], ...opts } });
     return toDownload(res, 'orbes-print-sheet.pdf');
+  }
+
+  /**
+   * Certificate cards carrying claim codes (POST: the codes travel in the body, never in a URL).
+   * The server checks each code against its product's hash and audits product ids only.
+   */
+  async certificates(items: readonly CertificateItem[], opts: CertificateOptions = {}): Promise<Download> {
+    const body = { items: items.map((i) => ({ productId: i.productId, claimCode: i.claimCode })), ...opts };
+    const res = await this.request<Response>('POST', '/api/admin/certificates', { raw: true, body });
+    return toDownload(res, opts.format === 'csv' ? 'orbes-certificates.csv' : 'orbes-certificate.pdf');
   }
 
   revokeCode(codeId: string, reason: string): Promise<{ code: CodeJson }> {

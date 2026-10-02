@@ -106,12 +106,12 @@ genome/
     keys/                KeyProvider (local AES-GCM files | memory; KMS/HSM-ready interface), KeyService
     crypto/              strict Ed25519 (node:crypto), scrypt, TOTP, secretbox
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
-                         scan tokens, scan-history retention
+                         certificate cards, scan tokens, scan-history retention
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
-    render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets
+    render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views
     admin/               admin console: catalogue, generator, keys, anomalies, audit

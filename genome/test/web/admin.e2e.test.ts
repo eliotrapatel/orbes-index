@@ -4,7 +4,7 @@
  * provider) and driven in Chromium through playwright-core.
  *
  * Flow: sign in → create a model in the catalogue → issue a product with the
- * generator (claim code shown once, code preview) → download the SVG and
+ * generator (claim code shown once, its certificate card, code preview) → download the SVG and
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
@@ -295,9 +295,15 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.selectOption('select[name=theme]', 'ivory');
     await page.waitForSelector('[data-testid=code-figure].figure--theme-ivory');
 
-    // Hiding drops the only copy the console holds.
+    // The certificate card that carries the claim code, checked against its hash by the server.
+    const [card] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-certificate]')]);
+    expect(card.suggestedFilename()).toBe(`ORBES-certificate-${issuedProductId}-PROOF.pdf`);
+    expect(readFileSync((await card.path())!).subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
+
+    // Hiding drops the only copy the console holds, and the card download goes with it.
     await page.getByRole('button', { name: /I have recorded it/ }).click();
     expect(await page.locator('[data-testid=claim-code]').textContent()).not.toContain(body.claimCode.slice(0, 4));
+    expect(await page.locator('[data-testid=download-certificate]').count()).toBe(0);
     await page.selectOption('select[name=theme]', 'classic');
     expect(await page.locator('select[name=theme] option').allTextContents()).toEqual(['CLASSIC — BLACK ON WHITE', 'INVERTED — WHITE ON BLACK', 'IVORY — INK ON IVORY']);
 

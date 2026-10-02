@@ -8,6 +8,10 @@
  * SVG / PNG / PDF downloads with print options, and the one-time claim
  * code. The claim code exists only in this page's memory: it is never
  * stored client-side and disappears when the operator leaves or hides it.
+ * While it is shown, the certificate card that carries it (PDF, claim code
+ * under the scratch-off panel) can be downloaded; the server checks the code
+ * against its hash before printing it, and the button goes with Copy when
+ * the code is hidden.
  */
 import { bracket } from '../../shared/corners.js';
 import { focusFirst, h, mount } from '../../shared/dom.js';
@@ -19,7 +23,9 @@ import { href, productHref } from '../router.js';
 import type { Category, Collection, IssueResponse, Model } from '../types.js';
 import { artifactPanel } from '../ui/artifacts.js';
 import { busy, button, checkbox, copyButton, defList, field, input, linkButton, mono, pageHeader, section, select, setFieldError } from '../ui/components.js';
+import { saveDownload } from '../ui/download.js';
 import { genomeFigure } from '../ui/figures.js';
+import { notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
@@ -206,7 +212,7 @@ function asideNotes(): HTMLElement {
 function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
   const { product: p, genome: g, code: c } = r;
 
-  const claim = r.claimCode ? claimPanel(r.claimCode) : null;
+  const claim = r.claimCode ? claimPanel(ctx, p.productId, r.claimCode) : null;
 
   return [
     pageHeader({
@@ -259,7 +265,7 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
   ].filter((x): x is HTMLElement => x !== null);
 }
 
-function claimPanel(code: string): HTMLElement {
+function claimPanel(ctx: ViewContext, productId: string, code: string): HTMLElement {
   const value = formatClaimCode(code);
   const text = h('p', { class: 'claim__code mono', data: { testid: 'claim-code' } }, value);
   const hide = button('I have recorded it — hide', {
@@ -270,9 +276,20 @@ function claimPanel(code: string): HTMLElement {
       panel.classList.add('is-hidden');
       hide.remove();
       copy.remove();
+      card.remove();
     },
   });
   const copy = copyButton(value, 'Copy');
+  const card = button('Download certificate card', { kind: 'ghost', testId: 'download-certificate' });
+  card.addEventListener('click', () => {
+    void busy(card, async () => {
+      try {
+        saveDownload(await ctx.api.certificates([{ productId, claimCode: code }], { format: 'pdf', layout: 'card' }));
+      } catch (e) {
+        notifyError(e, 'The certificate card could not be produced.');
+      }
+    }, 'Rendering…');
+  });
   const panel = bracket(
     h(
       'section',
@@ -280,7 +297,7 @@ function claimPanel(code: string): HTMLElement {
       h('p', { class: 'claim__label' }, 'Claim code · shown once'),
       text,
       h('p', { class: 'claim__note' }, 'Place it inside the packaging, never on the product. Only its scrypt hash is stored; it cannot be displayed again.'),
-      h('div', { class: 'claim__tools' }, copy, hide),
+      h('div', { class: 'claim__tools' }, copy, card, hide),
     ),
   );
   return panel;

@@ -286,6 +286,24 @@ export const printSheetBody = body({
   cropMarks: z.boolean().optional(),
 });
 
+/**
+ * Certificate cards (§15.7): each claim code travels once, in the body (never a URL), is checked
+ * against its product's hash and never stored. Messages never repeat a submitted value.
+ */
+export const certificateBody = body({
+  items: z
+    .array(
+      z.strictObject({
+        productId: productRef,
+        claimCode: z.string().max(32, 'Invalid claim code'),
+      }),
+    )
+    .min(1, 'Add at least one product')
+    .max(50, 'At most 50 products per request'),
+  format: z.enum(['pdf', 'csv']).optional(),
+  layout: z.enum(['card', 'sheet']).optional(),
+});
+
 export const createRevocationBody = body({
   targetType: z.enum(REVOCATION_TARGET_TYPES),
   targetId: z.string().trim().min(1, 'Required').max(64, 'At most 64 characters'),

@@ -26,6 +26,7 @@ import { AuditService } from './services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
 import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
+import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
@@ -47,6 +48,8 @@ export interface AppServices {
   authenticators: AuthenticatorRegistry;
   /** Collections and models (categories: `AppContext.categories`). */
   catalog: CatalogService;
+  /** Certificate cards carrying claim codes (PDF, A4 sheet, CSV for print shops). */
+  certificates: CertificateService;
 }
 
 export interface AppContext {
@@ -119,6 +122,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
     const issuance = new IssuanceService({ db, keys, audit, categories, clock, log });
     const catalog = new CatalogService({ db, audit, categories, clock });
+    const certificates = new CertificateService({ db, audit, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
@@ -133,6 +137,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       auth,
       authenticators,
       catalog,
+      certificates,
       ...overrides.services,
     };
 
