@@ -19,6 +19,7 @@ import {
   SERVICE_TYPES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
+import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -337,14 +338,41 @@ export const createRevocationBody = body({
 
 // ── Admin: scans, anomalies, warranties, audit ─────────────────────────────
 
-export const scanListQuery = z.object({
-  productId: productRef.optional(),
-  state: z.enum(VERIFICATION_STATES).optional(),
-});
+const DAY_MS = 86_400_000;
 
+/**
+ * One end of a time window: an ISO 8601 date-time with its zone, or a UTC day (`YYYY-MM-DD`), which
+ * stands for its first millisecond as a start (`from`) and its last as an end (`to`). Both ends are included.
+ */
+const windowBound = (end: 'from' | 'to') =>
+  z.union([
+    isoDate.transform((d) => new Date(Date.parse(`${d}T00:00:00.000Z`) + (end === 'to' ? DAY_MS - 1 : 0))),
+    isoDateTime,
+  ]);
+
+/**
+ * Filters of the scans registry (GET /api/admin/scans): the product, the result, and the window
+ * `from`–`to` the scans were made in (both included), e.g. the window of an anomaly.
+ */
+export const scanListQuery = z
+  .object({
+    productId: queryOptional(productRef),
+    state: queryOptional(z.enum(VERIFICATION_STATES)),
+    from: queryOptional(windowBound('from')),
+    to: queryOptional(windowBound('to')),
+  })
+  .refine((q) => !q.from || !q.to || q.from.getTime() <= q.to.getTime(), { message: 'from must not be after to', path: ['to'] });
+
+/**
+ * Filters and order of the anomalies list (GET /api/admin/anomalies). `type` is one of the types the
+ * service can record (ANOMALY_TYPES, derived from ANOMALY_WEIGHTS); `sort` defaults to severity.
+ */
 export const anomalyListQuery = z.object({
-  status: z.enum(ANOMALY_STATUSES).optional(),
-  severity: z.enum(ANOMALY_SEVERITIES).optional(),
+  status: queryOptional(z.enum(ANOMALY_STATUSES)),
+  severity: queryOptional(z.enum(ANOMALY_SEVERITIES)),
+  type: queryOptional(z.enum(ANOMALY_TYPES)),
+  productId: queryOptional(productRef),
+  sort: queryOptional(z.enum(ANOMALY_SORTS)),
 });
 
 export const anomalyParams = z.object({ id: uuid });

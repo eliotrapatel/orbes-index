@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as serverSchema from '../../src/server/db/schema.js';
+import { ANOMALY_SORTS as SERVER_ANOMALY_SORTS } from '../../src/server/services/anomaly.js';
 import { ROLE_RANK as SERVER_ROLE_RANK } from '../../src/server/http/sessions.js';
 import { ARTIFACT_DEFAULTS as SERVER_ARTIFACT_DEFAULTS, ARTIFACT_LIMITS as SERVER_ARTIFACT_LIMITS, MAX_SHEET_ITEMS, planPrintSheet } from '../../src/server/render/artifact.js';
 import { SHEET_PAGES } from '../../src/server/render/print-sheet.js';
@@ -7,6 +8,28 @@ import { MAX_CODE_IDS } from '../../src/server/routes/admin/codes.js';
 import { ARTIFACT_THEME_NAMES as SERVER_THEME_NAMES } from '../../src/server/render/scene.js';
 import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
 import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
+import {
+  anomalyFiltersFrom,
+  badgeText,
+  consoleTitle,
+  countriesLine,
+  decisionError,
+  decisionNeedsContext,
+  decisionOffer,
+  decisionPhrase,
+  decisionReason,
+  decisionSteps,
+  decisionSummary,
+  hasAnomalyFilters,
+  MARK_FIELDS,
+  REASON_MAX,
+  REVOKE_FIELD,
+  scanHref,
+  SORT_OPTIONS,
+  sortValue,
+  typeOptions,
+  windowScansHref,
+} from '../../src/web/admin/model/anomalies.js';
 import { dashboardKpis, severityBars, statusBars } from '../../src/web/admin/model/dashboard.js';
 import {
   ARTIFACT_DEFAULTS,
@@ -39,7 +62,8 @@ import { primaryCode, productActions, productAttributes, productSheet } from '..
 import { chainVerdict, compromiseTime, confirmationPhrase, keyActions, phraseMatches, revocationTargetError, triageMoves } from '../../src/web/admin/model/registry.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import * as web from '../../src/web/admin/types.js';
-import type { DashboardData, Model, ProductDetail } from '../../src/web/admin/types.js';
+import type { AnomalyContext, DashboardData, Model, ProductDetail } from '../../src/web/admin/types.js';
+import { ATTENTION_INTERVAL_MS, startAttentionPoll, type VisibilitySource } from '../../src/web/admin/ui/attention.js';
 
 describe('admin enums mirror the server', () => {
   it('keeps every shared enum identical', () => {
@@ -58,6 +82,7 @@ describe('admin enums mirror the server', () => {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
+    expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
   });
 
   it('uses the server role ranks and artifact limits', () => {
@@ -606,5 +631,220 @@ describe('registry view rules', () => {
     const bad = chainVerdict({ ok: false, checked: 41, firstBadId: 42, head: null });
     expect(bad).toMatchObject({ title: 'Chain broken', tone: 'critical' });
     expect(bad.detail).toContain('#42');
+  });
+});
+
+// ── Anomaly triage ─────────────────────────────────────────────────────────
+
+describe('anomaly triage view model', () => {
+  const ID = '0b4f6a8e-2c1d-4e5f-8a9b-0c1d2e3f4a5b';
+  const CODE = '7d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6';
+  const context = (over: Partial<AnomalyContext> = {}): AnomalyContext => ({
+    anomaly: {
+      id: ID,
+      productId: 'O26-J-00184',
+      productUuid: '11111111-1111-4111-8111-111111111111',
+      codeId: CODE,
+      type: 'IMPOSSIBLE_TRAVEL',
+      severity: 'HIGH',
+      riskScore: 60,
+      details: { scanEventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      status: 'OPEN',
+      occurrences: 1,
+      firstSeenAt: '2026-10-01T10:00:00.000Z',
+      lastSeenAt: '2026-10-01T10:01:00.000Z',
+      resolvedBy: null,
+      resolvedAt: null,
+      resolutionNote: null,
+    },
+    window: { from: '2026-09-30T10:00:00.000Z', to: '2026-10-01T11:01:00.000Z' },
+    scans: { total: 0, truncated: false, items: [] },
+    countries: [],
+    devices: 0,
+    trigger: null,
+    code: { id: CODE, issue: 1, status: 'ACTIVE' },
+    product: { productId: 'O26-J-00184', lifecycle: { status: 'OWNED', allowed: ['TRANSFERRED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN', 'REVOKED'], returnTo: null, canReinstate: false } },
+    ...over,
+  });
+
+  it('keeps the filters and the order in the URL; the default order stays out of it', () => {
+    expect(anomalyFiltersFrom({ status: 'OPEN', type: ' IMPOSSIBLE_TRAVEL ', productId: 'O26-J-00184', sort: 'risk', severity: '', page: '2' })).toEqual({
+      status: 'OPEN',
+      type: 'IMPOSSIBLE_TRAVEL',
+      productId: 'O26-J-00184',
+      sort: 'risk',
+    });
+    expect(hasAnomalyFilters({ sort: 'risk' })).toBe(false);
+    expect(hasAnomalyFilters({ productId: 'O26-J-00184' })).toBe(true);
+    expect(SORT_OPTIONS.map((o) => o.value)).toEqual(['', 'risk', 'lastSeen']);
+    expect(SORT_OPTIONS.map((o) => o.label)).toEqual(['Severity, then risk', 'Risk', 'Last seen']);
+    // Every non-default option is an order the server knows.
+    for (const o of SORT_OPTIONS.slice(1)) expect(web.ANOMALY_SORTS).toContain(o.value);
+    expect([sortValue(undefined), sortValue('severity'), sortValue('lastSeen')]).toEqual(['', '', 'lastSeen']);
+  });
+
+  it('offers every type the server lists (and keeps a type of the URL it no longer lists)', () => {
+    const types = ['IMPOSSIBLE_TRAVEL', 'UNSOLD_PIECE_SCAN'];
+    expect(typeOptions(types)).toEqual([
+      { value: '', label: 'All types' },
+      { value: 'IMPOSSIBLE_TRAVEL', label: 'IMPOSSIBLE TRAVEL' },
+      { value: 'UNSOLD_PIECE_SCAN', label: 'UNSOLD PIECE SCAN' },
+    ]);
+    expect(typeOptions(types, 'OLD_TYPE').map((o) => o.value)).toEqual(['', 'IMPOSSIBLE_TRAVEL', 'UNSOLD_PIECE_SCAN', 'OLD_TYPE']);
+  });
+
+  it('counts OPEN HIGH + CRITICAL in the badge and prefixes the tab title with it', () => {
+    expect([badgeText(0), badgeText(-1), badgeText(Number.NaN), badgeText(3), badgeText(99), badgeText(100)]).toEqual(['', '', '', '3', '99', '99+']);
+    expect(consoleTitle('Anomalies', 3)).toBe('(3) Anomalies — ORBES Genome Console');
+    expect(consoleTitle('Dashboard', 0)).toBe('Dashboard — ORBES Genome Console');
+  });
+
+  it("links a finding's window and its triggering scan into Verification events", () => {
+    const c = context();
+    expect(windowScansHref(c)).toBe('#/scans?productId=O26-J-00184&from=2026-09-30T10%3A00%3A00.000Z&to=2026-10-01T11%3A01%3A00.000Z');
+    expect(windowScansHref(context({ product: null }))).toBeNull();
+    // The second the scan was made in, with the scan marked.
+    expect(scanHref({ id: 'scan-1', occurredAt: '2026-10-01T10:01:00.420Z' }, 'O26-J-00184')).toBe(
+      '#/scans?productId=O26-J-00184&from=2026-10-01T10%3A01%3A00.000Z&to=2026-10-01T10%3A01%3A00.999Z&scan=scan-1',
+    );
+    expect(scanHref({ id: 'scan-2', occurredAt: '2026-10-01T10:01:00.000Z' }, null)).toBe('#/scans?from=2026-10-01T10%3A01%3A00.000Z&to=2026-10-01T10%3A01%3A00.999Z&scan=scan-2');
+    expect(
+      countriesLine([
+        { country: 'FR', scans: 1204 },
+        { country: null, scans: 2 },
+      ]),
+    ).toBe('FR 1 204 · UNKNOWN 2');
+  });
+
+  it('offers the marks the lifecycle allows (OPERATOR) and the ACTIVE code (ADMIN), only for a finding that can be resolved', () => {
+    const open = triageMoves('OPEN');
+    expect(decisionOffer(context(), 'ADMIN', open)).toEqual({
+      productId: 'O26-J-00184',
+      marks: ['COUNTERFEIT_FLAGGED', 'STOLEN'],
+      revoke: { codeId: CODE, issue: 1 },
+    });
+    expect(decisionOffer(context(), 'OPERATOR', open)).toMatchObject({ marks: ['COUNTERFEIT_FLAGGED', 'STOLEN'], revoke: null });
+    expect(decisionOffer(context(), 'AUDITOR', open)).toMatchObject({ marks: [], revoke: null });
+    // Closed findings only reopen.
+    expect(decisionOffer(context(), 'ADMIN', triageMoves('RESOLVED'))).toMatchObject({ marks: [], revoke: null });
+    // A STOLEN piece cannot be marked again; a revoked code is not offered.
+    const stolen = context({ product: { productId: 'O26-J-00184', lifecycle: { status: 'STOLEN', allowed: ['OWNED', 'RETIRED', 'REVOKED'], returnTo: 'OWNED', canReinstate: false } }, code: { id: CODE, issue: 1, status: 'REVOKED' } });
+    expect(decisionOffer(stolen, 'ADMIN', open)).toMatchObject({ marks: [], revoke: null });
+    // No context (an identity never registered): nothing to act on.
+    expect(decisionOffer(null, 'ADMIN', open)).toEqual({ productId: null, marks: [], revoke: null });
+    expect(decisionNeedsContext(context().anomaly, 'OPERATOR')).toBe(true);
+    expect(decisionNeedsContext({ ...context().anomaly, productUuid: null, codeId: null }, 'ADMIN')).toBe(false);
+    expect(decisionNeedsContext({ ...context().anomaly, status: 'DISMISSED' }, 'ADMIN')).toBe(false);
+    expect(decisionNeedsContext(context().anomaly, 'AUDITOR')).toBe(false);
+  });
+
+  it('chains the actions in order: mark, revoke, then record the decision', () => {
+    const offer = decisionOffer(context(), 'ADMIN', triageMoves('OPEN'));
+    const v = { status: 'RESOLVED', note: 'Seized in Lyon', [MARK_FIELDS.COUNTERFEIT_FLAGGED]: 'true', [REVOKE_FIELD]: 'true' };
+    const steps = decisionSteps(v, offer);
+    expect(steps.map((s) => s.key)).toEqual(['mark:COUNTERFEIT_FLAGGED', `revoke:${CODE}`, 'status:RESOLVED']);
+    expect(steps.map((s) => s.label)).toEqual(['Mark the piece COUNTERFEIT FLAGGED', 'Revoke the code', 'Record the finding RESOLVED']);
+    expect(decisionSummary(steps)).toBe('Finding RESOLVED · piece COUNTERFEIT FLAGGED · code revoked.');
+    expect(decisionSteps({ status: 'ACKNOWLEDGED' }, offer).map((s) => s.key)).toEqual(['status:ACKNOWLEDGED']);
+    // A box the offer does not hold is ignored (a stale form never acts beyond what the role may do).
+    expect(decisionSteps({ status: 'RESOLVED', note: 'x', [REVOKE_FIELD]: 'true' }, decisionOffer(context(), 'OPERATOR', triageMoves('OPEN'))).map((s) => s.kind)).toEqual(['status']);
+  });
+
+  it('checks the decision: a note to close, one mark at a time, and acting on the piece resolves', () => {
+    const moves = triageMoves('OPEN');
+    const offer = decisionOffer(context(), 'ADMIN', moves);
+    expect(decisionError({ status: 'RESOLVED', note: ' ' }, offer, moves)).toMatch(/note/);
+    expect(decisionError({ status: 'RESOLVED', note: 'x', [MARK_FIELDS.COUNTERFEIT_FLAGGED]: 'true', [MARK_FIELDS.STOLEN]: 'true' }, offer, moves)).toMatch(/not both/);
+    expect(decisionError({ status: 'ACKNOWLEDGED', [REVOKE_FIELD]: 'true' }, offer, moves)).toMatch(/choose Resolve/);
+    expect(decisionError({ status: 'RESOLVED', note: 'x', [MARK_FIELDS.STOLEN]: 'true', [REVOKE_FIELD]: 'true' }, offer, moves)).toBeNull();
+    expect(decisionError({ status: 'ACKNOWLEDGED' }, offer, moves)).toBeNull();
+    // Revoking the code asks for the product page's typed phrase.
+    expect(decisionPhrase({ status: 'RESOLVED', [REVOKE_FIELD]: 'true' }, offer)).toBe(confirmationPhrase('revoke-code', 1));
+    expect(decisionPhrase({ status: 'RESOLVED', [MARK_FIELDS.STOLEN]: 'true' }, offer)).toBeNull();
+  });
+
+  it('cites the finding in every reason, within each route limit', () => {
+    const a = context().anomaly;
+    expect(decisionReason(a, ' Seized in Lyon ', REASON_MAX.transition)).toBe(`Anomaly ${ID} (IMPOSSIBLE TRAVEL): Seized in Lyon`);
+    expect(decisionReason(a, undefined, REASON_MAX.revoke)).toBe(`Anomaly ${ID} (IMPOSSIBLE TRAVEL)`);
+    const long = decisionReason(a, 'x'.repeat(2000), REASON_MAX.revoke);
+    expect(long).toHaveLength(500);
+    expect(long.startsWith(`Anomaly ${ID}`)).toBe(true);
+    expect(REASON_MAX).toEqual({ transition: 1000, revoke: 500 });
+  });
+});
+
+describe('anomaly badge refresh', () => {
+  class FakeDoc implements VisibilitySource {
+    hidden = false;
+    private readonly listeners = new Set<() => void>();
+    addEventListener(_type: 'visibilitychange', fn: () => void): void {
+      this.listeners.add(fn);
+    }
+    removeEventListener(_type: 'visibilitychange', fn: () => void): void {
+      this.listeners.delete(fn);
+    }
+    show(hidden: boolean): void {
+      this.hidden = hidden;
+      for (const fn of this.listeners) fn();
+    }
+    get watched(): number {
+      return this.listeners.size;
+    }
+  }
+  afterEach(() => vi.useRealTimers());
+
+  it('asks at once, then every minute while the tab is visible; a hidden tab stops asking until shown again', async () => {
+    vi.useFakeTimers();
+    const doc = new FakeDoc();
+    let count = 3;
+    const load = vi.fn(async () => count);
+    const shown: number[] = [];
+    const poll = startAttentionPoll({ load, apply: (n) => shown.push(n), doc });
+    expect(ATTENTION_INTERVAL_MS).toBe(60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(shown).toEqual([3]);
+    count = 4;
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shown).toEqual([3, 4]);
+
+    doc.show(true);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(load).toHaveBeenCalledTimes(2);
+    count = 1;
+    doc.show(false); // shown again: asks at once, then every minute
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown).toEqual([3, 4, 1]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(load).toHaveBeenCalledTimes(4);
+
+    // A navigation asks now.
+    await poll.refresh();
+    expect(load).toHaveBeenCalledTimes(5);
+    poll.stop();
+    expect(doc.watched).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(load).toHaveBeenCalledTimes(5);
+  });
+
+  it('keeps the last count when a request fails, and applies only the latest answer', async () => {
+    vi.useFakeTimers();
+    const doc = new FakeDoc();
+    const answers: { resolve: (n: number) => void; reject: (e: Error) => void }[] = [];
+    const shown: number[] = [];
+    const poll = startAttentionPoll({ load: () => new Promise<number>((resolve, reject) => answers.push({ resolve, reject })), apply: (n) => shown.push(n), doc });
+    void poll.refresh();
+    answers[1].resolve(2); // the newer answer first
+    answers[0].resolve(7); // a slow, older one never overwrites it
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown).toEqual([2]);
+    void poll.refresh();
+    answers[2].reject(new Error('offline'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown).toEqual([2]);
+    poll.stop();
   });
 });

@@ -159,6 +159,24 @@ body {
   width: 40px;
 }
 
+/* OPEN HIGH + CRITICAL findings on the Anomalies link: an inverted count, in Helvetica Neue (main.ts). */
+.side__badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 10px;
+  padding: 1px 5px;
+  font-family: var(--font);
+  font-size: var(--fs-nano);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-align: center;
+  vertical-align: 1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--white);
+  background: var(--ink);
+}
+
 .side__foot {
   padding: 22px 32px 26px;
   border-top: 1px solid var(--hairline);
@@ -746,6 +764,16 @@ a.bar__label:hover {
   background: var(--ivory);
 }
 
+/* The row the page is about (the anomaly whose detail is open). */
+.table tbody tr.is-current {
+  background: var(--ivory);
+}
+
+.cell-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .cell-sub {
   display: block;
   margin-top: 2px;
@@ -863,6 +891,17 @@ a.bar__label:hover {
 
 .filters .cfield__hint {
   display: none;
+}
+
+/* The time window of the scans list (from an anomaly), with its Clear link. */
+.filters__window {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: -8px 0 22px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */
@@ -1024,6 +1063,17 @@ a.bar__label:hover {
 
 .cfield.is-invalid .cfield__hint {
   color: var(--critical);
+}
+
+/* A tick box in a dialog, its hint under its label. */
+.cfield--check {
+  margin-bottom: 14px;
+}
+
+.cfield--check .cfield__hint {
+  min-height: 0;
+  margin-top: 4px;
+  padding-left: 24px;
 }
 
 .cfield--checks {
@@ -1380,6 +1430,28 @@ a.bar__label:hover {
 .timeline__reason {
   grid-column: 2 / -1;
   font-size: var(--fs-micro);
+  color: var(--ink-soft);
+}
+
+/* An anomaly's scans, oldest first: the filled dot is the scan that raised the finding. */
+.timeline--scans .timeline__item::before {
+  background: var(--white);
+}
+
+.timeline--scans .timeline__item--trigger::before {
+  background: var(--ink);
+}
+
+.panel--finding {
+  margin-bottom: 48px;
+}
+
+.panel__subtitle {
+  margin-top: 30px;
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
   color: var(--ink-soft);
 }
 
@@ -1806,6 +1878,41 @@ a.bar__label:hover {
   margin-top: 24px;
 }
 
+/* The decision dialog's report, step by step (mark, revoke, resolve). */
+.steps {
+  list-style: none;
+  margin-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.steps__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.steps__state {
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-soft);
+}
+
+.steps__item[data-state="done"] .steps__state {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.steps__item[data-state="failed"] .steps__label,
+.steps__item[data-state="failed"] .steps__state {
+  font-weight: 700;
+  color: var(--critical);
+}
+
 .dialog__error {
   min-height: 18px;
   font-size: var(--fs-micro);
@@ -1978,6 +2085,7 @@ a.bar__label:hover {
 .page-head__eyebrow,
 .page-head__title,
 .panel__title,
+.panel__subtitle,
 .kpi__label,
 .deflist__label,
 .table th,

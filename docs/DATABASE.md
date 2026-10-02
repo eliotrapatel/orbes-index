@@ -676,7 +676,7 @@ Risk findings for human review. The system never revokes automatically.
 | `type` | `text` | NOT NULL | — | `CHECK (type ~ '^[A-Z][A-Z0-9_]*$')`. Values written: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN` (rules) and `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED` (verification). |
 | `severity` | `text` | NOT NULL | — | `CHECK (severity IN ('LOW','MEDIUM','HIGH','CRITICAL'))` |
 | `risk_score` | `int` | NOT NULL | — | `CHECK (BETWEEN 0 AND 100)`. Keeps its maximum across repeats. |
-| `details` | `jsonb` | NOT NULL | `'{}'` | Finding details (latest occurrence). |
+| `details` | `jsonb` | NOT NULL | `'{}'` | Finding details (latest occurrence), with `scanEventId`, the scan that raised it (every finding, rule or service level, since 2026-10-02). |
 | `status` | `text` | NOT NULL | `'OPEN'` | `CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED','DISMISSED'))` |
 | `occurrences` | `int` | NOT NULL | `1` | `CHECK (occurrences >= 1)` |
 | `first_seen_at` | `timestamptz` | NOT NULL | `now()` | |
@@ -687,6 +687,7 @@ Risk findings for human review. The system never revokes automatically.
 
 - **Indexes:** primary key; `anomalies_single_open_per_type`: unique `(product_id, type) WHERE status IN ('OPEN','ACKNOWLEDGED')` (a repeat finding increments `occurrences` instead of adding a row); `anomalies_status_severity_idx`; `anomalies_product_id_idx`; `anomalies_code_id_idx`.
 - **Written by:** `AnomalyService.recordFinding` (called by `VerificationService`; upsert on the partial unique index). Findings without a product cannot be deduplicated by the index (NULLs never conflict), so they are deduplicated by type and `details.packedIdentity` under a dedicated advisory lock (§8.3). `AnomalyService.updateStatus` (`PATCH /api/admin/anomalies/:id`; audit `anomaly.update`). Recording a finding is not audited.
+- **Read by:** the console's triage (API §16.4, §16.8, §16.9): the list most severe first, the OPEN HIGH and CRITICAL count of its badge (`anomalies_status_severity_idx`), and a finding's scans in its window, read from `scan_events` by `(product_id, occurred_at)` (`scan_events_product_occurred_idx`), or by `packed_identity` within the window for a finding without a product. No schema change: A-04 needs no migration.
 - **Confidentiality:** risk scores, rule details and thresholds are internal and never appear in public responses.
 
 ### 5.20 `revocations`

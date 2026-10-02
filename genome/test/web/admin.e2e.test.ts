@@ -8,7 +8,9 @@
  * decode it with the core decoder after rasterising it with resvg, then
  * verify the decoded data through the public API → product page (spec §22)
  * → warranty activation and code re-issue → key rotation → audit chain
- * verification → sign out. Also: TOTP enrolment + two-step sign-in, and the
+ * verification → sign out. Also: anomaly triage (the badge and the tab title,
+ * the filters, a finding's scans, one dialog that marks the piece, revokes its
+ * code and resolves the finding), TOTP enrolment + two-step sign-in, and the
  * read-only AUDITOR console. No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
@@ -32,6 +34,7 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -129,6 +132,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   let modelId: string;
   const problems: string[] = [];
   let issuedProductId = '';
+  /** The pieces seedRegistry issued: the first one travelled from France to Japan in seconds. */
+  let seeded: IssueResult[] = [];
 
   async function watch(p: Page): Promise<void> {
     p.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
@@ -211,7 +216,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     modelId = model.id;
-    await seedRegistry(ctx, modelId);
+    seeded = await seedRegistry(ctx, modelId);
 
     app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
     await app.listen({ port, host: '127.0.0.1' });
@@ -463,6 +468,113 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
   }, STEP_TIMEOUT);
 
+  it('resolves an anomaly and revokes its code in one dialog; the badge and the tab title follow', async () => {
+    const piece = seeded[0];
+    const pid = piece.product.productId;
+    const { anomaly } = ctx.services;
+    const travel = (await anomaly.list({ productId: pid, type: 'IMPOSSIBLE_TRAVEL' }, { page: 1, pageSize: 10 })).items[0];
+    const jp = await ctx.db.selectFrom('scan_events').select('id').where('product_id', '=', piece.product.id).where('country', '=', 'JP').executeTakeFirstOrThrow();
+    expect(travel).toMatchObject({ status: 'OPEN', severity: 'HIGH', details: { scanEventId: jp.id } });
+
+    // The badge on Anomalies and the tab title count the OPEN HIGH and CRITICAL findings.
+    const before = (await anomaly.summary()).attention;
+    expect(before).toBeGreaterThanOrEqual(2);
+    const badge = page.locator('.side__link[data-route=anomalies] [data-testid=anomaly-badge]');
+    await go(page, `#/products/${pid}`, pid);
+    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before));
+    expect(await badge.isVisible()).toBe(true);
+    expect(await badge.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    await expect.poll(() => page.title()).toBe(`(${before}) ${pid} — ORBES Genome Console`);
+
+    // Triage from the product page: the list of this piece's findings, with every type the server records.
+    await page.click('#anomalies a.cbtn:has-text("Triage")');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}`);
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Anomalies');
+    expect(await page.title()).toBe(`(${before}) Anomalies — ORBES Genome Console`);
+    expect(await page.inputValue('input[name=productId]')).toBe(pid);
+    const ofPiece = (await anomaly.list({ productId: pid }, { page: 1, pageSize: 50 })).total;
+    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(ofPiece);
+    expect(await page.locator('select[name=type] option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['', ...ANOMALY_TYPES]);
+    expect(await page.locator('select[name=sort] option').allTextContents()).toEqual(['Severity, then risk', 'Risk', 'Last seen']);
+    await page.selectOption('select[name=type]', 'IMPOSSIBLE_TRAVEL');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL`);
+    await page.selectOption('select[name=sort]', 'risk');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL&sort=risk`);
+    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+
+    // The detail: the piece's scans in the finding's window, their countries, the devices, the scan that raised it.
+    await page.click('[data-testid=anomaly-details]');
+    await page.waitForSelector('#finding [data-testid=anomaly-timeline]');
+    expect(await page.locator('table.table tbody tr.is-current').count()).toBe(1);
+    const scans = page.locator('[data-testid=anomaly-timeline] .timeline__item');
+    expect(await scans.count()).toBe(3);
+    expect(await page.locator('.timeline__item--trigger').getAttribute('data-scan')).toBe(jp.id);
+    expect(await page.locator('.timeline__item--trigger .timeline__who').textContent()).toMatch(/^JP/);
+    const fact = (label: string) => page.locator('#finding .deflist__row', { has: page.locator('.deflist__label', { hasText: label }) }).locator('.deflist__value');
+    expect(await fact('Countries').textContent()).toBe('FR 1 · GB 1 · JP 1');
+    expect(await fact('Distinct devices').textContent()).toBe('2');
+    expect(await fact('Code').textContent()).toBe('Issue 1ACTIVE');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+
+    // The triggering scan opens in Verification events, marked, within the second it was made in.
+    await page.click('[data-testid=trigger-scan]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await page.waitForSelector('[data-testid=scans-window]');
+    await expect.poll(() => page.locator('table.table tbody tr.is-current').count()).toBe(1);
+    expect(await page.locator('table.table tbody tr.is-current').getAttribute('aria-current')).toBe('true');
+    await page.goBack();
+    await page.waitForSelector('#finding [data-testid=anomaly-timeline]');
+
+    // One dialog: mark the piece, revoke its code, resolve the finding. The code's revocation asks for its phrase.
+    await page.click('[data-testid=detail-triage]');
+    await page.waitForSelector('dialog.dialog');
+    const phrase = page.locator('[data-testid=dialog-phrase]');
+    expect(await phrase.isVisible()).toBe(false);
+    await page.selectOption('dialog select[name=status]', 'RESOLVED');
+    // The boxes are ticked through their labels, as a pointer does (the drawn mark covers the input).
+    await page.locator('dialog label.ccheck', { hasText: 'Mark the piece COUNTERFEIT FLAGGED' }).click();
+    await page.locator('dialog label.ccheck', { hasText: 'Revoke the code (issue 1)' }).click();
+    expect(await page.getByLabel('Mark the piece COUNTERFEIT FLAGGED').isChecked()).toBe(true);
+    expect(await page.getByLabel('Mark the piece STOLEN').isChecked()).toBe(false);
+    expect(await page.getByLabel('Revoke the code (issue 1)').isChecked()).toBe(true);
+    expect(await phrase.isVisible()).toBe(true);
+    expect(await page.locator('dialog.dialog .cfield__phrase').textContent()).toBe('REVOKE ISSUE 1');
+    expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await page.fill('dialog textarea[name=note]', 'Seized at a market stall in Lyon');
+    await page.fill('[data-testid=dialog-phrase]', 'REVOKE ISSUE 1');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+
+    // A step that fails stops the chain and the dialog says which steps were done.
+    const revokeUrl = `**/api/admin/codes/${piece.code.id}/revoke`;
+    await page.route(revokeUrl, (r) => r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'The server is busy.' } }) }));
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/^Revoke the code: The server is busy\. The steps done stay done/);
+    const report = page.locator('[data-testid=decision-steps] .steps__item');
+    expect(await report.evaluateAll((items) => items.map((i) => `${i.querySelector('.steps__label')?.textContent} ${(i as HTMLElement).dataset.state}`))).toEqual([
+      'Mark the piece COUNTERFEIT FLAGGED done',
+      'Revoke the code failed',
+      'Record the finding RESOLVED pending',
+    ]);
+    expect((await ctx.services.lifecycle.snapshot(piece.product.id)).status).toBe('COUNTERFEIT_FLAGGED');
+    expect((await anomaly.get(travel.id)).status).toBe('OPEN');
+
+    // Confirming again runs the rest only: the piece is not marked twice.
+    await page.unroute(revokeUrl);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Finding RESOLVED · piece COUNTERFEIT FLAGGED · code revoked.")');
+    const marks = (await ctx.services.lifecycle.history(pid)).filter((e) => e.to === 'COUNTERFEIT_FLAGGED');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].reason).toBe(`Anomaly ${travel.id} (IMPOSSIBLE TRAVEL): Seized at a market stall in Lyon`);
+    const code = await ctx.db.selectFrom('codes').select(['status', 'revocation_reason']).where('id', '=', piece.code.id).executeTakeFirstOrThrow();
+    expect(code).toEqual({ status: 'REVOKED', revocation_reason: `Anomaly ${travel.id} (IMPOSSIBLE TRAVEL): Seized at a market stall in Lyon` });
+    expect(await anomaly.get(travel.id)).toMatchObject({ status: 'RESOLVED', resolutionNote: 'Seized at a market stall in Lyon' });
+
+    // The finding has left the badge and the title.
+    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before - 1));
+    await expect.poll(() => page.title()).toBe(`(${before - 1}) Anomalies — ORBES Genome Console`);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
   it('rotates the signing key with a typed confirmation', async () => {
     await go(page, '#/keys', 'Signing keys');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
@@ -698,6 +810,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('#actions').count()).toBe(0);
     expect(await p.locator('#artifacts').count()).toBe(0);
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
+    // Anomalies: the badge and every finding's detail, no decision.
+    await go(p, '#/anomalies', 'Anomalies');
+    await expect.poll(() => p.locator('[data-testid=anomaly-badge] .side__badge-count').textContent()).toBe(String((await ctx.services.anomaly.summary()).attention));
+    expect(await p.locator('[data-testid=anomaly-details]').count()).toBeGreaterThan(0);
+    expect(await p.locator('[data-testid=triage]').count()).toBe(0);
+    await p.locator('[data-testid=anomaly-details]').first().click();
+    await p.waitForSelector('#finding');
+    expect(await p.locator('[data-testid=detail-triage]').count()).toBe(0);
     await go(p, '#/keys', 'Signing keys');
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
     await go(p, '#/audit', 'Audit log');

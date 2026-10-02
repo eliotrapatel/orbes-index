@@ -97,7 +97,11 @@ export interface Column<T> {
   kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions')[];
 }
 
-export function table<T>(columns: Column<T>[], rows: T[], opts: { empty?: string; onRow?: (row: T) => string | null; caption?: string } = {}): HTMLElement {
+export function table<T>(
+  columns: Column<T>[],
+  rows: T[],
+  opts: { empty?: string; onRow?: (row: T) => string | null; caption?: string; /** The row the page is about (`is-current`). */ current?: (row: T) => boolean } = {},
+): HTMLElement {
   if (rows.length === 0) {
     return h('div', { class: 'empty' }, h('span', { class: 'empty__mark', attrs: { 'aria-hidden': 'true' } }), h('p', { class: 'empty__text' }, opts.empty ?? 'Nothing to show.'));
   }
@@ -115,7 +119,12 @@ export function table<T>(columns: Column<T>[], rows: T[], opts: { empty?: string
         null,
         ...rows.map((r) => {
           const link = opts.onRow?.(r) ?? null;
-          const tr = h('tr', { class: link ? 'is-link' : undefined }, ...columns.map((c) => h('td', { class: cls(c) }, c.cell(r))));
+          const current = opts.current?.(r) === true;
+          const tr = h(
+            'tr',
+            { class: [link ? 'is-link' : null, current ? 'is-current' : null], attrs: { 'aria-current': current ? 'true' : null } },
+            ...columns.map((c) => h('td', { class: cls(c) }, c.cell(r))),
+          );
           if (link) {
             // Whole-row navigation for the mouse; the first link in the row stays the keyboard target.
             tr.addEventListener('click', (ev) => {

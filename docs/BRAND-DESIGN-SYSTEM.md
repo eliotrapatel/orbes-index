@@ -413,6 +413,8 @@ There are no icons in the pictographic sense. Every mark is built from the orbit
 | **Console loading** | 22 px hairline ring with a 5 px moon, one turn per 1.6 s | LOADING |
 | **Empty state** | 9 px `--metal` circle | "Nothing to show." |
 | **History timeline** | 7 px circles on a 1 px line; the latest filled | Status history |
+| **Scans timeline** | The same line, oldest first; every circle hollow but the scan that raised the finding, filled | An anomaly's scans in its window (console, `.timeline--scans`) |
+| **Console count** | An inverted count, white figures in Helvetica Neue bold (`--fs-nano`, tabular) on an ink ground, beside the link's word; `99+` beyond 99, absent at 0. The tab title repeats it as `(3) Dashboard — ORBES Genome Console` | OPEN HIGH and CRITICAL findings on ANOMALIES (`.side__badge`) |
 | **Separators** | `·` in `--metal` | Between tabs and options |
 | **Favicons** | Both the monogram (§3.9) in ink `#0A0A0A`, its ink box 26 of 32 units wide and centred, written by `genome/scripts/favicons.ts`. `/verify`: on a white disc (r 15), legible on a dark tab bar. `/admin`: on an ivory square with four corner moons (r 2), so the console's tab is told apart from the public app's | Browser tabs |
 

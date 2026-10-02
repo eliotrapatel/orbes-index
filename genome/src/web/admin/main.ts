@@ -6,14 +6,22 @@
  * `orbes_admin` cookie; this script only holds the profile and the CSRF
  * token returned by GET /api/admin/auth/me. When the server enforces MFA
  * and this admin has not enrolled, the only reachable screen is enrolment.
+ *
+ * While signed in, the Anomalies link carries a badge, the count of OPEN
+ * HIGH and CRITICAL findings (GET /api/admin/anomalies/summary), also
+ * prefixed to the tab title as `(3)`: asked on every navigation and every
+ * minute while the tab is visible (ui/attention.ts), only by a role that
+ * sees the link.
  */
 import { byId, focusFirst, h, mount } from '../shared/dom.js';
 import { monogramSvg } from '../shared/monogram.js';
 import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
+import { badgeText, consoleTitle } from './model/anomalies.js';
 import { can, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
+import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
 import { notifyError } from './ui/toast.js';
 import { anomaliesView } from './views/anomalies.js';
@@ -84,11 +92,39 @@ const app = byId('app');
 const api = new AdminApi();
 let session: AdminSession | null = null;
 let renderSeq = 0;
-let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement } | null = null;
+let shell: { root: HTMLElement; view: HTMLElement; nav: HTMLElement; crumb: HTMLElement; badge: HTMLElement } | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
+let pageTitle = 'Orbes';
+/** OPEN HIGH + CRITICAL findings, as last read (0 when signed out). */
+let attention = 0;
+let attentionPoll: AttentionPoll | null = null;
 
 function setTitle(t: string): void {
-  document.title = `${t} — ORBES Genome Console`;
+  pageTitle = t;
+  document.title = consoleTitle(pageTitle, attention);
+}
+
+/** Show the count on the Anomalies link and in the tab title. */
+function showAttention(count: number): void {
+  attention = count;
+  const text = badgeText(count);
+  if (shell) {
+    shell.badge.hidden = text === '';
+    shell.badge.querySelector('.side__badge-count')!.textContent = text;
+  }
+  document.title = consoleTitle(pageTitle, attention);
+}
+
+/** Start the badge's refresh once signed in (and past MFA), or ask again after a navigation. */
+function watchAttention(): void {
+  if (attentionPoll) void attentionPoll.refresh();
+  else attentionPoll = startAttentionPoll({ load: async () => (await api.anomalySummary()).attention, apply: showAttention });
+}
+
+function forgetAttention(): void {
+  attentionPoll?.stop();
+  attentionPoll = null;
+  attention = 0;
 }
 
 /** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
@@ -108,6 +144,13 @@ function enrolled(next: string): () => void {
 // ── Shell ──────────────────────────────────────────────────────────────────
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
+  // The count reads in Helvetica Neue inside the display-face link; screen readers hear what it counts.
+  const badge = h(
+    'span',
+    { class: 'side__badge', attrs: { hidden: true, 'data-testid': 'anomaly-badge' } },
+    h('span', { class: 'side__badge-count' }),
+    h('span', { class: 'visually-hidden' }, ' open HIGH or CRITICAL'),
+  );
   const nav = h(
     'nav',
     { class: 'side__nav', attrs: { 'aria-label': 'Console' } },
@@ -118,7 +161,11 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         'div',
         { class: 'side__group' },
         h('p', { class: 'side__group-title' }, g.group),
-        h('ul', { class: 'side__list' }, ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label)))),
+        h(
+          'ul',
+          { class: 'side__list' },
+          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, i.route === 'anomalies' ? badge : null))),
+        ),
       );
     }),
   );
@@ -157,13 +204,14 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { root, view, nav, crumb };
+  return { root, view, nav, crumb, badge };
 }
 
 function ensureShell(s: AdminSession): NonNullable<typeof shell> {
   if (!shell || !app.contains(shell.root)) {
     shell = buildShell(s);
     mount(app, shell.root);
+    showAttention(attention);
   }
   return shell;
 }
@@ -183,6 +231,7 @@ function markNav(active: RouteName | null): void {
 function showLogin(notice?: string): void {
   renderSeq++;
   shell = null;
+  forgetAttention();
   resetProductViewState();
   resetCodesViewState();
   setTitle('Sign in');
@@ -268,6 +317,8 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   const sh = ensureShell(s);
   const seq = ++renderSeq;
   const scrollY = opts.keepScroll ? window.scrollY : 0;
+  // Only a role that sees the Anomalies link asks for its count.
+  if (sh.nav.contains(sh.badge)) watchAttention();
 
   if (r.name === 'security') {
     markNav(null);

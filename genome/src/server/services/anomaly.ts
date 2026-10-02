@@ -3,6 +3,11 @@
  * pure rules of anomaly-rules.ts and keeps the `anomalies` table (one OPEN or
  * ACKNOWLEDGED row per product and type; repeats increment `occurrences`).
  *
+ * For the console's triage it lists findings (filters, most severe first),
+ * counts the OPEN HIGH and CRITICAL ones (the console's badge) and reads the
+ * scans around one finding: the timeline, its countries, its distinct
+ * devices and the scan that last raised it.
+ *
  * Everything here is internal: risk scores, thresholds and finding details
  * are for the admin console only and never part of a public response.
  */
@@ -19,20 +24,44 @@ import {
   type CodeStatus,
   type JsonObject,
   type ProductStatus,
+  type ScanEventType,
 } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { makePage, noopLogger, pageOffset, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 import type { AnomalyConfig } from '../config.js';
 import type { AuditService } from './audit.js';
-import { evaluateRules, horizonMs, type ScanRecord, type ScoredFinding } from './anomaly-rules.js';
+import { ANOMALY_TYPES, evaluateRules, horizonMs, type ScanRecord, type ScoredFinding } from './anomaly-rules.js';
 
 export type { AnomalyConfig } from '../config.js';
-export { ANOMALY_WEIGHTS, type AnomalyType } from './anomaly-rules.js';
+export { ANOMALY_TYPES, ANOMALY_WEIGHTS, type AnomalyType } from './anomaly-rules.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TYPE_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const MAX_NOTE = 2000;
 const DEFAULT_HISTORY_LIMIT = 1000;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+/** Orders of the admin list: most severe first (the default, then the highest risk), highest risk first, or last seen first. */
+export const ANOMALY_SORTS = ['severity', 'risk', 'lastSeen'] as const;
+export type AnomalySort = (typeof ANOMALY_SORTS)[number];
+
+/** The severities the console's badge counts among OPEN findings. */
+export const ATTENTION_SEVERITIES: readonly AnomalySeverity[] = Object.freeze(['HIGH', 'CRITICAL']);
+
+/** A finding's scans are read from this long before its first occurrence (or its rule's window, when longer)… */
+export const CONTEXT_LEAD_MS = DAY_MS;
+/** …to this long after its last one. */
+export const CONTEXT_TAIL_MS = HOUR_MS;
+/** At most this many scans of the window are returned: the latest ones, oldest first. */
+export const CONTEXT_MAX_SCANS = 100;
+
+/** Rank of a severity (LOW 0 … CRITICAL 3) for ordering; built from constants only. */
+const SEVERITY_RANK = sql<number>`CASE a.severity ${sql.join(
+  ANOMALY_SEVERITIES.map((s, i) => sql`WHEN ${sql.lit(s)} THEN ${sql.lit(i)}`),
+  sql` `,
+)} ELSE -1 END`;
 /**
  * Serialises recording of product-less findings (VALID_SIGNATURE_UNREGISTERED):
  * the partial unique index cannot deduplicate NULL product ids. Defined with
@@ -105,6 +134,63 @@ export interface AnomalyFilters {
   type?: string;
   /** products.id (uuid) or canonical product id. */
   productId?: string;
+}
+
+/** GET /api/admin/anomalies/summary: what waits for triage. */
+export interface AnomalySummary {
+  /** OPEN findings (not yet acknowledged) by severity. */
+  open: Record<AnomalySeverity, number>;
+  /** OPEN findings of severity HIGH or CRITICAL: the console's badge. */
+  attention: number;
+  /** Every type the service can record (the list's type filter). */
+  types: string[];
+}
+
+/** One scan around a finding, as the triage panel shows it. */
+export interface AnomalyContextScan {
+  id: string;
+  occurredAt: Date;
+  eventType: ScanEventType;
+  state: string;
+  country: string | null;
+  region: string | null;
+  deviceHash: string | null;
+  userAgentFamily: string | null;
+  /** The verification's risk score (null when no authentication record exists). */
+  riskScore: number | null;
+  /** The scan named by the finding's `details.scanEventId`: the one that last raised it. */
+  trigger: boolean;
+}
+
+/** GET /api/admin/anomalies/:id/context (the route adds the product's lifecycle). */
+export interface AnomalyContext {
+  anomaly: AnomalyRecord;
+  /** The finding's window (contextWindow): the scans below were made in it. */
+  window: { from: Date; to: Date };
+  /** The scans of the window, ADMIN_TEST excluded as the rules exclude it: the latest CONTEXT_MAX_SCANS, oldest first. */
+  scans: { total: number; truncated: boolean; items: AnomalyContextScan[] };
+  /** Scans of the window per country (null: unknown), most first. */
+  countries: { country: string | null; scans: number }[];
+  /** Distinct device pseudonyms among the window's scans. */
+  devices: number;
+  /** The scan named by `details.scanEventId`, wherever it falls; null when there is none or it was purged. */
+  trigger: AnomalyContextScan | null;
+  /** The code the finding names. */
+  code: { id: string; issue: number; status: CodeStatus } | null;
+}
+
+/**
+ * The window of a finding's scans: from CONTEXT_LEAD_MS before its first occurrence (or its rule's
+ * window, `details.windowMin` / `details.windowDays`, when longer) to CONTEXT_TAIL_MS after its last.
+ */
+export function contextWindow(a: Pick<AnomalyRecord, 'firstSeenAt' | 'lastSeenAt' | 'details'>): { from: Date; to: Date } {
+  const d = a.details ?? {};
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const rule = positive(d.windowMin) ? d.windowMin * MINUTE_MS : positive(d.windowDays) ? d.windowDays * DAY_MS : 0;
+  return {
+    from: new Date(a.firstSeenAt.getTime() - Math.max(CONTEXT_LEAD_MS, rule)),
+    to: new Date(a.lastSeenAt.getTime() + CONTEXT_TAIL_MS),
+  };
 }
 
 export interface AnomalyServiceDeps {
@@ -273,10 +359,16 @@ export class AnomalyService {
 
   // ── Admin ────────────────────────────────────────────────────────────────
 
-  async list(filters: AnomalyFilters = {}, page: PageRequest): Promise<Page<AnomalyRecord>> {
+  /**
+   * Findings matching the filters. `sort`: `severity` (default: CRITICAL, HIGH, MEDIUM, LOW, then the
+   * highest risk), `risk` (highest first, then the most severe) or `lastSeen` (most recent first); ties
+   * end on the most recently seen, then the id, so pages never overlap.
+   */
+  async list(filters: AnomalyFilters = {}, page: PageRequest, sort: AnomalySort = 'severity'): Promise<Page<AnomalyRecord>> {
     if (filters.status !== undefined && !ANOMALY_STATUSES.includes(filters.status)) throw validationError('Unknown anomaly status.');
     if (filters.severity !== undefined && !ANOMALY_SEVERITIES.includes(filters.severity)) throw validationError('Unknown anomaly severity.');
     if (filters.type !== undefined && !TYPE_RE.test(filters.type)) throw validationError('Unknown anomaly type.');
+    if (!ANOMALY_SORTS.includes(sort)) throw validationError('Unknown anomaly order.');
     let q = this.db.selectFrom('anomalies as a').leftJoin('products as p', 'p.id', 'a.product_id');
     if (filters.status) q = q.where('a.status', '=', filters.status);
     if (filters.severity) q = q.where('a.severity', '=', filters.severity);
@@ -286,15 +378,98 @@ export class AnomalyService {
       q = UUID_RE.test(ref) ? q.where('a.product_id', '=', ref) : q.where('p.product_id', '=', ref);
     }
     const [{ total }] = await q.select((eb) => eb.fn.countAll<number>().as('total')).execute();
-    const rows = await q
-      .selectAll('a')
-      .select('p.product_id as canonical_id')
+    let rows = q.selectAll('a').select('p.product_id as canonical_id');
+    if (sort === 'severity') rows = rows.orderBy(SEVERITY_RANK, 'desc').orderBy('a.risk_score', 'desc');
+    if (sort === 'risk') rows = rows.orderBy('a.risk_score', 'desc').orderBy(SEVERITY_RANK, 'desc');
+    const found = await rows
       .orderBy('a.last_seen_at', 'desc')
       .orderBy('a.id', 'asc')
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
-    return makePage(rows.map((r) => toRecord(r, r.canonical_id)), Number(total), page);
+    return makePage(found.map((r) => toRecord(r, r.canonical_id)), Number(total), page);
+  }
+
+  /** OPEN findings by severity, the badge count (OPEN HIGH + CRITICAL) and the known types. */
+  async summary(): Promise<AnomalySummary> {
+    const rows = await this.db
+      .selectFrom('anomalies')
+      .select((eb) => ['severity', eb.fn.countAll<number>().as('n')])
+      .where('status', '=', 'OPEN')
+      .groupBy('severity')
+      .execute();
+    const open = Object.fromEntries(ANOMALY_SEVERITIES.map((s) => [s, 0])) as Record<AnomalySeverity, number>;
+    for (const r of rows) open[r.severity] = Number(r.n);
+    return { open, attention: ATTENTION_SEVERITIES.reduce((n, s) => n + open[s], 0), types: [...ANOMALY_TYPES] };
+  }
+
+  /**
+   * The scans around a finding: its product's scans (or, without a product, those of the scanned
+   * identity) in its window, their countries and distinct devices, the scan that last raised it
+   * (`details.scanEventId`) and the code it names. ADMIN_TEST scans are left out, as the rules leave them.
+   */
+  async context(id: string): Promise<AnomalyContext> {
+    const anomaly = await this.get(id);
+    const window = contextWindow(anomaly);
+    const triggerId = typeof anomaly.details.scanEventId === 'string' && UUID_RE.test(anomaly.details.scanEventId) ? anomaly.details.scanEventId.toLowerCase() : null;
+    const packed = anomaly.details.packedIdentity;
+
+    const scope = () => {
+      const q = this.db.selectFrom('scan_events as s').where('s.event_type', '!=', 'ADMIN_TEST');
+      if (anomaly.productUuid) return q.where('s.product_id', '=', anomaly.productUuid);
+      if (typeof packed === 'number' && Number.isSafeInteger(packed)) return q.where('s.packed_identity', '=', packed);
+      return null;
+    };
+    const inWindow = () => scope()?.where('s.occurred_at', '>=', window.from).where('s.occurred_at', '<=', window.to) ?? null;
+    const columns = (q: NonNullable<ReturnType<typeof scope>>) =>
+      q
+        .leftJoin('authentication_events as ae', 'ae.scan_event_id', 's.id')
+        .select(['s.id', 's.occurred_at', 's.event_type', 's.result_state', 's.country', 's.region', 's.device_hash', 's.user_agent_family', 'ae.risk_score']);
+    type Row = Awaited<ReturnType<ReturnType<typeof columns>['execute']>>[number];
+    const toScan = (r: Row): AnomalyContextScan => ({
+      id: r.id,
+      occurredAt: r.occurred_at,
+      eventType: r.event_type,
+      state: r.result_state,
+      country: r.country?.trim() || null,
+      region: r.region,
+      deviceHash: r.device_hash,
+      userAgentFamily: r.user_agent_family,
+      riskScore: r.risk_score ?? null,
+      trigger: r.id === triggerId,
+    });
+
+    let scans: AnomalyContext['scans'] = { total: 0, truncated: false, items: [] };
+    let countries: AnomalyContext['countries'] = [];
+    let devices = 0;
+    const q = inWindow();
+    if (q) {
+      const totals = await q
+        .select((eb) => [eb.fn.countAll<number>().as('n'), eb.fn.count<number>('s.device_hash').distinct().as('devices')])
+        .executeTakeFirstOrThrow();
+      const latest = await columns(q).orderBy('s.occurred_at', 'desc').orderBy('s.id', 'desc').limit(CONTEXT_MAX_SCANS).execute();
+      const byCountry = await q
+        .select((eb) => ['s.country', eb.fn.countAll<number>().as('n')])
+        .groupBy('s.country')
+        .orderBy('n', 'desc')
+        .orderBy('s.country', 'asc')
+        .execute();
+      const total = Number(totals.n);
+      scans = { total, truncated: total > latest.length, items: latest.reverse().map(toScan) };
+      countries = byCountry.map((r) => ({ country: r.country?.trim() || null, scans: Number(r.n) }));
+      devices = Number(totals.devices);
+    }
+
+    let trigger: AnomalyContextScan | null = scans.items.find((s) => s.trigger) ?? null;
+    if (!trigger && triggerId) {
+      const row = await columns(this.db.selectFrom('scan_events as s')).where('s.id', '=', triggerId).executeTakeFirst();
+      trigger = row ? toScan(row) : null;
+    }
+
+    const code = anomaly.codeId
+      ? ((await this.db.selectFrom('codes').select(['id', 'issue', 'status']).where('id', '=', anomaly.codeId).executeTakeFirst()) ?? null)
+      : null;
+    return { anomaly, window, scans, countries, devices, trigger, code };
   }
 
   async get(id: string): Promise<AnomalyRecord> {

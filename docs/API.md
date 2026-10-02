@@ -381,6 +381,8 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/owners` | AUDITOR | — | admin | 16.2 |
 | GET | `/api/admin/warranties` | AUDITOR | — | admin | 16.3 |
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
+| GET | `/api/admin/anomalies/summary` | AUDITOR | — | admin | 16.8 |
+| GET | `/api/admin/anomalies/:id/context` | AUDITOR | — | admin | 16.9 |
 | PATCH | `/api/admin/anomalies/:id` | OPERATOR | yes | admin | 16.5 |
 | GET | `/api/admin/revocations` | AUDITOR | — | admin | 16.6 |
 | POST | `/api/admin/revocations` | **ADMIN** | yes | admin | 16.7 |
@@ -393,7 +395,7 @@ Auth: **—** none; **Account** `orbes_session`; **AUDITOR / OPERATOR / ADMIN** 
 | GET | `/api/admin/admins` | **ADMIN** | — | admin | 17.7 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.8 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId` and `sort` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, `/api/admin/admins` and `/api/admin/admins/:id/totp/reset`. There is no HTTP endpoint for creating admin users (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further admins with `scripts/admin.ts create`, see [DEPLOYMENT](DEPLOYMENT.md)), changing passwords, deactivating categories or cancelling service records; those operations exist only in the services and command-line tools.
 
 ---
 
@@ -1370,7 +1372,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
 
 - `codes[].verification` re-verifies each stored code live (payload fields against the row, payload hash, Ed25519 signature, key trust). It is `{ "valid": true, "keyStatus" }` or `{ "valid": false, "reason", "keyStatus" }` with `reason` one of `UNKNOWN_KEY`, `PAYLOAD_INVALID`, `PAYLOAD_MISMATCH`, `PAYLOAD_HASH_MISMATCH`, `SIGNATURE_INVALID`, `KEY_REVOKED`. A row tampered with in the database shows up here as invalid. Read views never include `data`.
 - `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email and display name; `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
-- `anomalies` lists up to 100 anomalies of the product (shape in §16.4); `services` the service records (§14.8).
+- `anomalies` lists up to 100 anomalies of the product, most severe first (shape and order of §16.4); `services` the service records (§14.8).
 - `lifecycle.allowed` lists the statuses `transitions` accepts now; `returnTo` is where a return, recovery or reinstatement would lead; `canReinstate` is true for a REVOKED product whose previous status is known.
 
 Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`.
@@ -1710,6 +1712,9 @@ AUDITOR. Paginated scan events with their authentication record, newest first.
 |---|---|
 | `productId` | Canonical id or uuid. An unknown product gives an empty page. |
 | `state` | One of the 9 verification states. |
+| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone. The console opens an anomaly's window (§16.9) and its triggering scan (the second it was made in, the scan marked) this way. |
+
+An empty value (`?state=&from=`) means the filter is not given, as a filter form sends it.
 
 Item:
 
@@ -1754,7 +1759,17 @@ AUDITOR. Paginated warranty records (shape of §14.6), newest first. Query `stat
 
 ### 16.4 `GET /api/admin/anomalies`
 
-AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `DISMISSED`) and `severity` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+AUDITOR. Paginated, the most severe first.
+
+| Query | Rules |
+|---|---|
+| `status` | `OPEN`, `ACKNOWLEDGED`, `RESOLVED` or `DISMISSED`. |
+| `severity` | `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. |
+| `type` | One of the types below (extension). The list is `ANOMALY_TYPES`, derived from the weights table of `anomaly-rules.ts`: a type added there is accepted here, listed by §16.8 and offered by the console's Type filter without further change. Anything else, lower case included, is `400 VALIDATION_FAILED`. |
+| `productId` | Canonical id (any case) or uuid (extension). An unknown product gives an empty page. |
+| `sort` | `severity` (default): CRITICAL, HIGH, MEDIUM, LOW, then the highest `riskScore` within a severity. `risk`: the highest `riskScore` first, then the most severe. `lastSeen`: the most recently seen first (the order before 2026-10-02). Ties end on the most recently seen, then the id, so pages never overlap (extension). |
+
+An empty value (`?type=&sort=`) means the filter is not given. The console keeps every filter and the order in the view's URL (`#/anomalies?productId=O26-J-00003&type=IMPOSSIBLE_TRAVEL&sort=risk`); a product page's TRIAGE link opens the list filtered by that product.
 
 ```json
 {
@@ -1777,13 +1792,15 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
 }
 ```
 
-Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `details.scanEventId` names the scan that last raised the finding, for the rule findings and, since 2026-10-02, for the three service findings too (a service finding recorded before has none until it occurs again: its detail then says the triggering scan was not recorded). `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
 OPERATOR. Triage. Body `{ "status": AnomalyStatus, "note"?: string | null (≤ 2000) }`. RESOLVED and DISMISSED record who and when; OPEN or ACKNOWLEDGED clears them.
 
 **200** — the updated anomaly. Errors: `400 VALIDATION_FAILED`, `404 ANOMALY_NOT_FOUND`, `409 ANOMALY_ALREADY_OPEN`.
+
+**The console's decision dialog** can act on the piece in the same gesture. For a finding that can be resolved it offers, as tick boxes, the marks `COUNTERFEIT_FLAGGED` and `STOLEN` its product's lifecycle allows (§16.9 `product.lifecycle.allowed`; OPERATOR, one mark at a time) and the revocation of its code while ACTIVE (ADMIN, with the typed phrase `REVOKE ISSUE <n>` of the product page). Acting on the piece resolves the finding. The dialog calls the existing routes, in this order, each audited by its own service: the transition (§14.4), the code's revocation (§15.4), then this route with `RESOLVED` and the note. The reason of the first two cites the finding, `Anomaly <id> (<TYPE>): <note>` (cut to the route's limit: 1 000 and 500 characters), so the status history, the revocation register and the audit log lead back to it. A step that fails stops the chain: the dialog lists each step as done, failed or not done, and confirming again runs only what was not done. Nothing is ever chained without the admin's tick.
 
 ### 16.6 `GET /api/admin/revocations`
 
@@ -1811,6 +1828,53 @@ AUDITOR. Paginated revocation register, newest first:
 - KEY → key revocation without a compromise time (codes recorded before now stay trusted). Use §17.4 to set a compromise time.
 
 **201** — the new revocation row (shape of §16.6). Errors: `400 VALIDATION_FAILED`, plus the errors of the dispatched operation (`404 CODE_NOT_FOUND`, `409 CODE_ALREADY_REVOKED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSITION_NOT_ALLOWED`, `404 KEY_NOT_FOUND`, `409 KEY_ALREADY_REVOKED`, …).
+
+### 16.8 `GET /api/admin/anomalies/summary` (extension of the contract)
+
+AUDITOR. What waits for triage:
+
+```json
+{
+  "open": { "LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 1 },
+  "attention": 3,
+  "types": ["IMPOSSIBLE_TRAVEL", "SCAN_VELOCITY", "DEVICE_DIVERSITY", "GEO_DISPERSION", "LOST_STOLEN_SCAN",
+            "POST_REVOCATION_SCAN", "GENOME_MISMATCH", "CODE_MISMATCH", "VALID_SIGNATURE_UNREGISTERED"]
+}
+```
+
+`open` counts the **OPEN** findings by severity (an ACKNOWLEDGED finding has been seen; the dashboard's `anomalies.open`, §13.1, counts both). `attention` is `open.HIGH + open.CRITICAL`: the console shows it as a badge on the ANOMALIES link (`99+` beyond 99, nothing at 0) and prefixes it to the tab title, `(3) Dashboard — ORBES Genome Console`. The console asks on every navigation and every 60 s while its tab is visible; a hidden tab stops asking and asks again when it is shown. `types` is every type the server records (§16.4), for the list's Type filter.
+
+### 16.9 `GET /api/admin/anomalies/:id/context` (extension of the contract)
+
+AUDITOR. The scans around one finding, for the console's detail panel (`#/anomalies?id=<id>`):
+
+```json
+{
+  "anomaly": { "id": "1dd3573b-…", "type": "IMPOSSIBLE_TRAVEL", "severity": "HIGH", "status": "OPEN", "…": "shape of §16.4" },
+  "window": { "from": "2026-09-30T08:14:21.929Z", "to": "2026-10-01T09:15:21.929Z" },
+  "scans": {
+    "total": 3,
+    "truncated": false,
+    "items": [
+      { "id": "b9f87d9b-…", "occurredAt": "2026-10-01T08:15:21.929Z", "eventType": "VERIFY", "state": "SUSPICIOUS_ACTIVITY",
+        "country": "JP", "region": null, "deviceHash": "ZoczF36E…", "userAgentFamily": "Mobile Safari", "riskScore": 60, "trigger": true }
+    ]
+  },
+  "countries": [{ "country": "FR", "scans": 2 }, { "country": "JP", "scans": 1 }],
+  "devices": 2,
+  "trigger": { "id": "b9f87d9b-…", "…": "the scan named by details.scanEventId" },
+  "code": { "id": "c7dda4b5-…", "issue": 1, "status": "ACTIVE" },
+  "product": { "productId": "O26-J-00003", "lifecycle": { "status": "OWNED", "allowed": ["TRANSFERRED", "…", "COUNTERFEIT_FLAGGED", "LOST", "STOLEN", "REVOKED"], "returnTo": null, "canReinstate": false } }
+}
+```
+
+- `window` runs from 24 h before the finding's first occurrence (or its rule's window, `details.windowMin` / `details.windowDays`, when longer) to 1 h after its last.
+- `scans` are the product's scans in the window (for a finding without a product, `VALID_SIGNATURE_UNREGISTERED`, those of the scanned identity, `details.packedIdentity`), ADMIN_TEST scans left out as the rules leave them out: `total` counts them all, `items` holds the latest 100, oldest first (`truncated` when there are more). `riskScore` is the verification's (null without an authentication record); `trigger` marks the scan named by `details.scanEventId`.
+- `countries` counts the window's scans per country (null: unknown), most first; `devices` counts the distinct device pseudonyms. Only pseudonyms leave the database: never an IP pseudonym, an account or a coordinate.
+- `trigger` is the scan named by `details.scanEventId` wherever it falls, or null (none recorded, or purged by retention).
+- `code` is the code the finding names (null for none); `product` its canonical id and lifecycle snapshot (§14.3), null without a product. The console offers only the marks `lifecycle.allowed` holds and revokes only an ACTIVE code (§16.5).
+
+Errors: `400 VALIDATION_FAILED` (an id that is not a uuid), `404 ANOMALY_NOT_FOUND`.
 
 ---
 

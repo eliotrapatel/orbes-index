@@ -112,6 +112,22 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
       const r = await op.get(url);
       expect(r.statusCode, `${url} ${r.body.slice(0, 200)}`).toBe(200);
     }
+    // ── Triage on pg: a finding's type and product filters and the orders, the badge, its scans and the scans window ──
+    const wrong = p.genome.glyphs.map((g: number) => (g + 1) % 16);
+    const mismatch = safeJson(await client().post('/api/v1/verify', { code: p.code.data, genome: { glyphs: wrong } })) as any;
+    const findings = safeJson(await op.get(`/api/admin/anomalies?productId=${p.product.productId}&type=GENOME_MISMATCH&sort=severity`)) as any;
+    expect(findings.items).toHaveLength(1);
+    expect(findings.items[0].details.scanEventId).toBe(mismatch.scanId);
+    for (const sort of ['risk', 'lastSeen']) expect((await op.get(`/api/admin/anomalies?sort=${sort}`)).statusCode).toBe(200);
+    expect((safeJson(await op.get('/api/admin/anomalies/summary')) as any).attention).toBeGreaterThanOrEqual(1);
+    const context = safeJson(await op.get(`/api/admin/anomalies/${findings.items[0].id}/context`)) as any;
+    expect(context.trigger.id).toBe(mismatch.scanId);
+    expect(context.scans.total).toBeGreaterThanOrEqual(27);
+    expect(context.devices).toBeGreaterThan(1);
+    expect(context.product.lifecycle.allowed).toContain('STOLEN');
+    const windowed = safeJson(await op.get(`/api/admin/scans?productId=${p.product.productId}&from=${context.window.from}&to=${context.window.to}`)) as any;
+    expect(windowed.total).toBe(context.scans.total);
+
     // ── Printing a production batch on pg: filters, ids, manifest ──
     const batched = safeJson(await op.post('/api/admin/products', { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', productionBatch: 'B-PG-1', variant: 'Size 52' })) as any;
     const day = batched.code.issuedAt;

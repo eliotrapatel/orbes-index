@@ -217,6 +217,8 @@ The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) 
 - **Risk score:** `100 · (1 − Π(1 − wᵢ·decayᵢ/100))`, rounded. `decay` is linear over `decayDays`, from the time of each rule's most recent violation. A same-place burst (`SCAN_VELOCITY` ⊕ `DEVICE_DIVERSITY`) scores 62 ≥ 60.
 - **Owner adjustment:** scans of the product's current owner — the authenticated owner's scan being verified, and every past scan whose `account_id` is the current owner's — are left out of `DEVICE_DIVERSITY` and `SCAN_VELOCITY`, so the owner never triggers them; they still count for travel and dispersion.
 - **New findings only:** every finding contributes its decayed weight to the score, but only findings whose violation involves the scan being verified are recorded (upserted into `anomalies`); an old burst is not re-counted as a new occurrence on every later scan.
+- **The raising scan:** every recorded finding, rule or service level, carries `details.scanEventId`, the scan that last raised it.
+- **Triage (console):** `list(filters, page, sort)` filters by status, severity, type and product and orders the most severe first by default; `summary()` counts OPEN findings by severity; `context(id)` reads the scans around one finding (API §16.4, §16.8, §16.9). The service never acts on a piece: marking it or revoking its code goes through their own routes, on a human's decision.
 - **Defaults:** threshold 60, 900 km/h, 500 km, 60 min / 20 scans / 5 devices, 7 days / 12 devices, 7 days / 3 countries, 30-day decay.
 - **Country centroids:** `src/server/geo/centroids.ts` holds approximate centroids for ISO 3166-1 alpha-2 codes.
 
@@ -372,10 +374,12 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/genomes?page` | — |
 | GET | `/api/admin/codes?productionBatch&modelId&status&issuedFrom&issuedTo&page` | Filters by the product's batch and model, the code's status and its UTC issue days (extension). |
 | GET | `/api/admin/codes/ids?productionBatch&modelId&status&issuedFrom&issuedTo` | `{ ids, total, truncated }`: the printable (ACTIVE) codes of the filters, at most 1 000, for a print sheet (extension). |
-| GET | `/api/admin/scans?productId&state&page` | Scan and authentication events. |
+| GET | `/api/admin/scans?productId&state&from&to&page` | Scan and authentication events (`from` / `to`: the window, both ends included, an instant with its zone or a UTC day; extension). |
 | GET | `/api/admin/owners?page` | Accounts with product counts. |
 | GET | `/api/admin/warranties?status&page` | — |
-| GET | `/api/admin/anomalies?status&severity&page` | — |
+| GET | `/api/admin/anomalies?status&severity&type&productId&sort&page` | Most severe first, then the highest risk (`sort=severity`, default); `sort=risk` or `lastSeen`. `type` is one of `ANOMALY_TYPES` (the keys of `ANOMALY_WEIGHTS`), `productId` a canonical id or uuid (`type`, `productId`, `sort`: extension). |
+| GET | `/api/admin/anomalies/summary` | `{ open (OPEN by severity), attention (OPEN HIGH + CRITICAL: the console's badge), types }` (extension). |
+| GET | `/api/admin/anomalies/:id/context` | The finding's scans in its window (latest 100, oldest first, with the total), countries, distinct devices, the scan of `details.scanEventId`, its code and its product's lifecycle (extension). |
 | PATCH | `/api/admin/anomalies/:id` | Body `{ status, note }`. |
 | GET | `/api/admin/revocations` | — |
 | POST | `/api/admin/revocations` | Body `{ targetType, targetId, reason }`. Dispatches to the code, product or key service. |

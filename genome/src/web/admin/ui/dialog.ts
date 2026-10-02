@@ -3,19 +3,22 @@
  * focus trapping, Escape and the backdrop come from the browser).
  *
  * Destructive actions pass a `phrase` the admin must type (e.g.
- * `REVOKE KEY 3`): the confirm button stays disabled until it matches. With
- * `submit`, the request runs while the dialog is open and a refusal from
- * the server is shown inside it, so nothing typed is lost.
+ * `REVOKE KEY 3`): the confirm button stays disabled until it matches. The
+ * phrase may depend on the fields (a box that adds an irreversible action):
+ * it then shows only while the fields ask for it. With `submit`, the request
+ * runs while the dialog is open and a refusal from the server is shown inside
+ * it, so nothing typed is lost.
  */
 import { h, type Child } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
 import { phraseMatches } from '../model/registry.js';
-import { button, field, input, select, textarea } from './components.js';
+import { button, checkbox, field, input, select, textarea } from './components.js';
 
 export interface DialogField {
   name: string;
   label: string;
-  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime';
+  /** `checkbox`: its value is `'true'` when ticked, `''` otherwise (`value: 'true'` ticks it at first). */
+  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox';
   options?: { value: string; label: string }[];
   required?: boolean;
   hint?: string;
@@ -32,8 +35,8 @@ export interface DialogOptions {
   confirmLabel: string;
   cancelLabel?: string;
   danger?: boolean;
-  /** Typed confirmation phrase for irreversible actions. */
-  phrase?: string;
+  /** Typed confirmation phrase for irreversible actions; a function decides from the fields (null: none needed). */
+  phrase?: string | ((values: DialogValues) => string | null);
   fields?: DialogField[];
   /** Client-side check; return a message to block submission. */
   validate?: (values: DialogValues) => string | null;
@@ -45,9 +48,15 @@ function readValues(form: HTMLFormElement): DialogValues {
   const out: DialogValues = {};
   for (const el of Array.from(form.elements)) {
     const c = el as HTMLInputElement;
-    if (c.name && c.name !== '__phrase') out[c.name] = c.value;
+    if (c.name && c.name !== '__phrase') out[c.name] = c.type === 'checkbox' ? (c.checked ? 'true' : '') : c.value;
   }
   return out;
+}
+
+/** A tick box with its hint, laid out as a wide field. */
+function checkboxField(f: DialogField): HTMLElement {
+  const box = checkbox(f.name, f.label, f.value === 'true');
+  return h('div', { class: ['cfield', 'cfield--wide', 'cfield--check'], data: { field: f.name } }, box, f.hint ? h('span', { class: 'cfield__hint' }, f.hint) : null);
 }
 
 function controlFor(f: DialogField): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement {
@@ -77,22 +86,33 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     const cancel = button(o.cancelLabel ?? 'Cancel', { kind: 'ghost', testId: 'dialog-cancel' });
 
     const controls = (o.fields ?? []).map((f) => {
+      if (f.kind === 'checkbox') return checkboxField(f);
       const c = controlFor(f);
       if (f.required) c.required = true;
       return field(f.label, c, { hint: f.hint, required: f.required, wide: true });
     });
 
+    // The phrase the fields ask for now (null: none).
+    let phraseOf: (values: DialogValues) => string | null = () => null;
     let phraseInput: HTMLInputElement | null = null;
+    let syncPhrase = () => {};
     if (o.phrase) {
-      phraseInput = input('__phrase', { placeholder: o.phrase, mono: true });
+      const spec = o.phrase;
+      phraseOf = typeof spec === 'function' ? spec : () => spec;
+      phraseInput = input('__phrase', { mono: true });
       phraseInput.setAttribute('data-testid', 'dialog-phrase');
       // The phrase can hold an identifier (REVOKE O26-J-00184): it reads in --font, the words around it in the display face.
-      const label = h('span', null, 'Type ', h('span', { class: 'cfield__phrase' }, o.phrase), ' to confirm');
-      controls.push(field(label, phraseInput, { wide: true, hint: 'This cannot be undone.' }));
-      confirm.disabled = true;
-      phraseInput.addEventListener('input', () => {
-        confirm.disabled = !phraseMatches(phraseInput!.value, o.phrase!);
-      });
+      const phraseText = h('span', { class: 'cfield__phrase' });
+      const label = h('span', null, 'Type ', phraseText, ' to confirm');
+      const phraseField = field(label, phraseInput, { wide: true, hint: 'This cannot be undone.' });
+      controls.push(phraseField);
+      syncPhrase = () => {
+        const p = phraseOf(readValues(form));
+        phraseField.hidden = p === null;
+        phraseText.textContent = p ?? '';
+        phraseInput!.placeholder = p ?? '';
+        confirm.disabled = p !== null && !phraseMatches(phraseInput!.value, p);
+      };
     }
 
     const body = o.body === undefined ? [] : Array.isArray(o.body) ? o.body : [o.body];
@@ -108,6 +128,9 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     );
     const dlg = h('dialog', { class: ['dialog', o.danger ? 'dialog--danger' : null], attrs: { 'aria-label': o.title } }, form);
     document.body.appendChild(dlg);
+    form.addEventListener('input', syncPhrase);
+    form.addEventListener('change', syncPhrase);
+    syncPhrase();
 
     let settled = false;
     const finish = (v: DialogValues | null) => {
@@ -127,7 +150,6 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       error.textContent = '';
-      if (o.phrase && !phraseMatches(phraseInput?.value ?? '', o.phrase)) return;
       for (const el of Array.from(form.querySelectorAll<HTMLInputElement>('input[required], select[required], textarea[required]'))) {
         if (!el.value.trim()) {
           error.textContent = 'Complete the required fields.';
@@ -141,6 +163,8 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
         error.textContent = invalid;
         return;
       }
+      const phrase = phraseOf(values);
+      if (phrase !== null && !phraseMatches(phraseInput?.value ?? '', phrase)) return;
       if (!o.submit) return finish(values);
       const label = confirm.textContent;
       confirm.disabled = true;
@@ -156,6 +180,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
         cancel.disabled = false;
         confirm.removeAttribute('aria-busy');
         confirm.textContent = label;
+        syncPhrase();
       }
     });
 

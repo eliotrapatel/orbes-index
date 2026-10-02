@@ -331,7 +331,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
     // the phrase to type in a confirmation (REVOKE O26-J-00184) is a --font span inside its label;
     // and no field label is written with a figure (its range or example goes in the hint, read in --font).
     expect(rules(adminStyles).some((r) => r.selectors.includes('.dialog__eyebrow') && r.decls['font-family'] !== undefined)).toBe(false);
-    expect(readFileSync(join(WEB, 'admin/ui/dialog.ts'), 'utf8')).toContain("h('span', { class: 'cfield__phrase' }, o.phrase)");
+    // (The phrase may depend on the fields, a ticked box that revokes a code: the span is filled as they change.)
+    const dialogSrc = readFileSync(join(WEB, 'admin/ui/dialog.ts'), 'utf8');
+    expect(dialogSrc).toContain("const phraseText = h('span', { class: 'cfield__phrase' });");
+    expect(dialogSrc).toContain("h('span', null, 'Type ', phraseText, ' to confirm')");
+    expect(dialogSrc).toContain("phraseText.textContent = p ?? '';");
     for (const view of readdirSync(join(WEB, 'admin/views'))) {
       const src = readFileSync(join(WEB, 'admin/views', view), 'utf8');
       const labels = [...src.matchAll(/\blabel: '([^']*)'/g), ...src.matchAll(/\bfield\('([^']*)'/g)].map((m) => m[1]);

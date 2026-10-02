@@ -40,6 +40,10 @@ export type AnomalySeverity = (typeof ANOMALY_SEVERITIES)[number];
 export const ANOMALY_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED'] as const;
 export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
 
+/** Orders of the anomalies list (server: ANOMALY_SORTS); the types themselves come from GET /api/admin/anomalies/summary. */
+export const ANOMALY_SORTS = ['severity', 'risk', 'lastSeen'] as const;
+export type AnomalySort = (typeof ANOMALY_SORTS)[number];
+
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
 
@@ -368,6 +372,51 @@ export interface AnomalyRecord {
   resolvedBy: string | null;
   resolvedAt: Iso | null;
   resolutionNote: string | null;
+}
+
+/** Filters and order of GET /api/admin/anomalies, as kept in the view's URL. */
+export interface AnomalyFilters {
+  status?: string;
+  severity?: string;
+  type?: string;
+  productId?: string;
+  sort?: string;
+}
+
+/** GET /api/admin/anomalies/summary. */
+export interface AnomalySummary {
+  /** OPEN findings by severity. */
+  open: Record<AnomalySeverity, number>;
+  /** OPEN HIGH + CRITICAL: the badge on Anomalies. */
+  attention: number;
+  /** Every type the server can record. */
+  types: string[];
+}
+
+export interface AnomalyScan {
+  id: string;
+  occurredAt: Iso;
+  eventType: string;
+  state: string;
+  country: string | null;
+  region: string | null;
+  deviceHash: string | null;
+  userAgentFamily: string | null;
+  riskScore: number | null;
+  /** The scan that last raised the finding (details.scanEventId). */
+  trigger: boolean;
+}
+
+/** GET /api/admin/anomalies/:id/context: the scans around one finding. */
+export interface AnomalyContext {
+  anomaly: AnomalyRecord;
+  window: { from: Iso; to: Iso };
+  scans: { total: number; truncated: boolean; items: AnomalyScan[] };
+  countries: { country: string | null; scans: number }[];
+  devices: number;
+  trigger: AnomalyScan | null;
+  code: { id: string; issue: number; status: CodeStatus } | null;
+  product: { productId: string; lifecycle: LifecycleSnapshot } | null;
 }
 
 export interface ProductDetail {

@@ -851,7 +851,7 @@ docker compose exec app node --import tsx scripts/admin.ts reset-totp --email op
 | `signing key self-test failed or no ACTIVE key` | Log (error, at start) | Page: issuance is down |
 | `signature failed verify-after-sign; refused`, `signing failed`, `key generation failed` | Log (error) | Page: custody problem |
 | `startup failed`, `uncaught exception`, `unhandled rejection`, `graceful shutdown timed out` | Log (error) | Page |
-| New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` | Page: possible key compromise |
+| New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` (`GET /api/admin/anomalies/summary`: `open.CRITICAL`). In the console, the badge on ANOMALIES and the `(n)` of the tab title count the OPEN HIGH and CRITICAL findings | Page: possible key compromise |
 | `verification flagged` (SUSPICIOUS ACTIVITY) | Log (warn) | Ticket / dashboard |
 | `housekeeping job failed`, `health check: database unavailable` | Log (error) | Ticket |
 | Audit chain broken | `GET /api/admin/audit/verify` (daily job) returns `ok: false` | Page |

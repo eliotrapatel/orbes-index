@@ -16,8 +16,11 @@ import type {
   AdminProfile,
   AdminSession,
   AdminUser,
+  AnomalyContext,
+  AnomalyFilters,
   AnomalyRecord,
   AnomalyStatus,
+  AnomalySummary,
   ArtifactFormat,
   ArtifactTheme,
   AuditEntry,
@@ -434,7 +437,8 @@ export class AdminApi {
 
   // ── Registries ───────────────────────────────────────────────────────────
 
-  scans(q: { productId?: string; state?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ScanRecord>> {
+  /** `from` / `to`: ISO 8601 instants or UTC days, both included (the window of an anomaly). */
+  scans(q: { productId?: string; state?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}): Promise<Paged<ScanRecord>> {
     return this.get('/api/admin/scans', q);
   }
 
@@ -446,8 +450,18 @@ export class AdminApi {
     return this.get('/api/admin/warranties', q);
   }
 
-  anomalies(q: { status?: string; severity?: string; page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
-    return this.get('/api/admin/anomalies', q);
+  anomalies(q: AnomalyFilters & { page?: number; pageSize?: number } = {}): Promise<Paged<AnomalyRecord>> {
+    return this.get('/api/admin/anomalies', { ...q });
+  }
+
+  /** OPEN findings by severity, the badge count (OPEN HIGH + CRITICAL) and the known types. */
+  anomalySummary(): Promise<AnomalySummary> {
+    return this.get('/api/admin/anomalies/summary');
+  }
+
+  /** The scans around one finding, its code and what its product's lifecycle allows. */
+  anomalyContext(id: string): Promise<AnomalyContext> {
+    return this.get(`/api/admin/anomalies/${encodeURIComponent(id)}/context`);
   }
 
   updateAnomaly(id: string, status: AnomalyStatus, note?: string): Promise<AnomalyRecord> {

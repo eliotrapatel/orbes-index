@@ -1,6 +1,7 @@
 /**
  * Registry views for the console: scan & authentication events, owners,
- * warranties and anomalies (with triage).
+ * warranties and anomalies (with triage: filters, the badge's summary and
+ * the scans around one finding).
  *
  * These are the only places internal verification facts (reasons, risk
  * scores, authenticator results) leave the database, and only to an
@@ -16,7 +17,7 @@ import type { AdminRouteDeps } from './index.js';
 
 export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { db } = ctx;
-  const { warranty, anomaly } = ctx.services;
+  const { warranty, anomaly, lifecycle } = ctx.services;
 
   app.get('/api/admin/scans', async (request) => {
     const f = parse(scanListQuery, request.query);
@@ -31,6 +32,8 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
       q = q.where('s.product_id', '=', product.id);
     }
     if (f.state !== undefined) q = q.where('s.result_state', '=', f.state);
+    if (f.from !== undefined) q = q.where('s.occurred_at', '>=', f.from);
+    if (f.to !== undefined) q = q.where('s.occurred_at', '<=', f.to);
     const total = await q.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await q
       .select([
@@ -141,8 +144,19 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
   });
 
   app.get('/api/admin/anomalies', async (request) => {
-    const f = parse(anomalyListQuery, request.query);
-    return anomaly.list({ ...(f.status ? { status: f.status } : {}), ...(f.severity ? { severity: f.severity } : {}) }, pageOf(request.query));
+    const { sort, ...filters } = parse(anomalyListQuery, request.query);
+    return anomaly.list(filters, pageOf(request.query), sort);
+  });
+
+  // The console's badge (OPEN HIGH + CRITICAL), polled every minute while a console tab is visible.
+  app.get('/api/admin/anomalies/summary', async () => anomaly.summary());
+
+  app.get('/api/admin/anomalies/:id/context', async (request) => {
+    const { id } = parse(anomalyParams, request.params);
+    const c = await anomaly.context(id);
+    // The product's lifecycle, so the console offers only the marks its status allows.
+    const product = c.anomaly.productUuid ? { productId: c.anomaly.productId, lifecycle: await lifecycle.snapshot(c.anomaly.productUuid) } : null;
+    return { ...c, product };
   });
 
   app.patch('/api/admin/anomalies/:id', async (request) => {
