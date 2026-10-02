@@ -305,17 +305,18 @@ export class IssuanceService {
       throw validationError('Production date cannot be in the future.');
     }
 
-    // Reads before the transaction: PGlite has a single connection, and these give precise errors.
+    // Reads before the transaction: PGlite has a single connection, and these give precise errors. The transaction
+    // reads the model's and the category's `active` again under a share lock (issueIn).
     const category = await this.categories.getByCode(p.categoryCode);
     if (!category) throw notFound('Category', 'CATEGORY_NOT_FOUND');
-    if (!category.active) throw conflict('CATEGORY_INACTIVE', 'This category is no longer used for new products.');
+    if (!category.active) throw categoryInactive();
     const model = await this.db.selectFrom('models').selectAll().where('id', '=', p.modelId).executeTakeFirst();
     if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
     if (model.category_id !== category.index) {
       throw validationError('The model belongs to another category.', `model category ${model.category_id}, requested ${category.index}`);
     }
     // A model retired from the catalogue (A-10) issues no new piece; its pieces already issued verify as before.
-    if (!model.active) throw conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
+    if (!model.active) throw modelInactive();
     if (p.collectionId !== undefined) {
       const col = await this.db.selectFrom('collections').select('id').where('id', '=', p.collectionId).executeTakeFirst();
       if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
@@ -519,6 +520,18 @@ export class IssuanceService {
   ): Promise<Omit<IssueResult, 'claimCode'>> {
     const { p, year, categoryIndex } = a;
     const now = this.clock();
+    // Read again under a share lock: a model or category deactivated (A-10) since the checks before the transaction
+    // (the claim-code hash and the signing come in between) issues nothing, and a deactivation now waits for this one.
+    const live = await trx
+      .selectFrom('models as m')
+      .innerJoin('categories as c', 'c.id', 'm.category_id')
+      .select(['m.active as model_active', 'c.active as category_active'])
+      .where('m.id', '=', p.modelId)
+      .forShare()
+      .executeTakeFirst();
+    if (!live) throw notFound('Model', 'MODEL_NOT_FOUND');
+    if (!live.category_active) throw categoryInactive();
+    if (!live.model_active) throw modelInactive();
     await this.lockSigner(trx, signer);
 
     // Per (year, category) lock: max+1 is then race-free; the UNIQUE constraint remains the backstop.
@@ -825,6 +838,9 @@ export class IssuanceService {
 }
 
 // ── Mapping ────────────────────────────────────────────────────────────────
+
+const categoryInactive = () => conflict('CATEGORY_INACTIVE', 'This category is no longer used for new products.');
+const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 
 function mapDbError(e: unknown, kind: WorkKind): unknown {
   if (e instanceof DomainError) return e;

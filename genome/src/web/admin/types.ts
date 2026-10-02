@@ -130,6 +130,8 @@ export interface Category {
   warrantyMonths: number;
   active: boolean;
   createdAt: Iso;
+  /** Pieces issued in the category: a deactivation leaves them verifying as before. */
+  products: number;
 }
 
 export interface Collection {
@@ -468,6 +470,8 @@ export interface OwnerRecord {
   transfersPausedUntil: Iso | null;
   /** The expiry of the open recovery code, while it can still be used. */
   recoveryCodeExpiresAt: Iso | null;
+  /** After 5 wrong guesses at the open code within an hour, it is refused without being checked until then. */
+  recoveryCodeThrottledUntil: Iso | null;
 }
 
 /** A scan found by the REF printed under a result, with the accounts it leads to. */

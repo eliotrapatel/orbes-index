@@ -166,16 +166,17 @@ export class CategoryRegistry {
     return record;
   }
 
-  /** Activate or deactivate a category. Deactivated categories still resolve (old products stay verifiable). */
+  /**
+   * Activate or deactivate a category. Deactivated categories still resolve (old products stay verifiable).
+   * Asking for the state the category already has changes nothing and writes no audit entry. The row is locked
+   * first: an issuance under way (which reads `active` under a share lock) is waited for.
+   */
   async setActive(code: string, active: boolean, actor: Actor): Promise<CategoryRecord> {
     const record = await inTransaction(this.db, async (trx) => {
-      const row = await trx
-        .updateTable('categories')
-        .set({ active })
-        .where('code', '=', code)
-        .returningAll()
-        .executeTakeFirst();
-      if (!row) throw notFound('Category', 'CATEGORY_NOT_FOUND');
+      const current = await trx.selectFrom('categories').selectAll().where('code', '=', code).forNoKeyUpdate().executeTakeFirst();
+      if (!current) throw notFound('Category', 'CATEGORY_NOT_FOUND');
+      if (current.active === active) return fromRow(current);
+      const row = await trx.updateTable('categories').set({ active }).where('code', '=', code).returningAll().executeTakeFirstOrThrow();
       const updated = fromRow(row);
       await this.audit.record(
         {

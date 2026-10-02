@@ -256,8 +256,12 @@ describe('password change and assisted recovery (C-04)', () => {
       expect(answers[0]).toEqual({ error: { code: 'RECOVERY_CODE_INVALID', message: expect.stringMatching(/ORBES Client Services/) } });
     });
 
-    it('allows 5 failures per account per hour, then refuses even the right code', async () => {
+    it('allows 5 wrong guesses at a code per hour, then refuses even the right code; a new code starts afresh', async () => {
       const { email } = await accountClient(h);
+      // Attempts while no code is open guess nothing: they do not spend the budget of the code issued next.
+      for (let i = 0; i < 6; i++) {
+        expect((await h.client({ ip: `198.51.100.${30 + i}` }).post('/api/v1/account/recover', { email, recoveryCode: `YYYY-YYYY-YYY${i}`, newPassword: NEW_PASSWORD })).statusCode).toBe(400);
+      }
       const code = await issueCode(email);
       for (let i = 0; i < 5; i++) {
         expect((await h.client({ ip: `198.51.100.${10 + i}` }).post('/api/v1/account/recover', { email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i}`, newPassword: NEW_PASSWORD })).statusCode).toBe(400);
@@ -266,6 +270,12 @@ describe('password change and assisted recovery (C-04)', () => {
       expect(held.statusCode).toBe(400);
       expect(errorOf(held).code).toBe('RECOVERY_CODE_INVALID');
       expect((await h.client().post('/api/v1/account/login', { email, password: NEW_PASSWORD })).statusCode).toBe(401);
+      // Client Services sees the throttle on the owner, and issues a new code, which works at once.
+      const owners = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners?email=${encodeURIComponent(email)}`)) as { items: { recoveryCodeThrottledUntil: string | null }[] };
+      expect(owners.items[0].recoveryCodeThrottledUntil).toEqual(expect.any(String));
+      const fresh = await issueCode(email);
+      expect((await h.client().post('/api/v1/account/recover', { email, recoveryCode: fresh, newPassword: NEW_PASSWORD })).statusCode).toBe(200);
+      expect((await h.client().post('/api/v1/account/login', { email, password: NEW_PASSWORD })).statusCode).toBe(200);
     });
 
     it('refuses a LOCKED account with 403 ACCOUNT_LOCKED', async () => {
@@ -310,7 +320,7 @@ describe('password change and assisted recovery (C-04)', () => {
       const list = safeJson(await (await adminClient(h, 'AUDITOR')).get('/api/admin/owners?pageSize=200')) as { items: Record<string, unknown>[] };
       const owner = list.items.find((o) => o.id === id)!;
       // An AUDITOR reads the email masked (A-06).
-      expect(owner).toMatchObject({ email: `o***@example.com`, status: 'ACTIVE', recoveryCodeExpiresAt: issued.expiresAt, transfersPausedUntil: null });
+      expect(owner).toMatchObject({ email: `o***@example.com`, status: 'ACTIVE', recoveryCodeExpiresAt: issued.expiresAt, recoveryCodeThrottledUntil: null, transfersPausedUntil: null });
       expect(JSON.stringify(list)).not.toContain(issued.recoveryCode);
 
       // Used: no open code any more, and transfers are paused.

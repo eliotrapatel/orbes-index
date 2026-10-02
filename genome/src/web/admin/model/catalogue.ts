@@ -1,7 +1,8 @@
 /**
  * The catalogue's edits (A-10), as pure functions the view and the tests
- * share: what a model's change sends, how many issued pieces it touches, and
- * the care block exactly as a client reads it on /verify.
+ * share: what a model's change sends, how many issued pieces a change of a
+ * model, a collection or a category touches, and the care block exactly as a
+ * client reads it on /verify.
  *
  * A model's name, care instructions and collection, and a collection's name,
  * are read live by the public result of every piece issued with them: the
@@ -60,10 +61,31 @@ function pieces(n: number): string {
   return `${formatCount(n)} issued ${n === 1 ? 'piece' : 'pieces'}`;
 }
 
-/** Said before a model is saved: its name, care instructions and collection reach every piece issued with it. */
+/**
+ * Said before a model is saved: its name and care instructions reach every piece issued with it, and its collection
+ * every such piece that has no collection of its own (product_overview reads the piece's collection, else the model's).
+ */
 export function modelImpact(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return 'Touches no issued piece yet. The pieces issued with this model will read its name, care instructions and collection on /verify.';
-  return `Touches ${pieces(n)}: the result of each on /verify reads this model’s name, care instructions and collection as soon as they are saved.`;
+  if (!Number.isFinite(n) || n <= 0) {
+    return 'Touches no issued piece yet. The pieces issued with this model will read its name and care instructions on /verify, and its collection unless they have their own.';
+  }
+  return `Touches ${pieces(n)}: the result of each on /verify reads this model’s name and care instructions, and its collection unless the piece has its own, as soon as they are saved.`;
+}
+
+/**
+ * Said before a category is deactivated or activated (ADMIN): how many pieces were issued in it, and that none of
+ * their results changes; only new issuance stops or starts again. `active`: the category's state before the change.
+ */
+export function categoryImpact(n: number, active: boolean): string {
+  const count = Number.isFinite(n) && n > 0 ? n : 0;
+  const issued = count === 0 ? null : `Its ${formatCount(count)} issued ${count === 1 ? 'piece keeps' : 'pieces keep'} verifying as before: no public result changes.`;
+  if (active) {
+    return [
+      issued ?? 'No piece has been issued in this category yet.',
+      'No new piece can be issued in it, and the generator stops offering it; it can be activated again.',
+    ].join(' ');
+  }
+  return ['The category receives new pieces again: the generator offers it with its active models.', issued].filter(Boolean).join(' ');
 }
 
 /** Said before a collection is renamed: the name reaches every piece shown in it. */

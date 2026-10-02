@@ -31,7 +31,7 @@ import { base32Decode, base32Encode, generateTotpSecret, totpUri, verifyTotp } f
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { ADMIN_ROLES, type AccountRow, type AdminRole, type AdminUserRow, type SessionSubjectType } from '../db/schema.js';
-import { conflict, DomainError, isDomainError, notFound, validationError } from '../errors.js';
+import { conflict, DomainError, isDomainError, notFound, unauthorized, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
@@ -264,13 +264,22 @@ export class AuthService {
 
     const rehash = needsRehash(account.password_hash) ? await hashSecret(password) : undefined;
     return inTransaction(this.db, async (tx) => {
-      // Read again under the row lock: a lock by Client Services that committed during the scrypt check above has
-      // already ended the account's sessions, so the session opened here would outlive it (and work after an unlock).
-      // FOR SHARE: a lock still in progress is waited for, and one that starts now waits for this session, then ends it.
-      const fresh = await tx.selectFrom('accounts').select('status').where('id', '=', account.id).forShare().executeTakeFirst();
+      // Read again under the row lock. A lock by Client Services (A-06) or an assisted recovery (C-04) that committed
+      // during the scrypt check above has already ended the account's sessions: the session opened here would outlive
+      // it (and, after a lock, work again after the unlock). A recovery also replaced the password that was checked,
+      // so the old one must not open a session, nor be written back by a rehash.
+      // FOR NO KEY UPDATE: a lock, a recovery or a password change still in progress is waited for, and one that starts
+      // now waits for this session, then ends it. An exclusive lock, not FOR SHARE: this transaction may then write the
+      // row (the throttle reset, a rehash), and two logins that both held a share lock and both wrote would deadlock;
+      // concurrent logins of one account run one after the other instead. Foreign-key checks (FOR KEY SHARE) still pass.
+      const fresh = await tx.selectFrom('accounts').select(['status', 'password_hash']).where('id', '=', account.id).forNoKeyUpdate().executeTakeFirst();
       if (fresh?.status === 'LOCKED') throw customerAccountLocked();
       if (fresh?.status !== 'ACTIVE') throw invalidCredentials();
-      if (rehash) await tx.updateTable('accounts').set({ password_hash: rehash, updated_at: this.clock() }).where('id', '=', account.id).execute();
+      const unchanged = fresh.password_hash === account.password_hash;
+      // Changed meanwhile: by a recovery or a password change (then the password checked above no longer opens a
+      // session), or by a concurrent login's rehash of this same password (rare: checked again, under the lock).
+      if (!unchanged && !(await verifySecret(password, fresh.password_hash))) throw invalidCredentials();
+      if (rehash && unchanged) await tx.updateTable('accounts').set({ password_hash: rehash, updated_at: this.clock() }).where('id', '=', account.id).execute();
       if (account.failed_logins !== 0 || account.failed_logins_since !== null) {
         await tx.updateTable('accounts').set({ failed_logins: 0, failed_logins_since: null }).where('id', '=', account.id).execute();
       }
@@ -530,6 +539,16 @@ export class AuthService {
    * account is throttled the current password is not even looked at (same
    * answer). The new password is checked against the policy before the
    * current one, so a weak choice costs no attempt.
+   *
+   * The two scrypts run outside the transaction; the write then re-reads the
+   * subject's row under its lock and goes ahead only if nothing happened
+   * meanwhile (C-04, A-06): a customer account LOCKED by Client Services
+   * answers 403 ACCOUNT_LOCKED; an account no longer active, a disabled
+   * admin, or a `keepToken` session that has ended (a recovery, a lock or
+   * another password change ended it) answers 401; a password replaced
+   * meanwhile (by a recovery or a concurrent change: the current password
+   * no longer matches the stored hash) answers 400 CURRENT_PASSWORD_INVALID.
+   * So a change under way can never undo a recovery or outlive a lock.
    */
   async changePassword(
     subject: { type: SessionSubjectType; id: string },
@@ -550,6 +569,22 @@ export class AuthService {
     }
     const hash = await hashSecret(next);
     await inTransaction(this.db, async (tx) => {
+      // Under the row lock (as login, the lock and the recovery take it): what was verified must still hold.
+      let verified: string | undefined;
+      if (subject.type === 'admin') {
+        const fresh = await tx.selectFrom('admin_users').select(['password_hash', 'disabled_at']).where('id', '=', row.id).forNoKeyUpdate().executeTakeFirst();
+        if (!fresh || fresh.disabled_at !== null) throw unauthorized();
+        verified = fresh.password_hash;
+      } else {
+        const fresh = await tx.selectFrom('accounts').select(['password_hash', 'status']).where('id', '=', row.id).forNoKeyUpdate().executeTakeFirst();
+        if (fresh?.status === 'LOCKED') throw customerAccountLocked();
+        if (!fresh || fresh.status !== 'ACTIVE') throw unauthorized();
+        verified = fresh.password_hash;
+      }
+      if (opts.keepToken !== undefined && !(await this.sessions.isLive(opts.keepToken, subject.type, row.id, tx))) throw unauthorized();
+      // Replaced meanwhile: by a recovery or another change, the current password no longer matches it; a concurrent
+      // sign-in's re-hash of the same password still does (rare: checked again, under the lock).
+      if (verified !== row.password_hash && !(await verifySecret(current, verified))) throw currentPasswordInvalid();
       const values = { password_hash: hash, updated_at: this.clock() };
       if (subject.type === 'admin') await tx.updateTable('admin_users').set(values).where('id', '=', row.id).execute();
       else await tx.updateTable('accounts').set(values).where('id', '=', row.id).execute();

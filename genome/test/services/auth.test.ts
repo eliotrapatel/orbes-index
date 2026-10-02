@@ -244,7 +244,7 @@ describe('AuthService', () => {
       const recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
       const staff = await auth.createAdmin({ email: email('cs'), password: PASSWORD, role: 'ADMIN' }, system);
       const { recoveryCode } = await recovery.issue(reg.account.id, { type: 'admin', id: staff.id });
-      // Wrong email, then a code past its 30 minutes: one answer.
+      // Wrong email: refused.
       await expectDomainError(recovery.recover({ email: email('nobody'), recoveryCode, newPassword: 'a brand new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
       await recovery.recover({ email: addr, recoveryCode, newPassword: 'a brand new passphrase' });
       expect(await auth.authenticateAccount(reg.session.token)).toBeNull();
@@ -253,6 +253,7 @@ describe('AuthService', () => {
       // Used once.
       await expectDomainError(recovery.recover({ email: addr, recoveryCode, newPassword: 'another new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
       const second = await recovery.issue(reg.account.id, { type: 'admin', id: staff.id });
+      // A code past its 30 minutes: the same answer.
       clock.advance(30 * 60_000);
       await expectDomainError(recovery.recover({ email: addr, recoveryCode: second.recoveryCode, newPassword: 'another new passphrase' }), 'RECOVERY_CODE_INVALID', 400);
     });

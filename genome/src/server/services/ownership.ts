@@ -33,7 +33,7 @@ import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AcquiredVia, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
 import { DomainError, forbidden, notFound, tooManyRequests, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -214,6 +214,18 @@ async function lockForOwnerAction(tx: Db, productId: string): Promise<ProductRow
   return p;
 }
 
+/**
+ * The acting account's row, read FOR SHARE before any product is locked (lock order account → product, as
+ * in the recovery and the lock). A request already on its way when ORBES Client Services locked the account
+ * (A-06: the lock ends the sessions, but the session guard ran before it) is refused here: the lock still
+ * in progress is waited for, and one that starts now waits for this request.
+ */
+async function readActingAccount(tx: Db, accountId: string): Promise<{ status: AccountStatus; transfers_frozen_until: Date | null } | undefined> {
+  const account = await tx.selectFrom('accounts').select(['status', 'transfers_frozen_until']).where('id', '=', accountId).forShare().executeTakeFirst();
+  if (account?.status === 'LOCKED') throw customerAccountLocked();
+  return account;
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export class OwnershipService {
@@ -315,9 +327,8 @@ export class OwnershipService {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const account = await tx.selectFrom('accounts').select(['status', 'transfers_frozen_until']).where('id', '=', accountId).forShare().executeTakeFirst();
       // Locked by ORBES Client Services while this request was on its way (the lock ends the sessions, A-06).
-      if (account?.status === 'LOCKED') throw customerAccountLocked();
+      const account = await readActingAccount(tx, accountId);
       if (account?.transfers_frozen_until && account.transfers_frozen_until.getTime() > now.getTime()) throw transfersPaused(account.transfers_frozen_until);
       const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
@@ -455,12 +466,16 @@ export class OwnershipService {
   }
 
   /**
-   * Cancel every pending transfer offered by an account (the assisted recovery of its password, C-04):
-   * a transfer code handed out by whoever held the account must not complete afterwards. Runs inside
-   * the caller's transaction, which already holds the account row; each product is then locked (lock
-   * order account → product) and its pending transfer re-read, so one accepted meanwhile is left as it
-   * is. Audited `ownership.transfer.cancel` with `reason`, like a cancellation by the owner. Returns
-   * the ids of the transfers cancelled.
+   * Cancel every pending transfer offered by an account (the assisted recovery of its password, C-04, and
+   * the lock by ORBES Client Services, A-06): a transfer code handed out by whoever held the account must
+   * not complete afterwards. Runs inside the caller's transaction, which already holds the account row.
+   *
+   * Two passes, so that no row lock is ever requested after the transaction has taken the audit chain's
+   * lock (AuditService.record holds it until commit), as in every other product mutation (row first, audit
+   * last): first each product is locked in product order (lock order account → products, and products
+   * always in the same order) and its pending transfer re-read and cancelled, so one accepted meanwhile is
+   * left as it is; then one `ownership.transfer.cancel` is recorded per cancelled transfer, with `reason`,
+   * like a cancellation by the owner. Returns the ids of the transfers cancelled. The caller audits after.
    */
   async cancelPendingTransfersFrom(tx: Db, accountId: string, actor: Actor, reason: string): Promise<string[]> {
     assertAccountId(accountId);
@@ -469,9 +484,10 @@ export class OwnershipService {
       .select(['id', 'product_id'])
       .where('from_account_id', '=', accountId)
       .where('status', '=', 'PENDING')
+      .orderBy('product_id')
       .orderBy('created_at')
       .execute();
-    const cancelled: string[] = [];
+    const cancelled: { transferId: string; productId: string }[] = [];
     for (const t of pending) {
       const now = this.clock();
       const p = await requireProduct(tx, t.product_id, { forUpdate: true });
@@ -484,13 +500,16 @@ export class OwnershipService {
       if (Number(r.numUpdatedRows) !== 1) continue;
       const current = await this.currentOwnership(tx, p.id);
       await tx.updateTable('products').set({ ownership_state: ownershipStateFor(current, false), updated_at: now }).where('id', '=', p.id).execute();
+      cancelled.push({ transferId: t.id, productId: p.product_id });
+    }
+    // Every row lock is taken: the audit chain's lock can be held from here to the commit.
+    for (const c of cancelled) {
       await this.audit.record(
-        { actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason } },
+        { actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: c.productId, details: { transferId: c.transferId, reason } },
         tx,
       );
-      cancelled.push(t.id);
     }
-    return cancelled;
+    return cancelled.map((c) => c.transferId);
   }
 
   /** Client services reviewed proof of purchase: the owner becomes verified; REGISTERED → OWNED. */
@@ -537,6 +556,8 @@ export class OwnershipService {
     if (!INCIDENT_TYPES.includes(type)) throw validationError('Incident type must be LOST or STOLEN.');
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      // Locked by ORBES Client Services while this request was on its way (A-06): refused, as a transfer is.
+      await readActingAccount(tx, accountId);
       const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
       if (!current || current.account_id !== accountId) throw notOwner();

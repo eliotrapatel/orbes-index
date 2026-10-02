@@ -221,6 +221,18 @@ export class SessionService {
     return toInfo(row);
   }
 
+  /**
+   * Whether `token` is still a live session of this subject, read in the caller's transaction (nothing is
+   * touched or deleted). A write that holds the subject's row lock uses it to make sure that its own session
+   * was not ended meanwhile (a lock, a recovery and a password change end sessions under that same lock).
+   */
+  async isLive(token: unknown, subjectType: SessionSubjectType, subjectId: string, trx?: Db): Promise<boolean> {
+    const idHash = hashSessionToken(token);
+    if (!idHash) return false;
+    const row = await (trx ?? this.db).selectFrom('sessions').select(['subject_type', 'subject_id', 'expires_at']).where('id_hash', '=', idHash).executeTakeFirst();
+    return !!row && row.subject_type === subjectType && row.subject_id === subjectId && row.expires_at.getTime() > this.clock().getTime();
+  }
+
   /** Delete the session behind `token`. Returns whether one existed. */
   async revoke(token: unknown, trx?: Db): Promise<boolean> {
     const idHash = hashSessionToken(token);

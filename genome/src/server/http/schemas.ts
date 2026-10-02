@@ -57,9 +57,9 @@ export const text = (max: number, min = 1) =>
     .max(max, `At most ${max} characters`)
     .refine((s) => !CONTROL_CHARS.test(s), 'Contains invalid characters');
 
-/** Optional text where '' and null mean "not given" (admin forms send empty strings). */
+/** Optional text where null, '' and blank text mean "not given" (admin forms send empty strings). */
 export const optionalText = (max: number) =>
-  z.preprocess((v) => (v === '' || v === null ? undefined : v), text(max).optional());
+  z.preprocess((v) => (v === null || (typeof v === 'string' && v.trim() === '') ? undefined : v), text(max).optional());
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CANONICAL_PRODUCT_ID_RE = /^O\d{2}-[A-Z]-\d{5,6}$/i;

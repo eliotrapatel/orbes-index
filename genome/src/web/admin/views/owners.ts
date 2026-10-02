@@ -151,13 +151,15 @@ function referencePanel(ref: string, scans: ReferenceMatch[], accounts: OwnerRec
   );
 }
 
-/** The account's status, then what a recovery left: an open code, or transfers paused until a date. */
+/** The account's status, then what a recovery left: an open code (and its attempts throttled), or transfers paused until a date. */
 export function ownerStatus(o: OwnerRecord): HTMLElement {
   return h(
     'span',
     { data: { testid: 'owner-status' } },
     statusMark(humanize(o.status), toneOf('account', o.status)),
     o.recoveryCodeExpiresAt ? h('span', { class: 'cell-sub' }, `Recovery code open until ${formatDateTime(o.recoveryCodeExpiresAt)}`) : null,
+    // Five wrong guesses at the code within an hour: it is refused unchecked until then; a new code starts afresh.
+    o.recoveryCodeThrottledUntil ? h('span', { class: 'cell-sub' }, `Recovery attempts throttled until ${formatDateTime(o.recoveryCodeThrottledUntil)}`) : null,
     o.transfersPausedUntil ? h('span', { class: 'cell-sub' }, `Transfers paused until ${formatDateTime(o.transfersPausedUntil)}`) : null,
   );
 }

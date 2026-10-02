@@ -369,6 +369,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // An ADMIN deactivates a category: the generator stops offering it; activated again, it is offered again.
     const leather = page.locator('#categories tbody tr', { hasText: 'LEATHER GOODS' });
     await leather.locator('[data-testid=toggle-category]').click();
+    // Said first, as for a model or a collection: the pieces it touches (none issued here), and that none changes.
+    await impact.waitFor();
+    expect(await impact.textContent()).toBe('No piece has been issued in this category yet. No new piece can be issued in it, and the generator stops offering it; it can be activated again.');
     await confirmDialog(page);
     await expect.poll(() => leather.locator('.status__text').textContent()).toBe('INACTIVE');
     expect(await leather.locator('[data-testid=toggle-category]').textContent()).toBe('Activate');
@@ -582,6 +585,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => rows.count()).toBe(1);
     expect(await rows.first().textContent()).toContain(finding);
     expect(await page.locator('[data-testid=anomaly-reports]').textContent()).toBe('1 case');
+    // The latest answer as the scans list shows it: where, and the customer's note.
+    expect(await page.locator('[data-testid=anomaly-report-note]').textContent()).toBe('Offered at a third of the boutique price.');
     await page.locator('[data-testid=narrowed]').getByText('Show all').click();
     await expect.poll(() => rows.count()).toBeGreaterThan(1);
 
@@ -668,12 +673,25 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await shot(page, 'owner-sheet', { full: true });
 
+    // The recovery code from the sheet too (the mechanism of C-04): shown once above the sheet, then hidden; the
+    // account then reads that a code is open.
+    await page.click('[data-testid=issue-recovery-code]');
+    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Only after checking the identity of the client\./);
+    await confirmDialog(page);
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').textContent()).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    await page.click('[data-testid=hide-recovery-code]');
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').count()).toBe(0);
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Recovery code open until/);
+
     // Lock: the dialog says what it does; the sheet then reads LOCKED and offers the unlock; the client cannot sign in.
     await page.click('[data-testid=lock-account]');
     await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Every session of the account ends now.*cannot sign in or use a recovery code/);
     await confirmDialog(page);
+    // The lock revoked the code just issued, and says so.
     await page.waitForSelector('.toast:has-text("Account locked.")');
+    expect(await page.locator('.toast', { hasText: 'Account locked.' }).textContent()).toContain('the open recovery code revoked');
     await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/LOCKED/);
+    expect(await page.locator('#account [data-testid=owner-status]').textContent()).not.toMatch(/Recovery code open/);
     expect(await page.locator('[data-testid=lock-account]').count()).toBe(0);
     expect(await page.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
     await expect(ctx.services.auth.login({ email, password }, {})).rejects.toMatchObject({ code: 'ACCOUNT_LOCKED', httpStatus: 403 });

@@ -17,7 +17,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { REPORT } from '../copy.js';
+import { REPORT, REQUEST_ERRORS } from '../copy.js';
 import { REPORT_CHANNELS, type ReportChannel } from '../types.js';
 import type { ReportModel } from '../view-model.js';
 
@@ -30,8 +30,8 @@ const NOTE_MAX = 500;
 
 function messageOf(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.isNetwork) return 'The ORBES service could not be reached. Check your connection, then try again.';
-    if (e.status === 429) return 'Too many attempts. Please wait a moment, then try again.';
+    if (e.isNetwork) return REQUEST_ERRORS.network;
+    if (e.status === 429) return REQUEST_ERRORS.rateLimited;
     if (e.status >= 500) return 'Your answer could not be sent just now. Please try again in a moment.';
     return e.message;
   }

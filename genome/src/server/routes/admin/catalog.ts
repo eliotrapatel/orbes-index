@@ -24,8 +24,9 @@ import type { CategoryRecord } from '../../services/categories.js';
 import type { AdminRouteDeps } from './index.js';
 import { itemsOf } from './serialize.js';
 
-function categoryJson(c: CategoryRecord) {
-  return { index: c.index, code: c.code, name: c.name, warrantyMonths: c.warrantyMonths, active: c.active, createdAt: c.createdAt };
+/** `products`: the pieces issued in the category, which a deactivation leaves verifying as before (A-10). */
+function categoryJson(c: CategoryRecord, issued: ReadonlyMap<number, number>) {
+  return { index: c.index, code: c.code, name: c.name, warrantyMonths: c.warrantyMonths, active: c.active, createdAt: c.createdAt, products: issued.get(c.index) ?? 0 };
 }
 
 export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
@@ -34,20 +35,25 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
 
   // ── Categories ───────────────────────────────────────────────────────────
 
-  app.get('/api/admin/categories', async () => itemsOf((await categories.list()).map(categoryJson)));
+  app.get('/api/admin/categories', async () => {
+    const list = await categories.list();
+    const issued = await catalog.issuedByCategory();
+    return itemsOf(list.map((c) => categoryJson(c, issued)));
+  });
 
   app.post('/api/admin/categories', { config: { guard: { minRole: 'ADMIN' } } }, async (request, reply) => {
     const b = parse(createCategoryBody, request.body);
     const created = await categories.create({ code: b.code, name: b.name, warrantyMonths: b.warrantyMonths }, adminActor(request));
     reply.code(201);
-    return categoryJson(created);
+    return categoryJson(created, new Map());
   });
 
   // A deactivated category receives no new product; its pieces keep verifying (the registry still resolves it).
   app.post('/api/admin/categories/:code/active', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { code } = parse(categoryParams, request.params);
     const b = parse(categoryActiveBody, request.body);
-    return categoryJson(await categories.setActive(code, b.active, adminActor(request)));
+    const updated = await categories.setActive(code, b.active, adminActor(request));
+    return categoryJson(updated, await catalog.issuedByCategory());
   });
 
   // ── Collections ──────────────────────────────────────────────────────────

@@ -102,6 +102,8 @@ describe('CategoryRegistry', () => {
     expect(next.index).toBe(7); // index 2 is not reused
     const on = await registry.setActive('L', true, admin);
     expect(on.active).toBe(true);
+    // The state it already has: nothing changes, nothing is audited (the next test reads the whole audit trail).
+    expect(await registry.setActive('L', true, admin)).toMatchObject({ code: 'L', active: true });
     await expectDomainError(registry.setActive('Z', false, admin), 'CATEGORY_NOT_FOUND', 404);
   });
 

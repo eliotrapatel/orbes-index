@@ -123,6 +123,23 @@ describe('SessionService', () => {
     expect(await sessions.revokeAllForSubject('account', 'not-a-uuid')).toBe(0);
   });
 
+  it('tells whether a token is still a live session of one subject, without touching it', async () => {
+    const subjectId = randomUUID();
+    const s = await sessions.create({ subjectType: 'account', subjectId });
+    const seen = (await t.db.selectFrom('sessions').select('last_seen_at').where('subject_id', '=', subjectId).executeTakeFirstOrThrow()).last_seen_at;
+    clock.advance(10 * 60_000);
+    expect(await sessions.isLive(s.token, 'account', subjectId)).toBe(true);
+    expect((await t.db.selectFrom('sessions').select('last_seen_at').where('subject_id', '=', subjectId).executeTakeFirstOrThrow()).last_seen_at).toEqual(seen);
+    expect(await sessions.isLive(s.token, 'admin', subjectId)).toBe(false);
+    expect(await sessions.isLive(s.token, 'account', randomUUID())).toBe(false);
+    expect(await sessions.isLive('garbage', 'account', subjectId)).toBe(false);
+    await sessions.revokeAllForSubject('account', subjectId);
+    expect(await sessions.isLive(s.token, 'account', subjectId)).toBe(false);
+    const late = await sessions.create({ subjectType: 'account', subjectId });
+    clock.advance(720 * 3_600_000);
+    expect(await sessions.isLive(late.token, 'account', subjectId)).toBe(false);
+  });
+
   it('step-up to MFA rotates the token: a new MFA-passed session replaces the old one', async () => {
     const subjectId = randomUUID();
     const s = await sessions.create({ subjectType: 'admin', subjectId, ipHash: 'ip', userAgent: 'UA' });

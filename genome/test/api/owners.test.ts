@@ -4,7 +4,8 @@
  * progress, 20 latest scans), lock and unlock (ADMIN: sessions end, pending
  * transfers cancelled, the open recovery code revoked, sign-in refused), the
  * right-of-access export (ADMIN, no-store, audited, every audit entry that
- * names the account), emails masked for an AUDITOR everywhere, and the
+ * names the account, no other owner's data on a piece sold, no internal
+ * flag), emails masked for an AUDITOR everywhere, and the
  * recovery code of C-04 refused once expired or used.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -375,6 +376,37 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       expect((await cs.get('/api/admin/owners/5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6/export')).statusCode).toBe(404);
       expect(UUID_RE.test(id)).toBe(true);
+    });
+
+    it('gives no current status for a piece owned before, and no internal flag for a piece owned now', async () => {
+      const seller = await accountClient(h);
+      const id = await accountIdOf(seller.email);
+      const sold = await ownedPiece(seller.client);
+      const offer = safeJson(await seller.client.post('/api/v1/ownership/transfers', { productId: sold.productId })) as { transferCode: string };
+      const buyer = await accountClient(h);
+      expect((await buyer.client.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode })).statusCode).toBe(200);
+      // What happens to the piece afterwards is the buyer's: a STOLEN declaration and a transfer under way.
+      expect((await buyer.client.post('/api/v1/ownership/incidents', { productId: sold.productId, type: 'STOLEN' })).statusCode).toBe(201);
+      // A piece the seller still owns, flagged by staff: an internal status, which reads REVOKED for the public.
+      const kept = await ownedPiece(seller.client);
+      await h.ctx.services.lifecycle.transition(kept.productId, 'COUNTERFEIT_FLAGGED', { reason: 'copies of its code reported online' }, SYSTEM_ACTOR);
+
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      expect(res.statusCode).toBe(200);
+      const x = safeJson(res) as { pieces: Record<string, unknown>[] };
+      expect(x.pieces).toEqual([
+        expect.objectContaining({ productId: kept.productId, until: null, status: 'REVOKED', ownershipState: expect.any(String) }),
+        expect.objectContaining({ productId: sold.productId, until: expect.any(String), endedReason: 'TRANSFERRED_OUT' }),
+      ]);
+      expect(x.pieces[1]).not.toHaveProperty('status');
+      expect(x.pieces[1]).not.toHaveProperty('ownershipState');
+      expect(res.body).not.toMatch(/STOLEN|COUNTERFEIT/);
+      // The owner's sheet, for staff, still reads the registry as it is.
+      const sheet = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}`)) as { pieces: { productId: string; status: string }[] };
+      expect(sheet.pieces.map((p) => [p.productId, p.status])).toEqual([
+        [kept.productId, 'COUNTERFEIT_FLAGGED'],
+        [sold.productId, 'STOLEN'],
+      ]);
     });
   });
 });

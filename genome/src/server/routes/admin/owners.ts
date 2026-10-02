@@ -42,6 +42,7 @@ function ownerJson(o: OwnerSummary, inClear: boolean) {
     productsEver: o.productsEver,
     transfersPausedUntil: o.transfersPausedUntil,
     recoveryCodeExpiresAt: o.recoveryCodeExpiresAt,
+    recoveryCodeThrottledUntil: o.recoveryCodeThrottledUntil,
   };
 }
 

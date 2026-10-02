@@ -172,6 +172,72 @@ describe('OwnerService', () => {
     expect(await left()).toBe(1);
   });
 
+  /** Run `during` (committed) just before the next transaction of the services begins its body. */
+  async function interleaved<T>(during: () => Promise<unknown>, request: () => Promise<T>): Promise<T> {
+    const begin = t.db.transaction.bind(t.db);
+    const spy = vi.spyOn(t.db, 'transaction').mockImplementationOnce(() => {
+      const builder = begin();
+      return {
+        execute: async <R>(fn: Parameters<typeof builder.execute<R>>[0]) => {
+          await during();
+          return builder.execute(fn);
+        },
+      } as unknown as ReturnType<typeof begin>;
+    });
+    try {
+      return await request();
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it('refuses a password change whose password check was under way when the lock committed, after the unlock too', async () => {
+    const c = await customer();
+    const email = `client.${n}@example.com`;
+    // The lock commits after the change has checked the current password and hashed the new one, before it writes.
+    await expectDomainError(
+      interleaved(
+        () => owners.lock(c.id, admin),
+        () => auth.changePassword({ type: 'account', id: c.id }, { currentPassword: PASSWORD, newPassword: 'the taker’s new passphrase' }, c.actor, { keepToken: c.token }),
+      ),
+      'ACCOUNT_LOCKED',
+      403,
+    );
+    expect(await audit.list({ action: 'account.password_change', targetId: c.id })).toMatchObject({ items: [] });
+    // The password is the client's own: after the unlock it signs in, the taker's does not.
+    await owners.unlock(c.id, admin);
+    await expectDomainError(auth.login({ email, password: 'the taker’s new passphrase' }), 'INVALID_CREDENTIALS', 401);
+    expect((await auth.login({ email, password: PASSWORD })).account.id).toBe(c.id);
+  });
+
+  it('refuses a LOST or STOLEN declaration that was on its way when the lock took effect', async () => {
+    const c = await customer();
+    const piece = await ownedBy(c);
+    await owners.lock(c.id, admin);
+    // The session guard ran before the lock; the service re-reads the account under its row lock, as for a transfer.
+    await expectDomainError(ownership.reportIncident(c.id, piece, 'STOLEN', c.actor), 'ACCOUNT_LOCKED', 403);
+    expect((await owners.sheet(c.id)).pieces[0].status).toBe('REGISTERED');
+    await owners.unlock(c.id, admin);
+    expect((await ownership.reportIncident(c.id, piece, 'LOST', c.actor)).to).toBe('LOST');
+  });
+
+  it('cancels every pending transfer of the account, and audits them once every piece is locked', async () => {
+    const c = await customer();
+    const pieces = [await ownedBy(c), await ownedBy(c), await ownedBy(c)];
+    for (const piece of pieces) await ownership.initiateTransfer(c.id, piece, c.actor);
+    const before = (await t.db.selectFrom('audit_logs').select((eb) => eb.fn.max('id').as('id')).executeTakeFirstOrThrow()).id;
+    const r = await owners.lock(c.id, admin);
+    expect(r.transfersCancelled).toHaveLength(3);
+    const states = await t.db.selectFrom('products').select('ownership_state').where('product_id', 'in', pieces).execute();
+    expect(states.map((s) => s.ownership_state)).toEqual(['REGISTERED', 'REGISTERED', 'REGISTERED']);
+    // One entry per cancelled transfer, then the lock's: the audit chain is taken after the last product lock.
+    const entries = await t.db.selectFrom('audit_logs').select(['action', 'target_id', 'details']).where('id', '>', Number(before)).orderBy('id').execute();
+    expect(entries.map((e) => e.action)).toEqual(['ownership.transfer.cancel', 'ownership.transfer.cancel', 'ownership.transfer.cancel', 'account.lock']);
+    expect(entries.slice(0, 3).map((e) => e.target_id).sort()).toEqual([...pieces].sort());
+    expect(new Set(entries.slice(0, 3).map((e) => (e.details as { transferId: string }).transferId))).toEqual(new Set(r.transfersCancelled));
+    for (const e of entries.slice(0, 3)) expect(e.details).toMatchObject({ reason: 'account_locked' });
+  });
+
   it('revokes the open recovery code: a code handed out before the lock does not work after the unlock', async () => {
     const c = await customer();
     const email = `client.${n}@example.com`;

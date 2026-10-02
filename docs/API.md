@@ -105,7 +105,7 @@ Applies to every **unsafe** request (any method other than `GET`, `HEAD`, `OPTIO
 1. **Origin rule.** The `Origin` header must equal `PUBLIC_ORIGIN` exactly (scheme, host and port). A request without `Origin` is accepted only with `Sec-Fetch-Site: same-origin`. `Origin: null`, look-alike hosts and `Sec-Fetch-Site: same-site` or `cross-site` are refused.
 2. **Token rule.** When the request is authenticated by a session cookie, the header `x-csrf-token` must equal that session's CSRF token (compared in constant time). Tokens of other sessions are refused.
 
-Failures answer `403 CSRF_FAILED`. Session-less mutations (account registration and login, the assisted account recovery of §10.8, admin login, and logout without a session) apply the origin rule only. Public endpoints (`/api/v1/verify` and the `GET` endpoints of §8) need neither.
+Failures answer `403 CSRF_FAILED`. Session-less mutations (account registration and login, the assisted account recovery of §10.8, a customer's report on a scan of §8.5, admin login, and logout without a session) apply the origin rule only. Public endpoints (`/api/v1/verify` and the `GET` endpoints of §8) need neither.
 
 The CSRF token is returned by account registration and login (`csrfToken`), `GET /api/v1/account/session` (when signed in), `GET /api/v1/account/me`, admin login, `GET /api/admin/auth/me` and TOTP enrolment (`POST /api/admin/auth/totp/enable`, which issues a new session). It stays the same for the life of the session.
 
@@ -518,8 +518,8 @@ Where the customer saw or bought the piece of a result that was **not authentic*
 |---|---|---|---|
 | `scanId` | uuid | yes | The `scanId` of the verification (§9.2). |
 | `channel` | string | yes | `BOUTIQUE`, `ONLINE`, `PRIVATE` (a private sale) or `OTHER`. |
-| `where` | string | no | ≤ 200 characters after trimming: the boutique, the website, the city. `""` or `null` = not given. |
-| `note` | string | no | ≤ 500 characters after trimming. `""` or `null` = not given. |
+| `where` | string | no | ≤ 200 characters after trimming: the boutique, the website, the city. `""`, blank text or `null` = not given. |
+| `note` | string | no | ≤ 500 characters after trimming. `""`, blank text or `null` = not given. |
 
 Control characters (other than tab and line breaks) and unknown fields are refused (`400 VALIDATION_FAILED`).
 
@@ -921,7 +921,7 @@ Body `{ "email": string (3–254), "password": string (1–1024) }`. Session-les
 
 Errors: `400 VALIDATION_FAILED`, `401 INVALID_CREDENTIALS` (identical for unknown emails and wrong passwords), `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
 
-**Locked account.** An account LOCKED by ORBES Client Services (§16.12) answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*) once the password is right, and no session is opened; a wrong password still answers `401 INVALID_CREDENTIALS`, so the lock is never revealed to someone who does not hold the password. The account is read again under its row lock in the transaction that opens the session, so a sign-in whose password check was under way when the lock took effect is refused too, rather than opening a session that would work again after an unlock.
+**Locked account.** An account LOCKED by ORBES Client Services (§16.12) answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*) once the password is right, and no session is opened; a wrong password still answers `401 INVALID_CREDENTIALS`, so the lock is never revealed to someone who does not hold the password. The account is read again under its row lock in the transaction that opens the session, so a sign-in whose password check was under way when the lock took effect is refused too, rather than opening a session that would work again after an unlock. The same re-read refuses (`401 INVALID_CREDENTIALS`) a sign-in whose password was replaced meanwhile by an assisted recovery (§10.8) or a password change (§10.7): the old password opens no session once the new one is stored. Concurrent sign-ins of one account take that lock in turn.
 
 **Per-account throttle.** After 10 wrong passwords for one account within 15 minutes (counted from the first failure of the window), further logins to that account are refused for the rest of the window **without checking the password**, with the same `401 INVALID_CREDENTIALS` and the same response time as a wrong password: the answer reveals neither the throttle nor whether the account exists. A successful login resets the counter; failures spread over more than 15 minutes start a new window. This complements the per-IP `auth` budget (§3), which a distributed guesser can spread across addresses.
 
@@ -1014,8 +1014,9 @@ The signed-in customer changes their password (C-04). Body `{ "currentPassword":
 - `newPassword` follows the rules of registration (§10.1: at least 12 characters after NFKC normalisation, not equal to the email…). It is checked first, so a weak choice (`400 VALIDATION_FAILED`) costs no attempt.
 - A wrong current password answers **`400 CURRENT_PASSWORD_INVALID`**, never a 401 (the verify app and the console end the session on any 401), and counts in the account's login throttle (§10.2), audited `account.login_failed` with `details.via: "password_change"`: whoever holds a session cannot guess the password faster than a login could. While the account is throttled, the current password is not checked, with the same answer.
 - On success the new password is stored, **every other session of the account ends** and this one is kept. Audited `account.password_change`.
+- **Nothing that happened during the check is undone.** The two scrypt evaluations (the current password, then the new one) run before the write, which then reads the account again under its row lock: if ORBES Client Services locked it meanwhile, the answer is `403 ACCOUNT_LOCKED` (§16.12); if this session has ended (an assisted recovery, §10.8, or a lock ended every session), `401 UNAUTHORIZED`; if the password is no longer the one that was checked (a recovery or another change committed first), `400 CURRENT_PASSWORD_INVALID`. In each case nothing is written: a change under way can neither undo a recovery nor outlive a lock.
 
-**200** `{ "ok": true }`. Errors: `400 VALIDATION_FAILED`, `400 CURRENT_PASSWORD_INVALID`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
+**200** `{ "ok": true }`. Errors: `400 VALIDATION_FAILED`, `400 CURRENT_PASSWORD_INVALID`, `401 UNAUTHORIZED`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
 
 In the verify app, signed in: CHANGE PASSWORD beside SIGN OUT in the OWNERSHIP panel (it moves to the customer's pieces with F-01). A wrong current password is said on its field, and the page stays signed in.
 
@@ -1049,9 +1050,11 @@ No session is opened and no cookie is set: the customer then signs in with the n
 4. **new transfers out of the account are paused for 72 hours** (`transfersPausedUntil`; §11.2 then answers `409 TRANSFERS_PAUSED`), against a takeover of the account by social engineering of Client Services; transfers offered *to* the account are not affected;
 5. the code is marked used. Audited `account.recover` with the account as target and the code's id, the sessions and transfers ended and the end of the pause; never the code or the email.
 
+A request with the old password that was already under way when the recovery committed gets nothing either: a sign-in (§10.2) re-reads the account's password under its row lock before it opens the session, and a password change (§10.7) before it writes, so neither opens a session nor writes back the old password, nor sets one of its own.
+
 **One answer for every refusal.** An unknown email, a wrong, malformed, expired (30 minutes), used or replaced code, a deleted account, and an account over its attempt limit all answer `400 RECOVERY_CODE_INVALID` with the same message and one scrypt evaluation: the answer reveals neither whether the email has an account nor why the code failed.
 
-**Attempt limit.** At most **5 failures per account per rolling hour**. They are counted from the audit log (`account.recover_failed`, with the reason for staff: `NO_OPEN_CODE`, `EXPIRED` or `MISMATCH`), committed before the answer, and attempts on one account are serialised by its row lock, so the limit holds exactly across instances. Further attempts are refused without looking at the code, the right one included (`account.recover_throttled`), until the oldest failure is an hour old. Someone who knows a customer's email can therefore hold the recovery back for up to an hour (accepted, SECURITY-MODEL §3.3); Client Services sees the failures in the account's audit entries.
+**Attempt limit.** At most **5 wrong guesses at the open code per rolling hour**. Every refused attempt is recorded in the audit log, committed before the answer, as `account.recover_failed` with its reason for staff: `NO_OPEN_CODE` (no code is open), `EXPIRED`, or `MISMATCH` (a wrong guess at the open code, which also names the code, `details.recoveryCodeId`, and the attempt number). Only the `MISMATCH` entries of the open code count: an attempt while no code is open, or once it has expired, guesses nothing, so it costs the same scrypt but spends no budget, and a code freshly issued by Client Services always starts with all 5 guesses. Attempts on one account are serialised by its row lock, so the limit holds exactly across instances. After the fifth wrong guess, the code is refused without being checked, the right one included (`account.recover_throttled`, naming the code), until the oldest of those guesses is an hour old, which outlasts its 30 minutes: the code is spent, and the owner's record in the console reads *Recovery attempts throttled until …* (`recoveryCodeThrottledUntil`, §16.2). Client Services then issues a new code. The residual risk (accepted, SECURITY-MODEL §3.3): someone who knows the customer's email and hammers the form within the 30 minutes after a code is issued can spend that code's guesses before the customer uses it; each new code needs a new attempt, inside its own 30 minutes, and each is recorded on the account.
 
 A LOCKED account answers `403 ACCOUNT_LOCKED` once the code is right, and the code is not used. The lock itself revokes the open code (§16.12), so this answer comes only when the lock lands between the check of the code and its use; a code issued before a lock then fails like a replaced one, also after the unlock, and Client Services issues a new one if the customer needs it.
 
@@ -1130,9 +1133,11 @@ The sender withdraws a pending offer. Body `{ "productId": string }`.
 
 The current owner reports the product lost or stolen. Body `{ "productId": string, "type": "LOST" | "STOLEN" }`. Any pending transfer is cancelled. From then on, verifications of the product answer `SUSPICIOUS_ACTIVITY` and its codes can no longer be printed. Recovery is done by client services (admin transition back to the previous status).
 
+A declaration that was already on its way when ORBES Client Services locked the account (§16.12) is refused with `403 ACCOUNT_LOCKED`, as a transfer is (§11.2): the account row is re-read under its lock.
+
 **201** `{ "productId": "O26-J-00002", "type": "LOST", "reportedAt": "2026-10-01T08:15:21.929Z" }`
 
-Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSITION_NOT_ALLOWED` (e.g. already reported).
+Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 TRANSITION_NOT_ALLOWED` (e.g. already reported).
 
 ---
 
@@ -1236,8 +1241,10 @@ AUDITOR. Landing counts.
 **`GET /api/admin/categories`** (AUDITOR) — every category, active or not, by index:
 
 ```json
-{ "items": [ { "index": 1, "code": "J", "name": "Jewelry", "warrantyMonths": 24, "active": true, "createdAt": "2026-10-01T08:13:21.929Z" } ] }
+{ "items": [ { "index": 1, "code": "J", "name": "Jewelry", "warrantyMonths": 24, "active": true, "createdAt": "2026-10-01T08:13:21.929Z", "products": 184 } ] }
 ```
+
+`products` is the number of pieces issued in the category (A-10): the console's Deactivate / Activate dialog says it first, with the fact that none of their results changes. The category object of the two writes below carries it too (`0` for a new category).
 
 **`POST /api/admin/categories`** (**ADMIN**) — creates a category with the lowest free index (1–31). The index and letter can never change afterwards.
 
@@ -1249,7 +1256,7 @@ AUDITOR. Landing counts.
 
 **201** — the category object. Errors: `400 VALIDATION_FAILED`, `409 CATEGORY_CODE_TAKEN`, `409 CATEGORY_INDEX_EXHAUSTED`.
 
-**`POST /api/admin/categories/:code/active`** (**ADMIN**; extension of the contract) — body `{ "active": boolean }`. `:code` is the category letter (case-insensitive). A deactivated category receives no new product (`POST /api/admin/products` answers `409 CATEGORY_INACTIVE`) and leaves the public list of `GET /api/v1/categories` and the console's generator; its pieces keep verifying exactly as before (the registry still resolves its index), and it can be activated again. Its index and letter never change and are never reused. Audited `category.deactivate` or `category.activate` (target the letter). **200** — the category object. Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`.
+**`POST /api/admin/categories/:code/active`** (**ADMIN**; extension of the contract) — body `{ "active": boolean }`. `:code` is the category letter (case-insensitive). A deactivated category receives no new product (`POST /api/admin/products` answers `409 CATEGORY_INACTIVE`) and leaves the public list of `GET /api/v1/categories` and the console's generator; its pieces keep verifying exactly as before (the registry still resolves its index), and it can be activated again. Its index and letter never change and are never reused. Audited `category.deactivate` or `category.activate` (target the letter); asking for the state the category already has changes nothing and writes no audit entry. An issuance under way reads the category's `active` again under a share lock in its transaction (§14.2), so a deactivation and an issuance run one after the other. **200** — the category object. Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`.
 
 ### 13.3 Collections
 
@@ -1307,9 +1314,9 @@ AUDITOR. Landing counts.
 | `defaultMaterial` | string \| null | ≤ 200 characters; `""`/`null` clears it. Proposed by the generator; each piece keeps its own `material`. |
 | `careInstructions` | string \| null | ≤ 2 000 characters; `""`/`null` clears them (the CARE tab of /verify then shows its general care text). Public: `product.care`. |
 | `collectionId` | uuid \| null | Must exist; `""`/`null` = none. Public: `product.collection` of the pieces without a collection of their own. |
-| `active` | boolean | `false`: no new product with this model (`POST /api/admin/products` answers `409 MODEL_INACTIVE`, the generator hides it); its pieces keep verifying as before. `true` offers it again. |
+| `active` | boolean | `false`: no new product with this model (`POST /api/admin/products` answers `409 MODEL_INACTIVE`, the generator hides it); its pieces keep verifying as before. `true` offers it again. An issuance under way reads `active` again under a share lock in its transaction (§14.2), so it never completes with a model deactivated meanwhile. |
 
-**Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once: the console says how many (`products`) before saving, and shows the care block as the client reads it. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`.
+**Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once (the collection only on the pieces without one of their own): the console says how many (`products`) before saving, and shows the care block as the client reads it. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`.
 
 The narrative fields of a model (workshop, materials, repairability) are a later phase (A-10 phase 2).
 
@@ -1363,7 +1370,7 @@ Item:
 
 ### 14.2 `POST /api/admin/products` — issue a product
 
-OPERATOR. In one transaction: allocates the serial, creates the product (ISSUED), its GENOME-01, signs its first code (issue 1) with the ACTIVE key (the signature is verified before it is stored), creates the warranty row (not started) and writes the audit entry. The body is validated strictly by the issuance service.
+OPERATOR. In one transaction: allocates the serial, creates the product (ISSUED), its GENOME-01, signs its first code (issue 1) with the ACTIVE key (the signature is verified before it is stored), creates the warranty row (not started) and writes the audit entry. The body is validated strictly by the issuance service. The category and the model are checked before the transaction and read again under a share lock inside it, so a deactivation (§13.2, §13.4) that commits while the piece is prepared still refuses it (`409 CATEGORY_INACTIVE`, `409 MODEL_INACTIVE`).
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
@@ -1828,7 +1835,7 @@ Item:
 
 ### 16.2 `GET /api/admin/owners`
 
-AUDITOR. Paginated customer accounts, newest first: `{ "id", "email", "displayName", "country", "status", "createdAt", "products" (currently owned), "productsEver", "transfersPausedUntil", "recoveryCodeExpiresAt" }`. `status` is `ACTIVE`, `LOCKED` (§16.12) or `DELETED`. `transfersPausedUntil` is the end of the 72-hour transfer pause after an assisted recovery (§10.8) while it lasts, else `null`; `recoveryCodeExpiresAt` the expiry of the open recovery code (§16.10) while it can still be used, else `null`. The code itself is never listed. The routes of the owners live in `routes/admin/owners.ts`, their service in `services/owners.ts` (A-06).
+AUDITOR. Paginated customer accounts, newest first: `{ "id", "email", "displayName", "country", "status", "createdAt", "products" (currently owned), "productsEver", "transfersPausedUntil", "recoveryCodeExpiresAt", "recoveryCodeThrottledUntil" }`. `status` is `ACTIVE`, `LOCKED` (§16.12) or `DELETED`. `transfersPausedUntil` is the end of the 72-hour transfer pause after an assisted recovery (§10.8) while it lasts, else `null`; `recoveryCodeExpiresAt` the expiry of the open recovery code (§16.10) while it can still be used, else `null`; `recoveryCodeThrottledUntil`, after 5 wrong guesses at that open code within an hour, the time until which it is refused without being checked (§10.8, attempt limit), else `null`: the code is spent, and Client Services issues a new one, which starts with the whole budget. The code itself is never listed. The routes of the owners live in `routes/admin/owners.ts`, their service in `services/owners.ts` (A-06).
 
 **Emails.** OPERATOR and ADMIN read customers' emails in clear. An **AUDITOR reads them masked**: the first character of the local part, `***`, then the domain (`jane@example.com` → `j***@example.com`), here, in the searches below, on the owner's sheet (§16.11) and in a product's ownership history (§14.3).
 
@@ -1886,7 +1893,7 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
 }
 ```
 
-`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+`reports` counts the customers' reports on the scans that took part in the finding (§16.8), with how many cases are still open and the latest report; `null` when there is none. Only this list carries it (not the anomalies of the product page). In the console, the Reports column shows the number of cases (a link to them in Cases), how many are open, and the latest report's channel, place and note, as Verification events shows a scan's. Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 
@@ -1975,7 +1982,7 @@ OPERATOR. Closes a case. Body `{ "status": "CLOSED", "note": string }`: the note
 
 Errors: `400 VALIDATION_FAILED` (malformed id, a body with fields), `403 FORBIDDEN` (AUDITOR, OPERATOR), `403 CSRF_FAILED`, `404 ACCOUNT_NOT_FOUND`, `409 ACCOUNT_NOT_ACTIVE`.
 
-In the console: *Recovery code* on the account's row of Owners and on the owner's sheet (§16.11; ADMIN only), a dialog that says what the code does, then the code once on an ivory panel with COPY and *Given to the client — hide*; the row then reads *Recovery code open until …*, and after the recovery *Transfers paused until …*. The A-06 brief named this route `/:id/recovery` and its public field `code`; there is one recovery mechanism, so they keep the names of C-04 (`/:id/recovery-code`, `recoveryCode`).
+In the console: *Recovery code* on the account's row of Owners and on the owner's sheet (§16.11; ADMIN only), a dialog that says what the code does, then the code once on an ivory panel with COPY and *Given to the client — hide*; the row then reads *Recovery code open until …* (and *Recovery attempts throttled until …* once 5 wrong guesses have spent it), and after the recovery *Transfers paused until …*. The A-06 brief named this route `/:id/recovery` and its public field `code`; there is one recovery mechanism, so they keep the names of C-04 (`/:id/recovery-code`, `recoveryCode`).
 
 ### 16.11 `GET /api/admin/owners/:id` (extension of the contract)
 
@@ -1984,7 +1991,7 @@ AUDITOR. The owner's sheet for ORBES Client Services (A-06): what they need whil
 ```json
 {
   "owner": { "id": "6d1c…", "email": "ada@example.com", "displayName": "Ada", "country": "FR", "status": "ACTIVE", "createdAt": "…",
-             "products": 1, "productsEver": 2, "transfersPausedUntil": null, "recoveryCodeExpiresAt": null },
+             "products": 1, "productsEver": 2, "transfersPausedUntil": null, "recoveryCodeExpiresAt": null, "recoveryCodeThrottledUntil": null },
   "pieces": [
     { "productId": "O26-J-00184", "model": "MONOLITHE", "type": "RING", "material": "925 STERLING SILVER", "variant": "54",
       "status": "OWNED", "ownershipState": "TRANSFER_PENDING", "acquiredVia": "FIRST_REGISTRATION", "verified": true,
@@ -2009,7 +2016,7 @@ In the console: `#/owners/:id`, reached from Owners, from a REF search and from 
 
 **ADMIN**. No body (or `{}`).
 
-**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request. In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`). Until it is unlocked the customer cannot sign in or use a recovery code (`403 ACCOUNT_LOCKED`, *This account is locked. ORBES Client Services can assist you.*, §10.2, §10.8), and a transfer request already on its way is refused (§11.2), as is a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
+**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request. In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`). Until it is unlocked the customer cannot sign in: a sign-in with the right password answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*, §10.2). Nor can they use a recovery code: the lock revoked the open one and none can be issued while the account is locked, so a code answers `400 RECOVERY_CODE_INVALID` like a replaced one (§10.8); `403 ACCOUNT_LOCKED` comes only when the lock lands between the check of a code and its use. A request already on its way when the lock takes effect is refused with `403 ACCOUNT_LOCKED`: a transfer (§11.2), a LOST or STOLEN declaration (§11.5), a password change (§10.7) and a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
 
 **200** `{ "status": "LOCKED", "sessionsRevoked": 2, "transfersCancelled": 1, "recoveryCodesRevoked": 1 }` (`recoveryCodesRevoked`: 0 or 1; a code already expired is left as it was). Audited `account.lock` with the account as target and `{ sessionsRevoked, transfersCancelled, recoveryCodesRevoked }`; never the email.
 
@@ -2027,7 +2034,7 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 |---|---|
 | `format`, `version`, `exportedAt` | `"orbes.account-export"`, `1`, the time of the export. |
 | `account` | `id`, `email` (in clear), `displayName`, `country`, `status`, `createdAt`, `updatedAt`, `transfersPausedUntil`. |
-| `pieces` | Every ownership period, as on the sheet (§16.11). |
+| `pieces` | Every ownership period, as on the sheet (§16.11), with one difference: a piece the account **owned before** (`until` set) carries no current `status` nor `ownershipState`, which now describe the next owner (a LOST or STOLEN declaration, a transfer under way) and are not this account's data; its period, `acquiredVia`, `verified`, `since`, `until` and `endedReason` describe the account's own ownership. A piece it owns now keeps both, in the public vocabulary: a piece flagged as counterfeit reads `REVOKED`, as it does on /verify (BRAND §4.1). |
 | `transfers` | Every transfer offered by the account (`direction: "OUT"`) or accepted by it (`"IN"`), with its status (a pending one past its expiry reads `EXPIRED`), creation, expiry and completion. |
 | `scans` | Every scan made while signed in, oldest first: `reference` (the REF), time, event, result, piece, `country`, `region`, `lat`/`lon` (rounded to 0.1°, §4), `userAgentFamily` (the browser family, e.g. `Safari/iOS`; the whole user agent of a scan is never stored), `clientMetrics` (what the app measured while decoding, as stored: corrections, module size, decode time, camera or upload; or `null`), and the customer's `report` on it (§8.5: `channel`, `place`, `note`, `createdAt`) or `null`. The scan's whole id is never given, only its REF. |
 | `sessions` | The account's sessions still stored: `createdAt`, `lastSeenAt`, `expiresAt`, `userAgent`. |

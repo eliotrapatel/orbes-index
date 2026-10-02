@@ -27,7 +27,8 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
   status.addEventListener('change', () => ctx.setQuery({ status: status.value, id: undefined, page: undefined }));
   severity.addEventListener('change', () => ctx.setQuery({ severity: severity.value, id: undefined, page: undefined }));
 
-  // The customers' answers on the scans that took part in the finding: how many, how many still open, the latest.
+  // The customers' answers on the scans that took part in the finding: how many, how many still open, the latest
+  // (where, and the customer's note), as the Verification events list shows a scan's.
   const reports = (a: AnomalyRecord) =>
     a.reports
       ? h(
@@ -36,6 +37,7 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
           h('a', { class: 'idlink', attrs: { href: href('cases', {}, { anomalyId: a.id }), 'data-testid': 'anomaly-reports' } }, `${a.reports.count} ${a.reports.count === 1 ? 'case' : 'cases'}`),
           h('span', { class: 'cell-sub' }, `${a.reports.open} open`),
           h('span', { class: 'cell-details' }, reportWhere(a.reports.latest)),
+          a.reports.latest.note ? h('span', { class: 'cell-details', data: { testid: 'anomaly-report-note' } }, a.reports.latest.note) : null,
         )
       : h('span', { class: 'soft' }, '—');
 

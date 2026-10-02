@@ -2,7 +2,8 @@
  * Demo dataset: a small, believable ORBES maison: five categories, a
  * catalogue of models, 41 products across the lifecycle, eight customer
  * accounts, warranties, service records, transfers, incidents and scan
- * histories, with anomalies that came out of real anomaly scoring.
+ * histories, with anomalies that came out of real anomaly scoring and two
+ * customers' reports on scans that were not authentic (open cases).
  *
  * Everything goes through the real services (issuance, warranty, ownership,
  * lifecycle, verification, anomaly): there are no hand-written rows, so
@@ -22,9 +23,11 @@
  *   O26-J-00184  MONOLITHE RING · 925 STERLING SILVER · created 2026, sold
  *                (ACTIVATED) and unregistered: AUTHENTIC — FIRST REGISTRATION
  *   O26-J-00194  HORIZON CUFF, impossible travel (Tokyo → Paris → New York in
- *                95 minutes): an OPEN HIGH anomaly
+ *                95 minutes): an OPEN HIGH anomaly; the New York scanner says
+ *                where they saw it, an OPEN case in the console's Cases queue
  *   O26-J-00193  ECLIPSE PENDANT reported stolen, then scanned by a stranger:
- *                SUSPICIOUS ACTIVITY and an OPEN anomaly
+ *                SUSPICIOUS ACTIVITY and an OPEN anomaly; the stranger says
+ *                where it was offered, an OPEN case
  *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
@@ -37,7 +40,7 @@ import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
 import { noopLogger, type Actor, type Logger } from '../../types.js';
 import type { Db } from '../connection.js';
-import type { AnomalyStatus, ProductStatus, ServiceType, VerificationState } from '../schema.js';
+import type { AnomalyStatus, ProductStatus, ReportChannel, ServiceType, VerificationState } from '../schema.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -194,9 +197,17 @@ type Who = { account: AccountKey } | { stranger: number } | { boutique: Boutique
 
 type When = string | Date;
 
+/** The answer to WHERE DID YOU SEE OR BUY THIS PIECE? sent a few minutes after a scan that was not authentic (C-02). */
+interface DemoReport {
+  channel: ReportChannel;
+  place?: string;
+  note?: string;
+}
+
 interface Story {
   activate(at: When, boutique: BoutiqueKey): void;
-  scan(at: When, who: Who, place: PlaceKey, expect: VerificationState, opts?: { oldIssue?: number }): void;
+  /** With `report`, the scanner then answers the question, which opens a case in the console's Cases queue. */
+  scan(at: When, who: Who, place: PlaceKey, expect: VerificationState, opts?: { oldIssue?: number; report?: DemoReport }): void;
   /** Scan by the customer (FIRST REGISTRATION) followed by the registration itself. */
   register(at: When, account: AccountKey, place?: PlaceKey): void;
   /** Transfer code offered by `from`; with `accept`, redeemed by `to` who then scans the piece. */
@@ -341,12 +352,14 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'B2601-ECL',
     issuedAt: '2026-01-20T11:05',
     expect: 'SUSPICIOUS_ACTIVITY',
-    scenario: 'Reported STOLEN by Elena García, then scanned by a stranger in Barcelona: SUSPICIOUS ACTIVITY, open anomaly.',
+    scenario: 'Reported STOLEN by Elena García, then scanned by a stranger in Barcelona: SUSPICIOUS ACTIVITY, open anomaly, and an open case where the stranger says it was offered.',
     story: (s, t) => {
       s.activate('2026-03-07T12:00', 'ONLINE_ES');
       s.register('2026-03-08T20:30', 'elena');
       s.incident(t.ago(20, 2), 'elena', 'STOLEN');
-      s.scan(t.ago(2, 7), { stranger: 1 }, 'BARCELONA', 'SUSPICIOUS_ACTIVITY');
+      s.scan(t.ago(2, 7), { stranger: 1 }, 'BARCELONA', 'SUSPICIOUS_ACTIVITY', {
+        report: { channel: 'PRIVATE', place: 'Barcelona, a seller met through a classified ad', note: 'Offered well below the boutique price, without its box.' },
+      });
     },
   },
   {
@@ -356,7 +369,7 @@ const PRODUCTS: readonly ProductDef[] = [
     issuedAt: '2026-03-10T09:00',
     expect: 'AUTHENTIC_REGISTERED',
     scenario:
-      'Owned by Kenji Tanaka in Tokyo. Three days ago its code was scanned in Tokyo, Paris and New York within 95 minutes: impossible travel, open HIGH anomaly.',
+      'Owned by Kenji Tanaka in Tokyo. Three days ago its code was scanned in Tokyo, Paris and New York within 95 minutes: impossible travel, open HIGH anomaly, and an open case where the New York scanner says they saw it.',
     story: (s, t) => {
       s.activate('2026-04-02T05:00', 'TOKYO');
       s.register('2026-04-02T12:00', 'kenji');
@@ -364,7 +377,9 @@ const PRODUCTS: readonly ProductDef[] = [
       const burst = t.ago(3, 3);
       s.scan(burst, { account: 'kenji' }, 'TOKYO', 'AUTHENTIC_OWNERSHIP_VERIFIED');
       s.scan(new Date(burst.getTime() + 40 * 60_000), { stranger: 2 }, 'PARIS', 'SUSPICIOUS_ACTIVITY');
-      s.scan(new Date(burst.getTime() + 95 * 60_000), { stranger: 3 }, 'NEW_YORK', 'SUSPICIOUS_ACTIVITY');
+      s.scan(new Date(burst.getTime() + 95 * 60_000), { stranger: 3 }, 'NEW_YORK', 'SUSPICIOUS_ACTIVITY', {
+        report: { channel: 'ONLINE', place: 'a marketplace listing', note: 'The listing showed several cuffs with the same code.' },
+      });
       s.scan(t.ago(2, 1), { account: 'kenji' }, 'TOKYO', 'AUTHENTIC_OWNERSHIP_VERIFIED');
     },
   },
@@ -963,10 +978,23 @@ type AddStep = (when: When, label: string, run: (w: World) => Promise<void>) => 
 function storyFor(productId: string, add: AddStep): Story {
   return {
     activate: (when, boutique) => add(when, `activate (${boutique})`, (w) => activate(w, productId, when, boutique)),
-    scan: (when, who, place, expect, opts) =>
+    scan: (when, who, place, expect, opts) => {
       add(when, `scan by ${whoLabel(who)} in ${place}`, async (w) => {
-        await scan(w, productId, who, place, expect, opts?.oldIssue);
-      }),
+        const outcome = await scan(w, productId, who, place, expect, opts?.oldIssue);
+        if (opts?.report) w.pending.set(`report:${productId}`, outcome.scanId);
+      });
+      const report = opts?.report;
+      if (report) {
+        add(new Date(at(when).getTime() + 4 * 60_000), `report by ${whoLabel(who)}`, async (w) => {
+          const scanId = w.pending.get(`report:${productId}`);
+          if (!scanId) throw new Error('no scan to report on');
+          w.pending.delete(`report:${productId}`);
+          // As POST /api/v1/reports records it: the signed-in account, else the public with the IP pseudonym.
+          const actor: Actor = 'account' in who ? accountActor(w, who.account) : { type: 'system', id: 'public', ipHash: ipHash(w, who) };
+          await w.ctx.services.reports.submit({ scanId, channel: report.channel, place: report.place ?? null, note: report.note ?? null }, actor);
+        });
+      }
+    },
     register: (when, account, place) => {
       const start = at(when);
       add(start, `registration scan by ${account}`, async (w) => {

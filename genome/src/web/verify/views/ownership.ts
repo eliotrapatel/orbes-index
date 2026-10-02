@@ -26,7 +26,7 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD } from '../copy.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, REQUEST_ERRORS } from '../copy.js';
 import { contactBlock, sectionLabel } from './common.js';
 
 export interface OwnershipDeps {
@@ -67,8 +67,8 @@ interface PanelState {
 
 function messageOf(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.isNetwork) return 'The ORBES service could not be reached. Check your connection, then try again.';
-    if (e.status === 429) return 'Too many attempts. Please wait a moment, then try again.';
+    if (e.isNetwork) return REQUEST_ERRORS.network;
+    if (e.status === 429) return REQUEST_ERRORS.rateLimited;
     if (e.status === 401) return 'Your session has ended. Please sign in again.';
     if (e.status >= 500) return 'This could not be completed just now. Please try again in a moment.';
     return e.message;
@@ -461,7 +461,8 @@ export class OwnershipPanel {
         this.state.signInEmail = email.value.trim();
         this.state.authTab = 'signin';
         this.state.recover = null;
-        this.state.notice = ACCOUNT_PASSWORD.recovered(formatDateTimeLong(r.transfersPausedUntil, -new Date().getTimezoneOffset()));
+        // The offset at the end of the pause, 72 hours ahead: a change to or from summer time may fall in between.
+        this.state.notice = ACCOUNT_PASSWORD.recovered(formatDateTimeLong(r.transfersPausedUntil, -new Date(r.transfersPausedUntil).getTimezoneOffset()));
         this.render();
         this.root.querySelector<HTMLInputElement>('input[name="password"]')?.focus();
       },

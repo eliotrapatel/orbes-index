@@ -165,6 +165,22 @@ describe('demo seed', () => {
     expect(states.filter((s) => s.result_state === 'SUSPICIOUS_ACTIVITY').map((s) => s.country)).toEqual(['FR', 'US']);
   });
 
+  it('opens two cases in the Cases queue: where strangers saw the stolen pendant and the cuff of the impossible travel', async () => {
+    const cases = await ctx.services.reports.list({ status: 'OPEN' }, { page: 1, pageSize: 10 });
+    expect(cases.total).toBe(2);
+    expect(cases.items.map((c) => [c.scan.productId, c.channel, c.scan.state]).sort()).toEqual([
+      ['O26-J-00193', 'PRIVATE', 'SUSPICIOUS_ACTIVITY'],
+      ['O26-J-00194', 'ONLINE', 'SUSPICIOUS_ACTIVITY'],
+    ]);
+    // Each leads to the anomaly its scan took part in; the strangers are recorded as the public, never by name.
+    for (const c of cases.items) expect(c.anomaly?.status).toBe('OPEN');
+    const audited = await ctx.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('action', '=', 'scan.report').execute();
+    expect(audited).toEqual([
+      { actor_type: 'system', actor_id: 'public', details: {} },
+      { actor_type: 'system', actor_id: 'public', details: {} },
+    ]);
+  });
+
   it('keeps the audit chain intact and attributes back-office work to the demo seed', async () => {
     const chain = await ctx.audit.verifyChain();
     expect(chain.ok).toBe(true);

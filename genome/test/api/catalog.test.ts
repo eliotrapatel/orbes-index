@@ -141,10 +141,19 @@ describe('the editable catalogue (A-10)', () => {
   });
 
   it('POST /api/admin/categories/:code/active (ADMIN): a deactivated category issues no new piece, its pieces verify', async () => {
+    // The console's list counts the pieces issued in each category: what its Deactivate dialog says first.
+    const issuedInJ = Number(
+      (await h.ctx.db.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('category_id', '=', 1).executeTakeFirstOrThrow()).n,
+    );
+    expect(issuedInJ).toBeGreaterThan(0);
+    const listed = safeJson(await auditor.get('/api/admin/categories')) as { items: { code: string; products: number }[] };
+    expect(listed.items.find((c) => c.code === 'J')?.products).toBe(issuedInJ);
     expect(errorOf(await operator.post('/api/admin/categories/J/active', { active: false })).code).toBe('FORBIDDEN');
     const off = await admin.post('/api/admin/categories/j/active', { active: false });
     expect(off.statusCode, off.body).toBe(200);
-    expect(safeJson(off)).toMatchObject({ code: 'J', active: false });
+    expect(safeJson(off)).toMatchObject({ code: 'J', active: false, products: issuedInJ });
+    // Asked again for the state it has: 200, nothing changes and nothing is audited.
+    expect(safeJson(await admin.post('/api/admin/categories/J/active', { active: false }))).toMatchObject({ code: 'J', active: false });
     expect(errorOf(await issueViaApi(operator)).code).toBe('CATEGORY_INACTIVE');
     expect((await verify(piece.code.data)).state).toMatch(/^AUTHENTIC/);
     // The public list names the categories that accept new pieces; the console lists them all.

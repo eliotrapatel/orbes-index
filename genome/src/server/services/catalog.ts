@@ -20,6 +20,7 @@
  * is no longer offered for new products (IssuanceService: 409
  * MODEL_INACTIVE); its pieces verify as before.
  */
+import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { conflict, notFound, validationError } from '../errors.js';
@@ -347,22 +348,36 @@ export class CatalogService {
       ]);
   }
 
+  /**
+   * Collections with their counts. The issued pieces are counted once for all collections (one pass over the
+   * products, grouped), not once per collection: no index can serve product_overview's rule below.
+   */
   private collectionQuery() {
+    const shownIn = sql<string>`coalesce(p.collection_id, pm.collection_id)`;
     return this.db
       .selectFrom('collections as c')
-      .select((eb) => [
-        'c.id',
-        'c.name',
-        'c.created_at',
-        eb.selectFrom('models as m').select((m) => m.fn.countAll<number>().as('n')).whereRef('m.collection_id', '=', 'c.id').as('models'),
+      .leftJoin(
+        (eb) => eb.selectFrom('models as m').select((m) => ['m.collection_id', m.fn.countAll<number>().as('n')]).groupBy('m.collection_id').as('modelled'),
+        (j) => j.onRef('modelled.collection_id', '=', 'c.id'),
+      )
+      .leftJoin(
         // product_overview's rule: the piece's own collection, else its model's.
-        eb
-          .selectFrom('products as p')
-          .innerJoin('models as pm', 'pm.id', 'p.model_id')
-          .select((p) => p.fn.countAll<number>().as('n'))
-          .where((w) => w(w.fn.coalesce('p.collection_id', 'pm.collection_id'), '=', w.ref('c.id')))
-          .as('products'),
-      ]);
+        (eb) =>
+          eb
+            .selectFrom('products as p')
+            .innerJoin('models as pm', 'pm.id', 'p.model_id')
+            .select((p) => [shownIn.as('collection_id'), p.fn.countAll<number>().as('n')])
+            .groupBy(shownIn)
+            .as('issued'),
+        (j) => j.onRef('issued.collection_id', '=', 'c.id'),
+      )
+      .select(['c.id', 'c.name', 'c.created_at', 'modelled.n as models', 'issued.n as products']);
+  }
+
+  /** Issued pieces per category index (the console's categories list: what a deactivation touches). */
+  async issuedByCategory(): Promise<Map<number, number>> {
+    const rows = await this.db.selectFrom('products').select((eb) => ['category_id', eb.fn.countAll<number>().as('n')]).groupBy('category_id').execute();
+    return new Map(rows.map((r) => [r.category_id, Number(r.n)]));
   }
 }
 

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PNG } from 'pngjs';
 import { fromBase64Url, toHex } from '../../src/core/bytes.js';
 import { computeGenome } from '../../src/core/genome/genome.js';
@@ -268,6 +268,44 @@ describe('IssuanceService.issueProduct', () => {
     expect([e.httpStatus, e.code]).toEqual([409, 'MODEL_INACTIVE']);
     await w.t.db.updateTable('models').set({ active: true }).where('id', '=', m.id).execute();
     expect((await w.issuance.issueProduct(input, admin)).product.sku).toBe('HAL-RG');
+  });
+
+  it('refuses a model or a category deactivated while the piece was being prepared (A-10)', async () => {
+    const m = await w.t.db
+      .insertInto('models')
+      .values({ category_id: 1, name: 'ORBIT', type: 'RING', sku_prefix: 'ORB-RG' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const input = { categoryCode: 'J', modelId: m.id, material: '925 STERLING SILVER', withClaimSecret: true };
+    // The deactivation commits after the checks made before the transaction (the claim code is hashed in between).
+    const deactivatedMeanwhile = async (deactivate: () => Promise<unknown>) => {
+      const begin = w.t.db.transaction.bind(w.t.db);
+      const spy = vi.spyOn(w.t.db, 'transaction').mockImplementationOnce(() => {
+        const builder = begin();
+        return {
+          execute: async <R>(fn: Parameters<typeof builder.execute<R>>[0]) => {
+            await deactivate();
+            return builder.execute(fn);
+          },
+        } as unknown as ReturnType<typeof begin>;
+      });
+      try {
+        return await domainError(w.issuance.issueProduct(input, admin));
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    const before = await w.t.db.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    const model = await deactivatedMeanwhile(() => w.t.db.updateTable('models').set({ active: false }).where('id', '=', m.id).execute());
+    expect([model.httpStatus, model.code]).toEqual([409, 'MODEL_INACTIVE']);
+    await w.t.db.updateTable('models').set({ active: true }).where('id', '=', m.id).execute();
+    // Another instance deactivated the category: this one's cache still reads it active.
+    const category = await deactivatedMeanwhile(() => w.t.db.updateTable('categories').set({ active: false }).where('id', '=', 1).execute());
+    expect([category.httpStatus, category.code]).toEqual([409, 'CATEGORY_INACTIVE']);
+    await w.t.db.updateTable('categories').set({ active: true }).where('id', '=', 1).execute();
+    const after = await w.t.db.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    expect(Number(after.n)).toBe(Number(before.n));
+    expect((await w.issuance.issueProduct(input, admin)).product.sku).toBe('ORB-RG');
   });
 
   it('treats empty optional form fields as absent', async () => {

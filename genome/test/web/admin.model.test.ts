@@ -26,7 +26,7 @@ import {
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
 import { formatCount } from '../../src/web/admin/format.js';
-import { carePreview, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
+import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
@@ -651,12 +651,25 @@ describe('catalogue edits (A-10)', () => {
   });
 
   it('says how many issued pieces a change touches before it is saved', () => {
-    expect(modelImpact(184)).toBe('Touches 184 issued pieces: the result of each on /verify reads this model’s name, care instructions and collection as soon as they are saved.');
+    // The collection only of the pieces without one of their own (product_overview: the piece's, else the model's).
+    expect(modelImpact(184)).toBe(
+      'Touches 184 issued pieces: the result of each on /verify reads this model’s name and care instructions, and its collection unless the piece has its own, as soon as they are saved.',
+    );
     expect(modelImpact(1)).toMatch(/^Touches 1 issued piece: /);
     expect(modelImpact(12480).startsWith(`Touches ${formatCount(12480)} issued pieces: `)).toBe(true);
     expect(modelImpact(0)).toMatch(/^Touches no issued piece yet\. /);
     expect(collectionImpact(2)).toBe('Touches 2 issued pieces: the result of each on /verify reads the new name as soon as it is saved.');
     expect(collectionImpact(0)).toBe('Touches no issued piece yet.');
+    // A category: its pieces counted first, and none of their results changes.
+    expect(categoryImpact(9, true)).toBe(
+      'Its 9 issued pieces keep verifying as before: no public result changes. No new piece can be issued in it, and the generator stops offering it; it can be activated again.',
+    );
+    expect(categoryImpact(1, true)).toMatch(/^Its 1 issued piece keeps verifying as before: /);
+    expect(categoryImpact(0, true)).toBe('No piece has been issued in this category yet. No new piece can be issued in it, and the generator stops offering it; it can be activated again.');
+    expect(categoryImpact(12480, false)).toBe(
+      `The category receives new pieces again: the generator offers it with its active models. Its ${formatCount(12480)} issued pieces keep verifying as before: no public result changes.`,
+    );
+    expect(categoryImpact(0, false)).toBe('The category receives new pieces again: the generator offers it with its active models.');
   });
 
   it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {

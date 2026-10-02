@@ -292,9 +292,13 @@ describe('public API', () => {
       expect(again.statusCode).toBe(409);
       expect(errorOf(again)).toEqual({ code: 'REPORT_ALREADY_SENT', message: 'A report has already been sent for this reference.' });
       expect(await h.ctx.db.selectFrom('scan_reports').select('id').where('scan_event_id', '=', scanId).execute()).toHaveLength(1);
-      // Optional fields may be left out, or sent empty.
+      // Optional fields may be left out, or sent empty or blank: all mean "not given".
       const bare = await c.post('/api/v1/reports', { scanId: await unreadableScan(c), channel: 'PRIVATE', where: '', note: null });
       expect(bare.statusCode).toBe(201);
+      const blankScan = await unreadableScan(c);
+      const blank = await c.post('/api/v1/reports', { scanId: blankScan, channel: 'OTHER', where: '   ', note: ' \n\t ' });
+      expect(blank.statusCode, blank.body).toBe(201);
+      expect(await h.ctx.db.selectFrom('scan_reports').select(['place', 'note']).where('scan_event_id', '=', blankScan).executeTakeFirstOrThrow()).toEqual({ place: null, note: null });
     });
 
     it('refuses an authentic scan, a scan 24 hours old and an unknown scan alike: 409 REPORT_NOT_ALLOWED', async () => {

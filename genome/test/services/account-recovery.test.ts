@@ -3,9 +3,12 @@
  * issues after an identity check, and the recovery it allows: new password,
  * every session revoked, pending transfers cancelled, new transfers paused
  * for 72 hours, the code used once. One answer for an unknown email and a
- * wrong, expired, used or replaced code; 5 failures per account per hour.
+ * wrong, expired, used or replaced code; 5 wrong guesses per code per hour
+ * (attempts without an open code spend nothing). A password change or a
+ * sign-in with the old password that was under way when a recovery
+ * committed is refused.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { verifySecret } from '../../src/server/crypto/scrypt.js';
 import type { ProductStatus } from '../../src/server/db/schema.js';
@@ -22,6 +25,7 @@ import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/
 import { normalizeClaimCode } from '../../src/server/services/claim-codes.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
+import { OwnerService } from '../../src/server/services/owners.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
 import { SessionService } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
@@ -293,6 +297,113 @@ describe('AccountRecoveryService', () => {
       const { recoveryCode } = await recovery.issue(c.id, admin);
       await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
       expect(await accountRow(c.id)).toMatchObject({ failed_logins: 0, failed_logins_since: null });
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+    });
+
+    it('counts only guesses at an open code: attempts without one cost a scrypt and are recorded, but spend nothing', async () => {
+      const c = await customer();
+      // Someone who knows the email hammers the form while no code is open.
+      for (let i = 0; i < 2 * RECOVERY_ATTEMPT_LIMIT; i++) {
+        await expectDomainError(recovery.recover({ email: c.email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i % 10}`, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+      }
+      const recorded = (await audit.list({ action: 'account.recover_failed', targetId: c.id }, { page: 1, pageSize: 50 })).items;
+      expect(recorded).toHaveLength(2 * RECOVERY_ATTEMPT_LIMIT);
+      for (const e of recorded) expect(e.details).toEqual({ reason: 'NO_OPEN_CODE' });
+      // The code Client Services then issues starts with the whole budget: it works at once.
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+      expect(await audit.list({ action: 'account.recover_throttled', targetId: c.id })).toMatchObject({ items: [] });
+    });
+
+    it('throttles one code after its wrong guesses; a new code starts afresh, and the console says until when', async () => {
+      const c = await customer();
+      const first = await recovery.issue(c.id, admin);
+      const firstId = (await codeRows(c.id))[0].id;
+      for (let i = 0; i < RECOVERY_ATTEMPT_LIMIT; i++) {
+        clock.advance(60_000);
+        await expectDomainError(recovery.recover({ email: c.email, recoveryCode: `ZZZZ-ZZZZ-ZZZ${i}`, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+      }
+      const guesses = (await audit.list({ action: 'account.recover_failed', targetId: c.id })).items;
+      expect(guesses.map((e) => e.details).reverse()).toEqual([1, 2, 3, 4, 5].map((attempt) => ({ recoveryCodeId: firstId, attempt, reason: 'MISMATCH' })));
+      await expectDomainError(recovery.recover({ email: c.email, recoveryCode: first.recoveryCode, newPassword: NEW_PASSWORD }), 'RECOVERY_CODE_INVALID', 400);
+      expect((await audit.list({ action: 'account.recover_throttled', targetId: c.id })).items[0].details).toEqual({ recoveryCodeId: firstId, failures: RECOVERY_ATTEMPT_LIMIT });
+      // The sheet shows the throttle: until the first of the five guesses is an hour old.
+      const owners = new OwnerService({ db: t.db, audit, sessions, ownership, clock: clock.now });
+      const throttledUntil = new Date(guesses.at(-1)!.occurredAt.getTime() + RECOVERY_ATTEMPT_WINDOW_MS);
+      expect((await owners.sheet(c.id)).owner).toMatchObject({ recoveryCodeExpiresAt: first.expiresAt, recoveryCodeThrottledUntil: throttledUntil });
+
+      // Client Services issues a new code: it works at once, whatever the guesses at the old one.
+      const second = await recovery.issue(c.id, admin);
+      expect((await owners.sheet(c.id)).owner).toMatchObject({ recoveryCodeExpiresAt: second.expiresAt, recoveryCodeThrottledUntil: null });
+      await recovery.recover({ email: c.email, recoveryCode: second.recoveryCode, newPassword: NEW_PASSWORD });
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+    });
+
+    /** Run `during` (committed) just before the next transaction of the services begins its body. */
+    async function interleaved<T>(during: () => Promise<unknown>, request: () => Promise<T>): Promise<T> {
+      const begin = t.db.transaction.bind(t.db);
+      const spy = vi.spyOn(t.db, 'transaction').mockImplementationOnce(() => {
+        const builder = begin();
+        return {
+          execute: async <R>(fn: Parameters<typeof builder.execute<R>>[0]) => {
+            await during();
+            return builder.execute(fn);
+          },
+        } as unknown as ReturnType<typeof begin>;
+      });
+      try {
+        return await request();
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    it('refuses a password change that was under way when a recovery committed: the recovered password stays', async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      // Whoever holds a hijacked session changes the password they know; the customer's recovery commits between the
+      // check of that password and the write.
+      await expectDomainError(
+        interleaved(
+          () => recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }),
+          () => auth.changePassword({ type: 'account', id: c.id }, { currentPassword: PASSWORD, newPassword: 'the taker’s passphrase' }, c.actor, { keepToken: c.session.token }),
+        ),
+        'UNAUTHORIZED',
+        401,
+      );
+      expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
+      await expectDomainError(auth.login({ email: c.email, password: 'the taker’s passphrase' }, {}), 'INVALID_CREDENTIALS', 401);
+      await expectDomainError(auth.login({ email: c.email, password: PASSWORD }, {}), 'INVALID_CREDENTIALS', 401);
+      expect(await audit.list({ action: 'account.password_change', targetId: c.id })).toMatchObject({ items: [] });
+
+      // Without a session to keep, the hash that was verified must still be the stored one.
+      const d = await customer();
+      const second = await recovery.issue(d.id, admin);
+      await expectDomainError(
+        interleaved(
+          () => recovery.recover({ email: d.email, recoveryCode: second.recoveryCode, newPassword: NEW_PASSWORD }),
+          () => auth.changePassword({ type: 'account', id: d.id }, { currentPassword: PASSWORD, newPassword: 'the taker’s passphrase' }, d.actor),
+        ),
+        'CURRENT_PASSWORD_INVALID',
+        400,
+      );
+      expect((await auth.login({ email: d.email, password: NEW_PASSWORD }, {})).account.id).toBe(d.id);
+    });
+
+    it('opens no session for a sign-in with the old password that was under way when a recovery committed', async () => {
+      const c = await customer();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await expectDomainError(
+        interleaved(
+          () => recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }),
+          () => auth.login({ email: c.email, password: PASSWORD }, {}),
+        ),
+        'INVALID_CREDENTIALS',
+        401,
+      );
+      const left = await t.db.selectFrom('sessions').select('subject_id').where('subject_id', '=', c.id).execute();
+      expect(left).toEqual([]);
       expect((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).account.id).toBe(c.id);
     });
 

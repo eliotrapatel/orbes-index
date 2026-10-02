@@ -37,6 +37,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import type { AccountStatus, AcquiredVia, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clock, type Page, type PageRequest } from '../types.js';
+import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import type { OwnershipService } from './ownership.js';
@@ -90,6 +91,11 @@ export interface OwnerSummary {
   transfersPausedUntil: Date | null;
   /** The expiry of the open recovery code, while it can still be used. */
   recoveryCodeExpiresAt: Date | null;
+  /**
+   * After 5 wrong guesses at the open code within an hour (C-04), it is refused without being checked until then;
+   * null otherwise. A new code starts with the whole budget.
+   */
+  recoveryCodeThrottledUntil: Date | null;
 }
 
 /** A scan found by its REF, with the accounts it leads to. */
@@ -168,6 +174,18 @@ export interface LockOutcome {
   recoveryCodesRevoked: number;
 }
 
+/**
+ * An ownership period as the export gives it. A piece the account owns now keeps its status and ownership state,
+ * in the public vocabulary (a piece flagged as counterfeit reads REVOKED, BRAND §4.1); a piece it owned before carries
+ * neither: they now describe the next owner (a LOST or STOLEN declaration, a transfer under way), not this account.
+ */
+export type ExportedPiece = Omit<OwnedPiece, 'status' | 'ownershipState'> & { status?: ProductStatus; ownershipState?: OwnershipState };
+
+/** The status of a piece the account owns, as its export names it: no internal flag reaches the customer. */
+export function exportedStatus(status: ProductStatus): ProductStatus {
+  return status === 'COUNTERFEIT_FLAGGED' ? 'REVOKED' : status;
+}
+
 /** The answer to a request under the right of access: what the registry holds about one account. */
 export interface AccountExport {
   format: 'orbes.account-export';
@@ -183,7 +201,7 @@ export interface AccountExport {
     updatedAt: Date;
     transfersPausedUntil: Date | null;
   };
-  pieces: OwnedPiece[];
+  pieces: ExportedPiece[];
   transfers: { id: string; productId: string; direction: 'OUT' | 'IN'; status: TransferStatus; createdAt: Date; expiresAt: Date; completedAt: Date | null }[];
   scans: {
     reference: string;
@@ -345,7 +363,6 @@ export class OwnerService {
       if (account.status !== 'ACTIVE') throw conflict('ACCOUNT_NOT_ACTIVE', 'Only an active account can be locked.');
       await tx.updateTable('accounts').set({ status: 'LOCKED', updated_at: now }).where('id', '=', account.id).execute();
       const sessionsRevoked = await this.sessions.revokeAllForSubject('account', account.id, {}, tx);
-      const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
       // A code issued before the lock may be the takeover itself (a fooled identity check, THREAT-MODEL U):
       // it does not outlive the lock. After the unlock, Client Services issues a new one if the client needs it.
       const revoked = await tx
@@ -358,6 +375,8 @@ export class OwnerService {
         .returning('id')
         .execute();
       const recoveryCodesRevoked = revoked.length;
+      // Last of the writes: it audits each cancellation, and no row is locked after the audit chain's lock.
+      const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
       await this.audit.record(
         {
           actor,
@@ -486,7 +505,7 @@ export class OwnerService {
           updatedAt: a.updated_at,
           transfersPausedUntil: a.transfers_frozen_until && a.transfers_frozen_until.getTime() > now.getTime() ? a.transfers_frozen_until : null,
         },
-        pieces,
+        pieces: pieces.map(({ status, ownershipState, ...period }) => (period.until === null ? { ...period, status: exportedStatus(status), ownershipState } : period)),
         transfers: transfers.map((t) => ({
           id: t.id,
           productId: t.product_id,
@@ -570,9 +589,11 @@ export class OwnerService {
         'a.transfers_frozen_until',
         sql<number>`count(o.id) FILTER (WHERE o.ended_at IS NULL)`.as('current_products'),
         sql<number>`count(o.id)`.as('total_products'),
-        // The open recovery code's expiry, while it can still be used (one at most per account).
+        // The open recovery code, while it can still be used (one at most per account).
         sql<Date | null>`(SELECT r.expires_at FROM account_recovery_codes r
                            WHERE r.account_id = a.id AND r.used_at IS NULL AND r.revoked_at IS NULL AND r.expires_at > ${now})`.as('recovery_expires_at'),
+        sql<string | null>`(SELECT r.id FROM account_recovery_codes r
+                             WHERE r.account_id = a.id AND r.used_at IS NULL AND r.revoked_at IS NULL AND r.expires_at > ${now})`.as('recovery_code_id'),
       ])
       .groupBy(['a.id', 'a.email', 'a.display_name', 'a.country', 'a.status', 'a.created_at', 'a.transfers_frozen_until'])
       .orderBy('a.created_at', 'desc')
@@ -580,6 +601,11 @@ export class OwnerService {
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
+    const throttled = await recoveryThrottledUntil(
+      this.db,
+      rows.flatMap((r) => (r.recovery_code_id ? [{ accountId: r.id, codeId: r.recovery_code_id }] : [])),
+      now,
+    );
     return makePage(
       rows.map((r) => ({
         id: r.id,
@@ -593,6 +619,7 @@ export class OwnerService {
         // After an assisted recovery: new transfers out of the account are refused until then.
         transfersPausedUntil: r.transfers_frozen_until && r.transfers_frozen_until.getTime() > now.getTime() ? r.transfers_frozen_until : null,
         recoveryCodeExpiresAt: r.recovery_expires_at === null ? null : new Date(r.recovery_expires_at),
+        recoveryCodeThrottledUntil: (r.recovery_code_id && throttled.get(r.recovery_code_id)) || null,
       })),
       Number(total.n),
       page,

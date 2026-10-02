@@ -266,6 +266,16 @@ export const REPORT = Object.freeze({
 });
 
 /**
+ * What a form of the OWNERSHIP panel and the report on a scan say when the request fails without a message of the
+ * server's, written once for both: the network, then the rate limit. A refusal the server explains (a 4xx) reads as
+ * the server wrote it; a 5xx has a sentence of its own in each form.
+ */
+export const REQUEST_ERRORS = Object.freeze({
+  network: 'The ORBES service could not be reached. Check your connection, then try again.',
+  rateLimited: 'Too many attempts. Please wait a moment, then try again.',
+});
+
+/**
  * A 429 when a piece is registered with its claim code: too many claim codes tried for this piece
  * (by anyone, within the hour, SECURITY-MODEL §3.8), or too many requests from this connection.
  * Either way the wait can be up to an hour, longer than the scan's registration window, so the

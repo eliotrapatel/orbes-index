@@ -9,12 +9,13 @@
  * Activate). A model's name, care instructions and collection, and a
  * collection's name, read live on the result of every piece issued with
  * them: each dialog says how many issued pieces it touches before anything
- * is saved, and the model's shows its care block as the client reads it on
- * /verify. A model's category and SKU prefix never change.
+ * is saved (a category's, that its issued pieces keep verifying as before),
+ * and the model's shows its care block as the client reads it on /verify.
+ * A model's category and SKU prefix never change.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
-import { carePreview, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact, type ModelForm } from '../model/catalogue.js';
+import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact, type ModelForm } from '../model/catalogue.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import type { Category, Collection, Model } from '../types.js';
@@ -58,18 +59,12 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done('Category created.'));
 
-  // ADMIN. Reversible, and nothing issued changes: no typed phrase.
+  // ADMIN. Reversible, and nothing issued changes (said with the count of its pieces first): no typed phrase.
   const toggleCategory = (c: Category) =>
     void openDialog({
       title: c.active ? 'Deactivate category' : 'Activate category',
       eyebrow: `${humanize(c.name)} · ${c.code}`,
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        c.active
-          ? 'No new piece can be issued in this category, and the generator stops offering it. Its pieces keep verifying as before, and the category can be activated again.'
-          : 'The category receives new pieces again: the generator offers it with its active models.',
-      ),
+      body: h('p', { class: 'dialog__text', data: { testid: 'catalogue-impact' } }, categoryImpact(c.products, c.active)),
       confirmLabel: c.active ? 'Deactivate' : 'Activate',
       submit: async () => {
         await ctx.api.setCategoryActive(c.code, !c.active);
@@ -160,6 +155,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Name', cell: (c) => humanize(c.name), kind: ['wide'] },
     { label: 'Warranty', cell: (c) => `${c.warrantyMonths} MONTHS`, kind: ['nowrap'] },
     { label: 'Status', cell: (c) => activeMark(c.active), kind: ['nowrap'] },
+    { label: 'Issued', cell: (c) => formatCount(c.products), kind: ['num'] },
     { label: 'Created', cell: (c) => formatDate(c.createdAt), kind: ['nowrap'] },
   ];
   if (canToggle) {
