@@ -100,9 +100,10 @@ describe('housekeeping', () => {
     }
   });
 
-  it('purges scan history older than SCAN_RETENTION_DAYS, dependants first, and keeps everything when unset', async () => {
+  it('purges scan history older than SCAN_RETENTION_DAYS, dependants first, after counting it, and keeps everything when unset', async () => {
     // Each seeded scan carries an authentication event; the 120-day and the 1-day ones also carry a customer's
     // report (scan_reports, C-02), the old one closed by an admin: a report goes with its scan, open or closed.
+    // The daily statistics (A-09) count every complete day before the purge, and the purge never lowers them.
     const t = await createTestDb();
     const clock = createManualClock('2026-05-01T00:00:00.000Z');
     const day = 86_400_000;
@@ -124,6 +125,12 @@ describe('housekeeping', () => {
       auth: (await t.db.selectFrom('authentication_events').select('id').execute()).length,
       reports: (await t.db.selectFrom('scan_reports').select('id').execute()).length,
     });
+    /** The scans counted by the daily statistics: their total, and the days counted. */
+    const counted = async () => {
+      const rows = await t.db.selectFrom('scan_daily_stats').select(['day', 'country', 'result_state', 'event_type', 'n']).execute();
+      for (const r of rows) expect([r.country, r.result_state, r.event_type]).toEqual(['ZZ', 'UNKNOWN', 'VERIFY']);
+      return { scans: rows.reduce((n, r) => n + Number(r.n), 0), days: rows.length };
+    };
     try {
       const ids: Record<number, string> = {};
       for (const daysAgo of [400, 120, 31, 29, 1]) ids[daysAgo] = await seed(daysAgo);
@@ -153,9 +160,13 @@ describe('housekeeping', () => {
       // Unset (the default): nothing is purged.
       const keepAll = await createContext(testConfig(), { db: t.db, clock: clock.now });
       const hk0 = startHousekeeping(keepAll, { intervalMs: 3_600_000 });
-      expect((await hk0.runOnce()).scanHistory).toBe(0);
+      const first = await hk0.runOnce();
+      expect(first.scanHistory).toBe(0);
+      // Midnight UTC: yesterday is not complete yet (ten minutes after midnight), so the 1-day scan waits.
+      expect(first.scanStats).toBe(4);
       await hk0.stop();
       expect(await counts()).toEqual({ scans: 5, auth: 5, reports: 2 });
+      expect(await counted()).toEqual({ scans: 4, days: 4 });
 
       const log = captureLog();
       const ctx = await createContext(testConfig({ scanRetentionDays: 30 }), { db: t.db, clock: clock.now, log });
@@ -165,6 +176,8 @@ describe('housekeeping', () => {
         expect(r.scanHistory).toBe(3);
         // The 120-day scan went with its (closed) report; the recent report stays with its scan.
         expect(await counts()).toEqual({ scans: 2, auth: 2, reports: 1 });
+        // The purged scans stay counted: the statistics ran first and the purge never touches them.
+        expect(await counted()).toEqual({ scans: 4, days: 4 });
         expect(await t.db.selectFrom('scan_reports').select('scan_event_id').execute()).toEqual([{ scan_event_id: ids[1] }]);
         const left = await t.db.selectFrom('scan_events').select('occurred_at').orderBy('occurred_at').execute();
         expect(left.map((x) => new Date(x.occurred_at).getTime())).toEqual([at(29).getTime(), at(1).getTime()]);
@@ -174,6 +187,8 @@ describe('housekeeping', () => {
         clock.advance(30 * day);
         expect((await hk.runOnce()).scanHistory).toBe(2);
         expect(await counts()).toEqual({ scans: 0, auth: 0, reports: 0 });
+        // The 1-day scan, now in a complete day, was counted in the same pass, before its purge.
+        expect(await counted()).toEqual({ scans: 5, days: 5 });
       } finally {
         await hk.stop();
         await ctx.close();
