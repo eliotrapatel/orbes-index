@@ -386,7 +386,7 @@ AUDITOR is read-only. Mutations require OPERATOR, or ADMIN for keys, revocation 
 | GET | `/api/admin/audit/verify` | Verifies the audit hash chain. |
 | POST | `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable` | TOTP enrolment (extension); enable rotates the session token. |
 | POST | `/api/admin/codes/print-sheet` | Multi-up PDF of ACTIVE codes (extension). |
-| POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every file and file name says PROOF until the brand validates the layout (extension). |
+| POST | `/api/admin/certificates` | OPERATOR. Certificate cards (PDF card or A4 sheet of 10, or the print shop's CSV), each claim code checked against its hash, never stored or logged; every card and every file name, the CSV's included, says PROOF until the brand validates the layout; checks stop at the first wrong code, one request in progress per admin (extension). |
 | GET | `/api/admin/admins` | ADMIN. Console users (extension). |
 | POST | `/api/admin/admins/:id/totp/reset` | ADMIN. Removes a lost second factor, ends that admin's sessions, audited (extension). |
 
