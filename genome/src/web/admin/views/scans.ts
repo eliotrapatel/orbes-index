@@ -8,7 +8,7 @@
  * raised it, marked in the list).
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime, humanize, shortHash } from '../format.js';
+import { formatDateTime, formatWindowBound, humanize, shortHash } from '../format.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import type { ScanRecord } from '../types.js';
@@ -35,7 +35,7 @@ export async function scansView(ctx: ViewContext): Promise<HTMLElement> {
     ? h(
         'p',
         { class: 'filters__window', data: { testid: 'scans-window' } },
-        `Window ${q.from ? formatDateTime(q.from, { seconds: true }) : '…'} → ${q.to ? formatDateTime(q.to, { seconds: true }) : '…'}`,
+        `Window ${formatWindowBound(q.from, 'from')} → ${formatWindowBound(q.to, 'to')}`,
         ' ',
         linkButton('Clear', href('scans', {}, { ...q, from: undefined, to: undefined, scan: undefined, page: undefined }), 'ghost'),
       )

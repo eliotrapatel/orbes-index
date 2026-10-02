@@ -76,18 +76,23 @@ export const productRef = z
   .refine((s) => CANONICAL_PRODUCT_ID_RE.test(s) || UUID_RE.test(s), 'Invalid product id')
   .transform((s) => (UUID_RE.test(s) ? s.toLowerCase() : s.toUpperCase()));
 
+/** A calendar day, YYYY-MM-DD, from year 0001: JavaScript reads year 0000, PostgreSQL has none. */
 const isoDate = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a date (YYYY-MM-DD)')
+  .regex(/^(?!0000)\d{4}-\d{2}-\d{2}$/, 'Must be a date (YYYY-MM-DD)')
   .refine((s) => {
     const d = new Date(`${s}T00:00:00.000Z`);
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   }, 'Not a valid date');
 
+/** The first instant PostgreSQL stores as one of the common era (0001-01-01, UTC). */
+const FIRST_INSTANT_MS = Date.parse('0001-01-01T00:00:00.000Z');
+
 const isoDateTime = z
   .string()
   .max(40)
   .refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.test(s) && !Number.isNaN(Date.parse(s)), 'Must be an ISO 8601 date-time with a time zone')
+  .refine((s) => !(Date.parse(s) < FIRST_INSTANT_MS), 'Must be on or after 0001-01-01 (UTC)')
   .transform((s) => new Date(s));
 
 /** A query value where an empty or blank string means "not given" (filter forms send empty fields). */

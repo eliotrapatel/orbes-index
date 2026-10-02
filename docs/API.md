@@ -71,7 +71,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 1.3 Responses
 
-- JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
+- JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`, from year 0001: PostgreSQL has no year 0000, so a date or a date-time before `0001-01-01` (UTC) is `400 VALIDATION_FAILED`, never sent to the database. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
 - Wherever a path or body takes a product reference (`productId`), both the canonical id (case-insensitive) and the product's row UUID are accepted.
 - API responses carry `Cache-Control: no-store` unless an endpoint states otherwise.
 - Security headers on every response include: the Content-Security-Policy `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `Permissions-Policy: camera=(self)`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (except the public key list), and in production `Strict-Transport-Security: max-age=63072000; includeSubDomains`. `X-Powered-By` is removed.
@@ -1773,7 +1773,7 @@ AUDITOR. Paginated scan events with their authentication record, newest first.
 |---|---|
 | `productId` | Canonical id or uuid. An unknown product gives an empty page. |
 | `state` | One of the 9 verification states. |
-| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone. The console opens an anomaly's window (§16.9) and its triggering scan (the second it was made in, the scan marked) this way. |
+| `from`, `to` | The window the scans were made in, both ends included (extension): an ISO 8601 date-time with its zone (`2026-10-01T08:15:21.929Z`, `2026-10-01T10:15:21+02:00`), or a UTC day `YYYY-MM-DD`, which stands for its first millisecond as `from` and its last as `to`. Either may be given alone; `from` after `to` is `400 VALIDATION_FAILED`, and so is a time without a zone or a bound before `0001-01-01` (UTC). The console opens an anomaly's window (§16.9) and its triggering scan (the second it was made in, the scan marked) this way. |
 
 An empty value (`?state=&from=`) means the filter is not given, as a filter form sends it.
 
@@ -1979,9 +1979,9 @@ The window is at most **366 days**. Every figure comes from `scan_daily_stats` (
 - `daily` holds one entry per day of the window, oldest first, days without scans included.
 - `countries` holds every country with scans in the window, most scans first, then by code; `ZZ` is a scan whose location is unknown (`GEO_MODE=none`, or no country for its address). `signals` counts that country's scans in the four states.
 
-The console shows four figures (scans, authentic, counterfeit signals, countries), every scan per day as one curve whose cursor reads a day (pointer, or the arrow keys once the curve has focus), one small curve per state scaled to its busiest day and linked to its scans in Verification events (§16.1, while the history keeps them), the ten countries with the most scans and the ten with the most signals as hairline bars (oxblood where a signature did not verify), the signals by country and state, and the days with scans as a table. No map: the CSP admits no external tiles, and the volume does not call for one.
+The console shows four figures (scans, authentic, counterfeit signals, countries), every scan per day as one curve whose cursor reads a day (pointer, or the arrow keys once the curve has focus), one small curve per state scaled to its busiest day and linked to its scans in Verification events (§16.1, while the history keeps them) over the window's whole days (`from` the first day's `T00:00:00.000Z`, `to` the last day's `T23:59:59.999Z`), the ten countries with the most scans and the ten with the most signals as hairline bars (oxblood where a signature did not verify), the signals by country and state, and the days with scans as a table. No map: the CSP admits no external tiles, and the volume does not call for one.
 
-Errors: `400 VALIDATION_FAILED` (a day that is not `YYYY-MM-DD` or does not exist, `days` outside 1–366 or not a whole number, `from` with `days`, `from` after `to`, a window over 366 days).
+Errors: `400 VALIDATION_FAILED` (a day that is not `YYYY-MM-DD` or does not exist, a day of year 0000, `days` outside 1–366 or not a whole number, `from` with `days`, `from` after `to`, a window over 366 days, `days` that would start the window before `0001-01-01`).
 
 ---
 

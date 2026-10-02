@@ -101,6 +101,9 @@ describe('GET /api/admin/analytics', () => {
       'from=2026-09-01&days=30',
       'from=2026-02-30',
       'to=2026-10-01T00:00:00Z',
+      // PostgreSQL has no year 0000, given or reached by counting days back.
+      'from=0000-01-01&to=0000-01-02',
+      'to=0001-01-01&days=2',
     ]) {
       const res = await auditor.get(`/api/admin/analytics?${q}`);
       expect(res.statusCode, q).toBe(400);

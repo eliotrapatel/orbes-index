@@ -174,10 +174,23 @@ describe('actionable anomalies', () => {
       expect(await window('from=&to=')).toEqual([3, 2, 1, 0]);
     });
 
-    it('refuses a window that ends before it starts, or a time without a zone', async () => {
-      for (const q of ['from=2026-10-02&to=2026-10-01', 'from=2026-10-01T12:00:00Z&to=2026-10-01T11:59:59Z', 'from=2026-10-01T00:00', 'to=2026-02-30', 'from=yesterday']) {
-        expect(errorOf(await auditor.get(`/api/admin/scans?${q}`)).code, q).toBe('VALIDATION_FAILED');
+    it('refuses a window that ends before it starts, a time without a zone, or a bound before year 0001', async () => {
+      for (const q of [
+        'from=2026-10-02&to=2026-10-01',
+        'from=2026-10-01T12:00:00Z&to=2026-10-01T11:59:59Z',
+        'from=2026-10-01T00:00',
+        'to=2026-02-30',
+        'from=yesterday',
+        // PostgreSQL has no year 0000: refused (400), never sent to the database (500).
+        'from=0000-01-01',
+        'to=0000-06-01T00:00:00Z',
+        'from=0001-01-01T00:00:00%2B01:00',
+      ]) {
+        const res = await auditor.get(`/api/admin/scans?${q}`);
+        expect(res.statusCode, q).toBe(400);
+        expect(errorOf(res).code, q).toBe('VALIDATION_FAILED');
       }
+      expect(await window('from=0001-01-01T00:00:00Z')).toEqual([3, 2, 1, 0]);
     });
   });
 

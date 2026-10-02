@@ -2315,22 +2315,30 @@ a.bar__label:hover {
   pointer-events: none;
 }
 
+/* The readout opens 16 px beside the cursor, on the side with room; --dx
+   (model/analytics.ts readoutPlacement) is its left edge from the cursor, so
+   it never leaves the plot. Its own width wherever it opens, never squeezed by
+   the plot's edge. Over the cursor on a phone, it keeps clear of the day's
+   point (--low: at the foot of the plot). */
 .trend__tip {
   --x: 0;
+  --dx: 16px;
   position: absolute;
   z-index: 2;
   top: 0;
   left: calc(var(--x) * 100%);
+  transform: translateX(var(--dx));
+  width: max-content;
   min-width: 200px;
-  margin-left: 16px;
   padding: 12px 16px 14px;
   border: 1px solid var(--hairline-strong);
   background: var(--white);
   pointer-events: none;
 }
 
-.trend__tip--left {
-  transform: translateX(calc(-100% - 32px));
+.trend__tip--low {
+  top: auto;
+  bottom: 0;
 }
 
 .trend__tip-total {

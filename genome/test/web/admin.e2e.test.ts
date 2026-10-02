@@ -672,7 +672,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] svg.spark').getAttribute('class')).toBe('spark spark--critical');
     expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] .srow__value').textContent()).toBe('2');
     expect(await page.locator('.srow.srow--zero').count()).toBe(3);
-    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] a.srow__label').getAttribute('href')).toMatch(/^#\/scans\?state=INVALID_SIGNATURE&from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}$/);
+    expect(await page.locator('.srow[data-state=INVALID_SIGNATURE] a.srow__label').getAttribute('href')).toMatch(
+      /^#\/scans\?state=INVALID_SIGNATURE&from=\d{4}-\d{2}-\d{2}T00%3A00%3A00\.000Z&to=\d{4}-\d{2}-\d{2}T23%3A59%3A59\.999Z$/,
+    );
     // The countries: France first (its staff scans not counted); the signals, China first, in oxblood (its signatures did not verify).
     const countries = page.locator('.panel--countries .bar');
     expect(await countries.first().locator('.bar__label').textContent()).toBe('FR · France');
@@ -704,12 +706,51 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await shot(page, 'analytics', { full: true });
 
+    // On a phone, the readout stays on the screen whatever the day: beside the cursor where the plot has room, over it
+    // near the middle, clear of the day's point; the page never scrolls sideways.
+    await page.mouse.move(0, 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await trend.focus();
+      await page.keyboard.press('Home');
+      const misplaced: string[] = [];
+      for (let day = 0; day < 90; day++) {
+        if (day > 0) await page.keyboard.press('ArrowRight');
+        const m = await page.evaluate(() => {
+          const de = document.documentElement;
+          const readout = document.querySelector<HTMLElement>('[data-testid=analytics-tip]')!;
+          const t = readout.getBoundingClientRect();
+          const d = document.querySelector('.trend__dot')!.getBoundingClientRect();
+          const cx = d.left + d.width / 2;
+          const cy = d.top + d.height / 2;
+          return {
+            hidden: readout.hidden,
+            overflow: de.scrollWidth - de.clientWidth,
+            left: Math.round(t.left),
+            right: Math.round(t.right),
+            viewport: de.clientWidth,
+            coversPoint: cx > t.left && cx < t.right && cy > t.top && cy < t.bottom,
+          };
+        });
+        if (m.hidden || m.overflow !== 0 || m.left < 0 || m.right > m.viewport || m.coversPoint) misplaced.push(`day ${day}: ${JSON.stringify(m)}`);
+      }
+      expect(misplaced).toEqual([]);
+      expect(await trend.getAttribute('aria-valuenow')).toBe('89');
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+
     // Thirty days: Japan and the United States fall out of the window.
     await page.click('[data-testid=range-30]');
     await expect.poll(() => kpis.first().locator('.kpi__value').textContent()).toBe('14');
     expect(await page.evaluate(() => location.hash)).toBe('#/analytics?days=30');
     expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(30);
     expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'Unknown location']);
+    // A state's scans open in Verification events over the window's whole days, its last day to 23:59:59.
+    await page.click('.srow[data-state=INVALID_SIGNATURE] a.srow__label');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    expect(await page.locator('[data-testid=scans-window]').textContent()).toMatch(/^Window \d{2} [A-Z]{3} \d{4} · 00:00:00 UTC → \d{2} [A-Z]{3} \d{4} · 23:59:59 UTC/);
+    expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 

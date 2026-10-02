@@ -118,6 +118,7 @@ describe('admin codes: filters, batch ids and the print-sheet manifest', () => {
       for (const q of [
         `issuedFrom=${DAY2}&issuedTo=${DAY1}`,
         'issuedFrom=2026-02-30',
+        'issuedFrom=0000-01-01', // PostgreSQL has no year 0000
         'issuedTo=03/03/2026',
         'status=LOST',
         'modelId=not-a-uuid',

@@ -30,12 +30,8 @@ import {
 import { href } from '../router.js';
 import type { AnalyticsData } from '../types.js';
 import { trendChart, sparkline } from '../ui/charts.js';
-import { barList, kpi, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { barList, emptyState, kpi, pageHeader, section, statusMark, table } from '../ui/components.js';
 import type { ViewContext } from './context.js';
-
-function empty(text: string): HTMLElement {
-  return h('div', { class: 'empty' }, h('span', { class: 'empty__mark', attrs: { 'aria-hidden': 'true' } }), h('p', { class: 'empty__text' }, text));
-}
 
 /** LAST 30 DAYS · LAST 90 DAYS, each its own URL; the figures read in Helvetica Neue inside the display-face tab. */
 function rangeTabs(current: AnalyticsRange): HTMLElement {
@@ -115,7 +111,7 @@ export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
     { class: 'view view--analytics' },
     pageHeader({ eyebrow: 'Activity', title: 'Analytics', lead: analyticsLead(d), actions: [rangeTabs(range)] }),
     h('div', { class: 'kpis' }, ...analyticsKpis(d).map((k) => kpi(k.label, k.value, k.note, k.tone))),
-    section('Scans by day', none ? empty('No scan counted in these days.') : trendChart(d), {
+    section('Scans by day', none ? emptyState('No scan counted in these days.') : trendChart(d), {
       note: `${formatDate(d.from)} – ${formatDate(d.to)}`,
       class: 'panel--trend',
     }),
@@ -123,8 +119,8 @@ export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
     h(
       'div',
       { class: 'grid grid--2' },
-      section('Countries', none ? empty('No scan counted in these days.') : barList(countryBars(d)), { note: 'Most scans', class: 'panel--countries' }),
-      section('Counterfeit signals by country', d.signals.total === 0 ? empty('No counterfeit signal in these days.') : barList(signalBars(d)), {
+      section('Countries', none ? emptyState('No scan counted in these days.') : barList(countryBars(d)), { note: 'Most scans', class: 'panel--countries' }),
+      section('Counterfeit signals by country', d.signals.total === 0 ? emptyState('No counterfeit signal in these days.') : barList(signalBars(d)), {
         note: 'Invalid signature · Unknown · Malformed code · Suspicious activity',
         class: 'panel--signals',
       }),

@@ -172,6 +172,34 @@ export function nearestDay(fraction: number, days: number): number {
   return Math.max(0, Math.min(days - 1, Math.round(fraction * (days - 1))));
 }
 
+/** Space between the cursor (or the day's point) and its readout, in CSS pixels. */
+export const READOUT_GAP = 16;
+
+/**
+ * Where the day's readout opens in a plot `plot.width` × `plot.height` CSS pixels, for a day at `p` and a
+ * readout `box` wide and tall: `dx`, its left edge from the cursor (beside it on the right when it fits,
+ * else on the left; when neither side has room, as on a phone for a day near the middle, over the cursor,
+ * inside the plot, so the page never scrolls sideways; a readout wider than the plot keeps its right edge
+ * on the plot's), and `low`, true when it sits at the foot of the plot rather than its top: only over the
+ * cursor, when a readout at the top would cover the day's point and one at the foot would not (or would
+ * cover less of the plot above it).
+ */
+export function readoutPlacement(
+  p: Point,
+  box: { width: number; height: number },
+  plot: { width: number; height: number },
+  gap = READOUT_GAP,
+): { dx: number; low: boolean } {
+  const at = p.x * plot.width;
+  if (at + gap + box.width <= plot.width) return { dx: gap, low: false };
+  if (at - gap - box.width >= 0) return { dx: -gap - box.width, low: false };
+  const left = Math.min(Math.max(0, at - box.width / 2), plot.width - box.width);
+  // The point's distance from the top of the plot: clear of a readout at the top, else of one at the foot.
+  const top = (1 - p.y) * plot.height;
+  const low = top < box.height + gap / 2 && (top <= plot.height - box.height - gap / 2 || p.y > 0.5);
+  return { dx: left - at, low };
+}
+
 /** What the cursor reads on one day: the count first, then every state with scans that day. */
 export function dayReadout(d: AnalyticsData, index: number): { day: string; total: string; lines: { label: string; value: string; tone: Tone }[] } {
   const entry = d.daily[index];
@@ -197,7 +225,10 @@ export interface StateRow {
   values: number[];
   /** The busiest day (`4 ON 03 SEP 2026`), or an empty string without scans. */
   peak: string;
-  /** Its scans in Verification events, over the window (while the history keeps them). */
+  /**
+   * Its scans in Verification events, over the window (while the history keeps them): from the first
+   * millisecond of the first day to the last of the last day, as an anomaly's window links (`scanHref`).
+   */
   link: string;
 }
 
@@ -218,7 +249,7 @@ export function stateRows(d: AnalyticsData): StateRow[] {
       share: percent(total, d.total),
       values,
       peak: peakIndex < 0 ? '' : `${formatCount(values[peakIndex])} ON ${formatDate(d.daily[peakIndex].day)}`,
-      link: href('scans', {}, { state, from: d.from, to: d.to }),
+      link: href('scans', {}, { state, from: `${d.from}T00:00:00.000Z`, to: `${d.to}T23:59:59.999Z` }),
     };
   });
 }

@@ -94,15 +94,21 @@ export async function aggregateScanStats(db: Db, now: Date): Promise<number> {
 
 // ── Report ─────────────────────────────────────────────────────────────────
 
+/** The first day PostgreSQL stores as a date of the common era (it has no year 0000). */
+const FIRST_DAY = '0001-01-01';
+
 /**
  * The window of a report from the query (http/schemas.ts `analyticsQuery`, which already checks a
  * window given by both ends): `to` defaults to the last complete day, `from` to the `days` days
  * (default ANALYTICS_DEFAULT_DAYS) that end on `to`. Throws 400 VALIDATION_FAILED when `from` is after
- * `to` or the window is longer than ANALYTICS_MAX_DAYS.
+ * `to`, the window is longer than ANALYTICS_MAX_DAYS, or the `days` before `to` would start before
+ * 0001-01-01 (`to=0001-01-01&days=2`).
  */
 export function analyticsWindow(q: { from?: string; to?: string; days?: number }, now: Date): { from: string; to: string } {
   const to = q.to ?? lastCompleteDay(now);
   const from = q.from ?? addDays(to, -((q.days ?? ANALYTICS_DEFAULT_DAYS) - 1));
+  // A day before year 0001 reads `0000-…` or `-000001-…`: both sort before FIRST_DAY.
+  if (from < FIRST_DAY) throw validationError(`days: The window must start on ${FIRST_DAY} or later.`);
   if (from > to) throw validationError('to: from must not be after to.');
   if (daySpan(from, to) > ANALYTICS_MAX_DAYS) throw validationError(`to: The window is at most ${ANALYTICS_MAX_DAYS} days.`);
   return { from, to };

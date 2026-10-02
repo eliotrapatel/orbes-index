@@ -97,13 +97,18 @@ export interface Column<T> {
   kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions')[];
 }
 
+/** The empty state of a list or a chart: the mark and one line saying what is missing. */
+export function emptyState(text: string): HTMLElement {
+  return h('div', { class: 'empty' }, h('span', { class: 'empty__mark', attrs: { 'aria-hidden': 'true' } }), h('p', { class: 'empty__text' }, text));
+}
+
 export function table<T>(
   columns: Column<T>[],
   rows: T[],
   opts: { empty?: string; onRow?: (row: T) => string | null; caption?: string; /** The row the page is about (`is-current`). */ current?: (row: T) => boolean } = {},
 ): HTMLElement {
   if (rows.length === 0) {
-    return h('div', { class: 'empty' }, h('span', { class: 'empty__mark', attrs: { 'aria-hidden': 'true' } }), h('p', { class: 'empty__text' }, opts.empty ?? 'Nothing to show.'));
+    return emptyState(opts.empty ?? 'Nothing to show.');
   }
   const cls = (c: Column<T>) => (c.kind ?? []).map((k) => `col--${k}`);
   return h(

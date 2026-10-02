@@ -3,7 +3,9 @@
  * element by element (shared/dom.ts `s`), its geometry in attributes, its
  * look in the stylesheet (classes only, never a style attribute), and what
  * moves (the cursor, the labels along the axes) is placed by CSS custom
- * properties set through the CSSOM (`--x`, `--y`), as barList does with `--f`.
+ * properties set through the CSSOM (`--x`, `--y`), as barList does with `--f`;
+ * the readout's side too (`--dx`, from the room the plot has: never past its
+ * edges, so the page never scrolls sideways on a phone).
  *
  * The SVG stretches to its box (preserveAspectRatio="none"); its strokes keep
  * their width (`vector-effect: non-scaling-stroke` in the stylesheet), and
@@ -11,7 +13,7 @@
  */
 import { h, s } from '../../shared/dom.js';
 import { formatCount } from '../format.js';
-import { axisLevels, curve, dayReadout, dayTicks, nearestDay, niceMax, svgPoints, type StateRow } from '../model/analytics.js';
+import { axisLevels, curve, dayReadout, dayTicks, nearestDay, niceMax, readoutPlacement, svgPoints, type Point, type StateRow } from '../model/analytics.js';
 import type { AnalyticsData } from '../types.js';
 import { statusMark } from './components.js';
 
@@ -76,6 +78,13 @@ export function trendChart(d: AnalyticsData): HTMLElement {
     tip,
   );
 
+  // The readout's side from the room the plot actually has, measured once its day is written in it.
+  const placeTip = (p: Point) => {
+    const { dx, low } = readoutPlacement(p, { width: tip.offsetWidth, height: tip.offsetHeight }, { width: plot.clientWidth, height: plot.clientHeight });
+    tip.style.setProperty('--dx', `${Math.round(dx)}px`);
+    tip.classList.toggle('trend__tip--low', low);
+  };
+
   let current = d.daily.length - 1;
   const show = (index: number) => {
     if (d.daily.length === 0) return;
@@ -85,13 +94,13 @@ export function trendChart(d: AnalyticsData): HTMLElement {
     place(cursor, p.x);
     place(dot, p.x, p.y);
     place(tip, p.x);
-    tip.classList.toggle('trend__tip--left', p.x > 0.5);
     tip.replaceChildren(
       h('p', { class: 'trend__tip-total' }, r.total),
       h('p', { class: 'trend__tip-day' }, r.day),
       ...r.lines.map((l) => h('p', { class: 'trend__tip-line' }, statusMark(l.label, l.tone), h('span', { class: 'trend__tip-value' }, l.value))),
     );
     cursor.hidden = dot.hidden = tip.hidden = false;
+    placeTip(p);
     plot.setAttribute('aria-valuenow', String(current));
     plot.setAttribute('aria-valuetext', [r.day, r.total, ...r.lines.map((l) => `${l.label} ${l.value}`)].join(', '));
   };

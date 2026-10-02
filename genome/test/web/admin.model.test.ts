@@ -26,6 +26,7 @@ import {
   dayReadout,
   dayTicks,
   nearestDay,
+  readoutPlacement,
   niceMax,
   signalBars,
   signalCountries,
@@ -1201,6 +1202,34 @@ describe('analytics view model', () => {
     expect([nearestDay(0, 90), nearestDay(0.5, 90), nearestDay(1, 90), nearestDay(-1, 90), nearestDay(2, 90), nearestDay(0.7, 1)]).toEqual([0, 45, 89, 0, 89, 0]);
   });
 
+  it("opens the day's readout where the plot has room, never past its edges, and clear of the day's point", () => {
+    const desktop = { width: 1000, height: 200 };
+    const phone = { width: 316, height: 200 };
+    const box = { width: 250, height: 100 };
+    // Beside the cursor: on the right while it fits, then on the left.
+    expect(readoutPlacement({ x: 0.5, y: 1 }, box, desktop)).toEqual({ dx: 16, low: false });
+    expect(readoutPlacement({ x: 0.9, y: 1 }, box, desktop)).toEqual({ dx: -266, low: false });
+    expect(readoutPlacement({ x: 0, y: 0 }, box, phone)).toEqual({ dx: 16, low: false });
+    expect(readoutPlacement({ x: 1, y: 0 }, box, phone)).toEqual({ dx: -266, low: false });
+    // A phone, a day near the middle (37 % to 50 % of the window overflowed by up to 40 px before): over the cursor, inside the plot.
+    for (const x of [0.37, 0.45, 0.5, 0.6]) {
+      const { dx } = readoutPlacement({ x, y: 0 }, box, phone);
+      const left = x * phone.width + dx;
+      expect(left, String(x)).toBeGreaterThanOrEqual(0);
+      expect(left + box.width, String(x)).toBeLessThanOrEqual(phone.width);
+    }
+    expect(readoutPlacement({ x: 0.5, y: 0 }, box, phone)).toEqual({ dx: -125, low: false });
+    // Over the cursor, at the foot of the plot when the readout at its top would cover the point.
+    expect(readoutPlacement({ x: 0.5, y: 1 }, box, phone).low).toBe(true);
+    expect(readoutPlacement({ x: 0.5, y: 0.55 }, box, phone).low).toBe(true);
+    expect(readoutPlacement({ x: 0.5, y: 0.4 }, box, phone).low).toBe(false);
+    // Covered either way: the side away from the point.
+    expect(readoutPlacement({ x: 0.5, y: 0.5 }, { width: 250, height: 180 }, phone).low).toBe(false);
+    expect(readoutPlacement({ x: 0.5, y: 0.6 }, { width: 250, height: 180 }, phone).low).toBe(true);
+    // Wider than the plot: its right edge on the plot's, the overflow on the side of the axis labels.
+    expect(readoutPlacement({ x: 0.5, y: 0 }, { width: 400, height: 100 }, phone)).toEqual({ dx: -242, low: false });
+  });
+
   it('reads a day: its count first, then each state seen that day', () => {
     const d = analyticsData();
     expect(dayReadout(d, 1)).toEqual({
@@ -1220,7 +1249,8 @@ describe('analytics view model', () => {
     expect(rows.map((r) => r.state)).toEqual([...web.VERIFICATION_STATES]);
     const invalid = rows.find((r) => r.state === 'INVALID_SIGNATURE')!;
     expect(invalid).toMatchObject({ label: 'INVALID SIGNATURE', tone: 'critical', total: 2, share: '15%', values: [0, 2, 0, 0], peak: '2 ON 29 SEP 2026' });
-    expect(invalid.link).toBe('#/scans?state=INVALID_SIGNATURE&from=2026-09-28&to=2026-10-01');
+    // The window's days as instants, the last day whole: the scans view reads it 00:00:00 → 23:59:59 UTC.
+    expect(invalid.link).toBe('#/scans?state=INVALID_SIGNATURE&from=2026-09-28T00%3A00%3A00.000Z&to=2026-10-01T23%3A59%3A59.999Z');
     expect(rows.find((r) => r.state === 'REVOKED')).toMatchObject({ total: 0, share: '0%', peak: '' });
     expect(rows.find((r) => r.state === 'MALFORMED_CODE')!.tone).toBe('muted');
   });

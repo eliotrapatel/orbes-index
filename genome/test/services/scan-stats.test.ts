@@ -86,6 +86,10 @@ describe('day arithmetic', () => {
     expect(() => analyticsWindow({ from: '2025-09-30' }, now)).toThrow(/at most 366 days/);
     expect(() => analyticsWindow({ from: '2026-10-02' }, now)).toThrow(/from must not be after to/);
     expect(() => analyticsWindow({ days: 367 }, now)).toThrow(/at most 366 days/);
+    // PostgreSQL has no year 0000: a window that would start before 0001-01-01 is refused, not queried.
+    expect(analyticsWindow({ to: '0001-01-01', days: 1 }, now)).toEqual({ from: '0001-01-01', to: '0001-01-01' });
+    expect(() => analyticsWindow({ to: '0001-01-01', days: 2 }, now)).toThrow(/start on 0001-01-01 or later/);
+    expect(() => analyticsWindow({ to: '0001-03-01', days: 366 }, now)).toThrow(/start on 0001-01-01 or later/);
   });
 });
 
