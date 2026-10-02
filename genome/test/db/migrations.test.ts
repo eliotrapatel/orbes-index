@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { isCheckViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
-import { migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
+import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
 
@@ -98,7 +98,7 @@ describe('migrations', () => {
    * Every column, index, constraint and trigger of the public schema. Not the column positions: PostgreSQL
    * never reuses the number of a dropped column, so a column dropped and added again comes back one further.
    */
-  const snapshot = async () =>
+  const snapshotOf = async (db: Kysely<any>) =>
     (
       await sql<{ object: string }>`
         SELECT 'table ' || table_name || ' ' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS object
@@ -107,8 +107,9 @@ describe('migrations', () => {
         UNION ALL SELECT 'constraint ' || conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid)
           FROM pg_constraint WHERE connamespace = 'public'::regnamespace
         UNION ALL SELECT 'trigger ' || tgrelid::regclass::text || ' ' || tgname FROM pg_trigger WHERE NOT tgisinternal
-        ORDER BY 1`.execute(t.db)
+        ORDER BY 1`.execute(db)
     ).rows.map((r) => r.object);
+  const snapshot = () => snapshotOf(t.db);
 
   /** Roll back until `name` is reverted: the schema with it applied, and without it. */
   async function rollBackTo(name: string): Promise<{ with: string[]; without: string[] }> {
@@ -298,6 +299,44 @@ describe('migrations', () => {
     expect(await tables()).toContain('retailers');
     await sql`DELETE FROM scan_events`.execute(t.db);
     await sql`DELETE FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(t.db);
+  });
+
+  it('each migration of the 2026-10-02 plan (0004 to 0010) goes down to exactly the schema a fresh database has one migration earlier', async () => {
+    // The tracks wrote them apart; deployed together, every down step must still land on its predecessor's schema.
+    const names = Object.keys(MIGRATIONS);
+    const first = names.indexOf('0004_scan_reports');
+    expect(names.slice(first)).toEqual([
+      '0004_scan_reports',
+      '0005_account_recovery',
+      '0006_admin_password_change_required',
+      '0007_print_batch_indexes',
+      '0008_retail_mode',
+      '0009_scan_daily_stats',
+      '0010_models_active',
+    ]);
+    // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
+    const built = new Map<string, string[]>();
+    const fresh = await createTestDb({ migrated: false });
+    try {
+      const migrator = createMigrator(fresh.db);
+      for (const name of names) {
+        const r = await migrator.migrateUp();
+        expect(r.error, name).toBeUndefined();
+        expect(r.results?.map((x) => x.migrationName)).toEqual([name]);
+        built.set(name, await snapshotOf(fresh.db));
+      }
+    } finally {
+      await fresh.close();
+    }
+    const latest = await snapshot();
+    expect(latest).toEqual(built.get(names[names.length - 1]));
+    // This database rolled back one migration at a time: each step lands on the fresh schema of the one before.
+    for (let i = names.length - 1; i >= first; i--) {
+      expect((await migrateDown(t.db)).reverted).toEqual([names[i]]);
+      expect(await snapshot(), `${names[i]} down`).toEqual(built.get(names[i - 1]));
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(names.slice(first));
+    expect(await snapshot()).toEqual(latest);
   });
 
   it('roll back cleanly and re-apply', async () => {
