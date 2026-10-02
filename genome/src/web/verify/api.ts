@@ -46,6 +46,8 @@ export interface ApiClientOptions {
 interface RequestOptions {
   /** Send the CSRF token (unsafe account routes). */
   csrf?: boolean;
+  /** This request's own timeout (default: the client's). */
+  timeoutMs?: number;
   /** Internal: this is the retry after a CSRF refresh. */
   retried?: boolean;
   /** HTTP cache mode (default no-store; a public, cacheable read may use the browser's cache). */
@@ -53,6 +55,8 @@ interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+/** The contact of ORBES Client Services is optional: its read gives up early, and is tried again with the next result. */
+export const CONTACT_TIMEOUT_MS = 4_000;
 /** Largest response body we are willing to parse (verify outcomes are ~2 KB). */
 const MAX_RESPONSE_CHARS = 256 * 1024;
 
@@ -87,7 +91,7 @@ export class ApiClient {
 
   /** How ORBES Client Services is reached (`{}` when nothing is configured); the browser may keep it 5 minutes. */
   clientServices(): Promise<ClientServices> {
-    return this.request<ClientServices>('GET', '/api/v1/client-services', undefined, { cache: 'default' });
+    return this.request<ClientServices>('GET', '/api/v1/client-services', undefined, { cache: 'default', timeoutMs: CONTACT_TIMEOUT_MS });
   }
 
   // ── Account ──────────────────────────────────────────────────────────────
@@ -165,7 +169,7 @@ export class ApiClient {
     if (opts.csrf && this.csrfToken) headers['x-csrf-token'] = this.csrfToken;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.timeoutMs);
     let res: Response;
     try {
       res = await this.fetchImpl(this.base + path, {
@@ -224,4 +228,16 @@ export function toApiError(status: number, payload: unknown): ApiError {
   const code = typeof e?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(e.code) ? e.code : status === 429 ? 'RATE_LIMITED' : `HTTP_${status}`;
   const message = typeof e?.message === 'string' && e.message.length <= 500 ? e.message : 'The request could not be completed.';
   return new ApiError(status, code, message);
+}
+
+/**
+ * `p`'s value, or `fallback` when `p` has not settled within `ms`; `p` itself
+ * runs on (a read that answers late can still fill a cache). `p` must not reject.
+ */
+export function settledWithin<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }

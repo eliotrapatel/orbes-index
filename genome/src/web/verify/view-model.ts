@@ -150,6 +150,13 @@ export function formatDateTime(iso: string, offsetMinutes = 0): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+/** The offset of a time shown at `offsetMinutes` east of UTC, e.g. 'UTC+02:00', 'UTC-03:30'. */
+export function utcOffsetLabel(offsetMinutes = 0): string {
+  const m = Math.round(Math.abs(offsetMinutes));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `UTC${offsetMinutes < 0 && m > 0 ? '-' : '+'}${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+}
+
 /** First block of the scan id, enough for Client Services to find it. */
 export function shortReference(scanId: string): string {
   const head = (scanId || '').split('-')[0] ?? '';
@@ -281,7 +288,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
   // a warranty that no longer applies. Nothing when Client Services is not configured.
   const placement = !authentic ? 'help' : vm.warranty && outcome.warranty?.status === 'VOID' ? 'warranty' : null;
   if (placement && opts.clientServices) {
-    const contact = contactModel(opts.clientServices, vm, placement);
+    const contact = contactModel(opts.clientServices, vm, placement, opts.offsetMinutes ?? 0);
     if (contact) vm.contact = contact;
   }
   return vm;
@@ -292,7 +299,7 @@ const MAILBOX = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const PHONE = /^\+[1-9](?:[ .-]?[0-9]){6,14}$/;
 const HOURS = /^[^\p{Cc}]{1,120}$/u;
 
-function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement']): ContactModel | null {
+function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement'], offsetMinutes: number): ContactModel | null {
   const text = (v: unknown, re: RegExp, max: number): string | undefined => {
     if (typeof v !== 'string') return undefined;
     const t = v.trim();
@@ -305,12 +312,13 @@ function contactModel(cs: ClientServices, vm: ResultViewModel, placement: Contac
   if (email) {
     const title = vm.titleSub ? `${vm.titleMain} — ${vm.titleSub}` : vm.titleMain;
     const subject = ['ORBES', vm.reference ? `REF ${vm.reference}` : '', title].filter((x) => x.length > 0).join(' — ');
-    // The customer writes above the facts; RFC 6068 wants CRLF line breaks in a mailto body.
+    // The customer writes above the facts; RFC 6068 wants CRLF line breaks in a mailto body. The time is
+    // the one on the customer's screen, in their own zone, so the email names its offset from UTC.
     const facts: [string, string][] = [
       [CONTACT.reference, vm.reference],
       [CONTACT.result, title],
       [CONTACT.warranty, placement === 'warranty' ? (vm.warranty?.status ?? '') : ''],
-      [CONTACT.verified, vm.verifiedAt],
+      [CONTACT.verified, vm.verifiedAt ? `${vm.verifiedAt} (${utcOffsetLabel(offsetMinutes)})` : ''],
     ];
     const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
     contact.mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

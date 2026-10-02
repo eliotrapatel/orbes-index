@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { ApiClient, ApiError, toApiError } from '../../src/web/verify/api.js';
+import { describe, expect, it, vi } from 'vitest';
+import { ApiClient, ApiError, CONTACT_TIMEOUT_MS, settledWithin, toApiError } from '../../src/web/verify/api.js';
 import { SessionStore } from '../../src/web/verify/session.js';
 
 interface Call {
@@ -65,6 +65,47 @@ describe('ApiClient', () => {
     // Every other request stays out of the cache.
     await api.verify({ code: 'abc' });
     expect(caches).toEqual(['default', 'no-store']);
+  });
+
+  it('gives up the contact read after its own short timeout, never the verification\'s 15 s', async () => {
+    vi.useFakeTimers();
+    try {
+      // A server that never answers the contact read (the fetch only ends when aborted).
+      const stalled: typeof fetch = (_input, init) =>
+        new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      const api = new ApiClient({ fetch: stalled });
+      const read = api.clientServices().then(
+        () => 'answered',
+        (e: unknown) => (e instanceof ApiError ? e.code : 'other'),
+      );
+      await vi.advanceTimersByTimeAsync(CONTACT_TIMEOUT_MS - 1);
+      expect(await Promise.race([read, Promise.resolve('pending')])).toBe('pending');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await read).toBe('TIMEOUT');
+      expect(CONTACT_TIMEOUT_MS).toBeLessThan(15_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settledWithin: the value when it comes in time, else the fallback, and the read runs on', async () => {
+    vi.useFakeTimers();
+    try {
+      expect(await settledWithin<{ email?: string }>(Promise.resolve({ email: 'a@b.co' }), 1_000, {})).toEqual({ email: 'a@b.co' });
+      let answer!: (v: { email: string }) => void;
+      const slow = new Promise<{ email: string } | Record<string, never>>((resolve) => (answer = resolve));
+      const result = settledWithin(slow, 1_000, {});
+      await vi.advanceTimersByTimeAsync(999);
+      expect(await Promise.race([result, Promise.resolve('pending')])).toBe('pending');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toEqual({});
+      // The late answer still arrives for whoever kept the read (the app's cache).
+      answer({ email: 'late@theorbes.com' });
+      expect(await slow).toEqual({ email: 'late@theorbes.com' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('learns the CSRF token from /me and sends it on account mutations', async () => {

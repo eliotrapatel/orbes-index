@@ -26,6 +26,7 @@ import {
   shortReference,
   splitTitle,
   toneOf,
+  utcOffsetLabel,
 } from '../../src/web/verify/view-model.js';
 
 const GENOME = {
@@ -342,8 +343,9 @@ describe('verify view-model: ORBES Client Services contact', () => {
     expect(to).toBe('clientservices@theorbes.com');
     const title = VERIFICATION_COPY[state].title;
     expect(subject).toBe(`ORBES — REF 4515B884 — ${title}`);
-    // The customer writes above the facts Client Services needs: the reference, the result, the time shown.
-    expect(body).toBe(`\r\n\r\nREFERENCE: 4515B884\r\nRESULT: ${title}\r\nVERIFIED: 1 OCT 2026 · 10:30`);
+    // The customer writes above the facts Client Services needs: the reference, the result, the time shown,
+    // with its offset from UTC (Client Services in Paris reads a customer's local time unambiguously).
+    expect(body).toBe(`\r\n\r\nREFERENCE: 4515B884\r\nRESULT: ${title}\r\nVERIFIED: 1 OCT 2026 · 10:30 (UTC+02:00)`);
   });
 
   it('encodes the subject and body for a mailto: link (no raw spaces, dashes or line breaks)', () => {
@@ -362,7 +364,18 @@ describe('verify view-model: ORBES Client Services contact', () => {
     expect(vm.contact?.placement).toBe('warranty');
     const { subject, body } = mail(vm.contact!.mailto!);
     expect(subject).toBe('ORBES — REF 4515B884 — AUTHENTIC — REGISTERED');
-    expect(body).toBe('\r\n\r\nREFERENCE: 4515B884\r\nRESULT: AUTHENTIC — REGISTERED\r\nWARRANTY: NO LONGER VALID\r\nVERIFIED: 1 OCT 2026 · 10:30');
+    expect(body).toBe('\r\n\r\nREFERENCE: 4515B884\r\nRESULT: AUTHENTIC — REGISTERED\r\nWARRANTY: NO LONGER VALID\r\nVERIFIED: 1 OCT 2026 · 10:30 (UTC+02:00)');
+  });
+
+  it('names the offset of the time in the email, whatever the zone, and only there', () => {
+    const at = (offsetMinutes: number) => mail(resultViewModel(outcome('REVOKED'), { offsetMinutes, clientServices: CS }).contact!.mailto!).body.split('\r\n').at(-1);
+    expect(at(0)).toBe('VERIFIED: 1 OCT 2026 · 08:30 (UTC+00:00)');
+    expect(at(-300)).toBe('VERIFIED: 1 OCT 2026 · 03:30 (UTC-05:00)');
+    expect(at(330)).toBe('VERIFIED: 1 OCT 2026 · 14:00 (UTC+05:30)');
+    expect(at(-210)).toBe('VERIFIED: 1 OCT 2026 · 05:00 (UTC-03:30)');
+    // The screen keeps the time as it was: the offset is for Client Services.
+    expect(resultViewModel(outcome('REVOKED'), { offsetMinutes: 120, clientServices: CS }).verifiedAt).toBe('1 OCT 2026 · 10:30');
+    expect(utcOffsetLabel(-0)).toBe('UTC+00:00');
   });
 
   it('shows nothing without configuration, or with neither a usable email nor a usable phone', () => {

@@ -508,7 +508,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(href.protocol).toBe('mailto:');
     expect(href.pathname).toBe(CLIENT_SERVICES.email);
     expect(href.searchParams.get('subject')).toBe(`ORBES — REF ${ref} — INVALID SIGNATURE`);
-    expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d$`));
+    expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d \\(UTC[+-]\\d\\d:\\d\\d\\)$`));
     await attrOf(email, 'class', 'textlink contact__email');
     await countOf(page.locator('.btn:visible'), 1);
     // One line, inside the column (never wider than the page), in a text link's 44 px tap zone.
@@ -532,6 +532,40 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('shows a result without waiting for a contact read that does not answer, and offers the contact on a later result', async () => {
+    const issued = await srv.issue();
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[12] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The first read of the contact is held by the network and never answered; later ones go through.
+    let held = 0;
+    await page.route('**/api/v1/client-services', async (route) => {
+      if (held++ === 0) return;
+      await route.fallback();
+    });
+    const verified = page.waitForResponse((r) => r.url().endsWith('/api/v1/verify'));
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'stalled-contact.png', forged));
+    await verified;
+    const answeredAt = Date.now();
+    await page.locator('.view--result').waitFor({ timeout: 10_000 });
+    // Not the 15 s of a request timeout: about the 1 s the result may wait for the contact, at most.
+    expect(Date.now() - answeredAt).toBeLessThan(3_000);
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await countOf(page.locator('.contact'), 0);
+    await visible(page.locator('.result__help'));
+    // The held read gives up on its own (a few seconds); the next result reads the contact again and shows it.
+    await page.waitForTimeout(4_500);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'stalled-contact-2.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await visible(page.locator('.result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    expect(held).toBe(2);
+    expect(problems.filter((p) => !/client-services/.test(p))).toEqual([]);
+    await page.context().close();
   }, 120_000);
 
   it('offers the same contact in the WARRANTY tab of an authentic piece whose warranty no longer applies, and nowhere else', async () => {

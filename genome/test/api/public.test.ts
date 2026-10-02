@@ -74,7 +74,11 @@ describe('public API', () => {
 
     it('serves the configured email, phone and hours, and nothing else of the configuration', async () => {
       const cs = await createHarness({
-        config: { clientServices: { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' } },
+        config: {
+          clientServices: { email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' },
+          // A distinct budget per group, so the header names the group the route draws on.
+          rateLimits: { verifyPerMinute: 9_001, authPerMinute: 9_002, adminPerMinute: 9_003, apiPerMinute: 9_004 },
+        },
       });
       try {
         const res = await cs.client().get('/api/v1/client-services');
@@ -82,7 +86,8 @@ describe('public API', () => {
         expect(safeJson(res)).toEqual({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Saturday, 10:00–19:00 (Paris)' });
         expect(res.headers['cache-control']).toBe('public, max-age=300');
         // A public route of the api group: no session needed, rate-limited like the other reads.
-        expect(res.headers['x-ratelimit-limit']).toBeDefined();
+        expect(res.headers['x-ratelimit-limit']).toBe(String(cs.ctx.config.rateLimits.apiPerMinute));
+        expect(cs.ctx.config.rateLimits.apiPerMinute).toBe(9_004);
         // Only what was set: a phone alone is served alone.
         const phoneOnly = await createHarness({ config: { clientServices: { phone: '+33 1 23 45 67 89' } } });
         try {

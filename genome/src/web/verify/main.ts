@@ -12,7 +12,7 @@
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
-import { ApiClient } from './api.js';
+import { ApiClient, settledWithin } from './api.js';
 import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
 import { HINTS, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
@@ -30,6 +30,12 @@ type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message';
 
 /** Minimum time VERIFYING… stays visible, so a fast answer never reads as a flicker. */
 const MIN_VERIFYING_MS = 650;
+/**
+ * How long a result may wait for the contact of ORBES Client Services, from the moment the
+ * verification is sent (the two are read together). A contact that has not come by then is left
+ * out of this result; its read goes on, and the next result has it.
+ */
+const CONTACT_WAIT_MS = 1_000;
 /** Fade-out of the outgoing screen. */
 const LEAVE_MS = 280;
 /** Pause on "ORBES CODE FOUND" before VERIFYING…, so the lock is seen. */
@@ -287,20 +293,24 @@ class App {
     await this.verify(input, gen);
   }
 
-  /** How ORBES Client Services is reached; never rejects (`{}`, so no contact, when it cannot be read). */
+  /**
+   * How ORBES Client Services is reached; never rejects (`{}`, so no contact, when it cannot be
+   * read), and never makes a result wait more than CONTACT_WAIT_MS. A read that fails (it gives
+   * up after CONTACT_TIMEOUT_MS) is tried again with the next result.
+   */
   private contactDetails(): Promise<ClientServices> {
     this.clientServices ??= this.api.clientServices().catch(() => {
       this.clientServices = null;
       return {};
     });
-    return this.clientServices;
+    return settledWithin(this.clientServices, CONTACT_WAIT_MS, {});
   }
 
   private async verify(input: VerifyInput, gen: number): Promise<void> {
     this.lastInput = input;
     const started = performance.now();
     try {
-      // Read in parallel with the verification: the contact adds no wait to the result.
+      // Read in parallel with the verification: the contact makes the result wait 1 s at most (CONTACT_WAIT_MS).
       const [outcome, clientServices] = await Promise.all([this.api.verify(input), this.contactDetails()]);
       const rest = MIN_VERIFYING_MS - (performance.now() - started);
       if (rest > 0 && !prefersReducedMotion()) await sleep(rest);
