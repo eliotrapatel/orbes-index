@@ -5,7 +5,7 @@
  * the console user who took the latest decision (A-02).
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime, humanize, summarizeDetails } from '../format.js';
+import { anomalyName, formatDateTime, humanize, summarizeDetails } from '../format.js';
 import { can } from '../model/permissions.js';
 import { triageMoves } from '../model/registry.js';
 import { toneOf } from '../model/tone.js';
@@ -34,7 +34,7 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
       testId: 'triage',
       onClick: () =>
         void openDialog({
-          title: humanize(a.type),
+          title: anomalyName(a.type),
           eyebrow: `${a.severity} · ${a.productId ?? 'Unregistered identity'} · ${humanize(a.status)}`,
           body: h('p', { class: 'dialog__text' }, summarizeDetails(a.details, 400) || 'No details recorded.'),
           fields: [
@@ -68,7 +68,7 @@ export async function anomaliesView(ctx: ViewContext): Promise<HTMLElement> {
             h(
               'span',
               null,
-              humanize(a.type),
+              anomalyName(a.type),
               h('span', { class: 'cell-details' }, summarizeDetails(a.details, 220)),
               a.resolutionNote ? h('span', { class: 'cell-sub' }, a.resolutionNote) : null,
             ),

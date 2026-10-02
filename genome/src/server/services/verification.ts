@@ -18,6 +18,8 @@
  * `staffScan` (A-08, the console's sale mode) runs the same steps 1–8 for a
  * console user and records an ADMIN_TEST scan naming that user, without the
  * history, ownership and anomaly steps and without any public wording.
+ * `verify` with a console session (S-07: `ScanMeta.adminId`) is a staff scan
+ * too: ADMIN_TEST, no anomaly, no registration token, the public wording.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -73,6 +75,11 @@ export interface ScanMeta {
   ipHash?: string;
   geo?: GeoInfo;
   userAgentFamily?: string;
+  /**
+   * admin_users.id of the console user whose session the request carries (S-07): the scan is a
+   * staff scan, recorded as ADMIN_TEST under that user (see verify()).
+   */
+  adminId?: string;
 }
 
 export type VerificationNotice = 'UNUSUAL_ACTIVITY';
@@ -285,12 +292,22 @@ export class VerificationService {
     this.registrationTtlMs = deps.registrationTtlMs ?? SCAN_TOKEN_TTL_MS;
   }
 
+  /**
+   * The public verification. A request that carries a console session (`meta.adminId`, S-07) is a
+   * staff scan: the same decision, recorded as ADMIN_TEST under that console user without the
+   * device, session or account pseudonyms; it records no anomaly, takes no part in the scoring of
+   * step 9 (which still reads the public history, so the state is the one a customer would see) and
+   * earns no registration token. A public scan of a piece ORBES has not sold yet (ISSUED, or in a
+   * pre-sale service) records UNSOLD_PIECE_SCAN, once per piece and per UTC day, with weight 0:
+   * the state shown does not change.
+   */
   async verify(input: VerifyInput, meta: ScanMeta = {}): Promise<VerifyOutcome> {
     const started = performance.now();
     const now = this.clock();
     const genomeReading = cleanGenome(input?.genome);
     const clientMetrics = cleanClientMetrics(input?.client);
     const m = cleanMeta(meta);
+    const staff = m.adminId !== null;
 
     const w: Work = { reasons: [], signatureValid: false, trusted: false, genomeCheck: 'NOT_PROVIDED', riskScore: 0, isOwner: false };
     await this.decide(w, input?.code, genomeReading);
@@ -304,10 +321,12 @@ export class VerificationService {
           code_id: w.trusted && w.reg?.code ? w.reg.code.id : null,
           product_id: w.reg?.productUuid ?? null,
           packed_identity: w.payload ? packedOf(w.payload) : null,
-          event_type: 'VERIFY',
-          device_hash: m.deviceHash,
-          session_hash: m.sessionHash,
-          account_id: m.accountId,
+          event_type: staff ? 'ADMIN_TEST' : 'VERIFY',
+          admin_id: m.adminId,
+          // A staff scan names its console user and nothing else of the browser (as the sale mode's).
+          device_hash: staff ? null : m.deviceHash,
+          session_hash: staff ? null : m.sessionHash,
+          account_id: staff ? null : m.accountId,
           ip_hash: m.ipHash,
           country: m.country,
           region: m.region,
@@ -322,17 +341,27 @@ export class VerificationService {
         .executeTakeFirstOrThrow();
       const scanId = scan.id;
 
-      if (w.serviceFinding) await this.anomaly.recordFinding(this.serviceFinding(w, now), trx);
+      // A staff scan records no anomaly (ADMIN_TEST scans are outside every finding, as the sale mode's).
+      if (w.serviceFinding && !staff) await this.anomaly.recordFinding(this.serviceFinding(w, now), trx);
 
       if (w.trusted && w.reg?.code) {
         const reg = w.reg;
         const code = reg.code!;
         w.isOwner = m.accountId !== null && reg.ownerAccountId !== null && m.accountId === reg.ownerAccountId;
+        // A pre-sale service (ISSUED → SERVICED): the piece was never sold.
+        const preSaleService = await isPreSaleService(trx, { id: reg.productUuid, status: reg.status });
 
-        // Step 9: score this code's recent history, this scan included.
+        // S-07: the code of a piece ORBES has not sold yet, scanned outside the maison (no console session).
+        // Every such scan says so in its reasons; the finding itself is recorded once per piece and per UTC day.
+        if (!staff && (reg.status === 'ISSUED' || preSaleService)) {
+          w.reasons.push('ANOMALY:UNSOLD_PIECE_SCAN');
+          await this.anomaly.recordFinding(this.unsoldPieceFinding(w, now, scanId, m.country, preSaleService), trx, { oncePerUtcDay: true });
+        }
+
+        // Step 9: score this code's recent history, this scan included (a staff scan: the history alone).
         const evaluation = await this.anomaly.evaluate(
           { productId: reg.productUuid, codeId: code.id, scanEventId: scanId, accountIsOwner: w.isOwner },
-          { trx, productStatus: reg.status, codeStatus: code.status, ownerAccountId: reg.ownerAccountId },
+          { trx, productStatus: reg.status, codeStatus: code.status, ownerAccountId: reg.ownerAccountId, observeOnly: staff },
         );
         w.riskScore = evaluation.riskScore;
         for (const f of evaluation.findings) w.reasons.push(`ANOMALY:${f.type}`);
@@ -357,16 +386,16 @@ export class VerificationService {
           return { token: token.token, expiresAt: token.expiresAt.toISOString(), claimCodeRequired };
         };
         // A pre-sale service (ISSUED → SERVICED) was never sold: not open for first registration.
-        const registrable = async () =>
-          REGISTRABLE.includes(reg.status) && !(await isPreSaleService(trx, { id: reg.productUuid, status: reg.status }));
+        const registrable = REGISTRABLE.includes(reg.status) && !preSaleService;
         if (w.state === undefined) {
           if (w.isOwner) w.state = 'AUTHENTIC_OWNERSHIP_VERIFIED';
           else if (reg.ownerAccountId !== null) w.state = 'AUTHENTIC_REGISTERED';
-          else if (await registrable()) {
+          else if (registrable) {
             w.state = 'AUTHENTIC_FIRST_REGISTRATION';
-            registration = await issueToken(reg.hasClaimSecret);
+            // A staff scan is the console user's test, never a buyer's scan: no registration token.
+            if (!staff) registration = await issueToken(reg.hasClaimSecret);
           } else w.state = 'AUTHENTIC';
-        } else if (riskOnly && reg.ownerAccountId === null && reg.hasClaimSecret && (await registrable())) {
+        } else if (riskOnly && reg.ownerAccountId === null && reg.hasClaimSecret && registrable && !staff) {
           // Anomaly poisoning (strangers scanning copies) must not lock out the buyer who holds the
           // certificate claim code: the token is offered, and only the claim code can use it.
           registration = await issueToken(true);
@@ -767,6 +796,22 @@ export class VerificationService {
       details: f.details,
     };
   }
+
+  /** S-07: the public scan of a piece not sold yet, with the scan's country (null when unknown). */
+  private unsoldPieceFinding(w: Work, now: Date, scanEventId: string, country: string | null, preSaleService: boolean): AnomalyFinding {
+    const reg = w.reg!;
+    const { severity, weight } = ANOMALY_WEIGHTS.UNSOLD_PIECE_SCAN;
+    return {
+      type: 'UNSOLD_PIECE_SCAN',
+      severity,
+      weight,
+      riskScore: weight,
+      productId: reg.productUuid,
+      codeId: reg.code?.id ?? null,
+      at: now,
+      details: { country, productStatus: reg.status, ...(preSaleService ? { preSaleService: true } : {}), scanEventId },
+    };
+  }
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
@@ -862,6 +907,7 @@ interface CleanMeta {
   lat: number | null;
   lon: number | null;
   userAgentFamily: string | null;
+  adminId: string | null;
 }
 
 function cleanMeta(meta: ScanMeta | undefined): CleanMeta {
@@ -883,5 +929,6 @@ function cleanMeta(meta: ScanMeta | undefined): CleanMeta {
     lat: hasPoint ? roundCoord(lat) : null,
     lon: hasPoint ? roundCoord(lon) : null,
     userAgentFamily: text(meta?.userAgentFamily, 64),
+    adminId: typeof meta?.adminId === 'string' && UUID_RE.test(meta.adminId) ? meta.adminId.toLowerCase() : null,
   };
 }

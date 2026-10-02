@@ -158,7 +158,13 @@ describe('demo seed', () => {
     expect(stolen.items[0]).toMatchObject({ productId: 'O26-J-00193', status: 'OPEN' });
     const triaged = await ctx.services.anomaly.list({ type: 'POST_REVOCATION_SCAN' }, { page: 1, pageSize: 10 });
     expect(triaged.items[0]).toMatchObject({ productId: 'O26-J-00198', status: 'DISMISSED' });
-    expect(result.anomalies.open).toBe(2);
+    // S-07: stock scanned outside a console session. Lyon, by a stranger: open; the Paris boutique's own check: dismissed.
+    const unsold = await ctx.services.anomaly.list({ type: 'UNSOLD_PIECE_SCAN' }, { page: 1, pageSize: 10 });
+    expect(unsold.items.map((a) => [a.productId, a.status, a.severity, a.riskScore, a.details.country])).toEqual([
+      ['O26-L-00018', 'OPEN', 'MEDIUM', 0, 'FR'],
+      ['O26-J-00186', 'DISMISSED', 'MEDIUM', 0, 'FR'],
+    ]);
+    expect(result.anomalies.open).toBe(3);
 
     const states = await ctx.db
       .selectFrom('scan_events as s')

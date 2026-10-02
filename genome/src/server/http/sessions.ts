@@ -169,6 +169,20 @@ export async function loadAdmin(ctx: AppContext, request: FastifyRequest): Promi
   return auth;
 }
 
+/**
+ * The console user behind a public request (S-07: a staff scan on /api/v1/verify): the caller's
+ * admin session when the console itself would let it in — alive, of an enabled account with a role
+ * this server knows, its password the member's own, past the second factor when the console
+ * requires one — and null otherwise. The admin cookie is SameSite=Strict: a cross-site request
+ * never carries it, so no other site can make a visitor's scan count as a staff scan.
+ */
+export async function loadStaff(ctx: AppContext, request: FastifyRequest, opts: { requireMfa: boolean }): Promise<AdminAuth | null> {
+  const auth = await loadAdmin(ctx, request);
+  if (!auth || auth.admin.passwordChangeRequired) return null;
+  if (opts.requireMfa && !auth.session.mfaPassed) return null;
+  return hasRole(auth.admin.role, 'RETAIL') ? auth : null;
+}
+
 /** The authenticated account (the guard already ran; throws 401 defensively otherwise). */
 export function requireAccount(request: FastifyRequest): AccountAuth {
   const a = request.orbes.account;

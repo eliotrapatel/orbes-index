@@ -598,7 +598,7 @@ After-sales service operations.
 
 ### 5.16 `scan_events`
 
-One row per processed verification request (`POST /api/v1/verify`), including requests whose code turned out to be malformed or invalid, and per staff scan of the sale mode (`POST /api/admin/sale/lookup`, A-08: `ADMIN_TEST`). Requests rejected before processing (request validation errors, oversized or non-JSON bodies, rate limiting) are not recorded.
+One row per processed verification request (`POST /api/v1/verify`), including requests whose code turned out to be malformed or invalid, and per staff scan of the sale mode (`POST /api/admin/sale/lookup`, A-08: `ADMIN_TEST`). A verification request that carries a console session is a staff scan too (S-07, API §9.7: `ADMIN_TEST`). Requests rejected before processing (request validation errors, oversized or non-JSON bodies, rate limiting) are not recorded.
 
 | Column | Type | Null | Default | Constraints / notes |
 |---|---|---|---|---|
@@ -607,7 +607,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `code_id` | `uuid` | NULL | — | FK → `codes.id`. Set only when the scanned code matched the registry and its key was trusted. |
 | `product_id` | `uuid` | NULL | — | FK → `products.id`. Set when the signature was valid and the signed identity resolved to a product. |
 | `packed_identity` | `bigint` | NULL | — | `CHECK (BETWEEN 0 AND 4294967295)`. Set whenever the payload decoded. |
-| `event_type` | `text` | NOT NULL | — | `CHECK (event_type IN ('VERIFY','REGISTER','TRANSFER','ADMIN_TEST'))`. The current code writes `VERIFY` (public scans) and `ADMIN_TEST` (staff scans of the sale mode); anomaly scoring ignores `ADMIN_TEST`. |
+| `event_type` | `text` | NOT NULL | — | `CHECK (event_type IN ('VERIFY','REGISTER','TRANSFER','ADMIN_TEST'))`. The current code writes `VERIFY` (public scans) and `ADMIN_TEST` (staff scans: the sale mode, and `/api/v1/verify` with a console session, S-07); anomaly scoring ignores `ADMIN_TEST`, and an `ADMIN_TEST` scan records no anomaly. |
 | `device_hash` | `text` | NULL | — | Device pseudonym (see Privacy). |
 | `session_hash` | `text` | NULL | — | Session pseudonym, when the viewer was logged in. |
 | `account_id` | `uuid` | NULL | — | FK → `accounts.id`: the logged-in viewer. |
@@ -623,7 +623,7 @@ One row per processed verification request (`POST /api/v1/verify`), including re
 | `latency_ms` | `int` | NULL | — | `CHECK (latency_ms >= 0)`. Server-side processing time. |
 
 - **Indexes:** primary key; `scan_events_product_occurred_idx (product_id, occurred_at)`; `scan_events_code_occurred_idx (code_id, occurred_at)`; `scan_events_account_id_idx (account_id)`; `scan_events_admin_id_idx (admin_id)`; `scan_events_occurred_at_idx (occurred_at)`.
-- **Written by:** `VerificationService.verify`, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token; and `VerificationService.staffScan` (the sale mode, A-08: steps 1–8 only, `event_type = 'ADMIN_TEST'` with `admin_id`, its `authentication_events` row with risk 0 and no anomaly, and the sale token minted in the same transaction).
+- **Written by:** `VerificationService.verify`, in one transaction with the matching `authentication_events` row, any anomaly findings and any scan token (a staff scan, S-07: `event_type = 'ADMIN_TEST'` with `admin_id` and without the device, session and account pseudonyms, no anomaly, no registration token; no migration: the 0008 columns and CHECK already allow it); and `VerificationService.staffScan` (the sale mode, A-08: steps 1–8 only, `event_type = 'ADMIN_TEST'` with `admin_id`, its `authentication_events` row with risk 0 and no anomaly, and the sale token minted in the same transaction).
 - **Privacy:**
   - **IP addresses and device ids are stored only as HMACs.** Each pseudonym is `base64url(HMAC-SHA-256(IP_HASH_PEPPER, "orbes/<domain>/v1" ‖ 0x00 ‖ value))` (43 characters), with domain `ip` (canonical client IP; IPv4-mapped IPv6 unwrapped, IPv6 not truncated), `device` (the random 128-bit id from the signed `orbes_device` cookie, `__Host-orbes_device` in production) or `session` (the session id, itself the SHA-256 of the session token). The domain label keeps the three kinds from colliding. Without the pepper the values cannot be linked back to an address or a cookie.
   - **Coordinates are coarse:** latitude and longitude are rounded to 0.1° (about 10 km) and are only recorded when the edge or a trusted proxy supplies them (`GEO_MODE=cloudflare`, or `headers` behind `TRUST_PROXY`), or when the server looks the client IP up in a local GeoIP database (`GEO_MODE=mmdb`, `TRUST_PROXY` required in production; the IP itself is never stored). `region` is filled only in `cloudflare` mode. With `GEO_MODE=none` (the default), no location is stored.
@@ -678,7 +678,7 @@ Risk findings for human review. The system never revokes automatically.
 | `id` | `uuid` | NOT NULL | `gen_random_uuid()` | PK |
 | `product_id` | `uuid` | NULL | — | FK → `products.id`. NULL for a validly signed identity that is not registered. |
 | `code_id` | `uuid` | NULL | — | FK → `codes.id` |
-| `type` | `text` | NOT NULL | — | `CHECK (type ~ '^[A-Z][A-Z0-9_]*$')`. Values written: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN` (rules) and `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED` (verification). |
+| `type` | `text` | NOT NULL | — | `CHECK (type ~ '^[A-Z][A-Z0-9_]*$')`. Values written: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN` (rules) and `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`, `UNSOLD_PIECE_SCAN` (verification; the last, S-07, with `risk_score` 0, once per product and UTC day). A new type needs no migration: the CHECK takes any upper-case name. |
 | `severity` | `text` | NOT NULL | — | `CHECK (severity IN ('LOW','MEDIUM','HIGH','CRITICAL'))` |
 | `risk_score` | `int` | NOT NULL | — | `CHECK (BETWEEN 0 AND 100)`. Keeps its maximum across repeats. |
 | `details` | `jsonb` | NOT NULL | `'{}'` | Finding details (latest occurrence). |
@@ -691,7 +691,7 @@ Risk findings for human review. The system never revokes automatically.
 | `resolution_note` | `text` | NULL | — | ≤ 2 000 characters. |
 
 - **Indexes:** primary key; `anomalies_single_open_per_type`: unique `(product_id, type) WHERE status IN ('OPEN','ACKNOWLEDGED')` (a repeat finding increments `occurrences` instead of adding a row); `anomalies_status_severity_idx`; `anomalies_product_id_idx`; `anomalies_code_id_idx`.
-- **Written by:** `AnomalyService.recordFinding` (called by `VerificationService`; upsert on the partial unique index). Findings without a product cannot be deduplicated by the index (NULLs never conflict), so they are deduplicated by type and `details.packedIdentity` under a dedicated advisory lock (§8.3). `AnomalyService.updateStatus` (`PATCH /api/admin/anomalies/:id`; audit `anomaly.update`). Recording a finding is not audited.
+- **Written by:** `AnomalyService.recordFinding` (called by `VerificationService`; upsert on the partial unique index). `UNSOLD_PIECE_SCAN` (S-07) is recorded with `oncePerUtcDay`: nothing when a row of that product and type was last seen on the same UTC day, whatever its status (served by `anomalies_product_id_idx`), and the upsert's `DO UPDATE … WHERE last_seen_at < <day start>` keeps a concurrent first scan of the day from counting twice; its `occurrences` count days. Findings without a product cannot be deduplicated by the index (NULLs never conflict), so they are deduplicated by type and `details.packedIdentity` under a dedicated advisory lock (§8.3). `AnomalyService.updateStatus` (`PATCH /api/admin/anomalies/:id`; audit `anomaly.update`). Recording a finding is not audited.
 - **Confidentiality:** risk scores, rule details and thresholds are internal and never appear in public responses.
 
 ### 5.20 `revocations`

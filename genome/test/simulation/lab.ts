@@ -660,6 +660,27 @@ export class Lab {
     return { device: this.device(name, place, { client }), accountId: row.id };
   }
 
+  /**
+   * A boutique's tablet signed in to the console as a seller (a RETAIL account, through the admin
+   * login): its scans on /api/v1/verify are staff scans (S-07), recorded as ADMIN_TEST under it.
+   */
+  async staff(name: string, place: Place, opts: { preset?: PresetName } = {}): Promise<{ device: Device; adminId: string }> {
+    const n = ++this.devices;
+    const client = new Client(this.app, { ip: `192.0.2.${100 + (n % 150)}` });
+    const creds = await createAdmin(this.ctx, 'RETAIL');
+    const login = await client.post('/api/admin/auth/login', { email: creds.email, password: creds.password });
+    if (login.statusCode !== 200) throw new Error(`staff login failed: ${login.statusCode} ${login.body}`);
+    this.secrets.add(creds.id);
+    this.devices--; // device() below counts it
+    return { device: this.device(name, place, { client, ...opts }), adminId: creds.id };
+  }
+
+  /** The type of a recorded scan and the console user it names (ADMIN_TEST only). */
+  async scanEventOf(scanId: string | undefined) {
+    if (!scanId) return undefined;
+    return this.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id', 'device_hash']).where('id', '=', scanId).executeTakeFirst();
+  }
+
   /** First registration through the real token flow: POST /api/v1/ownership/register. */
   async register(owner: Device, scan: Submission, claimCode?: string): Promise<number> {
     const token = scan.body.registration?.token as string | undefined;

@@ -858,6 +858,7 @@ docker compose exec app node --import tsx scripts/admin.ts enable --email ops@th
 | `signature failed verify-after-sign; refused`, `signing failed`, `key generation failed` | Log (error) | Page: custody problem |
 | `startup failed`, `uncaught exception`, `unhandled rejection`, `graceful shutdown timed out` | Log (error) | Page |
 | New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` | Page: possible key compromise |
+| New `UNSOLD_PIECE_SCAN` anomaly (console: UNSOLD PIECE SCANNED): a piece not sold yet, scanned outside the console | `GET /api/admin/anomalies?status=OPEN`, or `anomalies` rows with `type = 'UNSOLD_PIECE_SCAN' AND status = 'OPEN'` (country in `details`), daily | Ticket: stock possibly diverted (API §9.7, THREAT-MODEL U) |
 | `verification flagged` (SUSPICIOUS ACTIVITY) | Log (warn) | Ticket / dashboard |
 | `housekeeping job failed`, `health check: database unavailable` | Log (error) | Ticket |
 | Audit chain broken | `GET /api/admin/audit/verify` (daily job) returns `ok: false` | Page |

@@ -3,11 +3,13 @@
  * Services contact, verify.
  *
  * Nothing here needs a session. /verify reads the account cookie only to
- * recognise the current owner, sets the `orbes_device` cookie, and passes
- * pseudonymous request metadata (hashed IP and device, coarse geo and user
- * agent family) to the verification service. The response is the service's
- * public outcome as is: it is built from an allow-list there and never
- * carries risk scores, thresholds or raw statuses.
+ * recognise the current owner, and the console cookie only to tell a staff
+ * scan (S-07: recorded as ADMIN_TEST under that console user, outside the
+ * anomaly findings, without a registration token); it sets the
+ * `orbes_device` cookie and passes pseudonymous request metadata (hashed IP
+ * and device, coarse geo and user agent family) to the verification service.
+ * The response is the service's public outcome as is: it is built from an
+ * allow-list there and never carries risk scores, thresholds or raw statuses.
  */
 import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';
@@ -17,12 +19,17 @@ import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
 import { parse, verifyBody } from '../http/schemas.js';
-import { loadAccount } from '../http/sessions.js';
+import { loadAccount, loadStaff } from '../http/sessions.js';
 import type { ScanMeta } from '../services/verification.js';
 
 export interface RouteDeps {
   ctx: AppContext;
   limiters: RateLimiters;
+}
+
+export interface PublicRouteDeps extends RouteDeps {
+  /** The console's rule (ADMIN_REQUIRE_MFA): a console session counts as staff only past its second factor. */
+  requireAdminMfa: boolean;
 }
 
 /** Package version, read once (falls back when the server runs bundled without package.json). */
@@ -37,7 +44,7 @@ export const APP_VERSION: string = (() => {
 
 const HEALTH_DB_TIMEOUT_MS = 2_000;
 
-export const publicRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
+export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { ctx, limiters, requireAdminMfa }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
 
   app.get('/api/v1/health', async (_request, reply) => {
@@ -100,6 +107,9 @@ export const publicRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, li
       // Keyed hash of the session id (itself sha256 of the token): links scans of one session, nothing more.
       meta.sessionHash = pseudonymize(ctx.config.ipHashPepper, 'session', viewer.session.id);
     }
+    // A browser signed in to the console scans as staff (S-07): ADMIN_TEST, under that console user.
+    const staff = await loadStaff(ctx, request, { requireMfa: requireAdminMfa });
+    if (staff) meta.adminId = staff.admin.id;
     return ctx.services.verification.verify(input, meta);
   });
 };

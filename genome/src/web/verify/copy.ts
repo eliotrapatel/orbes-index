@@ -221,6 +221,21 @@ export const CONTACT = Object.freeze({
 export const CLAIM_HELD =
   'Too many claim codes have been tried for this piece. Registration is held for up to an hour: please try again later. ORBES Client Services can assist you.';
 
+/**
+ * OWNERSHIP tab of a piece ORBES has not sold yet (AUTHENTIC: still in stock, or in a pre-sale
+ * service). A piece is sold when ORBES or an authorised retailer starts its warranty (the sale
+ * mode, A-08, or the console): until then it has not been handed over, which a buyer should know (S-07).
+ */
+export const NOT_DELIVERED_NOTE =
+  'This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.';
+
+/**
+ * OWNERSHIP tab of a piece open for its first registration, scanned from a browser signed in to the
+ * ORBES console: the server recorded a staff scan and offered no registration (S-07).
+ */
+export const STAFF_SCAN_NOTE =
+  'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered. To register a piece of your own, scan it in a browser that is not signed in to the console.';
+
 /** The honest limit of a code-based verification, shown under every positive result. */
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';

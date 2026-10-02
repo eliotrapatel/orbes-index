@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  anomalyName,
   formatAge,
   formatCount,
   formatDate,
@@ -47,6 +48,13 @@ describe('admin formatters', () => {
     expect(formatCount(undefined)).toBe('—');
     expect(percent(1, 3)).toBe('33%');
     expect(percent(5, 0)).toBe('0%');
+  });
+
+  it('names anomaly types: UNSOLD PIECE SCANNED (S-07), any other type humanized', () => {
+    expect(anomalyName('UNSOLD_PIECE_SCAN')).toBe('UNSOLD PIECE SCANNED');
+    expect(anomalyName('IMPOSSIBLE_TRAVEL')).toBe('IMPOSSIBLE TRAVEL');
+    expect(anomalyName('constructor')).toBe('CONSTRUCTOR');
+    expect(anomalyName(null)).toBe('—');
   });
 
   it('humanizes enums and shortens hashes', () => {

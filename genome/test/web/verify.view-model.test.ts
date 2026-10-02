@@ -9,8 +9,10 @@ import {
   DEFAULT_CARE,
   FALLBACK_TITLES,
   HINTS,
+  NOT_DELIVERED_NOTE,
   PROBLEMS,
   problemForApiError,
+  STAFF_SCAN_NOTE,
   STATUS,
   type ProblemKind,
 } from '../../src/web/verify/copy.js';
@@ -184,8 +186,14 @@ describe('verify view-model: ownership modes', () => {
     expect(vm.ownership).toEqual({ kind: 'register', token: 'tok_abc', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true, underReview: false });
   });
 
-  it('FIRST_REGISTRATION without a token offers nothing to register', () => {
-    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION')).ownership).toEqual({ kind: 'unregistered' });
+  it('FIRST_REGISTRATION without a token is a staff scan (S-07): nothing to register, and the tab says why', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION'));
+    expect(vm.ownership).toEqual({ kind: 'staff' });
+    // Not the registration's tab: the result opens on PRODUCT as for any piece the viewer cannot register.
+    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: '', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: false } })).ownership).toEqual({
+      kind: 'staff',
+    });
   });
 
   it('OWNERSHIP_VERIFIED is the viewer’s own piece, with any pending transfer', () => {
@@ -473,6 +481,17 @@ describe('verify copy', () => {
   it('every camera problem offers the photo upload', () => {
     for (const k of kinds.filter((x) => x.startsWith('camera-'))) {
       expect([PROBLEMS[k].primary, PROBLEMS[k].secondary], k).toContain('upload');
+    }
+  });
+
+  it('says a piece not sold yet has not been delivered, and why a staff scan offers no registration (S-07)', () => {
+    expect(NOT_DELIVERED_NOTE).toBe('This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.');
+    expect(STAFF_SCAN_NOTE).toMatch(/signed in to the ORBES console/);
+    expect(STAFF_SCAN_NOTE).toMatch(/registration is not offered/);
+    for (const line of [NOT_DELIVERED_NOTE, STAFF_SCAN_NOTE]) {
+      // The customer's object is a piece; the BRAND §4.5 words never used to the public.
+      expect(line).toMatch(/\bpiece\b/);
+      expect(line).not.toMatch(/\bproduct\b|fake|counterfeit|fraud|stolen|alert|danger|warning|genuine/i);
     }
   });
 

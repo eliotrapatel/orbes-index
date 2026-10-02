@@ -28,8 +28,12 @@ export const RULE_TYPES = [
 ] as const;
 export type RuleType = (typeof RULE_TYPES)[number];
 
-/** Findings recorded by the verification service itself (not scored by rules). */
-export const SERVICE_FINDING_TYPES = ['GENOME_MISMATCH', 'CODE_MISMATCH', 'VALID_SIGNATURE_UNREGISTERED'] as const;
+/**
+ * Findings recorded by the verification service itself (not scored by rules). UNSOLD_PIECE_SCAN
+ * (S-07): a public scan (no console session) of a piece ORBES has not sold yet, still ISSUED or in
+ * a pre-sale service; recorded once per piece and per UTC day.
+ */
+export const SERVICE_FINDING_TYPES = ['GENOME_MISMATCH', 'CODE_MISMATCH', 'VALID_SIGNATURE_UNREGISTERED', 'UNSOLD_PIECE_SCAN'] as const;
 export type ServiceFindingType = (typeof SERVICE_FINDING_TYPES)[number];
 
 export type AnomalyType = RuleType | ServiceFindingType;
@@ -46,6 +50,9 @@ export const ANOMALY_WEIGHTS: Readonly<Record<AnomalyType, { severity: AnomalySe
   GENOME_MISMATCH: { severity: 'HIGH', weight: 60 },
   CODE_MISMATCH: { severity: 'CRITICAL', weight: 100 },
   VALID_SIGNATURE_UNREGISTERED: { severity: 'CRITICAL', weight: 100 },
+  // Weight 0: the earliest sign of diverted stock (theft in stock or in transport, labels taken) is for
+  // ORBES to follow up; the customer's result never changes because of it.
+  UNSOLD_PIECE_SCAN: { severity: 'MEDIUM', weight: 0 },
 });
 
 /** One past scan of the code, as the rules see it. */

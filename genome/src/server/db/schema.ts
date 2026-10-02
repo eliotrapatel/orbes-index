@@ -353,7 +353,7 @@ export interface ScanEventsTable {
   device_hash: string | null;
   session_hash: string | null;
   account_id: string | null;
-  /** Migration 0008: the console user behind an ADMIN_TEST scan (a sale lookup); null otherwise. */
+  /** Migration 0008: the console user behind an ADMIN_TEST scan (a sale lookup, or /verify with a console session: S-07); null otherwise. */
   admin_id: string | null;
   ip_hash: string | null;
   country: string | null;              // char(2)

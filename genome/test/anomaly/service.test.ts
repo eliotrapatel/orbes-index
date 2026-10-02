@@ -97,6 +97,38 @@ describe('AnomalyService', () => {
     expect(e.findings).toEqual([]);
   });
 
+  it('observeOnly (a staff scan, S-07): the public history scores, the scan itself takes no part and nothing is recorded', async () => {
+    const r = await issue(w);
+    const t0 = w.clock.now().getTime();
+    await scanAt(r, new Date(t0), { country: 'FR' });
+    w.clock.set(t0 + 2 * MIN);
+    // A staff scan from Japan two minutes later: as a public scan it would be impossible travel.
+    const staff = await w.t.db
+      .insertInto('scan_events')
+      .values({ occurred_at: new Date(t0 + 2 * MIN), code_id: r.code.id, product_id: r.product.id, event_type: 'ADMIN_TEST', country: 'JP', result_state: 'PENDING' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const quiet = await w.anomaly.evaluate({ productId: r.product.id, codeId: r.code.id, scanEventId: staff.id, accountIsOwner: false }, { observeOnly: true });
+    expect(quiet).toEqual({ riskScore: 0, findings: [] });
+
+    // Public scans make the history impossible; a staff scan then reads it as a customer would, and adds nothing.
+    const pub = await scanAt(r, new Date(t0 + 2 * MIN), { country: 'JP' });
+    await evalAt(r, pub);
+    w.clock.set(t0 + 3 * MIN);
+    const before = (await anomalies(w)).filter((a) => a.product_id === r.product.id);
+    expect(before.map((a) => [a.type, a.occurrences])).toEqual([['IMPOSSIBLE_TRAVEL', 1]]);
+    const staff2 = await w.t.db
+      .insertInto('scan_events')
+      .values({ occurred_at: new Date(t0 + 3 * MIN), code_id: r.code.id, product_id: r.product.id, event_type: 'ADMIN_TEST', country: 'US', result_state: 'PENDING' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const seen = await w.anomaly.evaluate({ productId: r.product.id, codeId: r.code.id, scanEventId: staff2.id, accountIsOwner: false }, { observeOnly: true });
+    expect(seen.riskScore).toBe(60);
+    expect(seen.findings.map((f) => f.type)).toEqual(['IMPOSSIBLE_TRAVEL']);
+    expect((await anomalies(w)).filter((a) => a.product_id === r.product.id)).toEqual(before);
+    w.clock.set(t0);
+  });
+
   it('validates its input', async () => {
     const r = await issue(w);
     await expect(w.anomaly.evaluate({ productId: 'x', codeId: r.code.id, scanEventId: randomUUID(), accountIsOwner: false })).rejects.toThrow(TypeError);
@@ -153,6 +185,44 @@ describe('AnomalyService', () => {
       expect(rows.map((a) => a.status).sort()).toEqual(['OPEN', 'RESOLVED']);
       // Reopening the resolved one would create a second open anomaly of the same type.
       await expect(w.anomaly.updateStatus(row.id, { status: 'OPEN' }, admin)).rejects.toMatchObject({ code: 'ANOMALY_ALREADY_OPEN', httpStatus: 409 });
+    });
+
+    it('oncePerUtcDay (S-07): one occurrence per product and UTC day, in any status, even against a concurrent recording', async () => {
+      const r = await issue(w);
+      const day = Date.parse('2026-06-03T00:00:00.000Z');
+      const unsold = (at: number, details: Record<string, string> = {}) =>
+        finding({ type: 'UNSOLD_PIECE_SCAN', severity: 'MEDIUM', weight: 0, riskScore: 0, productId: r.product.id, codeId: r.code.id, at: new Date(at), details });
+      const rows = async () => (await anomalies(w)).filter((a) => a.product_id === r.product.id);
+
+      await w.anomaly.recordFinding(unsold(day + 9 * 60 * MIN, { country: 'FR' }), undefined, { oncePerUtcDay: true });
+      // Later the same day, twice at once: neither adds an occurrence (PostgreSQL races: test/verification/postgres.test.ts).
+      await Promise.all([
+        w.anomaly.recordFinding(unsold(day + 15 * 60 * MIN, { country: 'IT' }), undefined, { oncePerUtcDay: true }),
+        w.anomaly.recordFinding(unsold(day + 23 * 60 * MIN + 59 * MIN, { country: 'DE' }), undefined, { oncePerUtcDay: true }),
+      ]);
+      let [row] = await rows();
+      expect(row).toMatchObject({ type: 'UNSOLD_PIECE_SCAN', status: 'OPEN', occurrences: 1, risk_score: 0, details: { country: 'FR' } });
+      expect(row.last_seen_at.getTime()).toBe(day + 9 * 60 * MIN);
+
+      // The next UTC day counts once more: occurrences count days.
+      await w.anomaly.recordFinding(unsold(day + 24 * 60 * MIN + MIN, { country: 'ES' }), undefined, { oncePerUtcDay: true });
+      await w.anomaly.recordFinding(unsold(day + 30 * 60 * MIN, { country: 'GB' }), undefined, { oncePerUtcDay: true });
+      [row] = await rows();
+      expect(row).toMatchObject({ occurrences: 2, details: { country: 'ES' } });
+      expect(row.first_seen_at.getTime()).toBe(day + 9 * 60 * MIN);
+
+      // Dismissed that day: not raised again before the next day, then a new OPEN row starts.
+      await w.anomaly.updateStatus(row.id, { status: 'DISMISSED', note: 'stock check' }, admin);
+      await w.anomaly.recordFinding(unsold(day + 47 * 60 * MIN), undefined, { oncePerUtcDay: true });
+      expect((await rows()).map((a) => a.status)).toEqual(['DISMISSED']);
+      await w.anomaly.recordFinding(unsold(day + 48 * 60 * MIN, { country: 'FR' }), undefined, { oncePerUtcDay: true });
+      expect((await rows()).map((a) => [a.status, a.occurrences]).sort()).toEqual([
+        ['DISMISSED', 2],
+        ['OPEN', 1],
+      ]);
+
+      // Without a product there is no day to count.
+      await expect(w.anomaly.recordFinding({ ...unsold(day), productId: null }, undefined, { oncePerUtcDay: true })).rejects.toThrow(TypeError);
     });
 
     it('rejects malformed findings', async () => {

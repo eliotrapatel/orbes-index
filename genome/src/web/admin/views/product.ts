@@ -10,7 +10,7 @@
  * role; destructive ones ask for a typed confirmation.
  */
 import { h } from '../../shared/dom.js';
-import { formatDate, formatDateTime, humanize, isoDay, shortHash, summarizeDetails, versionLabel } from '../format.js';
+import { anomalyName, formatDate, formatDateTime, humanize, isoDay, shortHash, summarizeDetails, versionLabel } from '../format.js';
 import { openAnomalies, productActions, productAttributes, productSheet, type ProductActions } from '../model/product.js';
 import { confirmationPhrase } from '../model/registry.js';
 import { retailerOptions } from '../model/sale.js';
@@ -528,7 +528,7 @@ function anomaliesPanel(d: ProductDetail): HTMLElement {
     'Anomalies',
     table(
       [
-        { label: 'Finding', cell: (x) => humanize(x.type) },
+        { label: 'Finding', cell: (x) => anomalyName(x.type) },
         { label: 'Severity', cell: (x) => statusMark(x.severity, toneOf('severity', x.severity)), kind: ['nowrap'] },
         { label: 'Status', cell: (x) => anomalyStatus(x), kind: ['nowrap'] },
         { label: 'Seen', cell: (x) => String(x.occurrences), kind: ['num'] },

@@ -65,7 +65,7 @@ export const adminRecordRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
-    // A staff scan (ADMIN_TEST, the sale mode) names its console user, by email at display time.
+    // A staff scan (ADMIN_TEST: the sale mode, or /verify with a console session) names its console user, by email at display time.
     const staff = await adminEmailsById(db, rows.map((r) => r.admin_id));
     return makePage(
       rows.map((r) => ({

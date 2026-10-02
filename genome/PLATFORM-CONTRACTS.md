@@ -150,7 +150,8 @@ export type VerificationState = 'AUTHENTIC' | 'AUTHENTIC_FIRST_REGISTRATION' | '
   'AUTHENTIC_OWNERSHIP_VERIFIED' | 'SUSPICIOUS_ACTIVITY' | 'REVOKED' | 'UNKNOWN' | 'INVALID_SIGNATURE' | 'MALFORMED_CODE';
 export interface VerifyInput { code: string /* base64url of the 79-byte framed data */;
   genome?: { glyphs: (number | null)[]; confidence?: number[] }; client?: { rsErrors?: number; rsErasures?: number; moduleSizePx?: number; decodeMs?: number; source?: 'camera' | 'upload' } }
-export interface ScanMeta { deviceHash?: string; sessionHash?: string; accountId?: string; ipHash?: string; geo?: GeoInfo; userAgentFamily?: string }
+export interface ScanMeta { deviceHash?: string; sessionHash?: string; accountId?: string; ipHash?: string; geo?: GeoInfo; userAgentFamily?: string;
+  adminId?: string /* extension (S-07): the console user of the request's console session: a staff scan */ }
 verify(input: VerifyInput, meta: ScanMeta): Promise<VerifyOutcome>;
 ```
 
@@ -164,7 +165,7 @@ The decision procedure is normative. Each step that ends the procedure records t
 6. **Registry.** If the product or code is missing, the result is `UNKNOWN` with a CRITICAL anomaly `VALID_SIGNATURE_UNREGISTERED` (reasons `PRODUCT_NOT_REGISTERED` / `CODE_NOT_REGISTERED`). If the code exists but `payload_hash` differs, the result is `SUSPICIOUS_ACTIVITY` with a CRITICAL anomaly `CODE_MISMATCH`.
 7. **Genome cross-check:** recompute the genome from the signed identity and genome version. If at least 6 glyphs were provided with confidence ≥ 0.5 and at least 2 of those mismatch, the result is `SUSPICIOUS_ACTIVITY` with anomaly `GENOME_MISMATCH`. Record `genome_check`.
 8. **Statuses.** Code status `SUPERSEDED` or `REVOKED` gives `REVOKED`. Product status `REVOKED`, `COUNTERFEIT_FLAGGED` or `RETIRED` gives `REVOKED`. Product status `LOST` or `STOLEN` gives `SUSPICIOUS_ACTIVITY`.
-9. **Anomalies.** The scan event is inserted (for every request, steps 1–8 included) with the provisional `result_state` `'PENDING'` when no earlier step decided, and updated to the final state in the same transaction (step 12). For a trusted, registered code, run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY` (reason `RISK_THRESHOLD`). The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'` (reason `RISK_THRESHOLD_OWNER`).
+9. **Anomalies.** The scan event is inserted (for every request, steps 1–8 included) with the provisional `result_state` `'PENDING'` when no earlier step decided, and updated to the final state in the same transaction (step 12). *Extension (S-07):* for a trusted, registered code of a product not sold yet (`ISSUED`, or `SERVICED` in a pre-sale service), a public scan records the service finding `UNSOLD_PIECE_SCAN` (MEDIUM, weight 0, with the country, once per product and UTC day); it never changes the state. For a trusted, registered code, run `anomaly.evaluate(...)`, which includes this scan. If the risk score is at least `config.anomaly.suspiciousThreshold`, the result is `SUSPICIOUS_ACTIVITY` (reason `RISK_THRESHOLD`). The exception is a logged-in current owner: they get `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice: 'UNUSUAL_ACTIVITY'` (reason `RISK_THRESHOLD_OWNER`).
 10. **Ownership**, when the result is not already decided:
     - The viewer is the current owner: `AUTHENTIC_OWNERSHIP_VERIFIED`.
     - Another current owner exists: `AUTHENTIC_REGISTERED`.
@@ -211,7 +212,9 @@ The rules are pure functions over the code's recent scan history, which keeps th
 | `LOST_STOLEN_SCAN` | Scan of a product whose status is `LOST` or `STOLEN` | HIGH / 50 |
 | `POST_REVOCATION_SCAN` | Scan of a revoked or superseded code | MEDIUM / 30 |
 
-The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) are recorded by the verification service.
+The service-level findings `GENOME_MISMATCH` (HIGH), `CODE_MISMATCH` (CRITICAL) and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) are recorded by the verification service, and, as an extension (S-07), `UNSOLD_PIECE_SCAN` (MEDIUM, weight 0, once per product and UTC day: a public scan of a product not sold yet).
+
+- **Staff scans (extension, S-07):** a `verify` request with `ScanMeta.adminId` (the route sets it from a console session the admin guard would accept) is recorded as `ADMIN_TEST` with `admin_id` and without device, session or account pseudonyms. It records no finding, takes no part in `evaluate` (called with `observeOnly`: the public history is scored, the staff scan is left out and nothing is recorded) and gets no registration token. ADMIN_TEST scans never enter any rule's history.
 
 - **Sources, not cookies (SEC-7):** `SCAN_VELOCITY` and `DEVICE_DIVERSITY` count distinct sources: the IP pseudonym (`ip_hash`) when present, else the device-cookie pseudonym, else the session pseudonym; scans with none share one bucket. A client that drops its cookie on every request (one address) is one source; so is a boutique wifi with many phones. The config names `velocityMinDevices` / `deviceMax` are kept and apply to sources. `IMPOSSIBLE_TRAVEL` and `GEO_DISPERSION` use the geo fields, not sources.
 - **Risk score:** `100 · (1 − Π(1 − wᵢ·decayᵢ/100))`, rounded. `decay` is linear over `decayDays`, from the time of each rule's most recent violation. A same-place burst (`SCAN_VELOCITY` ⊕ `DEVICE_DIVERSITY`) scores 62 ≥ 60.
@@ -320,7 +323,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 | GET | `/api/v1/keys` and `/.well-known/orbes-keys.json` | Public keys (`listPublic`), including `revokedAt` and `compromisedAt` so offline verifiers apply the same trust cut-off. |
 | GET | `/api/v1/categories` | Returns `[{ code, index, name }]` for active categories. |
 | GET | `/api/v1/client-services` | Extension: `{ email?, phone?, hours? }` from `CLIENT_SERVICES_*`, `{}` when none is set. `Cache-Control: public, max-age=300`. |
-| POST | `/api/v1/verify` | Takes `VerifyInput` (`code`: any string of at most 1024 characters; undecodable codes are recorded as `MALFORMED_CODE`), returns `VerifyOutcome`. Missing, non-string or longer codes and other schema violations → 400, not recorded. Rate-limited. Reads the session cookie optionally to detect the owner. |
+| POST | `/api/v1/verify` | Takes `VerifyInput` (`code`: any string of at most 1024 characters; undecodable codes are recorded as `MALFORMED_CODE`), returns `VerifyOutcome`. Missing, non-string or longer codes and other schema violations → 400, not recorded. Rate-limited. Reads the session cookie optionally to detect the owner, and the admin cookie to tell a staff scan (extension, S-07: ADMIN_TEST, no finding, no registration token). |
 
 ### Account routes (cookie `orbes_session`, `__Host-` prefixed in production)
 

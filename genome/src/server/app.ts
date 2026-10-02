@@ -119,10 +119,11 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   const limiters = await registerRateLimits(app, config);
 
   const deps = { ctx, limiters };
-  await app.register(publicRoutes, deps);
+  const requireAdminMfa = opts.requireAdminMfa ?? config.adminRequireMfa;
+  await app.register(publicRoutes, { ...deps, requireAdminMfa });
   await app.register(accountRoutes, deps);
   await app.register(ownershipRoutes, deps);
-  await app.register(adminRoutes, { ...deps, requireMfa: opts.requireAdminMfa ?? config.adminRequireMfa });
+  await app.register(adminRoutes, { ...deps, requireMfa: requireAdminMfa });
 
   if (opts.serveStatic ?? true) await registerStatic(app, opts.staticDir ?? DEFAULT_STATIC_DIR);
 

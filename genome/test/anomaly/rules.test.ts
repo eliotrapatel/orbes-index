@@ -11,7 +11,9 @@ import {
   lostStolenScan,
   postRevocationScan,
   prepareHistory,
+  RULE_TYPES,
   scanVelocity,
+  SERVICE_FINDING_TYPES,
   sourceKey,
   type ScanRecord,
 } from '../../src/server/services/anomaly-rules.js';
@@ -337,6 +339,10 @@ describe('scoring', () => {
     expect(ANOMALY_WEIGHTS.GENOME_MISMATCH.severity).toBe('HIGH');
     expect(ANOMALY_WEIGHTS.CODE_MISMATCH.severity).toBe('CRITICAL');
     expect(ANOMALY_WEIGHTS.VALID_SIGNATURE_UNREGISTERED.severity).toBe('CRITICAL');
+    // S-07: recorded for ORBES to follow up, never part of the customer's result.
+    expect(ANOMALY_WEIGHTS.UNSOLD_PIECE_SCAN).toEqual({ severity: 'MEDIUM', weight: 0 });
+    expect(SERVICE_FINDING_TYPES).toContain('UNSOLD_PIECE_SCAN');
+    expect(RULE_TYPES).not.toContain('UNSOLD_PIECE_SCAN' as never);
   });
 
   it('prepareHistory drops invalid entries and sorts deterministically', () => {

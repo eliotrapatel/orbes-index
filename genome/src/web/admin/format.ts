@@ -59,6 +59,17 @@ export function humanize(v: string | null | undefined): string {
   return v.replace(/_/g, ' ').toUpperCase();
 }
 
+/** Anomaly types whose console name is not their code read aloud. */
+const ANOMALY_NAMES: ReadonlyMap<string, string> = new Map([
+  // S-07: a piece ORBES has not sold yet, scanned outside a console session.
+  ['UNSOLD_PIECE_SCAN', 'UNSOLD PIECE SCANNED'],
+]);
+
+/** The console's name of an anomaly type (`UNSOLD PIECE SCANNED`); any other type humanized. */
+export function anomalyName(type: string | null | undefined): string {
+  return (type ? ANOMALY_NAMES.get(type) : undefined) ?? humanize(type);
+}
+
 /** First and last characters of a long hash: `3f9a1c…e04b`. Short values are returned unchanged. */
 export function shortHash(v: string | null | undefined, head = 8, tail = 4): string {
   if (!v) return '—';

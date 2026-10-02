@@ -412,7 +412,7 @@ export interface ScanRecord {
   codeId: string | null;
   packedIdentity: number | null;
   accountId: string | null;
-  /** The console user behind a staff scan (ADMIN_TEST: the sale mode), by email. */
+  /** The console user behind a staff scan (ADMIN_TEST: the sale mode, or /verify in a browser signed in to the console), by email. */
   adminEmail: string | null;
   deviceHash: string | null;
   country: string | null;

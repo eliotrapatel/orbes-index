@@ -86,7 +86,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 | Cookie (development, test) | Production name | Set by | Purpose | Attributes |
 |---|---|---|---|---|
 | `orbes_session` | `__Host-orbes_session` | Account registration and login | Customer session | `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` in production, `Expires` = session expiry |
-| `orbes_admin` | `__Host-orbes_admin` | Admin login, TOTP enrolment (new token) | Staff session | same |
+| `orbes_admin` | `__Host-orbes_admin` | Admin login, TOTP enrolment (new token) | Staff session; on `POST /api/v1/verify` it makes the scan a staff scan (§9.7) | same |
 | `orbes_device` | `__Host-orbes_device` | `POST /api/v1/verify` | Pseudonymous device id for anomaly scoring (§4) | `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in production, `Max-Age` 2 years, signed with `COOKIE_SECRET` |
 
 - In production every cookie carries the `__Host-` prefix: browsers then accept it only with `Secure`, `Path=/` and no `Domain`, so a sibling subdomain or a plain-HTTP response can neither plant nor shadow it. An unprefixed `orbes_session` sent to a production server is ignored. The prefix needs HTTPS, hence the plain names in development and test.
@@ -163,7 +163,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 What the server records about a verification request (see [DATABASE §5.16](DATABASE.md#516-scan_events)):
 
-- `HMAC(IP_HASH_PEPPER, device id)`, `HMAC(IP_HASH_PEPPER, IP)` and, for a logged-in viewer, an HMAC of the session id. Raw IP addresses and device ids are never stored or logged.
+- `HMAC(IP_HASH_PEPPER, device id)`, `HMAC(IP_HASH_PEPPER, IP)` and, for a logged-in viewer, an HMAC of the session id. Raw IP addresses and device ids are never stored or logged. A staff scan (a request that carries a console session, §9.7) keeps only the IP pseudonym and names its console user instead.
 - Country, and latitude/longitude rounded to 0.1° (about 10 km), only when supplied by the edge (`GEO_MODE=cloudflare`, which also gives a `region`) or a trusted proxy (`GEO_MODE=headers` with `TRUST_PROXY`), or looked up by the server in a local GeoIP database from `request.ip` (`GEO_MODE=mmdb`, DB-IP / MaxMind format at `GEO_MMDB_PATH`; no `region`; `TRUST_PROXY` required in production so that `request.ip` is the client's address, not the proxy's). The default `GEO_MODE=none` records no location.
 - A coarse browser family such as `Safari/iOS`, never the full user-agent string.
 - Optional decoder metrics sent by the client.
@@ -353,7 +353,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/.well-known/orbes-keys.json` | — | — | api | 8.2 |
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
-| POST | `/api/v1/verify` | — (account cookie optional) | — | verify | 9 |
+| POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
 | POST | `/api/v1/account/logout` | Account (optional) | yes | api | 10.3 |
@@ -515,7 +515,7 @@ The app checks the email and phone against the same rules as the server before b
 
 ## 9. Verification: `POST /api/v1/verify`
 
-Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring.
+Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner. If it carries a console session (`orbes_admin`) the console would let in, the scan is a **staff scan** (§9.7): recorded as `ADMIN_TEST` under that console user, outside the anomaly findings, without a registration token. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring (a staff scan only reads it).
 
 ### 9.1 Request
 
@@ -590,7 +590,7 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `ownership.registered` | boolean | The product has a current owner. |
 | `ownership.you` | boolean | The logged-in viewer is that owner. |
 | `ownership.transferPending` | `true` | Only when registered and an unexpired transfer is pending. |
-| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION`; and `SUSPICIOUS_ACTIVITY` when only the scan history made the scan suspicious, the product has no owner, is open for registration and ships with a claim code (then `claimCodeRequired` is always `true`; §9.4 step 10). |
+| `registration` | object | `AUTHENTIC_FIRST_REGISTRATION`; and `SUSPICIOUS_ACTIVITY` when only the scan history made the scan suspicious, the product has no owner, is open for registration and ships with a claim code (then `claimCodeRequired` is always `true`; §9.4 step 10). **Never on a staff scan** (§9.7): `AUTHENTIC_FIRST_REGISTRATION` without `registration` means the request carried a console session. |
 | `registration.token` | string | Single-use registration token (base64url, 43 characters) for `POST /api/v1/ownership/register`. |
 | `registration.expiresAt` | ISO timestamp | 15 minutes after the scan. |
 | `registration.claimCodeRequired` | boolean | The product ships with a claim code that must be supplied at registration. |
@@ -618,7 +618,7 @@ The wording comes from `services/copy.ts`, the single source of these sentences 
 
 ### 9.4 Decision procedure
 
-The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case. Order: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (normative: `genome/PLATFORM-CONTRACTS.md` §2.4).
+The first step that decides the state ends the decision; the scan event, authentication record and anomaly findings are written in every case (a staff scan records no finding, §9.7). Order: parse → key lookup → signature → revoked-key trust → genome-version support → registry → genome cross-check → statuses → anomalies → ownership → authenticators (normative: `genome/PLATFORM-CONTRACTS.md` §2.4).
 
 | Step | Condition | Result |
 |---|---|---|
@@ -633,8 +633,9 @@ The first step that decides the state ends the decision; the scan event, authent
 | 7 | Genome cross-check: at least 6 glyphs with confidence ≥ 0.5 were provided and 2 or more of them differ from the genome recomputed from the signed identity. Fewer than 6 is inconclusive and never flagged. | `SUSPICIOUS_ACTIVITY` (anomaly `GENOME_MISMATCH`) |
 | 8 | Code status SUPERSEDED or REVOKED; or product status REVOKED, COUNTERFEIT_FLAGGED or RETIRED. | `REVOKED` |
 | 8 | Product status LOST or STOLEN. | `SUSPICIOUS_ACTIVITY` |
-| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
-| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token; otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true`, so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
+| 9 | A public scan of a piece ORBES has not sold yet (product status ISSUED, or SERVICED in a pre-sale service entered from ISSUED) of a code that passed steps 1–6 records the MEDIUM anomaly `UNSOLD_PIECE_SCAN` with the scan's country, once per piece and per UTC day, with weight 0 (§9.7). | unchanged |
+| 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans; a staff scan only reads the history, §9.7). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
+| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token (none on a staff scan, §9.7); otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true` (not on a staff scan), so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
 | 11 | Authenticator policy: may set `assurance: "CODE_ONLY"` and `hardwareProofRequired`. Never changes the state. | — |
 | 12 | The authentication record and the final scan state are persisted and the outcome returned. | — |
 
@@ -861,6 +862,23 @@ When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genom
 ### 9.6 Errors
 
 `400 VALIDATION_FAILED`, `400 INVALID_JSON`, `413`, `415`, `429 RATE_LIMITED`, `500 INTERNAL_ERROR`. A verification outcome is never an error.
+
+### 9.7 Pieces not sold yet, and staff scans (S-07)
+
+**A piece ORBES has not sold yet.** Its product status is ISSUED (in stock), or SERVICED in a pre-sale service entered from ISSUED (`isPreSaleService`, §14.4). Until a sale it answers `AUTHENTIC` like any piece in force, and the customer still sees exactly that: same state, title, message and fields (the verify app's OWNERSHIP tab says **NOT YET DELIVERED**: *This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.*, BRAND §4.4). A piece is sold when ORBES or an authorised retailer starts its warranty (the sale mode on a seller's phone, §16.9, or the console, §14.6); before that, a scan of it outside a console session is the earliest sign of diverted stock (theft in stock or in transport, labels taken), before the first copy is sold. Each one records the internal anomaly **`UNSOLD_PIECE_SCAN`** (§16.4), named *Unsold piece scanned* in the console (set in its capitals, **UNSOLD PIECE SCANNED**):
+
+- when the code passed steps 1–6 (a trusted registered code, whatever steps 7–9 then decide) and the request carries no console session;
+- severity MEDIUM, **weight 0**: it never raises the risk score of step 9, so the state shown never changes because of it; the authentication record of every such scan lists the reason `ANOMALY:UNSOLD_PIECE_SCAN`;
+- **once per piece and per UTC day**: the first such scan of the day opens the finding or adds one occurrence to the open one, later scans that day add nothing (concurrent scans included), and a finding closed that day is not raised again before the next one; `occurrences` therefore counts days;
+- `details`: `country` (ISO alpha-2 of the scan, `null` when unknown), `productStatus` (`ISSUED` or `SERVICED`), `preSaleService: true` for a pre-sale service, `scanEventId` of the day's first scan.
+
+**Staff scans.** A request whose `orbes_admin` cookie is a session the console itself would let in (alive, of an enabled console user with a known role, its password the user's own, past the second factor when `ADMIN_REQUIRE_MFA` holds) is a staff scan, whoever else the browser is signed in as:
+
+- one scan event of type `ADMIN_TEST` naming the console user (`scan_events.admin_id`, shown as *by email* in the console's verification events, §16.1), with the IP pseudonym, coarse location and browser family but **no device, session or account pseudonym**;
+- **no anomaly** is recorded (no `UNSOLD_PIECE_SCAN`, nor any finding of steps 6–9), and the scan takes no part in step 9: the code's public history is scored as it stands, so the state is the one a customer would see now, and ADMIN_TEST scans never count in any later scoring;
+- **no registration token**, also under step 10's exception: a console user's test is never a buyer's scan. The state stays the one a customer would see (`AUTHENTIC_FIRST_REGISTRATION` included); the verify app's OWNERSHIP tab then says **STAFF SCAN**: *This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered.*
+
+A member of the team who buys a piece therefore scans and registers it from a browser that is not signed in to the console. The admin cookie is `SameSite=Strict`: a cross-site request never carries it, so no other site can make a visitor's scan count as a staff scan, and a console session that the guard would refuse (temporary password, second factor missing when required, disabled account) leaves the scan public.
 
 ---
 
@@ -1731,7 +1749,7 @@ Item:
 }
 ```
 
-`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `eventType` is `VERIFY` for a public scan and `ADMIN_TEST` for a staff scan (the sale mode, §16.9), whose `adminEmail` names the console user who scanned (read at display time; the row keeps `scan_events.admin_id`); `adminEmail` is `null` on every other scan. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
+`productId` is the canonical id; `deviceHash` is a pseudonym (HMAC), never a raw id; the IP pseudonym is not returned. `eventType` is `VERIFY` for a public scan and `ADMIN_TEST` for a staff scan (the sale mode, §16.9, or `/api/v1/verify` from a browser signed in to the console, §9.7), whose `adminEmail` names the console user who scanned (read at display time; the row keeps `scan_events.admin_id`); `adminEmail` is `null` on every other scan. `genomeCheck` is `MATCH`, `MISMATCH`, `NOT_PROVIDED` or `INCONCLUSIVE`. `reasons` lists machine reasons such as `MALFORMED:<CRC|LENGTH|VERSION|RANGE|RESERVED|ENCODING|INPUT>`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `PRODUCT_NOT_REGISTERED`, `CODE_NOT_REGISTERED`, `CODE_MISMATCH`, `KEY_REVOKED`, `GENOME_MISMATCH`, `CODE_SUPERSEDED`, `CODE_REVOKED`, `UNSUPPORTED_GENOME_VERSION`, `UNSUPPORTED_CODE_VERSION`, `PRODUCT_<STATUS>`, `ANOMALY:<TYPE>`, `RISK_THRESHOLD`, `RISK_THRESHOLD_OWNER`, `REGISTRATION_WITH_CLAIM_CODE` (a registration token was issued on a suspicious scan, §9.4 step 10).
 
 ### 16.2 `GET /api/admin/owners`
 
@@ -1769,7 +1787,7 @@ AUDITOR. Paginated, most recently seen first. Query `status` (`OPEN`, `ACKNOWLED
 
 `resolvedBy` (`admin:<id>`) and `resolvedAt` are set when a finding is RESOLVED or DISMISSED. `actorEmail` names the console user whose triage decision (§16.5) is the latest on the finding, whatever it was (acknowledged, resolved, dismissed or reopened): read at display time from the audit log's newest `anomaly.update` entry by an admin and from `admin_users`, null while no admin has triaged it. The same object appears in the product detail (§14.3).
 
-Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`. The last two (CRITICAL) indicate a possible signing-key compromise. `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
+Types: `IMPOSSIBLE_TRAVEL`, `SCAN_VELOCITY`, `DEVICE_DIVERSITY`, `GEO_DISPERSION`, `LOST_STOLEN_SCAN`, `POST_REVOCATION_SCAN`, `GENOME_MISMATCH`, `CODE_MISMATCH`, `VALID_SIGNATURE_UNREGISTERED`, `UNSOLD_PIECE_SCAN`. `CODE_MISMATCH` and `VALID_SIGNATURE_UNREGISTERED` (CRITICAL) indicate a possible signing-key compromise. `UNSOLD_PIECE_SCAN` (MEDIUM, risk 0, shown as **UNSOLD PIECE SCANNED** in the console) is a scan of a piece ORBES has not sold yet outside a console session, recorded once per piece and per UTC day, so its `occurrences` count days; details `{ country, productStatus, preSaleService?, scanEventId }` (§9.7). `SCAN_VELOCITY` details are `{ scans, sources, windowMin }` and `DEVICE_DIVERSITY` details `{ sources, scans, windowDays }`: both rules count distinct **sources** (the IP pseudonym, else the device cookie, else the session), not raw device cookies, so one address that drops its cookie on every request counts once.
 
 ### 16.5 `PATCH /api/admin/anomalies/:id`
 

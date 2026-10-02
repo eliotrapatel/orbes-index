@@ -26,6 +26,9 @@
  *                95 minutes): an OPEN HIGH anomaly
  *   O26-J-00193  ECLIPSE PENDANT reported stolen, then scanned by a stranger:
  *                SUSPICIOUS ACTIVITY and an OPEN anomaly
+ *   O26-L-00018  APOGEE BELT in stock in Milan (ISSUED), its code scanned in
+ *                Lyon by a stranger: AUTHENTIC, and an OPEN UNSOLD PIECE
+ *                SCANNED finding (S-07)
  *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
@@ -290,8 +293,12 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'B2604-MNL',
     issuedAt: '2026-04-08T09:10',
     expect: 'AUTHENTIC',
-    scenario: 'In stock in Paris (ISSUED): authentic, not sold.',
-    story: (s, t) => s.scan(t.ago(12, 2), { boutique: 'PARIS' }, 'PARIS', 'AUTHENTIC'),
+    scenario:
+      'In stock in Paris (ISSUED): authentic, not sold. Checked by the boutique on a phone outside the console, so the scan raised UNSOLD PIECE SCANNED; dismissed with a note.',
+    story: (s, t) => {
+      s.scan(t.ago(12, 2), { boutique: 'PARIS' }, 'PARIS', 'AUTHENTIC');
+      s.triage(t.ago(11, 5), 'UNSOLD_PIECE_SCAN', 'DISMISSED', 'Stock check by the Paris boutique on a phone that was not signed in to the console.');
+    },
   },
   {
     productId: 'O26-J-00187',
@@ -592,8 +599,8 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'L2602-APG',
     issuedAt: '2026-02-16T08:30',
     expect: 'AUTHENTIC',
-    scenario: 'In stock in Milan (ISSUED), checked yesterday.',
-    story: (s, t) => s.scan(t.ago(0, 20), { boutique: 'MILAN' }, 'MILAN', 'AUTHENTIC'),
+    scenario: 'In stock in Milan (ISSUED), never sold, yet its code was scanned in Lyon yesterday, outside the maison: AUTHENTIC all the same, and an open UNSOLD PIECE SCANNED finding.',
+    story: (s, t) => s.scan(t.ago(0, 20), { stranger: 5 }, 'LYON', 'AUTHENTIC'),
   },
   {
     productId: 'O26-L-00019',

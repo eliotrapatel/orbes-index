@@ -464,6 +464,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     await shot(page, 'anomalies');
     expect(await page.locator('.status--critical').count()).toBeGreaterThanOrEqual(1);
+    // S-07: the piece issued above, scanned outside the console while still in stock, under its console name.
+    const unsold = page.locator('table.table tbody tr', { hasText: 'UNSOLD PIECE SCANNED' });
+    expect(await unsold.count()).toBe(1);
+    expect(await unsold.textContent()).toContain(issuedProductId);
   }, STEP_TIMEOUT);
 
   it('triages an anomaly', async () => {
