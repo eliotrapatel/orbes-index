@@ -8,7 +8,7 @@ Every value in this document is read from the code. Where a rule is a brand reco
 | Layer | File |
 |---|---|
 | House style of theorbes.com (the reference) | `index.html` (root; never modified) |
-| Web tokens and primitives | `genome/src/web/shared/brand.css`, `corners.ts`, `dom.ts` |
+| Web tokens and primitives | `genome/src/web/shared/brand.css`, `corners.ts`, `dom.ts`, `fonts/gravesend-sans-500.woff2` (display face) |
 | Verification app | `genome/src/web/verify/**` (copy in `copy.ts`) |
 | Console | `genome/src/web/admin/**` |
 | Public result copy | `genome/src/server/services/copy.ts` |
@@ -231,15 +231,34 @@ Beyond 0.12 u of spread, adjacent rings start to merge. Foil, deboss fill and en
 
 ## 3. Interface foundations
 
-Both web apps import `shared/brand.css`, which mirrors the house style of theorbes.com: white and black, Helvetica Neue, uppercase micro-type with wide tracking, 1 px rules, hairline corner brackets, film grain and slow `cubic-bezier(0.22, 1, 0.36, 1)` motion. All CSS is in external files (CSP `style-src 'self'`); scripts only toggle classes or set custom properties through the CSSOM.
+Both web apps import `shared/brand.css`, which mirrors the house style of theorbes.com: white and black, Helvetica Neue, uppercase micro-type with wide tracking, 1 px rules, hairline corner brackets, film grain and slow `cubic-bezier(0.22, 1, 0.36, 1)` motion. One addition: the brand's display face, Gravesend Sans, sets the wordmark, titles and labels (§3.1). All CSS is in external files (CSP `style-src 'self'`); scripts only toggle classes or set custom properties through the CSSOM.
 
 ### 3.1 Typography
 
-**Stack.** `"Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif` (`--font`), the exact stack of `index.html`. No web font is shipped. On Apple devices the design renders in Helvetica Neue (and Helvetica Neue Light for weight 300). Elsewhere it falls back to Helvetica or Arial, and on most Android devices to the platform sans-serif (Roboto); weight 300 then renders as 400. The screenshots in this document were taken in Chromium on Linux, where the stack resolves to Liberation Sans, metric-compatible with Helvetica and Arial, at weight 400 throughout.
+**Two faces**, both tokens of `brand.css`:
+
+| Token | Stack | Sets |
+|---|---|---|
+| `--font-display` | `"Gravesend Sans", var(--font)` | The brand's voice: the wordmark, titles and tracked-capital labels (navigation, tabs, eyebrows, section, row and column labels, field labels, buttons and text links, status lines such as SCANNING…) |
+| `--font` | `"Helvetica Neue", HelveticaNeue, Helvetica, Arial, sans-serif`, the exact stack of `index.html` | Everything read: sentences, values, identifiers, codes, dates, counts, the customer reference, inputs. The page default (`body`). |
+
+The display face is opted into role by role: `brand.css` sets the shared `.wordmark`, `.btn`, `.textlink` and `.field__label`, and each app lists its own titles and labels in one rule at the end of its stylesheet. No stylesheet names a font except through these tokens and the console's `--mono` (checked by `genome/test/web/verify.brand.test.ts`).
+
+**Gravesend Sans Medium** (Rian Hughes / Device, 2019; the one cut the brand supplied, licence in [NOTICE.md](../NOTICE.md)) ships as `genome/src/web/shared/fonts/gravesend-sans-500.woff2`: 10.4 KB, subset with fontTools to Basic Latin (U+0020–007E) and the brand's punctuation `© · × – — ‘ ’ “ ” • … ← → −`, kerning kept, its other OpenType features dropped, its copyright and designer names kept. The `@font-face` of `brand.css` declares weight 500, `font-display: swap` (the fallback paints at once, never invisible text) and a `unicode-range` equal to the subset, so any other character falls back to `--font`; the test checks that range against the file's own character map and weight class. The build emits the file to `/assets/` with a content hash, cached as immutable like the bundles, from the page origin that the CSP already allows (`default-src 'self'`). Both shells preload it (`<link rel="preload" as="font" type="font/woff2" crossorigin>`), and `genome/scripts/build-web.ts` rewrites that preload to the very file the stylesheet loads, so a visitor downloads it once for both apps (`test/web/verify.build.test.ts`; the E2E suites count the requests). To rebuild the subset from the supplied OTF:
+
+```sh
+pyftsubset GravesendSans-Medium.otf --flavor=woff2 --desubroutinize --layout-features=kern --name-IDs='*' \
+  --unicodes="U+0020-007E,U+00A9,U+00B7,U+00D7,U+2013-2014,U+2018-2019,U+201C-201D,U+2022,U+2026,U+2190,U+2192,U+2212" \
+  --output-file=genome/src/web/shared/fonts/gravesend-sans-500.woff2
+```
+
+**Figures read in `--font`.** Gravesend's figure one is drawn as its capital I, its zero is an oval beside a round O, and it has no tabular figures. Every line that can carry an identifier, a code, a count or a date is therefore set in `--font`, even beside display labels: the console crumb, panel notes, dialog titles and numbered enrolment steps, a page titled with a product id (`pageHeader({ identifier: true })`, `.page-head__title--id`), the scanner's zoom control (1×, 2×). A fixed label whose figures cannot be misread keeps the display face (VERIFICATIONS · 24 H, PAYLOAD SHA-256). The E2E suites check that no visible display text of the verify result, the console dashboard or a product page holds a one or a zero.
+
+**Rendering.** Display text renders in Gravesend Sans on every platform, Android and Windows included. Reading text renders in Helvetica Neue on Apple devices (Helvetica Neue Light for weight 300); elsewhere it falls back to Helvetica or Arial, and on most Android devices to the platform sans-serif (Roboto), where weight 300 renders as 400. The screenshots in this document were taken on 2026-10-02 in Chrome for Testing on macOS, so reading text is Helvetica Neue. One predates the display face: the locked scanner (`verify-03-locked.png`), kept from an earlier capture in Chromium on Linux because Chrome for Testing on macOS paints the frozen camera frame black; on Linux the reading stack resolves to Liberation Sans, metric-compatible with Helvetica and Arial.
 
 **Case and tracking.** Titles, labels, buttons, tabs and metadata are uppercase with wide tracking. Explanatory sentences are sentence case, never tracked beyond 0.06 em. Tracked type carries trailing letter-spacing after its last glyph, so centred tracked text is compensated with an equal `text-indent` (`.indent-micro`, `.indent-label`, and per-component indents), as theorbes.com does.
 
-**Weights.** 400 everywhere; 300 for display numerals and titles (result title, console page title, KPI values, product id in the console sheet, generator identity); 700 only in the console, for alert and critical status labels and the lifecycle move in the history timeline.
+**Weights.** Gravesend has one weight, Medium (500), and the display face renders every display role in it, whatever weight the role asks for: the result title and the console page title ask for 300, which only their fallback honours. In `--font`: 400 everywhere; 300 for display numerals (KPI values, the product id of the console sheet, the generator identity, a page titled with a product id); 700 only in the console, for alert and critical status labels and the lifecycle move in the history timeline, all in `--font`. No display role asks for a bold the browser would have to fake from the single cut (checked).
 
 **Numerals.** `font-variant-numeric: tabular-nums` for identifiers, dates and values. Counts use a thin space (U+2009) as thousands separator: `12 480`.
 
@@ -270,50 +289,52 @@ Component sizes between those steps are tokens too, so neither stylesheet sets a
 | `--fs-display-sm` / `--fs-display` | 22 / 26px | console product id / generator identity |
 | `--fs-figure` | 46px | KPI value |
 
+*Face* is `--font-display` (display) or `--font` (reading). *Weight* is the weight a role asks for; display roles render in Gravesend's single Medium (500), and only their fallback honours 300.
+
 **Verification app — type in use**
 
-| Role | Size | Weight | Tracking | Notes |
-|---|---|---|---|---|
-| Wordmark, landing | clamp(26px, 7.6vw, 34px) | 400 | 0.62em | indent 0.62em |
-| Wordmark, small (result) | 12px | 400 | 0.55em | 11px in the scanner header |
-| AUTHENTICATION | 9px | 400 | 0.40em | `--ink-soft` |
-| Result title | 24px | 300 | 0.30em | line-height 1.3; **18px** / 1.55 for caution and void states |
-| Result sub-title | 10px | 400 | 0.30em | `--ink-soft`, e.g. FIRST REGISTRATION |
-| Message title (problems) | 15px | 400 | 0.30em | line-height 1.7 |
-| Prose | 13px | 400 | 0.02em | line-height 1.75, `--ink-soft`, balanced wrapping, ≤ 31–32 ch |
-| Owner notice | 12px | 400 | 0.02em | between two `--hairline-strong` rules |
-| GENOME label | 8px | 400 | 0.36em | `--ink-soft` |
-| GENOME id | 17px | 400 | 0.22em | tabular |
-| Product lines | 11px | 400 | 0.30em | line-height 2.55 |
-| Tabs | 9px | 400 | 0.22em | selected `--ink`, others `--ink-soft` |
-| Row label / value | 9px / 11px | 400 | 0.28em / 0.14em | value right-aligned, tabular |
-| Section label | 8.5px | 400 | 0.34em | e.g. VERIFICATION |
-| Status line (scanner, verifying) | 10px | 400 | 0.34em | |
-| Scan hint | 11px | 400 | 0.06em | sentence case, `rgba(255,255,255,0.74)` |
-| Button | 10px | 400 | 0.28em | |
-| Text link, scanner controls, field labels | 8px | 400 | 0.30em | |
-| Field input | 16px | 400 | 0.04em | 16px so iOS does not zoom; code input 18px / 0.28em |
-| Transfer code | 19px | 400 | 0.26em | tabular, on ivory |
-| Footnote | 10px | 400 | 0.02em | line-height 1.75 |
-| Result meta (VERIFIED · REF) | 10px | 400 | 0.22em | `--ink-soft`, tabular: the reference customers quote |
-| Landing meta | 7px | 400 | 0.32em | opacity 0.4, as theorbes.com's 6.5px meta at 0.28 |
+| Role | Face | Size | Weight | Tracking | Notes |
+|---|---|---|---|---|---|
+| Wordmark, landing | display | clamp(26px, 7.6vw, 34px) | 400 | 0.62em | indent 0.62em |
+| Wordmark, small (result) | display | 12px | 400 | 0.55em | 11px in the scanner header |
+| AUTHENTICATION | display | 9px | 400 | 0.40em | `--ink-soft` |
+| Result title | display | 24px | 300 | 0.30em | line-height 1.3; **18px** / 1.55 for caution and void states |
+| Result sub-title | display | 10px | 400 | 0.30em | `--ink-soft`, e.g. FIRST REGISTRATION |
+| Message title (problems) | display | 15px | 400 | 0.30em | line-height 1.7 |
+| Prose | reading | 13px | 400 | 0.02em | line-height 1.75, `--ink-soft`, balanced wrapping, ≤ 31–32 ch |
+| Owner notice | reading | 12px | 400 | 0.02em | between two `--hairline-strong` rules |
+| GENOME label | display | 8px | 400 | 0.36em | `--ink-soft` |
+| GENOME id | reading | 17px | 400 | 0.22em | tabular |
+| Product lines | reading | 11px | 400 | 0.30em | line-height 2.55 |
+| Tabs | display | 9px | 400 | 0.22em | selected `--ink`, others `--ink-soft` |
+| Row label / value | display / reading | 9px / 11px | 400 | 0.28em / 0.14em | value right-aligned, tabular |
+| Section label | display | 8.5px | 400 | 0.34em | e.g. VERIFICATION |
+| Status line (scanner, verifying) | display | 10px | 400 | 0.34em | |
+| Scan hint | reading | 11px | 400 | 0.06em | sentence case, `rgba(255,255,255,0.74)` |
+| Button | display | 10px | 400 | 0.28em | |
+| Text link, scanner controls, field labels | display (zoom control: reading) | 8px | 400 | 0.30em | |
+| Field input | reading | 16px | 400 | 0.04em | 16px so iOS does not zoom; code input 18px / 0.28em |
+| Transfer code | reading | 19px | 400 | 0.26em | tabular, on ivory |
+| Footnote | reading | 10px | 400 | 0.02em | line-height 1.75 |
+| Result meta (VERIFIED · REF) | reading | 10px | 400 | 0.22em | `--ink-soft`, tabular: the reference customers quote |
+| Landing meta | display | 7px | 400 | 0.32em | opacity 0.4, as theorbes.com's 6.5px meta at 0.28 |
 
 **Console — type in use**
 
-| Role | Size | Weight | Tracking |
-|---|---|---|---|
-| Sidebar wordmark | 15px | 400 | 0.62em (the shared `.wordmark`, `--track-wordmark`) |
-| Page title | 30px | 300 | 0.20em |
-| Product id (fact sheet) / generator identity | 22px / 26px | 300 | 0.22em / 0.20em |
-| KPI value | 46px | 300 | 0.04em, tabular |
-| Dialog title | 17px | 400 | 0.18em |
-| Claim code | 30px | 400 | 0.24em |
-| Panel title | 11px | 400 | 0.30em |
-| Navigation link | 10px | 400 | 0.24em |
-| Status mark text | 10px | 400 (700 for alert, critical) | 0.20em (0.18em bold) |
-| Body, table cells, definition values | 12–13px | 400 | 0.03–0.06em |
-| Eyebrows, column heads, field labels, buttons, crumb | 8px | 400 | 0.30–0.36em |
-| Identifiers and hashes | 11.5px monospace | 400 | 0.02em |
+| Role | Face | Size | Weight | Tracking |
+|---|---|---|---|---|
+| Sidebar wordmark | display | 15px | 400 | 0.62em (the shared `.wordmark`, `--track-wordmark`) |
+| Page title | display (reading when it is a product id) | 30px | 300 | 0.20em |
+| Product id (fact sheet) / generator identity | reading | 22px / 26px | 300 | 0.22em / 0.20em |
+| KPI value | reading | 46px | 300 | 0.04em, tabular |
+| Dialog title | reading | 17px | 400 | 0.18em |
+| Claim code | reading | 30px | 400 | 0.24em |
+| Panel title | display | 11px | 400 | 0.30em |
+| Navigation link | display | 10px | 400 | 0.24em |
+| Status mark text | reading | 10px | 400 (700 for alert, critical) | 0.20em (0.18em bold) |
+| Body, table cells, definition values | reading | 12–13px | 400 | 0.03–0.06em |
+| Eyebrows, column heads, field labels, buttons, crumb | display (crumb: reading) | 8px | 400 | 0.30–0.36em |
+| Identifiers and hashes | monospace | 11.5px monospace | 400 | 0.02em |
 
 Monospace (`ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace`) is reserved for identifiers and hashes, and appears only in the console.
 
@@ -430,6 +451,7 @@ The verification app carries theorbes.com's film grain: a fixed SVG `feTurbulenc
 - **Fields**: a label in 8 px tracked caps, a single 1 px underline (`--hairline-strong`, ink on focus), no box.
 - **Focus**: a 1 px `currentColor` outline 4 px outside the element, keyboard only (`:focus-visible`); headings that receive focus programmatically on screen changes show none.
 - **Console buttons** (`.cbtn`): 38 px, 8 px tracked caps, square; *primary* is the hairline button (outlined in ink, filled only on hover or keyboard focus), *secondary* outlined, *ghost* an underlined word, *danger* outlined in oxblood.
+- **Type**: buttons, text links and field labels speak in the display face; what is typed into a field reads in `--font` (§3.1).
 
 ---
 
@@ -693,7 +715,7 @@ Physical test kit: [`assets/test-sheets/orbes-code-test-sheets.pdf`](assets/test
 
 Places where the implementation departs from this system or from itself. None affects decoding or security.
 
-1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it in Helvetica Neue at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four. **Partly resolved (console, 2026-10-01):** the sidebar wordmark is the shared `.wordmark` (`--track-wordmark`, 0.62 em) at 15 px, no longer a copy of its values. Still open, **outside this software prototype**: one vector wordmark for the specimen, the print label and theorbes.com needs the brand's master vector artwork (a design deliverable; only the raster PNG in `index.html` exists), and theorbes.com's `index.html` is not modified by this system. When the artwork exists, it replaces the stroked lettering of `LABEL_LAYOUT` and the specimen's typeset title.
+1. **Three renderings of the wordmark.** theorbes.com shows ORBES as a raster logo (geometric sans, base64 PNG in `index.html`). The apps typeset it at 0.62 em (`.wordmark`, `genome/src/web/shared/brand.css`; 0.55 em small; console sidebar `genome/src/web/admin/styles.css` `.side__wordmark`), in Gravesend Sans since 2026-10-02 (§3.1, item 18); the vocabulary specimen at 0.42 em, weight 300 (`genome/scripts/genome-symbol-study.ts`); the print label in stroked geometric lettering at 0.9 cap-height tracking (`genome/src/server/render/print-sheet.ts` `LABEL_LAYOUT`). A single vector wordmark should replace all four. **Partly resolved (console, 2026-10-01):** the sidebar wordmark is the shared `.wordmark` (`--track-wordmark`, 0.62 em) at 15 px, no longer a copy of its values. Still open, **outside this software prototype**: one vector wordmark for the specimen, the print label and theorbes.com needs the brand's master vector artwork (a design deliverable; only the raster PNG in `index.html` exists), and theorbes.com's `index.html` is not modified by this system. When the artwork exists, it replaces the stroked lettering of `LABEL_LAYOUT` and the specimen's typeset title.
 2. **Ink.** theorbes.com uses `#000000`; the apps use `--ink: #0A0A0A`. ~~The scanner ground is pure `#000` (`genome/src/web/verify/styles.css`, `body[data-screen="scan"]`, `.view--scan`).~~ **Resolved (verify app, 2026-10-01):** the scanner ground and veil use `var(--ink)` (guarded by `genome/test/web/verify.brand.test.ts`). **Resolved (GENOME on ivory, 2026-10-01):** the GENOME on the ivory plates is drawn in the ivory colourway's ink `ORBES_CODE_STYLES.ivory.ink` (`#111111`, now in `genome/src/core/code/styles.ts`) by `genomeFigureMarkup` (`genome/src/web/admin/ui/figures.ts`) and `genomeRowMarkup` (`genome/src/web/verify/genome-view.ts`), exactly as the ivory code prints it (checked by `test/web/admin.brand.test.ts` and `test/web/verify.brand.test.ts`). Was: the same GENOME on screen was drawn in `#0A0A0A` (console) or `currentColor` = `--ink` (verify). theorbes.com's `#000000` stays as it is (`index.html` is not part of this system).
 3. **`--metal` used for text that must be read.** **Resolved (console, 2026-10-01):** every readable text of `genome/src/web/admin/styles.css` that was `--metal` (`.side__group-title`, `.login__foot`, `.bar--zero` labels, `.cinput::placeholder`, the sidebar and sign-in place lines, the hidden claim code) is now `--ink-soft` (6.7 : 1 on white, 6.0 : 1 on ivory); no rule sets text colour to `--metal` any more, and the `brand.css` comment states 6.7 : 1 (checked by `test/web/admin.brand.test.ts`). Was: `--metal` used, against its own comment ("never used for text that must be read", 2.8 : 1, 2.5 : 1 on ivory): console navigation group titles `.side__group-title`, the sign-in foot "Internal use only · All actions are recorded" `.login__foot`, zero-value bar labels `.bar--zero`, and input placeholders `.cinput::placeholder` (`genome/src/web/admin/styles.css`). The `--ink-soft` comment also states 6.4 : 1; the measured ratio is 6.7 : 1 (`brand.css`).
 4. ~~**The reference customers are asked to quote is 7 px.**~~ **Resolved (verify app, 2026-10-01):** `.result__meta` is now 10 px (`--fs-micro`), `--ink-soft`, tabular, without the 8 px `.nano` class. Was: Non-authentic results say "Please quote the reference below", but `REF …` is set at 7 px, `--ink-soft` (`.result__meta`, `genome/src/web/verify/styles.css`). It should be at least 10 px.
@@ -710,7 +732,7 @@ Places where the implementation departs from this system or from itself. None af
 15. ~~**Specimen palette.**~~ **Resolved (2026-10-01):** `SPECIMEN_PAPER` is ivory `#F6F2EA` and `SPECIMEN_MUTED` is `--ink-soft` `#5C5C5C`; the specimen was regenerated with unchanged geometry. Was: `docs/assets/genome-01-vocabulary.svg` uses paper `#F7F5F0` and grey `#8A8780` (`SPECIMEN_PAPER`, `SPECIMEN_MUTED` in `genome/scripts/genome-symbol-study.ts`), not ivory `#F6F2EA` and `--ink-soft` / `--metal`.
 16. ~~**Quiet band wording in the spec.**~~ **Resolved (2026-10-01):** ORBES-CODE-SPEC §3, §4.7 and §9 now keep the seal quiet ring and the 2 u margin ink-free and permit, in the outer quiet band only, the decorative hairlines at r 23.5 and 24.0 at their specified tones with ≥ 0.6 u clearance. Was: ORBES-CODE-SPEC §3 counts the band "between data and moons" as a quiet zone and §9 says quiet zones "MUST be free of ink", yet the decor horizon (r 24.0) and outer guide (r 23.5) are printed in that band by design (`genome/src/core/code/primitives.ts`; the horizon is about 34 % contrast in the classic colourway). The spec should limit "free of ink" to the seal quiet ring and the outer 2 u zone, and allow decor at ≥ 0.6 u clearance.
 17. ~~**Customer vocabulary.**~~ **Resolved (server copy, 2026-10-01):** the AUTHENTIC message now reads "registered to an active **piece**" (`genome/src/server/services/copy.ts`). Was: "registered to an active product", while every other customer sentence says "piece".
-18. **Platform fonts.** No web font is shipped, so Android and Windows visitors see Roboto or Arial and never the light weight (§3.1). Still open, **outside this software prototype**: licensing and bundling a Helvetica Neue cut (or choosing a licensed alternative) is a brand and licensing decision; no font file can be added without a licence. Until then the stack of §3.1 is the deliberate fallback, identical to theorbes.com's. A licensed WOFF2 would be served from `/assets/`, which the CSP already allows (`default-src 'self'`, `genome/src/server/http/security.ts`).
+18. ~~**Platform fonts.**~~ **Resolved (both apps, 2026-10-02):** the brand supplied its display face, Gravesend Sans Medium (Rian Hughes / Device; its web licence is the brand's responsibility, [NOTICE.md](../NOTICE.md)). It ships as a 10.4 KB WOFF2 subset (`genome/src/web/shared/fonts/gravesend-sans-500.woff2`), declared in `brand.css` with `font-display: swap`, preloaded by both shells and served from `/assets/` with a content hash (§3.1). It sets the wordmark, titles and tracked-capital labels through the new token `--font-display`, so they render identically on Apple, Android and Windows devices; reading text stays in the Helvetica Neue stack of `--font`, identical to theorbes.com. This is the brand's decision in place of the first recommendation (a Helvetica Neue or Now cut in weights 300 and 400, first in `--font`): one file was supplied, a display face, so it gets its own token, and figures stay in `--font` because Gravesend's one is its capital I (§3.1). Still open, **outside this software**: the same face on theorbes.com, prepared in [launch/THEORBES-FONT.md](launch/THEORBES-FONT.md) for the owner's agreement (`index.html` is not modified by this system), and reading text on Android and Windows, which still falls back to the platform sans-serif. Was: no web font was shipped, so Android and Windows visitors saw Roboto or Arial and never the light weight; licensing and bundling a Helvetica Neue cut, or a licensed alternative, was a brand and licensing decision.
 19. ~~**"REGISTRATION OPEN" after it has closed.**~~ **Resolved (verify app, 2026-10-01):** the heading reads REGISTRATION CLOSED once the window has expired (`registrationStatus`, `genome/src/web/verify/view-model.ts`). Was: When the registration window of a scan has expired, the OWNERSHIP tab still heads the panel REGISTRATION OPEN above "The registration window of this scan has closed." (`genome/src/web/verify/views/ownership.ts`, `registerBlock`).
 20. **Certificate card awaiting validation.** The card that carries the claim code (§7) is produced by the console and the API, but its layout has not been validated by the brand: every card, sheet and file therefore says PROOF (`CERTIFICATE_LAYOUT_STATUS = 'PROOF'`, `genome/src/server/render/certificate.ts`). Still open: the brand reviews the specimen of §7 (format, lettering sizes, copy, scratch-off panel) with the [packaging kit](launch/PACKAGING-KIT.md) (its §6 lists what to sign off), then the constant becomes `VALIDATED` and the specimens are regenerated (`genome/scripts/certificate-specimen.ts`; `genome/test/render/certificate.test.ts` checks they match).
 

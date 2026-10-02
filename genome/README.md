@@ -79,7 +79,7 @@ npm ci
 | `npm run dev` | Development server with reload (`tsx watch`). Listens on `127.0.0.1:8080`. In-memory PGlite and keys, migrated and keyed automatically. Everything is lost on restart. |
 | `npm start` | Same server without reload (`node --import tsx src/server/index.ts`), which is how the container runs it. In production add `-- --migrate` or `MIGRATE_ON_START=true` to apply migrations. |
 | `npm run demo` | The server in demo mode (`tsx src/server/index.ts --demo`, the same as `npm start -- --demo`): in-memory PGlite loaded with the demo dataset through the real services; a demo console sign-in is printed once. Development and test only. Serves the web apps when `dist/web/` has been built. |
-| `npm run build:web` | Builds `src/web/*` into `dist/web/` (esbuild, minified, content-hashed, CSP-checked). The server serves `/verify`, `/admin` and `/assets/*` from there when it exists. `npx tsx scripts/build-web.ts --dev` gives unminified output with sourcemaps. |
+| `npm run build:web` | Builds `src/web/*` into `dist/web/` (esbuild, minified, content-hashed, CSP-checked; the shells' font preload points at the very file the CSS loads). The server serves `/verify`, `/admin` and `/assets/*` from there when it exists. `npx tsx scripts/build-web.ts --dev` gives unminified output with sourcemaps. |
 
 For a persistent local setup, point `DATABASE_URL` at a directory or a PostgreSQL database, and keep keys on disk:
 

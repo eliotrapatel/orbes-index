@@ -19,3 +19,27 @@ address of a scan. The location is used only for internal anomaly scoring
   `orbes-geoip`) and reads it as published; values are rounded at lookup time.
 
 The database file itself is not part of this repository.
+
+## Fonts
+
+**Gravesend Sans Medium** — Rian Hughes / Device, <http://devicefonts.co.uk>
+
+The verification app (`/verify`) and the console (`/admin`) set their
+wordmark, titles and labels in Gravesend Sans Medium, the brand's display
+face (BRAND-DESIGN-SYSTEM §3.1).
+
+- File: `genome/src/web/shared/fonts/gravesend-sans-500.woff2`, served from
+  `/assets/` of the verification service. theorbes.com does not use it; a
+  proposal waits for the owner's agreement (`docs/launch/THEORBES-FONT.md`).
+- Copyright: © 2019 Rian Hughes / Device. All rights reserved.
+- Licence: commercial, not open source. ORBES supplied the font and is
+  responsible for holding a web (webfont) licence that covers its use on
+  the domains that serve it. The repository carries the file only to build
+  these apps; it is not licensed for any other use.
+- Changes: a subset of the supplied OpenType (CFF) file, converted to WOFF2
+  with fontTools: Basic Latin and the punctuation the interfaces use, kerning
+  kept, other OpenType features removed. The copyright and designer names
+  are kept in the file. The command is in BRAND-DESIGN-SYSTEM §3.1.
+
+Helvetica Neue and the other families of the reading stack are not shipped:
+they come from the visitor's device.

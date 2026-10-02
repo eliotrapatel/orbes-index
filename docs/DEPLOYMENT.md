@@ -55,7 +55,7 @@ One image (`genome/Dockerfile`) contains everything the service needs:
 |---|---|---|
 | `/verify`, `/verify/*` | Mobile scanner (`dist/web/verify`) | Needs HTTPS: browsers only open the camera in a secure context. |
 | `/admin`, `/admin/*` | Admin console (`dist/web/admin`) | Restrict at the edge (§14). |
-| `/assets/*` | Content-hashed bundles, CSS, favicons | `Cache-Control: public, max-age=31536000, immutable`. |
+| `/assets/*` | Content-hashed bundles, CSS, favicons, the display font (WOFF2, preloaded by both shells) | `Cache-Control: public, max-age=31536000, immutable`. |
 | `/api/v1/*` | Public and account API | `Cache-Control: no-store`, except `/api/v1/keys` (5 min) and `/api/v1/categories` (1 min). |
 | `/api/admin/*` | Admin API | Cookie sessions, CSRF, TOTP enforced in production. |
 | `/.well-known/orbes-keys.json` | Public signing keys (same document as `/api/v1/keys`) | CORS `*`, `max-age=300`. |
