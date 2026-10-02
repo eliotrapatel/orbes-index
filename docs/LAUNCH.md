@@ -150,7 +150,7 @@ docker compose ps                                                # caddy, app, p
 - [ ] Terms for ORBES accounts, ownership registration and transfers.
 - [ ] Attribution for the GeoIP data: "IP Geolocation by DB-IP" (CC BY 4.0), see `NOTICE.md`. It can live in the privacy policy.
 - [ ] Customer copy reviewed by legal. The system never claims a scan proves an object is genuine; keep it that way in packaging and marketing.
-- [ ] Packaging and website text: "Verify only at theorbes.com/verify". The words are in the [packaging kit](launch/PACKAGING-KIT.md) (launch/PACKAGING-KIT.md), in French and English:
+- [ ] Packaging and website text: "Verify only at theorbes.com/verify". The words are in the [packaging kit](launch/PACKAGING-KIT.md), in French and English:
   - the three steps of the packaging, the same as on the certificate card;
   - the card's copy and the claim code rules;
   - the second-hand sentence;

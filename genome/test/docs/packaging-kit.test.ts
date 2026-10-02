@@ -12,8 +12,11 @@
  *    certificate card draws them (CERTIFICATE_COPY), so card and packaging
  *    never drift apart;
  *  - the second-hand sentence (J-02) in both languages;
- *  - the announcement held until the H1/H2 review of COMPLIANCE §7, and the
- *    kit linked from LAUNCH §10.
+ *  - the announcement held until the H1/H2 review of COMPLIANCE §7; each of
+ *    its drafts, website, social and e-mail, in both languages, says that a
+ *    printed code can be copied and names ORBES Client Services (BRAND §4.6),
+ *    and each social post fits in 280 characters;
+ *  - the kit linked from LAUNCH §10.
  *
  * CUSTOMER_COPY lists the documents held to the lexicon; a new public-facing
  * document under docs/launch/ joins it.
@@ -66,6 +69,16 @@ describe('forbidden-term matcher', () => {
     expect(findForbidden('please contact support', terms)).toHaveLength(1);
     // Not inside other words.
     expect(findForbidden('cryptographic signature, ORBES Client Services, SQRT, envolé', terms)).toEqual([]);
+  });
+
+  it('inflects every word of a term, not only the last', () => {
+    const terms = ['code-barres', 'certifié original', 'original certifié', 'COUNTERFEIT', 'Web3'];
+    for (const text of ['codes-barres', 'certifiée originale', 'certifiés originaux', 'originaux certifiés', 'counterfeiting', 'counterfeited', 'Web 3', 'web-3']) {
+      expect(findForbidden(text, terms), text).toHaveLength(1);
+    }
+    // The kit lists the singular spelling too, so « code-barre » is caught as well.
+    expect(findForbidden('un code-barre', frenchForbiddenTerms())).not.toEqual([]);
+    expect(findForbidden('originality, webs, counterfeitless', terms)).toEqual([]);
   });
 
   it('reads the English terms from BRAND §4.5 and the French ones from the kit lexicon', () => {
@@ -145,6 +158,26 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
     expect(compliance).toMatch(/^\| H1 \|/m);
     expect(compliance).toMatch(/^\| H2 \|/m);
     expect(compliance).toMatch(/before the public launch announcement/);
+  });
+
+  it('says in every draft, as BRAND §4.6 asks, that a printed code can be copied, and offers ORBES Client Services', () => {
+    /** The EN and FR drafts of one channel of §5, as plain text. */
+    const drafts = (channel: string) => {
+      const [, en, fr, ...extra] = section(parts.announcement, channel).split(/^\*\*(?:EN|FR)\*\*$/m);
+      expect(extra, channel).toEqual([]);
+      return { en: en.replace(/^>\s?/gm, '').trim(), fr: fr.replace(/^>\s?/gm, '').trim() };
+    };
+    for (const channel of ['### Website', '### Social', '### E-mail']) {
+      const { en, fr } = drafts(channel);
+      expect(en, `${channel}, EN`).toContain('A printed code can be copied');
+      expect(fr, `${channel}, FR`).toContain('Un code imprimé peut être copié');
+      for (const draft of [en, fr]) expect(draft, channel).toContain('ORBES Client Services');
+    }
+    // A post is read on its own, and still fits once [DATE] holds the longest date.
+    const social = drafts('### Social');
+    for (const post of [social.en.replace('[DATE]', '30 September 2027'), social.fr.replace('[DATE]', '30 septembre 2027')]) {
+      expect([...post].length, post).toBeLessThanOrEqual(280);
+    }
   });
 
   it('is the packaging and website text of LAUNCH §10', () => {

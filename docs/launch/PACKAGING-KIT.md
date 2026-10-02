@@ -19,7 +19,7 @@ The kit says only what the software does. Its sources:
 | The words of `/verify`, in English | `genome/src/web/verify/copy.ts`, `genome/src/server/services/copy.ts` |
 | theorbes.com/verify opens verify.theorbes.com/verify | `vercel.json` (redirect, live once LAUNCH §9 is done) |
 
-`genome/test/docs/packaging-kit.test.ts` checks this file: no forbidden term, English or French, outside the marked lexicon of §4; no exclamation mark; the official address on the packaging, the card and the announcement, and no other; the card's steps word for word as the renderer draws them; the second-hand sentence in both languages; the H1/H2 hold on the announcement.
+`genome/test/docs/packaging-kit.test.ts` checks this file: no forbidden term, English or French, outside the marked lexicon of §4; no exclamation mark; the official address on the packaging, the card and the announcement, and no other; the card's steps word for word as the renderer draws them; the second-hand sentence in both languages; the H1/H2 hold on the announcement, and in each of its drafts the sentence on what a printed code does not prove and ORBES Client Services (BRAND §4.6).
 
 ---
 
@@ -129,7 +129,7 @@ Le recto seul est dessiné par la console. Le verso, identique sur toutes les ca
 > Scratch the panel only when you register your piece at theorbes.com/verify. The claim code registers it once, in your name. Keep this card with your piece; never photograph or share the code.
 >
 > **CHANGE OF OWNER**
-> Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.
+> Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one. If the panel is intact and the piece is not yet registered, register it with this claim code.
 >
 > VERIFY ONLY AT THEORBES.COM/VERIFY
 
@@ -139,7 +139,7 @@ Le recto seul est dessiné par la console. Le verso, identique sur toutes les ca
 > Ne grattez la zone qu'au moment d'enregistrer votre pièce sur theorbes.com/verify. Le claim code l'enregistre une seule fois, à votre nom. Gardez cette carte avec votre pièce ; ne photographiez et ne partagez jamais le code.
 >
 > **CHANGEMENT DE PROPRIÉTAIRE**
-> Vous achetez cette pièce ? Demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un.
+> Vous achetez cette pièce ? Demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un. Si la zone est intacte et la pièce pas encore enregistrée, enregistrez-la avec ce claim code.
 >
 > VÉRIFIEZ UNIQUEMENT SUR THEORBES.COM/VERIFY
 
@@ -147,9 +147,9 @@ Le recto seul est dessiné par la console. Le verso, identique sur toutes les ca
 
 ## 3. Second-hand purchase · Achat d'occasion
 
-One sentence, word for word on the card's verso, in the FAQ and under the AUTHENTIC — REGISTERED result of `/verify` (planned, J-02). Changing it here means changing it everywhere. The announcement only adapts its first words (§5).
+One sentence, word for word on the card's verso, in the FAQ and under the AUTHENTIC — REGISTERED result of `/verify` (planned, J-02). Changing it here means changing it everywhere. The announcement only adapts its first words (§5). The verso adds one line for a piece resold before anyone registered it: it has no owner yet, so no transfer code can exist, and the buyer registers it with the claim code (§2). `/verify` needs no such line: J-02 shows the sentence for a registered piece only.
 
-Une seule phrase, mot pour mot au verso de la carte, dans la FAQ et sous le résultat AUTHENTIC — REGISTERED de `/verify` (prévu, J-02). La changer ici, c'est la changer partout. L'annonce n'en adapte que les premiers mots (§5).
+Une seule phrase, mot pour mot au verso de la carte, dans la FAQ et sous le résultat AUTHENTIC — REGISTERED de `/verify` (prévu, J-02). La changer ici, c'est la changer partout. L'annonce n'en adapte que les premiers mots (§5). Le verso ajoute une ligne pour une pièce revendue avant tout enregistrement : elle n'a pas encore de propriétaire, donc aucun code de transfert ne peut exister, et l'acheteur l'enregistre avec le claim code (§2). `/verify` n'a pas besoin de cette ligne : J-02 n'y montre la phrase que pour une pièce enregistrée.
 
 | EN | FR |
 |---|---|
@@ -171,7 +171,7 @@ Ce lexique traduit BRAND §4.5 pour tout texte ORBES en français : emballage, c
 |---|---|---|
 | « AUTHENTIC » (le résultat, en anglais comme à l'écran), « identité ORBES émise et signée par ORBES », « enregistrée » | « vrai », « véritable », « pièce authentique », « 100 % authentique », « authenticité garantie », « garanti authentique », « certifié authentique », « certifié original », « original certifié » | AUTHENTIC, issued and signed by ORBES, registered · never REAL, GENUINE as a verdict, 100 % GENUINE, AUTHENTICITY GUARANTEED, CERTIFIED ORIGINAL |
 | « activité inhabituelle » (UNUSUAL ACTIVITY à l'écran), « demande un examen », « n'est plus valide », « non enregistré » | « faux », « fausse », « contrefaçon », « contrefait », « fraude », « frauduleux », « frauduleuse », « volé », « alerte », « danger », « avertissement » (au public) | UNUSUAL ACTIVITY, requires review, no longer valid, not registered · never FAKE, COUNTERFEIT, FRAUD, STOLEN, ALERT, DANGER, WARNING (to the public) |
-| « ORBES CODE », « ORBES GENOME », « ORBES SEAL », « orbite », « pièce » | « QR », « QR code », « code QR », « code-barres », « identifiant de tag », « NFT », « jeton », « blockchain », « chaîne de blocs », « registre distribué », « crypto », « cryptomonnaie », « Web3 » | ORBES CODE, ORBES GENOME, ORBES SEAL, orbit, piece · never QR, barcode, tag ID, NFT, token, blockchain, ledger, crypto, Web3 |
+| « ORBES CODE », « ORBES GENOME », « ORBES SEAL », « orbite », « pièce » | « QR », « QR code », « code QR », « code-barres », « code-barre », « identifiant de tag », « NFT », « jeton », « blockchain », « chaîne de blocs », « registre distribué », « crypto », « cryptomonnaie », « Web3 » | ORBES CODE, ORBES GENOME, ORBES SEAL, orbit, piece · never QR, barcode, tag ID, NFT, token, blockchain, ledger, crypto, Web3 |
 | « signature », « clé ORBES » (un onglet plus loin) | « infalsifiable », « impossible à contrefaire », « impossible à copier », « incopiable », « inviolable », « inclonable », « impiratable », « qualité militaire », « niveau militaire », « niveau bancaire », « sécurité bancaire », « résistant au quantique », « post-quantique », « propulsé par l'IA » | signature, ORBES key · never IMPOSSIBLE TO COUNTERFEIT, UNHACKABLE, UNCLONABLE, TAMPER-PROOF, MILITARY-GRADE, BANK-GRADE, QUANTUM-SAFE, AI-POWERED |
 | « ORBES Client Services peut vous accompagner » | « contactez le support », « support technique », « erreur », « oups », « une erreur est survenue », « quelque chose s'est mal passé » | ORBES Client Services can assist you · never Contact support, Error, Oops, Something went wrong |
 | « pièce » (BRAND §4.1) | « produit » | piece, never product |
@@ -227,19 +227,19 @@ Rules (BRAND §4.6): state what is checked, say plainly what it does not cover, 
 
 ### Social · Réseaux
 
-The address in plain text, no short link, no readable code in the visual. · L'adresse en clair, pas de lien raccourci, aucun code lisible sur le visuel.
+The address in plain text, no short link, no readable code in the visual. Each post stays under 280 characters once `[DATE]` is filled in, and keeps its sentence on what a printed code does not prove and who can help: a post is read on its own. · L'adresse en clair, pas de lien raccourci, aucun code lisible sur le visuel. Chaque message reste sous 280 caractères une fois `[DATE]` rempli, et garde sa phrase sur ce qu'un code imprimé ne prouve pas et sur qui peut aider : un message se lit seul.
 
 **EN**
 
-> ORBES GENOME CODE. From [DATE], every ORBES piece carries its own ORBES identity, issued and signed by ORBES. Verify it at theorbes.com/verify, and only there.
+> ORBES GENOME CODE. From [DATE], every ORBES piece carries its own ORBES identity, issued and signed by ORBES. A printed code can be copied; ORBES Client Services can inspect a piece on request. Verify it at theorbes.com/verify, and only there.
 
 **FR**
 
-> ORBES GENOME CODE. À partir du [DATE], chaque pièce ORBES porte sa propre identité ORBES, émise et signée par ORBES. Vérifiez-la sur theorbes.com/verify, et uniquement là.
+> ORBES GENOME CODE. À partir du [DATE], chaque pièce ORBES porte sa propre identité ORBES, émise et signée par ORBES. Un code imprimé peut être copié ; ORBES Client Services peut examiner une pièce sur demande. Vérifiez-la sur theorbes.com/verify, et uniquement là.
 
 ### E-mail
 
-The address stays plain text, never a link: the message teaches the habit it asks for. · L'adresse reste en texte, jamais en lien : le message enseigne l'habitude qu'il demande.
+The address stays plain text, never a link: the message teaches the habit it asks for. Send it as plain text, with automatic link detection turned off where the e-mail tool allows it. A mail app may still make the address clickable, so the closing asks the reader to type it and never claims the message holds no link. · L'adresse reste en texte, jamais en lien : le message enseigne l'habitude qu'il demande. Envoyez-le en texte brut, détection automatique des liens désactivée si l'outil d'envoi le permet. Une messagerie peut tout de même rendre l'adresse cliquable : la conclusion demande donc de la taper, sans jamais affirmer que le message ne contient aucun lien.
 
 **EN**
 
@@ -255,7 +255,7 @@ The address stays plain text, never a link: the message teaches the habit it ask
 >
 > Buying an ORBES piece second-hand? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.
 >
-> Verify only at theorbes.com/verify. ORBES never sends a verification link, this message included: type the address yourself.
+> Verify only at theorbes.com/verify. ORBES never asks you to follow a link to verify a piece: type the address yourself.
 
 **FR**
 
@@ -271,7 +271,7 @@ The address stays plain text, never a link: the message teaches the habit it ask
 >
 > Vous achetez une pièce ORBES d'occasion ? Demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un.
 >
-> Vérifiez uniquement sur theorbes.com/verify. ORBES n'envoie jamais de lien de vérification, ce message compris : tapez l'adresse vous-même.
+> Vérifiez uniquement sur theorbes.com/verify. ORBES ne vous demande jamais de suivre un lien pour vérifier une pièce : tapez l'adresse vous-même.
 
 ---
 
@@ -284,7 +284,7 @@ Nothing is printed or published while a line it depends on is open. · Rien n'es
 | Packaging text, FR and EN (§1) | Brand | printing packaging | Open |
 | Capitals check: THEORBES.COM/VERIFY typed in capitals on a phone reaches the scanner (§1, Capitals) | Brand and operator | printing packaging or cards | Open |
 | Card recto: the specimen of BRAND §7, then `CERTIFICATE_LAYOUT_STATUS` set to `VALIDATED` and the specimens regenerated (BRAND §8 item 20) | Brand | printing cards | Open |
-| Card verso, or insert (§2) | Brand | printing cards | Open |
+| Card verso, or insert (§2), with its line for a piece resold before its first registration (§3) | Brand | printing cards | Open |
 | Second-hand sentence (§3) | Legal | printing or publishing it | Open |
 | French lexicon (§4) | Brand and legal | any French copy | Open |
 | Announcement (§5): brand, legal review (LAUNCH §10), privacy policy online, H1/H2 review of COMPLIANCE §7 | Brand, legal, owner | publishing | Open |

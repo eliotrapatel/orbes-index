@@ -11,7 +11,8 @@
  *
  * A document may quote a forbidden term only inside such a marked block.
  * Matching is by whole word (Unicode letters), case-insensitive, with spaces
- * and hyphens interchangeable and plural or feminine endings included.
+ * and hyphens interchangeable, letters and digits split ("Web3", "Web 3"),
+ * and plural, feminine or verb endings allowed on every word of a term.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -89,15 +90,23 @@ export function forbiddenTerms(): string[] {
   return [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN, ...frenchForbiddenTerms()];
 }
 
-/** Whole-word, case-insensitive matcher: "TAMPER-PROOF" also matches "tamper proof", « volé » also « volées ». */
+/** Endings any word of a term may carry: plural and feminine (« volées », « codes-barres », « certifiée originale »), English -ing, -ed, -er ("counterfeiting"). */
+const ENDING = '(?:e?s|e|x|ing|ed|ers?)?';
+
+/**
+ * Whole-word, case-insensitive matcher: "TAMPER-PROOF" also matches "tamper
+ * proof", « volé » « volées », « code-barres » « codes-barres », "Web3" "Web 3".
+ * A word ending in -al also takes the French plural -aux (« originaux certifiés »).
+ */
 export function termPattern(term: string): RegExp {
   const words = term
     .trim()
-    .split(/[\s-]+/)
+    .split(/[\s-]+|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/u)
     .filter(Boolean)
-    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['’]/g, "['’]"));
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['’]/g, "['’]"))
+    .map((w) => `${w.replace(/al$/i, 'a(?:l|ux)')}${ENDING}`);
   if (words.length === 0) throw new Error('empty term');
-  return new RegExp(`(?<![\\p{L}\\p{N}])${words.join('[\\s-]*')}(?:e?s|e|x)?(?![\\p{L}\\p{N}])`, 'giu');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${words.join('[\\s-]*')}(?![\\p{L}\\p{N}])`, 'giu');
 }
 
 /** Forbidden terms found in `text`, each with a little context: [] when the text is clean. */
