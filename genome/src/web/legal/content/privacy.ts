@@ -12,9 +12,10 @@
  *    DB-IP database (GEO_MODE=mmdb, deploy/vps/.env.example);
  *  - the account: email, password as a scrypt hash, an optional name; sessions
  *    of 30 days at most with the IP pseudonym and the user agent;
- *  - the retention: SCAN_RETENTION_DAYS is not set in production (the
- *    owner's decision with counsel, after the launch), so verifications are
- *    kept without a time limit, as the page says; sessions end after 30 days;
+ *  - the retention: SCAN_RETENTION_DAYS=90 in production (the owner's
+ *    decision of 2026-10-03, the plan's choice 17), so verifications are kept
+ *    90 days (services/scan-retention.ts purges older scans with what hangs on
+ *    them; scan_daily_stats keep the daily counts); sessions end after 30 days;
  *    the backups keep 14 nightly and 8 weekly archives, and no archive taken
  *    before an update past 63 days (deploy/vps/scripts/backup.sh): about two
  *    months;
@@ -41,7 +42,7 @@ const EN: LegalDocument = {
       id: 'controller',
       title: 'Who is responsible',
       blocks: [
-        'ORBES is responsible for this processing. Its identity is given in the [legal notice](/legal/notice). For any question about your data, and to exercise your rights, write to ORBES Client Services.',
+        'CONGLOMERAT LLC ("ORBES") is responsible for this processing. Its identity is given in the [legal notice](/legal/notice). For any question about your data, and to exercise your rights, write to ORBES Client Services.',
         { contact: true },
       ],
     },
@@ -116,7 +117,7 @@ const EN: LegalDocument = {
       title: 'How long it is kept',
       blocks: [
         [
-          '- **Verifications**: no retention period has been set yet, so they are kept without a time limit. The period, once decided, will be published on this page; older verifications will then be deleted with everything attached to them, your answer included, and only the daily counts will remain.',
+          '- **Verifications**: kept 90 days. Older verifications are deleted with everything attached to them, your answer included, and only the daily counts remain.',
           '- **Sessions**: deleted when they end, at sign-out or 30 days after sign-in at most.',
           '- **Your account and what it records**: as long as the account exists. The service does not yet let you delete your account: ask ORBES Client Services.',
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
@@ -160,7 +161,7 @@ const FR: LegalDocument = {
       id: 'controller',
       title: 'Responsable du traitement',
       blocks: [
-        'ORBES est responsable de ce traitement. Son identité figure dans les [mentions légales](/legal/notice). Pour toute question sur vos données, et pour exercer vos droits, écrivez à ORBES Client Services.',
+        'CONGLOMERAT LLC (« ORBES ») est responsable de ce traitement. Son identité figure dans les [mentions légales](/legal/notice). Pour toute question sur vos données, et pour exercer vos droits, écrivez à ORBES Client Services.',
         { contact: true },
       ],
     },
@@ -235,7 +236,7 @@ const FR: LegalDocument = {
       title: 'Durée de conservation',
       blocks: [
         [
-          "- **Vérifications** : aucune durée de conservation n'est encore fixée ; elles sont donc conservées sans limite de temps. La durée, une fois décidée, sera publiée sur cette page ; les vérifications plus anciennes seront alors supprimées avec tout ce qui s'y rattache, votre réponse comprise, et seuls les comptes quotidiens resteront.",
+          "- **Vérifications** : conservées 90 jours. Les vérifications plus anciennes sont supprimées avec tout ce qui s'y rattache, votre réponse comprise, et seuls les comptes quotidiens restent.",
           '- **Sessions** : supprimées à leur fin, à la déconnexion ou 30 jours au plus après la connexion.',
           "- **Votre compte et ce qu'il enregistre** : tant que le compte existe. Le service ne permet pas encore de supprimer votre compte : adressez-vous à ORBES Client Services.",
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",

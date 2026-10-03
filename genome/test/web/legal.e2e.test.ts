@@ -160,7 +160,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     }
     // The legal notice names the publisher ORBES; the FAQ answers a buyer with the sentence /verify shows.
     await page.goto(`${srv.origin}/legal/notice?lang=en`);
-    await textOf(page.locator('#publisher').locator('xpath=..').locator('.legal__item').first(), 'Company name: ORBES');
+    await textOf(page.locator('#publisher').locator('xpath=..').locator('.legal__item').first(), 'Company name: CONGLOMERAT LLC');
     await page.goto(`${srv.origin}/legal/faq?lang=en`);
     await textOf(page.locator('#second-hand').locator('xpath=..').locator('.legal__text').first(), RESALE_GUIDANCE);
     expect(problems).toEqual([]);

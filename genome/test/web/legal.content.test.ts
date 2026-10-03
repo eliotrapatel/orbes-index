@@ -89,12 +89,10 @@ function parseDraft(md: string): { preamble: string[]; sections: DraftSection[] 
 
 const PLACEHOLDER = /\[À COMPLÉTER ?:([^\]]*)\]/g;
 const hasPlaceholder = (s: string): boolean => s.includes('[À COMPLÉTER');
-/** What a field to complete reads as on the page meanwhile: the company and its director read ORBES (LEGAL_IDENTITY). */
+/** What a field of the legal identity reads as on the page (LEGAL_IDENTITY): the drafts now name the company. */
 const IDENTITY: Readonly<Record<string, string>> = {
   'company name': LEGAL_IDENTITY.companyName,
   'raison sociale': LEGAL_IDENTITY.companyName,
-  'name of the publication director': LEGAL_IDENTITY.publicationDirector,
-  'nom du directeur de la publication': LEGAL_IDENTITY.publicationDirector,
 };
 const fieldsOf = (s: string): string[] => [...s.matchAll(PLACEHOLDER)].map((m) => m[1].trim());
 /** A unit whose every field is one of the legal identity, which the page reads as ORBES. */
@@ -249,16 +247,21 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(sectionProblems('t', ['**Lead.** Kept. [À COMPLÉTER: x]'], ['Kept.'])).not.toEqual([]);
   });
 
-  it('shows no field to complete, no review line, and reads the company as ORBES until its identity is given', () => {
+  it('shows no field to complete and no review line, and names the publisher CONGLOMERAT LLC (choice 16)', () => {
     for (const page of LEGAL_PAGES) {
       for (const lang of LANGS) {
         const text = readText(DOCUMENTS[page][lang], lang);
         expect(text, `${page}.${lang}`).not.toMatch(/COMPLÉTER|\[|\]|\*Code|Brouillon|Draft for legal review|TODO|TBD/);
       }
     }
-    expect(LEGAL_IDENTITY).toEqual({ companyName: 'ORBES', publicationDirector: 'ORBES' });
-    // The drafts still wait for the identity: once counsel fills them, the comparison above asks for this page to follow.
-    for (const lang of LANGS) expect(readDoc(`docs/legal/legal-notice.${lang}.md`)).toContain('[À COMPLÉTER');
+    expect(LEGAL_IDENTITY.companyName).toBe('CONGLOMERAT LLC');
+    for (const lang of LANGS) {
+      const notice = readText(DOCUMENTS.notice[lang], lang);
+      for (const s of ['CONGLOMERAT LLC', 'Wyoming', '30 N Gould St, Ste N, Sheridan, WY 82801', 'support@theorbes.com']) expect(notice, `${lang}: ${s}`).toContain(s);
+      expect(notice, lang).not.toMatch(/RCS|capital|VAT|TVA|directeur de la publication|publication director/i);
+      // The hosts' details still wait in the drafts, left out of the page.
+      expect(readDoc(`docs/legal/legal-notice.${lang}.md`)).toContain('[À COMPLÉTER');
+    }
   });
 
   it('never conflates the three marks (BRAND §2.1): the ORBES CODE is not "the seal", the GENOME is no signature', () => {
@@ -346,12 +349,14 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(caddy).toMatch(/request>client_ip ip_mask \{\s*ipv4 24\s*ipv6 48\s*\}/);
   });
 
-  it('says verifications are kept without a time limit while SCAN_RETENTION_DAYS is unset in production', () => {
+  it('says verifications are kept 90 days, the SCAN_RETENTION_DAYS the owner set in production (choice 17)', () => {
+    // The template keeps it commented; the production .env sets SCAN_RETENTION_DAYS=90 (runbook §3.5).
     expect(env).toMatch(/^# SCAN_RETENTION_DAYS=/m);
     expect(env).not.toMatch(/^SCAN_RETENTION_DAYS=/m);
     expect(compose).toContain('SCAN_RETENTION_DAYS: ${SCAN_RETENTION_DAYS:-}');
-    expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('no retention period has been set yet, so they are kept without a time limit');
-    expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain("aucune durée de conservation n'est encore fixée ; elles sont donc conservées sans limite de temps");
+    expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('**Verifications**: kept 90 days. Older verifications are deleted with everything attached to them');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain("**Vérifications** : conservées 90 jours. Les vérifications plus anciennes sont supprimées avec tout ce qui s'y rattache");
+    expect(readDoc('docs/launch/DEPLOY-RECOMMANDATIONS-2026-10.md')).toContain('SCAN_RETENTION_DAYS=90');
   });
 
   it('dates the backups as backup.sh keeps them: 14 daily and 8 weekly archives, and no event archive past 63 days, about two months', () => {
@@ -527,7 +532,8 @@ describe('legal pages: both languages, links, lexicon', () => {
     // here: give LEGAL_VERSION the date of the change and add its line with the fingerprint this test reports. A line
     // never changes once its version is published in production. 2026-10-03: the first version, completed that day
     // (OPS-D2 and J-04/J-06 review) before any deployment of the legal pages.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': '3e40a07f7f34c631' };
+    // 2026-10-03 was revised the same day it went live (publisher, contact, Wyoming law, 90-day retention: choices 16-18).
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

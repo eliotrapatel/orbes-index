@@ -28,14 +28,14 @@ const EN: LegalDocument = {
       title: 'Article 1 — Purpose',
       blocks: [
         'These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, and the ownership certificate.',
-        'The service is published by ORBES, whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.',
+        'The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.',
       ],
     },
     {
       id: 'article-2',
       title: 'Article 2 — Definitions',
       blocks: [
-        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **ORBES Client Services**: the client service of ORBES.',
+        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).',
       ],
     },
     {
@@ -162,9 +162,9 @@ const EN: LegalDocument = {
     },
     {
       id: 'article-16',
-      title: 'Article 16 — Applicable law, mediation and disputes',
+      title: 'Article 16 — Applicable law and disputes',
       blocks: [
-        'These terms are governed by French law. In a dispute, you may first turn to ORBES Client Services.',
+        'These terms are governed by the laws of the State of Wyoming, United States, without regard to its conflict-of-laws rules. Nothing in them deprives a consumer of the protection of the mandatory rules of the law of the country where they live. In a dispute, you may first turn to ORBES Client Services. Any dispute relating to these terms will be handled in the courts located in Wyoming, United States, subject to those mandatory rules.',
       ],
     },
   ],
@@ -180,14 +180,14 @@ const FR: LegalDocument = {
       title: 'Article 1 — Objet',
       blocks: [
         "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, et le certificat de propriété.",
-        "Le service est édité par ORBES, dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.",
+        "Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.",
       ],
     },
     {
       id: 'article-2',
       title: 'Article 2 — Définitions',
       blocks: [
-        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **ORBES Client Services** : le service client d'ORBES.",
+        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).",
       ],
     },
     {
@@ -314,9 +314,9 @@ const FR: LegalDocument = {
     },
     {
       id: 'article-16',
-      title: 'Article 16 — Droit applicable, médiation et litiges',
+      title: 'Article 16 — Droit applicable et litiges',
       blocks: [
-        "Les présentes conditions sont soumises au droit français. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services.",
+        "Les présentes conditions sont régies par le droit de l'État du Wyoming (États-Unis), sans égard à ses règles de conflit de lois. Rien dans ces conditions ne prive un consommateur de la protection des règles impératives de la loi du pays où il réside. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Tout litige relatif aux présentes conditions relève des tribunaux situés dans le Wyoming (États-Unis), sous réserve de ces règles impératives.",
       ],
     },
   ],

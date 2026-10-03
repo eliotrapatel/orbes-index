@@ -580,6 +580,70 @@ Si `ADMIN_ALLOWED_IPS` restreint un jour la console, le réseau de chaque boutiq
 
 Après la vérification d'identité (playbook §6, à finaliser avec ton juriste) : `Owners` → la ligne du client → `Recovery code` (ADMIN). Le code s'affiche une fois : **lis-le au client**, qui le tape sous `FORGOTTEN PASSWORD?` dans les 30 minutes. Il appartient au client : ne l'écris nulle part, ne l'envoie pas, ne le range pas.
 
+### 3.5 Les données du propriétaire du 2026-10-03 : contact, conservation des scans, identité légale
+
+Tes choix 16 à 18 : le contact d'ORBES Client Services (`support@theorbes.com`, sans téléphone), la conservation des scans pendant **90 jours**, et l'identité légale (CONGLOMERAT LLC, droit du Wyoming). L'identité et le texte de la politique de confidentialité sont dans le code. Le contact et la durée sont dans `.env`. On fait les deux en un seul déploiement, **sans migration**, pour que la page et le serveur disent toujours la même chose. Ce sont des valeurs publiques : rien à ranger.
+
+**0. Avant.** Comme au §2.1 : l'heure (hors 03:00–05:30 UTC), le pré-contrôle et l'accord du responsable de l'hôte (« même schéma, aucune migration, l'application redémarre »).
+
+**1. Les lignes existent-elles déjà ?**
+
+```bash
+grep -nE '^(CLIENT_SERVICES_|SCAN_RETENTION_DAYS=)' .env
+```
+
+Sortie attendue : **rien**. Ajoute alors les trois lignes, une commande à la fois :
+
+```bash
+printf '%s\n' 'CLIENT_SERVICES_EMAIL=support@theorbes.com' >> .env
+```
+
+```bash
+printf '%s\n' 'CLIENT_SERVICES_HOURS=Monday to Friday, 10:00–18:00 (Paris)' >> .env
+```
+
+```bash
+printf '%s\n' 'SCAN_RETENTION_DAYS=90' >> .env
+```
+
+```bash
+grep -nE '^(CLIENT_SERVICES_|SCAN_RETENTION_DAYS=)' .env
+```
+
+Sortie attendue : les trois lignes, chacune une seule fois.
+
+**2. Vérifie les valeurs avant de redémarrer** (une copie jetable de l'application lit le nouveau `.env`, rien ne change) :
+
+```bash
+docker compose run --rm --no-deps -T app node --import tsx scripts/db.ts status
+```
+
+Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les treize lignes `applied`. Un `Invalid configuration:` nomme la ligne à corriger dans `.env`.
+
+**3. Récupère le commit et déploie**, comme au §2.3 et au §2.4. Le commit est celui que Claude te donne, et sa CI doit être verte :
+
+```bash
+git -C /opt/orbes/orbes-index fetch origin
+```
+
+```bash
+git -C /opt/orbes/orbes-index merge --ff-only origin/claude/orbes-genome-code-system-o8bmnk
+```
+
+```bash
+scripts/deploy.sh
+```
+
+Sortie attendue : `schema: 13 migration(s) applied, all known to orbes-genome:<tag>`, aucune ligne `Applied … migration(s)`, les tests de fumée, puis `deployed orbes-genome:<tag> (previous: 62ad9a76d098)`.
+
+**4. Vérifie** depuis ton Mac (le contact est en cache 5 minutes) :
+
+```bash
+curl -s https://verify.theorbes.com/api/v1/client-services
+```
+
+Sortie attendue : `{"email":"support@theorbes.com","hours":"Monday to Friday, 10:00–18:00 (Paris)"}`. Sur `https://verify.theorbes.com/legal/notice`, l'éditeur est CONGLOMERAT LLC, et sur `/legal/privacy` les vérifications sont conservées 90 jours. La première purge passe dans l'heure et n'efface rien : aucun scan n'a encore 90 jours.
+
 ---
 
 ## 4. Ce qui reste après ces déploiements

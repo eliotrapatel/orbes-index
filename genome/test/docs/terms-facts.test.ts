@@ -584,15 +584,18 @@ describe('terms of use (docs/legal/terms.fr.md, terms.en.md)', () => {
 });
 
 describe('legal notice (docs/legal/legal-notice.fr.md, legal-notice.en.md)', () => {
-  const FIELDS: Readonly<Record<Lang, readonly string[]>> = {
-    fr: ['raison sociale', 'RCS', 'capital', 'directeur de la publication'],
-    en: ['company name', 'RCS', 'share capital', 'publication director'],
+  // The owner's identity of 2026-10-03 (choice 16): a Wyoming company, to which French register fields do not apply.
+  const IDENTITY: Readonly<Record<Lang, readonly string[]>> = {
+    fr: ['Raison sociale : CONGLOMERAT LLC', 'Forme juridique : limited liability company (Wyoming, États-Unis)', 'Siège social : 30 N Gould St, Ste N, Sheridan, WY 82801, États-Unis', 'support@theorbes.com'],
+    en: ['Company name: CONGLOMERAT LLC', 'Legal form: limited liability company (Wyoming, United States)', 'Registered office: 30 N Gould St, Ste N, Sheridan, WY 82801, United States', 'support@theorbes.com'],
   };
 
   for (const lang of LANGS) {
-    it(`${lang}: keeps the [À COMPLÉTER] fields of the brief, each one well formed`, () => {
+    it(`${lang}: names the publisher, and every remaining [À COMPLÉTER] field is well formed`, () => {
       const fields = placeholders(notices[lang]);
-      for (const f of FIELDS[lang]) expect(fields.some((p) => p.includes(f)), f).toBe(true);
+      for (const s of IDENTITY[lang]) expect(notices[lang], s).toContain(s);
+      // No field of the French register remains (the intro says why they do not apply).
+      expect(notices[lang]).not.toMatch(/^- (Immatriculation|Registration|Numéro de TVA|EU VAT)|^## (Directeur de la publication|Publication director)|au capital de|share capital of/m);
       // Every marker opens a field that closes: an unclosed one would print as text.
       expect(notices[lang].split('[À COMPLÉTER').length - 1).toBe(fields.length);
       expect(terms[lang].split('[À COMPLÉTER').length - 1).toBe(placeholders(terms[lang]).length);

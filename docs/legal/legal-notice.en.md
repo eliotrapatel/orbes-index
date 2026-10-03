@@ -2,22 +2,16 @@
 
 **Draft for legal review, not validated.** This notice covers theorbes.com and verify.theorbes.com. [Version française](legal-notice.fr.md).
 
-The [À COMPLÉTER: …] fields await the legal identity of ORBES; they keep the French marker of the French version. Until they are filled in, the published page reads "ORBES" with no empty field in sight (see the [note for counsel](counsel-note.fr.md), in French).
+The publisher's identity is that of CONGLOMERAT LLC, a Wyoming company, given by the owner on 2026-10-03; French register fields (RCS, share capital, EU VAT number, publication director) do not apply to it. The remaining [À COMPLÉTER: …] fields keep the French marker of the French version; until they are filled in, the published page leaves them out with no empty field in sight (see the [note for counsel](counsel-note.fr.md), in French).
 
 This notice is published under French law no. 2004-575 of 21 June 2004 on confidence in the digital economy.
 
 ## Publisher
 
-- Company name: [À COMPLÉTER: company name]
-- Legal form: [À COMPLÉTER: legal form], with a share capital of [À COMPLÉTER: share capital] euros
-- Registration: RCS [À COMPLÉTER: registry town and RCS number]
-- Registered office: [À COMPLÉTER: address of the registered office]
-- EU VAT number: [À COMPLÉTER: EU VAT number]
-- Contact: ORBES Client Services, [À COMPLÉTER: email address and phone]
-
-## Publication director
-
-[À COMPLÉTER: name of the publication director], [À COMPLÉTER: position of the publication director].
+- Company name: CONGLOMERAT LLC
+- Legal form: limited liability company (Wyoming, United States)
+- Registered office: 30 N Gould St, Ste N, Sheridan, WY 82801, United States
+- Contact: ORBES Client Services, support@theorbes.com
 
 ## Hosting
 

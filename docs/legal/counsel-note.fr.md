@@ -74,3 +74,17 @@ Le Code de la consommation (articles L. 612-1 et L. 616-1) impose à tout profes
 ## 5. Mentions légales
 
 Le brief cite l'article 6-III de la loi n° 2004-575 du 21 juin 2004 (LCEN) et ses sanctions pénales. Le brouillon vise la loi sans citer d'article : la numérotation de son article 6 a changé depuis 2024, à vérifier. Les mentions couvrent theorbes.com (Vercel Inc.) et verify.theorbes.com (OVHcloud, serveur au Canada). Le serveur hors de l'Union européenne est un écart accepté par ORBES (COMPLIANCE §7, H2) : la politique de confidentialité (`/legal/privacy`) dit où les données sont traitées, et vous confirmerez le fondement du transfert.
+
+## Décisions du propriétaire du 2026-10-03
+
+- **Éditeur** : CONGLOMERAT LLC, limited liability company du Wyoming, 30 N Gould St, Ste N, Sheridan, WY 82801, États-Unis (la même entité que joinentity.com). Le propriétaire n'est pas en France : les champs du droit français (RCS, capital social, TVA intracommunautaire, directeur de la publication) sont retirés des mentions.
+- **Droit applicable** : le droit et les tribunaux du Wyoming, comme pour ENTITY, sans priver le consommateur des règles impératives de la loi de son pays de résidence. Le médiateur de la consommation est retiré.
+- **Contact** : support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris), sans téléphone.
+- **Conservation des scans** : 90 jours (`SCAN_RETENTION_DAYS=90`).
+
+À vérifier par l'avocat, sans que cela bloque la publication :
+- le RGPD vaut pour les clients situés dans l'Union (art. 3.2) : faut-il désigner un représentant dans l'Union (art. 27) ?
+- la clause de juridiction du Wyoming face à un consommateur européen, et l'obligation de médiation (L. 612-1) pour un professionnel établi hors de l'Union qui vend en France ;
+- la portée de la loi Toubon (§2) pour un éditeur établi hors de France ;
+- l'hébergement au Canada (décision d'adéquation partielle).
+

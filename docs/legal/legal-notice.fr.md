@@ -2,22 +2,16 @@
 
 **Brouillon pour revue juridique, non validé.** Ces mentions valent pour theorbes.com et verify.theorbes.com. [English version](legal-notice.en.md).
 
-Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES. Tant qu'ils ne sont pas remplis, la page publiée affiche « ORBES » sans champ vide visible (voir la [note pour l'avocat](counsel-note.fr.md)).
+L'éditeur est CONGLOMERAT LLC, société du Wyoming, selon l'identité donnée par le propriétaire le 2026-10-03 ; les champs du droit français (RCS, capital social, TVA intracommunautaire, directeur de la publication) ne s'y appliquent pas. Les champs [À COMPLÉTER : …] restants ne figurent pas sur la page publiée tant qu'ils ne sont pas remplis, sans champ vide visible (voir la [note pour l'avocat](counsel-note.fr.md)).
 
 Ces mentions sont publiées en application de la loi n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique.
 
 ## Éditeur
 
-- Raison sociale : [À COMPLÉTER : raison sociale]
-- Forme juridique : [À COMPLÉTER : forme juridique], au capital de [À COMPLÉTER : capital social] euros
-- Immatriculation : RCS [À COMPLÉTER : ville du greffe et numéro RCS]
-- Siège social : [À COMPLÉTER : adresse du siège social]
-- Numéro de TVA intracommunautaire : [À COMPLÉTER : numéro de TVA intracommunautaire]
-- Contact : ORBES Client Services, [À COMPLÉTER : adresse e-mail et téléphone]
-
-## Directeur de la publication
-
-[À COMPLÉTER : nom du directeur de la publication], [À COMPLÉTER : qualité du directeur de la publication].
+- Raison sociale : CONGLOMERAT LLC
+- Forme juridique : limited liability company (Wyoming, États-Unis)
+- Siège social : 30 N Gould St, Ste N, Sheridan, WY 82801, États-Unis
+- Contact : ORBES Client Services, support@theorbes.com
 
 ## Hébergement
 

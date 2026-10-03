@@ -2,25 +2,20 @@
  * The legal notice (J-06), published from its drafts,
  * docs/legal/legal-notice.en.md and legal-notice.fr.md (J-04), section by
  * section and in their words (test/web/legal.content.test.ts holds it to
- * them). Until ORBES gives its legal identity (company name, legal form and
- * share capital, RCS, registered office, VAT number, publication director:
- * the plan's "Ce dont j'aurai besoin de toi", item 3), the page reads ORBES
- * where the company is named and leaves the other fields out, so no empty
- * field shows; the hosts' phone numbers and OVHcloud's entity wait the same
- * way. The contact of ORBES Client Services is shown under the publisher
- * when the server publishes one (GET /api/v1/client-services).
- *
- * When the identity comes: fill the drafts' [À COMPLÉTER] fields, then copy
- * them here (LEGAL_IDENTITY names what the page shows meanwhile).
+ * them). The publisher is CONGLOMERAT LLC, a Wyoming company (owner's
+ * decision of 2026-10-03, the plan's choice 16): French register fields (RCS,
+ * share capital, VAT number, publication director) do not apply to it. The
+ * hosts' phone numbers and OVHcloud's entity still wait, left out so no empty
+ * field shows. The contact of ORBES Client Services is shown under the
+ * publisher when the server publishes one (GET /api/v1/client-services).
  */
 import type { LegalDocument } from './types.js';
 
-/** What the page shows for the fields of the legal identity that ORBES has not given yet. */
+/** The publisher's legal identity, as the drafts give it. */
 export const LEGAL_IDENTITY = Object.freeze({
-  /** The drafts' [À COMPLÉTER: company name] / [À COMPLÉTER : raison sociale]. */
-  companyName: 'ORBES',
-  /** The drafts' [À COMPLÉTER: name of the publication director] / [À COMPLÉTER : nom du directeur de la publication]. */
-  publicationDirector: 'ORBES',
+  companyName: 'CONGLOMERAT LLC',
+  legalForm: { en: 'limited liability company (Wyoming, United States)', fr: 'limited liability company (Wyoming, États-Unis)' },
+  registeredOffice: { en: '30 N Gould St, Ste N, Sheridan, WY 82801, United States', fr: '30 N Gould St, Ste N, Sheridan, WY 82801, États-Unis' },
 });
 
 const EN: LegalDocument = {
@@ -34,12 +29,7 @@ const EN: LegalDocument = {
     {
       id: 'publisher',
       title: 'Publisher',
-      blocks: [`- Company name: ${LEGAL_IDENTITY.companyName}\n- Contact: ORBES Client Services`, { contact: true }],
-    },
-    {
-      id: 'publication-director',
-      title: 'Publication director',
-      blocks: [LEGAL_IDENTITY.publicationDirector],
+      blocks: [`- Company name: ${LEGAL_IDENTITY.companyName}\n- Legal form: ${LEGAL_IDENTITY.legalForm.en}\n- Registered office: ${LEGAL_IDENTITY.registeredOffice.en}\n- Contact: ORBES Client Services, support@theorbes.com`, { contact: true }],
     },
     {
       id: 'hosting',
@@ -83,12 +73,7 @@ const FR: LegalDocument = {
     {
       id: 'publisher',
       title: 'Éditeur',
-      blocks: [`- Raison sociale : ${LEGAL_IDENTITY.companyName}\n- Contact : ORBES Client Services`, { contact: true }],
-    },
-    {
-      id: 'publication-director',
-      title: 'Directeur de la publication',
-      blocks: [LEGAL_IDENTITY.publicationDirector],
+      blocks: [`- Raison sociale : ${LEGAL_IDENTITY.companyName}\n- Forme juridique : ${LEGAL_IDENTITY.legalForm.fr}\n- Siège social : ${LEGAL_IDENTITY.registeredOffice.fr}\n- Contact : ORBES Client Services, support@theorbes.com`, { contact: true }],
     },
     {
       id: 'hosting',

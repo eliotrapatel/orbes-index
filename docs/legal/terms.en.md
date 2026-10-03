@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: [À COMPLÉTER: effective date]. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 3 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -8,7 +8,7 @@ Each article ends with a *Code: …* line that points to the rules of the code i
 
 These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, and the ownership certificate.
 
-The service is published by [À COMPLÉTER: company name] ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
+The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
 
 *Code: R56.*
 
@@ -22,7 +22,7 @@ The service is published by [À COMPLÉTER: company name] ("ORBES"), whose full 
 - **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.
 - **Transfer code**: the code the registered owner creates to pass on the registration of a piece.
 - **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.
-- **ORBES Client Services**: the client service of ORBES, reachable at [À COMPLÉTER: email address, phone and hours of ORBES Client Services].
+- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).
 
 *Code: — (legal clause).*
 
@@ -166,8 +166,8 @@ ORBES may change these terms. The version in force and its date are published on
 
 *Code: R57.*
 
-## Article 16 — Applicable law, mediation and disputes
+## Article 16 — Applicable law and disputes
 
-These terms are governed by French law. In a dispute, you may first turn to ORBES Client Services. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name, address and website of the consumer mediator]. [À COMPLÉTER: competent court, on counsel's advice.]
+These terms are governed by the laws of the State of Wyoming, United States, without regard to its conflict-of-laws rules. Nothing in them deprives a consumer of the protection of the mandatory rules of the law of the country where they live. In a dispute, you may first turn to ORBES Client Services. Any dispute relating to these terms will be handled in the courts located in Wyoming, United States, subject to those mandatory rules.
 
 *Code: — (legal clause).*

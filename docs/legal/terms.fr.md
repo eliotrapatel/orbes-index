@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : [À COMPLÉTER : date d'entrée en vigueur]. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 3 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -8,7 +8,7 @@ Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du 
 
 Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, et le certificat de propriété.
 
-Le service est édité par [À COMPLÉTER : raison sociale] (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
+Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
 
 *Code : R56.*
 
@@ -22,7 +22,7 @@ Le service est édité par [À COMPLÉTER : raison sociale] (« ORBES »), dont 
 - **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.
 - **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.
 - **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.
-- **ORBES Client Services** : le service client d'ORBES, joignable à [À COMPLÉTER : adresse e-mail, téléphone et horaires d'ORBES Client Services].
+- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).
 
 *Code : — (clause juridique).*
 
@@ -166,8 +166,8 @@ ORBES peut modifier les présentes conditions. La version en vigueur et sa date 
 
 *Code : R57.*
 
-## Article 16 — Droit applicable, médiation et litiges
+## Article 16 — Droit applicable et litiges
 
-Les présentes conditions sont soumises au droit français. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Vous pouvez aussi recourir gratuitement au médiateur de la consommation [À COMPLÉTER : nom, adresse et site du médiateur de la consommation]. [À COMPLÉTER : juridiction compétente, selon l'avis de l'avocat.]
+Les présentes conditions sont régies par le droit de l'État du Wyoming (États-Unis), sans égard à ses règles de conflit de lois. Rien dans ces conditions ne prive un consommateur de la protection des règles impératives de la loi du pays où il réside. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Tout litige relatif aux présentes conditions relève des tribunaux situés dans le Wyoming (États-Unis), sous réserve de ces règles impératives.
 
 *Code : — (clause juridique).*
