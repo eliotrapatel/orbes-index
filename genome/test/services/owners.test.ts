@@ -358,6 +358,21 @@ describe('OwnerService', () => {
     expect((await owners.lock((await customer()).id, admin)).certificatesRevoked).toBe(0);
   });
 
+  it('withdraws a link created after the lock read its clock (committed while the lock waited for the account row) at its own creation time', async () => {
+    const c = await customer();
+    const piece = await ownedBy(c);
+    const link = await certificates.create(c.id, piece, {}, c.actor);
+    // On PostgreSQL a creation's FOR SHARE on the account can go ahead of a lock already waiting with its clock read:
+    // the link then bears a later time than the lock's. Its withdrawal keeps revoked_at >= created_at (0013's CHECK).
+    const later = new Date(clock.now().getTime() + 1_000);
+    await t.db.updateTable('ownership_certificates').set({ created_at: later }).where('id', '=', link.id).execute();
+    expect((await owners.lock(c.id, admin)).certificatesRevoked).toBe(1);
+    const row = await t.db.selectFrom('ownership_certificates').select(['created_at', 'revoked_at']).where('id', '=', link.id).executeTakeFirstOrThrow();
+    expect(row.revoked_at).toEqual(later);
+    expect(row.created_at).toEqual(later);
+    await expectDomainError(certificates.lookup(link.token), 'CERTIFICATE_NOT_FOUND', 404);
+  });
+
   it('exports the links to ownership certificates the account created, open, ended and withdrawn, with their state and never a token (F-06)', async () => {
     const c = await customer();
     const [a, b, d] = [await ownedBy(c), await ownedBy(c), await ownedBy(c)];

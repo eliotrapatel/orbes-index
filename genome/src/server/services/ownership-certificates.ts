@@ -45,6 +45,7 @@
  * `verify` rate budget.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { ProductStatus } from '../db/schema.js';
 import { DomainError, forbidden, unauthorized, validationError } from '../errors.js';
@@ -254,6 +255,10 @@ async function liveAccountSession(tx: Db, idHash: Uint8Array, accountId: string,
  * for it (creation reads the account FOR SHARE first; after a lock it is refused). It takes only the links' row locks:
  * the caller runs it before its first audit entry, as no row is locked after the audit chain's lock (DATABASE §8.3),
  * and records them afterwards with auditWithdrawnCertificates. Returns the links withdrawn, by piece then id.
+ *
+ * `now` is the caller's clock, read before it locked the account row; a creation that read its own clock later
+ * may have committed meanwhile (on PostgreSQL a new FOR SHARE can go ahead of a FOR UPDATE that is waiting). Such
+ * a link is withdrawn at its own creation time, never before it (the CHECK revoked_at >= created_at of 0013).
  */
 export async function withdrawAccountCertificates(tx: Db, accountId: string, now: Date): Promise<WithdrawnCertificate[]> {
   if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw validationError('Invalid account.');
@@ -261,7 +266,7 @@ export async function withdrawAccountCertificates(tx: Db, accountId: string, now
   const rows = await tx
     .updateTable('ownership_certificates as c')
     .from('products as p')
-    .set({ revoked_at: now })
+    .set({ revoked_at: sql<Date>`greatest(${now}::timestamptz, c.created_at)` })
     .whereRef('p.id', '=', 'c.product_id')
     .where('c.revoked_at', 'is', null)
     .where('c.expires_at', '>', now)

@@ -252,6 +252,20 @@ describe('AccountRecoveryService', () => {
       expect((await certificates.lookup((await certificates.create(c.id, piece.productId, {}, c.actor)).token)).status).toBe('VALID');
     });
 
+    it('withdraws a link created after the recovery read its clock at its own creation time (0013: revoked_at >= created_at)', async () => {
+      const c = await customer();
+      const piece = await ownedBy(c);
+      const link = await certificates.create(c.id, piece.productId, {}, c.actor);
+      // Committed while the recovery waited for the account row (PostgreSQL), with a later clock than the recovery's.
+      const later = new Date(clock.now().getTime() + 1_000);
+      await t.db.updateTable('ownership_certificates').set({ created_at: later }).where('id', '=', link.id).execute();
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      expect((await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD })).certificatesRevoked).toBe(1);
+      const row = await t.db.selectFrom('ownership_certificates').select('revoked_at').where('id', '=', link.id).executeTakeFirstOrThrow();
+      expect(row.revoked_at).toEqual(later);
+      await expectDomainError(certificates.lookup(link.token), 'CERTIFICATE_NOT_FOUND', 404);
+    });
+
     it('gives no link to a creation still on its way with a session the recovery ended: 401, nothing created (F-06)', async () => {
       const c = await customer();
       const piece = await ownedBy(c);
