@@ -13,14 +13,22 @@
  * Every image has its alternative text (view-model.ts). A photograph that
  * cannot be loaded (removed meanwhile) takes its frame with it, and the
  * plate goes when none is left: never a broken image. Shared with the
- * owner's list of pieces.
+ * owner's list of pieces (MY PIECES, F-01), where each plate is named after
+ * its piece.
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { PHOTOS } from '../copy.js';
 import type { PhotoModel } from '../view-model.js';
 
-export function photoPlate(photos: readonly PhotoModel[], extraClass?: string): HTMLElement | null {
+export interface PhotoPlateOptions {
+  /** A class of the page that places the plate (MY PIECES: `piece__photos`). */
+  extraClass?: string;
+  /** The section's accessible name (default: PHOTOS.label, the result's). */
+  label?: string;
+}
+
+export function photoPlate(photos: readonly PhotoModel[], opts: PhotoPlateOptions = {}): HTMLElement | null {
   if (photos.length === 0) return null;
   const note = h('p', { class: 'photos__note', text: PHOTOS.note(photos.length) });
   const figures = photos.map((p) => {
@@ -28,7 +36,7 @@ export function photoPlate(photos: readonly PhotoModel[], extraClass?: string): 
     return h('figure', { class: 'photo', data: { kind: p.kind } }, img, h('figcaption', { class: 'photo__caption', text: p.caption }));
   });
   const grid = bracket(h('div', { class: ['photos__plate', `photos__plate--${figures.length > 1 ? 'pair' : 'single'}`] }, ...figures));
-  const plate = h('section', { class: ['result__photos', extraClass], attrs: { 'aria-label': PHOTOS.label } }, grid, note);
+  const plate = h('section', { class: ['result__photos', opts.extraClass], attrs: { 'aria-label': opts.label ?? PHOTOS.label } }, grid, note);
   for (const figure of figures) {
     figure.querySelector('img')?.addEventListener(
       'error',

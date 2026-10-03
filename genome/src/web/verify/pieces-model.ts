@@ -5,11 +5,12 @@
  *
  * The owner's view says what the registry holds about their own piece: since when it is theirs, how
  * they acquired it, whether their ownership is verified, a transfer under way, the warranty, the
- * services, and their own declaration (LOST or STOLEN). It never names an internal status.
+ * services, their own declaration (LOST or STOLEN), and the photographs ORBES holds of it (F-04), as an
+ * authentic result shows them. It never names an internal status.
  */
 import { PIECES } from './copy.js';
 import type { IncidentType, OwnedPiece, ServiceRecord } from './types.js';
-import { formatDate, formatDateLong, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type Row } from './view-model.js';
+import { formatDate, formatDateLong, photoModels, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
 
 export type PieceTabId = 'ownership' | 'warranty' | 'service';
 
@@ -33,6 +34,11 @@ export interface PieceModel {
   genome?: GenomeModel;
   /** MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
   productLines: string[];
+  /**
+   * The photographs of the piece (F-04), its own first, then its model's, each with its alternative text: those of an
+   * authentic result (photoModels), on their ivory plate under the GENOME's. Empty when ORBES holds none.
+   */
+  photos: PhotoModel[];
   /** The status line of the OWNERSHIP panel. */
   status: string;
   ownershipRows: Row[];
@@ -104,6 +110,7 @@ export function pieceModel(p: OwnedPiece): PieceModel {
     productId,
     key: productId.toLowerCase(),
     productLines: productLines(p),
+    photos: photoModels(p),
     status,
     ownershipRows: rows,
     ownershipNotes: notes,

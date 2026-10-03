@@ -606,7 +606,7 @@ The place and the note are the customer's own words: **personal data**. They are
 
 ### 8.6 `GET /api/v1/media/:sha256`
 
-A photograph that an authentic result names (§9.2 `product.imageUrl` and `product.photoUrl`, F-04): a model's reference photograph or the photograph of one piece, uploaded in the console (§13.4, §14.12). Public, no session, rate group `api`; `HEAD` too.
+A photograph that an authentic result names (§9.2 `product.imageUrl` and `product.photoUrl`, F-04), as does the owner's list of pieces (§10.5): a model's reference photograph or the photograph of one piece, uploaded in the console (§13.4, §14.12). Public, no session, rate group `api`; `HEAD` too.
 
 `:sha256` is the lower-case hexadecimal SHA-256 of the image's bytes (upper case is accepted and read as lower case): the URL names its content, so the answer never changes.
 
@@ -1150,7 +1150,7 @@ The caller's current products, newest acquisition first.
 | Field | Notes |
 |---|---|
 | `collection` | The product's collection, or else its model's; `null` when neither has one. |
-| `imageUrl`, `photoUrl` | The model's reference photograph and the piece's own (F-04, §8.6), or `null`: the owner's list of pieces shows them as an authentic result does. |
+| `imageUrl`, `photoUrl` | The model's reference photograph and the piece's own (F-04, §8.6), or `null`: MY PIECES shows them as an authentic result does, on their ivory plate under the piece's GENOME, each with its alternative text (BRAND §5). Not on an ownership certificate (§8.7), which attests a record, not an object. |
 | `acquiredVia` | `FIRST_REGISTRATION` or `TRANSFER`. |
 | `verified` | Ownership proven by claim code or confirmed by client services. |
 | `transfer` | `{ "pending": true, "expiresAt": … }` while an unexpired transfer offer is pending. |

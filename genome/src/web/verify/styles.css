@@ -1418,6 +1418,13 @@ h1[tabindex="-1"]:focus,
 .piece__plate .bracket--bl { bottom: 10px; left: 10px; }
 .piece__plate .bracket--br { bottom: 10px; right: 10px; }
 
+/* The photographs ORBES holds of a piece (F-04): the plate of an authentic
+   result (.result__photos), under the écrin that carries the piece's heading,
+   at the distance of the piece's lines. */
+.piece__photos {
+  margin-top: 40px;
+}
+
 .piece__lines {
   margin-top: 40px;
   text-align: center;

@@ -166,6 +166,10 @@ export interface OwnedPiece {
   /** `version` is an integer here (1), `pattern` the glyph ids joined by "·". */
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
+  /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+  /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`, or null. */
+  photoUrl: string | null;
 }
 
 /** One after-sales service of a piece (GET /api/v1/products/:productId/service-history), without staff notes. */

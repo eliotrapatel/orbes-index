@@ -463,6 +463,8 @@ export const STAFF_SCAN_NOTE =
 export const PHOTOS = Object.freeze({
   /** The section's accessible name. */
   label: 'Photographs of this piece',
+  /** Its name in MY PIECES, where each piece of the list has its own (F-01). */
+  labelOf: (productId: string) => `Photographs of ${productId}`,
   piece: 'THIS PIECE',
   model: 'THE MODEL',
   pieceAlt: (productId: string) => `This piece, ${productId}, photographed by ORBES at issuance`,

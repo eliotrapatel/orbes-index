@@ -10,6 +10,9 @@
  *     ◔ · ◯ · ◕ · …                          the glyphs in their orbit, around the SEAL
  *     G1-E1DC-BE52 · GENOME-01
  *   └                      ┘
+ *   ┌                      ┐
+ *     [ this piece ] [ model ]               the photographs ORBES holds (F-04),
+ *   └                      ┘                 on ivory, as on an authentic result
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
  *   OWNERSHIP · WARRANTY · SERVICE            tabs (the result's tablist)
  *     REGISTERED TO YOU · SINCE · ACQUIRED · OWNERSHIP · TRANSFER
@@ -36,7 +39,7 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, PIECES } from '../copy.js';
+import { ACCOUNT_PASSWORD, PHOTOS, PIECES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
@@ -45,6 +48,7 @@ import { formatDate, pieceContactModel, recoveryContactModel } from '../view-mod
 import { contactBlock, rows, sectionLabel, viewRoot } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
+import { photoPlate } from './photos.js';
 import { tabsView } from './tabs.js';
 
 export interface PiecesDeps {
@@ -404,13 +408,16 @@ class PieceCard {
         this.model.genome ? genomeBlock(this.model.genome, { titleId }) : h('h2', { class: 'genome__id', id: titleId, text: this.model.productId }),
       ),
     );
+    // The photographs (F-04) under the plate, which carries the piece's heading: they belong to this piece for a
+    // screen reader as for the eye, the plate of each named after it.
+    const photos = photoPlate(this.model.photos, { extraClass: 'piece__photos', label: PHOTOS.labelOf(this.model.productId) });
     const lines = h('ul', { class: 'lines piece__lines', attrs: { 'aria-label': 'Piece' } }, ...this.model.productLines.map((line) => h('li', { class: 'lines__line', text: line })));
     const tabs = tabsView<PieceTabId>(PIECE_TABS, (id) => this.build(id), 'ownership', {
       labels: PIECE_TAB_LABELS,
       idPrefix: `${this.key}-`,
       label: `${this.model.productId} information`,
     });
-    this.root = h('article', { class: 'piece', attrs: { 'aria-labelledby': titleId } }, plate, lines, tabs.root);
+    this.root = h('article', { class: 'piece', attrs: { 'aria-labelledby': titleId } }, plate, photos, lines, tabs.root);
     this.render();
   }
 

@@ -149,6 +149,8 @@ describe('certificate copy (BRAND §4.5, §4.6)', () => {
       inService: false,
       certificateAllowed: true,
       warranty: { status: 'ACTIVE' },
+      imageUrl: null,
+      photoUrl: null,
     });
     const s = certificateScreen(valid());
     if (s.kind !== 'valid') throw new Error(s.kind);

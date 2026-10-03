@@ -463,6 +463,16 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
     expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
   });
 
+  it('sets them in MY PIECES too (F-01): the same plate, under the écrin that carries the piece\'s heading, at the distance of its lines', () => {
+    const piecesView = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
+    const at = (needle: string) => piecesView.indexOf(needle);
+    expect(at("photoPlate(this.model.photos, { extraClass: 'piece__photos'")).toBeGreaterThan(0);
+    expect(at("{ class: 'piece', attrs: { 'aria-labelledby': titleId } }, plate, photos, lines, tabs.root)")).toBeGreaterThan(0);
+    expect(rule(styles, '.piece__photos')['margin-top']).toBe(rule(styles, '.piece__lines')['margin-top']);
+    // The result's rule sets the plate's distance first; MY PIECES' own one comes later in the sheet, so it wins.
+    expect(styles.indexOf('.piece__photos {')).toBeGreaterThan(styles.indexOf('.result__photos {'));
+  });
+
   it('never crops a photograph, gives each its alternative text, and hides one that cannot be loaded', () => {
     expect(rule(styles, '.photo__img')).toMatchObject({ width: '100%', 'aspect-ratio': '1', 'object-fit': 'contain' });
     expect(photosView).toContain("attrs: { src: p.src, alt: p.alt, decoding: 'async' }");

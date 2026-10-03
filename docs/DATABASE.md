@@ -874,7 +874,7 @@ The photographs of the catalogue and of the pieces (migration `0012_media`, reco
 - **Indexes:** primary key; `media_objects_created_by_idx (created_by)`. The two foreign keys that point here lead `models_image_sha256_idx` and `products_photo_sha256_idx`.
 - **Triggers:** `media_objects_immutable` (BEFORE UPDATE, `OR001` "media objects are content-addressed and never change").
 - **Written by:** `MediaService` (`src/server/services/media.ts`) only: `INSERT … ON CONFLICT (sha256) DO NOTHING` in the transaction that points a model or a piece to the image. Once that transaction has committed, an image that no model and no piece uses any more (the one replaced or removed) is deleted; should a concurrent upload of the very same bytes point to it meanwhile, the foreign key refuses the delete and the row stays, used. The size of the table is bounded by the photographs in use.
-- **Read by:** `GET /api/v1/media/:sha256` (public, `Cache-Control: public, max-age=31536000, immutable`). A verification names an image only on an `AUTHENTIC*` result.
+- **Read by:** `GET /api/v1/media/:sha256` (public, `Cache-Control: public, max-age=31536000, immutable`). A verification names an image only on an `AUTHENTIC*` result; the owner's list of pieces (`GET /api/v1/account/products`, MY PIECES) names those of the account's own pieces; an ownership certificate names none.
 - **Privacy:** photographs of objects, stripped of their metadata; a photograph showing a person is out of place here (the console says what each one is for). Included in the database backups (§11) like every other table.
 
 ### 5.27 `ownership_certificates`

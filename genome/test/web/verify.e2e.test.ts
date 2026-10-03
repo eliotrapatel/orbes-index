@@ -14,9 +14,10 @@
  * guidance under AUTHENTIC — REGISTERED and its link to RECEIVING THIS PIECE
  * (J-02), the reception of a piece with its transfer code (F-03: signed in
  * after the scan, VERIFY AGAIN; the code of another piece refused; the
- * window of the scan closed), MY PIECES (F-01: sign-in, the list, its tabs
- * from the keyboard, a piece reported stolen then scanned by a stranger, a
- * loss withdrawn; a direct link, a reload and the back button), the
+ * window of the scan closed), MY PIECES (F-01: sign-in, the list and the
+ * photograph of a piece (F-04), its tabs from the keyboard, a piece reported
+ * stolen then scanned by a stranger, a loss withdrawn; a direct link, a
+ * reload and the back button), the
  * ownership certificate (F-06: created in MY PIECES, opened from its link by
  * a visitor, its PDF, ended by a declaration, withdrawn, its address typed
  * back in capitals as the PDF letters it), and the problem screens. On each
@@ -763,6 +764,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const polish = await srv.ctx.services.warranty.openService(older.product.id, { type: 'POLISH', location: 'Paris atelier', notes: 'staff note' }, SYSTEM_ACTOR);
     await srv.ctx.services.warranty.completeService(polish.id, {}, SYSTEM_ACTOR);
     const newer = await ownedPiece(owner.account.id);
+    // ORBES photographed the older piece at issuance (F-04); its model, shared with other tests, has no photograph.
+    await srv.ctx.services.media.setProductPhoto(older.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
 
     // The landing offers MY PIECES once the session is known, signed out too: the owner of a piece that is gone cannot scan it.
@@ -793,6 +796,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const card = page.getByRole('article', { name: older.product.productId });
     const other = page.getByRole('article', { name: newer.product.productId });
     expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    // Under the écrin that carries its heading, the photograph ORBES took of the piece (F-04), on the ivory plate of an
+    // authentic result, with its alternative text, the plate named after the piece; the other piece has none.
+    const photos = card.getByRole('region', { name: `Photographs of ${older.product.productId}` });
+    await visible(photos);
+    const photo = photos.locator('img.photo__img');
+    await countOf(photo, 1);
+    await attrOf(photo, 'alt', `This piece, ${older.product.productId}, photographed by ORBES at issuance`);
+    await textsOf(photos.locator('.photo__caption'), ['THIS PIECE']);
+    await textOf(photos.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
+    await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 480]);
+    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    const [ecrin, photosBox, linesBox] = [(await card.locator('.piece__plate').boundingBox())!, (await photos.boundingBox())!, (await card.locator('.piece__lines').boundingBox())!];
+    expect(photosBox.y).toBeGreaterThan(ecrin.y + ecrin.height);
+    expect(photosBox.y + photosBox.height).toBeLessThan(linesBox.y);
+    await countOf(other.locator('.result__photos, img'), 0);
     await countOf(card.locator('.genome__glyphs .genome-svg--orbit g[data-layer="genome"]'), 8);
     await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
     await textOf(card.locator('.genome__meta'), `${older.genome.fingerprint} · GENOME-01`);
