@@ -16,11 +16,15 @@
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
  *   OWNERSHIP · WARRANTY · SERVICE            tabs (the result's tablist)
  *     REGISTERED TO YOU · SINCE · ACQUIRED · OWNERSHIP · TRANSFER
- *     REPORT LOST / STOLEN  (confirmed: LOST · STOLEN, then CONFIRM REPORT)
- *     PIECE FOUND           (a loss the owner reported; confirmed)
+ *     REPORT LOST / STOLEN  (confirmed: LOST · STOLEN, then CONFIRM REPORT;
+ *                           a piece the server would refuse to report, revoked,
+ *                           retired or flagged: ORBES Client Services instead)
+ *     PIECE FOUND           (a loss the owner reported; confirmed with the
+ *                           account's password)
  *     OWNERSHIP CERTIFICATE (F-06: CREATE CERTIFICATE, 7 · 30 · 90 DAYS, then
  *                           CREATE LINK; the link shown once, COPY LINK, OPEN;
- *                           the open links, each with WITHDRAW)
+ *                           the open links, each with WITHDRAW; read again
+ *                           after a creation, TRY AGAIN while unreadable)
  *   ── next piece ──
  *   SIGNED IN AS …     CHANGE PASSWORD   SIGN OUT
  *            [ SCAN ORBES CODE ]
@@ -33,7 +37,10 @@
  *
  * Every action is a same-origin JSON call through ApiClient (session cookie +
  * CSRF token); server messages are shown as they come. A 401 anywhere ends
- * the session on the page, which then offers the sign-in again.
+ * the session on the page, which then offers the sign-in again. After a
+ * report, a withdrawal or a cancelled transfer, the piece is read again
+ * (GET /api/v1/account/products): the status it returned to is the server's
+ * (a loss declared during a service returns to IN SERVICE), never guessed.
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
@@ -505,18 +512,14 @@ class PieceCard {
   private incidentBlock(): (HTMLElement | null)[] {
     const m = this.model;
     const inc = m.incident;
-    if (inc.kind === 'with-services') {
+    if (inc.kind === 'with-services' || inc.kind === 'not-reportable') {
+      // A theft or a loss ORBES Client Services recorded, or a piece the server would refuse to report: theirs.
       const contact = pieceContactModel(this.deps.contacts, m.productId, m.status);
-      return [this.text(PIECES.withClientServices[inc.type]), contact ? contactBlock(contact) : null];
+      return [this.text(inc.kind === 'with-services' ? PIECES.withClientServices[inc.type] : PIECES.notReportable), contact ? contactBlock(contact) : null];
     }
     if (inc.kind === 'found') {
       if (this.confirm !== 'found') return [this.text(PIECES.lostByYou), this.actions(this.textButton(PIECES.found, () => this.open('found'), 'piece__incident-action'))];
-      return [
-        this.label(PIECES.foundTitle),
-        this.text(PIECES.foundLead),
-        this.errorLine(),
-        this.actions(this.confirmButton(PIECES.confirmFound, () => this.resolve()), this.textButton(PIECES.cancel, () => this.close())),
-      ];
+      return [this.label(PIECES.foundTitle), this.text(PIECES.foundLead), this.foundForm(), this.actions(this.textButton(PIECES.cancel, () => this.close()))];
     }
     if (this.confirm !== 'report') return [this.text(PIECES.reportLead), this.actions(this.textButton(PIECES.report, () => this.open('report'), 'piece__incident-action'))];
     const option = (type: IncidentType, label: string) =>
@@ -570,8 +573,13 @@ class PieceCard {
         ),
       );
     }
-    if (this.certificates === null) out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: PIECES.certificatesFailed }));
-    else if (this.certificates.length > 0) {
+    if (this.certificates === null) {
+      // The open links could not be read: said, with TRY AGAIN, for as long as they cannot (never an empty list).
+      out.push(
+        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: PIECES.certificatesFailed }),
+        this.actions(this.textButton(PIECES.retry, () => void this.retryCertificates(), 'piece__certificates-retry')),
+      );
+    } else if (this.certificates.length > 0) {
       out.push(
         h(
           'ul',
@@ -647,7 +655,35 @@ class PieceCard {
     this.renderFocus(`.piece__validity [data-days="${days}"]`);
   }
 
-  /** CREATE LINK: the link, shown once, then COPY LINK takes the focus; the new link joins the list. */
+  /** The piece's open links as the server lists them now, newest first; null when they cannot be read. */
+  private async readCertificates(): Promise<OwnerCertificate[] | null> {
+    try {
+      return (await this.deps.api.certificates()).filter((c) => c.productId === this.piece.productId);
+    } catch (e) {
+      this.deps.session.noteError(e);
+      return null;
+    }
+  }
+
+  /** TRY AGAIN under a list that could not be read: read it again; the alert stays while it still cannot be. */
+  private async retryCertificates(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.notice = null;
+    this.render();
+    try {
+      this.certificates = await this.readCertificates();
+    } finally {
+      this.busy = false;
+    }
+    this.renderFocus(this.certificates === null ? '.piece__certificates-retry' : '.piece__certificate-title');
+  }
+
+  /**
+   * CREATE LINK: the link, shown once, then COPY LINK takes the focus; the list is read again, the new link in it. A
+   * list that could not be read before stays unread (its alert and TRY AGAIN) until it can be: shown as the new link
+   * alone, it would hide the others, which could then not be withdrawn.
+   */
   private async createCertificate(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -659,8 +695,11 @@ class PieceCard {
       const offer = await this.deps.api.createCertificate(this.model.productId, this.days);
       this.offer = offer;
       this.creating = false;
-      this.certificates = [{ id: offer.id, productId: offer.productId, createdAt: offer.createdAt, expiresAt: offer.expiresAt, valid: true }, ...(this.certificates ?? [])];
       ok = true;
+      const made: OwnerCertificate = { id: offer.id, productId: offer.productId, createdAt: offer.createdAt, expiresAt: offer.expiresAt, valid: true };
+      const listed = await this.readCertificates();
+      if (listed !== null) this.certificates = listed.some((c) => c.id === offer.id) ? listed : [made, ...listed];
+      else if (this.certificates !== null) this.certificates = [made, ...this.certificates];
     } catch (e) {
       this.deps.session.noteError(e);
       this.certificateError = messageOf(e);
@@ -748,8 +787,24 @@ class PieceCard {
     this.panel.querySelector<HTMLElement>(`.piece__choice [data-incident="${type}"]`)?.focus();
   }
 
-  /** One request at a time; done, the piece is updated as the server now holds it, and its status line takes the focus. */
-  private async run(action: () => Promise<void>, notice: string, after: (p: OwnedPiece) => OwnedPiece): Promise<void> {
+  /**
+   * After a change the server made: the piece as the server now holds it, read again (the status a withdrawal returns
+   * it to is the server's: a loss declared during a service returns to IN SERVICE). `guess`, the change as the page
+   * knows it, only when the list cannot be read just now (or no longer holds the piece).
+   */
+  private async refresh(guess: (p: OwnedPiece) => OwnedPiece): Promise<void> {
+    let fresh: OwnedPiece | undefined;
+    try {
+      fresh = (await this.deps.api.products()).find((p) => p.productId === this.piece.productId);
+    } catch (e) {
+      this.deps.session.noteError(e);
+    }
+    this.piece = fresh ?? guess(this.piece);
+    this.model = pieceModel(this.piece);
+  }
+
+  /** One request at a time; done, the piece is read again as the server now holds it, and its status line takes the focus. */
+  private async run(action: () => Promise<void>, notice: string, guess: (p: OwnedPiece) => OwnedPiece): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.error = null;
@@ -758,19 +813,25 @@ class PieceCard {
     let ok = false;
     try {
       await action();
-      this.piece = after(this.piece);
-      this.model = pieceModel(this.piece);
-      this.confirm = null;
-      this.choice = null;
-      this.notice = notice;
       ok = true;
     } catch (e) {
       this.deps.session.noteError(e);
       this.error = messageOf(e);
+    }
+    try {
+      if (ok) await this.done(notice, guess);
     } finally {
       this.busy = false;
     }
     this.render(ok ? 'status' : 'retry');
+  }
+
+  /** A change made: the piece read again, the confirmation closed, the sentence that says what was done. */
+  private async done(notice: string, guess: (p: OwnedPiece) => OwnedPiece): Promise<void> {
+    await this.refresh(guess);
+    this.confirm = null;
+    this.choice = null;
+    this.notice = notice;
   }
 
   /** REPORT LOST / STOLEN, once confirmed: every scan then shows UNUSUAL ACTIVITY, and a pending transfer is cancelled. */
@@ -782,18 +843,51 @@ class PieceCard {
       this.panel.querySelector<HTMLElement>('.piece__choice .auth__option')?.focus();
       return;
     }
-    void this.run(() => this.deps.api.reportIncident(this.model.productId, type).then(() => undefined), PIECES.reported[type], (p) => {
-      // Its certificate links end with the report (F-06): the server reads them NO LONGER VALID from now on.
-      this.certificates = this.certificates?.map((c) => ({ ...c, valid: false })) ?? null;
-      this.offer = null;
-      this.creating = false;
-      return { ...p, incident: type, incidentResolvable: type === 'LOST', certificateAllowed: false, transfer: { pending: false } };
-    });
+    void this.run(
+      async () => {
+        await this.deps.api.reportIncident(this.model.productId, type);
+        // Its certificate links end with the report (F-06): the server reads them NO LONGER VALID from now on.
+        this.certificates = this.certificates?.map((c) => ({ ...c, valid: false })) ?? null;
+        this.offer = null;
+        this.creating = false;
+      },
+      PIECES.reported[type],
+      (p) => ({ ...p, incident: type, incidentResolvable: type === 'LOST', incidentReportable: false, certificateAllowed: false, transfer: { pending: false } }),
+    );
   }
 
-  /** PIECE FOUND, once confirmed: the piece returns to the status it held before the loss. */
-  private resolve(): void {
-    void this.run(() => this.deps.api.resolveIncident(this.model.productId).then(() => undefined), PIECES.resolved, (p) => ({ ...p, incident: null, incidentResolvable: false, certificateAllowed: true }));
+  /**
+   * PIECE FOUND, confirmed with the account's password (a session alone does not withdraw a report): the piece returns
+   * to the status it held before the loss, read again from the server. A wrong password is said on its field (a 400,
+   * never a 401: the session stays).
+   */
+  private foundForm(): HTMLFormElement {
+    const password = h('input', { attrs: { type: 'password', name: 'current-password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
+    return accountForm(this.deps.session, 'found', [field(`${this.key}-found-password`, PIECES.foundPassword, password)], PIECES.confirmFound, async () => {
+      if (!password.value) {
+        password.setAttribute('aria-invalid', 'true');
+        throw new FormError(PIECES.foundPasswordMissing);
+      }
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        try {
+          await this.deps.api.resolveIncident(this.model.productId, password.value);
+        } catch (e) {
+          if (e instanceof ApiError && e.code === 'CURRENT_PASSWORD_INVALID') {
+            password.value = '';
+            password.setAttribute('aria-invalid', 'true');
+          }
+          throw e;
+        }
+        password.value = '';
+        this.error = null;
+        await this.done(PIECES.resolved, (p) => ({ ...p, incident: null, incidentResolvable: false, incidentReportable: true, certificateAllowed: true }));
+      } finally {
+        this.busy = false;
+      }
+      this.render('status');
+    });
   }
 
   private cancelTransfer(): void {

@@ -193,11 +193,11 @@ describe('ApiClient', () => {
     expect(await api.reportIncident('O26-J-00184', 'LOST')).toMatchObject({ type: 'LOST' });
     expect(f.calls[3]).toMatchObject({ url: '/api/v1/ownership/incidents', method: 'POST', body: { productId: 'O26-J-00184', type: 'LOST' } });
     expect(f.calls[3].headers['x-csrf-token']).toBe('t1');
-    expect(await api.resolveIncident('O26-J-00184')).toMatchObject({ resolvedAt: '2026-10-03T10:00:00.000Z' });
-    expect(f.calls[4]).toMatchObject({ url: '/api/v1/ownership/incidents/resolve', method: 'POST', body: { productId: 'O26-J-00184' } });
+    expect(await api.resolveIncident('O26-J-00184', 'my own passphrase')).toMatchObject({ resolvedAt: '2026-10-03T10:00:00.000Z' });
+    expect(f.calls[4]).toMatchObject({ url: '/api/v1/ownership/incidents/resolve', method: 'POST', body: { productId: 'O26-J-00184', currentPassword: 'my own passphrase' } });
     expect(f.calls[4].headers['x-csrf-token']).toBe('t1');
     // A theft: the server's sentence, as it is written for the owner.
-    await expect(api.resolveIncident('O26-J-00184')).rejects.toMatchObject({ status: 409, code: 'INCIDENT_NOT_RESOLVABLE' });
+    await expect(api.resolveIncident('O26-J-00184', 'my own passphrase')).rejects.toMatchObject({ status: 409, code: 'INCIDENT_NOT_RESOLVABLE' });
     // A list that is not one is a bad response, never an empty list.
     await expect(api.products()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });

@@ -262,10 +262,67 @@ describe('verify view-model: ownership modes', () => {
         const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false, transferPending: true }, transfer: bad as unknown as typeof transfer }));
         expect(vm.ownership).not.toHaveProperty('transfer');
       }
-      // The owner's own piece, a first registration and a result that is not authentic take no transfer, whatever they carry.
+      // The owner's own piece and a first registration take no transfer, whatever they carry.
       expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ownership: { registered: true, you: true, transferPending: true }, transfer })).ownership.kind).toBe('yours');
-      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer })).ownership).toEqual({ kind: 'unregistered' });
       expect(initialTab(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: 't', expiresAt: transfer.expiresAt, claimCodeRequired: false } })))).toBe('ownership');
+      // A result that is neither authentic nor UNUSUAL ACTIVITY takes none either.
+      for (const state of ['REVOKED', 'UNKNOWN', 'INVALID_SIGNATURE'] as const) expect(resultViewModel(outcome(state, { transfer })).ownership).toEqual({ kind: 'unregistered' });
+    });
+
+    it('UNUSUAL ACTIVITY with a transfer window (the server\'s exception): the piece its GENOME names, under review, no tabs', () => {
+      const vm = resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer }));
+      expect(vm.ownership).toEqual({ kind: 'registered', productId: GENOME.id, transferPending: true, transfer, underReview: true });
+      expect(vm.tabs).toEqual([]);
+      expect(vm.productLines).toEqual([]);
+      // The reference of the scan for Client Services, and FORGOTTEN PASSWORD? where the sign-in may be offered.
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer }), { clientServices: { email: 'clientservices@theorbes.com' } }).recoveryContact).toBeDefined();
+      // Without a usable window, or without a GENOME naming a piece, nothing to receive.
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer: { ...transfer, token: '' } })).ownership).toEqual({ kind: 'unregistered' });
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer, genome: undefined })).ownership).toEqual({ kind: 'unregistered' });
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer, genome: { ...GENOME, id: 'not a piece' } })).ownership).toEqual({ kind: 'unregistered' });
+      // A registration token with the claim code required comes first (an unowned piece has no transfer anyway).
+      const registration = { token: 'tok_reg', expiresAt: transfer.expiresAt, claimCodeRequired: true };
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer, registration })).ownership.kind).toBe('register');
+    });
+
+    it('a staff scan (S-07) of a piece whose transfer is pending names the console session: no window, and no VERIFY AGAIN', () => {
+      // The server gives a staff scan no window: verifying again in this browser would only repeat it.
+      const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { staffScan: true, ownership: { registered: true, you: false, transferPending: true } }));
+      expect(vm.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: true, staff: true });
+      expect(vm.ownership).not.toHaveProperty('transfer');
+      expect(initialTab(vm)).toBe('product');
+      // A window sent anyway is not used on a staff scan.
+      expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { staffScan: true, ownership: { registered: true, you: false, transferPending: true }, transfer })).ownership).toEqual({
+        kind: 'registered',
+        productId: 'O26-J-00184',
+        transferPending: true,
+        staff: true,
+      });
+      // Without a pending transfer there is nothing to receive: an owner who signs in and verifies again is still recognised.
+      expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { staffScan: true, ownership: { registered: true, you: false } })).ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: false });
+      expect(RECEIVING.staffScan).toMatch(/scan it in a browser that is not signed in to the console\.$/);
+    });
+
+    it('counts the windows on this device\'s clock: one 20 minutes fast still offers the 15 minutes of the scan', () => {
+      // The scan at 08:30 server time; the window ends at 08:45. The device's clock reads 08:50 when the result arrives.
+      const receivedAt = Date.parse('2026-10-01T08:50:00.000Z');
+      const registration = { token: 'tok_reg', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: false };
+      const reg = resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration }), { receivedAt }).ownership as { kind: 'register'; expiresAt: string };
+      expect(reg.expiresAt).toBe('2026-10-01T09:05:00.000Z');
+      expect(registrationOpen(reg.expiresAt, receivedAt + 14 * 60_000)).toBe(true);
+      expect(registrationOpen(reg.expiresAt, receivedAt + 15 * 60_000)).toBe(false);
+      // Without the shift, the same device would have found the window closed on arrival.
+      expect(registrationOpen(registration.expiresAt, receivedAt)).toBe(false);
+      const pending = { ownership: { registered: true, you: false, transferPending: true }, transfer };
+      const win = (resultViewModel(outcome('AUTHENTIC_REGISTERED', pending), { receivedAt }).ownership as { transfer: { token: string; expiresAt: string } }).transfer;
+      expect(win).toEqual({ token: 'tok_transfer', expiresAt: '2026-10-01T09:05:00.000Z' });
+      // A clock 10 minutes slow: the window ends 15 minutes after arrival on that clock too, never later.
+      const slow = Date.parse('2026-10-01T08:20:00.000Z');
+      const late = (resultViewModel(outcome('AUTHENTIC_REGISTERED', pending), { receivedAt: slow }).ownership as { transfer: { expiresAt: string } }).transfer;
+      expect(late.expiresAt).toBe('2026-10-01T08:35:00.000Z');
+      // On an UNUSUAL ACTIVITY result as well; and without an arrival time, the server's expiry as written.
+      expect((resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer }), { receivedAt }).ownership as { transfer: { expiresAt: string } }).transfer.expiresAt).toBe('2026-10-01T09:05:00.000Z');
+      expect((resultViewModel(outcome('AUTHENTIC_REGISTERED', pending)).ownership as { transfer: { expiresAt: string } }).transfer.expiresAt).toBe(transfer.expiresAt);
     });
 
     it('speaks of the piece and of a scan, never of a token, a product or blame (BRAND §4.5)', () => {

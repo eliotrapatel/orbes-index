@@ -23,7 +23,8 @@
  * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
  * (an email prefilled with the reference and the result), its phone and
  * hours; UNUSUAL ACTIVITY adds, when the server offers it, the section DO
- * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code); then
+ * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code) or DO
+ * YOU HOLD A TRANSFER CODE? (F-03: receiving the piece with it); then
  * WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the
  * scan. A warranty that no longer applies offers the same contact in its
  * tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel offers it to a
@@ -33,6 +34,7 @@
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
+import { RECEIVING } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { initialTab, type ResultViewModel, type TabId } from '../view-model.js';
 import { contactBlock, toneMark, viewRoot } from './common.js';
@@ -155,8 +157,22 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         ),
       );
     }
-    // Under the contact (and under the certificate-card section when there is one, which follows the help
-    // line): where the piece was seen or bought, attached to this scan. Optional.
+    // UNUSUAL ACTIVITY with a transfer window (F-03, the same exception for a transfer): the reader signed in when the
+    // scan was made may still receive the piece with the transfer code its owner gave. No product data.
+    if (vm.ownership.kind === 'registered' && vm.ownership.underReview === true) {
+      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
+      sections.push(
+        h(
+          'section',
+          { class: 'result__card', attrs: { 'aria-labelledby': 'transfer-card-title' } },
+          h('h2', { class: 'result__card-title', id: 'transfer-card-title', text: RECEIVING.cardTitle }),
+          h('p', { class: 'prose result__card-text', text: RECEIVING.cardText }),
+          ownership.root,
+        ),
+      );
+    }
+    // Under the contact (and under the certificate-card or transfer-code section when there is one, which follows the
+    // help line): where the piece was seen or bought, attached to this scan. Optional.
     if (vm.report && handlers.report) sections.push(reportSection(vm.report, handlers.report));
   }
 

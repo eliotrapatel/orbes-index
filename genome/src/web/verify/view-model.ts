@@ -9,7 +9,9 @@
  * the photographs of an authentic piece (F-04: its own, then its model's),
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
- * registration token, the certificate-card section), where ORBES Client
+ * registration token or a transfer window, the certificate-card or the
+ * transfer-code section), when the scan's windows end on this device's
+ * clock, where ORBES Client
  * Services is offered, with its prefilled email, and whether the customer
  * may say where the piece was seen or bought (a result that was not
  * authentic). It never infers
@@ -43,9 +45,13 @@ export type OwnershipMode =
   /**
    * Someone else owns it; the viewer may hold a transfer code. `transfer` (F-03): this scan's window to receive it,
    * which the server gives a signed-in reader who is not the owner while a transfer is pending; the code is then
-   * accepted for this piece only, with this scan.
+   * accepted for this piece only, with this scan. Its `expiresAt` is on this device's clock (see resultViewModel).
+   * `staff` (S-07): this scan carried a console session, so it earned no window, and scanning again in this browser
+   * would earn none either: the panel says so instead of VERIFY AGAIN. `underReview`: offered on an UNUSUAL
+   * ACTIVITY result from the scan history alone (the server's exception, as for registration), where the transfer
+   * code the owner gave is what proves the handover.
    */
-  | { kind: 'registered'; productId: string; transferPending: boolean; transfer?: { token: string; expiresAt: string } }
+  | { kind: 'registered'; productId: string; transferPending: boolean; transfer?: { token: string; expiresAt: string }; staff?: true; underReview?: true }
   /** No owner and registration is not open: the piece has not been delivered by ORBES or an authorised retailer yet. */
   | { kind: 'unregistered' }
   /**
@@ -290,9 +296,12 @@ function genomeVersionNumber(version: string): number {
 
 /**
  * Build the result screen from a verification outcome. `clientServices` (GET /api/v1/client-services)
- * adds the contact of ORBES Client Services where the result asks for it.
+ * adds the contact of ORBES Client Services where the result asks for it. `receivedAt` (this device's
+ * clock, ms) is when the outcome arrived: the windows of the scan (registration, transfer) then end on
+ * this device's clock 15 minutes after it, as they do on the server's after `verifiedAt`, whatever the
+ * gap between the two clocks; without it, they end at the server's `expiresAt` as written.
  */
-export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: number; clientServices?: ClientServices } = {}): ResultViewModel {
+export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: number; clientServices?: ClientServices; receivedAt?: number } = {}): ResultViewModel {
   const state: VerificationState = VERIFICATION_STATES.includes(outcome.state) ? outcome.state : 'MALFORMED_CODE';
   const authentic = AUTHENTIC.has(state);
   const title = splitTitle(outcome.title || FALLBACK_TITLES[state]);
@@ -363,7 +372,7 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
   if (authentic) {
     const warranty = warrantyModel(outcome.warranty);
     if (warranty) vm.warranty = warranty;
-    vm.ownership = ownershipMode(outcome);
+    vm.ownership = ownershipMode(outcome, clockShift(outcome, opts.receivedAt));
     vm.footnote = ASSURANCE_NOTE;
     // J-02: a registered piece reads the same for its owner signed out and for every copy of its code, so a buyer is
     // told what shows that the seller holds the registration. AUTHENTIC — REGISTERED only, and never over a notice of
@@ -373,8 +382,9 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
       if (vm.ownership.kind === 'registered' && vm.tabs.includes('ownership')) vm.noticeLink = { label: RESALE_ACTION, tab: 'ownership' };
     }
   } else if (state === 'SUSPICIOUS_ACTIVITY') {
-    // The holder of the certificate card may still register (no tabs, no product data): see ownershipMode.
-    vm.ownership = ownershipMode(outcome);
+    // The holder of the certificate card may still register, and the holder of a transfer code receive the piece
+    // (no tabs, no product data): see ownershipMode.
+    vm.ownership = ownershipMode(outcome, clockShift(outcome, opts.receivedAt));
   }
 
   // Wherever the copy sends the customer to ORBES Client Services: every caution and void result, and
@@ -467,22 +477,51 @@ export function pieceContactModel(cs: ClientServices | undefined, productId: str
   return lines ? contactOf(lines, 'piece', ['ORBES', productId, status].filter((x) => x.length > 0).join(' — '), [[CONTACT.piece, productId]]) : null;
 }
 
-function ownershipMode(o: VerifyOutcome): OwnershipMode {
+/**
+ * How far this device's clock is ahead of the server's (ms, negative when behind), measured when the outcome arrived
+ * (`receivedAt`) against the server's time of the scan (`verifiedAt`); 0 when either is unknown. It includes the
+ * moment the answer took to arrive, so a window never ends on the device before it does on the server.
+ */
+function clockShift(o: VerifyOutcome, receivedAt: number | undefined): number {
+  const server = typeof o.verifiedAt === 'string' ? Date.parse(o.verifiedAt) : Number.NaN;
+  return receivedAt !== undefined && Number.isFinite(receivedAt) && Number.isFinite(server) ? receivedAt - server : 0;
+}
+
+/** A window's end on this device's clock: the server's expiry moved by `shift` (clockShift); as written when 0. */
+function onDeviceClock(expiresAt: string, shift: number): string {
+  const t = Date.parse(expiresAt);
+  return shift === 0 || !Number.isFinite(t) ? expiresAt : new Date(t + shift).toISOString();
+}
+
+/** The scan's transfer window (F-03), when the server sent a usable one, its end on this device's clock. */
+function transferWindow(o: VerifyOutcome, shift: number): { token: string; expiresAt: string } | undefined {
+  const t = o.transfer;
+  return t && typeof t.token === 'string' && t.token !== '' && typeof t.expiresAt === 'string' ? { token: t.token, expiresAt: onDeviceClock(t.expiresAt, shift) } : undefined;
+}
+
+const PRODUCT_ID = /^O[0-9]{2}-[A-Z]-[0-9]{5,6}$/;
+
+function ownershipMode(o: VerifyOutcome, shift = 0): OwnershipMode {
   const productId = o.product?.productId ?? '';
   const reg = o.registration;
   if (o.state === 'SUSPICIOUS_ACTIVITY') {
     // The server's rule (verification.ts, step 10): a token on an unusual activity result is usable
     // with the claim code of the certificate card only. A token without that requirement is ignored.
     if (reg?.token && reg.claimCodeRequired === true) {
-      return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: true, underReview: true };
+      return { kind: 'register', token: reg.token, expiresAt: onDeviceClock(reg.expiresAt, shift), claimCodeRequired: true, underReview: true };
     }
+    // F-03, the same exception for a transfer: unusual activity from the scan history alone, a transfer pending, a
+    // signed-in reader who is not the owner. The piece is the one the GENOME names (no product data on this result).
+    const t = transferWindow(o, shift);
+    const piece = o.genome?.id ?? '';
+    if (t && PRODUCT_ID.test(piece)) return { kind: 'registered', productId: piece, transferPending: true, transfer: t, underReview: true };
     return { kind: 'unregistered' };
   }
   if (o.state === 'AUTHENTIC_FIRST_REGISTRATION') {
     // A browser signed in to the console: the server recorded a staff scan and issued no token.
     if (o.staffScan === true) return { kind: 'staff' };
     if (reg?.token) {
-      return { kind: 'register', token: reg.token, expiresAt: reg.expiresAt, claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
+      return { kind: 'register', token: reg.token, expiresAt: onDeviceClock(reg.expiresAt, shift), claimCodeRequired: reg.claimCodeRequired === true, underReview: false };
     }
     // No token otherwise: nothing to register with.
     return { kind: 'unregistered' };
@@ -491,10 +530,11 @@ function ownershipMode(o: VerifyOutcome): OwnershipMode {
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };
   if (own?.registered) {
     const transferPending = own.transferPending === true;
+    // S-07: a staff scan never earns a transfer window, and VERIFY AGAIN in this browser would be another staff scan.
+    if (transferPending && o.staffScan === true) return { kind: 'registered', productId, transferPending, staff: true };
     // F-03: the server's transfer window of this scan, only beside the pending transfer it is for.
-    const t = o.transfer;
-    const scanWindow = transferPending && t && typeof t.token === 'string' && t.token !== '' && typeof t.expiresAt === 'string' ? { transfer: { token: t.token, expiresAt: t.expiresAt } } : {};
-    return { kind: 'registered', productId, transferPending, ...scanWindow };
+    const t = transferPending ? transferWindow(o, shift) : undefined;
+    return { kind: 'registered', productId, transferPending, ...(t ? { transfer: t } : {}) };
   }
   return { kind: 'unregistered' };
 }
@@ -529,7 +569,11 @@ export function photoModels(p: { productId: string; model: string; type: string;
   return out;
 }
 
-/** Whether a registration window (ISO expiry) is still open at `now` (ms); the same for a transfer window (F-03). */
+/**
+ * Whether a registration window (ISO expiry) is still open at `now` (ms); the same for a transfer window (F-03). Both
+ * are on this device's clock: the modes of resultViewModel carry the server's expiry moved by the gap between the
+ * clocks, so a device whose clock is wrong by minutes still offers the form for the 15 minutes of the scan.
+ */
 export function registrationOpen(expiresAt: string, now: number): boolean {
   const t = Date.parse(expiresAt);
   return Number.isFinite(t) && t > now;

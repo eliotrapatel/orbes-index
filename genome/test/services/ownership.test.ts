@@ -675,10 +675,39 @@ describe('OwnershipService', () => {
       expect(await productRow(p.id)).toMatchObject({ status: 'LOST', ownership_state: 'REGISTERED' });
       const thief = await account();
       await expectDomainError(accept(thief, offer.transferCode, p), 'TRANSFER_CANCELLED', 410);
-      // LOST → STOLEN is not in the table.
-      await expectDomainError(ownership.reportIncident(owner.id, p.productId, 'STOLEN', owner.actor), 'TRANSITION_NOT_ALLOWED', 409);
+      // LOST → STOLEN is not in the table: a piece already reported is not reported again (said of the piece).
+      await expectDomainError(ownership.reportIncident(owner.id, p.productId, 'STOLEN', owner.actor), 'INCIDENT_NOT_ALLOWED', 409);
       // Recovery (admin) returns to the pre-incident status.
       expect((await lifecycle.allowedTransitions(p.productId))[0]).toBe('REGISTERED');
+    });
+
+    it.each<[ProductStatus]>([['REVOKED'], ['RETIRED'], ['COUNTERFEIT_FLAGGED']])(
+      'refuses a %s piece with a sentence about the piece, which MY PIECES never offers to report (incidentReportable)',
+      async (to) => {
+        const { p, owner } = await owned();
+        expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: null, incidentReportable: true });
+        await lifecycle.transition(p.productId, to, { reason: 'test' }, admin);
+        expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: null, incidentReportable: false });
+        for (const type of ['LOST', 'STOLEN'] as const) {
+          const e = await expectDomainError(ownership.reportIncident(owner.id, p.productId, type, owner.actor), 'INCIDENT_NOT_ALLOWED', 409);
+          // Never the lifecycle's staff wording ("this product"), never the status.
+          expect(e.publicMessage).toBe('This piece cannot be reported here. ORBES Client Services can assist you.');
+          expect(e.publicMessage).not.toMatch(/product|revoked|retired|counterfeit/i);
+        }
+        expect(await productRow(p.id)).toMatchObject({ status: to });
+        expect((await audit.list({ action: 'ownership.incident', targetId: p.productId })).total).toBe(0);
+        // A stranger still learns nothing of the piece: ownership is checked first.
+        const stranger = await account();
+        await expectDomainError(ownership.reportIncident(stranger.id, p.productId, 'LOST', stranger.actor), 'NOT_OWNER', 403);
+      },
+    );
+
+    it('lists a reported piece as not reportable again, and a found one as reportable', async () => {
+      const { p, owner } = await owned();
+      await ownership.reportIncident(owner.id, p.productId, 'LOST', owner.actor);
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: 'LOST', incidentReportable: false });
+      await ownership.resolveIncident(owner.id, p.productId, owner.actor);
+      expect((await ownership.listForAccount(owner.id))[0]).toMatchObject({ incident: null, incidentReportable: true });
     });
 
     it('only the owner can report; the type is validated', async () => {
@@ -808,6 +837,7 @@ describe('OwnershipService', () => {
         transfer: { pending: true },
         incident: null,
         incidentResolvable: false,
+        incidentReportable: true,
         inService: false,
         certificateAllowed: true,
         genome: { id: p.productId, version: 1, glyphs: [1, 2, 3, 4, 10, 11, 12, 13] },

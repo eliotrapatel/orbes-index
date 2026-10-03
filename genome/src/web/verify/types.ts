@@ -157,6 +157,11 @@ export interface OwnedPiece {
   incident: IncidentType | null;
   /** A LOST its owner reported: PIECE FOUND withdraws it (POST /api/v1/ownership/incidents/resolve). */
   incidentResolvable: boolean;
+  /**
+   * REPORT LOST / STOLEN may be offered: false while the piece is reported, and for a piece the server would refuse to
+   * report (revoked, retired or flagged: 409 INCIDENT_NOT_ALLOWED). MY PIECES then points to ORBES Client Services.
+   */
+  incidentReportable: boolean;
   inService: boolean;
   /**
    * A link to an ownership certificate may be created (F-06): false while the piece is reported lost or stolen, or

@@ -146,6 +146,7 @@ describe('certificate copy (BRAND §4.5, §4.6)', () => {
       transfer: { pending: false },
       incident: null,
       incidentResolvable: false,
+      incidentReportable: true,
       inService: false,
       certificateAllowed: true,
       warranty: { status: 'ACTIVE' },

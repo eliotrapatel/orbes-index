@@ -1008,7 +1008,7 @@ describe('F-03: the transfer token of a signed-in recipient', () => {
     expect(again.transferCode).toMatch(/^[0-9A-Z]{4}-/);
   });
 
-  it('no token for a reader signed out, for the owner, on a staff scan, without a pending transfer, or on a result that is not authentic', async () => {
+  it('no token for a reader signed out, for the owner, on a staff scan, without a pending transfer, or on a result that is not authentic for another reason than the scan history', async () => {
     const { r, owner } = await offered();
     const reader = await createAccount(w);
     const signedOut = await verify(w, r.code.data, { deviceHash: 'anon' });
@@ -1035,8 +1035,26 @@ describe('F-03: the transfer token of a signed-in recipient', () => {
     expect((await verify(w, late.r.code.data, { accountId: reader })).transfer).toBeUndefined();
     w.clock.set(start);
 
-    // Not authentic: unusual activity from the scan history, while the transfer is pending (the scans
-    // run within its 7 days, so only the state can withhold the token).
+    // Not authentic, and not from the scan history alone: a piece ORBES Client Services recorded LOST while its
+    // transfer is pending (the state comes from its status, which no transfer code answers).
+    const recorded = await offered();
+    await w.lifecycle.transition(recorded.r.product.productId, 'LOST', { reason: 'reported by phone' }, { type: 'admin', id: staff });
+    const withStatus = await verify(w, recorded.r.code.data, { accountId: reader });
+    expect(withStatus.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(withStatus.transfer).toBeUndefined();
+    expect((await authEvent(w, withStatus.scanId)).reasons as string[]).not.toContain('TRANSFER_WITH_TRANSFER_CODE');
+    expect(await transferTokens(recorded.r)).toEqual([]);
+    // A first registration has no owner and no transfer.
+    const fresh = await issueActivated(w);
+    const first = await verify(w, fresh.code.data, { accountId: reader });
+    expect(first.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+    expect(first.transfer).toBeUndefined();
+  });
+
+  it('UNUSUAL ACTIVITY from the scan history alone still gives the signed-in recipient a token: the transfer code proves the handover (as the claim code does for a registration)', async () => {
+    // Strangers scan a code a second-hand listing shows, from three countries, while its transfer is pending (the scans
+    // run within its 7 days): the risk score alone makes the piece read UNUSUAL ACTIVITY to everyone but its owner.
+    const start = w.clock.now().getTime();
     const travelled = await offered();
     const t0 = start + 60 * MIN;
     for (const [i, c] of ['FR', 'JP', 'US'].entries()) {
@@ -1046,16 +1064,42 @@ describe('F-03: the transfer token of a signed-in recipient', () => {
     const pending = await w.t.db.selectFrom('ownership_transfers').select(['status', 'expires_at']).where('product_id', '=', travelled.r.product.id).executeTakeFirstOrThrow();
     expect(pending.status).toBe('PENDING');
     expect(pending.expires_at.getTime()).toBeGreaterThan(w.clock.now().getTime());
-    const suspicious = await verify(w, travelled.r.code.data, { accountId: reader, geo: { country: 'US' } });
-    w.clock.set(start);
-    expect(suspicious.state).toBe('SUSPICIOUS_ACTIVITY');
-    expect(suspicious.transfer).toBeUndefined();
-    expect(await transferTokens(travelled.r)).toEqual([]);
-    // A first registration has no owner and no transfer.
-    const fresh = await issueActivated(w);
-    const first = await verify(w, fresh.code.data, { accountId: reader });
-    expect(first.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
-    expect(first.transfer).toBeUndefined();
+    try {
+      // Signed out, and signed in as the owner: nothing changes (no token; the owner keeps OWNERSHIP VERIFIED).
+      const signedOut = await verify(w, travelled.r.code.data, { geo: { country: 'US' } });
+      expect(signedOut.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(signedOut.transfer).toBeUndefined();
+      expect((await verify(w, travelled.r.code.data, { accountId: travelled.owner })).transfer).toBeUndefined();
+      // A staff scan earns none either.
+      const recipient = await createAccount(w);
+      expect((await verify(w, travelled.r.code.data, { accountId: recipient, adminId: staff })).transfer).toBeUndefined();
+      expect(await transferTokens(travelled.r)).toEqual([]);
+
+      // The recipient, signed in: the result says UNUSUAL ACTIVITY, and carries the window, with nothing of the piece
+      // but its GENOME, which names it.
+      const suspicious = await verify(w, travelled.r.code.data, { accountId: recipient, geo: { country: 'US' } });
+      expect(suspicious.state).toBe('SUSPICIOUS_ACTIVITY');
+      expect(suspicious.transfer).toEqual({ token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expiresAt: new Date(w.clock.now().getTime() + 15 * MIN).toISOString() });
+      expect(suspicious.genome?.id).toBe(travelled.r.product.productId);
+      for (const hidden of ['product', 'warranty', 'ownership', 'registration'] as const) expect(suspicious[hidden]).toBeUndefined();
+      expect((await scanEvent(w, suspicious.scanId)).account_id).toBe(recipient);
+      const reasons = (await authEvent(w, suspicious.scanId)).reasons as string[];
+      expect(reasons).toEqual(expect.arrayContaining(['RISK_THRESHOLD', 'TRANSFER_WITH_TRANSFER_CODE']));
+      // Only with the owner's transfer code, for this piece and this account, once.
+      const intruder = await createAccount(w);
+      await expect(
+        w.ownership.acceptTransfer(intruder, { transferCode: travelled.offer.transferCode, productId: travelled.r.product.productId, transferToken: suspicious.transfer!.token }, { type: 'account', id: intruder }),
+      ).rejects.toMatchObject({ code: 'TRANSFER_TOKEN_INVALID' });
+      const accepted = await w.ownership.acceptTransfer(
+        recipient,
+        { transferCode: travelled.offer.transferCode, productId: travelled.r.product.productId, transferToken: suspicious.transfer!.token },
+        { type: 'account', id: recipient },
+      );
+      expect(accepted).toMatchObject({ productId: travelled.r.product.productId, accountId: recipient, acquiredVia: 'TRANSFER' });
+      expect((await transferTokens(travelled.r))[0].used_at).not.toBeNull();
+    } finally {
+      w.clock.set(start);
+    }
   });
 });
 

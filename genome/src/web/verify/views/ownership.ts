@@ -4,10 +4,12 @@
  * and receive a piece with a transfer code: for the piece this scan read and
  * with this scan's transfer window (F-03), which the server gives a signed-in
  * reader while a transfer is pending (signed in after the scan: VERIFY AGAIN;
- * the window closed: SCAN AGAIN). The same panel, in its register
- * mode alone, is the certificate-card section of an UNUSUAL ACTIVITY result
- * (`underReview`: the claim code is required), and, in its account mode, the
- * sign-in of MY PIECES when signed out (F-01).
+ * the window closed: SCAN AGAIN; a staff scan, which never earns one: STAFF
+ * SCAN). The same panel, in its register mode alone, is the certificate-card
+ * section of an UNUSUAL ACTIVITY result (`underReview`: the claim code is
+ * required), in its registered mode the transfer-code section of such a
+ * result (`underReview`: the window the server gave), and, in its account
+ * mode, the sign-in of MY PIECES when signed out (F-01).
  *
  * The password (C-04): under SIGN IN, FORGOTTEN PASSWORD? leads to ORBES
  * Client Services (the contact of C-02), who check the customer's identity
@@ -267,17 +269,26 @@ export class OwnershipPanel {
    * A piece registered to someone else: RECEIVING THIS PIECE (F-03). The transfer code is accepted for this piece
    * only, with this scan's transfer window: signed out, the sign-in first; signed in without a window (the scan was
    * made signed out, or by another account), VERIFY AGAIN; no transfer pending, nothing to enter, and VERIFY AGAIN
-   * for an owner who signed in after the scan; the window closed, SCAN AGAIN.
+   * for an owner who signed in after the scan; the window closed, SCAN AGAIN. A staff scan (S-07: a browser signed
+   * in to the console) earns no window, here or on a new scan: STAFF SCAN and how to receive a piece of one's own.
+   * On an UNUSUAL ACTIVITY result (`underReview`) the same form, under DO YOU HOLD A TRANSFER CODE?, whose page
+   * already offers SCAN AGAIN.
    */
   private registeredBlock(m: Extract<OwnershipMode, { kind: 'registered' }>, s: SessionState): (HTMLElement | null)[] {
     // A heading the second-hand guidance's link moves to (J-02, showReceiving).
     const receiving = sectionLabel(RECEIVING.title, RECEIVING_ID);
     receiving.tabIndex = -1;
     const out: (HTMLElement | null)[] = [
-      this.status('REGISTERED TO ITS OWNER'),
+      this.status(m.staff ? 'STAFF SCAN' : 'REGISTERED TO ITS OWNER'),
       this.text(m.transferPending ? 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.' : 'This piece is registered to an ORBES account.'),
       receiving,
     ];
+    if (m.staff) {
+      // VERIFY AGAIN would repeat the staff scan, and earn no window again.
+      out.push(this.text(RECEIVING.staffScan));
+      return out;
+    }
+    if (m.underReview) out.push(this.text(RECEIVING.underReview));
     if (s.status !== 'signed-in') {
       out.push(this.text(RECEIVING.lead), ...this.authBlock(RECEIVING.signIn));
       out.push(h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerHint }));
@@ -304,9 +315,10 @@ export class OwnershipPanel {
       return out;
     }
     if (!registrationOpen(t.expiresAt, this.now())) {
+      // On an UNUSUAL ACTIVITY result the foot already offers SCAN AGAIN: the sentence points to it, no second button.
       out.push(
         this.text(RECEIVING.closed),
-        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
+        m.underReview ? null : h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
       );
       return out;
     }

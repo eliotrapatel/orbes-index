@@ -124,7 +124,7 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     // ── MY PIECES (F-01): the new owner reports it lost, then finds it again (the status history read on pg) ──
     expect((await buyer.post('/api/v1/ownership/incidents', { productId: p.product.productId, type: 'LOST' })).statusCode).toBe(201);
     expect((safeJson(await buyer.get('/api/v1/account/products')) as any).products[0]).toMatchObject({ incident: 'LOST', incidentResolvable: true });
-    const found = await buyer.post('/api/v1/ownership/incidents/resolve', { productId: p.product.productId });
+    const found = await buyer.post('/api/v1/ownership/incidents/resolve', { productId: p.product.productId, currentPassword: PASSWORD });
     expect(found.statusCode, found.body).toBe(200);
     expect((safeJson(await buyer.get('/api/v1/account/products')) as any).products[0]).toMatchObject({ incident: null, incidentResolvable: false });
     // A certificate made before the loss stays ended once the piece is found (the status history read on pg), until withdrawn.

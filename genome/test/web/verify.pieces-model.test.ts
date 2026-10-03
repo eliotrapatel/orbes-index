@@ -29,6 +29,7 @@ function piece(extra: Partial<OwnedPiece> = {}): OwnedPiece {
     transfer: { pending: false },
     incident: null,
     incidentResolvable: false,
+    incidentReportable: true,
     inService: false,
     certificateAllowed: true,
     genome: { id: 'O26-J-00184', version: 1, fingerprint: G.fingerprint, glyphs: [...G.glyphs], pattern: G.ids.join('·') },
@@ -146,6 +147,23 @@ describe('MY PIECES: loss and theft', () => {
     expect(pieceModel(piece()).incident).toEqual({ kind: 'reportable' });
   });
 
+  it('offers no REPORT LOST / STOLEN on a piece the server would refuse to report (revoked, retired, flagged): ORBES Client Services instead', () => {
+    // The server names no status, only the flag (incidentReportable false, with certificateAllowed false beside it).
+    const refused = pieceModel(piece({ incidentReportable: false, certificateAllowed: false }));
+    expect(refused.incident).toEqual({ kind: 'not-reportable' });
+    expect(refused).toMatchObject({ status: 'REGISTERED TO YOU', certificateOffered: false });
+    // Its other lines stay: a pending transfer can still be cancelled, a service is still said.
+    const pending = pieceModel(piece({ incidentReportable: false, transfer: { pending: true, expiresAt: '2026-10-08T00:00:00.000Z' }, inService: true }));
+    expect(pending).toMatchObject({ transferPending: true, status: 'TRANSFER PENDING' });
+    expect(pending.ownershipNotes).toEqual([expect.stringMatching(/^A transfer of this piece is pending/), 'This piece is with ORBES for a service. Its history is under SERVICE.']);
+    // A reported piece reads as reported, whatever the flag says (false while it is).
+    expect(pieceModel(piece({ incident: 'LOST', incidentResolvable: true, incidentReportable: false })).incident).toEqual({ kind: 'found' });
+    // A server that predates the flag: offered, as before (the server still refuses what it must).
+    const older: Partial<OwnedPiece> = piece();
+    delete older.incidentReportable;
+    expect(pieceModel(older as OwnedPiece).incident).toEqual({ kind: 'reportable' });
+  });
+
   it('offers PIECE FOUND for a loss the owner reported, and nothing to press for a theft or a loss Client Services recorded', () => {
     const lost = pieceModel(piece({ incident: 'LOST', incidentResolvable: true }));
     expect(lost).toMatchObject({ status: 'REPORTED LOST', incident: { kind: 'found' } });
@@ -161,11 +179,12 @@ describe('MY PIECES: loss and theft', () => {
 
   it('offers OWNERSHIP CERTIFICATE (F-06) on a piece the server allows one for, never on a reported one', () => {
     expect(pieceModel(piece()).certificateOffered).toBe(true);
-    // Revoked, flagged or retired (the server names no status, only the flag): creation would always be refused.
-    const revoked = pieceModel(piece({ certificateAllowed: false }));
+    // Revoked, flagged or retired (the server names no status, only the flags): creation would always be refused.
+    const revoked = pieceModel(piece({ certificateAllowed: false, incidentReportable: false }));
     expect(revoked.certificateOffered).toBe(false);
-    // Nothing else of the piece changes: it is still the owner's, with REPORT LOST / STOLEN.
-    expect(revoked).toMatchObject({ status: 'REGISTERED TO YOU', incident: { kind: 'reportable' } });
+    // It is still the owner's, but REPORT LOST / STOLEN is absent too: the server would refuse the report.
+    expect(revoked).toMatchObject({ status: 'REGISTERED TO YOU', incident: { kind: 'not-reportable' } });
+    expect(revoked.incident.kind).not.toBe('reportable');
     // Reported lost or stolen: no section, whatever the flag says.
     for (const p of [piece({ incident: 'LOST', incidentResolvable: true }), piece({ incident: 'STOLEN' })]) expect(pieceModel(p).certificateOffered).toBe(false);
     // A server that predates the flag: offered, as before.

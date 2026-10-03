@@ -14,6 +14,7 @@ import {
   createHarness,
   errorOf,
   issue,
+  PASSWORD,
   safeJson,
   scanToReceive,
   seedCatalog,
@@ -204,7 +205,7 @@ describe('sessions, CSRF and authorisation under attack', () => {
       ['/api/v1/ownership/transfers', { productId: pid }],
       ['/api/v1/ownership/transfers/cancel', { productId: pid }],
       ['/api/v1/ownership/incidents', { productId: pid, type: 'STOLEN' }],
-      ['/api/v1/ownership/incidents/resolve', { productId: pid }],
+      ['/api/v1/ownership/incidents/resolve', { productId: pid, currentPassword: PASSWORD }],
       ['/api/v1/ownership/certificates', { productId: pid }],
     ] as const) {
       const res = await other.post(url, body);
@@ -238,7 +239,7 @@ describe('sessions, CSRF and authorisation under attack', () => {
         ['/api/v1/ownership/transfers', { productId: pid }],
         ['/api/v1/ownership/transfers/cancel', { productId: pid }],
         ['/api/v1/ownership/incidents', { productId: pid, type: 'LOST' }],
-        ['/api/v1/ownership/incidents/resolve', { productId: pid }],
+        ['/api/v1/ownership/incidents/resolve', { productId: pid, currentPassword: PASSWORD }],
         ['/api/v1/ownership/certificates', { productId: pid }],
       ] as const) {
         const res = await stranger.post(url, body);

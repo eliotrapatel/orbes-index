@@ -9,10 +9,11 @@
  *
  * All are account-authenticated (the list of certificates is the one read),
  * so the scope guard enforces the session, and for every mutation the CSRF
- * token and same-origin checks. Registration and transfer
- * acceptance take secrets (claim codes, transfer codes) and therefore draw
- * from the `auth` rate-limit budget on top of the service's own per-product
- * claim-attempt limit.
+ * token and same-origin checks. Registration, transfer acceptance and PIECE
+ * FOUND take secrets (claim codes, transfer codes, the account's password)
+ * and therefore draw from the `auth` rate-limit budget, on top of the
+ * service's own per-product claim-attempt limit and the account's sign-in
+ * throttle.
  *
  * Responses describe the ownership, never the product's internal status.
  */
@@ -27,6 +28,7 @@ import {
   parse,
   productRefBody,
   registerOwnershipBody,
+  resolveIncidentBody,
 } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import type { OwnershipResult } from '../services/ownership.js';
@@ -39,7 +41,7 @@ function ownershipJson(r: OwnershipResult) {
 export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { ownership, ownershipCertificates } = ctx.services;
+  const { auth, ownership, ownershipCertificates } = ctx.services;
   // F-03: the scanned piece is required, unless ORBES Client Services assists acceptances (TRANSFER_ACCEPT_REQUIRE_PRODUCT=false).
   const acceptBody = ctx.config.transferAcceptRequireProduct ? acceptTransferBody : assistedAcceptTransferBody;
 
@@ -82,10 +84,14 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
   });
 
   // PIECE FOUND (MY PIECES, F-01): the owner withdraws a loss they reported themselves; a theft stays with ORBES Client Services.
-  app.post('/api/v1/ownership/incidents/resolve', async (request) => {
+  // The account's password is typed again (400 CURRENT_PASSWORD_INVALID when wrong, counted like a failed sign-in): a
+  // session alone, left open on another device or taken over, does not make a piece reported lost read as clean.
+  app.post('/api/v1/ownership/incidents/resolve', { config: { rateGroup: 'auth' } }, async (request) => {
     const { account } = requireAccount(request);
-    const b = parse(productRefBody, request.body);
-    const change = await ownership.resolveIncident(account.id, b.productId, accountActor(request));
+    const b = parse(resolveIncidentBody, request.body);
+    const actor = accountActor(request);
+    await auth.confirmAccountPassword(account.id, b.currentPassword, actor, 'incident_resolve');
+    const change = await ownership.resolveIncident(account.id, b.productId, actor);
     return { productId: change.productId, type: 'LOST', resolvedAt: change.at };
   });
 

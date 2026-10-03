@@ -399,7 +399,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const { productId } = await ownedPiece(owner.client);
       expect((await owner.client.post('/api/v1/ownership/incidents', { productId, type: 'LOST' })).statusCode).toBe(201);
       h.clock.advance(1_000);
-      expect((await owner.client.post('/api/v1/ownership/incidents/resolve', { productId })).statusCode).toBe(200);
+      expect((await owner.client.post('/api/v1/ownership/incidents/resolve', { productId, currentPassword: PASSWORD })).statusCode).toBe(200);
       const x = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`)) as Record<string, any>;
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.status]).slice(-4)).toEqual([
         ['product.transition', 'account', productId, 'LOST'],

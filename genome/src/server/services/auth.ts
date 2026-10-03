@@ -710,6 +710,29 @@ export class AuthService {
    * the stored hash) answers 400 CURRENT_PASSWORD_INVALID. So a change under
    * way can never undo a recovery or outlive a lock.
    */
+  /**
+   * The account's password, typed again to confirm an action a session alone must not be enough for: PIECE FOUND
+   * (POST /api/v1/ownership/incidents/resolve, F-01), which makes a piece the owner reported lost read as clean.
+   * Checked as the current password of a password change is: a wrong one answers 400 CURRENT_PASSWORD_INVALID (never
+   * a 401, which would sign the app out) and counts towards the account's sign-in throttle (`account.login_failed`
+   * with `via`), and while the account is throttled the password is not even looked at (same answer). Nothing is
+   * written when it is right. 401 when the account is no longer active, 403 ACCOUNT_LOCKED when it is locked.
+   */
+  async confirmAccountPassword(accountId: string, password: unknown, actor: Actor, via: 'incident_resolve'): Promise<void> {
+    const row = await this.requireAccount(this.db, accountId);
+    if (row.status === 'LOCKED') throw customerAccountLocked();
+    if (row.status !== 'ACTIVE') throw unauthorized();
+    const current = loginPassword(password);
+    if (this.accountThrottled(row)) {
+      await this.burnTime(current);
+      throw currentPasswordInvalid();
+    }
+    if (current === undefined || !(await verifySecret(current, row.password_hash))) {
+      await this.recordAccountFailure(row.id, actor.ipHash ? { ipHash: actor.ipHash } : {}, via);
+      throw currentPasswordInvalid();
+    }
+  }
+
   async changePassword(
     subject: { type: SessionSubjectType; id: string },
     input: { currentPassword: string; newPassword: string },
@@ -801,7 +824,7 @@ export class AuthService {
    * Count a wrong customer password in the current throttle window (a new window once the old one expired).
    * `via`: where it was typed, when not at sign-in (the current password of a password change).
    */
-  private async recordAccountFailure(accountId: string, meta: ClientMeta, via?: 'password_change'): Promise<void> {
+  private async recordAccountFailure(accountId: string, meta: ClientMeta, via?: 'password_change' | 'incident_resolve'): Promise<void> {
     const now = this.clock();
     const windowStart = new Date(now.getTime() - ACCOUNT_LOGIN_THROTTLE.windowMs);
     await inTransaction(this.db, async (tx) => {

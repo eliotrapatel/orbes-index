@@ -235,9 +235,12 @@ export class ApiClient {
     return this.request<IncidentReport>('POST', '/api/v1/ownership/incidents', { productId, type }, { csrf: true });
   }
 
-  /** PIECE FOUND: withdraws a loss the owner reported themselves (a theft stays with ORBES Client Services). */
-  resolveIncident(productId: string): Promise<IncidentResolution> {
-    return this.request<IncidentResolution>('POST', '/api/v1/ownership/incidents/resolve', { productId }, { csrf: true });
+  /**
+   * PIECE FOUND: withdraws a loss the owner reported themselves (a theft stays with ORBES Client Services), with the
+   * account's password typed again. A wrong one is 400 CURRENT_PASSWORD_INVALID: the session stays.
+   */
+  resolveIncident(productId: string, currentPassword: string): Promise<IncidentResolution> {
+    return this.request<IncidentResolution>('POST', '/api/v1/ownership/incidents/resolve', { productId, currentPassword }, { csrf: true });
   }
 
   // ── Ownership certificates (F-06) ────────────────────────────────────────

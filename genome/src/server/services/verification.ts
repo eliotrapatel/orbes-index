@@ -27,8 +27,9 @@
  * Scan tokens (scan-tokens.ts) tie an action to this scan of this piece: the
  * registration token of a first registration (step 10), and the transfer token
  * (F-03) of a signed-in reader who is not the owner of a piece whose transfer
- * is pending, on an authentic result, which the acceptance of that transfer
- * uses up for that piece and that account.
+ * is pending, on an authentic result (or UNUSUAL ACTIVITY from the scan
+ * history alone, the registration's exception), which the acceptance of that
+ * transfer uses up for that piece and that account.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -135,7 +136,9 @@ export interface VerifyOutcome {
   /**
    * F-03: the TRANSFER_ACCEPT token of this scan, for POST /api/v1/ownership/transfers/accept with the transfer code
    * of this piece. Only on an AUTHENTIC_* result read by a signed-in account that is not the owner of a piece whose
-   * transfer is pending (never on a staff scan); valid 15 minutes, single use, for this piece and this account.
+   * transfer is pending (never on a staff scan), or on a SUSPICIOUS_ACTIVITY result from the scan history alone read
+   * the same way (the registration's exception: the transfer code proves the handover); valid 15 minutes, single
+   * use, for this piece and this account.
    */
   transfer?: { token: string; expiresAt: string };
   /**
@@ -447,12 +450,16 @@ export class VerificationService {
 
         // F-03: the recipient of a pending transfer reads the piece signed in, and it reads as authentic: this scan
         // earns the token that the acceptance of the transfer uses up, for this piece and this account. A staff scan
-        // never does (its scan event names no account), nor the owner, nor a result that is not authentic.
+        // never does (its scan event names no account), nor the owner, nor a result that is not authentic, with one
+        // exception, the registration's: UNUSUAL ACTIVITY from the scan history alone (riskOnly). Strangers scanning
+        // copies of a code shown in a listing must not lock out the recipient, who holds the transfer code, the
+        // secret its owner gave for the handover; the result still says UNUSUAL ACTIVITY.
         let transfer: VerifyOutcome['transfer'];
         const authentic = w.state !== undefined && AUTHENTIC_STATES.includes(w.state);
-        if (!staff && m.accountId !== null && !w.isOwner && reg.ownerAccountId !== null && reg.transferPending && authentic) {
+        if (!staff && m.accountId !== null && !w.isOwner && reg.ownerAccountId !== null && reg.transferPending && (authentic || riskOnly)) {
           const t = await createScanToken(trx, { productId: reg.productUuid, scanEventId: scanId, purpose: 'TRANSFER_ACCEPT', now, ttlMs: TRANSFER_TOKEN_TTL_MS });
           transfer = { token: t.token, expiresAt: t.expiresAt.toISOString() };
+          if (riskOnly) w.reasons.push('TRANSFER_WITH_TRANSFER_CODE');
         }
 
         // Step 11: authenticator policy (never changes the state).
@@ -851,6 +858,9 @@ export class VerificationService {
     }
     // SUSPICIOUS from the risk score alone on an unregistered product with a claim secret (step 10).
     if (state === 'SUSPICIOUS_ACTIVITY' && registration?.claimCodeRequired === true) out.registration = registration;
+    // SUSPICIOUS from the risk score alone on a piece whose transfer is pending, read by a signed-in reader who is not
+    // its owner (F-03): the transfer window, usable with the owner's transfer code only. The GENOME names the piece.
+    if (state === 'SUSPICIOUS_ACTIVITY' && transfer) out.transfer = transfer;
     return out;
   }
 

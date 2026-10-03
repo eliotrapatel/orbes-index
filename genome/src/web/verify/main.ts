@@ -422,14 +422,18 @@ class App {
     this.lastInput = input;
     const started = performance.now();
     try {
-      // Read in parallel with the verification: the contact makes the result wait 1 s at most (CONTACT_WAIT_MS).
-      const [outcome, clientServices] = await Promise.all([this.api.verify(input), this.contactDetails()]);
+      // Read in parallel with the verification: the contact makes the result wait 1 s at most (CONTACT_WAIT_MS). The
+      // time the outcome arrived, on this device's clock: the scan's windows are counted from it (resultViewModel).
+      const [{ outcome, receivedAt }, clientServices] = await Promise.all([
+        this.api.verify(input).then((o) => ({ outcome: o, receivedAt: Date.now() })),
+        this.contactDetails(),
+      ]);
       const rest = MIN_VERIFYING_MS - (performance.now() - started);
       if (rest > 0 && !prefersReducedMotion()) await sleep(rest);
       if (gen !== this.generation) return;
       this.lastInput = null;
       this.stopCamera();
-      const vm = resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices });
+      const vm = resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices, receivedAt });
       const view = resultView(vm, {
         onScanAgain: () => void this.startScan(),
         onRefresh: () => void this.retryVerify(input),

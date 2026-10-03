@@ -14,13 +14,16 @@
  * guidance under AUTHENTIC — REGISTERED and its link to RECEIVING THIS PIECE
  * (J-02), the reception of a piece with its transfer code (F-03: signed in
  * after the scan, VERIFY AGAIN; the code of another piece refused; the
- * window of the scan closed), MY PIECES (F-01: sign-in, the list and the
- * photograph of a piece (F-04), its tabs from the keyboard, a piece reported
- * stolen then scanned by a stranger, a loss withdrawn; a direct link, a
- * reload and the back button), the
+ * window of the scan closed; from an UNUSUAL ACTIVITY result caused by the
+ * scan history alone; never from a staff scan), MY PIECES (F-01: sign-in,
+ * the list and the photograph of a piece (F-04), its tabs from the keyboard,
+ * a piece reported stolen then scanned by a stranger, a loss withdrawn with
+ * the account's password and read again from the server, a piece the owner
+ * cannot report; a direct link, a reload and the back button), the
  * ownership certificate (F-06: created in MY PIECES, opened from its link by
  * a visitor, its PDF, ended by a declaration, withdrawn, its address typed
- * back in capitals as the PDF letters it), and the problem screens. On each
+ * back in capitals as the PDF letters it; a list of links that cannot be
+ * read stays said after a creation), and the problem screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -37,7 +40,7 @@ import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CLAIM_HELD, RECEIVING, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -897,7 +900,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'LOST' });
     await other.getByRole('button', { name: 'PIECE FOUND' }).click();
     await textOf(other.locator('.section-label'), 'PIECE FOUND');
+    await textOf(other.locator('.piece__ownership'), /Confirm with the password of your ORBES account that this piece is back with you\./);
     await keepsFloors(page, ['CONFIRM', 'CANCEL']);
+    // The account's password, typed again: a session alone does not withdraw the report. Missing, then wrong (a 400:
+    // the session stays, the field is cleared and takes the focus), the piece stays reported.
+    const foundPassword = other.getByLabel('PASSWORD', { exact: true });
+    await other.getByRole('button', { name: 'CONFIRM', exact: true }).click();
+    await textOf(other.getByRole('alert'), 'Enter the password of your ORBES account.');
+    await foundPassword.fill('not the password of this account');
+    await other.getByRole('button', { name: 'CONFIRM', exact: true }).click();
+    await textOf(other.getByRole('alert'), 'The current password is not correct.');
+    await valueOf(foundPassword, '');
+    await attrOf(foundPassword, 'aria-invalid', 'true');
+    expect(await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.type)).toBe('password');
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'LOST' });
+    await foundPassword.fill(PASSWORD);
     await other.getByRole('button', { name: 'CONFIRM', exact: true }).click();
     await textOf(other.locator('.ownership__status'), 'REGISTERED TO YOU');
     await textOf(other.getByRole('status'), 'This piece is no longer reported lost.');
@@ -926,6 +943,82 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(stranger.page)).toBe('AUTHENTIC REGISTERED');
     expect(stranger.problems).toEqual([]);
     await stranger.page.context().close();
+  }, 180_000);
+
+  it('MY PIECES reads a piece again after a change: a loss declared during a service returns to IN SERVICE; a piece the server would refuse to report points to Client Services; links it cannot list stay said', async () => {
+    const email = 'paul.durand@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    // In service when its owner loses it (SERVICED → LOST), revoked by ORBES (the report would be refused), and an
+    // ordinary piece whose certificate links cannot be read just now.
+    const serviced = await ownedPiece(owner.account.id);
+    await srv.ctx.services.warranty.openService(serviced.product.id, { type: 'POLISH', location: 'Paris atelier' }, SYSTEM_ACTOR);
+    const revoked = await ownedPiece(owner.account.id);
+    await srv.ctx.services.lifecycle.transition(revoked.product.id, 'REVOKED', { reason: 'test' }, SYSTEM_ACTOR);
+    const shared = await ownedPiece(owner.account.id);
+    const ctx = await mobileContext(browser, { reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const problems: string[] = [];
+    page.on('console', (m) => {
+      if (!isExpectedConsole(m) || /Content Security Policy/i.test(m.text())) problems.push(`console ${m.type()}: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    // The list of open links answers what the app cannot read (as a server mid-deploy might), until told otherwise.
+    let listUnreadable = true;
+    await page.route('**/api/v1/ownership/certificates', (route) =>
+      route.request().method() === 'GET' && listUnreadable ? route.fulfill({ status: 200, contentType: 'application/json', body: '{"unexpected":true}' }) : route.fallback(),
+    );
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const signIn = page.locator('.pieces__signin');
+    await signIn.getByLabel('EMAIL').fill(email);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await countOf(page.locator('article.piece'), 3);
+
+    // The piece in service: reported lost, then found with the password; it reads IN SERVICE again, as the server holds it.
+    const inService = page.getByRole('article', { name: serviced.product.productId });
+    await textOf(inService.locator('.ownership__status'), 'IN SERVICE');
+    await inService.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
+    await inService.getByRole('button', { name: 'LOST', exact: true }).click();
+    await inService.getByRole('button', { name: 'CONFIRM REPORT' }).click();
+    await textOf(inService.locator('.ownership__status'), 'REPORTED LOST');
+    await inService.getByRole('button', { name: 'PIECE FOUND' }).click();
+    await inService.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await inService.getByRole('button', { name: 'CONFIRM', exact: true }).click();
+    await textOf(inService.locator('.ownership__status'), 'IN SERVICE');
+    await textOf(inService.locator('.piece__ownership'), /This piece is with ORBES for a service\. Its history is under SERVICE\./);
+    await textOf(inService.getByRole('status'), 'This piece is no longer reported lost.');
+    expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', serviced.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'SERVICED' });
+
+    // The revoked piece: still the owner's, but no REPORT LOST / STOLEN (the server would refuse it) and no certificate:
+    // ORBES Client Services, with their contact.
+    const refused = page.getByRole('article', { name: revoked.product.productId });
+    await textOf(refused.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await countOf(refused.getByRole('button', { name: 'REPORT LOST / STOLEN' }), 0);
+    await countOf(refused.locator('.piece__certificate-title'), 0);
+    await textOf(refused.locator('.piece__ownership'), /A loss or a theft of this piece cannot be reported here: tell ORBES Client Services\./);
+    await visible(refused.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES']);
+
+    // The links of the last piece cannot be read: said, with TRY AGAIN. A link created meanwhile does not stand for
+    // the list (the others would be hidden, and could not be withdrawn): the alert stays.
+    const sharing = page.getByRole('article', { name: shared.product.productId });
+    await textOf(sharing.getByRole('alert'), 'Your certificate links could not be shown just now.');
+    await visible(sharing.getByRole('button', { name: 'TRY AGAIN' }));
+    const earlier = await srv.ctx.services.ownershipCertificates.create(owner.account.id, shared.product.productId, {}, { type: 'account', id: owner.account.id });
+    await sharing.getByRole('button', { name: 'CREATE CERTIFICATE' }).click();
+    await sharing.getByRole('button', { name: 'CREATE LINK' }).click();
+    await visible(sharing.locator('.certificate-link__value'));
+    await textOf(sharing.getByRole('alert'), 'Your certificate links could not be shown just now.');
+    await countOf(sharing.locator('.piece__certificate'), 0);
+    await keepsFloors(page, ['COPY LINK', 'OPEN LINK', 'TRY AGAIN', 'CREATE CERTIFICATE']);
+    // Readable again: TRY AGAIN lists both links, each with WITHDRAW.
+    listUnreadable = false;
+    await sharing.getByRole('button', { name: 'TRY AGAIN' }).click();
+    await countOf(sharing.getByRole('alert'), 0);
+    await countOf(sharing.locator('.piece__certificate'), 2);
+    await expect.poll(async () => sharing.locator('.piece__certificate-withdraw').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.certificate)), POLL).toContain(earlier.id);
+    expect(problems).toEqual([]);
+    await ctx.close();
   }, 180_000);
 
   it('MY PIECES from a direct link: the sign-in, then back to the landing rather than out of the app', async () => {
@@ -1090,6 +1183,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // Found again: the old link stays ended, listed as such, and the owner withdraws it.
     await card.getByRole('button', { name: 'PIECE FOUND' }).click();
+    await card.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await card.getByRole('button', { name: 'CONFIRM', exact: true }).click();
     await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
     await textsOf(card.locator('.piece__certificate-line'), [expect.stringMatching(/^CREATED \d{1,2} [A-Z]{3} \d{4} · NO LONGER VALID$/) as unknown as string]);
@@ -1174,13 +1268,35 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(scan).toEqual({ event_type: 'ADMIN_TEST', admin_id: seller.id, device_hash: null });
     expect(await srv.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', issued.product.id).execute()).toEqual([]);
 
+    // A piece registered to someone else, its transfer pending: a staff scan earns no window to receive it, so the
+    // OWNERSHIP tab says STAFF SCAN and how to receive a piece of one's own, never VERIFY AGAIN (another staff scan).
+    const listed = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(listed.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const holder = await srv.ctx.services.auth.registerAccount({ email: `holder-${listed.product.productId.toLowerCase()}@example.com`, password: PASSWORD }, {});
+    const holderActor = { type: 'account', id: holder.account.id } as const;
+    const first = await srv.ctx.services.verification.verify({ code: listed.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(holder.account.id, { registrationToken: first.registration!.token, claimCode: listed.claimCode! }, holderActor);
+    await srv.ctx.services.ownership.initiateTransfer(holder.account.id, listed.product.id, holderActor);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'staff-registered.png', listed));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+    await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    await textOf(page.locator('.ownership__status'), 'STAFF SCAN');
+    await textOf(page.locator('.ownership .section-label'), 'RECEIVING THIS PIECE');
+    await textOf(page.locator('.ownership__text').last(), RECEIVING.staffScan);
+    await countOf(page.getByRole('button', { name: 'VERIFY AGAIN' }), 0);
+    await countOf(page.locator('.ownership form'), 0);
+    expect(await srv.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', listed.product.id).where('purpose', '=', 'TRANSFER_ACCEPT').execute()).toEqual([]);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+
     // A code ORBES did not sign, from the same browser: a staff scan takes no report, so WHERE DID YOU SEE OR BUY
     // THIS PIECE? is not offered (the server would refuse it, and scanning again would only make another staff scan).
     const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
     signature[30] ^= 0x01;
     const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
-    await page.goBack();
-    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'staff-forged.png', forged));
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
     await visible(page.locator('.result__help'));
@@ -1189,6 +1305,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const forgedScans = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'result_state']).where('admin_id', '=', seller.id).orderBy('result_state').execute();
     expect(forgedScans).toEqual([
       { event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC_FIRST_REGISTRATION' },
+      { event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC_REGISTERED' },
       { event_type: 'ADMIN_TEST', result_state: 'INVALID_SIGNATURE' },
     ]);
     expect(problems).toEqual([]);
@@ -1267,6 +1384,50 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.locator('.result__card'), 0);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('lets the recipient of a transfer receive the piece from an UNUSUAL ACTIVITY result, with the transfer code its owner gave (F-03)', async () => {
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const seller = await srv.ctx.services.auth.registerAccount({ email: 'seller.listed@example.com', password: PASSWORD }, {});
+    const sellerActor = { type: 'account', id: seller.account.id } as const;
+    const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(seller.account.id, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, sellerActor);
+    const { transferCode } = await srv.ctx.services.ownership.initiateTransfer(seller.account.id, issued.product.id, sellerActor);
+    // Its code, shown in a second-hand listing, scanned by 22 strangers within a minute: suspicious from the history alone.
+    for (let i = 0; i < 22; i++) {
+      await srv.ctx.services.verification.verify({ code: issued.code.data }, { deviceHash: `listing-device-${i}`, ipHash: `listing-ip-${i}`, geo: { country: 'FR' } });
+    }
+    await srv.ctx.services.auth.registerAccount({ email: 'buyer.listed@example.com', password: PASSWORD }, {});
+
+    // The buyer, signed in before the scan.
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await page.goto(`${srv.origin}/verify/pieces`);
+    await page.getByLabel('EMAIL').fill('buyer.listed@example.com');
+    await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await page.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await visible(page.getByRole('button', { name: 'CHANGE PASSWORD' }));
+    await page.goto(`${srv.origin}/verify`);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'listed.png', issued));
+    expect(await resultTitle(page)).toBe('UNUSUAL ACTIVITY DETECTED');
+    await countOf(page.getByRole('tab'), 0);
+    await countOf(page.locator('.lines__line, .rows'), 0);
+    await countOf(page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' }), 0);
+    const section = page.getByRole('region', { name: 'DO YOU HOLD A TRANSFER CODE?' });
+    await visible(section);
+    expect(await page.locator('.result__help + .result__card').count()).toBe(1);
+    await textOf(section.locator('.result__card-text'), 'If the owner of this piece has given you a transfer code, you may receive it in your ORBES account with that code.');
+    await textOf(section.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(section, /While its activity is reviewed, this piece can be received only with the transfer code its owner gave you\./);
+    await textOf(section.locator('.section-label'), 'RECEIVING THIS PIECE');
+    await keepsFloors(page, ['RECEIVE THIS PIECE', 'SIGN OUT', 'SCAN AGAIN']);
+    await page.getByRole('textbox', { name: 'TRANSFER CODE' }).fill(transferCode);
+    await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
+    await textOf(section.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(section, new RegExp(`The ownership of ${issued.product.productId} has been transferred to your ORBES account\\.`));
+    const buyer = await srv.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', 'buyer.listed@example.com').executeTakeFirstOrThrow();
+    expect((await srv.ctx.services.ownership.currentOwner(issued.product.id))?.accountId).toBe(buyer.id);
     expect(problems).toEqual([]);
   }, 120_000);
 

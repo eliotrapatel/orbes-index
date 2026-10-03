@@ -20,11 +20,13 @@ export const PIECE_TAB_LABELS: Readonly<Record<PieceTabId, string>> = PIECES.tab
 
 /**
  * What the OWNERSHIP panel offers about loss and theft:
- *   reportable   — not reported: REPORT LOST / STOLEN (confirmed);
- *   found        — a LOST the owner reported: PIECE FOUND (confirmed);
- *   with-services — a STOLEN, or a LOST ORBES Client Services recorded: their contact, nothing to press.
+ *   reportable     — not reported: REPORT LOST / STOLEN (confirmed);
+ *   not-reportable — not reported, but the server would refuse a report (the piece is revoked, retired or flagged:
+ *                    `incidentReportable` false): ORBES Client Services and their contact, nothing to press;
+ *   found          — a LOST the owner reported: PIECE FOUND (confirmed with the account's password);
+ *   with-services  — a STOLEN, or a LOST ORBES Client Services recorded: their contact, nothing to press.
  */
-export type IncidentMode = { kind: 'reportable' } | { kind: 'found' } | { kind: 'with-services'; type: IncidentType };
+export type IncidentMode = { kind: 'reportable' } | { kind: 'not-reportable' } | { kind: 'found' } | { kind: 'with-services'; type: IncidentType };
 
 export interface PieceModel {
   productId: string;
@@ -85,8 +87,13 @@ export function pieceModel(p: OwnedPiece): PieceModel {
       ? { kind: 'found' }
       : p.incident === 'LOST' || p.incident === 'STOLEN'
         ? { kind: 'with-services', type: p.incident }
-        : { kind: 'reportable' };
-  const transferPending = p.transfer?.pending === true && incident.kind === 'reportable';
+        : // A server that predates the flag sends none: offered, as before (the server still refuses what it must).
+          p.incidentReportable === false
+          ? { kind: 'not-reportable' }
+          : { kind: 'reportable' };
+  /** Neither lost nor stolen: the piece's own lines (a transfer, a service) and the certificate may show. */
+  const notReported = incident.kind === 'reportable' || incident.kind === 'not-reportable';
+  const transferPending = p.transfer?.pending === true && notReported;
 
   let status: string = PIECES.status.yours;
   if (p.incident === 'LOST') status = PIECES.status.lost;
@@ -103,7 +110,7 @@ export function pieceModel(p: OwnedPiece): PieceModel {
 
   const notes: string[] = [];
   if (transferPending) notes.push(PIECES.transferPending(formatDateLong(p.transfer.expiresAt)));
-  if (p.inService && incident.kind === 'reportable') notes.push(PIECES.inService);
+  if (p.inService && notReported) notes.push(PIECES.inService);
   if (!p.verified) notes.push(PIECES.unverifiedNote);
 
   const model: PieceModel = {
@@ -117,7 +124,7 @@ export function pieceModel(p: OwnedPiece): PieceModel {
     transferPending,
     incident,
     // A server that predates the flag sends none: offered, as before (the server still refuses what it must).
-    certificateOffered: incident.kind === 'reportable' && p.certificateAllowed !== false,
+    certificateOffered: notReported && p.certificateAllowed !== false,
   };
   const genome = pieceGenomeModel(p.genome);
   if (genome) model.genome = genome;

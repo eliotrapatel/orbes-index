@@ -261,6 +261,12 @@ export const assistedAcceptTransferBody = body({ transferCode, productId: produc
 
 export const incidentBody = body({ productId: productRef, type: z.enum(['LOST', 'STOLEN']) });
 
+/**
+ * POST /api/v1/ownership/incidents/resolve (§11.6, PIECE FOUND): the piece, and the account's password, typed again: a
+ * session alone (one left open on another device, or taken) does not make a piece reported lost read as clean.
+ */
+export const resolveIncidentBody = body({ productId: productRef, currentPassword: password });
+
 export const productParams = z.object({ productId: productRef });
 
 // ── Ownership certificates (F-06) ──────────────────────────────────────────

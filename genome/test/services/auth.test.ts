@@ -260,6 +260,34 @@ describe('AuthService', () => {
       expect(await auth.authenticateAccount(reg.session.token)).not.toBeNull();
     });
 
+    it('confirms the account\'s password before PIECE FOUND (F-01): a wrong one is a 400 counted in the throttle, which then stops checking it', async () => {
+      const addr = email();
+      const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});
+      const actor = { type: 'account' as const, id: reg.account.id, ipHash: 'ip-9' };
+      // Right: nothing written.
+      const before = (await audit.list({ targetId: reg.account.id })).total;
+      await auth.confirmAccountPassword(reg.account.id, PASSWORD, actor, 'incident_resolve');
+      expect((await audit.list({ targetId: reg.account.id })).total).toBe(before);
+      // Wrong, missing or not a string: the same 400 (never a 401, which signs the app out), each counted where it was typed.
+      for (const wrong of ['not my password', '', undefined, 42]) {
+        await expectDomainError(auth.confirmAccountPassword(reg.account.id, wrong, actor, 'incident_resolve'), 'CURRENT_PASSWORD_INVALID', 400);
+      }
+      const failures = (await audit.list({ action: 'account.login_failed', targetId: reg.account.id })).items;
+      expect(failures).toHaveLength(4);
+      expect(failures[0]).toMatchObject({ ipHash: 'ip-9', details: { via: 'incident_resolve', throttled: false } });
+      for (let i = 4; i < ACCOUNT_LOGIN_THROTTLE.maxFailures; i++) {
+        await expectDomainError(auth.confirmAccountPassword(reg.account.id, `wrong ${i}`, actor, 'incident_resolve'), 'CURRENT_PASSWORD_INVALID', 400);
+      }
+      // Throttled: even the right password is refused, with the same answer, and nothing more is counted.
+      await expectDomainError(auth.confirmAccountPassword(reg.account.id, PASSWORD, actor, 'incident_resolve'), 'CURRENT_PASSWORD_INVALID', 400);
+      expect((await audit.list({ action: 'account.login_failed', targetId: reg.account.id })).total).toBe(ACCOUNT_LOGIN_THROTTLE.maxFailures);
+      clock.advance(ACCOUNT_LOGIN_THROTTLE.windowMs);
+      await auth.confirmAccountPassword(reg.account.id, PASSWORD, actor, 'incident_resolve');
+      // A locked account is refused as such.
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', reg.account.id).execute();
+      await expectDomainError(auth.confirmAccountPassword(reg.account.id, PASSWORD, actor, 'incident_resolve'), 'ACCOUNT_LOCKED', 403);
+    });
+
     it('a recovery code from ORBES Client Services ends every session and sets the new password', async () => {
       const addr = email();
       const reg = await auth.registerAccount({ email: addr, password: PASSWORD }, {});

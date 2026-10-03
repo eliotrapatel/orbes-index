@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, createHarness, errorOf, issue, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { accountClient, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('ownership API', () => {
   let h: Harness;
@@ -138,11 +138,17 @@ describe('ownership API', () => {
     expect((safeJson(after) as any).state).toBe('SUSPICIOUS_ACTIVITY');
   });
 
-  it('MY PIECES (F-01): the owner lists, reports LOST, then withdraws it (PIECE FOUND); a STOLEN stays with Client Services', async () => {
+  it('MY PIECES (F-01): the owner lists, reports LOST, then withdraws it (PIECE FOUND) with the password; a STOLEN stays with Client Services', async () => {
     const lost = await sellable(true);
     const stolen = await sellable(true);
-    const owner = (await accountClient(h)).client;
+    const signedUp = await accountClient(h);
+    const owner = signedUp.client;
     const stranger = (await accountClient(h)).client;
+    // Another session of the account, opened before the declaration (another device, or a taken one).
+    const other = h.client();
+    expect((await other.post('/api/v1/account/login', { email: signedUp.email, password: PASSWORD })).statusCode).toBe(200);
+    const found_ = (c: Client, productId: string, currentPassword: string | null = PASSWORD) =>
+      c.post('/api/v1/ownership/incidents/resolve', { productId, ...(currentPassword !== null ? { currentPassword } : {}) });
     for (const p of [lost, stolen]) {
       const reg = await scanForToken(owner, p.code.data);
       expect((await owner.post('/api/v1/ownership/register', { registrationToken: reg.token, claimCode: p.claimCode })).statusCode).toBe(201);
@@ -157,17 +163,32 @@ describe('ownership API', () => {
     // A stranger's scan of the lost piece: UNUSUAL ACTIVITY.
     expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('SUSPICIOUS_ACTIVITY');
 
-    // Only the owner; an unknown id answers alike; the body is the one of a transfer cancel.
-    expect(errorOf(await stranger.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId })).code).toBe('NOT_OWNER');
-    expect((await stranger.post('/api/v1/ownership/incidents/resolve', { productId: 'O26-J-99999' })).statusCode).toBe(403);
-    expect((await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId, type: 'LOST' })).statusCode).toBe(400);
+    // Only the owner (who types their password); an unknown id answers alike.
+    expect(errorOf(await found_(stranger, lost.product.productId)).code).toBe('NOT_OWNER');
+    expect((await found_(stranger, 'O26-J-99999')).statusCode).toBe(403);
+    expect((await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId, currentPassword: PASSWORD, type: 'LOST' })).statusCode).toBe(400);
     expect((await owner.post('/api/v1/ownership/incidents/resolve', {})).statusCode).toBe(400);
 
-    const theft = await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId });
+    // A session alone is not enough: without the password, or with a wrong one, the loss stays (400, never a 401 that
+    // would sign the app out); the session that predates the declaration is refused as the owner's own is.
+    for (const c of [other, owner]) {
+      const bare = await found_(c, lost.product.productId, null);
+      expect(bare.statusCode, bare.body).toBe(400);
+      expect(errorOf(bare).code).toBe('VALIDATION_FAILED');
+      const wrong = await found_(c, lost.product.productId, 'not the password of this account');
+      expect(wrong.statusCode).toBe(400);
+      expect(errorOf(wrong)).toEqual({ code: 'CURRENT_PASSWORD_INVALID', message: 'The current password is not correct.' });
+    }
+    expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('SUSPICIOUS_ACTIVITY');
+    // Each wrong password counts towards the account's sign-in throttle, said where it was typed.
+    const failures = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.login_failed').orderBy('id', 'desc').limit(2).execute();
+    for (const f of failures) expect(f.details).toMatchObject({ via: 'incident_resolve' });
+
+    const theft = await found_(owner, stolen.product.productId);
     expect(theft.statusCode).toBe(409);
     expect(errorOf(theft)).toEqual({ code: 'INCIDENT_NOT_RESOLVABLE', message: 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.' });
 
-    const found = await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId });
+    const found = await found_(owner, lost.product.productId);
     expect(found.statusCode).toBe(200);
     const body = safeJson(found) as { productId: string; type: string; resolvedAt: string };
     expect(body).toEqual({ productId: lost.product.productId, type: 'LOST', resolvedAt: expect.any(String) });
@@ -176,13 +197,31 @@ describe('ownership API', () => {
     // Found again, it takes new certificate links (F-06; the earlier ones stay ended).
     const relisted = (safeJson(await owner.get('/api/v1/account/products')) as { products: any[] }).products;
     expect(relisted.find((p) => p.productId === lost.product.productId)).toMatchObject({ incident: null, certificateAllowed: true });
-    const again = await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId });
+    const again = await found_(owner, lost.product.productId);
     expect(again.statusCode).toBe(409);
     expect(errorOf(again).code).toBe('NO_INCIDENT');
 
     // A session and the CSRF token, like every ownership mutation.
-    expect((await h.client().post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId })).statusCode).toBe(401);
-    expect(errorOf(await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect((await found_(h.client(), lost.product.productId)).statusCode).toBe(401);
+    expect(errorOf(await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId, currentPassword: PASSWORD }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+  });
+
+  it('MY PIECES (F-01): a piece revoked, retired or flagged is not reportable, and a report of it is refused in words about the piece', async () => {
+    const owner = (await accountClient(h)).client;
+    const pieces = { REVOKED: await sellable(false), RETIRED: await sellable(false), COUNTERFEIT_FLAGGED: await sellable(false) } as const;
+    for (const p of Object.values(pieces)) {
+      expect((await owner.post('/api/v1/ownership/register', { registrationToken: (await scanForToken(owner, p.code.data)).token })).statusCode).toBe(201);
+    }
+    const reportable = async () => new Map(((safeJson(await owner.get('/api/v1/account/products')) as { products: any[] }).products).map((p) => [p.productId, p.incidentReportable]));
+    for (const p of Object.values(pieces)) expect((await reportable()).get(p.product.productId)).toBe(true);
+    for (const [to, p] of Object.entries(pieces)) await h.ctx.services.lifecycle.transition(p.product.productId, to as 'REVOKED', { reason: 'test' }, SYSTEM_ACTOR);
+    const listed = await reportable();
+    for (const p of Object.values(pieces)) expect(listed.get(p.product.productId)).toBe(false);
+    for (const p of Object.values(pieces)) {
+      const res = await owner.post('/api/v1/ownership/incidents', { productId: p.product.productId, type: 'LOST' });
+      expect(res.statusCode).toBe(409);
+      expect(errorOf(res)).toEqual({ code: 'INCIDENT_NOT_ALLOWED', message: 'This piece cannot be reported here. ORBES Client Services can assist you.' });
+    }
   });
 
   it('F-03: a transfer is accepted for the piece scanned, with the transfer token of that scan', async () => {

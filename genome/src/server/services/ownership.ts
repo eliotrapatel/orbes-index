@@ -48,7 +48,7 @@ import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
-import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, type LifecycleService, type StatusChange } from './lifecycle.js';
+import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
@@ -74,6 +74,15 @@ export const TRANSFERABLE_STATUSES: readonly ProductStatus[] = Object.freeze(['R
 export const CERTIFICATE_ENDING_STATUSES: readonly ProductStatus[] = Object.freeze(['LOST', 'STOLEN', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED']);
 export const INCIDENT_TYPES = ['LOST', 'STOLEN'] as const;
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
+
+/**
+ * Whether the owner may report a piece in `status` LOST or STOLEN (`reportIncident`; `incidentReportable` of the
+ * owner's list): the lifecycle allows both from it (TRANSITIONS), and it is not REVOKED (which only reinstate()
+ * leaves). Not from REVOKED, RETIRED or COUNTERFEIT_FLAGGED, nor from a LOST or STOLEN already reported.
+ */
+export function incidentReportable(status: ProductStatus): boolean {
+  return status !== 'REVOKED' && INCIDENT_TYPES.every((t) => TRANSITIONS[status].includes(t));
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** HKDF `info` of the transfer-code HMAC key (derived from COOKIE_SECRET). */
@@ -141,6 +150,12 @@ export interface OwnedProduct {
    * themselves. A STOLEN, or a LOST recorded by ORBES Client Services, stays with Client Services.
    */
   incidentResolvable: boolean;
+  /**
+   * The owner may report the piece LOST or STOLEN (`reportIncident`, REPORT LOST / STOLEN in MY PIECES): false while
+   * it is reported, and for a piece revoked, retired or flagged (`incidentReportable`), where the report answers 409
+   * INCIDENT_NOT_ALLOWED. Names no status: MY PIECES points to ORBES Client Services instead.
+   */
+  incidentReportable: boolean;
   inService: boolean;
   /**
    * The owner may create a link to an ownership certificate of the piece (F-06): false in a status that ends them
@@ -290,6 +305,9 @@ const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
 export const notOwner = () => new DomainError('NOT_OWNER', 403, 'Only the current owner can do this.');
 const noIncident = () => new DomainError('NO_INCIDENT', 409, 'This piece is not reported lost.');
+/** A report the lifecycle would refuse (revoked, retired, flagged, or already reported): said of the piece, never with its status. */
+const incidentNotAllowed = (status: ProductStatus) =>
+  new DomainError('INCIDENT_NOT_ALLOWED', 409, 'This piece cannot be reported here. ORBES Client Services can assist you.', { detail: `status ${status}` });
 const incidentNotResolvable = () =>
   new DomainError('INCIDENT_NOT_RESOLVABLE', 409, 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.');
 
@@ -702,7 +720,11 @@ export class OwnershipService {
     });
   }
 
-  /** The owner reports the product LOST or STOLEN; any pending transfer is cancelled. */
+  /**
+   * The owner reports the product LOST or STOLEN; any pending transfer is cancelled. Only from a status that allows
+   * it (`incidentReportable`): a piece revoked, retired, flagged or already reported answers 409 INCIDENT_NOT_ALLOWED,
+   * which points to ORBES Client Services.
+   */
   async reportIncident(accountId: string, productId: string, type: IncidentType, actor: Actor): Promise<StatusChange> {
     assertAccountId(accountId);
     if (!INCIDENT_TYPES.includes(type)) throw validationError('Incident type must be LOST or STOLEN.');
@@ -713,6 +735,8 @@ export class OwnershipService {
       const p = await lockForOwnerAction(tx, productId);
       const current = await this.currentOwnership(tx, p.id);
       if (!current || current.account_id !== accountId) throw notOwner();
+      // Checked here rather than left to the lifecycle, whose refusal is worded for staff ("this product").
+      if (!incidentReportable(p.status)) throw incidentNotAllowed(p.status);
       const pending = await this.pendingTransfer(tx, p.id);
       if (pending) {
         // A transfer code in a thief's hands must not complete the theft.
@@ -854,6 +878,7 @@ export class OwnershipService {
         transfer: t ? { pending: true, expiresAt: t.expires_at } : { pending: false },
         incident: r.status === 'LOST' || r.status === 'STOLEN' ? r.status : null,
         incidentResolvable: resolvable.has(r.uuid),
+        incidentReportable: incidentReportable(r.status),
         inService: r.status === 'SERVICED',
         certificateAllowed: !CERTIFICATE_ENDING_STATUSES.includes(r.status),
         genome: g ? { id: g.genome_id, version: g.genome_version, fingerprint: g.fingerprint, glyphs: g.glyphs, pattern: g.pattern } : null,

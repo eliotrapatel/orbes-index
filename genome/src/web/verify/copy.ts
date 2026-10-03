@@ -295,10 +295,15 @@ export const PIECES = Object.freeze({
     LOST: 'This piece is now reported lost. Every scan of its code shows UNUSUAL ACTIVITY.',
     STOLEN: 'This piece is now reported stolen. Every scan of its code shows UNUSUAL ACTIVITY.',
   }),
+  /** A piece the server would refuse to report (revoked, retired or flagged: `incidentReportable` false). */
+  notReportable: 'A loss or a theft of this piece cannot be reported here: tell ORBES Client Services.',
   lostByYou: 'Every scan of its code shows UNUSUAL ACTIVITY until you tell ORBES that it has been found.',
   found: 'PIECE FOUND',
   foundTitle: 'PIECE FOUND',
-  foundLead: 'Confirm that this piece is back with you. Its scans will read as before, and it can be transferred again.',
+  foundLead: 'Confirm with the password of your ORBES account that this piece is back with you. Its scans will read as before, and it can be transferred again.',
+  /** The account's password, typed again: a session alone does not withdraw a report. */
+  foundPassword: 'PASSWORD',
+  foundPasswordMissing: 'Enter the password of your ORBES account.',
   confirmFound: 'CONFIRM',
   resolved: 'This piece is no longer reported lost.',
   withClientServices: Object.freeze({
@@ -398,6 +403,16 @@ export const RECEIVING = Object.freeze({
   codeHint: 'Created by its owner in their ORBES account.',
   codeIncomplete: 'Enter the 12 characters of the transfer code.',
   submit: 'RECEIVE THIS PIECE',
+  /**
+   * S-07: this browser is signed in to the ORBES console, so the scan was recorded as a staff test, which earns no
+   * window to receive the piece; scanning it again here would be another staff test.
+   */
+  staffScan:
+    'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and receiving this piece is not offered. To receive a piece of your own, scan it in a browser that is not signed in to the console.',
+  /** The section of an UNUSUAL ACTIVITY result that offers the form (F-03, as DO YOU HOLD THE CERTIFICATE CARD?). */
+  cardTitle: 'DO YOU HOLD A TRANSFER CODE?',
+  cardText: 'If the owner of this piece has given you a transfer code, you may receive it in your ORBES account with that code.',
+  underReview: 'While its activity is reviewed, this piece can be received only with the transfer code its owner gave you.',
 });
 
 /**
