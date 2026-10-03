@@ -81,6 +81,16 @@ export function anomalyName(type: string | null | undefined): string {
   return (type ? ANOMALY_NAMES.get(type) : undefined) ?? humanize(type);
 }
 
+/**
+ * A scan's machine reason as Verification events reads it: `ANOMALY:<TYPE>` under the anomaly's console
+ * name (`ANOMALY: UNSOLD PIECE SCANNED`, as Anomalies names it), any other reason humanized (`MALFORMED:CRC`).
+ */
+export function reasonLabel(reason: string | null | undefined): string {
+  const prefix = 'ANOMALY:';
+  if (reason?.startsWith(prefix)) return `ANOMALY: ${anomalyName(reason.slice(prefix.length))}`;
+  return humanize(reason);
+}
+
 /** First and last characters of a long hash: `3f9a1c…e04b`. Short values are returned unchanged. */
 export function shortHash(v: string | null | undefined, head = 8, tail = 4): string {
   if (!v) return '—';

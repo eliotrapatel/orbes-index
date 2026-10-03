@@ -9,7 +9,7 @@
  * (its scans, or the one scan `scan` that raised it, marked in the list).
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime, formatWindowBound, humanize, shortHash } from '../format.js';
+import { formatDateTime, formatWindowBound, humanize, reasonLabel, shortHash } from '../format.js';
 import { channelLabel } from '../model/registry.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
@@ -82,7 +82,8 @@ export async function scansView(ctx: ViewContext): Promise<HTMLElement> {
               'span',
               null,
               statusMark(humanize(r.state), toneOf('verification', r.state)),
-              r.authentication?.reasons?.length ? h('span', { class: 'cell-details' }, r.authentication.reasons.map(humanize).join(' · ')) : null,
+              // An anomaly among the reasons under its console name (ANOMALY: UNSOLD PIECE SCANNED, S-07).
+              r.authentication?.reasons?.length ? h('span', { class: 'cell-details' }, r.authentication.reasons.map(reasonLabel).join(' · ')) : null,
             ),
           kind: ['wide'],
         },

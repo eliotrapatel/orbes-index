@@ -659,6 +659,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const unsold = page.locator('table.table tbody tr', { hasText: 'UNSOLD PIECE SCANNED' });
     expect(await unsold.count()).toBe(1);
     expect(await unsold.textContent()).toContain(issuedProductId);
+    // Its scans in Verification events list the same signal under the same name among their reasons.
+    await go(page, `#/scans?productId=${issuedProductId}`, 'Verification events');
+    const reasons = page.locator('table.table tbody tr .cell-details');
+    await expect.poll(() => reasons.filter({ hasText: 'ANOMALY: UNSOLD PIECE SCANNED' }).count()).toBeGreaterThanOrEqual(1);
+    expect(await reasons.filter({ hasText: /UNSOLD PIECE SCAN(?!NED)/ }).count()).toBe(0);
   }, STEP_TIMEOUT);
 
   it('triages an anomaly', async () => {

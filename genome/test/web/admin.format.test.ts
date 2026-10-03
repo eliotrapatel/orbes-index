@@ -10,6 +10,7 @@ import {
   humanize,
   isoDay,
   percent,
+  reasonLabel,
   shortHash,
   summarizeDetails,
   versionLabel,
@@ -65,6 +66,15 @@ describe('admin formatters', () => {
     expect(anomalyName('IMPOSSIBLE_TRAVEL')).toBe('IMPOSSIBLE TRAVEL');
     expect(anomalyName('constructor')).toBe('CONSTRUCTOR');
     expect(anomalyName(null)).toBe('—');
+  });
+
+  it('reads a scan\'s reasons: an anomaly under its console name (ANOMALY: UNSOLD PIECE SCANNED), any other reason humanized', () => {
+    expect(reasonLabel('ANOMALY:UNSOLD_PIECE_SCAN')).toBe('ANOMALY: UNSOLD PIECE SCANNED');
+    expect(reasonLabel('ANOMALY:IMPOSSIBLE_TRAVEL')).toBe('ANOMALY: IMPOSSIBLE TRAVEL');
+    expect(reasonLabel('UNSOLD_PIECE_SCAN')).toBe('UNSOLD PIECE SCAN');
+    expect(reasonLabel('MALFORMED:CRC')).toBe('MALFORMED:CRC');
+    expect(reasonLabel('RISK_THRESHOLD_OWNER')).toBe('RISK THRESHOLD OWNER');
+    expect(reasonLabel(null)).toBe('—');
   });
 
   it('humanizes enums and shortens hashes', () => {
