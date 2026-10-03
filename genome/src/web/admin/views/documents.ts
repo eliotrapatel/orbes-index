@@ -24,7 +24,7 @@ export async function documentsView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'docs' },
-    pageHeader({ eyebrow: 'Library', title: 'Documents', lead: 'The reference texts of the team: how to sell and ship a piece, and what the packaging and the certificate card say.' }),
+    pageHeader({ eyebrow: 'Overview', title: 'Documents', lead: 'The reference texts of the team: how to sell and ship a piece, and what the packaging and the certificate card say.' }),
     h(
       'ul',
       { class: 'docs__list', data: { testid: 'documents' } },

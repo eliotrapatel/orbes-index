@@ -73,7 +73,14 @@ interface NavItem {
 }
 
 const NAV: { group: string; items: NavItem[] }[] = [
-  { group: 'Overview', items: [{ route: 'dashboard', label: 'Dashboard' }, { route: 'generator', label: 'Generator', cap: 'issue' }] },
+  {
+    group: 'Overview',
+    items: [
+      { route: 'dashboard', label: 'Dashboard' },
+      { route: 'generator', label: 'Generator', cap: 'issue' },
+      { route: 'documents', label: 'Documents' },
+    ],
+  },
   {
     group: 'Registry',
     items: [
@@ -110,7 +117,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'team', label: 'Team', cap: 'manageAdmins' },
     ],
   },
-  { group: 'Library', items: [{ route: 'documents', label: 'Documents' }] },
 ];
 
 const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteName }>> = {

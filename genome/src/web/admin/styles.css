@@ -105,11 +105,11 @@ body {
    CHANGE PASSWORD stay in view (5 px above and under each link, 10 px above a group, 4 px under it). */
 .side__nav {
   flex: 1;
-  padding: 8px 0 12px;
+  padding: 4px 0 8px;
 }
 
 .side__group {
-  padding: 10px 32px 4px;
+  padding: 8px 32px 2px;
 }
 
 .side__group-title {
@@ -3380,7 +3380,7 @@ a.bar__label:hover {
   padding: 1px 6px;
   background: var(--ivory);
   border: 1px solid var(--hairline);
-  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--mono);
   font-size: var(--fs-mono);
   white-space: nowrap;
 }
@@ -3391,7 +3391,7 @@ a.bar__label:hover {
   overflow-x: auto;
   background: var(--ink);
   color: var(--white);
-  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--mono);
   font-size: var(--fs-mono);
   line-height: 1.6;
 }
