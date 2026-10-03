@@ -15,13 +15,16 @@
  *        ▲                                     │ I HAVE A RECOVERY CODE
  *        └──── BACK TO SIGN IN / recovered ◀── SET A NEW PASSWORD (form)
  *
+ * A piece registered to someone else shows RECEIVING THIS PIECE, the heading
+ * the link under the result's second-hand guidance moves to (J-02).
+ *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
  * customers and never carry internal detail. The panel re-renders itself on
  * each state change; typed secrets (passwords, claim codes) are never stored
  * beyond the form fields.
  */
-import { h } from '../../shared/dom.js';
+import { h, prefersReducedMotion } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
@@ -43,6 +46,9 @@ export interface OwnershipDeps {
 
 /** Minimum password length (PLATFORM-CONTRACTS §2.9). */
 export const MIN_PASSWORD = 12;
+
+/** The id of RECEIVING THIS PIECE, the heading of a piece registered to someone else (J-02 links to it). */
+const RECEIVING_ID = 'receiving-title';
 
 
 type AuthTab = 'signin' | 'create';
@@ -115,6 +121,19 @@ export class OwnershipPanel {
     this.unsubscribe = null;
   }
 
+  /**
+   * Bring RECEIVING THIS PIECE into view and move keyboard focus to it (the link under the second-hand guidance,
+   * J-02). Centred on the screen: the selected tab and the status of the piece stay in sight above it, the sign-in
+   * or the transfer code below. False when the panel does not show it (the piece was just received, or another mode).
+   */
+  showReceiving(): boolean {
+    const heading = this.root.querySelector<HTMLElement>(`#${RECEIVING_ID}`);
+    if (!heading) return false;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    return true;
+  }
+
   // ── Rendering ────────────────────────────────────────────────────────────
 
   private render(): void {
@@ -123,6 +142,8 @@ export class OwnershipPanel {
     if (s.status === 'signed-in') this.state.recover = null;
     else this.state.changing = false;
     const hadFocus = typeof document !== 'undefined' && this.root.contains(document.activeElement);
+    // A heading focused on purpose (RECEIVING THIS PIECE, FORGOTTEN PASSWORD) keeps the focus if the re-render shows it again.
+    const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains('section-label') ? document.activeElement.id : '';
     const children: (HTMLElement | null)[] = [];
     if (s.status === 'signed-in' && this.state.changing) children.push(...this.changeBlock());
     else if (this.state.confirmation) children.push(...this.confirmationBlock());
@@ -149,7 +170,10 @@ export class OwnershipPanel {
     if (s.status === 'signed-in') children.push(this.accountLine(s.account.email));
     this.root.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
     // A re-render replaces the focused control; keep keyboard and screen-reader users in the panel.
-    if (hadFocus) (this.root.querySelector<HTMLElement>('input, button:not([disabled])') ?? this.root).focus({ preventScroll: true });
+    if (hadFocus) {
+      const heading = focusedHeading ? this.root.querySelector<HTMLElement>(`#${focusedHeading}`) : null;
+      (heading ?? this.root.querySelector<HTMLElement>('input, button:not([disabled])') ?? this.root).focus({ preventScroll: true });
+    }
   }
 
   private status(text: string): HTMLElement {
@@ -240,10 +264,13 @@ export class OwnershipPanel {
   }
 
   private registeredBlock(m: Extract<OwnershipMode, { kind: 'registered' }>, s: SessionState): (HTMLElement | null)[] {
+    // A heading the second-hand guidance's link moves to (J-02, showReceiving).
+    const receiving = sectionLabel('RECEIVING THIS PIECE', RECEIVING_ID);
+    receiving.tabIndex = -1;
     const out: (HTMLElement | null)[] = [
       this.status('REGISTERED TO ITS OWNER'),
       this.text(m.transferPending ? 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.' : 'This piece is registered to an ORBES account.'),
-      sectionLabel('RECEIVING THIS PIECE'),
+      receiving,
       this.text('If its owner has given you a transfer code, enter it to register this piece in your name.'),
     ];
     if (s.status !== 'signed-in') {

@@ -9,8 +9,9 @@
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
  * the scan, the photographs of an authentic piece above its GENOME (F-04), the password (FORGOTTEN PASSWORD? through ORBES Client Services
- * and a recovery code, then CHANGE PASSWORD beside SIGN OUT), and the
- * problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * and a recovery code, then CHANGE PASSWORD beside SIGN OUT), the
+ * second-hand guidance under AUTHENTIC — REGISTERED and its link to
+ * RECEIVING THIS PIECE (J-02), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -26,7 +27,7 @@ import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CLAIM_HELD, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -315,6 +316,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'claim.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
+    // No owner yet, so no transfer code can exist: no second-hand guidance (J-02).
+    await countOf(page.locator('.result__notice'), 0);
     // Registration opens straight on the OWNERSHIP tab.
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(page.locator('.ownership__status'), 'REGISTRATION OPEN');
@@ -358,6 +361,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Re-verify as the owner: the server now reports the ownership.
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await countOf(page.locator('.result__notice'), 0);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await page.getByRole('button', { name: 'CREATE TRANSFER CODE' }).click();
     await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
@@ -374,6 +378,87 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('tells a buyer of a registered piece to ask the seller for a transfer code (J-02); I HAVE A TRANSFER CODE opens OWNERSHIP on RECEIVING THIS PIECE', async () => {
+    // A piece sold and registered by its owner; a buyer scans it, signed out.
+    const email = 'antoine.seller@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(owner.account.id, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, { type: 'account', id: owner.account.id });
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'resale.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+
+    // Under the server's message, between the notice's hairlines, the sentence of the packaging kit, read in Helvetica Neue.
+    const notice = page.locator('.result__head .result__notice');
+    await textOf(notice, RESALE_GUIDANCE);
+    await attrOf(notice, 'role', 'note');
+    expect(await notice.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    // Then its link, a text link: the page keeps one hairline button, SCAN ANOTHER. The tabs open on PRODUCT.
+    const link = page.getByRole('button', { name: RESALE_ACTION });
+    await visible(link);
+    await attrOf(link, 'class', /\btextlink\b/);
+    await countOf(page.locator('.btn'), 1);
+    await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    const controls = [RESALE_ACTION, 'PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER'];
+    await keepsFloors(page, controls);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, controls);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-resale-guidance.png'), fullPage: true });
+
+    // The link selects OWNERSHIP and brings RECEIVING THIS PIECE into view, the selected tab still in sight above it,
+    // keyboard focus on that heading, without a ring.
+    const heading = page.locator('#receiving-title');
+    const ownershipTab = page.getByRole('tab', { name: 'OWNERSHIP' });
+    const inView = async () => {
+      const boxes = await Promise.all([heading.boundingBox(), ownershipTab.boundingBox()]);
+      return boxes.every((b) => b !== null && b.y >= 0 && b.y + b.height <= MOBILE_VIEWPORT.height);
+    };
+    // Before: the panel is not built yet, and the tabs are below the fold.
+    await countOf(heading, 0);
+    expect((await ownershipTab.boundingBox())!.y).toBeGreaterThan(MOBILE_VIEWPORT.height);
+    await link.click();
+    await attrOf(ownershipTab, 'aria-selected', 'true');
+    await textOf(heading, 'RECEIVING THIS PIECE');
+    await expect.poll(inView, POLL).toBe(true);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+    expect(await heading.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
+    await textOf(page.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(page.locator('.ownership__text').first(), 'This piece is registered to an ORBES account.');
+    // Below it, sign-in to receive the piece; the focus stays on the heading while the panel learns the session.
+    const panel = page.locator('.ownership');
+    await visible(panel.getByLabel('PASSWORD', { exact: true }));
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+    await page.screenshot({ path: join(OUT_DIR, 'verify-resale-receiving.png') });
+
+    // From the keyboard, once the panel is built: back to PRODUCT, then Enter on the link.
+    await page.getByRole('tab', { name: 'PRODUCT' }).click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await attrOf(ownershipTab, 'aria-selected', 'true');
+    await expect.poll(inView, POLL).toBe(true);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+
+    // The owner, signed in and scanning again, reads OWNERSHIP VERIFIED: the guidance is for others, never for them.
+    await panel.getByLabel('EMAIL', { exact: true }).fill(email);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(page.locator('.ownership__email'), email);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'resale-owner.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await countOf(page.locator('.result__notice'), 0);
+    await countOf(page.getByRole('button', { name: RESALE_ACTION }), 0);
+    expect(problems).toEqual([]);
+    await page.context().close();
   }, 120_000);
 
   it('recovers a forgotten password with the code of ORBES Client Services, then changes it beside SIGN OUT', async () => {

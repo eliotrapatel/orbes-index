@@ -6,7 +6,8 @@
  * floors of what is acted on (10 px type, 44 px tap zones; measured in a real
  * page by the E2E suites, test/support/tap-zones.ts), and the shipped display
  * face (Gravesend Sans) on titles and labels of both apps, never on what is
- * read.
+ * read; the copy against the lexicon of §4.5, and the second-hand guidance
+ * under AUTHENTIC — REGISTERED (J-02) as §4.3 and §4.4 quote it.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -18,8 +19,11 @@ import { computeGenome, genomeLayout } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
+import * as verifyCopy from '../../src/web/verify/copy.js';
+import { RESALE_ACTION, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
+import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden, readDoc, section } from '../docs/lexicon.js';
 import { parseUnicodeRange, readWoff2, woff2CodePoints, woff2Names, woff2WeightClass } from '../support/woff2.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
@@ -441,6 +445,57 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
     expect(Number.parseFloat(resolve(rule(styles, '.photo__caption')['font-size']))).toBeGreaterThanOrEqual(10);
     expect(rule(styles, '.photo__caption').color).toBe('var(--ink-soft)');
     expect(rule(styles, '.photos__note')).toMatchObject({ 'font-size': 'var(--fs-line)', color: 'var(--ink-soft)' });
+  });
+});
+
+describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-hand guidance (J-02)', () => {
+  /** Every sentence and label of the verify app's copy (copy.ts): nested functions are called with stand-in values. */
+  const copyLines = (): string[] => {
+    const out: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === 'string') out.push(v);
+      else if (typeof v === 'function') {
+        const r: unknown = (v as (...args: unknown[]) => unknown)('O26-J-00184', 'RING');
+        if (typeof r === 'string') out.push(r);
+      } else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+    };
+    // The module's own functions (camera and API classifiers) return kinds, not copy.
+    for (const v of Object.values(verifyCopy)) if (typeof v !== 'function') walk(v);
+    return out;
+  };
+  const terms = [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN];
+
+  it('writes no word of §4.5 (nor "product", §4.1) anywhere in the copy; "genuine" only where the footnote says what a code cannot prove', () => {
+    const lines = copyLines();
+    expect(lines.length).toBeGreaterThan(100);
+    expect(lines).toContain(RESALE_GUIDANCE);
+    expect(lines).toContain(RESALE_ACTION);
+    // §4.5 forbids GENUINE as a verdict: the footnote's one use is the limitation itself (§4.6).
+    expect(findForbidden(lines.filter((l) => l !== verifyCopy.ASSURANCE_NOTE).join('\n'), terms)).toEqual([]);
+    expect(findForbidden(verifyCopy.ASSURANCE_NOTE, terms)).toEqual([expect.stringContaining('"GENUINE"')]);
+    expect(verifyCopy.ASSURANCE_NOTE).toMatch(/cannot prove that an object is genuine/);
+    expect(lines.join('\n')).not.toContain('!');
+  });
+
+  it('asks a buyer for the seller\'s transfer code in one calm sentence, quoted in BRAND §4.3, its link in §4.3 and §4.4', () => {
+    // A request, never an accusation: it names the transfer code, the seller's ORBES account and the registered owner.
+    expect(RESALE_GUIDANCE).toMatch(/^Buying this piece\? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one\.$/);
+    const doc = readDoc('docs/BRAND-DESIGN-SYSTEM.md');
+    expect(section(doc, '### 4.3')).toContain(`| ${RESALE_GUIDANCE} · Then **${RESALE_ACTION}**`);
+    expect(section(doc, '### 4.4')).toMatch(new RegExp(`^\\| Owned by someone else, reached from the second-hand guidance.*\\| ${RESALE_ACTION},`, 'm'));
+    expect(section(doc, '### 4.4')).toContain('RECEIVING THIS PIECE');
+  });
+
+  it('puts the sentence in the result\'s notice and its link under it, a text link (the hairline button stays the foot\'s)', () => {
+    const at = (needle: string) => resultView.indexOf(needle);
+    expect(at("class: 'result__notice'")).toBeGreaterThan(0);
+    expect(at("class: 'textlink result__notice-link'")).toBeGreaterThan(at("class: 'result__notice'"));
+    // It takes the text link's 10 px, tracking and 44 px zone as they are: only its distance to the notice is set.
+    expect(Object.keys(rule(styles, '.result__notice-link'))).toEqual(['margin-top']);
+    // RECEIVING THIS PIECE, where it leads, is a heading focused on purpose: no ring (§3.8).
+    const ownershipView = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
+    expect(ownershipView).toContain("sectionLabel('RECEIVING THIS PIECE', RECEIVING_ID)");
+    expect(styles).toMatch(/\.section-label\[tabindex="-1"\]:focus/);
   });
 });
 

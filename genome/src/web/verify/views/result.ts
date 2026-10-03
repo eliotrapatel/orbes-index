@@ -6,6 +6,8 @@
  *      A U T H E N T I C        state title, tracked
  *      FIRST REGISTRATION       sub-title when the server title has one
  *   one sentence from the server
+ *   ─ Buying this piece? … ─    AUTHENTIC — REGISTERED only (J-02), then
+ *    I HAVE A TRANSFER CODE     a link to OWNERSHIP, RECEIVING THIS PIECE
  *   ┌                      ┐
  *     [ this piece ] [ model ]  photographs on ivory, when ORBES has them
  *   └                      ┘
@@ -38,7 +40,7 @@ import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { photoPlate } from './photos.js';
 import { reportSection, type ReportDeps } from './report.js';
-import { tabsView } from './tabs.js';
+import { tabsView, type TabsView } from './tabs.js';
 
 export interface ResultHandlers {
   onScanAgain(): void;
@@ -61,6 +63,16 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   // Short results (no genome, no tabs) sit in the optical centre instead of hanging from the top.
   if (!vm.genome && vm.tabs.length === 0) root.classList.add('is-compact');
   let ownership: OwnershipPanel | null = null;
+  let tabs: TabsView | null = null;
+
+  // The link under the second-hand guidance (J-02): the OWNERSHIP tab, on RECEIVING THIS PIECE (or on the tab itself
+  // when the panel no longer shows that section, once the piece has been received).
+  const openNoticeLink = (tab: TabId): void => {
+    // Selecting the tab builds its panel on first selection.
+    tabs?.select(tab);
+    if (tab === 'ownership' && ownership?.showReceiving()) return;
+    tabs?.select(tab, true);
+  };
 
   const head = h(
     'header',
@@ -75,6 +87,14 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     ),
     vm.message ? h('p', { class: 'result__message prose', text: vm.message }) : null,
     vm.notice ? h('p', { class: 'result__notice', attrs: { role: 'note' }, text: vm.notice }) : null,
+    vm.notice && vm.noticeLink
+      ? h('button', {
+          class: 'textlink result__notice-link',
+          attrs: { type: 'button' },
+          on: { click: () => openNoticeLink(vm.noticeLink!.tab) },
+          text: vm.noticeLink.label,
+        })
+      : null,
   );
 
   const sections: (HTMLElement | null)[] = [];
@@ -105,7 +125,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
           return h('div', { class: 'panel' }, ownership.root);
       }
     };
-    sections.push(tabsView(vm.tabs, build, vm.ownership.kind === 'register' ? 'ownership' : 'product').root);
+    tabs = tabsView(vm.tabs, build, vm.ownership.kind === 'register' ? 'ownership' : 'product');
+    sections.push(tabs.root);
   } else if (vm.tone !== 'authentic') {
     // The help line, then (when Client Services is configured) the prefilled email, the phone and the hours.
     sections.push(

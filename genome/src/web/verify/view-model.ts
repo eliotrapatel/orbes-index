@@ -3,6 +3,9 @@
  *
  * Pure (no DOM) and unit-tested. The server decides the state and writes the
  * title and message; this module only arranges them: which sections appear,
+ * the notice under the message (unusual activity for the owner, or, under
+ * AUTHENTIC — REGISTERED, the second-hand guidance of J-02 and its link to
+ * RECEIVING THIS PIECE),
  * the photographs of an authentic piece (F-04: its own, then its model's),
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
@@ -13,7 +16,7 @@
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -103,8 +106,16 @@ export interface ResultViewModel {
   titleMain: string;
   titleSub?: string;
   message: string;
-  /** Extra line for the owner when unusual activity was recorded elsewhere. */
+  /**
+   * A line under the message: for the owner, when unusual activity was recorded elsewhere and the server's message
+   * does not say it; under AUTHENTIC — REGISTERED, the second-hand guidance (J-02, RESALE_GUIDANCE).
+   */
   notice?: string;
+  /**
+   * The text link under the second-hand guidance (J-02): it opens the OWNERSHIP tab on RECEIVING THIS PIECE, where a
+   * transfer code is entered. Only where that section is shown: a piece registered to someone else.
+   */
+  noticeLink?: { label: string; tab: TabId };
   /** The photographs of an authentic piece (F-04): its own first, then its model's; empty otherwise. */
   photos: PhotoModel[];
   genome?: GenomeModel;
@@ -331,6 +342,13 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     }
     vm.ownership = ownershipMode(outcome);
     vm.footnote = ASSURANCE_NOTE;
+    // J-02: a registered piece reads the same for its owner signed out and for every copy of its code, so a buyer is
+    // told what shows that the seller holds the registration. AUTHENTIC — REGISTERED only, and never over a notice of
+    // unusual activity (said by the notice or by the server's message): that one comes first.
+    if (state === 'AUTHENTIC_REGISTERED' && outcome.notice !== 'UNUSUAL_ACTIVITY' && vm.notice === undefined) {
+      vm.notice = RESALE_GUIDANCE;
+      if (vm.ownership.kind === 'registered' && vm.tabs.includes('ownership')) vm.noticeLink = { label: RESALE_ACTION, tab: 'ownership' };
+    }
   } else if (state === 'SUSPICIOUS_ACTIVITY') {
     // The holder of the certificate card may still register (no tabs, no product data): see ownershipMode.
     vm.ownership = ownershipMode(outcome);

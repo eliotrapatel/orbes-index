@@ -15,6 +15,8 @@ import {
   PROBLEMS,
   problemForApiError,
   REPORT,
+  RESALE_ACTION,
+  RESALE_GUIDANCE,
   STAFF_SCAN_NOTE,
   STATUS,
   type ProblemKind,
@@ -232,6 +234,63 @@ describe('verify view-model: ownership modes', () => {
   it('REGISTERED belongs to someone else', () => {
     const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false } }));
     expect(vm.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: false });
+  });
+});
+
+describe('verify view-model: the second-hand guidance (J-02)', () => {
+  const registered = (extra: Partial<VerifyOutcome> = {}) => outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false }, ...extra });
+
+  it('tells a buyer under AUTHENTIC — REGISTERED to ask the seller for a transfer code, with a link to RECEIVING THIS PIECE', () => {
+    const vm = resultViewModel(registered());
+    expect(vm.notice).toBe(RESALE_GUIDANCE);
+    expect(vm.noticeLink).toEqual({ label: RESALE_ACTION, tab: 'ownership' });
+    expect(vm.tabs).toContain('ownership');
+    expect(vm.ownership.kind).toBe('registered');
+    // The same while a transfer is pending, and whatever the warranty says.
+    for (const extra of [{ ownership: { registered: true, you: false, transferPending: true } }, { warranty: { status: 'VOID' as const } }]) {
+      const other = resultViewModel(registered(extra));
+      expect(other.notice).toBe(RESALE_GUIDANCE);
+      expect(other.noticeLink).toEqual({ label: RESALE_ACTION, tab: 'ownership' });
+    }
+  });
+
+  it('is said for AUTHENTIC — REGISTERED only: never on OWNERSHIP VERIFIED, FIRST REGISTRATION nor any other state', () => {
+    const registration = { token: 'tok_scan', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: true };
+    for (const state of VERIFICATION_STATES.filter((s) => s !== 'AUTHENTIC_REGISTERED')) {
+      for (const extra of [{}, { ownership: { registered: true, you: false } }, { ownership: { registered: true, you: true } }, { registration }]) {
+        const vm = resultViewModel(outcome(state, extra));
+        expect(vm.notice, state).not.toBe(RESALE_GUIDANCE);
+        expect(vm.noticeLink, state).toBeUndefined();
+      }
+    }
+    // The viewer's own piece, and the first registration (no owner, so no transfer code can exist yet).
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ownership: { registered: true, you: true } })).notice).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration })).notice).toBeUndefined();
+  });
+
+  it('never covers a notice of unusual activity, said by the notice or by the server message', () => {
+    const own = resultViewModel(registered({ notice: 'UNUSUAL_ACTIVITY' }));
+    expect(own.notice).toMatch(/^Unusual activity has been recorded/);
+    expect(own.noticeLink).toBeUndefined();
+    const said = resultViewModel(registered({ notice: 'UNUSUAL_ACTIVITY', message: UNUSUAL_ACTIVITY_OWNER_COPY.message }));
+    expect(said.notice).toBeUndefined();
+    expect(said.noticeLink).toBeUndefined();
+  });
+
+  it('links only where the OWNERSHIP tab shows RECEIVING THIS PIECE', () => {
+    // A response without its ownership block: the sentence stands, but there is no section to open.
+    const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: undefined }));
+    expect(vm.ownership).toEqual({ kind: 'unregistered' });
+    expect(vm.notice).toBe(RESALE_GUIDANCE);
+    expect(vm.noticeLink).toBeUndefined();
+  });
+
+  it('says it in the words of the packaging kit, without a word of BRAND §4.5', () => {
+    expect(RESALE_GUIDANCE).toBe('Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.');
+    expect(RESALE_ACTION).toBe('I HAVE A TRANSFER CODE');
+    for (const line of [RESALE_GUIDANCE, RESALE_ACTION]) {
+      expect(line).not.toMatch(/\bproduct\b|fake|counterfeit|fraud|stolen|alert|danger|warning|genuine|token|!/i);
+    }
   });
 });
 

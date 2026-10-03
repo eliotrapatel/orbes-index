@@ -670,6 +670,14 @@ h1[tabindex="-1"]:focus,
   letter-spacing: 0.02em;
 }
 
+/* Under the second-hand guidance of AUTHENTIC — REGISTERED (J-02): I HAVE A
+   TRANSFER CODE, a text link (§3.8: the hairline button stays the foot's
+   SCAN ANOTHER) to the OWNERSHIP tab, on RECEIVING THIS PIECE, centred under
+   the notice's lower hairline. */
+.result__notice-link {
+  margin-top: 6px;
+}
+
 /* Photographs (F-04) — the piece's own, then its model's, on an ivory plate
    above the GENOME and framed like it: square frames, each photograph
    contained, never cropped, its caption beneath; one sentence under the
