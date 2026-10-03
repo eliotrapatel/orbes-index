@@ -506,15 +506,17 @@ export const RESALE_ACTION = 'I HAVE A TRANSFER CODE';
 export { DEFAULT_CARE } from '../shared/care.js';
 
 /**
- * The legal pages (J-06, src/web/legal/, served at /legal): their links at the foot of the landing and under every
- * result (PRIVACY · TERMS · LEGAL · HELP, then DB-IP's attribution, shared/legal.ts), and the terms of use under
- * CREATE ACCOUNT, whose article 1 says that creating an account means accepting them.
+ * The legal pages (J-06, src/web/legal/, served at /legal): their links at the foot of the landing, under every
+ * result and at the foot of MY PIECES (PRIVACY · TERMS · LEGAL · HELP, then DB-IP's attribution, shared/legal.ts), and
+ * under CREATE ACCOUNT the terms of use, whose article 1 says that creating an account means accepting them, beside the
+ * privacy policy, which says what the account records (the information due where data is collected).
  */
 export const LEGAL = Object.freeze({
   /** The name of the links' navigation landmark. */
   label: 'Legal information',
   links: Object.freeze({ privacy: 'PRIVACY', terms: 'TERMS', notice: 'LEGAL', faq: 'HELP' }),
-  /** Under CREATE ACCOUNT, before its link to the terms. */
+  /** Under CREATE ACCOUNT, before its links to the terms and the privacy policy (docs/legal/TERMS-FACTS.md R56). */
   accept: 'Creating an ORBES account means accepting the ORBES terms of use.',
   terms: 'TERMS OF USE',
+  privacy: 'PRIVACY POLICY',
 });

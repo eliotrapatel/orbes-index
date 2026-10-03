@@ -15,7 +15,11 @@
  *  - the retention: SCAN_RETENTION_DAYS is not set in production (the
  *    owner's decision with counsel, after the launch), so verifications are
  *    kept without a time limit, as the page says; sessions end after 30 days;
- *    the backups keep 14 daily and 8 weekly archives (about two months);
+ *    the backups keep 14 nightly and 8 weekly archives, and no archive taken
+ *    before an update past 63 days (deploy/vps/scripts/backup.sh): about two
+ *    months;
+ *  - a signed-in verification: the account and a keyed pseudonym of the
+ *    session (routes/public.ts `meta.sessionHash`, scan_events.session_hash);
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com.
  *
@@ -54,7 +58,7 @@ const EN: LegalDocument = {
           "- an approximate location: the country, and coordinates rounded to about 10 km, found from the IP address at the time of the verification in a database installed on ORBES's server ([IP Geolocation by DB-IP](https://db-ip.com)). The address is sent to no one for this;",
           '- the family of your browser and system (for example Safari on iOS), without its version;',
           '- measurements of the reading, sent by the page: how long it took, how much correction the code needed, camera or photo;',
-          '- if you are signed in to your ORBES account, that account.',
+          '- if you are signed in to your ORBES account, that account, and a pseudonym of your session.',
         ].join('\n'),
         'ORBES uses them to answer the verification, to detect unusual activity on a code (the same code verified in many places within minutes, as copies of it would be), and to count verifications by day, country and result. These daily counts hold no pseudonym, no code, no piece and no account. An unusual activity concerns a code, not a person: ORBES staff review it, and nothing is revoked automatically. ORBES processes these data for its legitimate interest in protecting its pieces, and those who buy them, against copies of their codes.',
         "The web server's access log keeps only a shortened form of the IP address (its last part masked), for the security of the service; the service's own log holds no IP address.",
@@ -173,7 +177,7 @@ const FR: LegalDocument = {
           "- une localisation approximative : le pays, et des coordonnées arrondies à 10 km environ, déduits de l'adresse IP au moment de la vérification dans une base installée sur le serveur d'ORBES ([IP Geolocation by DB-IP](https://db-ip.com)). L'adresse n'est transmise à personne pour cela ;",
           '- la famille de votre navigateur et de votre système (par exemple Safari sur iOS), sans sa version ;',
           '- des mesures de la lecture, envoyées par la page : sa durée, la part de correction dont le code a eu besoin, caméra ou photo ;',
-          '- si vous êtes connecté à votre compte ORBES, ce compte.',
+          '- si vous êtes connecté à votre compte ORBES, ce compte, et un pseudonyme de votre session.',
         ].join('\n'),
         "ORBES s'en sert pour répondre à la vérification, pour détecter une activité inhabituelle sur un code (le même code vérifié en de nombreux lieux en quelques minutes, comme le seraient ses copies), et pour compter les vérifications par jour, pays et résultat. Ces comptes quotidiens ne contiennent ni pseudonyme, ni code, ni pièce, ni compte. Une activité inhabituelle concerne un code, pas une personne : le personnel d'ORBES l'examine, et rien n'est révoqué automatiquement. ORBES traite ces données pour son intérêt légitime à protéger ses pièces, et ceux qui les achètent, contre les copies de leurs codes.",
         "Le journal d'accès du serveur web ne garde qu'une forme raccourcie de l'adresse IP (sa dernière partie masquée), pour la sécurité du service ; le journal du service lui-même ne contient aucune adresse IP.",

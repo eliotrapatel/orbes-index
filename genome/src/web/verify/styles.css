@@ -1354,7 +1354,9 @@ h1[tabindex="-1"]:focus,
   margin-top: 6px;
 }
 
-/* Under CREATE ACCOUNT (J-06): the sentence, then TERMS OF USE, centred. */
+/* Under CREATE ACCOUNT (J-06): the sentence, then TERMS OF USE · PRIVACY
+   POLICY, centred; a row that wraps keeps 12 px between its lines, so the
+   44 px zones stay apart, as .legal-links__pages. */
 .terms-note {
   display: flex;
   flex-direction: column;
@@ -1371,6 +1373,23 @@ h1[tabindex="-1"]:focus,
   letter-spacing: 0.02em;
   color: var(--ink-soft);
   text-wrap: balance;
+}
+
+.terms-note__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 6px;
+}
+
+.terms-note__link {
+  white-space: nowrap;
+}
+
+.terms-note__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
 }
 
 .result__foot {
@@ -1539,6 +1558,7 @@ h1[tabindex="-1"]:focus,
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 26px;
   margin-top: 60px;
 }
 
@@ -1713,6 +1733,7 @@ h1[tabindex="-1"]:focus,
 .tabs__tab,
 .tabs__dot,
 .legal-links__dot,
+.terms-note__dot,
 .rows__label,
 .section-label,
 .ownership__status,

@@ -146,12 +146,22 @@ export function legalLinks(opts: { newTab?: boolean; extraClass?: string } = {})
   );
 }
 
-/** Under CREATE ACCOUNT: creating an account means accepting the terms of use (their article 1), and the link to them. */
+/**
+ * Under CREATE ACCOUNT: creating an account means accepting the terms of use (their article 1), then TERMS OF USE ·
+ * PRIVACY POLICY, both in a new tab (the form and the scan's window stay): the privacy policy says what the account
+ * records, where the account data is collected. Text links held to the floors of §3.8, as legalLinks.
+ */
 export function termsNote(): HTMLElement {
   return h(
     'div',
     { class: 'terms-note' },
     h('p', { class: 'terms-note__text', text: LEGAL.accept }),
-    h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
+    h(
+      'div',
+      { class: 'terms-note__links' },
+      h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
+      h('span', { class: 'terms-note__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
+      h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('privacy'), ...NEW_TAB }, text: LEGAL.privacy }),
+    ),
   );
 }

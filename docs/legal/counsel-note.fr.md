@@ -23,11 +23,11 @@ Tous les champs portent la marque [À COMPLÉTER : …], dans les deux langues.
 | Fermeture du compte | CGU article 5 | Voir §4, point 3. |
 | Acceptation assistée d'un transfert | CGU article 8 | Le réglage existe côté serveur, aucun écran ne la propose (R40). |
 | Déclaration inexacte de perte ou de vol | CGU article 9 | |
-| Conditions de la garantie commerciale | CGU article 11 | Document distinct, à rédiger (§4, point 10). |
-| Motifs du verrouillage | CGU article 12 | Voir §4, point 7. |
+| Conditions de la garantie commerciale | CGU article 11 | Document distinct, à rédiger (§4, point 10). En attendant, la page publiée omet tout le point « Conditions », la phrase sur l'annulation de la garantie comprise (« ces conditions » ne renverrait à rien), et garde le rappel des garanties légales. |
+| Motifs du verrouillage | CGU article 12 | Voir §4, point 7. La page publiée garde « ORBES Client Services peut verrouiller un compte ORBES. », sans motifs. |
 | Limites de responsabilité | CGU article 14 | |
 | Information sur les modifications des CGU | CGU article 15 | Le service n'envoie pas d'e-mail (N1). |
-| Médiateur de la consommation, juridiction | CGU article 16 | Voir §3. |
+| Médiateur de la consommation, juridiction | CGU article 16 | Voir §3. Tant qu'aucun médiateur n'est désigné, la page publiée ne mentionne pas ce recours : une phrase qui promet « le médiateur de la consommation » sans le nommer ne renseignerait personne. Si ORBES doit en désigner un, l'information manque donc jusqu'à ce choix. |
 
 ## 2. Loi Toubon
 
@@ -37,7 +37,7 @@ Tous les champs portent la marque [À COMPLÉTER : …], dans les deux langues.
 - **l'entretien** : le texte d'entretien de chaque modèle, saisi dans la console (un texte par défaut, en anglais, quand le modèle n'en a pas), et l'historique des entretiens ;
 - **le mode d'emploi** : la marche à suivre pour scanner une pièce, l'enregistrer, la transférer, déclarer sa perte ou son vol, et les messages qui l'accompagnent.
 
-La carte certificat est imprimée en anglais ; l'emballage proposé est bilingue ([PACKAGING-KIT](../launch/PACKAGING-KIT.md)). Les pages légales seront publiées en français et en anglais.
+La carte certificat est imprimée en anglais ; l'emballage proposé est bilingue ([PACKAGING-KIT](../launch/PACKAGING-KIT.md)). Les pages légales sont publiées en français et en anglais (`/legal`, J-06).
 
 **Questions.**
 
@@ -57,14 +57,14 @@ Le Code de la consommation (articles L. 612-1 et L. 616-1) impose à tout profes
 
 ## 4. Points où le code et le droit doivent se rejoindre
 
-1. **L'enregistrement n'est pas un titre de propriété** (CGU articles 4 et 7 ; R25, R28, R29). Le registre lie une pièce à un compte ; la propriété « vérifiée » signifie seulement que le claim code a été donné, ou qu'ORBES Client Services a vu une preuve d'achat. La formulation vous revient.
+1. **L'enregistrement n'est pas un titre de propriété** (CGU articles 4 et 7 ; R25, R28, R29). Le registre lie une pièce à un compte ; la propriété « vérifiée » signifie seulement que le claim code a été donné, ou qu'ORBES Client Services a vu une preuve d'achat. Le titre de résultat AUTHENTIC — OWNERSHIP VERIFIED ne suit pas ce sens : c'est ce que lit le propriétaire enregistré connecté à son compte, que sa propriété soit vérifiée ou non au sens de l'article 7 (le code le sert à tout propriétaire connecté). L'article 4 le dit désormais ; faut-il plutôt renommer ce titre (par exemple AUTHENTIC — REGISTERED TO YOU), ce qui changerait l'application, le kit d'emballage et le guide de vente ? La formulation vous revient.
 2. **Le transfert est définitif** (CGU article 8 ; R41, N3). Aucune route ne défait un transfert accepté, et le personnel ne peut pas réattribuer une pièce : la valeur `ADMIN` de `acquired_via` existe dans le schéma, mais aucun code ne l'écrit. En cas de litige entre vendeur et acheteur, ORBES Client Services peut verrouiller un compte (R19) ou enregistrer un vol, pas rendre la pièce. Faut-il garder « définitif » tel quel, ou prévoir une procédure (et donc un développement) ?
 3. **Pas de suppression de compte** (CGU article 5 ; N4). Le client ne peut pas supprimer son compte, et aucun outil ne le fait pour lui : le statut `DELETED` existe dans le schéma, aucun code ne l'écrit. Une demande d'effacement (RGPD, article 17) n'a donc pas encore de traitement. L'export du droit d'accès existe (R21). À trancher : délai, sort des pièces enregistrées, de l'historique des scans et du journal d'audit (permanent, il ne contient que des identifiants).
 4. **Âge et identité** (CGU article 5 ; N5). Aucune vérification à la création d'un compte.
 5. **Adresse e-mail non vérifiée** (CGU article 5 ; R07). Une adresse mal saisie empêche ORBES Client Services de retrouver le compte, et le service n'envoie aucun message.
-6. **Vérification d'identité avant un code de récupération** (CGU article 6 ; R13). C'est une procédure humaine, esquissée dans le [SALES-PLAYBOOK §6](../launch/SALES-PLAYBOOK.md), à finaliser avec vous. La suspension des transferts pendant 72 heures (R17) limite l'effet d'une vérification trompée.
+6. **Vérification d'identité avant un code de récupération** (CGU article 6 ; R13). De même, l'examen de la pièce avant de lever un vol (CGU article 9 ; R45) est une procédure humaine, que le code n'impose pas. C'est une procédure humaine, esquissée dans le [SALES-PLAYBOOK §6](../launch/SALES-PLAYBOOK.md), à finaliser avec vous. La suspension des transferts pendant 72 heures (R17) limite l'effet d'une vérification trompée.
 7. **Verrouillage** (CGU article 12 ; R19, R20). Le code applique le verrouillage, pas ses motifs : à définir, ainsi que l'information du titulaire (le service n'envoie pas d'e-mail).
-8. **Acceptation des CGU.** L'application met, sous CREATE ACCOUNT, la phrase « Creating an ORBES account means accepting the ORBES terms of use. » et un lien vers les CGU (`/legal/terms`) ; elle n'enregistre ni l'acceptation, ni la version acceptée. Un lien suffit-il, ou faut-il une case à cocher et la conservation de la version et de la date (un développement) ?
+8. **Acceptation des CGU** (CGU article 1 ; R56). L'application met, sous CREATE ACCOUNT, la phrase « Creating an ORBES account means accepting the ORBES terms of use. » et deux liens, vers les CGU (`/legal/terms`) et vers la politique de confidentialité (`/legal/privacy`) ; elle n'enregistre ni l'acceptation, ni la version acceptée. L'article 1 dit donc seulement que créer un compte, c'est accepter les conditions, comme le service l'indique sous CREATE ACCOUNT, et non qu'on les accepte « expressément ». Un lien suffit-il, ou faut-il une case à cocher et la conservation de la version et de la date (un développement), qui permettrait de rétablir « expressément » ?
 9. **Modification des CGU** (CGU article 15). Sans e-mail, l'information des titulaires de compte ne peut passer que par le service lui-même : quelle forme et quel délai ?
 10. **Garantie commerciale** (CGU article 11 ; R52 à R55). Le registre n'en porte que les dates, le point de vente et l'état. Ses conditions (durée par catégorie, exclusions, cas d'annulation, rappel des garanties légales) sont à rédiger dans un document distinct, en français.
 11. **Certificat de propriété** (CGU article 10 ; R46 à R51). Quiconque a le lien voit la pièce, la date de la propriété et la garantie, jamais le nom ni l'e-mail. Le propriétaire crée le lien lui-même et peut le retirer à tout moment.
@@ -73,4 +73,4 @@ Le Code de la consommation (articles L. 612-1 et L. 616-1) impose à tout profes
 
 ## 5. Mentions légales
 
-Le brief cite l'article 6-III de la loi n° 2004-575 du 21 juin 2004 (LCEN) et ses sanctions pénales. Le brouillon vise la loi sans citer d'article : la numérotation de son article 6 a changé depuis 2024, à vérifier. Les mentions couvrent theorbes.com (Vercel Inc.) et verify.theorbes.com (OVHcloud, serveur au Canada). Le serveur hors de l'Union européenne est un écart accepté par ORBES (COMPLIANCE §7, H2) : la politique de confidentialité dira où les données sont traitées, et vous confirmerez le fondement du transfert.
+Le brief cite l'article 6-III de la loi n° 2004-575 du 21 juin 2004 (LCEN) et ses sanctions pénales. Le brouillon vise la loi sans citer d'article : la numérotation de son article 6 a changé depuis 2024, à vérifier. Les mentions couvrent theorbes.com (Vercel Inc.) et verify.theorbes.com (OVHcloud, serveur au Canada). Le serveur hors de l'Union européenne est un écart accepté par ORBES (COMPLIANCE §7, H2) : la politique de confidentialité (`/legal/privacy`) dit où les données sont traitées, et vous confirmerez le fondement du transfert.

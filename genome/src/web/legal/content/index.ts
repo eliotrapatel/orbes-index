@@ -2,8 +2,11 @@
  * The content of the legal pages (J-06): the four documents in English and
  * French, the words of the pages around them, and LEGAL_VERSION, the date of
  * this version of the texts, shown under each title. Change LEGAL_VERSION
- * with any change of a text: the terms (article 15) and the privacy policy
- * tell their readers that the version in force and its date are shown here.
+ * with any change of a text: the terms (article 15, docs/legal/TERMS-FACTS.md
+ * R57) and the privacy policy tell their readers that the version in force
+ * and its date are shown here. test/web/legal.content.test.ts pins the
+ * fingerprint of DOCUMENTS to this version: a text changed without a new
+ * version fails it.
  */
 import type { LegalPage } from '../../shared/legal.js';
 import { FAQ } from './faq.js';

@@ -8,15 +8,15 @@ Each article ends with a *Code: …* line that points to the rules of the code i
 
 These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, and the ownership certificate.
 
-The service is published by [À COMPLÉTER: company name] ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them expressly.
+The service is published by [À COMPLÉTER: company name] ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
 
-*Code: — (legal clause).*
+*Code: R56.*
 
 ## Article 2 — Definitions
 
 - **Piece**: an ORBES object that carries an ORBES CODE.
-- **ORBES CODE**: the seal printed on the piece, which carries its ORBES identity and the signature of ORBES.
-- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, the visual signature derived from it.
+- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.
+- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.
 - **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.
 - **ORBES account**: the account created on the service with an email address and a password.
 - **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.
@@ -36,7 +36,7 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 ## Article 4 — What a result says
 
-**AUTHENTIC qualifies the ORBES identity, not the object.** An AUTHENTIC result (AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED or AUTHENTIC — OWNERSHIP VERIFIED) means that the ORBES identity read was issued and signed by ORBES, and states what the ORBES registry records about it. It does not concern the object presented.
+**AUTHENTIC qualifies the ORBES identity, not the object.** An AUTHENTIC result (AUTHENTIC, AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED or AUTHENTIC — OWNERSHIP VERIFIED) means that the ORBES identity read was issued and signed by ORBES, and states what the ORBES registry records about it. It does not concern the object presented. AUTHENTIC — OWNERSHIP VERIFIED is the result the registered owner reads, signed in to their ORBES account: it means that the piece is registered to that account, whether or not its ownership is verified in the sense of article 7.
 
 **A copy can verify like the original.** A printed code can be copied: on its own, it cannot prove that the object in your hands is the one ORBES made. The note under every positive result says so. ORBES Client Services can inspect a piece on request.
 
@@ -44,7 +44,7 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 **Hardware checks.** No hardware check (secure NFC chip, secure element, seal) is available yet. A piece designed to carry one is verified on its code alone, and the result says so.
 
-**Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. Every verification then reads REVOKED.
+**Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. A verification then reads REVOKED (UNUSUAL ACTIVITY DETECTED when the code read, or its ORBES GENOME, does not match what ORBES issued).
 
 **Registration is not a title of ownership.** The ORBES registry states the account to which a piece is registered. It is not a title of ownership and replaces neither an invoice nor a deed of sale. The ownership of a piece is proven under the rules of the applicable law.
 
@@ -96,7 +96,7 @@ Registration is not a title of ownership (article 4).
 
 ## Article 8 — Transfer of ownership
 
-**Creating the code.** Only the registered owner creates a transfer code, from their account. The code is valid for 7 days. A piece has one pending transfer at a time, and the owner can cancel it until it is accepted. A piece in service, revoked or withdrawn, or whose loss or theft has been reported, cannot be transferred. After the recovery of a password, the creation of transfer codes is paused (article 6).
+**Creating the code.** Only the registered owner creates a transfer code, from their account. The code is valid for 7 days. A piece has one pending transfer at a time, and the owner can cancel it until it is accepted. A piece in service, revoked, set aside by ORBES after review or withdrawn, or whose loss or theft has been reported, cannot be transferred. After the recovery of a password, the creation of transfer codes is paused (article 6).
 
 **Handing it over.** The transfer code is given only to the new owner. Whoever holds it can receive the piece in their own account.
 
@@ -112,7 +112,7 @@ Registration is not a title of ownership (article 4).
 
 **Report.** The registered owner reports the loss or theft of their piece from MY PIECES. Any pending transfer is then cancelled. Every verification of the piece then reads UNUSUAL ACTIVITY DETECTED, and it can no longer be transferred.
 
-**Withdrawal.** A loss you reported yourself, you withdraw from MY PIECES (PIECE FOUND), confirming the password of your account. A theft, or a loss recorded by ORBES Client Services, is withdrawn only by ORBES Client Services, after inspecting the piece.
+**Withdrawal.** A loss you reported yourself, you withdraw from MY PIECES (PIECE FOUND), confirming the password of your account. A theft, or a loss recorded by ORBES Client Services, is withdrawn only by ORBES Client Services, and a theft only after inspecting the piece.
 
 A report in the ORBES registry does not replace a complaint to the authorities. A knowingly inaccurate report engages its author [À COMPLÉTER: consequences, on counsel's advice].
 
@@ -124,7 +124,7 @@ A report in the ORBES registry does not replace a complaint to the authorities. 
 
 **Content.** The certificate shows, read when it is opened, the piece and its ORBES GENOME, the ownership (verified or not) and its date, the warranty, and that no loss or theft is reported. It never shows the name or the email address of the owner.
 
-**End of validity.** The certificate stops being valid when it expires, when the piece changes hands, when its loss or theft is reported, or when it is revoked or withdrawn.
+**End of validity.** The certificate stops being valid when it expires, when the piece changes hands, when its loss or theft is reported, or when it is revoked, set aside by ORBES after review, or withdrawn.
 
 **Scope.** The certificate attests a record in the ORBES registry, not the object it is shown with. To check an object, scan its ORBES CODE.
 
@@ -142,7 +142,7 @@ A report in the ORBES registry does not replace a complaint to the authorities. 
 
 ## Article 12 — Locking an account
 
-ORBES Client Services may lock an ORBES account [À COMPLÉTER: grounds for a lock, for example at its holder's request, on suspicion of a takeover or of a breach of these terms, on counsel's advice].
+ORBES Client Services may lock an ORBES account, [À COMPLÉTER: grounds for a lock, for example at its holder's request, on suspicion of a takeover or of a breach of these terms, on counsel's advice].
 
 The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and cancels its pending transfers. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.
 
@@ -164,7 +164,7 @@ ORBES describes faithfully what the service checks and what it does not (article
 
 ORBES may change these terms. The version in force and its date are published on the service. [À COMPLÉTER: how account holders are informed and when changes take effect, on counsel's advice; the service sends no email.]
 
-*Code: — (legal clause).*
+*Code: R57.*
 
 ## Article 16 — Applicable law, mediation and disputes
 

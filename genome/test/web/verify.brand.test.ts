@@ -308,13 +308,15 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
     expect(rules(brand).find((r) => r.selectors.includes('body'))?.decls['font-family']).toBe('var(--font)');
   });
 
-  it('ships exactly the declared subset (Basic Latin and the brand punctuation), with its licence names', () => {
+  it('ships exactly the declared subset (Basic Latin, the accented capitals of French, the brand punctuation), with its licence names', () => {
     expect(font.flavor).toBe('OTTO');
     const declared = parseUnicodeRange(face['unicode-range']);
     expect([...woff2CodePoints(font)].sort((a, b) => a - b)).toEqual([...declared].sort((a, b) => a - b));
     for (let c = 0x20; c <= 0x7e; c++) expect(declared.has(c), `U+${c.toString(16)}`).toBe(true);
     // The punctuation the interfaces set in titles and labels: · — – … × → ’ © (copy.ts, views).
     for (const ch of '·—–…×→’©') expect(declared.has(ch.codePointAt(0)!), ch).toBe(true);
+    // The capitals of French titles set in capitals (the legal pages, J-06): CONFIDENTIALITÉ, FRANÇAIS, « ».
+    for (const ch of 'ÀÂÆÇÉÈÊËÎÏÔÙÛÜŒŸ«»') expect(declared.has(ch.codePointAt(0)!), ch).toBe(true);
     // The copyright and designer names travel with the file (NOTICE.md).
     const names = woff2Names(font);
     expect(names.get(0)).toMatch(/Rian Hughes \/ Device/);

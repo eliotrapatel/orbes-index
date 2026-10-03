@@ -51,8 +51,9 @@ face (BRAND-DESIGN-SYSTEM §3.1).
   font from ours (`Cross-Origin-Resource-Policy: same-origin`, no CORS
   header), so this is a question of licence scope, not of hotlinking.
 - Changes: a subset of the supplied OpenType (CFF) file, converted to WOFF2
-  with fontTools: Basic Latin and the punctuation the interfaces use, kerning
-  kept, other OpenType features removed. The copyright and designer names
+  with fontTools: Basic Latin, the accented capitals of Latin-1 with Œ and Ÿ,
+  « » and the punctuation the interfaces use, kerning kept, other OpenType
+  features removed. The copyright and designer names
   are kept in the file. The command is in BRAND-DESIGN-SYSTEM §3.1.
 
 Helvetica Neue and the other families of the reading stack are not shipped:

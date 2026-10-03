@@ -56,7 +56,7 @@ At the top of the `<style>` element, the same declaration as `genome/src/web/sha
   font-weight: 500;
   font-style: normal;
   font-display: swap;
-  unicode-range: U+0020-007E, U+00A9, U+00B7, U+00D7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2190, U+2192, U+2212;
+  unicode-range: U+0020-007E, U+00A9, U+00AB, U+00B7, U+00BB, U+00C0-00DD, U+0152-0153, U+0178, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2190, U+2192, U+2212;
 }
 ```
 

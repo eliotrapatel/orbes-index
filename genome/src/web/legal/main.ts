@@ -71,18 +71,27 @@ function pagesNav(route: LegalRoute, lang: Lang, words: LegalWords): HTMLElement
   return h('nav', { class: 'legal-nav', attrs: { 'aria-label': words.navLabel } }, ...links);
 }
 
-/** ENGLISH · FRANÇAIS: the same page (and section) in the other language; each name in its own language. */
+/** The section the address names (#article-8), or ''. */
+const currentSection = (): string => (/^#[a-z0-9-]+$/.test(location.hash) ? location.hash : '');
+
+/**
+ * ENGLISH · FRANÇAIS: the same page (and section) in the other language; each name in its own language. The section
+ * is the one the address names now: a link followed inside the page (see Cookies, #cookies) moves it, and the
+ * switch follows ('hashchange').
+ */
 function languageNav(route: LegalRoute, lang: Lang, words: LegalWords): HTMLElement {
-  const hash = /^#[a-z0-9-]+$/.test(location.hash) ? location.hash : '';
-  const links = LANGS.flatMap((l, i) => [
-    i > 0 ? h('span', { class: 'legal-lang__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }) : null,
+  const links = LANGS.map((l) =>
     h('a', {
       class: ['textlink', 'legal-lang__link', l === lang && 'is-current'],
-      attrs: { href: hrefOf(route, l, hash), lang: l, hreflang: l, 'aria-current': l === lang ? 'true' : null },
+      attrs: { href: hrefOf(route, l, currentSection()), lang: l, hreflang: l, 'aria-current': l === lang ? 'true' : null },
       text: LANGUAGE_NAMES[l],
     }),
-  ]);
-  return h('nav', { class: 'legal-lang', attrs: { 'aria-label': words.languageLabel } }, ...links);
+  );
+  window.addEventListener('hashchange', () => {
+    links.forEach((a, i) => a.setAttribute('href', hrefOf(route, LANGS[i], currentSection())));
+  });
+  const items = links.flatMap((a, i) => [i > 0 ? h('span', { class: 'legal-lang__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }) : null, a]);
+  return h('nav', { class: 'legal-lang', attrs: { 'aria-label': words.languageLabel } }, ...items);
 }
 
 function documentView(doc: LegalDocument, lang: Lang): HTMLElement[] {
@@ -176,7 +185,8 @@ function start(): void {
     foot(lang, words),
   );
   // An anchor in the address (/legal/faq#transfer): its section, now that it exists.
-  const target = /^#[a-z0-9-]+$/.test(location.hash) ? document.getElementById(location.hash.slice(1)) : null;
+  const section = currentSection();
+  const target = section ? document.getElementById(section.slice(1)) : null;
   target?.scrollIntoView();
   void fillContacts(root, words);
 }

@@ -3,9 +3,9 @@
  * system (docs/BRAND-DESIGN-SYSTEM.md §3): the shell of the other apps (CSP
  * safe, the display font preloaded, the tab icon of /verify, the monogram
  * nowhere else, D-06), type from brand.css tokens only, the display face on
- * the wordmark, titles and labels and never on what is read, French titles
- * and links in the reading face (the display face has no accented capital),
- * figures of a heading in the reading face, the floors of §3.8 on every
+ * the wordmark, titles and labels and never on what is read, in French as
+ * in English (the subset carries the accented capitals of Latin-1), figures
+ * of a heading in the reading face, the floors of §3.8 on every
  * text link, no readable text in --metal, and a print view.
  */
 import { readFileSync } from 'node:fs';
@@ -116,16 +116,14 @@ describe('legal pages: type and colour from brand.css (BRAND-DESIGN-SYSTEM §3.1
     expect(main).toContain("h('span', { class: 'legal__figure', text: p.text })");
   });
 
-  it('sets French titles and links in the reading face, after the display rule: the display face has no accented capital', () => {
-    const french = all.find((r) => r.selectors.includes('.legal__title:lang(fr)'));
-    expect(french?.selectors).toEqual(['.legal__title:lang(fr)', '.legal__heading:lang(fr)', '.textlink:lang(fr)']);
-    expect(french?.decls['font-family']).toBe('var(--font)');
-    expect(all.indexOf(french!)).toBeGreaterThan(all.findIndex((r) => r.selectors.includes('.legal__title') && r.decls['font-family'] === 'var(--font-display)'));
-    // The subset the brand ships is Basic Latin and its punctuation: no É, no Ç.
+  it('sets French titles and links in the display face too: its subset carries the accented capitals (D-04)', () => {
+    // No rule sends a language back to the reading face.
+    expect(all.filter((r) => r.selectors.some((s) => /:lang\(/.test(s)))).toEqual([]);
+    // The capitals of French titles (text-transform: uppercase): À Â Ç É È Ê Ë Î Ï Ô Ù Û Ü Œ Ÿ, and « ».
     const range = /unicode-range:\s*([^;]+);/.exec(brand)![1];
-    expect(range).not.toMatch(/U\+00C[0-9A-F]|U\+00E/);
+    for (const r of ['U+00AB', 'U+00BB', 'U+00C0-00DD', 'U+0152-0153', 'U+0178']) expect(range).toContain(r);
     // Each language is named in its own: FRANÇAIS carries lang="fr", ENGLISH lang="en".
-    expect(main).toContain("attrs: { href: hrefOf(route, l, hash), lang: l, hreflang: l,");
+    expect(main).toContain("attrs: { href: hrefOf(route, l, currentSection()), lang: l, hreflang: l,");
   });
 });
 

@@ -2,8 +2,9 @@
  * The shape of the legal pages' content (J-06).
  *
  * A page is a title, an introduction and sections. Each block of text is
- * written in a small subset of Markdown, which the page renders with
- * textContent only (legal/markup.ts), never as HTML:
+ * written in a small subset of Markdown, which legal/model.ts parses into
+ * runs (parseBlock, parseInline) and legal/main.ts builds with textContent
+ * only, never as HTML:
  *
  *   - a block whose every line starts with "- " is a list, each line an item;
  *   - any other block is a paragraph;

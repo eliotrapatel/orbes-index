@@ -5,8 +5,8 @@
  *
  * Shared by the verification app (verify/view-model.ts: the contact under a
  * result, in a warranty, under FORGOTTEN PASSWORD?, in MY PIECES) and the
- * legal pages (legal/model.ts: the publisher's contact and the privacy
- * policy's, J-06).
+ * legal pages (legal/main.ts, fillContacts: the publisher's contact and the
+ * privacy policy's, J-06).
  */
 
 /** A plain mailbox: nothing a mailto: link would read as syntax. */

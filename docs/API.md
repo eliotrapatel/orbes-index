@@ -52,7 +52,7 @@ The API is served from the deployment's public origin (`PUBLIC_ORIGIN`, e.g. `ht
 | `/api/v1/…` | Public, customer account and ownership API |
 | `/api/admin/…` | Staff console API |
 | `/.well-known/orbes-keys.json` | Public signing keys (same body as `/api/v1/keys`) |
-| `/`, `/verify`, `/admin`, `/assets/…` | Web applications (§18) |
+| `/`, `/verify`, `/admin`, `/legal`, `/legal/*`, `/assets/…` | Web applications (§18): the verification app, the console, the legal pages |
 
 A production server answers only on an up-to-date database schema: it refuses to start with pending migrations unless started with `--migrate` (or `MIGRATE_ON_START=true`), or after `npm run db:migrate` ([DEPLOYMENT](DEPLOYMENT.md)). Development and test servers migrate on start.
 
@@ -2832,7 +2832,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | `/legal`, `/legal/*` | The legal pages' shell (`dist/web/legal/index.html`, J-06). Its own routes: `/legal/privacy` (the privacy policy), `/legal/terms` (the terms of use), `/legal/notice` (the legal notice), `/legal/faq` (the FAQ), and `/legal`, their index; any other path shows the index, its address put back to `/legal`. The language is `?lang=fr` or `?lang=en`, else the browser's (`navigator.languages`), else English; the page reads `GET /api/v1/client-services` (§8.4) to show the contact of ORBES Client Services where it names it | `no-cache` |
 | `/assets/*` | Bundles and stylesheets | Content-hashed names: `public, max-age=31536000, immutable`; others `no-cache`. Dotfiles are never served. |
 
-Without a build, these paths answer `404 NOT_FOUND`. Each app has its main bundle and, for the two that read codes with the camera, a decoder worker (`verify-worker-<hash>.js`; `admin-worker-<hash>.js`, the same decoder for the console's sale mode, §16.18), named by the shell's `<meta name="orbes-worker">`; the main bundles never carry the decoder. Every shell is served with `Permissions-Policy: camera=(self)` and a CSP that allows workers from the page's origin. The verification app links the legal pages at the foot of its landing, under every result (in a new tab) and under CREATE ACCOUNT (the terms of use); theorbes.com may link the same addresses.
+Without a build, these paths answer `404 NOT_FOUND`. Each app has its main bundle and, for the two that read codes with the camera, a decoder worker (`verify-worker-<hash>.js`; `admin-worker-<hash>.js`, the same decoder for the console's sale mode, §16.18), named by the shell's `<meta name="orbes-worker">`; the main bundles never carry the decoder. Every shell is served with `Permissions-Policy: camera=(self)` and a CSP that allows workers from the page's origin. The verification app links the legal pages at the foot of its landing, under every result and at the foot of MY PIECES (in a new tab), and under CREATE ACCOUNT (the terms of use and the privacy policy, in a new tab); theorbes.com may link the same addresses.
 
 ---
 

@@ -5,8 +5,9 @@
  * browser's, and said in <html lang>; the switch that keeps the page and its
  * section; the links between the pages that keep the language; the index
  * and an unknown path put back to /legal; the four pages with no field to
- * complete in sight; the display face in English, the reading face for
- * French titles and for figures; the contact of ORBES Client Services when
+ * complete in sight; the display face for titles and labels in both
+ * languages (its subset carries the accented capitals), the reading face for
+ * figures and text; the contact of ORBES Client Services when
  * the server publishes one, and none otherwise; the floors of §3.8 on every
  * control (the links inside a sentence aside); the print view.
  *
@@ -114,6 +115,26 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
+  it('keeps the section the reader has moved to: a link inside the page moves the switch along', async () => {
+    const { page, problems } = await open('/legal/privacy?lang=en');
+    const french = page.getByRole('navigation', { name: 'Language' }).getByRole('link', { name: 'FRANÇAIS' });
+    expect(await french.getAttribute('href')).toBe('/legal/privacy?lang=fr');
+    // "see Cookies", in the list of what a verification records.
+    await page.locator('#verification').locator('xpath=..').getByRole('link', { name: 'Cookies', exact: true }).click();
+    await page.waitForURL(`${srv.origin}/legal/privacy?lang=en#cookies`);
+    await expect.poll(() => french.getAttribute('href'), POLL).toBe('/legal/privacy?lang=fr#cookies');
+    await french.click();
+    await page.waitForURL(`${srv.origin}/legal/privacy?lang=fr#cookies`);
+    expect(await langOf(page)).toBe('fr');
+    await textOf(page.locator('#cookies'), 'COOKIES');
+    await expect.poll(() => page.evaluate(() => document.getElementById('cookies')!.getBoundingClientRect().top), POLL).toBeLessThan(80);
+    // And back: ENGLISH follows the address too.
+    const english = page.getByRole('navigation', { name: 'Langue' }).getByRole('link', { name: 'ENGLISH' });
+    expect(await english.getAttribute('href')).toBe('/legal/privacy?lang=en#cookies');
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
   it('shows the four pages from their index, and the index for any other path, its address put back to /legal', async () => {
     const { page, problems } = await open('/legal/cookies?lang=en');
     expect(new URL(page.url()).pathname).toBe('/legal');
@@ -146,7 +167,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
-  it('sets English titles in Gravesend Sans, French ones and every figure in Helvetica Neue, and reads in Helvetica Neue', async () => {
+  it('sets titles and labels in Gravesend Sans in both languages, every figure and what is read in Helvetica Neue', async () => {
     const { page, problems } = await open('/legal/terms?lang=en');
     const gravesend = /^"?Gravesend Sans"?/;
     const helvetica = /^"?Helvetica Neue"?/;
@@ -156,24 +177,43 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     expect(await family(page.locator('.legal__text').first())).toMatch(helvetica);
     expect(await family(page.locator('.legal__version'))).toMatch(helvetica);
     expect(await family(page.getByRole('link', { name: 'TERMS' }))).toMatch(gravesend);
-    // FRANÇAIS, on the English page, in the face of its language.
-    expect(await family(page.getByRole('link', { name: 'FRANÇAIS' }))).toMatch(helvetica);
+    // FRANÇAIS too, on the English page: its Ç is in the subset.
+    expect(await family(page.getByRole('link', { name: 'FRANÇAIS' }))).toMatch(gravesend);
     // No visible display text holds a one or a zero (Gravesend's one is its capital I).
-    const figures = await page.evaluate(() =>
-      [...document.querySelectorAll('body *')]
-        .filter((el) => el.checkVisibility() && /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
-        .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim())
-        .filter((t) => /[0-9]/.test(t)),
-    );
-    expect(figures).toEqual([]);
+    const displayFigures = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('body *')]
+          .filter((el) => el.checkVisibility() && /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
+          .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim())
+          .filter((t) => /[0-9]/.test(t)),
+      );
+    expect(await displayFigures()).toEqual([]);
     await page.goto(`${srv.origin}/legal/terms?lang=fr`);
     await page.locator('main.legal h1').waitFor();
-    expect(await family(page.locator('h1'))).toMatch(helvetica);
-    expect(await family(page.locator('#article-8'))).toMatch(helvetica);
-    expect(await family(page.getByRole('link', { name: 'MENTIONS LÉGALES', exact: true }))).toMatch(helvetica);
-    // The wordmark stays the brand's, and ENGLISH speaks in it too.
+    await page.evaluate(() => document.fonts.ready);
+    expect(await family(page.locator('h1'))).toMatch(gravesend);
+    expect(await family(page.locator('#article-8'))).toMatch(gravesend);
+    expect(await family(page.locator('#article-8 .legal__figure'))).toMatch(helvetica);
+    expect(await family(page.getByRole('link', { name: 'MENTIONS LÉGALES', exact: true }))).toMatch(gravesend);
     expect(await family(page.locator('.legal-head__wordmark'))).toMatch(gravesend);
     expect(await family(page.getByRole('link', { name: 'ENGLISH' }))).toMatch(gravesend);
+    expect(await family(page.locator('.legal__text').first())).toMatch(helvetica);
+    expect(await displayFigures()).toEqual([]);
+    // Every letter of the French titles and labels is drawn by Gravesend itself, not by the fallback, glyph by glyph:
+    // the face that covers them is the one file, already loaded.
+    const uncovered = await page.evaluate(async () => {
+      const shown = [...document.querySelectorAll('body *')]
+        .filter((el) => el.checkVisibility() && /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
+        .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join(''))
+        .join('')
+        .toUpperCase();
+      const letters = [...new Set(shown.replace(/[^\p{L}«»]/gu, ''))];
+      const out: string[] = [];
+      for (const ch of letters) if ((await document.fonts.load('500 16px "Gravesend Sans"', ch)).length === 0) out.push(ch);
+      return { out, letters: letters.join('') };
+    });
+    expect(uncovered.letters).toMatch(/É/);
+    expect(uncovered.out).toEqual([]);
     expect(problems).toEqual([]);
     await page.context().close();
   }, 120_000);

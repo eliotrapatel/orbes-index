@@ -3,9 +3,13 @@
  * and terms.fr.md (J-04), article by article and in their words: the review
  * lines (*Code: …*) are not published, and a field the drafts leave to
  * complete ([À COMPLÉTER: …]) never shows. The company's name reads ORBES;
- * a clause that waits for counsel's choice is left out of the sentence that
- * holds it, or the sentence goes; nothing else changes. The drafts' links
- * lead to the pages here, and the privacy policy they name is linked.
+ * any other field goes with the clause that holds it (the words since the
+ * comma or the full stop before it), or with its whole sentence, and then
+ * with the bold lead of that sentence and the sentences that refer back to
+ * it: article 11 publishes no warranty conditions ("those conditions" would
+ * point at nothing) and article 16 names no mediator until counsel fills
+ * them; nothing else changes. The drafts' links lead to the pages here, and
+ * the privacy policy they name is linked.
  * test/web/legal.content.test.ts holds this file to the drafts: a draft that
  * changes fails it until this page follows.
  *
@@ -24,14 +28,14 @@ const EN: LegalDocument = {
       title: 'Article 1 — Purpose',
       blocks: [
         'These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, and the ownership certificate.',
-        'The service is published by ORBES, whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them expressly.',
+        'The service is published by ORBES, whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.',
       ],
     },
     {
       id: 'article-2',
       title: 'Article 2 — Definitions',
       blocks: [
-        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the seal printed on the piece, which carries its ORBES identity and the signature of ORBES.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, the visual signature derived from it.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **ORBES Client Services**: the client service of ORBES.',
+        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **ORBES Client Services**: the client service of ORBES.',
       ],
     },
     {
@@ -46,11 +50,11 @@ const EN: LegalDocument = {
       id: 'article-4',
       title: 'Article 4 — What a result says',
       blocks: [
-        '**AUTHENTIC qualifies the ORBES identity, not the object.** An AUTHENTIC result (AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED or AUTHENTIC — OWNERSHIP VERIFIED) means that the ORBES identity read was issued and signed by ORBES, and states what the ORBES registry records about it. It does not concern the object presented.',
+        '**AUTHENTIC qualifies the ORBES identity, not the object.** An AUTHENTIC result (AUTHENTIC, AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED or AUTHENTIC — OWNERSHIP VERIFIED) means that the ORBES identity read was issued and signed by ORBES, and states what the ORBES registry records about it. It does not concern the object presented. AUTHENTIC — OWNERSHIP VERIFIED is the result the registered owner reads, signed in to their ORBES account: it means that the piece is registered to that account, whether or not its ownership is verified in the sense of article 7.',
         '**A copy can verify like the original.** A printed code can be copied: on its own, it cannot prove that the object in your hands is the one ORBES made. The note under every positive result says so. ORBES Client Services can inspect a piece on request.',
         '**UNUSUAL ACTIVITY DETECTED is a request for review, never a verdict.** This result asks you to contact ORBES Client Services before relying on the piece. It accuses neither the piece nor its holder.',
         '**Hardware checks.** No hardware check (secure NFC chip, secure element, seal) is available yet. A piece designed to carry one is verified on its code alone, and the result says so.',
-        '**Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. Every verification then reads REVOKED.',
+        '**Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. A verification then reads REVOKED (UNUSUAL ACTIVITY DETECTED when the code read, or its ORBES GENOME, does not match what ORBES issued).',
         '**Registration is not a title of ownership.** The ORBES registry states the account to which a piece is registered. It is not a title of ownership and replaces neither an invoice nor a deed of sale. The ownership of a piece is proven under the rules of the applicable law.',
       ],
     },
@@ -92,7 +96,7 @@ const EN: LegalDocument = {
       id: 'article-8',
       title: 'Article 8 — Transfer of ownership',
       blocks: [
-        '**Creating the code.** Only the registered owner creates a transfer code, from their account. The code is valid for 7 days. A piece has one pending transfer at a time, and the owner can cancel it until it is accepted. A piece in service, revoked or withdrawn, or whose loss or theft has been reported, cannot be transferred. After the recovery of a password, the creation of transfer codes is paused (article 6).',
+        '**Creating the code.** Only the registered owner creates a transfer code, from their account. The code is valid for 7 days. A piece has one pending transfer at a time, and the owner can cancel it until it is accepted. A piece in service, revoked, set aside by ORBES after review or withdrawn, or whose loss or theft has been reported, cannot be transferred. After the recovery of a password, the creation of transfer codes is paused (article 6).',
         '**Handing it over.** The transfer code is given only to the new owner. Whoever holds it can receive the piece in their own account.',
         '**Acceptance.** The new owner signs in to their ORBES account, scans the piece, then enters the transfer code within 15 minutes of that scan. The code must be the one of the piece scanned, and the scan must be made from their own account.',
         '**Final effect.** Once accepted, the transfer is final: the registration passes to the new owner, and neither the former owner nor the service can undo it. The ownership stays verified, or not, as it was. The warranty stays with the piece: the transfer does not change it.',
@@ -104,7 +108,7 @@ const EN: LegalDocument = {
       title: 'Article 9 — Loss and theft',
       blocks: [
         '**Report.** The registered owner reports the loss or theft of their piece from MY PIECES. Any pending transfer is then cancelled. Every verification of the piece then reads UNUSUAL ACTIVITY DETECTED, and it can no longer be transferred.',
-        '**Withdrawal.** A loss you reported yourself, you withdraw from MY PIECES (PIECE FOUND), confirming the password of your account. A theft, or a loss recorded by ORBES Client Services, is withdrawn only by ORBES Client Services, after inspecting the piece.',
+        '**Withdrawal.** A loss you reported yourself, you withdraw from MY PIECES (PIECE FOUND), confirming the password of your account. A theft, or a loss recorded by ORBES Client Services, is withdrawn only by ORBES Client Services, and a theft only after inspecting the piece.',
         'A report in the ORBES registry does not replace a complaint to the authorities.',
       ],
     },
@@ -114,7 +118,7 @@ const EN: LegalDocument = {
       blocks: [
         '**Creation.** From MY PIECES, the registered owner creates a link to a certificate of their piece, valid for 1 to 90 days (30 days by default). A piece has at most 10 links valid at a time. The link is shown once: ORBES keeps only a fingerprint of it and cannot show it again. The owner can withdraw a link at any time; a withdrawn link leads nowhere.',
         '**Content.** The certificate shows, read when it is opened, the piece and its ORBES GENOME, the ownership (verified or not) and its date, the warranty, and that no loss or theft is reported. It never shows the name or the email address of the owner.',
-        '**End of validity.** The certificate stops being valid when it expires, when the piece changes hands, when its loss or theft is reported, or when it is revoked or withdrawn.',
+        '**End of validity.** The certificate stops being valid when it expires, when the piece changes hands, when its loss or theft is reported, or when it is revoked, set aside by ORBES after review, or withdrawn.',
         '**Scope.** The certificate attests a record in the ORBES registry, not the object it is shown with. To check an object, scan its ORBES CODE.',
       ],
     },
@@ -124,7 +128,7 @@ const EN: LegalDocument = {
       blocks: [
         "**Start.** The ORBES warranty starts when ORBES, or an authorised retailer listed in the ORBES register of points of sale, activates it, on the date of purchase, for the length set for the category of the piece. In a boutique, the seller activates the warranty within 10 minutes of their scan of the piece, on the day's date and in the country of the point of sale.",
         '**Follow-up.** The service shows the status of the warranty of each piece. The warranty stays with the piece when it changes hands.',
-        '**Conditions.** ORBES may void the warranty of a piece in the cases those conditions provide for. The statutory guarantees remain due in every case.',
+        'The statutory guarantees remain due in every case.',
       ],
     },
     {
@@ -160,7 +164,7 @@ const EN: LegalDocument = {
       id: 'article-16',
       title: 'Article 16 — Applicable law, mediation and disputes',
       blocks: [
-        'These terms are governed by French law. In a dispute, you may first turn to ORBES Client Services. You may also use, free of charge, the consumer mediator.',
+        'These terms are governed by French law. In a dispute, you may first turn to ORBES Client Services.',
       ],
     },
   ],
@@ -176,14 +180,14 @@ const FR: LegalDocument = {
       title: 'Article 1 — Objet',
       blocks: [
         "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, et le certificat de propriété.",
-        "Le service est édité par ORBES, dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter expressément.",
+        "Le service est édité par ORBES, dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.",
       ],
     },
     {
       id: 'article-2',
       title: 'Article 2 — Définitions',
       blocks: [
-        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le sceau imprimé sur la pièce, qui porte son identité ORBES et la signature d'ORBES.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, la signature visuelle qui en découle.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **ORBES Client Services** : le service client d'ORBES.",
+        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **ORBES Client Services** : le service client d'ORBES.",
       ],
     },
     {
@@ -198,11 +202,11 @@ const FR: LegalDocument = {
       id: 'article-4',
       title: 'Article 4 — Ce que dit un résultat',
       blocks: [
-        "**AUTHENTIC qualifie l'identité ORBES, pas l'objet.** Un résultat AUTHENTIC (AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED ou AUTHENTIC — OWNERSHIP VERIFIED) signifie que l'identité ORBES lue a été émise et signée par ORBES, et indique ce que le registre ORBES en sait. Il ne porte pas sur l'objet présenté.",
+        "**AUTHENTIC qualifie l'identité ORBES, pas l'objet.** Un résultat AUTHENTIC (AUTHENTIC, AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED ou AUTHENTIC — OWNERSHIP VERIFIED) signifie que l'identité ORBES lue a été émise et signée par ORBES, et indique ce que le registre ORBES en sait. Il ne porte pas sur l'objet présenté. AUTHENTIC — OWNERSHIP VERIFIED est le résultat que lit le propriétaire enregistré, connecté à son compte ORBES : la pièce est enregistrée à ce compte, que sa propriété soit vérifiée ou non au sens de l'article 7.",
         "**Une copie peut vérifier comme l'original.** Un code imprimé peut être copié : à lui seul, il ne prouve pas que l'objet que vous tenez est celui qu'ORBES a fabriqué. La mention placée sous chaque résultat positif le rappelle. ORBES Client Services peut examiner une pièce sur demande.",
         "**UNUSUAL ACTIVITY DETECTED est une demande d'examen, jamais un verdict.** Ce résultat invite à contacter ORBES Client Services avant de se fier à la pièce. Il n'accuse ni la pièce ni son détenteur.",
         "**Contrôles matériels.** Aucun contrôle matériel (puce NFC sécurisée, élément sécurisé, scellé) n'est encore disponible. Une pièce conçue pour en recevoir un est vérifiée sur son seul code, et le résultat le précise.",
-        "**Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Chaque vérification affiche alors REVOKED.",
+        "**Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Une vérification affiche alors REVOKED (UNUSUAL ACTIVITY DETECTED quand le code lu, ou son ORBES GENOME, ne correspond pas à ce qu'ORBES a émis).",
         "**L'enregistrement n'est pas un titre de propriété.** Le registre ORBES indique le compte auquel une pièce est enregistrée. Il ne vaut pas titre de propriété et ne remplace ni une facture ni un acte de vente. La propriété d'une pièce se prouve selon les règles du droit applicable.",
       ],
     },
@@ -244,7 +248,7 @@ const FR: LegalDocument = {
       id: 'article-8',
       title: 'Article 8 — Transfert de propriété',
       blocks: [
-        "**Création du code.** Seul le propriétaire enregistré crée un code de transfert, depuis son compte. Le code vaut 7 jours. Une pièce n'a qu'un transfert en attente à la fois, et le propriétaire peut l'annuler tant qu'il n'est pas accepté. Une pièce en entretien, révoquée ou retirée, ou dont la perte ou le vol a été déclaré, ne se transfère pas. Après la récupération d'un mot de passe, la création de codes de transfert est suspendue (article 6).",
+        "**Création du code.** Seul le propriétaire enregistré crée un code de transfert, depuis son compte. Le code vaut 7 jours. Une pièce n'a qu'un transfert en attente à la fois, et le propriétaire peut l'annuler tant qu'il n'est pas accepté. Une pièce en entretien, révoquée, écartée par ORBES après examen ou retirée, ou dont la perte ou le vol a été déclaré, ne se transfère pas. Après la récupération d'un mot de passe, la création de codes de transfert est suspendue (article 6).",
         "**Remise.** Le code de transfert ne se donne qu'au nouveau propriétaire. Qui le détient peut recevoir la pièce dans son propre compte.",
         '**Acceptation.** Le nouveau propriétaire se connecte à son compte ORBES, scanne la pièce, puis saisit le code de transfert dans les 15 minutes qui suivent ce scan. Le code doit être celui de la pièce scannée, et le scan celui de son propre compte.',
         "**Effet définitif.** Une fois accepté, le transfert est définitif : l'enregistrement passe au nouveau propriétaire, et ni l'ancien propriétaire ni le service ne peuvent le défaire. La propriété reste vérifiée, ou non, comme elle l'était. La garantie reste attachée à la pièce : le transfert ne la modifie pas.",
@@ -256,7 +260,7 @@ const FR: LegalDocument = {
       title: 'Article 9 — Perte et vol',
       blocks: [
         '**Déclaration.** Le propriétaire enregistré déclare la perte ou le vol de sa pièce depuis MY PIECES. Un transfert en attente est alors annulé. Chaque vérification de la pièce affiche ensuite UNUSUAL ACTIVITY DETECTED, et elle ne se transfère plus.',
-        "**Retrait.** Une perte que vous avez déclarée vous-même, vous la retirez depuis MY PIECES (PIECE FOUND), en confirmant le mot de passe de votre compte. Un vol, ou une perte enregistrée par ORBES Client Services, n'est retiré que par ORBES Client Services, après examen de la pièce.",
+        "**Retrait.** Une perte que vous avez déclarée vous-même, vous la retirez depuis MY PIECES (PIECE FOUND), en confirmant le mot de passe de votre compte. Un vol, ou une perte enregistrée par ORBES Client Services, n'est retiré que par ORBES Client Services, et un vol seulement après examen de la pièce.",
         'La déclaration dans le registre ORBES ne remplace pas une plainte auprès des autorités.',
       ],
     },
@@ -266,7 +270,7 @@ const FR: LegalDocument = {
       blocks: [
         "**Création.** Le propriétaire enregistré crée depuis MY PIECES un lien vers un certificat de sa pièce, valable 1 à 90 jours (30 jours par défaut). Une pièce a au plus 10 liens valides à la fois. Le lien n'est montré qu'une fois : ORBES n'en garde qu'une empreinte et ne peut pas le montrer de nouveau. Le propriétaire peut retirer un lien à tout moment ; un lien retiré ne mène plus à rien.",
         "**Contenu.** Le certificat montre, lus au moment de son ouverture, la pièce et son ORBES GENOME, la propriété (vérifiée ou non) et sa date, la garantie, et l'absence de déclaration de perte ou de vol. Il ne montre jamais le nom ni l'adresse e-mail du propriétaire.",
-        "**Fin de validité.** Le certificat cesse d'être valide à son expiration, quand la pièce change de propriétaire, quand sa perte ou son vol est déclaré, ou quand elle est révoquée ou retirée.",
+        "**Fin de validité.** Le certificat cesse d'être valide à son expiration, quand la pièce change de propriétaire, quand sa perte ou son vol est déclaré, ou quand elle est révoquée, écartée par ORBES après examen, ou retirée.",
         "**Portée.** Le certificat atteste un enregistrement dans le registre ORBES, pas l'objet avec lequel il est présenté. Pour vérifier un objet, il faut scanner son ORBES CODE.",
       ],
     },
@@ -276,7 +280,7 @@ const FR: LegalDocument = {
       blocks: [
         "**Début.** La garantie ORBES commence à son activation par ORBES ou par un détaillant agréé inscrit au registre des points de vente d'ORBES, à la date d'achat, pour la durée prévue pour la catégorie de la pièce. En boutique, le vendeur active la garantie dans les 10 minutes qui suivent son scan de la pièce, à la date du jour et au pays du point de vente.",
         "**Suivi.** Le service affiche l'état de la garantie de chaque pièce. La garantie reste attachée à la pièce quand celle-ci change de propriétaire.",
-        "**Conditions.** ORBES peut annuler la garantie d'une pièce dans les cas que ces conditions prévoient. Les garanties légales restent dues dans tous les cas.",
+        'Les garanties légales restent dues dans tous les cas.',
       ],
     },
     {
@@ -312,7 +316,7 @@ const FR: LegalDocument = {
       id: 'article-16',
       title: 'Article 16 — Droit applicable, médiation et litiges',
       blocks: [
-        "Les présentes conditions sont soumises au droit français. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Vous pouvez aussi recourir gratuitement au médiateur de la consommation.",
+        "Les présentes conditions sont soumises au droit français. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services.",
       ],
     },
   ],

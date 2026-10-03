@@ -4,10 +4,9 @@
  *
  * One column of reading, 640 px at most, in the house style: white paper,
  * ink, hairlines, tracked capitals in the display face for the wordmark,
- * the titles and the links; the text itself in --font (Helvetica Neue).
- * French titles and links read in --font too: the display face ships Basic
- * Latin only, so an accented capital would fall back glyph by glyph
- * (BRAND-DESIGN-SYSTEM §3.1). Every text link keeps the floors of §3.8
+ * the titles and the links, in French as in English (its subset carries
+ * the accented capitals, BRAND-DESIGN-SYSTEM §3.1); the text itself in
+ * --font (Helvetica Neue). Every text link keeps the floors of §3.8
  * (10 px, 44 px zones); links inside a sentence are underlined words.
  */
 @import "../shared/brand.css";
@@ -277,22 +276,13 @@ body {
 
 /* Titles, section headings and tracked-capital labels in the display face
    (brand.css --font-display, BRAND-DESIGN-SYSTEM §3.1), with the wordmark
-   and the text links of brand.css. What is read stays in --font. */
+   and the text links of brand.css, in both languages: the subset carries
+   É, Ç, È, À… (CONFIDENTIALITÉ, FRANÇAIS). What is read stays in --font. */
 .legal__title,
 .legal__heading,
 .legal-lang__dot,
 .legal-foot__meta {
   font-family: var(--font-display);
-}
-
-/* French: the same roles in the reading face, whose capitals carry accents
-   (the display face's subset has none: CONFIDENTIALITÉ would mix two faces).
-   A language named in its own words follows its own: FRANÇAIS reads in
-   --font on the English page too (lang="fr"). The wordmark stays. */
-.legal__title:lang(fr),
-.legal__heading:lang(fr),
-.textlink:lang(fr) {
-  font-family: var(--font);
 }
 
 /* ── Small screens & print ─────────────────────────────────────────────── */

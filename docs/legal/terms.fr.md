@@ -8,15 +8,15 @@ Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du 
 
 Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, et le certificat de propriété.
 
-Le service est édité par [À COMPLÉTER : raison sociale] (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter expressément.
+Le service est édité par [À COMPLÉTER : raison sociale] (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
 
-*Code : — (clause juridique).*
+*Code : R56.*
 
 ## Article 2 — Définitions
 
 - **Pièce** : un objet ORBES qui porte un ORBES CODE.
-- **ORBES CODE** : le sceau imprimé sur la pièce, qui porte son identité ORBES et la signature d'ORBES.
-- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, la signature visuelle qui en découle.
+- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.
+- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.
 - **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.
 - **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.
 - **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.
@@ -36,7 +36,7 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 ## Article 4 — Ce que dit un résultat
 
-**AUTHENTIC qualifie l'identité ORBES, pas l'objet.** Un résultat AUTHENTIC (AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED ou AUTHENTIC — OWNERSHIP VERIFIED) signifie que l'identité ORBES lue a été émise et signée par ORBES, et indique ce que le registre ORBES en sait. Il ne porte pas sur l'objet présenté.
+**AUTHENTIC qualifie l'identité ORBES, pas l'objet.** Un résultat AUTHENTIC (AUTHENTIC, AUTHENTIC — FIRST REGISTRATION, AUTHENTIC — REGISTERED ou AUTHENTIC — OWNERSHIP VERIFIED) signifie que l'identité ORBES lue a été émise et signée par ORBES, et indique ce que le registre ORBES en sait. Il ne porte pas sur l'objet présenté. AUTHENTIC — OWNERSHIP VERIFIED est le résultat que lit le propriétaire enregistré, connecté à son compte ORBES : la pièce est enregistrée à ce compte, que sa propriété soit vérifiée ou non au sens de l'article 7.
 
 **Une copie peut vérifier comme l'original.** Un code imprimé peut être copié : à lui seul, il ne prouve pas que l'objet que vous tenez est celui qu'ORBES a fabriqué. La mention placée sous chaque résultat positif le rappelle. ORBES Client Services peut examiner une pièce sur demande.
 
@@ -44,7 +44,7 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 **Contrôles matériels.** Aucun contrôle matériel (puce NFC sécurisée, élément sécurisé, scellé) n'est encore disponible. Une pièce conçue pour en recevoir un est vérifiée sur son seul code, et le résultat le précise.
 
-**Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Chaque vérification affiche alors REVOKED.
+**Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Une vérification affiche alors REVOKED (UNUSUAL ACTIVITY DETECTED quand le code lu, ou son ORBES GENOME, ne correspond pas à ce qu'ORBES a émis).
 
 **L'enregistrement n'est pas un titre de propriété.** Le registre ORBES indique le compte auquel une pièce est enregistrée. Il ne vaut pas titre de propriété et ne remplace ni une facture ni un acte de vente. La propriété d'une pièce se prouve selon les règles du droit applicable.
 
@@ -96,7 +96,7 @@ L'enregistrement n'est pas un titre de propriété (article 4).
 
 ## Article 8 — Transfert de propriété
 
-**Création du code.** Seul le propriétaire enregistré crée un code de transfert, depuis son compte. Le code vaut 7 jours. Une pièce n'a qu'un transfert en attente à la fois, et le propriétaire peut l'annuler tant qu'il n'est pas accepté. Une pièce en entretien, révoquée ou retirée, ou dont la perte ou le vol a été déclaré, ne se transfère pas. Après la récupération d'un mot de passe, la création de codes de transfert est suspendue (article 6).
+**Création du code.** Seul le propriétaire enregistré crée un code de transfert, depuis son compte. Le code vaut 7 jours. Une pièce n'a qu'un transfert en attente à la fois, et le propriétaire peut l'annuler tant qu'il n'est pas accepté. Une pièce en entretien, révoquée, écartée par ORBES après examen ou retirée, ou dont la perte ou le vol a été déclaré, ne se transfère pas. Après la récupération d'un mot de passe, la création de codes de transfert est suspendue (article 6).
 
 **Remise.** Le code de transfert ne se donne qu'au nouveau propriétaire. Qui le détient peut recevoir la pièce dans son propre compte.
 
@@ -112,7 +112,7 @@ L'enregistrement n'est pas un titre de propriété (article 4).
 
 **Déclaration.** Le propriétaire enregistré déclare la perte ou le vol de sa pièce depuis MY PIECES. Un transfert en attente est alors annulé. Chaque vérification de la pièce affiche ensuite UNUSUAL ACTIVITY DETECTED, et elle ne se transfère plus.
 
-**Retrait.** Une perte que vous avez déclarée vous-même, vous la retirez depuis MY PIECES (PIECE FOUND), en confirmant le mot de passe de votre compte. Un vol, ou une perte enregistrée par ORBES Client Services, n'est retiré que par ORBES Client Services, après examen de la pièce.
+**Retrait.** Une perte que vous avez déclarée vous-même, vous la retirez depuis MY PIECES (PIECE FOUND), en confirmant le mot de passe de votre compte. Un vol, ou une perte enregistrée par ORBES Client Services, n'est retiré que par ORBES Client Services, et un vol seulement après examen de la pièce.
 
 La déclaration dans le registre ORBES ne remplace pas une plainte auprès des autorités. Une déclaration volontairement inexacte engage son auteur [À COMPLÉTER : suites prévues, selon l'avis de l'avocat].
 
@@ -124,7 +124,7 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 **Contenu.** Le certificat montre, lus au moment de son ouverture, la pièce et son ORBES GENOME, la propriété (vérifiée ou non) et sa date, la garantie, et l'absence de déclaration de perte ou de vol. Il ne montre jamais le nom ni l'adresse e-mail du propriétaire.
 
-**Fin de validité.** Le certificat cesse d'être valide à son expiration, quand la pièce change de propriétaire, quand sa perte ou son vol est déclaré, ou quand elle est révoquée ou retirée.
+**Fin de validité.** Le certificat cesse d'être valide à son expiration, quand la pièce change de propriétaire, quand sa perte ou son vol est déclaré, ou quand elle est révoquée, écartée par ORBES après examen, ou retirée.
 
 **Portée.** Le certificat atteste un enregistrement dans le registre ORBES, pas l'objet avec lequel il est présenté. Pour vérifier un objet, il faut scanner son ORBES CODE.
 
@@ -142,7 +142,7 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 ## Article 12 — Verrouillage du compte
 
-ORBES Client Services peut verrouiller un compte ORBES [À COMPLÉTER : motifs du verrouillage, par exemple à la demande de son titulaire, en cas de soupçon de prise de contrôle ou de manquement aux présentes conditions, selon l'avis de l'avocat].
+ORBES Client Services peut verrouiller un compte ORBES, [À COMPLÉTER : motifs du verrouillage, par exemple à la demande de son titulaire, en cas de soupçon de prise de contrôle ou de manquement aux présentes conditions, selon l'avis de l'avocat].
 
 Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et annule ses transferts en attente. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.
 
@@ -164,7 +164,7 @@ ORBES décrit fidèlement ce que vérifie le service et ce qu'il ne vérifie pas
 
 ORBES peut modifier les présentes conditions. La version en vigueur et sa date sont publiées sur le service. [À COMPLÉTER : information des titulaires de compte et date d'effet des modifications, selon l'avis de l'avocat ; le service n'envoie pas d'e-mail.]
 
-*Code : — (clause juridique).*
+*Code : R57.*
 
 ## Article 16 — Droit applicable, médiation et litiges
 

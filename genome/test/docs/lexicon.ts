@@ -14,10 +14,12 @@
  * and hyphens interchangeable, letters and digits split ("Web3", "Web 3"),
  * and plural, feminine or verb endings allowed on every word of a term.
  *
- * Held to it: the packaging kit (packaging-kit.test.ts) and the sales
+ * Held to it: the packaging kit (packaging-kit.test.ts), the sales
  * playbook, docs/launch/SALES-PLAYBOOK.md (sales-playbook.test.ts), whose
  * staff instructions may also hold such a word inside a code span that quotes
- * the software itself (`Products`, `STOLEN`): see `codeSpans`.
+ * the software itself (`Products`, `STOLEN`): see `codeSpans`, the drafts of
+ * the terms of use and the legal notice in docs/legal (terms-facts.test.ts),
+ * and the legal pages that publish them (test/web/legal.content.test.ts).
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

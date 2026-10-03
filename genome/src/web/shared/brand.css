@@ -1,5 +1,5 @@
 /*
- * ORBES brand foundation for the web apps (verify, admin).
+ * ORBES brand foundation for the web apps (verify, admin, legal).
  *
  * Tokens and primitives only: colour, type, motion, hairlines, corner
  * brackets, grain, buttons, focus. App stylesheets @import this file and add
@@ -16,19 +16,21 @@
  */
 
 /* The display face (BRAND-DESIGN-SYSTEM §3.1): Gravesend Sans Medium, the one
-   cut the brand supplied, subset to Basic Latin and the brand's punctuation
-   (© · × – — ‘ ’ “ ” • … ← → −), exactly the range below. The build emits it
-   to /assets/ with a content hash (font-src falls under default-src 'self');
-   both shells preload that same file. swap: the fallback paints at once and
-   Gravesend replaces it when it arrives, never invisible text. A glyph
-   outside the subset falls back to --font. */
+   cut the brand supplied, subset to Basic Latin, the accented capitals of
+   Latin-1 with Œ and Ÿ (French titles in capitals: CONFIDENTIALITÉ, FRANÇAIS),
+   « » and the brand's punctuation (© · × – — ‘ ’ “ ” • … ← → −), exactly the
+   range below. The build emits it to /assets/ with a content hash (font-src
+   falls under default-src 'self'); every shell (verify, admin, legal)
+   preloads that same file. swap: the fallback paints at once and Gravesend
+   replaces it when it arrives, never invisible text. A glyph outside the
+   subset falls back to --font. */
 @font-face {
   font-family: "Gravesend Sans";
   src: url("./fonts/gravesend-sans-500.woff2") format("woff2");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
-  unicode-range: U+0020-007E, U+00A9, U+00B7, U+00D7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2190, U+2192, U+2212;
+  unicode-range: U+0020-007E, U+00A9, U+00AB, U+00B7, U+00BB, U+00C0-00DD, U+0152-0153, U+0178, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2190, U+2192, U+2212;
 }
 
 :root {

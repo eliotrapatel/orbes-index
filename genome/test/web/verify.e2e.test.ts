@@ -419,14 +419,24 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
 
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
-    // Under CREATE ACCOUNT, the terms it accepts (J-06), in a new tab: the form and the scan's window stay.
+    // Under CREATE ACCOUNT, the terms it accepts and the privacy policy (J-06), each in a new tab: the form and the
+    // scan's window stay. The privacy policy is the information due where the account's data is collected.
     await textOf(page.locator('.terms-note__text'), 'Creating an ORBES account means accepting the ORBES terms of use.');
     const terms = page.getByRole('link', { name: 'TERMS OF USE' });
     await attrOf(terms, 'href', '/legal/terms');
     await attrOf(terms, 'target', '_blank');
     await attrOf(terms, 'rel', 'noopener');
+    const privacyPolicy = page.locator('.terms-note').getByRole('link', { name: 'PRIVACY POLICY' });
+    await attrOf(privacyPolicy, 'href', '/legal/privacy');
+    await attrOf(privacyPolicy, 'target', '_blank');
+    await attrOf(privacyPolicy, 'rel', 'noopener');
     expect(await page.locator('.terms-note').evaluate((el) => el.previousElementSibling?.matches('form.form--create'))).toBe(true);
-    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'TERMS OF USE']);
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'TERMS OF USE', 'PRIVACY POLICY']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      await keepsFloors(page, ['TERMS OF USE', 'PRIVACY POLICY']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
     // An ordinary address, longer than the line has room for beside SIGN OUT on a small phone.
     const email = 'marie-claire.dupont@example.com';
     await page.getByLabel('EMAIL').fill(email);
@@ -871,7 +881,23 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(signIn.locator('.ownership__text').first(), /^Sign in to see the pieces registered to your ORBES account\. A piece lost or stolen can be reported here, without scanning it\.$/);
     await visible(signIn.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }));
     await countOf(page.locator('article.piece'), 0);
-    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE']);
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
+    // Where the account's data is collected, the legal pages (J-06), in a new tab, under SCAN ORBES CODE.
+    expect(await legalLinksOf(page.locator('.view--pieces'))).toEqual([
+      { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
+      { name: 'TERMS', href: '/legal/terms', target: '_blank' },
+      { name: 'LEGAL', href: '/legal/notice', target: '_blank' },
+      { name: 'HELP', href: '/legal/faq', target: '_blank' },
+      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
+    ]);
+    const scanButton = (await page.locator('.pieces__foot').getByRole('button', { name: 'SCAN ORBES CODE' }).boundingBox())!;
+    expect((await page.locator('.pieces__legal').boundingBox())!.y).toBeGreaterThan(scanButton.y + scanButton.height);
+    // CREATE ACCOUNT, signed out in MY PIECES: the same note, both links.
+    await signIn.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await attrOf(signIn.locator('.terms-note').getByRole('link', { name: 'PRIVACY POLICY' }), 'href', '/legal/privacy');
+    await attrOf(signIn.locator('.terms-note').getByRole('link', { name: 'TERMS OF USE' }), 'href', '/legal/terms');
+    await keepsFloors(page, ['TERMS OF USE', 'PRIVACY POLICY', ...LEGAL_LINKS]);
+    await signIn.getByRole('button', { name: 'SIGN IN' }).first().click();
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();

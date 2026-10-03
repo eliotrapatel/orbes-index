@@ -28,6 +28,8 @@
  *   ── next piece ──
  *   SIGNED IN AS …     CHANGE PASSWORD   SIGN OUT
  *            [ SCAN ORBES CODE ]
+ *   PRIVACY · TERMS · LEGAL · HELP            the legal pages (J-06), in a new tab,
+ *   IP Geolocation by DB-IP                   signed out too (the sign-in collects data)
  *
  * Signed out (a direct link, a reload after the session ended, the landing's
  * MY PIECES), the OWNERSHIP panel's sign-in forms stand alone (its account
@@ -52,7 +54,7 @@ import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel,
 import type { SessionStore } from '../session.js';
 import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { contactBlock, rows, sectionLabel, viewRoot } from './common.js';
+import { contactBlock, legalLinks, rows, sectionLabel, viewRoot } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
@@ -111,7 +113,14 @@ class PiecesPage {
       ),
       this.body,
       this.account,
-      h('footer', { class: 'pieces__foot' }, h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: PIECES.scan })),
+      h(
+        'footer',
+        { class: 'pieces__foot' },
+        h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: PIECES.scan }),
+        // The legal pages (J-06), in a new tab: the account's data is collected here too (its sign-in, CREATE
+        // ACCOUNT), and a form under way stays.
+        legalLinks({ newTab: true, extraClass: 'pieces__legal' }),
+      ),
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.renderBody();

@@ -24,8 +24,10 @@
  * A piece registered to someone else shows RECEIVING THIS PIECE, the heading
  * the link under the result's second-hand guidance moves to (J-02).
  *
- * Under CREATE ACCOUNT, one sentence and TERMS OF USE: creating an account
- * means accepting the terms (their article 1), linked at /legal/terms (J-06).
+ * Under CREATE ACCOUNT, one sentence, then TERMS OF USE · PRIVACY POLICY:
+ * creating an account means accepting the terms (their article 1), linked at
+ * /legal/terms, and the privacy policy says what the account records, at
+ * /legal/privacy (J-06).
  *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for

@@ -6,10 +6,15 @@
  *    docs/legal/ (J-04): the same sections under the same headings, and in
  *    each one the drafts' paragraphs and list items in order and word for
  *    word (link targets aside), but for what holds a field to complete
- *    ([À COMPLÉTER: …]): such a sentence or item is left out, or published
- *    with only words of its own (the company's name read as ORBES,
- *    LEGAL_IDENTITY), never a word the draft does not have; the review lines
- *    (*Code: …*) are not published, and no field to complete shows;
+ *    ([À COMPLÉTER: …]): the company and the publication director read
+ *    ORBES (LEGAL_IDENTITY); any other field goes with the clause that holds
+ *    it (back to the comma or the full stop before it, docs/legal/README.md),
+ *    or with its whole sentence, and then with the bold lead of that sentence
+ *    and the sentences that refer back to it ("those conditions"): the words
+ *    that still need the field are never published without it; the review
+ *    lines (*Code: …*) are not published, and no field to complete shows;
+ *    the terms never call the ORBES CODE "the seal" nor the GENOME a
+ *    signature (BRAND §2.1);
  *  - the privacy policy against the code: the cookies the server sets, their
  *    names and lifetimes, the IP pseudonym, the rounding of the location and
  *    DB-IP, the session's length, the scrypt hashes, the retention left unset
@@ -23,6 +28,7 @@
  *    somewhere, the lexicon of BRAND §4.5 (English, and the kit's French)
  *    without exception, and no exclamation mark.
  */
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -35,7 +41,7 @@ import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '.
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { cookieName, SESSION_COOKIE } from '../../src/server/services/sessions.js';
 import { RESALE_GUIDANCE_FR } from '../../src/web/legal/content/faq.js';
-import { DOCUMENTS, LANGS, LANGUAGE_NAMES, WORDS, type Block, type Lang, type LegalDocument } from '../../src/web/legal/content/index.js';
+import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument } from '../../src/web/legal/content/index.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { parseBlock, plainText } from '../../src/web/legal/model.js';
 import { LEGAL_PAGES } from '../../src/web/shared/legal.js';
@@ -83,13 +89,16 @@ function parseDraft(md: string): { preamble: string[]; sections: DraftSection[] 
 
 const PLACEHOLDER = /\[À COMPLÉTER ?:([^\]]*)\]/g;
 const hasPlaceholder = (s: string): boolean => s.includes('[À COMPLÉTER');
-/** What a field to complete reads as on the page meanwhile: the company and its director read ORBES, the rest nothing. */
+/** What a field to complete reads as on the page meanwhile: the company and its director read ORBES (LEGAL_IDENTITY). */
 const IDENTITY: Readonly<Record<string, string>> = {
   'company name': LEGAL_IDENTITY.companyName,
   'raison sociale': LEGAL_IDENTITY.companyName,
   'name of the publication director': LEGAL_IDENTITY.publicationDirector,
   'nom du directeur de la publication': LEGAL_IDENTITY.publicationDirector,
 };
+const fieldsOf = (s: string): string[] => [...s.matchAll(PLACEHOLDER)].map((m) => m[1].trim());
+/** A unit whose every field is one of the legal identity, which the page reads as ORBES. */
+const identityOnly = (s: string): boolean => fieldsOf(s).length > 0 && fieldsOf(s).every((f) => f in IDENTITY);
 const filled = (s: string): string => s.replace(PLACEHOLDER, (_, hint: string) => ` ${IDENTITY[hint.trim()] ?? ''} `);
 /** The words a reader sees: a link's target is an address, not words. */
 const prose = (s: string): string => s.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1').replace(/\s+/g, ' ').trim();
@@ -102,21 +111,70 @@ const subsequence = (short: string[], long: string[]): boolean => {
   for (const w of long) if (i < short.length && w === short[i]) i++;
   return i === short.length;
 };
+/** The bold lead of a clause, "**Conditions.**": a unit of its own. */
+const isLead = (u: string): boolean => /^\*\*[^*]+\*\*$/.test(u.trim());
+/** A sentence that points back at the one before it: what it says needs the text that one holds. */
+const BACK_REFERENCE = /\b(?:those|these|such) conditions\b|\bces conditions\b/i;
+
+/**
+ * The words of a unit once each field that waits is left out with the clause that holds it, as docs/legal/README.md
+ * says: the words since the comma or the full stop before it ("the client service of ORBES, reachable at […]" keeps
+ * "the client service of ORBES"; "the consumer mediator […]" keeps nothing of its sentence). The company and the
+ * publication director read ORBES.
+ */
+function withoutFields(unit: string): string[] {
+  const out: string[] = [];
+  let clause: string[] = [];
+  for (const m of prose(unit).matchAll(/\[À COMPLÉTER ?:([^\]]*)\]|[\p{L}\p{N}]+|[,.]/gu)) {
+    if (m[1] !== undefined) {
+      const identity = IDENTITY[m[1].trim()];
+      if (identity) clause.push(...words(identity));
+      else clause = [];
+    } else if (m[0] === ',' || m[0] === '.') {
+      out.push(...clause);
+      clause = [];
+    } else clause.push(m[0]);
+  }
+  return [...out, ...clause];
+}
+
+/** Whether `p` is the draft unit `d`, which holds a field, as the page may publish it without that field. */
+function keepsWithoutField(d: string, p: string): boolean {
+  if (hasPlaceholder(p) || words(p).length === 0) return false;
+  // The company read as ORBES, its parenthesis ("ORBES") left out: only the draft's own words.
+  if (identityOnly(d)) return subsequence(words(p), words(filled(d)));
+  const kept = withoutFields(d);
+  return kept.length > 0 && kept.join(' ') === words(p).join(' ');
+}
 
 /** Why `published` is not `draft` as the pages publish a draft, or null when it is. */
 function unitsDiffer(draft: string[], published: string[]): string | null {
   let j = 0;
+  /** A unit holding a field was left out whole, earlier in this block. */
+  let leftOut = false;
   for (let i = 0; i < draft.length; i++) {
     const d = draft[i];
     const p = published[j];
-    if (p !== undefined && prose(p) === prose(d)) {
+    const same = p !== undefined && prose(p) === prose(d);
+    // A sentence that refers back to a sentence left out with its field goes with it.
+    if (leftOut && BACK_REFERENCE.test(prose(d))) {
+      if (same) return `"${p}" refers back to a sentence left out with its field`;
+      continue;
+    }
+    if (same) {
       j++;
       continue;
     }
-    if (!hasPlaceholder(d)) return `"${d}" is missing or changed`;
-    // A sentence or item that waits for a field: left out, or kept with only its own words (the company read as ORBES).
+    if (!hasPlaceholder(d)) {
+      // The bold lead of a sentence that goes whole with its field goes with it.
+      const next = draft[i + 1];
+      if (isLead(d) && next !== undefined && hasPlaceholder(next) && !identityOnly(next) && (p === undefined || !keepsWithoutField(next, p))) continue;
+      return `"${d}" is missing or changed`;
+    }
+    // A unit that waits for a field: published without it (and the clause that holds it), or left out whole.
     const laterDraft = draft.slice(i + 1).some((x) => prose(x) === prose(p ?? ''));
-    if (p !== undefined && !laterDraft && !hasPlaceholder(p) && words(p).length > 0 && subsequence(words(p), words(filled(d)))) j++;
+    if (p !== undefined && !laterDraft && keepsWithoutField(d, p)) j++;
+    else leftOut = true;
   }
   return j === published.length ? null : `"${published[j]}" is not in the draft`;
 }
@@ -133,7 +191,8 @@ function sectionProblems(where: string, draft: string[], published: readonly Blo
       j++;
       continue;
     }
-    if (units(d).every(hasPlaceholder)) continue;
+    // A block none of whose units can be published before its fields are filled is left out whole.
+    if (unitsDiffer(units(d), []) === null) continue;
     problems.push(`${where}: ${why}`);
   }
   if (j < text.length) problems.push(`${where}: "${text[j]}" is not in the draft`);
@@ -170,6 +229,24 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(sectionProblems('t', ['Published by [À COMPLÉTER: company name] ("ORBES").'], ['Published by ORBES SAS.'])).not.toEqual([]);
     expect(sectionProblems('t', ['- A: [À COMPLÉTER: x]\n- B: kept'], ['- B: kept'])).toEqual([]);
     expect(sectionProblems('t', ['- A: kept\n- B: kept'], ['- B: kept'])).not.toEqual([]);
+    // A field goes with the clause that holds it, back to the comma or the full stop before it…
+    expect(sectionProblems('t', ['- **X**: the client service of ORBES, reachable at [À COMPLÉTER: email].'], ['- **X**: the client service of ORBES.'])).toEqual([]);
+    expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina.'])).toEqual([]);
+    expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina. Phone:'])).not.toEqual([]);
+    // …so the words that still need it are never published without it (article 16 named no mediator).
+    const mediator = ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name of the mediator].'];
+    expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator.'])).not.toEqual([]);
+    expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES.'])).toEqual([]);
+    // A sentence that refers back to one left out with its field goes too, and so does the lead of that one (article 11).
+    const warranty = ['**Conditions.** The conditions are set out in [À COMPLÉTER: document]. ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'];
+    expect(sectionProblems('t', warranty, ['**Conditions.** ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'])).not.toEqual([]);
+    expect(sectionProblems('t', warranty, ['ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'])).not.toEqual([]);
+    expect(sectionProblems('t', warranty, ['The statutory guarantees remain due.'])).toEqual([]);
+    const garantie = ["**Conditions.** Elles figurent dans [À COMPLÉTER : document]. ORBES peut annuler la garantie dans les cas que ces conditions prévoient. Les garanties légales restent dues."];
+    expect(sectionProblems('t', garantie, ["**Conditions.** ORBES peut annuler la garantie dans les cas que ces conditions prévoient. Les garanties légales restent dues."])).not.toEqual([]);
+    expect(sectionProblems('t', garantie, ['Les garanties légales restent dues.'])).toEqual([]);
+    // A lead whose sentence is published stays.
+    expect(sectionProblems('t', ['**Lead.** Kept. [À COMPLÉTER: x]'], ['Kept.'])).not.toEqual([]);
   });
 
   it('shows no field to complete, no review line, and reads the company as ORBES until its identity is given', () => {
@@ -182,6 +259,27 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(LEGAL_IDENTITY).toEqual({ companyName: 'ORBES', publicationDirector: 'ORBES' });
     // The drafts still wait for the identity: once counsel fills them, the comparison above asks for this page to follow.
     for (const lang of LANGS) expect(readDoc(`docs/legal/legal-notice.${lang}.md`)).toContain('[À COMPLÉTER');
+  });
+
+  it('never conflates the three marks (BRAND §2.1): the ORBES CODE is not "the seal", the GENOME is no signature', () => {
+    for (const page of LEGAL_PAGES) {
+      for (const lang of LANGS) {
+        const text = readText(DOCUMENTS[page][lang], lang);
+        // "the seal" (the hardware checks say "seal" for a tamper seal, never with the article), "le sceau".
+        expect(text, `${page}.${lang}`).not.toMatch(/\bthe seal\b|\bsceau\b/i);
+        // The CODE's signature authenticates; the GENOME is glyphs derived from the identity.
+        expect(text, `${page}.${lang}`).not.toMatch(/visual signature|signature visuelle|GENOME[^.;:\n]*\bsignature\b/i);
+      }
+    }
+    const definition = (lang: Lang, term: string): string => {
+      const item = sectionText(DOCUMENTS.terms[lang], 'article-2').split('\n').find((l) => l.startsWith(`- **${term}**`));
+      if (!item) throw new Error(`no definition of ${term} (${lang})`);
+      return item;
+    };
+    expect(definition('en', 'ORBES CODE')).toContain('the ORBES SEAL is its centre');
+    expect(definition('fr', 'ORBES CODE')).toContain("l'ORBES SEAL en est le centre");
+    expect(definition('en', 'ORBES identity')).toContain('eight glyphs');
+    expect(definition('fr', 'Identité ORBES')).toContain('huit signes');
   });
 
   it('opens the legal notice with the scope and the law of its draft, and names both hosts', () => {
@@ -256,14 +354,30 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain("aucune durée de conservation n'est encore fixée ; elles sont donc conservées sans limite de temps");
   });
 
-  it('dates the backups as backup.sh keeps them: 14 daily and 8 weekly archives, about two months', () => {
+  it('dates the backups as backup.sh keeps them: 14 daily and 8 weekly archives, and no event archive past 63 days, about two months', () => {
     expect(backup).toContain('KEEP_DAILY="$(env_get BACKUP_KEEP_DAILY 14)"');
     expect(backup).toContain('KEEP_WEEKLY="$(env_get BACKUP_KEEP_WEEKLY 8)"');
     // The production .env template keeps the same numbers.
     expect(env).toMatch(/^BACKUP_KEEP_DAILY=14$/m);
     expect(env).toMatch(/^BACKUP_KEEP_WEEKLY=8$/m);
+    // Scheduled archives come every night, so their count bounds their age (14 days; 8 weeks and the current one).
+    // Event archives (pre-deploy-*, pre-restore, post-rotation…) come at no fixed pace: their age is bounded too,
+    // in daily/ and weekly/, by the age of the oldest weekly copy (genome/test/ops/vps-scripts.test.ts runs it).
+    expect(backup).toContain('WEEKLY_MAX_AGE_DAYS=$((KEEP_WEEKLY * 7 + 7))');
+    expect(backup).toContain('prune_old_events "$DAILY" "$WEEKLY_MAX_AGE_DAYS"');
+    expect(backup).toContain('prune_old_events "$WEEKLY" "$WEEKLY_MAX_AGE_DAYS"');
+    expect(backup).toMatch(/-mmin "\+\$\(\(days \* 1440\)\)"/);
+    expect(8 * 7 + 7).toBe(63);
     expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('encrypted: about two months');
     expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain('chiffrées : deux mois environ');
+  });
+
+  it('says a signed-in verification records the account and a pseudonym of the session, as the verification route does', () => {
+    const route = readDoc('genome/src/server/routes/public.ts');
+    expect(route).toContain('meta.accountId = viewer.account.id;');
+    expect(route).toContain("meta.sessionHash = pseudonymize(ctx.config.ipHashPepper, 'session', viewer.session.id);");
+    expect(sectionText(DOCUMENTS.privacy.en, 'verification')).toContain('- if you are signed in to your ORBES account, that account, and a pseudonym of your session.');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'verification')).toContain('- si vous êtes connecté à votre compte ORBES, ce compte, et un pseudonyme de votre session.');
   });
 
   it('names scrypt for the hashes, a CSP that loads nothing from another site, the hosts and the rights', () => {
@@ -406,6 +520,18 @@ describe('legal pages: both languages, links, lexicon', () => {
     });
     expect(findForbidden(chrome.join('\n'), lexicon)).toEqual([]);
     expect(chrome.join('\n')).not.toContain('!');
+  });
+
+  it('move LEGAL_VERSION with any change of a text: the published content is pinned to its version', () => {
+    // The fingerprint of the four documents, both languages. A text that changes without a new LEGAL_VERSION fails
+    // here: give LEGAL_VERSION the date of the change and add its line with the fingerprint this test reports. A line
+    // never changes once its version is published in production. 2026-10-03: the first version, completed that day
+    // (OPS-D2 and J-04/J-06 review) before any deployment of the legal pages.
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': '3e40a07f7f34c631' };
+    const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
+    expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
+    expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);
+    expect(new Set(Object.values(PUBLISHED)).size).toBe(Object.keys(PUBLISHED).length);
   });
 
   it('name the pages as the /verify app links them: PRIVACY · TERMS · LEGAL · HELP', () => {

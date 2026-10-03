@@ -55,7 +55,8 @@ import {
 } from '../../src/server/services/ownership.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
-import { ASSURANCE_NOTE, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
+import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
+import { ASSURANCE_NOTE, LEGAL as LEGAL_COPY, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { PACKAGING_KIT, REPO, findForbidden, forbiddenTerms, readDoc, section } from './lexicon.js';
 
 const LEGAL = 'docs/legal';
@@ -241,6 +242,27 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     },
   },
   SALE_TOKEN_TTL_MS: { value: `${minutes(SALE_TOKEN_TTL_MS)} minutes`, ...sameIn(`${minutes(SALE_TOKEN_TTL_MS)} minutes`) },
+  LEGAL: {
+    value: '—',
+    holds: () => {
+      // R56: the sentence under CREATE ACCOUNT, and its two links (the terms, the privacy policy), nothing recorded.
+      expect(LEGAL_COPY.accept).toBe('Creating an ORBES account means accepting the ORBES terms of use.');
+      const note = /export function termsNote\(\)[\s\S]*?\n\}/.exec(readDoc('genome/src/web/verify/views/common.ts'))?.[0] ?? '';
+      expect(note).toContain('text: LEGAL.accept');
+      expect(note).toContain("href: legalPath('terms')");
+      expect(note).toContain("href: legalPath('privacy')");
+      // The request that creates an account carries no acceptance, no version of the terms.
+      expect(Object.keys(registerAccountBody.shape).filter((k) => /accept|terms|consent|version/i.test(k))).toEqual([]);
+    },
+  },
+  LEGAL_VERSION: {
+    value: '—',
+    holds: () => {
+      // R57: a date, shown under each title in words.
+      expect(LEGAL_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(dateInWords(LEGAL_VERSION, 'en')).toMatch(/^\d{1,2} [A-Z][a-z]+ \d{4}$/);
+    },
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -306,8 +328,11 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+ownership\b/g).map((m) => m.file)).toEqual([]);
   },
   N4: () => {
-    expect(ROUTES.filter((r) => r.method === 'delete' && r.path.startsWith('/api/v1/account'))).toEqual([]);
+    // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3).
+    expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([]);
     expect(matches(/status:\s*'DELETED'|status\s*=\s*'DELETED'/g).map((m) => m.file)).toEqual([]);
+    // No row of accounts is deleted, through Kysely or in raw SQL, by the server or a script.
+    expect(matches(/deleteFrom\(\s*'accounts'\s*\)|\bDELETE\s+FROM\s+"?accounts\b/gi).map((m) => m.file)).toEqual([]);
   },
   N5: () => {
     expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'password']);
@@ -441,6 +466,9 @@ describe('TERMS-FACTS (docs/legal/TERMS-FACTS.md)', () => {
     expect(matches(/acquired_via:\s*'(\w+)'/g)).toHaveLength(2);
     expect(matches(/status:\s*'LOCKED'/g).length).toBeGreaterThan(0);
     expect(ROUTES).toContainEqual({ method: 'delete', path: '/api/v1/ownership/certificates/:id' });
+    // The console's owner routes are read (N4 looks there too), and so are the deletes of other tables.
+    expect(ROUTES.filter((r) => r.path.startsWith('/api/admin/owners')).length).toBeGreaterThan(3);
+    expect(matches(/deleteFrom\(\s*'(\w+)'\s*\)/g).map((m) => m.match[1])).toEqual(expect.arrayContaining(['sessions', 'scan_events']));
   });
 });
 
@@ -508,6 +536,35 @@ describe('terms of use (docs/legal/terms.fr.md, terms.en.md)', () => {
       // The registration article says it again.
       const registration = articles[lang].find((a) => a.refs.includes('R22'))!;
       expect(registration.body).toContain(lang === 'fr' ? "L'enregistrement n'est pas un titre de propriété" : 'Registration is not a title of ownership');
+    }
+  });
+
+  it('list every AUTHENTIC result /verify serves, and say what AUTHENTIC — OWNERSHIP VERIFIED means', () => {
+    const titles = Object.values(VERIFICATION_COPY)
+      .map((c) => c.title)
+      .filter((t) => t.startsWith('AUTHENTIC'));
+    expect(titles).toContain('AUTHENTIC');
+    const list = {
+      fr: /Un résultat AUTHENTIC \(([^)]+)\)/,
+      en: /An AUTHENTIC result \(([^)]+)\)/,
+    } as const;
+    for (const lang of LANGS) {
+      const body = articles[lang].find((a) => a.refs.includes('R02'))!.body;
+      const listed = list[lang].exec(body)?.[1].split(lang === 'fr' ? /, | ou / : /, | or /);
+      expect(listed?.sort(), lang).toEqual([...titles].sort());
+      // The owner reads OWNERSHIP VERIFIED signed in, whether or not the ownership is verified in article 7's sense.
+      expect(body).toContain(lang === 'fr' ? 'que sa propriété soit vérifiée ou non au sens de l\'article 7' : 'whether or not its ownership is verified in the sense of article 7');
+    }
+  });
+
+  it('never conflate the three marks (BRAND §2.1): the ORBES CODE is not "the seal", the GENOME is no signature', () => {
+    for (const lang of LANGS) {
+      const text = prose(terms[lang]);
+      expect(text, lang).not.toMatch(/\bthe seal\b|\bsceau\b/i);
+      expect(text, lang).not.toMatch(/visual signature|signature visuelle|GENOME[^.;:\n]*\bsignature\b/i);
+      const code = terms[lang].split('\n').find((l) => l.startsWith('- **ORBES CODE**'))!;
+      expect(code, lang).toContain('ORBES SEAL');
+      expect(code, lang).toMatch(lang === 'fr' ? /imprimé, marqué à chaud ou gravé/ : /printed, foiled or engraved/);
     }
   });
 
