@@ -21,27 +21,38 @@
  *     VERIFYING… (photo path) · UNUSUAL ACTIVITY (O26-J-00193, reported
  *     stolen) · INVALID SIGNATURE (a demo code with one signature bit flipped)
  *   admin (1440 × 900 CSS px at 1×)
- *     dashboard · product page O26-J-00184 · generator result
+ *     dashboard · product page O26-J-00184 · generator result · Cases (the
+ *     demo customers' two reports) · Analytics (the daily statistics of the
+ *     last 30 complete days) · the owner sheet of Camille Martin · Team (the
+ *     bootstrap ADMIN and two staff accounts created through the auth
+ *     service: an OPERATOR still on its temporary password, a RETAIL seller)
+ *   admin, sale mode (the phone of verify, after the console's captures: the
+ *     lookup records a scan): the RETAIL seller, signed in, at the Paris
+ *     boutique, with the in-stock O26-J-00187 read from a photo: READY TO SELL
  *   verify, last (its scans would change the console's figures)
  *     UNUSUAL ACTIVITY with DO YOU HOLD THE CERTIFICATE CARD? (O26-L-00014,
  *     sold and unregistered, with a claim code, after a burst of scans of
  *     copies of its code from 22 sources) · MY PIECES (F-01) of the demo
  *     owner Camille Martin, signed in · the OWNERSHIP CERTIFICATE (F-06)
- *     of one of her pieces, opened by a visitor from its link
+ *     of one of her pieces, opened by a visitor from its link (full page)
+ *   legal (the phone of verify): the FAQ (/legal/faq, J-06), in English
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
  * photographed searching, and POST /api/v1/verify is held while the locked
  * scanner and the VERIFYING… screen are photographed. The one-time claim code
  * on the generator result is hidden with its own control before capture.
- * The verify app's 2.2 % film grain (.grain) is hidden through the CSSOM
- * before each capture: invisible at documentation scale, it would otherwise
+ * The 2.2 % film grain (.grain) of verify and of the legal pages is hidden
+ * through the CSSOM before each capture: invisible at documentation scale, it would otherwise
  * roughly triple the size of the set.
  *
  * Titles and labels render in the shipped display face, Gravesend Sans,
  * everywhere (captures wait for document.fonts.ready). Reading text uses the
  * system stack: Helvetica Neue on macOS; Chromium on Linux has none and
  * resolves it to Liberation Sans (metric-compatible with Helvetica/Arial).
+ * Chrome for Testing on macOS paints the locked scanner's frozen camera
+ * frame black: from a Mac, keep docs/assets/ui/verify-03-locked.png from a
+ * Linux run (write the set elsewhere with --out and copy the rest).
  */
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -61,7 +72,7 @@ import { createContext, type AppContext } from '../src/server/context.js';
 import { closeDb, createDb, type Db } from '../src/server/db/connection.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } from '../src/server/db/seed/demo.js';
 import { MemoryKeyProvider } from '../src/server/keys/memory-provider.js';
-import { createManualClock, noopLogger } from '../src/server/types.js';
+import { createManualClock, noopLogger, systemActor } from '../src/server/types.js';
 import { cameraClipFrames } from '../test/e2e/support.js';
 import { svgToGray } from '../test/support/raster.js';
 import { writeY4m } from '../test/support/y4m.js';
@@ -76,12 +87,17 @@ const FIRST_REGISTRATION = DEMO_FIRST_REGISTRATION_PRODUCT_ID; // O26-J-00184, A
 const UNUSUAL_ACTIVITY = 'O26-J-00193'; // reported STOLEN, scanned by a stranger
 const FORGERY_BASE = 'O26-J-00186'; // in stock; its signature gets one flipped bit
 const CARD_SECTION = 'O26-L-00014'; // sold (ACTIVATED), unregistered, ships with a claim code
+const SALE_PIECE = 'O26-J-00187'; // in stock (ISSUED), never sold: READY TO SELL in the sale mode
+const SALE_BOUTIQUE = 'SAINT-HONORÉ'; // the demo point of sale the seller picks (ORBES PARIS — SAINT-HONORÉ)
 /** Scans of copies of its code, from this many distinct sources within a minute: velocity ⊕ diversity. */
 const CARD_BURST = 22;
 
 const ADMIN = { email: 'console@example.com', password: 'capture-ui-demo-password' };
 /** The demo owner whose pieces MY PIECES shows (the demo accounts take this password for the capture). */
 const OWNER = { email: 'camille.martin@example.com', password: 'capture-ui-owner-password' };
+/** Staff for the Team page: a seller (RETAIL) who signs in to the sale mode, and an OPERATOR on its temporary password. */
+const SELLER = { email: 'boutique.paris@example.com', password: 'capture-ui-seller-password' };
+const OPERATOR_EMAIL = 'atelier@example.com';
 const MOBILE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1440, height: 900 } as const;
 const IPHONE_UA =
@@ -506,7 +522,7 @@ async function captureVerifyCertificate(stage: Stage, shots: Shots): Promise<voi
     await view.evaluate(() => document.fonts.ready);
     await hideGrain(view);
     await sleep(600);
-    await shots.viewport(view, 'verify-13-ownership-certificate');
+    await shots.full(view, 'verify-13-ownership-certificate');
     await visitor.close();
   } finally {
     await browser.close();
@@ -551,6 +567,99 @@ async function captureAdmin(stage: Stage, shots: Shots): Promise<void> {
     await page.mouse.move(0, 0);
     await sleep(900);
     await shots.full(page, 'admin-03-generator-result');
+
+    // Cases (C-02): the demo customers' answers to WHERE DID YOU SEE OR BUY THIS PIECE?
+    await page.goto(`${stage.origin}/admin#/cases`);
+    await page.waitForSelector('.view--cases [data-testid=case-where]');
+    await sleep(900);
+    await shots.viewport(page, 'admin-04-cases');
+
+    // Analytics (A-09): the daily statistics the demo seed counted, as housekeeping does every night.
+    await page.goto(`${stage.origin}/admin#/analytics?days=30`);
+    await page.waitForSelector('.view--analytics [data-testid=analytics-trend]');
+    await sleep(1200);
+    await shots.full(page, 'admin-05-analytics');
+
+    // The owner sheet (A-06) of the demo owner whose pieces MY PIECES shows.
+    const owner = await stage.db.selectFrom('accounts').select('id').where('email_normalized', '=', OWNER.email).executeTakeFirstOrThrow();
+    await page.goto(`${stage.origin}/admin#/owners/${owner.id}`);
+    await page.waitForSelector('.view--owner [data-testid=owner-scan]');
+    await sleep(900);
+    await shots.viewport(page, 'admin-06-owner');
+
+    // Team (A-02, A-08): the bootstrap ADMIN and the two staff accounts of addStaff.
+    await page.goto(`${stage.origin}/admin#/team`);
+    await page.waitForSelector(`[data-testid=admin-users] tr:has-text("${OPERATOR_EMAIL}")`);
+    await sleep(900);
+    await shots.viewport(page, 'admin-07-team');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Two staff accounts for the Team page, through the auth service as the console and the shell create them:
+ * an OPERATOR from the Team page (a temporary password, never used here) and a RETAIL seller with a known
+ * password (as `scripts/admin.ts create` makes one), who signs in to the sale mode.
+ */
+async function addStaff(stage: Stage): Promise<void> {
+  const actor = systemActor('capture-ui');
+  await stage.ctx.services.auth.createStaff({ email: OPERATOR_EMAIL, role: 'OPERATOR' }, actor);
+  await stage.ctx.services.auth.createAdmin({ ...SELLER, role: 'RETAIL' }, actor);
+}
+
+/**
+ * The sale mode (A-08) on the seller's phone: signed in as RETAIL, the Paris boutique chosen, an in-stock
+ * piece read from a photo through the sale view's own photo reader. Run after the console captures: the
+ * lookup records a staff scan. The warranty is not started.
+ */
+async function captureSale(stage: Stage, shots: Shots): Promise<void> {
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await mobileContext(browser);
+    const page = await context.newPage();
+    watchPage(page, 'sale');
+    await page.goto(`${stage.origin}/admin`);
+    await page.waitForSelector('[data-testid=login-form]');
+    await page.fill('input[name=email]', SELLER.email);
+    await page.fill('input[name=password]', SELLER.password);
+    await page.click('[data-testid=login-submit]');
+    await page.waitForSelector('[data-testid=sale-shell] [data-testid=sale-retailer]');
+    const boutique = await page.$eval(
+      '[data-testid=sale-retailer]',
+      (s, name) => [...(s as HTMLSelectElement).options].find((o) => o.textContent?.includes(name))?.value ?? '',
+      SALE_BOUTIQUE,
+    );
+    if (!boutique) throw new Error(`no point of sale named ${SALE_BOUTIQUE}`);
+    await page.selectOption('[data-testid=sale-retailer]', boutique);
+    await page.setInputFiles('[data-testid=sale-photo]', { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(await codeOf(stage.db, SALE_PIECE)) });
+    await page.waitForSelector('[data-testid=sale-verdict]', { timeout: 20_000 });
+    const verdict = (await page.textContent('[data-testid=sale-verdict]'))?.trim();
+    if (verdict !== 'READY TO SELL') throw new Error(`${SALE_PIECE} reads ${verdict} in the sale mode`);
+    await page.evaluate(() => document.fonts.ready);
+    await page.mouse.move(0, 0);
+    await sleep(1200);
+    await shots.full(page, 'admin-08-sale');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
+/** The FAQ of the legal pages (J-06), on the phone of verify (English: the browser's language). */
+async function captureLegal(stage: Stage, shots: Shots): Promise<void> {
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await mobileContext(browser);
+    const page = await context.newPage();
+    watchPage(page, 'legal');
+    await page.goto(`${stage.origin}/legal/faq`);
+    await page.waitForSelector('.legal__section');
+    await page.evaluate(() => document.fonts.ready);
+    await hideGrain(page);
+    await sleep(600);
+    await shots.viewport(page, 'legal-01-faq');
     await context.close();
   } finally {
     await browser.close();
@@ -702,13 +811,18 @@ async function main(): Promise<void> {
     log('verify:');
     await captureVerify(stage, shots, workDir);
     log('admin:');
+    await addStaff(stage);
     await captureAdmin(stage, shots);
+    log('admin, sale mode:');
+    await captureSale(stage, shots);
     log('verify, certificate-card section:');
     await captureVerifyCard(stage, shots);
     log('verify, my pieces:');
     await captureVerifyPieces(stage, shots);
     log('verify, ownership certificate:');
     await captureVerifyCertificate(stage, shots);
+    log('legal:');
+    await captureLegal(stage, shots);
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);
