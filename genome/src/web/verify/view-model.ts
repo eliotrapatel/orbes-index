@@ -21,7 +21,7 @@
  */
 import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -65,8 +65,10 @@ export type OwnershipMode =
   /**
    * Not a scan: MY PIECES (F-01) signed out. The panel offers its sign-in forms (and FORGOTTEN PASSWORD?) alone,
    * so an owner whose piece is gone reaches the account without scanning it; signed in, the page lists the pieces.
+   * `lead`: the sentence over the forms where another page needs an account (a release's page, P-R03: any account
+   * enters its draw); MY PIECES' own when absent.
    */
-  | { kind: 'account' };
+  | { kind: 'account'; lead?: string };
 
 /**
  * ORBES Client Services, offered where the result asks the customer to contact it: under the
@@ -77,11 +79,12 @@ export type OwnershipMode =
  * /api/v1/client-services; absent when neither a usable email nor a usable phone is configured.
  */
 export interface ContactModel {
-  placement: 'help' | 'warranty' | 'recovery' | 'piece';
+  placement: 'help' | 'warranty' | 'recovery' | 'piece' | 'release';
   /**
    * mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and
    * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference; for a piece of
-   * MY PIECES, the subject "ORBES — {product id} — {status}" and the piece.
+   * MY PIECES, the subject "ORBES — {product id} — {status}" and the piece; for a place held in a release (P-R03),
+   * the subject "ORBES — {release} — PLACE HELD", the release and the entry.
    */
   mailto?: string;
   /** The number as configured, and its tel: link. */
@@ -463,6 +466,21 @@ export function recoveryContactModel(cs: ClientServices | undefined, reference: 
 export function pieceContactModel(cs: ClientServices | undefined, productId: string, status: string): ContactModel | null {
   const lines = cs ? contactLines(cs) : null;
   return lines ? contactOf(lines, 'piece', ['ORBES', productId, status].filter((x) => x.length > 0).join(' — '), [[CONTACT.piece, productId]]) : null;
+}
+
+/**
+ * ORBES Client Services for a place held in a release (P-R03): they contact the account to conclude the sale, and it
+ * may write first. The email's subject names the release, its body the release and the entry's id (the one its page
+ * publishes). Null when nothing is configured.
+ */
+export function releaseContactModel(cs: ClientServices | undefined, title: string, entryId: string): ContactModel | null {
+  const lines = cs ? contactLines(cs) : null;
+  return lines
+    ? contactOf(lines, 'release', ['ORBES', title, RELEASES.statusLabel.SELECTED].filter((x) => x.length > 0).join(' — '), [
+        [RELEASES.contactRelease, title],
+        [RELEASES.contactEntry, entryId],
+      ])
+    : null;
 }
 
 /**

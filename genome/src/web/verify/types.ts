@@ -288,3 +288,88 @@ export interface LookbookSheet {
   /** The model's care instructions; null: the general care text. */
   care: string | null;
 }
+
+/** A release's state as the public reads it (P-R03): a DRAFT is never sent. */
+export type DropState = 'UPCOMING' | 'OPEN' | 'CLOSED' | 'DRAWN' | 'CANCELLED';
+
+export const DROP_STATES: readonly DropState[] = ['UPCOMING', 'OPEN', 'CLOSED', 'DRAWN', 'CANCELLED'];
+
+/** An entry's status (P-R03): ENTERED, WITHDRAWN; drawn SELECTED or WAITLISTED; then CONFIRMED or LAPSED. */
+export type DropEntryStatus = 'ENTERED' | 'SELECTED' | 'WAITLISTED' | 'CONFIRMED' | 'LAPSED' | 'WITHDRAWN';
+
+export const DROP_ENTRY_STATUSES: readonly DropEntryStatus[] = ['ENTERED', 'SELECTED', 'WAITLISTED', 'CONFIRMED', 'LAPSED', 'WITHDRAWN'];
+
+/** The model of a release: `lookbook` is the `<slug>` of its sheet when the model is PUBLIC in the lookbook. */
+export interface DropModel {
+  name: string;
+  type: string;
+  collection: string | null;
+  /** The model's reference photograph: `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+  lookbook: string | null;
+}
+
+/** One release of GET /api/v1/drops (P-R03). */
+export interface DropCard {
+  id: string;
+  title: string;
+  state: DropState;
+  model: DropModel;
+  quantity: number;
+  opensAt: string;
+  closesAt: string;
+}
+
+/** A release's page (GET /api/v1/drops/:id): the seed's SHA-256 from the publication, the seed itself once drawn. */
+export interface DropSheet extends DropCard {
+  description: string | null;
+  purchaseWindowHours: number;
+  publishedAt: string;
+  cancelledAt: string | null;
+  drawnAt: string | null;
+  /** SHA-256 of the seed, 64 hexadecimal characters. */
+  seedHash: string;
+  /** The 32-byte seed in hexadecimal, once drawn; null before. */
+  seed: string | null;
+  /** The entries that took part in the draw, once drawn; null before. */
+  entries: number | null;
+}
+
+/** One entry of a drawn release (GET /api/v1/drops/:id/entries): never its account. `tier` 0 is no tier. */
+export interface DrawEntry {
+  id: string;
+  tier: number;
+  seniority: number;
+  rank: number;
+}
+
+/** A page of GET /api/v1/drops/:id/entries, by rank. */
+export interface DrawEntriesPage {
+  items: DrawEntry[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** One entry of the signed-in account (GET /api/v1/club/status, POST …/enter and …/withdraw): its id is the one the draw publishes. */
+export interface ClubEntry {
+  id: string;
+  dropId: string;
+  title: string;
+  state: DropState;
+  status: DropEntryStatus;
+  enteredAt: string;
+  rank: number | null;
+  respondBy: string | null;
+  opensAt: string;
+  closesAt: string;
+  drawnAt: string | null;
+}
+
+/** GET /api/v1/club/status (P-R03): the account's tier now (0: no piece; TITANE, PLATINE, PALLADIUM), and its entries. */
+export interface ClubStatus {
+  tier: { level: 0 | 1 | 2 | 3; name: 'TITANE' | 'PLATINE' | 'PALLADIUM' | null };
+  pieces: number;
+  seniority: number;
+  entries: ClubEntry[];
+}

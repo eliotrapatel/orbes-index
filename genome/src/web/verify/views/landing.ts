@@ -13,7 +13,9 @@
  * hidden if the account service cannot be reached.
  *
  * Under them, THE COLLECTION (P-R02), the lookbook of the models: a third
- * discreet link, shown at once (it needs no session).
+ * discreet link, shown at once (it needs no session); then THE RELEASES
+ * (P-R03), the drops ORBES announces, a fourth (entering one needs an
+ * account, reading them none).
  *
  * At the foot (J-06), under the centre and in the page's flow, so a short
  * screen scrolls to them rather than covering the actions: the legal pages,
@@ -23,7 +25,7 @@
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
 import type { SessionStore } from '../session.js';
-import { legalLinks, lookbookLink, orbitReticle, piecesLink, viewRoot } from './common.js';
+import { legalLinks, lookbookLink, orbitReticle, piecesLink, releasesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
@@ -33,6 +35,8 @@ export interface LandingHandlers {
   onPieces?(): void;
   /** THE COLLECTION (P-R02): the lookbook, in the app. */
   onCollection?(): void;
+  /** THE RELEASES (P-R03): the drops, in the app. */
+  onReleases?(): void;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
@@ -77,6 +81,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
         h('button', { class: 'textlink landing__upload', attrs: { type: 'button' }, on: { click: () => handlers.onUpload() }, text: 'UPLOAD A PHOTO' }),
         pieces,
         lookbookLink(handlers.onCollection, { extraClass: 'landing__collection' }),
+        releasesLink(handlers.onReleases, { extraClass: 'landing__releases' }),
       ),
     ),
     h(

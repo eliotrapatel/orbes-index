@@ -42,6 +42,16 @@ const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 const CATALOGUE: Record<string, Tone> = { ACTIVE: 'solid', INACTIVE: 'muted' };
 /** A model's place in the lookbook (P-R02): shown to everyone, to the owners of a piece only, or nowhere. */
 const LOOKBOOK: Record<string, Tone> = { PUBLIC: 'solid', RESERVED: 'outline', HIDDEN: 'muted' };
+/**
+ * A drop (P-R03): open to entries, or drawn, in force; a draft, announced or closed (its draw follows), pending;
+ * cancelled, historical.
+ */
+const DROP: Record<string, Tone> = { DRAFT: 'outline', UPCOMING: 'outline', OPEN: 'solid', CLOSED: 'outline', DRAWN: 'solid', CANCELLED: 'muted' };
+/**
+ * An entry of a drop (P-R03): a place held waits for ORBES Client Services, as an open case does; a sale concluded is in
+ * force; an entry or the waiting list pending; a lapse or a withdrawal, historical.
+ */
+const DROP_ENTRY: Record<string, Tone> = { ENTERED: 'outline', SELECTED: 'alert', WAITLISTED: 'outline', CONFIRMED: 'solid', LAPSED: 'muted', WITHDRAWN: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
   AUTHENTIC: 'solid',
   AUTHENTIC_FIRST_REGISTRATION: 'solid',
@@ -55,7 +65,22 @@ const VERIFICATION: Record<string, Tone> = {
   PENDING: 'outline',
 };
 
-export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account' | 'catalogue' | 'lookbook';
+export type ToneDomain =
+  | 'product'
+  | 'code'
+  | 'key'
+  | 'severity'
+  | 'anomaly'
+  | 'warranty'
+  | 'ownership'
+  | 'service'
+  | 'verification'
+  | 'case'
+  | 'account'
+  | 'catalogue'
+  | 'lookbook'
+  | 'drop'
+  | 'dropEntry';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -71,6 +96,8 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   account: ACCOUNT,
   catalogue: CATALOGUE,
   lookbook: LOOKBOOK,
+  drop: DROP,
+  dropEntry: DROP_ENTRY,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

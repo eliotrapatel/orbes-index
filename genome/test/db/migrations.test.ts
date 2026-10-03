@@ -10,7 +10,7 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
-  'collections', 'cryptographic_keys', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
+  'collections', 'cryptographic_keys', 'drop_entries', 'drops', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
   'scan_tokens', 'service_records', 'sessions', 'warranties',
 ];
@@ -108,6 +108,15 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX model_images_position_key ON public\.model_images USING btree \(model_id, "?position"?\)$/)).toBe(true);
     expect(has(/INDEX model_images_sha256_idx ON public\.model_images USING btree \(sha256\)$/)).toBe(true);
     expect(has(/INDEX model_images_created_by_idx ON public\.model_images USING btree \(created_by\)$/)).toBe(true);
+    // 0015: a drop's model and author, each foreign key at the head of its own index; one entry per account and drop;
+    // an account's entries; the entries of a drop by status and rank.
+    expect(has(/INDEX drops_model_id_idx ON public\.drops USING btree \(model_id\)$/)).toBe(true);
+    expect(has(/INDEX drops_created_by_idx ON public\.drops USING btree \(created_by\)$/)).toBe(true);
+    expect(has(/INDEX drops_published_opens_idx ON public\.drops USING btree \(opens_at\) WHERE \(published_at IS NOT NULL\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drop_entries_drop_account_key ON public\.drop_entries USING btree \(drop_id, account_id\)$/)).toBe(true);
+    expect(has(/INDEX drop_entries_account_idx ON public\.drop_entries USING btree \(account_id, created_at\)$/)).toBe(true);
+    expect(has(/INDEX drop_entries_handled_by_idx ON public\.drop_entries USING btree \(handled_by\)$/)).toBe(true);
+    expect(has(/INDEX drop_entries_drop_status_idx ON public\.drop_entries USING btree \(drop_id, status, rank\)$/)).toBe(true);
   });
 
   /**
@@ -468,7 +477,8 @@ describe('migrations', () => {
     expect(before.filter(of0014)).toEqual([]);
     expect(added.filter((o) => !of0014(o))).toEqual([]);
     expect(withLookbook.filter((o) => !of0014(o))).toEqual(before);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0014_model_lookbook']);
+    // Later migrations (0015…) were rolled back first: up again applies them after it.
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0014_model_lookbook'));
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -523,6 +533,118 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id IN (${model.id}, ${other.id})`.execute(t.db);
   });
 
+  it('0015 adds drops and drop_entries, and nothing else; down drops them alone, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withDrops, without: before } = await rollBackTo('0015_drops');
+    const of0015 = (o: string) => /\bdrops\b|\bdrop_entries\b/.test(o);
+    const added = withDrops.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0015(o))).toEqual([]);
+    expect(before.filter(of0015)).toEqual([]);
+    expect(withDrops.filter((o) => !of0015(o))).toEqual(before);
+    expect(added.filter((o) => o.startsWith('table drops ')).map((o) => o.split(' ')[2])).toEqual([
+      'cancelled_at', 'closes_at', 'created_at', 'created_by', 'description', 'drawn_at', 'id', 'model_id', 'opens_at', 'published_at',
+      'purchase_window_hours', 'quantity', 'seed', 'seed_enc', 'seed_hash', 'title',
+    ]);
+    expect(added.filter((o) => o.startsWith('table drop_entries ')).map((o) => o.split(' ')[2])).toEqual([
+      'account_id', 'created_at', 'drop_id', 'handled_at', 'handled_by', 'id', 'note', 'rank', 'respond_by', 'seniority', 'status', 'tier',
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger drop_entries drop_entries_immutable_identity', 'trigger drops drops_immutable_seed']);
+    for (const c of [
+      /^constraint drops drops_window CHECK \(\(closes_at > opens_at\)\)$/,
+      /^constraint drops drops_seed CHECK \(\(\(seed IS NULL\) OR \(\(octet_length\(seed\) = 32\) AND \(seed_hash = sha256\(seed\)\)\)\)\)$/,
+      /^constraint drops drops_drawn CHECK \(\(\(drawn_at IS NULL\) = \(seed IS NULL\)\)\)$/,
+      /^constraint drops drops_drawn_after_close CHECK /,
+      /^constraint drops drops_cancelled_before_draw CHECK \(\(\(cancelled_at IS NULL\) OR \(drawn_at IS NULL\)\)\)$/,
+      /^constraint drops drops_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_drop_account_key UNIQUE \(drop_id, account_id\)$/,
+      /^constraint drop_entries drop_entries_drop_id_fkey FOREIGN KEY \(drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_handled_by_fkey FOREIGN KEY \(handled_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_lapsed CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0015_drops'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0015: a seed sealed and committed, written in clear by the draw only; one entry per account and drop, its identity fixed, its status consistent', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (26, 'Z', 'Drop test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (26, 'D', 'RING', 'DROPT') RETURNING id`.execute(t.db)).rows[0];
+    const seed = new Uint8Array(32).fill(7);
+    const seedHash = createHash('sha256').update(seed).digest();
+    const sealed = `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`;
+    const insert = (v: Record<string, unknown> = {}) =>
+      sql<{ id: string }>`INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash)
+          VALUES (${v.model ?? model.id}, ${v.title ?? 'Release'}, ${v.quantity ?? 2}, ${v.opens ?? '2026-11-01T10:00:00Z'}, ${v.closes ?? '2026-11-03T10:00:00Z'},
+                  ${v.sealed ?? sealed}, ${v.hash ?? seedHash}) RETURNING id`.execute(t.db);
+    await expect(insert({ quantity: 0 })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ closes: '2026-11-01T10:00:00Z' })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_window'));
+    await expect(insert({ title: '  ' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ sealed: 'plain seed' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ hash: new Uint8Array(31) })).rejects.toSatisfy((e) => isCheckViolation(e));
+    const drop = (await insert()).rows[0];
+    const row = (await sql<{ purchase_window_hours: number; seed: Uint8Array | null }>`SELECT purchase_window_hours, seed FROM drops WHERE id = ${drop.id}`.execute(t.db)).rows[0];
+    expect(row).toEqual({ purchase_window_hours: 48, seed: null });
+    const set = (assignments: string) => sql.raw(`UPDATE drops SET ${assignments} WHERE id = '${drop.id}'`).execute(t.db);
+    for (const hours of [0, 337]) await expect(set(`purchase_window_hours = ${hours}`), String(hours)).rejects.toSatisfy((e) => isCheckViolation(e));
+    // The seed and its commitment never change; the seed in clear only with the draw, and only the one committed.
+    await expect(set(`seed_hash = decode(repeat('00', 32), 'hex')`)).rejects.toSatisfy(isGuardViolation);
+    await expect(set(`seed_enc = 'v1.${'C'.repeat(16)}.${'D'.repeat(64)}'`)).rejects.toSatisfy(isGuardViolation);
+    await expect(set(`seed = decode(repeat('07', 32), 'hex')`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_drawn'));
+    await expect(set(`drawn_at = '2026-11-04T10:00:00Z'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_drawn'));
+    await expect(set(`seed = decode(repeat('08', 32), 'hex'), drawn_at = '2026-11-04T10:00:00Z', published_at = '2026-10-30T10:00:00Z'`)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'drops_seed'),
+    );
+    // A draw needs a publication and a close behind it; a cancellation forbids it.
+    await expect(set(`seed = decode(repeat('07', 32), 'hex'), drawn_at = '2026-11-04T10:00:00Z'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_drawn_after_close'));
+    await expect(set(`seed = decode(repeat('07', 32), 'hex'), drawn_at = '2026-11-02T10:00:00Z', published_at = '2026-10-30T10:00:00Z'`)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'drops_drawn_after_close'),
+    );
+    await expect(set(`seed = decode(repeat('07', 32), 'hex'), drawn_at = '2026-11-04T10:00:00Z', published_at = '2026-10-30T10:00:00Z', cancelled_at = now()`)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'drops_cancelled_before_draw'),
+    );
+
+    // Entries: one per account and drop; the identity of a row never changes.
+    const account = async (n: number) =>
+      (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES (${`drop${n}@example.com`}, ${`drop${n}@example.com`}, 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const [a1, a2] = [await account(1), await account(2)];
+    const enter = (accountId: string, v: Record<string, unknown> = {}) =>
+      sql<{ id: string; status: string }>`INSERT INTO drop_entries (drop_id, account_id, status, tier, seniority, rank, respond_by)
+          VALUES (${drop.id}, ${accountId}, ${v.status ?? 'ENTERED'}, ${v.tier ?? null}, ${v.seniority ?? null}, ${v.rank ?? null}, ${v.respondBy ?? null}) RETURNING id, status`.execute(t.db);
+    const e1 = (await enter(a1)).rows[0];
+    expect(e1.status).toBe('ENTERED');
+    await expect(enter(a1)).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_entries_drop_account_key'));
+    await expect(enter(a2, { status: 'DRAWN' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(enter(a2, { tier: 1, seniority: 0, rank: 1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_entered'));
+    await expect(enter(a2, { status: 'WAITLISTED', tier: 1, seniority: 0 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_waitlisted'));
+    await expect(enter(a2, { status: 'SELECTED', tier: 1, seniority: 0, rank: 1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_held'));
+    await expect(enter(a2, { status: 'WITHDRAWN', tier: 1, seniority: 0, rank: 2 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_withdrawn'));
+    await expect(enter(a2, { status: 'WAITLISTED', tier: 4, seniority: 0, rank: 2 })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(enter(a2, { status: 'WAITLISTED', tier: 1, rank: 2 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_standing'));
+    for (const col of ['id', 'drop_id', 'account_id', 'created_at']) {
+      const value = col === 'created_at' ? `now() + interval '1 day'` : col === 'account_id' ? `'${a2}'` : `gen_random_uuid()`;
+      await expect(sql.raw(`UPDATE drop_entries SET ${col} = ${value} WHERE id = '${e1.id}'`).execute(t.db), col).rejects.toSatisfy(isGuardViolation);
+    }
+    // A concluded entry names when; a lapse comes after the place held.
+    const respondBy = new Date(Date.now() + 3 * 86_400_000);
+    await sql`UPDATE drop_entries SET status = 'SELECTED', tier = 1, seniority = 0, rank = 1, respond_by = ${respondBy} WHERE id = ${e1.id}`.execute(t.db);
+    await expect(sql`UPDATE drop_entries SET status = 'CONFIRMED' WHERE id = ${e1.id}`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_entries_handled'));
+    await expect(sql`UPDATE drop_entries SET status = 'LAPSED', handled_at = ${new Date(respondBy.getTime() - 1000)} WHERE id = ${e1.id}`.execute(t.db)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'drop_entries_lapsed'),
+    );
+    await sql`UPDATE drop_entries SET status = 'LAPSED', handled_at = ${respondBy} WHERE id = ${e1.id}`.execute(t.db);
+    await expect(sql`UPDATE drop_entries SET note = ' ' WHERE id = ${e1.id}`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+    // A drop and an account stay while an entry names them.
+    await expect(sql`DELETE FROM drops WHERE id = ${drop.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`DELETE FROM accounts WHERE id = ${a1}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await sql`DELETE FROM drop_entries WHERE drop_id = ${drop.id}`.execute(t.db);
+    await sql`DELETE FROM drops WHERE id = ${drop.id}`.execute(t.db);
+    await sql`DELETE FROM accounts WHERE id IN (${a1}, ${a2})`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -562,6 +684,7 @@ describe('migrations', () => {
       '0013_ownership_certificates',
       // The « Potentiel » plan of 2026-10-03 (docs/launch/DEPLOY-POTENTIEL-2026-10.md): deployment A.
       '0014_model_lookbook',
+      '0015_drops',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

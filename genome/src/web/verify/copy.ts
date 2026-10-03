@@ -550,3 +550,89 @@ export const LOOKBOOK = Object.freeze({
   /** The sheet of an address that leads nowhere (a model no longer shown, or reserved for owners). */
   notFound: 'This model is not in the ORBES collection.',
 });
+
+/**
+ * THE RELEASES (P-R03, /verify/releases, API §8.9 and §10.10): the models ORBES releases in a limited number of pieces,
+ * each entered from its page with an ORBES account (any: an account that holds no piece is drawn after the tiers),
+ * then drawn: by tier, then seniority, then the order of a seed whose fingerprint is published with the release and
+ * which the draw reveals, with every entry by its id, tier, seniority and rank. A place drawn is held until a time;
+ * ORBES Client Services concludes each sale and sends no email: the account's page says it. Reached from the landing
+ * and from MY PIECES, which groups the account's entries. The word is DRAW, never another (BRAND §4.5).
+ */
+export const RELEASES = Object.freeze({
+  title: 'THE RELEASES',
+  /** The text link of the landing, of MY PIECES and of a release's foot (back to the list). */
+  link: 'THE RELEASES',
+  lead: 'Pieces released in a limited number. Enter the draw with your ORBES account: ORBES Client Services concludes each sale.',
+  loading: 'ONE MOMENT…',
+  loadFailed: 'The releases could not be shown just now.',
+  retry: 'TRY AGAIN',
+  empty: 'No release is announced yet.',
+  /** The text link of each release of the list. */
+  see: 'SEE THE RELEASE',
+  scan: 'SCAN ORBES CODE',
+  /** The page of an address that leads nowhere: a release ORBES has not published. */
+  notFound: 'This release is not known to ORBES.',
+  /** A release's state, as its page and the list say it. */
+  state: Object.freeze({ UPCOMING: 'ENTRIES OPEN SOON', OPEN: 'ENTRIES OPEN', CLOSED: 'ENTRIES CLOSED', DRAWN: 'DRAWN', CANCELLED: 'CANCELLED' }),
+  pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
+  hours: (n: number) => (n === 1 ? '1 HOUR' : `${n} HOURS`),
+  /** A time shown in UTC, then on the phone's own clock. */
+  utc: (time: string) => `${time} UTC`,
+  onThisPhone: (time: string, offset: string) => `${time} on this phone (${offset})`,
+  /** The line of a release in the list: its pieces and the time that matters now. */
+  opensLine: (pieces: string, time: string) => `${pieces} · ENTRIES OPEN ${time} UTC`,
+  closesLine: (pieces: string, time: string) => `${pieces} · ENTRIES CLOSE ${time} UTC`,
+  section: Object.freeze({ release: 'THE RELEASE', entry: 'YOUR ENTRY', draw: 'THE DRAW', entries: 'THE ENTRIES' }),
+  rows: Object.freeze({ model: 'MODEL', pieces: 'PIECES', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', drawn: 'DRAWN' }),
+  photosLabel: (title: string) => `The model of ${title}, photographed by ORBES`,
+  /** Signed out, on a release's page: any ORBES account may enter, the sign-in and CREATE ACCOUNT follow. */
+  signIn: 'Enter the draw with your ORBES account: sign in, or create one. Any account may enter, one entry per person.',
+  enter: 'ENTER THE DRAW',
+  withdraw: 'WITHDRAW',
+  /** The account's own entry id, the one the draw's list publishes. */
+  entryId: (id: string) => `YOUR ENTRY ${id}`,
+  /** What the account's entry, or its absence, means now. */
+  status: Object.freeze({
+    open: 'Entries are open. One entry per person: ORBES Client Services may set aside a second one.',
+    upcoming: (time: string) => `Entries open on ${time}.`,
+    closed: 'Entries are closed. The draw follows.',
+    drawn: 'The draw has taken place.',
+    cancelled: 'This release has been cancelled: there will be no draw.',
+    entered: 'You are entered in the draw. You may withdraw until it takes place.',
+    enteredClosed: 'You are entered in the draw, which follows the close of entries.',
+    withdrawn: 'You withdrew from the draw. You may enter again while entries are open.',
+    withdrawnClosed: 'You withdrew from this draw.',
+    selected: (until: string) => `Your place is held until ${until} — ORBES Client Services will contact you.`,
+    waitlisted: (rank: number) => `You are on the waiting list, rank ${rank}. ORBES Client Services will contact you if a place opens.`,
+    confirmed: 'Your purchase is concluded with ORBES Client Services.',
+    lapsed: 'The time to conclude has passed: the place held for you has lapsed.',
+  }),
+  /** The status of an entry, as MY PIECES and a release's page name it. */
+  statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
+  /** A selection obliges no one; no email is sent. */
+  noObligation: 'A place drawn obliges you to nothing: ORBES Client Services concludes each sale with you, and sends no email. Your entries are followed in MY PIECES.',
+  /** The rule of the draw, exactly as the server applies it (services/drops.ts drawOrder). */
+  rule:
+    'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces, are selected; the next are on the waiting list, in that order.',
+  commitment: 'The seed was drawn when the release was created, and its fingerprint published with it. Once the draw has taken place, the seed is published here: its SHA-256 is that fingerprint, and anyone can rank the entries below again.',
+  /** Labels in the display face, so no figure: the commitment's sentence names SHA-256. */
+  seedHash: 'SEED FINGERPRINT',
+  seed: 'SEED',
+  /** The check made on this phone, once the seed is published. */
+  seedChecked: 'Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.',
+  seedMismatch: 'Checked on this phone: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
+  entriesLead: (n: number) => (n === 1 ? '1 entry took part in the draw.' : `${n} entries took part in the draw.`),
+  /** One entry of the draw's list: its rank, its tier and its seniority. */
+  entryLine: (rank: number, tier: string, years: number) => `${rank} · ${tier} · ${years === 1 ? '1 YEAR' : `${years} YEARS`}`,
+  noTier: 'NO TIER',
+  yours: 'YOURS',
+  more: 'SHOW MORE',
+  entriesFailed: 'The entries could not be shown just now.',
+  /** MY PIECES: the account's entries. */
+  yourEntries: 'YOUR RELEASES',
+  entryFailed: 'Your entries could not be shown just now.',
+  /** The facts of the email to ORBES Client Services about a place held. */
+  contactRelease: 'RELEASE',
+  contactEntry: 'ENTRY',
+});

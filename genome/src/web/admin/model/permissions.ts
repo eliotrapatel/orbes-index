@@ -2,7 +2,8 @@
  * What each admin role may do, mirroring the server guard (contract §3:
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
  * reinstatement, categories (created, activated, deactivated), console users,
- * points of sale and a customer's recovery code, lock and export). Every role
+ * points of sale, a customer's recovery code, lock and export, and the draw
+ * of a drop). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -38,6 +39,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   editCatalog: 'OPERATOR',
   /** Set or remove a model's reference photograph or the photograph of a piece (F-04): shown on /verify. */
   photograph: 'OPERATOR',
+  /** The Club's drops (P-R03): create, edit, publish and cancel a drop; conclude an entry, offer the next place. */
+  manageDrops: 'OPERATOR',
+  /** The draw of a drop (P-R03), once, after its entries close: ADMIN, with a phrase to type. */
+  drawDrop: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',

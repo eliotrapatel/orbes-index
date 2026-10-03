@@ -19,6 +19,11 @@ import type {
   CertificateLookup,
   CertificateOffer,
   ClientServices,
+  ClubEntry,
+  ClubStatus,
+  DrawEntriesPage,
+  DropCard,
+  DropSheet,
   DownloadedFile,
   IncidentReport,
   IncidentResolution,
@@ -155,6 +160,51 @@ export class ApiClient {
   /** A sheet, PUBLIC or RESERVED, for an account that holds a piece (the club). */
   clubLookbookSheet(slug: string): Promise<LookbookSheet> {
     return this.request<LookbookSheet>('GET', `/api/v1/club/lookbook/${encodeURIComponent(slug)}`);
+  }
+
+  // ── The releases (P-R03) ─────────────────────────────────────────────────
+
+  /**
+   * The published releases, the latest opening first. Read afresh each time (the server lets a shared cache keep it a
+   * minute): an opening, a close or a draw shows at once on this phone.
+   */
+  async drops(): Promise<DropCard[]> {
+    const r = await this.request<{ drops?: unknown }>('GET', '/api/v1/drops');
+    if (!Array.isArray(r?.drops)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.drops as DropCard[];
+  }
+
+  /** A release's page (404 DROP_NOT_FOUND for one ORBES has not published), read afresh: its draw shows at once. */
+  drop(id: string): Promise<DropSheet> {
+    return this.request<DropSheet>('GET', `/api/v1/drops/${encodeURIComponent(id)}`);
+  }
+
+  /** A page of a drawn release's entries, by rank (409 DROP_NOT_DRAWN before the draw). */
+  async drawEntries(id: string, page: number, pageSize = 100): Promise<DrawEntriesPage> {
+    const r = await this.request<DrawEntriesPage>('GET', `/api/v1/drops/${encodeURIComponent(id)}/entries?page=${page}&pageSize=${pageSize}`);
+    if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The signed-in account's tier and entries (the club; 401 signed out). */
+  async clubStatus(): Promise<ClubStatus> {
+    const r = await this.request<ClubStatus>('GET', '/api/v1/club/status');
+    if (!Array.isArray(r?.entries)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** ENTER THE DRAW of an open release (the same entry again after a withdrawal). */
+  async enterDrop(id: string): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/enter`, undefined, { csrf: true });
+    if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entry;
+  }
+
+  /** WITHDRAW from a release's draw, before it takes place. */
+  async withdrawDrop(id: string): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/withdraw`, undefined, { csrf: true });
+    if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entry;
   }
 
   // ── Account ──────────────────────────────────────────────────────────────

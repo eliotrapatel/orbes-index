@@ -39,6 +39,12 @@ import type {
   CodeJson,
   Collection,
   DashboardData,
+  DrawOutcome,
+  Drop,
+  DropChange,
+  DropEntry,
+  DropEntryStatus,
+  DropInput,
   GenomeJson,
   IssueBatchItem,
   IssueBatchResponse,
@@ -629,6 +635,56 @@ export class AdminApi {
   }
 
   /** The Cases queue: customers' reports on scans that were not authentic. */
+  // ── The Club: drops (P-R03) ──────────────────────────────────────────────
+
+  drops(page = 1, pageSize = 50): Promise<Paged<Drop>> {
+    return this.get('/api/admin/drops', { page, pageSize });
+  }
+
+  drop(id: string): Promise<Drop> {
+    return this.get(`/api/admin/drops/${encodeURIComponent(id)}`);
+  }
+
+  createDrop(input: DropInput): Promise<Drop> {
+    return this.post('/api/admin/drops', input);
+  }
+
+  updateDrop(id: string, change: DropChange): Promise<Drop> {
+    return this.patch(`/api/admin/drops/${encodeURIComponent(id)}`, change);
+  }
+
+  publishDrop(id: string): Promise<Drop> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/publish`);
+  }
+
+  cancelDrop(id: string): Promise<Drop> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** ADMIN: the draw, once, after its entries close. */
+  drawDrop(id: string): Promise<DrawOutcome> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/draw`);
+  }
+
+  dropEntries(id: string, q: { status?: DropEntryStatus; page?: number; pageSize?: number } = {}): Promise<Paged<DropEntry>> {
+    return this.get(`/api/admin/drops/${encodeURIComponent(id)}/entries`, q);
+  }
+
+  /** CONFIRMED: the sale concluded by ORBES Client Services. */
+  confirmDropEntry(id: string, entryId: string, note: string): Promise<DropEntry> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/confirm`, note ? { note } : {});
+  }
+
+  /** LAPSED, once the place held has passed its time. */
+  lapseDropEntry(id: string, entryId: string, note: string): Promise<DropEntry> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/lapse`, note ? { note } : {});
+  }
+
+  /** OFFER NEXT: the first of the waiting list, SELECTED. */
+  offerNextDropEntry(id: string): Promise<DropEntry> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/offer-next`);
+  }
+
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {
     return this.get('/api/admin/reports', q);
   }

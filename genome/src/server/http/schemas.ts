@@ -14,6 +14,7 @@ import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
   CODE_STATUSES,
+  DROP_ENTRY_STATUSES,
   LOOKBOOK_STATES,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
@@ -25,6 +26,7 @@ import {
 } from '../db/schema.js';
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
+import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
@@ -192,6 +194,12 @@ export const mediaParams = z.object({ sha256: sha256Hex });
  * router passes (≤ 128 characters): one that is no address answers like an unknown one, 404 LOOKBOOK_NOT_FOUND.
  */
 export const lookbookParams = z.object({ slug: z.string().max(128) });
+
+/**
+ * GET /api/v1/drops/:id and /entries, POST /api/v1/club/drops/:id/enter and /withdraw (§8.9, §10.10, P-R03): a drop's
+ * id. Any string the router passes (≤ 64 characters): one that is no id answers like an unknown drop, 404 DROP_NOT_FOUND.
+ */
+export const publicDropParams = z.object({ id: z.string().max(64) });
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
@@ -388,6 +396,56 @@ export const galleryOrderBody = body({
       }),
     )
     .max(GALLERY_MAX, `At most ${GALLERY_MAX} photographs`),
+});
+
+// ── Admin: drops (P-R03) ───────────────────────────────────────────────────
+
+export const dropParams = z.object({ id: uuid });
+
+export const dropEntryParams = z.object({ id: uuid, entryId: uuid });
+
+const dropTitle = text(DROP_TITLE_MAX);
+const dropQuantity = z.number().int('Must be a whole number of pieces').min(1, 'At least 1 piece').max(DROP_QUANTITY_MAX, `At most ${DROP_QUANTITY_MAX} pieces`);
+const purchaseWindowHours = z
+  .number()
+  .int('Must be a whole number of hours')
+  .min(PURCHASE_WINDOW_HOURS.min, `At least ${PURCHASE_WINDOW_HOURS.min} hour`)
+  .max(PURCHASE_WINDOW_HOURS.max, `At most ${PURCHASE_WINDOW_HOURS.max} hours`);
+
+/**
+ * POST /api/admin/drops (§16.19): a DRAFT of a model's release, its entries' window (`closesAt` after `opensAt`), its
+ * pieces and how long a place drawn is held (48 hours when omitted). The description is plain text ('' and null: none).
+ */
+export const createDropBody = body({
+  modelId: uuid,
+  title: dropTitle,
+  description: z.preprocess((v) => (v === '' ? null : v), text(DROP_DESCRIPTION_MAX).nullable().optional()),
+  quantity: dropQuantity,
+  opensAt: isoDateTime,
+  closesAt: isoDateTime,
+  purchaseWindowHours: purchaseWindowHours.optional(),
+}).refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] });
+
+/**
+ * PATCH /api/admin/drops/:id (§16.19): any field while the drop is a DRAFT; once published, `description` only (the
+ * service's rule, 409 DROP_PUBLISHED). At least one field; '' and null clear the description.
+ */
+export const updateDropBody = body({
+  modelId: uuid.optional(),
+  title: dropTitle.optional(),
+  description: z.preprocess((v) => (v === '' ? null : v), text(DROP_DESCRIPTION_MAX).nullable().optional()),
+  quantity: dropQuantity.optional(),
+  opensAt: isoDateTime.optional(),
+  closesAt: isoDateTime.optional(),
+  purchaseWindowHours: purchaseWindowHours.optional(),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change');
+
+/** GET /api/admin/drops/:id/entries: one status, or every entry. */
+export const dropEntriesQuery = z.object({ status: queryOptional(z.enum(DROP_ENTRY_STATUSES)) });
+
+/** POST …/entries/:entryId/confirm and …/lapse: the console's note on the entry, optional ('' and null: none). */
+export const dropEntryNoteBody = optionalBody({
+  note: z.preprocess((v) => (v === '' ? null : v), text(DROP_NOTE_MAX).nullable().optional()),
 });
 
 // ── Admin: products ────────────────────────────────────────────────────────

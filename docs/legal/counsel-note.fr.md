@@ -24,10 +24,10 @@ Tous les champs portent la marque [À COMPLÉTER : …], dans les deux langues.
 | Acceptation assistée d'un transfert | CGU article 8 | Le réglage existe côté serveur, aucun écran ne la propose (R40). |
 | Déclaration inexacte de perte ou de vol | CGU article 9 | |
 | Conditions de la garantie commerciale | CGU article 11 | Document distinct, à rédiger (§4, point 10). En attendant, la page publiée omet tout le point « Conditions », la phrase sur l'annulation de la garantie comprise (« ces conditions » ne renverrait à rien), et garde le rappel des garanties légales. |
-| Motifs du verrouillage | CGU article 12 | Voir §4, point 7. La page publiée garde « ORBES Client Services peut verrouiller un compte ORBES. », sans motifs. |
-| Limites de responsabilité | CGU article 14 | |
-| Information sur les modifications des CGU | CGU article 15 | Le service n'envoie pas d'e-mail (N1). |
-| Médiateur de la consommation, juridiction | CGU article 16 | Voir §3. Tant qu'aucun médiateur n'est désigné, la page publiée ne mentionne pas ce recours : une phrase qui promet « le médiateur de la consommation » sans le nommer ne renseignerait personne. Si ORBES doit en désigner un, l'information manque donc jusqu'à ce choix. |
+| Motifs du verrouillage | CGU article 13 | Voir §4, point 7. La page publiée garde « ORBES Client Services peut verrouiller un compte ORBES. », sans motifs. |
+| Limites de responsabilité | CGU article 15 | |
+| Information sur les modifications des CGU | CGU article 16 | Le service n'envoie pas d'e-mail (N1). |
+| Médiateur de la consommation, juridiction | CGU article 17 | Voir §3. Tant qu'aucun médiateur n'est désigné, la page publiée ne mentionne pas ce recours : une phrase qui promet « le médiateur de la consommation » sans le nommer ne renseignerait personne. Si ORBES doit en désigner un, l'information manque donc jusqu'à ce choix. |
 
 ## 2. Loi Toubon
 
@@ -51,7 +51,7 @@ Le Code de la consommation (articles L. 612-1 et L. 616-1) impose à tout profes
 
 **Questions.**
 
-1. ORBES doit-il désigner un médiateur au titre de ce service, ou celui de ses ventes suffit-il ? Lequel ? (CGU article 16.)
+1. ORBES doit-il désigner un médiateur au titre de ce service, ou celui de ses ventes suffit-il ? Lequel ? (CGU article 17.)
 2. Le brouillon ne renvoie pas à la plateforme européenne de règlement en ligne des litiges : elle a fermé en 2025 (règlement (UE) 2024/3228). À confirmer.
 3. Droit applicable et juridiction : quelle clause pour un client hors de France, consommateur ou non ?
 
@@ -63,13 +63,14 @@ Le Code de la consommation (articles L. 612-1 et L. 616-1) impose à tout profes
 4. **Âge et identité** (CGU article 5 ; N5). Aucune vérification à la création d'un compte.
 5. **Adresse e-mail non vérifiée** (CGU article 5 ; R07). Une adresse mal saisie empêche ORBES Client Services de retrouver le compte, et le service n'envoie aucun message.
 6. **Vérification d'identité avant un code de récupération** (CGU article 6 ; R13). De même, l'examen de la pièce avant de lever un vol (CGU article 9 ; R45) est une procédure humaine, que le code n'impose pas. C'est une procédure humaine, esquissée dans le [SALES-PLAYBOOK §6](../launch/SALES-PLAYBOOK.md), à finaliser avec vous. La suspension des transferts pendant 72 heures (R17) limite l'effet d'une vérification trompée.
-7. **Verrouillage** (CGU article 12 ; R19, R20). Le code applique le verrouillage, pas ses motifs : à définir, ainsi que l'information du titulaire (le service n'envoie pas d'e-mail).
+7. **Verrouillage** (CGU article 13 ; R19, R20). Le code applique le verrouillage, pas ses motifs : à définir, ainsi que l'information du titulaire (le service n'envoie pas d'e-mail).
 8. **Acceptation des CGU** (CGU article 1 ; R56). L'application met, sous CREATE ACCOUNT, la phrase « Creating an ORBES account means accepting the ORBES terms of use. » et deux liens, vers les CGU (`/legal/terms`) et vers la politique de confidentialité (`/legal/privacy`) ; elle n'enregistre ni l'acceptation, ni la version acceptée. L'article 1 dit donc seulement que créer un compte, c'est accepter les conditions, comme le service l'indique sous CREATE ACCOUNT, et non qu'on les accepte « expressément ». Un lien suffit-il, ou faut-il une case à cocher et la conservation de la version et de la date (un développement), qui permettrait de rétablir « expressément » ?
-9. **Modification des CGU** (CGU article 15). Sans e-mail, l'information des titulaires de compte ne peut passer que par le service lui-même : quelle forme et quel délai ?
+9. **Modification des CGU** (CGU article 16). Sans e-mail, l'information des titulaires de compte ne peut passer que par le service lui-même : quelle forme et quel délai ?
 10. **Garantie commerciale** (CGU article 11 ; R52 à R55). Le registre n'en porte que les dates, le point de vente et l'état. Ses conditions (durée par catégorie, exclusions, cas d'annulation, rappel des garanties légales) sont à rédiger dans un document distinct, en français.
 11. **Certificat de propriété** (CGU article 10 ; R46 à R51). Quiconque a le lien voit la pièce, la date de la propriété et la garantie, jamais le nom ni l'e-mail. Le propriétaire crée le lien lui-même et peut le retirer à tout moment.
 12. **Durée de conservation des scans.** Elle n'est pas encore fixée (`SCAN_RETENTION_DAYS`, DATABASE §10) : décision attendue avec vous. En attendant, la politique de confidentialité publiée dit la vérité : les vérifications sont conservées sans limite de temps.
 13. **Portée de la politique de confidentialité.** Elle couvre le service de vérification et le compte ORBES, et le dit. Les autres pages de theorbes.com (son `index.html`, hors de ce système) déposent leur propre cookie (`orbes_code`) et ont leurs propres formulaires : avant que theorbes.com renvoie ses mentions vers ces pages, il leur faut une section ou une politique propre.
+14. **Sorties et tirage** (CGU article 12 ; R58 à R70, depuis le 2026-10-04). Une sortie propose un modèle en un nombre limité de pièces. Tout compte ORBES s'y inscrit gratuitement, sans obligation d'achat ; un tirage classe ensuite les inscriptions par palier (les pièces enregistrées au compte), par ancienneté, puis dans l'ordre d'une graine engagée à la création et publiée après le tirage ; la vente se conclut avec ORBES Client Services, hors du service, et le mot « tirage » se dit DRAW à l'écran, jamais *lottery*. À confirmer : que ce tirage gratuit, sans obligation d'achat et dont l'ordre suit d'abord des critères publiés, échappe à la prohibition des loteries (code de la sécurité intérieure, articles L. 322-1 et suivants) ; que la priorité donnée aux détenteurs de pièces n'appelle pas d'autre mention ; sur quoi ORBES Client Services peut fonder l'écart de la seconde inscription d'une même personne (R59, une procédure humaine) ; et que la publication, après le tirage, de l'identifiant, du palier et de l'ancienneté de chaque inscription, jamais de son compte, est assez décrite par la politique de confidentialité.
 
 ## 5. Mentions légales
 

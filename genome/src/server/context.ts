@@ -29,6 +29,7 @@ import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
 import { ClubService } from './services/club.js';
+import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { LookbookService } from './services/lookbook.js';
@@ -76,7 +77,9 @@ export interface AppServices {
   media: MediaService;
   /** The lookbook of the models (P-R02): the PUBLIC ones and their sheets, the RESERVED ones for the club. */
   lookbook: LookbookService;
-  /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models). */
+  /** The drops (P-R03): releases on a waiting list, entered from /verify and drawn by tier from a committed seed. */
+  drops: DropService;
+  /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models; P-R03: its tier and its entries). */
   club: ClubService;
 }
 
@@ -169,7 +172,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sale = new SaleService({ db, verification, warranty, clock });
     const media = new MediaService({ db, audit, clock, log });
     const lookbook = new LookbookService({ db });
-    const club = new ClubService({ db, lookbook });
+    const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock });
+    const club = new ClubService({ db, lookbook, drops, clock });
 
     const services: AppServices = {
       issuance,
@@ -190,6 +194,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       sale,
       media,
       lookbook,
+      drops,
       club,
       ...overrides.services,
     };

@@ -46,9 +46,11 @@ import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
+import { clubView } from './views/club.js';
 import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
 import { dashboardView } from './views/dashboard.js';
+import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
@@ -104,6 +106,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: 'Clients',
     items: [
       { route: 'owners', label: 'Owners' },
+      { route: 'club', label: 'Club' },
       { route: 'warranties', label: 'Warranties' },
       { route: 'retailers', label: 'Points of sale' },
       { route: 'sale', label: 'Sale mode', cap: 'sell' },
@@ -135,6 +138,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
+  club: { view: clubView, title: 'Club', nav: 'club' },
+  drop: { view: dropView, title: 'Drop', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },

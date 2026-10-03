@@ -26,9 +26,15 @@
  *                           the open links, each with WITHDRAW; read again
  *                           after a creation, TRY AGAIN while unreadable)
  *   ── next piece ──
+ *   YOUR RELEASES                            the account's entries in the drops (P-R03):
+ *     MONOLITHE — RELEASE I · DRAWN          each release (a link to its page), its state,
+ *     PLACE HELD · Your place is held until … — ORBES Client Services will contact you.
+ *     YOUR ENTRY 3f9a…                        what the entry means now, its id (the one the
+ *                                            draw publishes), the contact for a place held
  *   SIGNED IN AS …     CHANGE PASSWORD   SIGN OUT
  *            [ SCAN ORBES CODE ]
  *            THE COLLECTION                  the lookbook (P-R02), a text link
+ *            THE RELEASES                    the drops (P-R03), a text link
  *   PRIVACY · TERMS · LEGAL · HELP            the legal pages (J-06), in a new tab,
  *   IP Geolocation by DB-IP                   signed out too (the sign-in collects data)
  *
@@ -49,13 +55,14 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, PHOTOS, PIECES } from '../copy.js';
+import { ACCOUNT_PASSWORD, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
-import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import { myEntries, type MyEntryModel } from '../releases-model.js';
+import type { CertificateOffer, ClientServices, ClubEntry, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, rows, sectionLabel, viewRoot } from './common.js';
+import { contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
@@ -70,6 +77,9 @@ export interface PiecesDeps {
   clientServices(): Promise<ClientServices>;
   /** THE COLLECTION (P-R02): the lookbook, in the app. */
   onCollection?(): void;
+  /** THE RELEASES (P-R03): the drops, in the app; and one release's page, from an entry. */
+  onReleases?(): void;
+  onRelease?(id: string): void;
 }
 
 export interface PiecesView {
@@ -88,6 +98,8 @@ class PiecesPage {
   readonly root: HTMLElement;
   private readonly lead = h('p', { class: 'prose pieces__lead', attrs: { hidden: true }, text: PIECES.lead });
   private readonly body = h('div', { class: 'pieces__body' });
+  /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
+  private readonly releases = h('section', { class: 'pieces__releases', attrs: { 'aria-labelledby': 'pieces-releases', hidden: true } });
   private readonly account = h('div', { class: 'pieces__account' });
   private unsubscribe: (() => void) | null;
   private disposed = false;
@@ -96,6 +108,8 @@ class PiecesPage {
   private contacts: ClientServices = {};
   private signIn: OwnershipPanel | null = null;
   private cards: PieceCard[] = [];
+  /** The account's entries in the drops; null when they could not be read. */
+  private entries: ClubEntry[] | null = [];
   private load: Load = { kind: 'idle' };
   /** Bumped on every load; an answer to an older one is dropped. */
   private loadGen = 0;
@@ -115,12 +129,14 @@ class PiecesPage {
         this.lead,
       ),
       this.body,
+      this.releases,
       this.account,
       h(
         'footer',
         { class: 'pieces__foot' },
         h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: PIECES.scan }),
         lookbookLink(deps.onCollection, { extraClass: 'pieces__collection' }),
+        releasesLink(deps.onReleases, { extraClass: 'pieces__releases-link' }),
         // The legal pages (J-06), in a new tab: the account's data is collected here too (its sign-in, CREATE
         // ACCOUNT), and a form under way stays.
         legalLinks({ newTab: true, extraClass: 'pieces__legal' }),
@@ -169,6 +185,7 @@ class PiecesPage {
       this.loadGen++;
       this.load = { kind: 'idle' };
       this.cards = [];
+      this.entries = [];
       this.changing = false;
       this.signIn ??= new OwnershipPanel(
         { kind: 'account' },
@@ -184,10 +201,15 @@ class PiecesPage {
     this.load = { kind: 'loading' };
     this.renderBody();
     try {
-      // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so.
-      const [list, certificates] = await Promise.all([
+      // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so. The
+      // account's entries in the drops (P-R03) likewise: without them, the page says they could not be shown.
+      const [list, certificates, club] = await Promise.all([
         this.deps.api.products(),
         this.deps.api.certificates().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+        this.deps.api.clubStatus().catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
         }),
@@ -202,6 +224,7 @@ class PiecesPage {
             certificates: certificates === null ? null : certificates.filter((c) => c.productId === p.productId),
           }),
       );
+      this.entries = club ? club.entries : null;
       this.load = { kind: 'ready' };
     } catch (e) {
       if (gen !== this.loadGen || this.disposed) return;
@@ -225,6 +248,7 @@ class PiecesPage {
   private renderBody(): void {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
+    this.renderReleases();
     if (!this.ready) {
       this.body.replaceChildren(this.waiting());
       return;
@@ -258,6 +282,55 @@ class PiecesPage {
 
   private waiting(): HTMLElement {
     return h('p', { class: 'ownership__meta micro soft pieces__waiting', attrs: { 'aria-busy': 'true' }, text: PIECES.loading });
+  }
+
+  /**
+   * YOUR RELEASES (P-R03): each entry of the account, its release a link to its page, what it means now (a place held
+   * until a time, then the contact of ORBES Client Services, who send no email) and its id, the one the draw publishes.
+   * Shown once the pieces are read, signed in; nothing when the account has entered no release.
+   */
+  private renderReleases(): void {
+    const signedIn = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready';
+    if (!signedIn || (this.entries !== null && this.entries.length === 0)) {
+      this.releases.hidden = true;
+      this.releases.replaceChildren();
+      return;
+    }
+    this.releases.hidden = false;
+    const heading = sectionLabel(RELEASES.yourEntries, 'pieces-releases');
+    if (this.entries === null) {
+      this.releases.replaceChildren(heading, h('p', { class: 'form__error', attrs: { role: 'alert' }, text: RELEASES.entryFailed }));
+      return;
+    }
+    const items = myEntries(this.entries, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices: this.contacts });
+    this.releases.replaceChildren(heading, h('ul', { class: 'pieces__entries' }, ...items.map((m) => h('li', { class: 'pieces__entry' }, this.entryBlock(m)))));
+  }
+
+  private entryBlock(m: MyEntryModel): HTMLElement {
+    const link = h(
+      'a',
+      {
+        class: 'textlink pieces__entry-title',
+        attrs: { href: m.href },
+        on: {
+          click: (ev) => {
+            if (!this.deps.onRelease || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+            ev.preventDefault();
+            this.deps.onRelease(m.dropId);
+          },
+        },
+      },
+      ...withNumerals(m.title),
+    );
+    return h(
+      'article',
+      { class: 'pieces__entry-card', data: { status: m.entry.label ?? '' } },
+      link,
+      h('p', { class: 'ownership__status pieces__entry-state', text: [m.stateLabel, m.entry.label].filter(Boolean).join(' · ') }),
+      h('p', { class: 'prose pieces__entry-sentence', text: m.entry.sentence }),
+      m.entry.entryId ? h('p', { class: 'ownership__meta micro soft pieces__entry-id', text: RELEASES.entryId(m.entry.entryId) }) : null,
+      m.entry.contact ? contactBlock(m.entry.contact) : null,
+    );
   }
 
   /** Signed in: the account line under the pieces, SIGNED IN AS … · CHANGE PASSWORD (C-04, moved here from the OWNERSHIP panel) · SIGN OUT. */

@@ -4,7 +4,8 @@
  *   landing ──SCAN──▶ scanner ──code read──▶ VERIFYING… ──▶ result
  *      ├──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
  *      ├──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
- *      └──THE COLLECTION──▶ the lookbook (/verify/lookbook, P-R02) ──SEE THE MODEL──▶ a sheet
+ *      ├──THE COLLECTION──▶ the lookbook (/verify/lookbook, P-R02) ──SEE THE MODEL──▶ a sheet
+ *      └──THE RELEASES──▶ the releases (/verify/releases, P-R03) ──SEE THE RELEASE──▶ a release's page
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
@@ -19,6 +20,8 @@
  *                    is the fragment, which no request line or proxy log holds;
  *   /verify/lookbook          THE COLLECTION, the lookbook of the models (P-R02);
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
+ *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
+ *   /verify/releases/<id>     a release's page, its entry and its draw (an address that is none: the list);
  *   anything else    the landing, its address put back to /verify.
  *
  * History: the landing screen is the base entry and every other screen shares
@@ -27,11 +30,14 @@
  * screen and releases the camera. A model's sheet is the one entry above
  * that: it lies on the lookbook's, so back from a sheet returns to the
  * lookbook, then to the landing (from a result, SEE THE MODEL turns the
- * scan's entry into the lookbook's). Opened directly, MY PIECES, a
- * certificate or the lookbook puts a landing entry under itself, and a sheet
- * the landing and the lookbook, so back still leads through the app rather
- * than out of it; a reload keeps the entry it is on. A certificate's fragment
- * edited in place reads the certificate again.
+ * scan's entry into the lookbook's). The releases (P-R03) are built alike: a
+ * release's page lies on the list's entry, so back from it returns to the
+ * list, then to the landing (from MY PIECES, an entry's release turns its
+ * entry into the list's). Opened directly, MY PIECES, a certificate, the
+ * lookbook or the releases puts a landing entry under itself, and a sheet or
+ * a release's page the landing and its list, so back still leads through
+ * the app rather than out of it; a reload keeps the entry it is on. A
+ * certificate's fragment edited in place reads the certificate again.
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
@@ -44,6 +50,7 @@ import { SessionStore } from './session.js';
 import type { ClientServices, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
+import { releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { resultViewModel } from './view-model.js';
 import { certificateView } from './views/certificate.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
@@ -51,30 +58,42 @@ import { landingView } from './views/landing.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
+import { releasesView, releaseView } from './views/releases.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet';
-
-/** What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a sheet. */
-type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release';
 
 /**
- * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, or the landing (also for
- * a path the app does not know). In any case: the certificate's PDF letters its address in capitals (the server
- * redirects those to /verify/c).
+ * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
+ * sheet, the releases or a release's page.
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' {
+type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release';
+
+/** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'certificate', 'lookbook', 'sheet', 'releases', 'release'];
+
+/**
+ * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
+ * release's page, or the landing (also for a path the app does not know). In any case: the certificate's PDF letters
+ * its address in capitals (the server redirects those to /verify/c).
+ */
+function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   const lookbook = lookbookRouteOf(path);
   if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
+  const releases = releasesRouteOf(path);
+  if (releases) return releases.release ? 'release' : 'releases';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
 /** The address of the sheet a path names, or null. */
 const sheetSlugOf = (pathname: string): string | null => lookbookRouteOf(pathname)?.sheet ?? null;
+
+/** The id of the release a path names, or null. */
+const releaseIdOf = (pathname: string): string | null => releasesRouteOf(pathname)?.release ?? null;
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
@@ -118,6 +137,8 @@ class App {
   private certificateToken: string | null = null;
   /** The address of the sheet on show (P-R02), to tell another sheet from the same one. */
   private sheetSlug: string | null = null;
+  /** The id of the release on show (P-R03), to tell another release from the same one. */
+  private releaseId: string | null = null;
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -138,6 +159,11 @@ class App {
         if (!(this.screen === 'sheet' && this.sheetSlug === slug)) void this.showSheet(slug);
       } else if (entry === 'lookbook' || route === 'lookbook') {
         if (this.screen !== 'lookbook') void this.showLookbook();
+      } else if (entry === 'release' || route === 'release') {
+        const id = releaseIdOf(location.pathname);
+        if (!(this.screen === 'release' && this.releaseId === id)) void this.showRelease(id);
+      } else if (entry === 'releases' || route === 'releases') {
+        if (this.screen !== 'releases') void this.showReleases();
       } else if (this.screen !== 'landing') this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -175,6 +201,17 @@ class App {
       } else if (!slug && location.pathname !== LOOKBOOK_PATH) history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
       if (slug) void this.showSheet(slug, false);
       else void this.showLookbook(false);
+    } else if (route === 'releases' || route === 'release') {
+      // The releases (P-R03) over the landing; a release's page over both, so back from it returns to the list. An
+      // address under /verify/releases that is none shows the list, its own address put back.
+      const id = releaseIdOf(location.pathname);
+      if (entryOf(history.state) !== (id ? 'release' : 'releases')) {
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+        if (id) history.pushState({ screen: 'release' }, '', releasePath(id));
+      } else if (!id && location.pathname !== RELEASES_PATH) history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
+      if (id) void this.showRelease(id, false);
+      else void this.showReleases(false);
     } else {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       this.showLanding(false);
@@ -194,8 +231,8 @@ class App {
    */
   private enter(): void {
     const entry = entryOf(history.state);
-    // From a sheet, the scan takes its entry over the lookbook's: back then returns to the lookbook.
-    if (entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'sheet') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
+    // From a sheet (or a release's page), the scan takes its entry over the lookbook's (the list's): back then returns there.
+    if (entry !== undefined && entry !== 'app' && REPLACEABLE.includes(entry)) history.replaceState({ screen: 'app' }, '', LANDING_PATH);
     else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
   }
 
@@ -217,9 +254,42 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
     else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
     void this.showLookbook();
+  }
+
+  /**
+   * THE RELEASES (P-R03), from the landing (an entry above it), from MY PIECES or the lookbook (in their entry), or
+   * from a release's page (the list is the entry under it: back to it).
+   */
+  private openReleases(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'release') {
+      history.back();
+      return;
+    }
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
+    else history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+    void this.showReleases();
+  }
+
+  /**
+   * A release's page, over the list's entry: from the list (SEE THE RELEASE), or from MY PIECES (an entry's release: its
+   * entry becomes the list's). Back from it returns to the list, never straight to the landing.
+   */
+  private openRelease(id: string): void {
+    const entry = entryOf(history.state);
+    const address = releasePath(id);
+    if (entry === 'release') history.replaceState({ screen: 'release' }, '', address);
+    else {
+      if (entry !== 'releases') {
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
+        else history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+      }
+      history.pushState({ screen: 'release' }, '', address);
+    }
+    void this.showRelease(id);
   }
 
   /**
@@ -267,6 +337,7 @@ class App {
       session: this.session,
       onPieces: () => this.openPieces(),
       onCollection: () => this.openLookbook(),
+      onReleases: () => this.openReleases(),
     });
     void this.swap(view, 'landing', focus);
   }
@@ -281,6 +352,8 @@ class App {
       onScan: () => void this.startScan(),
       clientServices: () => this.contactDetails(),
       onCollection: () => this.openLookbook(),
+      onReleases: () => this.openReleases(),
+      onRelease: (id) => this.openRelease(id),
     });
     if (await this.swap(view.root, 'pieces', focus)) this.live = view;
     else view.dispose();
@@ -303,6 +376,35 @@ class App {
     this.sheetSlug = slug;
     const view = sheetView({ api: this.api, session: this.session, slug, onCollection: () => this.openLookbook() });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** THE RELEASES (P-R03): the drops ORBES announces, each with its page. */
+  private async showReleases(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.releaseId = null;
+    const view = releasesView({ api: this.api, onScan: () => void this.startScan(), onRelease: (id) => this.openRelease(id), onCollection: () => this.openLookbook() });
+    if (await this.swap(view.root, 'releases', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** A release's page (P-R03): its entry for a signed-in account, its draw; `id` null: an address that is none. */
+  private async showRelease(id: string | null, focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.releaseId = id;
+    const view = releaseView({
+      api: this.api,
+      session: this.session,
+      id,
+      onScan: () => void this.startScan(),
+      onReleases: () => this.openReleases(),
+      onModel: (slug) => this.openSheet(slug),
+      clientServices: () => this.contactDetails(),
+      offsetMinutes: -new Date().getTimezoneOffset(),
+    });
+    if (await this.swap(view.root, 'release', focus)) this.live = view;
     else view.dispose();
   }
 
@@ -345,7 +447,7 @@ class App {
 
   private goHome(): void {
     const entry = entryOf(history.state);
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'sheet') history.back();
+    if (entry !== undefined && REPLACEABLE.includes(entry)) history.back();
     else this.showLanding();
   }
 

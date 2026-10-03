@@ -231,7 +231,7 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(sectionProblems('t', ['- **X**: the client service of ORBES, reachable at [À COMPLÉTER: email].'], ['- **X**: the client service of ORBES.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina. Phone:'])).not.toEqual([]);
-    // …so the words that still need it are never published without it (article 16 named no mediator).
+    // …so the words that still need it are never published without it (article 17 names no mediator).
     const mediator = ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name of the mediator].'];
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator.'])).not.toEqual([]);
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES.'])).toEqual([]);
@@ -533,7 +533,9 @@ describe('legal pages: both languages, links, lexicon', () => {
     // never changes once its version is published in production. 2026-10-03: the first version, completed that day
     // (OPS-D2 and J-04/J-06 review) before any deployment of the legal pages.
     // 2026-10-03 was revised the same day it went live (publisher, contact, Wyoming law, 90-day retention: choices 16-18).
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e' };
+    // 2026-10-04: deployment A of the plan of 2026-10-03, one version for the whole deployment (the releases of P-R03:
+    // terms article 12, the privacy policy's entries); its items until that deployment move this line, never another.
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '3db23ae620888dc9' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

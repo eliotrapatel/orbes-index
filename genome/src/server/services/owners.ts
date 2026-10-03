@@ -14,7 +14,8 @@
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
  *            transaction with every session of the account revoked, its
  *            pending transfers cancelled, its open links to ownership
- *            certificates withdrawn and its open recovery code revoked.
+ *            certificates withdrawn, its open entries in the drops withdrawn
+ *            (P-R03) and its open recovery code revoked.
  *            Sign-in is then refused (403 ACCOUNT_LOCKED) until it is
  *            unlocked, and a recovery code cannot be issued. Audited
  *            `account.lock`.
@@ -23,16 +24,18 @@
  *   export   GET  /api/admin/owners/:id/export (ADMIN): everything the registry
  *            holds about the account, for a request under the right of access,
  *            including the links to ownership certificates it created (never
- *            their tokens) and every audit entry that names it, as target or
- *            as actor. Audited `account.export` with counts only.
+ *            their tokens), its entries in the drops (P-R03) and every audit
+ *            entry that names it, as target or as actor. Audited
+ *            `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
  * not a second mechanism. Emails are masked for an AUDITOR by the routes
  * (routes/admin/serialize.ts `clientEmail`): the service returns them as stored.
  *
- * Lock order: the account row, its open certificate links, then the
- * products of its pending transfers (OwnershipService.cancelPendingTransfersFrom),
- * as in an assisted recovery.
+ * Lock order: the account row, its open certificate links, the drops of its
+ * open entries (FOR SHARE, as ENTER and WITHDRAW), then the products of its
+ * pending transfers (OwnershipService.cancelPendingTransfersFrom), as in an
+ * assisted recovery.
  * The audit log is permanent: entries name the account id, never its email.
  */
 import { sql } from 'kysely';
@@ -43,6 +46,7 @@ import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clo
 import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
+import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import type { OwnershipService } from './ownership.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
@@ -178,6 +182,8 @@ export interface LockOutcome {
   recoveryCodesRevoked: number;
   /** The account's links to ownership certificates the lock withdrew (F-06). */
   certificatesRevoked: number;
+  /** The account's entries in drops not drawn yet the lock withdrew (P-R03). */
+  dropEntriesWithdrawn: number;
 }
 
 /**
@@ -234,6 +240,11 @@ export interface AccountExport {
    * a reader of the link meets now. Never the token.
    */
   certificates: AccountCertificate[];
+  /**
+   * The account's entries in the drops (P-R03), oldest first: the release, the status, the entry's id (the one a
+   * drawn release publishes with its tier, seniority and rank) and the end of a place held; never the console's note.
+   */
+  dropEntries: ExportedDropEntry[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -391,21 +402,25 @@ export class OwnerService {
       const recoveryCodesRevoked = revoked.length;
       // Links to ownership certificates created by whoever held the account stop showing the record (THREAT-MODEL Y).
       const certificates = await withdrawAccountCertificates(tx, account.id, now);
+      // Its entries in drops not drawn yet leave their draw (P-R03): the drops FOR SHARE, as ENTER and WITHDRAW take them.
+      const entries = await withdrawAccountEntries(tx, account.id);
       // Last of the writes: it audits each cancellation, and no row is locked after the audit chain's lock.
       const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
       await auditWithdrawnCertificates(this.audit, tx, actor, certificates, 'account_locked');
+      await auditWithdrawnEntries(this.audit, tx, actor, entries, 'account_locked');
       const certificatesRevoked = certificates.length;
+      const dropEntriesWithdrawn = entries.length;
       await this.audit.record(
         {
           actor,
           action: 'account.lock',
           targetType: 'account',
           targetId: account.id,
-          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked, certificatesRevoked },
+          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn },
         },
         tx,
       );
-      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked };
+      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn };
     });
   }
 
@@ -483,6 +498,7 @@ export class OwnerService {
       // Withdrawn ones too: a withdrawal by a lock is audited with the ADMIN as actor and the piece as target, so the
       // activity below does not name the account for it.
       const certificates = await accountCertificates(tx, a.id, now);
+      const dropEntries = await accountDropEntries(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -555,6 +571,7 @@ export class OwnerService {
         sessions: sessions.map((s) => ({ createdAt: s.created_at, lastSeenAt: s.last_seen_at, expiresAt: s.expires_at, userAgent: s.user_agent })),
         recoveryCodes: codes.map((c) => ({ createdAt: c.created_at, expiresAt: c.expires_at, usedAt: c.used_at, revokedAt: c.revoked_at })),
         certificates,
+        dropEntries,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -580,6 +597,7 @@ export class OwnerService {
             sessions: out.sessions.length,
             recoveryCodes: out.recoveryCodes.length,
             certificates: out.certificates.length,
+            dropEntries: out.dropEntries.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

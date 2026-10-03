@@ -2,7 +2,8 @@
  * The owner's sheet of ORBES Client Services (A-06): search by exact email
  * and by the REF printed under a result, the sheet (pieces, transfers in
  * progress, 20 latest scans), lock and unlock (ADMIN: sessions end, pending
- * transfers cancelled, links to ownership certificates withdrawn, the open
+ * transfers cancelled, links to ownership certificates withdrawn, open
+ * entries in the drops withdrawn (P-R03, test/api/drops.test.ts), the open
  * recovery code revoked, sign-in refused), the
  * right-of-access export (ADMIN, no-store, audited, every audit entry that
  * names the account, no other owner's data on a piece sold, no internal
@@ -188,7 +189,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const locked = await cs.post(`/api/admin/owners/${id}/lock`);
       expect(locked.statusCode).toBe(200);
-      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1 });
+      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0 });
 
       // The sessions have ended; the right password is refused with the lock, a wrong one as ever.
       expect((await owner.client.get('/api/v1/account/me')).statusCode).toBe(401);
@@ -226,7 +227,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // The audit log names the account, the counts and the admin; never the email.
       const lockEntry = (await h.ctx.audit.list({ action: 'account.lock', targetId: id })).items;
       expect(lockEntry).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0 } }),
       ]);
       expect(JSON.stringify(lockEntry)).not.toContain(owner.email);
       expect((await h.ctx.audit.list({ action: 'ownership.transfer.cancel', targetId: productId })).items[0].details).toMatchObject({ reason: 'account_locked' });
@@ -354,8 +355,10 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.scans[2]).toMatchObject({ userAgentFamily: family, clientMetrics: null });
       expect(x.sessions).toEqual([expect.objectContaining({ userAgent: expect.stringContaining('iPhone') })]);
       expect(x.recoveryCodes).toEqual([expect.objectContaining({ usedAt: null, revokedAt: null })]);
-      // No link to an ownership certificate here (the service test lists open and withdrawn ones).
+      // No link to an ownership certificate here (the service test lists open and withdrawn ones), no entry in a drop
+      // (test/api/drops.test.ts lists them).
       expect(x.certificates).toEqual([]);
+      expect(x.dropEntries).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -385,7 +388,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

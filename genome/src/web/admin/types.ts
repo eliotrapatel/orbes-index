@@ -72,6 +72,14 @@ export type ReportStatus = (typeof REPORT_STATUSES)[number];
 export const LOOKBOOK_STATES = ['HIDDEN', 'PUBLIC', 'RESERVED'] as const;
 export type LookbookState = (typeof LOOKBOOK_STATES)[number];
 
+/** A drop's state (P-R03), computed by the server from its dates: DRAFT until published, CANCELLED before its draw only. */
+export const DROP_STATES = ['DRAFT', 'UPCOMING', 'OPEN', 'CLOSED', 'DRAWN', 'CANCELLED'] as const;
+export type DropState = (typeof DROP_STATES)[number];
+
+/** An entry of a drop (P-R03, drop_entries.status). */
+export const DROP_ENTRY_STATUSES = ['ENTERED', 'SELECTED', 'WAITLISTED', 'CONFIRMED', 'LAPSED', 'WITHDRAWN'] as const;
+export type DropEntryStatus = (typeof DROP_ENTRY_STATUSES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -738,6 +746,8 @@ export interface OwnerLock {
   recoveryCodesRevoked: number;
   /** The account's links to ownership certificates the lock withdrew. */
   certificatesRevoked: number;
+  /** The account's entries in drops not drawn yet the lock withdrew (P-R03). */
+  dropEntriesWithdrawn: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */
@@ -841,4 +851,68 @@ export interface ChainVerification {
   checked: number;
   firstBadId?: number;
   head: { id: number; hash: string } | null;
+}
+
+// ── The Club: drops (P-R03) ────────────────────────────────────────────────
+
+/** A drop as the console reads it (GET /api/admin/drops, /:id): never its sealed seed, nor the seed before the draw. */
+export interface Drop {
+  id: string;
+  title: string;
+  description: string | null;
+  model: { id: string; name: string; type: string; active: boolean };
+  quantity: number;
+  opensAt: Iso;
+  closesAt: Iso;
+  /** How long a place drawn is held, in hours (1 to 336). */
+  purchaseWindowHours: number;
+  state: DropState;
+  publishedAt: Iso | null;
+  cancelledAt: Iso | null;
+  drawnAt: Iso | null;
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  /** SHA-256 of the seed, hexadecimal: committed at creation, published with the drop. */
+  seedHash: string;
+  /** The seed, once drawn. */
+  seed: string | null;
+  entries: Record<DropEntryStatus, number>;
+}
+
+/** POST /api/admin/drops; any field of PATCH /api/admin/drops/:id while a DRAFT (the description only once published). */
+export interface DropInput {
+  modelId: string;
+  title: string;
+  description?: string | null;
+  quantity: number;
+  opensAt: Iso;
+  closesAt: Iso;
+  purchaseWindowHours?: number;
+}
+
+export type DropChange = Partial<DropInput>;
+
+/** An entry of a drop (GET /api/admin/drops/:id/entries): the email masked for an AUDITOR. */
+export interface DropEntry {
+  id: string;
+  accountId: string;
+  email: string;
+  status: DropEntryStatus;
+  enteredAt: Iso;
+  tier: number | null;
+  seniority: number | null;
+  rank: number | null;
+  respondBy: Iso | null;
+  handledBy: { id: string; email: string } | null;
+  handledAt: Iso | null;
+  note: string | null;
+}
+
+/** POST /api/admin/drops/:id/draw. */
+export interface DrawOutcome {
+  drop: Drop;
+  entries: number;
+  places: number;
+  selected: number;
+  waitlisted: number;
 }

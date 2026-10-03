@@ -73,7 +73,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 - JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`, from year 0001: PostgreSQL has no year 0000, so a date or a date-time before `0001-01-01` (UTC) is `400 VALIDATION_FAILED`, never sent to the database. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
 - Wherever a path or body takes a product reference (`productId`), both the canonical id (case-insensitive) and the product's row UUID are accepted.
-- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise (the public keys, the categories, the contact of Client Services, the lookbook's lists and sheets of §8.8, cached 5 minutes, and the photographs of §8.6, cached for a year as they never change).
+- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise (the public keys, the categories, the contact of Client Services, the lookbook's lists and sheets of §8.8, cached 5 minutes, the releases of §8.9, cached a minute, and the photographs of §8.6, cached for a year as they never change).
 - Security headers on every response include: the Content-Security-Policy `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `Permissions-Policy: camera=(self)`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (except the public key list), and in production `Strict-Transport-Security: max-age=63072000; includeSubDomains`. `X-Powered-By` is removed.
 - No CORS headers are sent, except on the public key list (§8.2). Browser code on another origin can therefore only read the public keys.
 
@@ -101,7 +101,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 2.2 CSRF protection
 
-Applies to every **unsafe** request (any method other than `GET`, `HEAD`, `OPTIONS`) under the account, ownership, club (§10.9) and admin routes:
+Applies to every **unsafe** request (any method other than `GET`, `HEAD`, `OPTIONS`) under the account, ownership, club (§10.9, §10.10) and admin routes:
 
 1. **Origin rule.** The `Origin` header must equal `PUBLIC_ORIGIN` exactly (scheme, host and port). A request without `Origin` is accepted only with `Sec-Fetch-Site: same-origin`. `Origin: null`, look-alike hosts and `Sec-Fetch-Site: same-site` or `cross-site` are refused.
 2. **Token rule.** When the request is authenticated by a session cookie, the header `x-csrf-token` must equal that session's CSRF token (compared in constant time). Tokens of other sessions are refused.
@@ -118,8 +118,8 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR > RETAIL**; a role may do everythi
 |---|---|
 | RETAIL | A seller (A-08, migration 0008). The sale mode of a phone (§16.18: look a scanned piece up, start its warranty at a point of sale) and the list of points of sale it chooses from (`GET /api/admin/retailers`, §16.17). Manage its own session, password and second factor. **Nothing else**: no product, code, scan, owner, warranty list or dashboard, no download. |
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2), the list of points of sale included. Manage its own session, password and second factor. **Nothing it does changes the registry**: although ranked above RETAIL, it does not use the sale mode (`403 FORBIDDEN` on `/api/admin/sale/*`; the console shows it no Sale mode link). |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's lookbook, its place, address, story and specifications, and its gallery (§13.4; P-R02), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
-| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's lookbook, its place, address, story and specifications, and its gallery (§13.4; P-R02), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), the releases of the Club page, created, edited, published and cancelled, and their entries concluded, lapsed or offered to the waiting list (§16.19; P-R03), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data), the draw of a release (§16.19; P-R03). |
 
 ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
 
@@ -146,7 +146,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 | `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (the ownership certificate a link opens, §8.7), `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
 | `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/v1/ownership/incidents/resolve`, `POST /api/admin/auth/login`, `POST /api/admin/auth/password`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
-| `api` | Every other `/api/v1/…` route (the lookbook's, §8.8, and the club's, §10.9, included), and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
+| `api` | Every other `/api/v1/…` route (the lookbook's, §8.8, the releases', §8.9, and the club's, §10.9 and §10.10, included), and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
 | `media` | `GET /api/v1/media/:sha256`, the photographs (§8.6; P-R02): a lookbook sheet shows up to nine, and the customers of a boutique share its address | 5 × the `api` budget (`MEDIA_RATE_FACTOR`, `http/rate-limit.ts`): 600 by default; no variable of its own |
 
 - Values accept integers 1–1 000 000; an unknown `RATE_LIMIT_*` variable is a configuration error. The `test` environment defaults to 10 000 per group.
@@ -369,6 +369,29 @@ Photographs (F-04, §8.6, §13.4, §14.12) and the lookbook (P-R02, §8.8, §10.
 | `IMAGE_ANIMATED` | 400 | An animated WebP (its animation flag, or ANIM / ANMF chunks): a photograph is a still image. |
 | `MEDIA_NOT_FOUND` | 404 | (§8.6) No stored photograph with this SHA-256: never uploaded, or removed and no longer used by any model, gallery or piece. |
 
+The releases (P-R03, §8.9, §10.10, §16.19):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `DROP_NOT_FOUND` | 404 | No release at this address for this reader: unknown, malformed, or (outside the console) not published. One answer for all (*This release is not known to ORBES.*). |
+| `DROP_ENTRY_NOT_FOUND` | 404 | (§16.19) No entry with this id in this release. |
+| `DROP_CANCELLED` | 409 | The release has been cancelled: no entry, no change of its fields but its description, no draw. |
+| `DROP_ALREADY_DRAWN` | 409 | The release has been drawn: its entries no longer change (no entry, no withdrawal), it is not drawn again and not cancelled. |
+| `DROP_PUBLISHED` | 409 | (§16.19) The release is published: only its description changes. |
+| `DROP_ALREADY_PUBLISHED` | 409 | (§16.19) The release is published already. |
+| `DROP_WINDOW_PAST` | 409 | (§16.19) Its entries would already be closed at its publication: change its dates first. |
+| `DROP_NOT_PUBLISHED` | 409 | (§16.19) A draft is not drawn. |
+| `DROP_NOT_CLOSED` | 409 | (§16.19) Its entries are still open: the draw follows their close (`closesAt`). |
+| `DROP_NOT_OPEN` | 409 | (§10.10) Its entries are not open: before `opensAt`, or after `closesAt`. |
+| `DROP_NOT_DRAWN` | 409 | (§8.9, §16.19) The release has not been drawn yet: no list of its draw, no place to offer. |
+| `DROP_ALREADY_ENTERED` | 409 | (§10.10) The account is entered already (one entry per account and release). |
+| `DROP_NOT_ENTERED` | 409 | (§10.10) The account has no entry to withdraw (none, or withdrawn already). |
+| `DROP_ENTRY_NOT_SELECTED` | 409 | (§16.19) Only an entry whose place is held (`SELECTED`) is concluded or lapses. |
+| `DROP_PLACE_HELD` | 409 | (§16.19) The place is held until its `respondBy` (said in the message, UTC): it lapses only after that time. |
+| `DROP_FULL` | 409 | (§16.19) Every piece of the release is held or sold (`SELECTED` and `CONFIRMED` reach `quantity`): no place to offer. |
+| `DROP_WAITLIST_EMPTY` | 409 | (§16.19) No entry is left on the waiting list. |
+| `DROP_SEED_UNAVAILABLE` | 503 | (§16.19) The seed of the draw cannot be opened with this server's key, or does not match its commitment (`seedHash`): the draw does not run, nothing is written. The key the seeds are sealed with comes from `KEY_ENCRYPTION_KEY` (from `COOKIE_SECRET` without one): changing it leaves the seeds of the releases not drawn yet unreadable ([DEPLOYMENT](DEPLOYMENT.md)); such a release is cancelled and created again. |
+
 ---
 
 ## 6. Pagination
@@ -399,6 +422,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/v1/media/:sha256` | — | — | media | 8.6 |
 | GET | `/api/v1/lookbook` | — | — | api | 8.8 |
 | GET | `/api/v1/lookbook/:slug` | — | — | api | 8.8 |
+| GET | `/api/v1/drops` | — | — | api | 8.9 |
+| GET | `/api/v1/drops/:id` | — | — | api | 8.9 |
+| GET | `/api/v1/drops/:id/entries` | — | — | api | 8.9 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
@@ -423,6 +449,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/v1/ownership/certificates/:id` | Account (the link's owner) | yes | api | 11.7 |
 | GET | `/api/v1/club/lookbook` | Account (an owner of a piece) | — | api | 10.9 |
 | GET | `/api/v1/club/lookbook/:slug` | Account (an owner of a piece) | — | api | 10.9 |
+| GET | `/api/v1/club/status` | Account | — | api | 10.10 |
+| POST | `/api/v1/club/drops/:id/enter` | Account | yes | api | 10.10 |
+| POST | `/api/v1/club/drops/:id/withdraw` | Account | yes | api | 10.10 |
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
 | POST | `/api/admin/auth/logout` | RETAIL (optional) | yes | admin | 12.2 |
 | GET | `/api/admin/auth/me` | RETAIL | — | admin | 12.3 |
@@ -490,6 +519,17 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | PATCH | `/api/admin/retailers/:id` | **ADMIN** | yes | admin | 16.17 |
 | POST | `/api/admin/sale/lookup` | RETAIL, OPERATOR, ADMIN | yes | verify | 16.18 |
 | POST | `/api/admin/sale/activate` | RETAIL, OPERATOR, ADMIN | yes | admin | 16.18 |
+| GET | `/api/admin/drops` | AUDITOR | — | admin | 16.19 |
+| POST | `/api/admin/drops` | OPERATOR | yes | admin | 16.19 |
+| GET | `/api/admin/drops/:id` | AUDITOR | — | admin | 16.19 |
+| PATCH | `/api/admin/drops/:id` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/publish` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/cancel` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/draw` | **ADMIN** | yes | admin | 16.19 |
+| GET | `/api/admin/drops/:id/entries` | AUDITOR | — | admin | 16.19 |
+| POST | `/api/admin/drops/:id/entries/:entryId/confirm` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/entries/:entryId/lapse` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/offer-next` | OPERATOR | yes | admin | 16.19 |
 | GET | `/api/admin/keys` | AUDITOR | — | admin | 17.1 |
 | POST | `/api/admin/keys/rotate` | **ADMIN** | yes | admin | 17.2 |
 | POST | `/api/admin/keys/:keyId/retire` | **ADMIN** | yes | admin | 17.3 |
@@ -506,7 +546,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, the photographs (`GET /api/v1/media/:sha256`, `/api/admin/models/:id/image`, `/api/admin/products/:productId/photo`; F-04), the lookbook (`GET /api/v1/lookbook` and `/:slug`, the club's `GET /api/v1/club/lookbook` and `/:slug`, `GET /api/admin/models/:id`, the lookbook's fields of `PATCH /api/admin/models/:id`, `/api/admin/models/:id/gallery`; P-R02, and `product.lookbook` of a verification), `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` and `incidentReportable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, the photographs (`GET /api/v1/media/:sha256`, `/api/admin/models/:id/image`, `/api/admin/products/:productId/photo`; F-04), the lookbook (`GET /api/v1/lookbook` and `/:slug`, the club's `GET /api/v1/club/lookbook` and `/:slug`, `GET /api/admin/models/:id`, the lookbook's fields of `PATCH /api/admin/models/:id`, `/api/admin/models/:id/gallery`; P-R02, and `product.lookbook` of a verification), the releases (`GET /api/v1/drops`, `/:id` and `/:id/entries`, the club's `GET /api/v1/club/status` and `POST /api/v1/club/drops/:id/enter` and `/withdraw`, every `/api/admin/drops` route, the lock's `dropEntriesWithdrawn` and the export's `dropEntries`; P-R03), `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` and `incidentReportable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -738,6 +778,55 @@ A model is in the lookbook as the console set it (§13.4): **HIDDEN** (the defau
 A HIDDEN or RESERVED model, an unknown or malformed address: one **`404 LOOKBOOK_NOT_FOUND`** (*This model is not in the ORBES collection.*), `no-store`, so a model shown later is seen at once. Errors: `400 BAD_REQUEST` (an address over 128 characters, §1.2), `404 LOOKBOOK_NOT_FOUND`, `429 RATE_LIMITED`.
 
 **In the verify app:** `/verify/lookbook`, THE COLLECTION (§18; BRAND §5): the models on ivory plates, grouped by collection, each with SEE THE MODEL, a text link to `/verify/lookbook/<slug>`, the sheet: the collection, the name and type, the cover and the gallery on an ivory plate, THE STORY, SPECIFICATIONS, CARE. Every photograph loads lazily. The landing and MY PIECES link to THE COLLECTION; an authentic result whose model is PUBLIC links to its sheet (`product.lookbook`, §9.2).
+
+### 8.9 `GET /api/v1/drops`, `GET /api/v1/drops/:id` and `GET /api/v1/drops/:id/entries` (extension of the contract)
+
+The **releases** (P-R03; *drops* in the code, `services/drops.ts`): a model ORBES releases in a limited number of pieces. ORBES accounts enter its draw while its entries are open (§10.10); after their close an ADMIN runs the draw once (§16.19), which ranks the entries by tier, then by seniority, then in the order of a seed committed when the release was created; ORBES Client Services then concludes each sale with the entries selected, outside the service. Public, no session; rate group `api`; `HEAD` too. The answers are the same for everyone and carry `Cache-Control: public, max-age=60`, so an opening, a close or a draw shows within a minute (the verification app asks with `cache: 'no-store'` and reads the server's answer at once).
+
+A release's **state** follows from its times: `UPCOMING` (published, before `opensAt`), `OPEN` (`opensAt` ≤ now < `closesAt`), `CLOSED` (after `closesAt`, not drawn yet), `DRAWN`, `CANCELLED` (cancelled before its draw). A draft (`DRAFT`, §16.19) is never here.
+
+**`GET /api/v1/drops`, 200**: the published releases, the latest opening first, at most 50; a cancelled one stays, `CANCELLED`.
+
+```json
+{
+  "drops": [
+    {
+      "id": "1f0c6c52-…",
+      "title": "MONOLITHE, the first fifty",
+      "state": "OPEN",
+      "model": { "name": "MONOLITHE", "type": "RING", "collection": "ORBIT", "imageUrl": "/api/v1/media/9f2c4e…", "lookbook": "monolithe" },
+      "quantity": 50,
+      "opensAt": "2026-10-12T10:00:00.000Z",
+      "closesAt": "2026-10-14T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `model.imageUrl` | The model's reference photograph (§8.6), or `null`. |
+| `model.lookbook` | The slug of the model's sheet (§8.8) when the model is PUBLIC in the lookbook, else `null`. |
+| `quantity` | The pieces released: the places of the draw. |
+
+**`GET /api/v1/drops/:id`, 200**: a release's page: the card above, and
+
+| Field | Notes |
+|---|---|
+| `description` | Plain paragraphs, a blank line between two; `null` without one. |
+| `purchaseWindowHours` | How long a place drawn is held for its entry: 1 to 336 hours, 48 unless the console set another. |
+| `publishedAt`, `cancelledAt`, `drawnAt` | Times; `null` when not (yet) so. |
+| `seedHash` | The SHA-256 of the release's seed, 64 hexadecimal characters: its **commitment**, drawn when the release was created, shown from its publication on. |
+| `seed` | The seed, 32 bytes as 64 hexadecimal characters, **once drawn**; `null` before. No route gives it before the draw, the console's included (§16.19). |
+| `entries` | Once drawn, how many entries took part (each has a rank); `null` before. |
+
+A draft, an unknown or a malformed id: one **`404 DROP_NOT_FOUND`** (*This release is not known to ORBES.*), `no-store`. Errors: `400 BAD_REQUEST` (an address over 128 characters, §1.2), `404 DROP_NOT_FOUND`, `429 RATE_LIMITED`.
+
+**`GET /api/v1/drops/:id/entries`, 200**: once drawn, the entries the draw ranked, by rank, paginated (§6): `{ "items": [ { "id": "7c2e90d1-…", "tier": 2, "seniority": 1, "rank": 1 } ], "page": 1, "pageSize": 50, "total": 132 }`. `id` is the entry's id, the one its account reads in MY PIECES (§10.10), **never its account**; `tier` (0: no piece, 1 TITANE, 2 PLATINE, 3 PALLADIUM) and `seniority` (full years) are those read at the draw. Before the draw: `409 DROP_NOT_DRAWN`. Errors: `404 DROP_NOT_FOUND`, `409 DROP_NOT_DRAWN`, `429 RATE_LIMITED`.
+
+**The rule of the draw** (`drawOrder`; TERMS-FACTS R65): the entries still `ENTERED` at the draw, by `tier` descending, then `seniority` descending, then `sha256(seed ‖ id)` ascending in hexadecimal, where `seed` is the 32 bytes of the seed and `id` the entry's id in lower-case ASCII (its 36 characters); two equal keys, by `id`. The first ranks, as many as there are places left (`quantity` less the entries already `SELECTED` or `CONFIRMED`), are selected, the others are on the waiting list. With the seed published, anyone can check that `sha256(seed)` is `seedHash` and rank the entries again.
+
+**In the verify app:** `/verify/releases`, THE RELEASES (§18; BRAND §5): the published releases, each with its model's photograph, its state, its pieces and the time that matters now (in UTC), and SEE THE RELEASE, a text link to `/verify/releases/<id>`, a release's page: its model (SEE THE MODEL when it is PUBLIC in the lookbook), its pieces, its dates in UTC and on the phone's own clock, how long a place is held, the rule of the draw word for word, the fingerprint of the seed; once drawn, the seed, checked on the phone (`crypto.subtle`: *Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.*), and the entries by rank, 100 at a time (SHOW MORE), the reader's own marked YOURS. Its entry (§10.10) is offered there. THE RELEASES is linked from the landing and from MY PIECES. The word is DRAW, never lottery (BRAND §4.5).
 
 ---
 
@@ -1323,6 +1412,57 @@ RESERVED means **unlisted, not confidential**: the sheet is not listed for the p
 Errors: `401 UNAUTHORIZED`, `403 OWNERS_ONLY`, `404 LOOKBOOK_NOT_FOUND`, `429 RATE_LIMITED`.
 
 **In the verify app:** THE COLLECTION (§8.8) asks for the reserved models once the session is known and signed in; an owner sees them under **RESERVED FOR OWNERS**, and their sheets read `RING · RESERVED FOR OWNERS`. Any other answer shows no section and says nothing. A sheet the public route answers 404 is asked of the club, signed in.
+
+### 10.10 The club's releases: `GET /api/v1/club/status`, `POST /api/v1/club/drops/:id/enter` and `POST /api/v1/club/drops/:id/withdraw` (extension of the contract)
+
+P-R03 (`routes/club.ts`, `services/club.ts`, `services/drops.ts`). A signed-in account (`401 UNAUTHORIZED` otherwise); the two mutations are POSTs, held to the CSRF rules of §2.2; every answer `no-store`; rate group `api`. **Any ORBES account** enters a release, whether or not it holds a piece: one that holds none is drawn after the tiers (tier 0).
+
+**`GET /api/v1/club/status`, 200**: the account's standing now, and its entries in the published releases, the latest opening first (at most 50).
+
+```json
+{
+  "tier": { "level": 2, "name": "PLATINE" },
+  "pieces": 3,
+  "seniority": 1,
+  "entries": [
+    {
+      "id": "7c2e90d1-…",
+      "dropId": "1f0c6c52-…",
+      "title": "MONOLITHE, the first fifty",
+      "state": "DRAWN",
+      "status": "SELECTED",
+      "enteredAt": "2026-10-12T10:04:11.000Z",
+      "rank": 4,
+      "respondBy": "2026-10-16T10:05:00.000Z",
+      "opensAt": "2026-10-12T10:00:00.000Z",
+      "closesAt": "2026-10-14T10:00:00.000Z",
+      "drawnAt": "2026-10-14T10:05:00.000Z"
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `tier` | `level`, 0 to 3, and its `name` (`null` for 0): TITANE from 1 piece held now, PLATINE from 3, PALLADIUM from 5 (`CLUB_TIER_THRESHOLDS`, a constant of the code, never a setting). A piece counts while its ownership is open and it is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED, as for §10.9. |
+| `pieces` | The pieces counted. |
+| `seniority` | The full years (UTC) since the account's first ownership began, past or present; 0 without one. |
+| `entries[].id` | The entry's id: the one the draw's list publishes (§8.9). |
+| `entries[].state` | The release's state (§8.9). |
+| `entries[].status` | `ENTERED`; `WITHDRAWN`; `SELECTED`, a place held until `respondBy`; `WAITLISTED`, on the waiting list at `rank`; `CONFIRMED`, the sale concluded by ORBES Client Services; `LAPSED`, the place held was not taken up in time. |
+| `entries[].enteredAt` | When the account first entered: an entry again keeps its row, its id and this time. |
+
+The tier and the seniority are those of now; the draw reads them again at its own time (TERMS-FACTS R65).
+
+**`POST /api/v1/club/drops/:id/enter`** (no body, or `{}`): enters an `OPEN` release; a withdrawn entry becomes `ENTERED` again, the same row and id (never a new one). **200** `{ "entry": { … } }`, the entry as in the status. Audited `drop.enter` (the account as actor, the release as target, `{ entryId }`, and `again: true` for an entry again). Refused: a release unknown, malformed or not published (`404 DROP_NOT_FOUND`), cancelled (`409 DROP_CANCELLED`), drawn (`409 DROP_ALREADY_DRAWN`), not open (`409 DROP_NOT_OPEN`: before `opensAt`, after `closesAt`), an account entered already (`409 DROP_ALREADY_ENTERED`).
+
+**`POST /api/v1/club/drops/:id/withdraw`** (no body, or `{}`): the account's `ENTERED` entry becomes `WITHDRAWN`, until the draw, even once the entries are closed. **200** `{ "entry": { … } }`. Audited `drop.withdraw` (`{ entryId }`). Refused: `404 DROP_NOT_FOUND`, `409 DROP_ALREADY_DRAWN`, `409 DROP_CANCELLED`, `409 DROP_NOT_ENTERED` (no entry, or withdrawn already).
+
+Both read the account's row under a share lock, then the release's: a lock of the account (§16.12) under way finishes first (`403 ACCOUNT_LOCKED` when it lands meanwhile; the lock withdraws the account's open entries), and so does a draw, which takes the release's row for update: an entry it ranked no longer changes. No email is sent (TERMS-FACTS N1): the account follows its entries here.
+
+Errors: `400 VALIDATION_FAILED` (a body with fields), `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `404 DROP_NOT_FOUND`, `409` as above, `429 RATE_LIMITED`.
+
+**In the verify app:** a release's page (§8.9) offers ENTER THE DRAW, its one button, to a signed-in account while entries are open, then WITHDRAW, a text link, until the draw; signed out, the sign-in and CREATE ACCOUNT of MY PIECES, under *Enter the draw with your ORBES account: sign in, or create one. Any account may enter, one entry per person.* The entry's status is said in a sentence: a place held reads *Your place is held until … — ORBES Client Services will contact you.*, with the contact of ORBES Client Services (an email the reader writes, ready with the release and the entry's id). MY PIECES lists YOUR RELEASES, each entry with its id and its status, and links THE RELEASES.
 
 ---
 
@@ -2576,11 +2716,11 @@ In the console: `#/owners/:id`, reached from Owners, from a REF search and from 
 
 **ADMIN**. No body (or `{}`).
 
-**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request (then after the identity check of SECURITY-MODEL §3.6, outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6). In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`), and its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_locked"`), so a link shared by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.7). Until it is unlocked the customer cannot sign in: a sign-in with the right password answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*, §10.2). Nor can they use a recovery code: the lock revoked the open one and none can be issued while the account is locked, so a code answers `400 RECOVERY_CODE_INVALID` like a replaced one (§10.8); `403 ACCOUNT_LOCKED` comes only when the lock lands between the check of a code and its use. A request already on its way when the lock takes effect is refused with `403 ACCOUNT_LOCKED`: a transfer (§11.2), a LOST or STOLEN declaration (§11.5), a first registration (§11.1, its claim code's check included) and the acceptance of a transfer by the locked account (§11.3), each of which reads the account again under a share lock before it locks the piece, so no piece reaches a LOCKED account; a password change (§10.7) and a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
+**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request (then after the identity check of SECURITY-MODEL §3.6, outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6). In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`), and its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_locked"`), so a link shared by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.7), and its **entries in releases not drawn yet are withdrawn** (§10.10; P-R03: an `ENTERED` entry of a release neither drawn nor cancelled becomes `WITHDRAWN`, audited `drop.withdraw` with `details.reason: "account_locked"`, before the transfers are cancelled), so a draw does not select the account. Until it is unlocked the customer cannot sign in: a sign-in with the right password answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*, §10.2). Nor can they use a recovery code: the lock revoked the open one and none can be issued while the account is locked, so a code answers `400 RECOVERY_CODE_INVALID` like a replaced one (§10.8); `403 ACCOUNT_LOCKED` comes only when the lock lands between the check of a code and its use. A request already on its way when the lock takes effect is refused with `403 ACCOUNT_LOCKED`: a transfer (§11.2), a LOST or STOLEN declaration (§11.5), a first registration (§11.1, its claim code's check included) and the acceptance of a transfer by the locked account (§11.3), each of which reads the account again under a share lock before it locks the piece, so no piece reaches a LOCKED account; a password change (§10.7) and a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
 
-**200** `{ "status": "LOCKED", "sessionsRevoked": 2, "transfersCancelled": 1, "recoveryCodesRevoked": 1, "certificatesRevoked": 1 }` (`recoveryCodesRevoked`: 0 or 1; a code already expired is left as it was; `certificatesRevoked`: the links withdrawn, an expired one left as it was). Audited `account.lock` with the account as target and `{ sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked }`; never the email.
+**200** `{ "status": "LOCKED", "sessionsRevoked": 2, "transfersCancelled": 1, "recoveryCodesRevoked": 1, "certificatesRevoked": 1, "dropEntriesWithdrawn": 1 }` (`recoveryCodesRevoked`: 0 or 1; a code already expired is left as it was; `certificatesRevoked`: the links withdrawn, an expired one left as it was; `dropEntriesWithdrawn`: the entries withdrawn, P-R03). Audited `account.lock` with the account as target and `{ sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn }`; never the email.
 
-**Unlock** a LOCKED account: the status becomes `ACTIVE` again and the customer signs in as before. Transfers cancelled, certificate links withdrawn and a recovery code revoked by the lock stay so: Client Services issues a new code if the customer needs one (§16.10). **200** `{ "status": "ACTIVE" }`. Audited `account.unlock`.
+**Unlock** a LOCKED account: the status becomes `ACTIVE` again and the customer signs in as before. Transfers cancelled, certificate links withdrawn, entries withdrawn (the customer enters again while a release's entries are open) and a recovery code revoked by the lock stay so: Client Services issues a new code if the customer needs one (§16.10). **200** `{ "status": "ACTIVE" }`. Audited `account.unlock`.
 
 Errors: `400 VALIDATION_FAILED` (malformed id, a body with fields), `403 FORBIDDEN` (AUDITOR, OPERATOR), `403 CSRF_FAILED`, `404 ACCOUNT_NOT_FOUND`, `409 ACCOUNT_ALREADY_LOCKED`, `409 ACCOUNT_NOT_ACTIVE` (a deleted account), `409 ACCOUNT_NOT_LOCKED`.
 
@@ -2600,11 +2740,12 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `sessions` | The account's sessions still stored: `createdAt`, `lastSeenAt`, `expiresAt`, `userAgent`. |
 | `recoveryCodes` | The recovery codes issued (§16.10): `createdAt`, `expiresAt`, `usedAt`, `revokedAt`. |
 | `certificates` | The links to ownership certificates the account created (§11.7, F-06), in its current and past ownership periods, oldest first: `productId`, `createdAt`, `expiresAt`, `revokedAt` (withdrawn by the owner, or with the account's lock or assisted recovery, whose audit entries name the ADMIN or the piece rather than the account) and `status`, what a reader of the link meets now: `VALID`, `NO_LONGER_VALID` (expired, its ownership period ended, or the piece lost, stolen, revoked, flagged or retired since; computed as in §8.7) or `WITHDRAWN` (§8.7's 404). Never the token, its hash or the link's id. |
-| `activity` | Every audit entry that names the account, oldest first: those **about** it (target: `account.register`, `account.login`, `account.login_failed`, `account.password_change`, `account.recover`, `account.recover_failed`, `account.lock`, …) and those it **made** (actor: `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `.accept`, `.cancel`, `ownership.incident`, `ownership.incident.resolve`, `ownership.certificate.create`, `ownership.certificate.revoke` (the owner's withdrawals and those of its assisted recovery; a lock's withdrawals name the ADMIN, and show in `certificates`), `product.transition`, `scan.report`, …). Each gives `occurredAt`, `action`, `by` (`account`, `admin` or `system`; never the staff member's identity), what it was about (`productId`, the piece's canonical id, or `reference`, a scan's REF, never its whole id; else `null`) and `status`, the status it gave the piece (`LOST` or `STOLEN` for a declared incident, the status it returned to for a loss withdrawn by its owner, `ownership.incident.resolve`, §11.6, the new status for a change of status) or `null`. Nothing else of an entry's details, which can name staff or other accounts. The audit log has no index on the actor, so the second half reads the whole log: accepted for this rare ADMIN request (DATABASE §5.21). A transfer the account offered and another account accepted is in `transfers`; its `ownership.transfer.accept` entry names the buyer as actor. |
+| `dropEntries` | (P-R03) Every entry of the account in a release (§10.10), oldest first: `entryId` (the id the draw's list publishes), `dropId`, `title`, `status`, `enteredAt`, and from the draw `tier`, `seniority`, `rank`, `respondBy`, `handledAt`. Never the note of ORBES Client Services nor who concluded it. |
+| `activity` | Every audit entry that names the account, oldest first: those **about** it (target: `account.register`, `account.login`, `account.login_failed`, `account.password_change`, `account.recover`, `account.recover_failed`, `account.lock`, …) and those it **made** (actor: `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `.accept`, `.cancel`, `ownership.incident`, `ownership.incident.resolve`, `ownership.certificate.create`, `ownership.certificate.revoke` (the owner's withdrawals and those of its assisted recovery; a lock's withdrawals name the ADMIN, and show in `certificates`), `product.transition`, `scan.report`, `drop.enter`, `drop.withdraw`, …). Each gives `occurredAt`, `action`, `by` (`account`, `admin` or `system`; never the staff member's identity), what it was about (`productId`, the piece's canonical id, or `reference`, a scan's REF, never its whole id; else `null`) and `status`, the status it gave the piece (`LOST` or `STOLEN` for a declared incident, the status it returned to for a loss withdrawn by its owner, `ownership.incident.resolve`, §11.6, the new status for a change of status) or `null`. Nothing else of an entry's details, which can name staff or other accounts. The audit log has no index on the actor, so the second half reads the whole log: accepted for this rare ADMIN request (DATABASE §5.21). A transfer the account offered and another account accepted is in `transfers`; its `ownership.transfer.accept` entry names the buyer as actor. |
 | `truncated` | The lists cut at 50 000 entries (`scans`, `activity`); empty when the export is complete. |
 | `notIncluded` | What the registry holds but cannot give back readably: the password and recovery codes (one-way scrypt hashes), the tokens of the certificate links (a one-way SHA-256 each), and the IP and device pseudonyms of scans, sessions and audit entries (keyed one-way hashes; no IP address or device cookie is stored). |
 
-Audited `account.export` with the account as target and the number of entries of each list; never the content or the email.
+Audited `account.export` with the account as target and the number of entries of each list (`dropEntries` included); never the content or the email.
 
 Errors: `400 VALIDATION_FAILED`, `403 FORBIDDEN` (AUDITOR, OPERATOR), `404 ACCOUNT_NOT_FOUND`.
 
@@ -2761,6 +2902,55 @@ Errors: `400 VALIDATION_FAILED` (body shape only; an undecodable code is a `MALF
 **`POST /api/admin/sale/activate`**. Body `{ "token": the sale token, "retailerId": an active point of sale (§16.17) }`. In one transaction: the token is used up, then the warranty starts **today** (UTC) at that point of sale, its country the point of sale's (WarrantyService.activate, §14.6); an ISSUED piece moves to ACTIVATED. The token only works for the console user whose scan earned it; any refusal rolls the use back, so the token stays usable until it expires. What the token was minted on is checked again under the piece's row lock, since it may have changed during the 10 minutes: no client account holds the piece (a client who registered it meanwhile from its card: `409 ALREADY_REGISTERED`), it is not in a service, and the scanned code is still its ACTIVE code (`409 WARRANTY_ACTIVATION_NOT_ALLOWED`). **200** `{ "warranty": … (§14.6), "statusChange": … | null, "scanId": "8b0f…" }`. The audit entry `warranty.activate` names the seller (actor), the point of sale (`retailer`, `retailerId`) and the scan (`saleScanId`).
 
 Errors: `400 VALIDATION_FAILED`, `400 SALE_TOKEN_INVALID` (unknown, a registration token, or another console user's), `409 SALE_TOKEN_USED`, `410 SALE_TOKEN_EXPIRED` (the three SALE_TOKEN errors call for a new scan: the screen keeps ACTIVATE WARRANTY off whatever point of sale is then chosen), `404 RETAILER_NOT_FOUND`, `409 RETAILER_INACTIVE`, `409 ALREADY_REGISTERED` (*This piece is registered to a client: it has been sold. Contact ORBES.*), `409 WARRANTY_ALREADY_ACTIVATED` (sold meanwhile from another phone or the console), `409 WARRANTY_VOID`, `409 WARRANTY_ACTIVATION_NOT_ALLOWED` (*The status of this piece does not allow a sale. Contact ORBES.* for a service opened or a code revoked meanwhile). These four hold whatever point of sale is chosen: the screen keeps ACTIVATE WARRANTY off after them too. Conversely, a sale token is refused by `/api/v1/ownership/register` (`400 REGISTRATION_TOKEN_INVALID`): a sale never registers an owner. The client registers the piece afterwards from the certificate card ("Register your piece with its card at theorbes.com/verify", the sale screen's closing instruction): the activated piece then verifies as AUTHENTIC — FIRST REGISTRATION.
+
+### 16.19 Releases: the Club page's drops (extension of the contract)
+
+P-R03 (`routes/admin/drops.ts`, `services/drops.ts`): the console's **Club** page (Clients), its **Drops** tab (`#/club`), and a release's page (`#/club/drops/:dropId`, reached from its row). An AUDITOR reads, with the customers' emails masked; an OPERATOR creates, edits, publishes and cancels a release and concludes its entries; the draw is **ADMIN**'s.
+
+A release is created a **`DRAFT`**: nothing of it is public. Its **seed**, 32 random bytes, is drawn at once, sealed (AES-256-GCM, with a key derived by HKDF from `KEY_ENCRYPTION_KEY`, as the console's TOTP secrets are, from `COOKIE_SECRET` without one, and the release's id as associated data) and committed by its SHA-256 (`seedHash`), which /verify shows from the publication on (§8.9): the draw cannot be run with another seed. A `DRAFT` changes freely; once published, its description only (`409 DROP_PUBLISHED`). Published, it shows on /verify. Cancelled, before its draw only.
+
+The release object:
+
+```json
+{
+  "id": "1f0c6c52-…",
+  "title": "MONOLITHE, the first fifty",
+  "description": null,
+  "model": { "id": "5b8e…", "name": "MONOLITHE", "type": "RING", "active": true },
+  "quantity": 50,
+  "opensAt": "2026-10-12T10:00:00.000Z",
+  "closesAt": "2026-10-14T10:00:00.000Z",
+  "purchaseWindowHours": 48,
+  "state": "OPEN",
+  "publishedAt": "2026-10-10T09:00:00.000Z",
+  "cancelledAt": null,
+  "drawnAt": null,
+  "createdAt": "2026-10-09T15:20:00.000Z",
+  "createdBy": { "id": "c41d…", "email": "operator@theorbes.com" },
+  "seedHash": "3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b",
+  "seed": null,
+  "entries": { "ENTERED": 120, "SELECTED": 0, "WAITLISTED": 0, "CONFIRMED": 0, "LAPSED": 0, "WITHDRAWN": 4 }
+}
+```
+
+`state`: `DRAFT`, else as §8.9. `seed`: `null` until the draw; the sealed seed is never sent. `entries`: the release's entries, counted by status.
+
+- **`GET /api/admin/drops`** (AUDITOR): every release, the latest created first, paginated (§6).
+- **`POST /api/admin/drops`** (OPERATOR): `{ modelId, title, description?, quantity, opensAt, closesAt, purchaseWindowHours? }`: a model offered for new pieces (`404 MODEL_NOT_FOUND`, `409 MODEL_INACTIVE`); a title of one line, 1 to 120 characters; plain paragraphs of at most 2 000 characters (`""` or `null`: none); 1 to 10 000 pieces; ISO 8601 times, `closesAt` after `opensAt`; the hours a place drawn is held, 1 to 336 (48 when omitted). **201** — the release, a `DRAFT`. Audited `drop.create` with its fields and its `seedHash`.
+- **`GET /api/admin/drops/:id`** (AUDITOR): one release. `404 DROP_NOT_FOUND`.
+- **`PATCH /api/admin/drops/:id`** (OPERATOR): at least one field of the creation's; a `DRAFT` changes any of them, a release published (or cancelled) its `description` only (`409 DROP_PUBLISHED`, `409 DROP_CANCELLED`). **200** — the release. Audited `drop.update` with each value changed, before and after (the description as its length and SHA-256, never its words); nothing changed, nothing written.
+- **`POST /api/admin/drops/:id/publish`** (OPERATOR, no body): the `DRAFT` shows on /verify with its `seedHash`. Refused once published (`409 DROP_ALREADY_PUBLISHED`), cancelled (`409 DROP_CANCELLED`), when its entries would already be closed (`409 DROP_WINDOW_PAST`) or its model is no longer offered (`409 MODEL_INACTIVE`). Audited `drop.publish` with `{ seedHash, quantity, opensAt, closesAt }`.
+- **`POST /api/admin/drops/:id/cancel`** (OPERATOR, no body; the console asks for the phrase `CANCEL` and the first 8 characters of the id): before the draw only (`409 DROP_ALREADY_DRAWN`; `409 DROP_CANCELLED` twice). Its entries stay as they were, without a draw. Audited `drop.cancel` with `{ published, entered }`.
+- **`POST /api/admin/drops/:id/draw`** (**ADMIN**, no body; the console asks for the phrase `DRAW` and the first 8 characters of the id): under the release's row lock, refused for a draft (`409 DROP_NOT_PUBLISHED`), before `closesAt` (`409 DROP_NOT_CLOSED`), cancelled (`409 DROP_CANCELLED`) or drawn (`409 DROP_ALREADY_DRAWN`: once only). The seed is opened and checked against `seedHash` (`503 DROP_SEED_UNAVAILABLE` otherwise, and nothing is written). Every entry still `ENTERED` takes part: its account's tier and seniority are read **now** (§10.10), never at its entry, and the order of §8.9 ranks them; the places left are `SELECTED`, held `purchaseWindowHours` from now (`respondBy`), the others `WAITLISTED`, each with its rank. The seed is stored in clear with `drawnAt`, and published (§8.9). **200** `{ "drop": { … }, "entries": 132, "places": 50, "selected": 50, "waitlisted": 82 }`. Audited `drop.draw` with `{ entries, places, selected, waitlisted, seed }`.
+- **`GET /api/admin/drops/:id/entries`** (AUDITOR; `?status=` one of the six, `?page=`, `?pageSize=`): its entries, by rank once drawn (the others after them), else by entry: `{ id, accountId, email, status, enteredAt, tier, seniority, rank, respondBy, handledBy, handledAt, note }`, `email` masked for an AUDITOR (`j***@example.com`), `handledBy` `{ id, email }` of the staff member who concluded it.
+- **`POST /api/admin/drops/:id/entries/:entryId/confirm`** and **`…/lapse`** (OPERATOR; `{ "note"?: string | null }`, at most 500 characters): on an entry whose place is held (`409 DROP_ENTRY_NOT_SELECTED` otherwise), `CONFIRMED` (the sale concluded by ORBES Client Services) or `LAPSED`, **only once its `respondBy` has passed** (`409 DROP_PLACE_HELD` before: a place is never taken back early). **200** — the entry. Audited `drop.entry.confirm` or `drop.entry.lapse` with `{ entryId, rank }` (and `noted: true` with a note, never its words). `404 DROP_ENTRY_NOT_FOUND`.
+- **`POST /api/admin/drops/:id/offer-next`** (OPERATOR, no body): the first `WAITLISTED` entry by rank is `SELECTED`, its place held `purchaseWindowHours` from now, only while the entries `SELECTED` and `CONFIRMED` stay under `quantity` (`409 DROP_FULL`) and one is left (`409 DROP_WAITLIST_EMPTY`); before the draw, `409 DROP_NOT_DRAWN`. **200** — the entry. Audited `drop.entry.offer` with `{ entryId, rank, respondBy }`.
+
+Every action reads the release's row under an update lock, so two of them, or an action and a draw, never cross; an entry or a withdrawal (§10.10) waits on it too. The audit log names the release and the entry's id, never an email.
+
+Errors besides: `400 VALIDATION_FAILED` (`:id` or `:entryId` not a UUID, a body out of bounds), `403 FORBIDDEN` (an AUDITOR's mutation, an OPERATOR's draw), `403 CSRF_FAILED`, `404 DROP_NOT_FOUND`.
+
+In the console: Club (Clients), Drops: the releases with their state, window of entries (UTC), pieces, entries and places held or sold; **New release** (OPERATOR) opens a dialog of its fields (times read and written in UTC). A release's page: its facts, the fingerprint of its seed, its address on /verify once published, then, once drawn, its seed; Edit, Description, Publish, Cancel (a phrase to type) and **Run the draw** (ADMIN, a phrase to type); its entries with Confirm and Lapse on a place held (Lapse once its time has passed), and Offer next while places are left.
 
 ---
 
@@ -2927,7 +3117,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | Path | Serves | Caching |
 |---|---|---|
 | `/` | `302` redirect to `/verify` | |
-| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5), `/verify/c#{token}` (an ownership certificate, §8.7: the token in the fragment, which the server never receives), `/verify/lookbook` (THE COLLECTION, §8.8) and `/verify/lookbook/<slug>` (a model's sheet; back from it returns to THE COLLECTION, then to the landing; an address under `/verify/lookbook` that is none shows THE COLLECTION, its address put back); any other path shows the landing, its address put back to `/verify` | `no-cache` |
+| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5), `/verify/c#{token}` (an ownership certificate, §8.7: the token in the fragment, which the server never receives), `/verify/lookbook` (THE COLLECTION, §8.8) and `/verify/lookbook/<slug>` (a model's sheet; back from it returns to THE COLLECTION, then to the landing; an address under `/verify/lookbook` that is none shows THE COLLECTION, its address put back), `/verify/releases` (THE RELEASES, §8.9) and `/verify/releases/<id>` (a release's page and its entry, §10.10; back from it returns to THE RELEASES, then to the landing; an address under `/verify/releases` that is none shows THE RELEASES, its address put back); any other path shows the landing, its address put back to `/verify` | `no-cache` |
 | `/VERIFY/C`, and any other spelling of `/verify/c` | `301` redirect to `/verify/c` (`GET`, `HEAD`): the ownership certificate's PDF letters its address in capitals (§8.7). A browser keeps the fragment, the certificate's token, across the redirect | |
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/legal`, `/legal/*` | The legal pages' shell (`dist/web/legal/index.html`, J-06). Its own routes: `/legal/privacy` (the privacy policy), `/legal/terms` (the terms of use), `/legal/notice` (the legal notice), `/legal/faq` (the FAQ), and `/legal`, their index; any other path shows the index, its address put back to `/legal`. The language is `?lang=fr` or `?lang=en`, else the browser's (`navigator.languages`), else English; the page reads `GET /api/v1/client-services` (§8.4) to show the contact of ORBES Client Services where it names it | `no-cache` |

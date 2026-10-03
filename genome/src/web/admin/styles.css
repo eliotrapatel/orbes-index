@@ -101,8 +101,9 @@ body {
   color: var(--ink-soft);
 }
 
-/* The ADMIN's sidebar, its longest (five groups, eighteen links, a two-line foot), fits a 900 px screen: SIGN OUT and
-   CHANGE PASSWORD stay in view (5 px above and under each link, 10 px above a group, 4 px under it). */
+/* The ADMIN's sidebar, its longest (five groups, twenty links with the Club of P-R03, a two-line foot), fits a 900 px
+   screen: SIGN OUT and CHANGE PASSWORD stay in view (4 px above and under each link, 10 px above a group, 4 px under
+   it). The Club took the 2 px a link gave up: the next link of a group needs room found elsewhere. */
 .side__nav {
   flex: 1;
   padding: 4px 0 8px;
@@ -127,7 +128,7 @@ body {
 .side__link {
   position: relative;
   display: block;
-  padding: 5px 0;
+  padding: 4px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;

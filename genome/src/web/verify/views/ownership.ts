@@ -9,7 +9,8 @@
  * section of an UNUSUAL ACTIVITY result (`underReview`: the claim code is
  * required), in its registered mode the transfer-code section of such a
  * result (`underReview`: the window the server gave), and, in its account
- * mode, the sign-in of MY PIECES when signed out (F-01).
+ * mode, the sign-in of MY PIECES when signed out (F-01) and of a release's
+ * page (P-R03, with its own sentence: any account enters a draw).
  *
  * The password (C-04): under SIGN IN, FORGOTTEN PASSWORD? leads to ORBES
  * Client Services (the contact of C-02), who check the customer's identity
@@ -166,8 +167,8 @@ export class OwnershipPanel {
           children.push(this.status('STAFF SCAN'), this.text(STAFF_SCAN_NOTE));
           break;
         case 'account':
-          // MY PIECES signed out: the sign-in alone. Signed in, the page lists the pieces and has its own account line.
-          if (s.status !== 'signed-in') children.push(...this.authBlock(PIECES.signInLead));
+          // MY PIECES signed out (or a release's page, P-R03): the sign-in alone. Signed in, the page has its own account line.
+          if (s.status !== 'signed-in') children.push(...this.authBlock(m.lead ?? PIECES.signInLead));
           break;
         default:
           children.push(this.status('NOT YET DELIVERED'), this.text(NOT_DELIVERED_NOTE));

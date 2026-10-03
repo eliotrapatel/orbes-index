@@ -28,7 +28,11 @@
  * read stays said after a creation), THE COLLECTION (P-R02: the lookbook
  * from the landing, a model's sheet and the way back through the lookbook,
  * a sheet's address opened directly, SEE THE MODEL under an authentic
- * result, the models reserved for an owner signed in), and the problem
+ * result, the models reserved for an owner signed in), THE RELEASES (P-R03:
+ * the list from the landing, a release's page, its sign-in, ENTER THE DRAW
+ * and WITHDRAW, YOUR RELEASES in MY PIECES, then, drawn, the place held with
+ * the contact of ORBES Client Services, the seed checked on the phone and
+ * the entries by rank), and the problem
  * screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
@@ -46,7 +50,8 @@ import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD, RECEIVING, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -1998,6 +2003,137 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'THE COLLECTION');
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(problems).toEqual([]);
+  }, 180_000);
+
+  it('THE RELEASES (P-R03): the list from the landing, a release, its sign-in, ENTER THE DRAW and WITHDRAW; YOUR RELEASES in MY PIECES; drawn, the place held, the seed checked on the phone, the entries by rank', async () => {
+    const { ctx } = srv;
+    // A model of its own, PUBLIC in the lookbook, photographed; a release of two pieces, open since an hour.
+    const category = (await ctx.categories.getByCode('J'))!;
+    const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'ECLIPSE', type: 'PENDANT', sku_prefix: 'ECL-RL' }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.media.setModelImage(model.id, { mime: 'image/jpeg', bytes: jpegPhoto(600, 600) }, SYSTEM_ACTOR);
+    await ctx.services.catalog.updateModel(model.id, { slug: 'eclipse', lookbook: 'PUBLIC' }, SYSTEM_ACTOR);
+    const staff = await ctx.services.auth.createAdmin({ email: 'releases@orbes.test', password: 'orbes releases passphrase 2026', role: 'ADMIN' }, SYSTEM_ACTOR);
+    const actor = { type: 'admin' as const, id: staff.id };
+    const drop = await ctx.services.drops.create(
+      { modelId: model.id, title: 'ECLIPSE — release I', description: 'Two pieces, cast in Paris.', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000) },
+      actor,
+    );
+    await ctx.services.drops.publish(drop.id, actor);
+    // The entrant holds a piece (TITANE): the draw ranks it first, before two accounts that hold none.
+    const email = 'release.entrant@example.com';
+    const entrant = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    await ownedPiece(entrant.account.id);
+    for (const n of [1, 2]) {
+      const other = await ctx.services.auth.registerAccount({ email: `release.other${n}@example.com`, password: PASSWORD }, {});
+      await ctx.services.drops.enter(other.account.id, drop.id, { type: 'account', id: other.account.id });
+    }
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The landing: THE RELEASES, a text link under THE COLLECTION.
+    const link = page.locator('.landing__actions').getByRole('link', { name: 'THE RELEASES' });
+    await visible(link);
+    await attrOf(link, 'href', '/verify/releases');
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'THE COLLECTION', 'THE RELEASES']);
+    await link.click();
+    await textOf(page.locator('h1'), 'THE RELEASES');
+    expect(new URL(page.url()).pathname).toBe('/verify/releases');
+    const card = page.locator('article.release-card', { hasText: 'ECLIPSE — RELEASE I' });
+    await visible(card);
+    await textOf(card.locator('.release-card__state'), 'ENTRIES OPEN');
+    await textOf(card.locator('.release-card__model'), 'ECLIPSE · PENDANT');
+    await textOf(card.locator('.release-card__line'), /^2 PIECES · ENTRIES CLOSE \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await attrOf(card.locator('img.release-card__img'), 'loading', 'lazy');
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['SEE THE RELEASE', 'SCAN ORBES CODE', 'THE COLLECTION', ...LEGAL_LINKS]);
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-releases.png'), fullPage: true });
+
+    // SEE THE RELEASE: its page, its facts in UTC then on the phone's clock, the rule, the seed's fingerprint.
+    await card.getByRole('link', { name: 'SEE THE RELEASE' }).click();
+    await textOf(page.locator('h1'), 'ECLIPSE — RELEASE I');
+    expect(new URL(page.url()).pathname).toBe(`/verify/releases/${drop.id}`);
+    await textOf(page.locator('.release__state'), 'ENTRIES OPEN');
+    await textOf(page.locator('.release__paragraph'), 'Two pieces, cast in Paris.');
+    await textsOf(page.locator('.release__section > .section-label'), ['THE RELEASE', 'YOUR ENTRY', 'THE DRAW']);
+    const closes = page.locator('.release__rows .rows__row', { hasText: 'ENTRIES CLOSE' });
+    await textOf(closes.locator('.release__utc'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await textOf(closes.locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
+    await attrOf(page.locator('.release__model-line').getByRole('link', { name: 'SEE THE MODEL' }), 'href', '/verify/lookbook/eclipse');
+    await textOf(page.locator('.release__rule'), RELEASES.rule);
+    await textOf(page.locator('.release__seed .release__hex'), groupHex(drop.seedHash));
+    // Signed out: the sign-in of an account, any account; then ENTER THE DRAW, the page's hairline button.
+    const panel = page.locator('.release__signin');
+    await textOf(panel.locator('.ownership__text').first(), RELEASES.signIn);
+    await panel.getByLabel('EMAIL').fill(email);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    const enter = page.getByRole('button', { name: 'ENTER THE DRAW' });
+    await visible(enter);
+    await textOf(page.locator('.release__sentence'), RELEASES.status.open);
+    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\btextlink\b/);
+    await keepsFloors(page, ['ENTER THE DRAW', 'SCAN ORBES CODE', 'THE RELEASES', 'SEE THE MODEL', ...LEGAL_LINKS]);
+    await enter.click();
+    await textOf(page.locator('.release__sentence'), RELEASES.status.entered);
+    const mine = await ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop.id).where('account_id', '=', entrant.account.id).executeTakeFirstOrThrow();
+    await textOf(page.locator('.release__entry-id'), `YOUR ENTRY ${mine.id}`);
+    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
+    await page.getByRole('button', { name: 'WITHDRAW' }).click();
+    await textOf(page.locator('.release__sentence'), RELEASES.status.withdrawn);
+    await page.getByRole('button', { name: 'ENTER THE DRAW' }).click();
+    await textOf(page.locator('.release__sentence'), RELEASES.status.entered);
+    // The same entry, its id kept.
+    await textOf(page.locator('.release__entry-id'), `YOUR ENTRY ${mine.id}`);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-release.png'), fullPage: true });
+    // Back from a release: the list, then the landing.
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE RELEASES');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(new URL(page.url()).pathname).toBe('/verify');
+
+    // MY PIECES groups the account's entries: its release, what it means now, its id.
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const releases = page.locator('.pieces__releases');
+    await textOf(releases.locator('.section-label'), 'YOUR RELEASES');
+    await textOf(releases.locator('.pieces__entry-state'), 'ENTRIES OPEN · ENTERED');
+    await textOf(releases.locator('.pieces__entry-id'), `YOUR ENTRY ${mine.id}`);
+    await attrOf(releases.getByRole('link', { name: 'ECLIPSE — RELEASE I' }), 'href', `/verify/releases/${drop.id}`);
+    await attrOf(page.locator('.pieces__foot').getByRole('link', { name: 'THE RELEASES' }), 'href', '/verify/releases');
+
+    // The draw, once the entries are closed (an ADMIN, in the console): the entrant, TITANE, first; a place held.
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 7_200_000), closes_at: new Date(Date.now() - 1_000) }).where('id', '=', drop.id).execute();
+    expect(await ctx.services.drops.draw(drop.id, actor)).toMatchObject({ entries: 3, selected: 2, waitlisted: 1 });
+    await page.reload();
+    await textOf(releases.locator('.pieces__entry-state'), 'DRAWN · PLACE HELD');
+    await textOf(releases.locator('.pieces__entry-sentence'), /^Your place is held until \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\) — ORBES Client Services will contact you\.$/);
+    await visible(releases.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await releases.getByRole('link', { name: 'ECLIPSE — RELEASE I' }).click();
+    await textOf(page.locator('h1'), 'ECLIPSE — RELEASE I');
+    await textOf(page.locator('.release__state'), 'DRAWN');
+    await textOf(page.locator('.release__entry .ownership__status'), 'PLACE HELD');
+    // The seed, checked on this phone against the fingerprint published with the release; the entries by rank, its own marked.
+    const seed = (await ctx.db.selectFrom('drops').select('seed').where('id', '=', drop.id).executeTakeFirstOrThrow()).seed!;
+    await textOf(page.locator('.release__seed .release__hex').nth(1), groupHex(Buffer.from(seed).toString('hex')));
+    await textOf(page.locator('.release__check'), RELEASES.seedChecked);
+    await textOf(page.locator('.release__entries-lead'), '3 entries took part in the draw.');
+    await countOf(page.locator('.release__item'), 3);
+    await textOf(page.locator('.release__item.is-yours .release__item-line'), '1 · TITANE · 0 YEARS');
+    await textOf(page.locator('.release__item.is-yours .release__item-id'), mine.id);
+    await countOf(page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
+    await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN ORBES CODE', 'THE RELEASES', ...LEGAL_LINKS]);
+    // An address under /verify/releases that is none: the list.
+    await page.goto(`${srv.origin}/verify/releases/nowhere`);
+    await textOf(page.locator('h1'), 'THE RELEASES');
+    expect(new URL(page.url()).pathname).toBe('/verify/releases');
     expect(problems).toEqual([]);
   }, 180_000);
 

@@ -7,7 +7,8 @@
  *    found at the line, or within the range, the table cites (the message
  *    gives the line where it is now), every constant the rules lean on
  *    holding what the rule says (the statuses that end a certificate, those
- *    that allow a transfer), and every absence of §10 (no email, no reset
+ *    that allow a transfer, the tiers of the club and the statuses they leave
+ *    out), and every absence of §10 (no email, no reset
  *    link, no undoing an accepted transfer, no account deletion, no age
  *    check) holding in the code;
  *  - the two production settings that would change a rule
@@ -38,7 +39,9 @@ import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
+import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces } from '../../src/server/services/club.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
+import { DROP_SEED_BYTES, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
   CERTIFICATE_ENDING_STATUSES,
@@ -263,6 +266,28 @@ const CONSTANTS: Record<string, ConstantSpec> = {
       expect(dateInWords(LEGAL_VERSION, 'en')).toMatch(/^\d{1,2} [A-Z][a-z]+ \d{4}$/);
     },
   },
+  'CLUB_TIER_THRESHOLDS, CLUB_EXCLUDED_STATUSES': {
+    value: `${CLUB_TIER_THRESHOLDS.slice(0, -1).join(', ')} et ${CLUB_TIER_THRESHOLDS.at(-1)} pièces`,
+    fr: CLUB_TIER_NAMES.map((name, i) => `${name} dès ${CLUB_TIER_THRESHOLDS[i]}${i === 0 ? ` pièce${CLUB_TIER_THRESHOLDS[0] > 1 ? 's' : ''}` : ''}`),
+    en: CLUB_TIER_NAMES.map((name, i) => `${name} from ${CLUB_TIER_THRESHOLDS[i]}${i === 0 ? ` piece${CLUB_TIER_THRESHOLDS[0] > 1 ? 's' : ''}` : ''}`),
+    holds: () => {
+      // R61: three tiers, named as the plan chose them (choice 7), each threshold reached by its count of pieces.
+      expect(CLUB_TIER_NAMES).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+      expect(CLUB_TIER_THRESHOLDS).toHaveLength(CLUB_TIER_NAMES.length);
+      CLUB_TIER_THRESHOLDS.forEach((t, i) => {
+        expect(tierForPieces(t)).toBe(i + 1);
+        expect(tierForPieces(t - 1)).toBe(i);
+      });
+      // A piece revoked, set aside by ORBES after review or withdrawn does not count; one lost, stolen or in service does.
+      expect([...CLUB_EXCLUDED_STATUSES].sort()).toEqual(['COUNTERFEIT_FLAGGED', 'RETIRED', 'REVOKED']);
+    },
+  },
+  DROP_SEED_BYTES: { value: `${DROP_SEED_BYTES} octets`, fr: [`${DROP_SEED_BYTES} octets`], en: [`${DROP_SEED_BYTES} bytes`] },
+  PURCHASE_WINDOW_HOURS: {
+    value: `${PURCHASE_WINDOW_HOURS.default} heures par défaut, de ${PURCHASE_WINDOW_HOURS.min} à ${PURCHASE_WINDOW_HOURS.max}`,
+    fr: [`${PURCHASE_WINDOW_HOURS.default} heures`],
+    en: [`${PURCHASE_WINDOW_HOURS.default} hours`],
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -276,6 +301,12 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the shareable certificate (F-06)': 'days > CERTIFICATE_MAX_DAYS',
   'the account lock (A-06)': "set({ status: 'LOCKED', updated_at: now })",
   'the boutique sale (A-08)': 'ttlMs: SALE_TOKEN_TTL_MS,',
+  'entering a release (P-R03)': "if (dropState(d, now) !== 'OPEN') throw dropNotOpen();",
+  'the tiers, a constant of the code (P-R03)': 'CLUB_TIER_THRESHOLDS.filter((t) => n >= t).length',
+  'the draw by tier, seniority, then the seed (P-R03)': 'keyed.sort((a, b) => b.tier - a.tier',
+  'the seed published only after the draw (P-R03)': 'seed: r.drawn_at && r.seed ? toHex(r.seed) : null,',
+  'a selection obliges no one, a lapse only after its time (P-R03)': 'throw placeHeld(e.respond_by)',
+  'the lock withdraws the open entries (P-R03)': 'withdrawAccountEntries(tx, account.id)',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────

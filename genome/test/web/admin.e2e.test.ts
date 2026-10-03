@@ -21,6 +21,11 @@
  * followed from the Cases queue to its scan, anomaly and piece, then closed;
  * a one-time recovery code issued from an owner's row (C-04); a client found
  * by email and by REF, the owner's sheet, its lock, unlock and export (A-06);
+ * the Club page (P-R03: its one link in the Clients group, the sidebar still
+ * fitting a 900 px screen; a release created, edited, published, drawn by an
+ * ADMIN after a typed phrase, an entry confirmed, another lapsed after its
+ * time, the next offered; read by an AUDITOR, emails masked, without an
+ * action);
  * the Analytics view (90 and 30 days, its cursor, the countries of the
  * counterfeit signals), anomaly triage (the badge and the tab title, the
  * filters, a finding's scans, one dialog that marks the piece, revokes its
@@ -1887,6 +1892,131 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await cspViolations(s)).toEqual([]);
     await staffContext.close();
     await adminContext.close();
+  }, STEP_TIMEOUT);
+
+  it('runs a release from the Club page (P-R03): created, edited, published; drawn by an ADMIN after a typed phrase; a sale confirmed, a place lapsed after its time, the next offered; an AUDITOR reads', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // One link more, Club, in the Clients group after Owners; the ADMIN's sidebar, twenty links, still fits a 900 px screen.
+    const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['owners', 'club', 'warranties', 'retailers', 'sale']);
+    expect(await p.locator('.side__link').count()).toBe(20);
+    for (const id of ['sign-out', 'change-password']) {
+      const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
+      expect(box.y + box.height, id).toBeLessThanOrEqual(900);
+    }
+    await p.locator('.side__link', { hasText: 'Club' }).click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Club');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
+    await expect.poll(() => p.locator('[data-testid=club-tab-drops]').getAttribute('aria-current')).toBe('page');
+
+    // A new release: a draft, its seed committed at once.
+    await p.click('[data-testid=drop-new]');
+    await p.selectOption('dialog select[name=modelId]', modelId);
+    await p.fill('dialog input[name=title]', 'MONOLITHE — release I');
+    await p.fill('dialog input[name=quantity]', '3');
+    const opens = new Date(Date.now() - 3_600_000);
+    const closes = new Date(Date.now() + 3_600_000);
+    const local = (d: Date) => d.toISOString().slice(0, 16);
+    await p.fill('dialog input[name=opensAt]', local(opens));
+    await p.fill('dialog input[name=closesAt]', local(closes));
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE — release I');
+    const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAFT');
+    const seedHash = (await ctx.db.selectFrom('drops').select('seed_hash').where('id', '=', dropId).executeTakeFirstOrThrow()).seed_hash;
+    expect(await p.locator('[data-testid=drop-seed-hash] .mono').getAttribute('title')).toBe(Buffer.from(seedHash).toString('hex'));
+    expect(await p.locator('[data-testid=drop-seed]').count()).toBe(0);
+    // A draft changes freely: two pieces instead of three.
+    await p.click('[data-testid=drop-edit]');
+    await p.fill('dialog input[name=quantity]', '2');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#release .deflist__row', { hasText: 'Pieces' }).locator('.deflist__value').textContent()).toBe('2');
+    // Published: its page on /verify; only the description changes from then on.
+    await p.click('[data-testid=drop-publish]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('OPEN');
+    expect(await p.locator('[data-testid=drop-edit]').count()).toBe(0);
+    expect(await p.locator('[data-testid=drop-page]').getAttribute('href')).toBe(`/verify/releases/${dropId}`);
+    await p.click('[data-testid=drop-describe]');
+    await p.fill('dialog textarea[name=description]', 'Two pieces, cast in Paris.');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#release').textContent()).toContain('Two pieces, cast in Paris.');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+
+    // Three accounts enter on /verify; one holds a piece (TITANE): the draw ranks it first.
+    const entrants: string[] = [];
+    for (const n of [1, 2, 3]) {
+      const a = await ctx.services.auth.registerAccount({ email: `club.entrant${n}@example.com`, password: 'club entrant passphrase 2026' }, {});
+      entrants.push(a.account.id);
+    }
+    const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
+    await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
+    await ctx.services.ownership.registerFirst(entrants[0]!, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: entrants[0]! });
+    for (const id of entrants) await ctx.services.drops.enter(id, dropId, { type: 'account', id });
+    await p.reload();
+    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(3);
+    // The entries close; an OPERATOR never draws, an ADMIN does, once, after the phrase.
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 7_200_000), closes_at: new Date(Date.now() - 1_000) }).where('id', '=', dropId).execute();
+    await p.reload();
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('CLOSED');
+    await p.click('[data-testid=drop-draw]');
+    await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled()).toBe(true);
+    await confirmDialog(p, `DRAW ${dropId.slice(0, 8).toUpperCase()}`);
+    await p.waitForSelector('.toast:has-text("Drawn: 2 places held, 1 on the waiting list.")');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAWN');
+    await expect.poll(() => p.locator('[data-testid=drop-seed]').count()).toBe(1);
+    const rows = p.locator('#entries tbody tr');
+    await expect.poll(() => rows.locator('td.col--num').first().textContent()).toBe('1');
+    expect(await rows.first().textContent()).toContain('TITANE');
+    expect(await rows.first().textContent()).toContain('club.entrant1@example.com');
+    expect(await rows.nth(2).locator('[data-testid=entry-status]').textContent()).toContain('WAITLISTED');
+    // The first sale concluded; the second place lapses only after its time.
+    await rows.first().locator('[data-testid=entry-confirm]').click();
+    await p.fill('dialog textarea[name=note]', 'Sold in the Paris boutique.');
+    await confirmDialog(p);
+    await expect.poll(() => rows.first().locator('[data-testid=entry-status]').textContent()).toContain('CONFIRMED');
+    expect(await rows.nth(1).locator('[data-testid=entry-lapse]').count()).toBe(0);
+    await ctx.db.updateTable('drop_entries').set({ respond_by: new Date(Date.now() - 1_000) }).where('drop_id', '=', dropId).where('rank', '=', 2).execute();
+    await p.reload();
+    await rows.nth(1).locator('[data-testid=entry-lapse]').click();
+    await confirmDialog(p);
+    await expect.poll(() => rows.nth(1).locator('[data-testid=entry-status]').textContent()).toContain('LAPSED');
+    await p.click('[data-testid=drop-offer-next]');
+    await confirmDialog(p);
+    await expect.poll(() => rows.nth(2).locator('[data-testid=entry-status]').textContent()).toContain('SELECTED');
+    expect(await p.locator('[data-testid=drop-offer-next]').count()).toBe(0);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-drop', { full: true });
+    // The Drops tab lists it, its row leading to its page.
+    await go(p, '#/club', 'Club');
+    await expect.poll(() => p.locator('#drops tbody tr', { hasText: 'MONOLITHE — release I' }).count()).toBe(1);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads the Club and the release, the emails masked, without an action.
+    const auditor = { email: 'club.audit@orbes.test', password: 'club auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, '#/club', 'Club');
+    expect(await ap.locator('[data-testid=drop-new]').count()).toBe(0);
+    await ap.locator('#drops [data-testid=drop-link]', { hasText: 'MONOLITHE — release I' }).click();
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('MONOLITHE — release I');
+    await expect.poll(() => ap.locator('#entries tbody tr').count()).toBe(3);
+    for (const shown of await ap.locator('[data-testid=entry-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
+    for (const action of ['drop-edit', 'drop-describe', 'drop-publish', 'drop-cancel', 'drop-draw', 'drop-offer-next', 'entry-confirm', 'entry-lapse']) {
+      expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    }
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
   }, STEP_TIMEOUT);
 
   it('gives an AUDITOR a read-only console', async () => {

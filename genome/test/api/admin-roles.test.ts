@@ -1,9 +1,11 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
  * mutates (the catalogue's models and collections included, created or
- * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04), ADMIN for keys, revocations, reinstatement, categories (created,
+ * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04,
+ * and the drops of the Club page, P-R03: created, edited, published, cancelled, their entries
+ * concluded and the next one offered), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
- * points of sale (A-08) and a customer's recovery code, lock and export;
+ * points of sale (A-08), a customer's recovery code, lock and export, and the draw of a drop;
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -93,6 +95,18 @@ const PROBES: Probe[] = [
   { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/lock`, body: INVALID, min: 'ADMIN' },
   { group: 'owners', method: 'POST', url: `/api/admin/owners/${UUID}/unlock`, body: INVALID, min: 'ADMIN' },
   { group: 'owners', method: 'GET', url: `/api/admin/owners/${UUID}/export`, min: 'ADMIN' },
+  { group: 'drops', method: 'GET', url: '/api/admin/drops', min: 'AUDITOR' },
+  { group: 'drops', method: 'POST', url: '/api/admin/drops', body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}`, min: 'AUDITOR' },
+  { group: 'drops', method: 'PATCH', url: `/api/admin/drops/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/draw`, body: INVALID, min: 'ADMIN' },
+  { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/entries`, min: 'AUDITOR' },
+  { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/entries?status=SELECTED`, min: 'AUDITOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
@@ -171,6 +185,7 @@ describe('admin role enforcement', () => {
       'sale',
       'media',
       'lookbook',
+      'drops',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

@@ -37,16 +37,18 @@ genome/
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
                          the sale mode, photographs of models and pieces (media), ownership
-                         certificates (shared links), the lookbook of the models and the owners' club
+                         certificates (shared links), the lookbook of the models and the owners' club,
+                         the releases (drops) and their draw by tier
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
-                         (/verify/pieces), an ownership certificate's page (/verify/c#token) and
-                         THE COLLECTION, the lookbook of the models (/verify/lookbook)
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
+                         (/verify/pieces), an ownership certificate's page (/verify/c#token),
+                         THE COLLECTION, the lookbook of the models (/verify/lookbook), and
+                         THE RELEASES, the drops and their draw (/verify/releases)
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (its releases); the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)

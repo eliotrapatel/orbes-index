@@ -1,12 +1,12 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 3 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 4 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
 ## Article 1 — Objet
 
-Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, et le certificat de propriété.
+Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, et les sorties.
 
 Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
 
@@ -22,13 +22,14 @@ Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité compl
 - **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.
 - **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.
 - **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.
+- **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).
 - **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).
 
 *Code : — (clause juridique).*
 
 ## Article 3 — Accès au service
 
-La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces.
+La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, et à s'inscrire aux sorties.
 
 ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut être interrompu, notamment pour maintenance. ORBES ne fait vérifier ses pièces qu'à l'adresse theorbes.com/verify, qui mène à verify.theorbes.com. Une autre adresse, ou un code imprimé à côté de la pièce, ne vient pas d'ORBES.
 
@@ -140,33 +141,49 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 *Code : R42, R52, R53, R54, R55.*
 
-## Article 12 — Verrouillage du compte
+## Article 12 — Sorties
+
+ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie, annoncée sur le service (THE RELEASES) avec son nombre de pièces, les dates de ses inscriptions et la règle de son tirage. ORBES peut annuler une sortie tant que son tirage n'a pas eu lieu.
+
+**Inscription.** Tout compte ORBES peut s'inscrire à une sortie pendant que ses inscriptions sont ouvertes, que des pièces y soient enregistrées ou non. L'inscription est gratuite et ne vous oblige à rien. Un compte s'inscrit une fois à une sortie : il peut retirer son inscription jusqu'au tirage, et s'inscrire de nouveau, sous la même inscription, tant que les inscriptions sont ouvertes. Une inscription par personne : ORBES Client Services peut écarter l'inscription d'un second compte de la même personne.
+
+**Paliers et ancienneté.** Le palier d'un compte se lit sur les pièces qui y sont enregistrées : TITANE dès 1 pièce, PLATINE dès 3, PALLADIUM dès 5. Une pièce révoquée, écartée par ORBES après examen ou retirée ne compte pas. L'ancienneté d'un compte est le nombre d'années pleines depuis qu'une pièce y a été enregistrée pour la première fois.
+
+**Tirage.** Après la clôture de ses inscriptions, ORBES procède au tirage d'une sortie, une seule fois. Il classe les inscriptions selon le palier de leur compte, puis selon son ancienneté, tous deux lus au moment du tirage, puis selon le SHA-256 d'une graine de 32 octets suivie de l'identifiant de l'inscription, par ordre croissant. La graine est tirée à la création de la sortie, et son empreinte est publiée avec la sortie. La graine elle-même est publiée après le tirage, avec l'identifiant, le palier, l'ancienneté et le rang de chaque inscription, jamais son compte : chacun peut vérifier l'ordre. MY PIECES montre à chaque compte l'identifiant de son inscription.
+
+**Place réservée.** Les premiers rangs, autant qu'il y a de pièces, sont sélectionnés ; les suivants sont sur la liste d'attente, dans leur ordre. Quand moins de comptes s'inscrivent qu'il n'y a de pièces, toutes les inscriptions sont sélectionnées. La place d'une inscription sélectionnée est réservée pendant la durée que fixe sa sortie, 48 heures sauf mention contraire. Le service n'envoie aucun e-mail : MY PIECES montre le statut de chaque inscription, et ORBES Client Services contacte les comptes sélectionnés.
+
+**Aucune obligation.** Une place réservée ne vous oblige à rien : ORBES Client Services conclut chaque vente avec vous, hors du service. Passé son délai, une place qui n'a pas été conclue expire, et ORBES peut la proposer à l'inscription suivante de la liste d'attente.
+
+*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70.*
+
+## Article 13 — Verrouillage du compte
 
 ORBES Client Services peut verrouiller un compte ORBES, [À COMPLÉTER : motifs du verrouillage, par exemple à la demande de son titulaire, en cas de soupçon de prise de contrôle ou de manquement aux présentes conditions, selon l'avis de l'avocat].
 
-Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et annule ses transferts en attente. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.
+Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), et annule ses transferts en attente. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.
 
 *Code : R19, R20.*
 
-## Article 13 — Données personnelles
+## Article 14 — Données personnelles
 
-ORBES traite les données du service (compte, enregistrements, scans) comme le décrit sa politique de confidentialité. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte.
+ORBES traite les données du service (compte, enregistrements, scans, inscriptions aux sorties) comme le décrit sa politique de confidentialité. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte.
 
 *Code : R21.*
 
-## Article 14 — Responsabilité
+## Article 15 — Responsabilité
 
 ORBES décrit fidèlement ce que vérifie le service et ce qu'il ne vérifie pas (article 4). Un résultat ne garantit pas qu'un objet est celui qu'ORBES a fabriqué : avant un achat, demandez un code de transfert au vendeur, et en cas de doute, ORBES Client Services peut examiner la pièce. [À COMPLÉTER : limites de responsabilité, selon l'avis de l'avocat.]
 
 *Code : R03.*
 
-## Article 15 — Modification des conditions
+## Article 16 — Modification des conditions
 
 ORBES peut modifier les présentes conditions. La version en vigueur et sa date sont publiées sur le service. [À COMPLÉTER : information des titulaires de compte et date d'effet des modifications, selon l'avis de l'avocat ; le service n'envoie pas d'e-mail.]
 
 *Code : R57.*
 
-## Article 16 — Droit applicable et litiges
+## Article 17 — Droit applicable et litiges
 
 Les présentes conditions sont régies par le droit de l'État du Wyoming (États-Unis), sans égard à ses règles de conflit de lois. Rien dans ces conditions ne prive un consommateur de la protection des règles impératives de la loi du pays où il réside. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Tout litige relatif aux présentes conditions relève des tribunaux situés dans le Wyoming (États-Unis), sous réserve de ces règles impératives.
 

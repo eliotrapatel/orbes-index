@@ -4,7 +4,8 @@
  * One guard covers the whole scope (http/sessions.ts): an admin session is
  * required everywhere except login; reads need AUDITOR, mutations OPERATOR
  * unless a route asks for ADMIN (keys, revocations, reinstatement,
- * categories, console users, a customer's recovery code, lock and export); every mutation needs the CSRF token and a same-origin
+ * categories, console users, a customer's recovery code, lock and export,
+ * the draw of a drop); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
@@ -20,6 +21,7 @@ import type { RouteDeps } from '../public.js';
 import { adminUserRoutes } from './admins.js';
 import { adminAnalyticsRoutes } from './analytics.js';
 import { adminDocumentRoutes } from './documents.js';
+import { adminDropRoutes } from './drops.js';
 import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
 import { adminCatalogRoutes } from './catalog.js';
@@ -56,6 +58,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminCertificateRoutes, deps);
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
+  await app.register(adminDropRoutes, deps);
   await app.register(adminReportRoutes, deps);
   await app.register(adminRevocationRoutes, deps);
   await app.register(adminKeyRoutes, deps);

@@ -94,6 +94,7 @@ describe('schema', () => {
       ['scan_reports', 'status', S.REPORT_STATUSES],
       ['media_objects', 'mime', S.MEDIA_MIME_TYPES],
       ['models', 'lookbook', S.LOOKBOOK_STATES],
+      ['drop_entries', 'status', S.DROP_ENTRY_STATUSES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

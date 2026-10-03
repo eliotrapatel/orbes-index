@@ -178,6 +178,7 @@ Ce lexique traduit BRAND §4.5 pour tout texte ORBES en français : emballage, c
 | « signature », « clé ORBES » (un onglet plus loin) | « infalsifiable », « impossible à contrefaire », « impossible à copier », « incopiable », « inviolable », « inclonable », « impiratable », « qualité militaire », « niveau militaire », « niveau bancaire », « sécurité bancaire », « résistant au quantique », « post-quantique », « propulsé par l'IA » | signature, ORBES key · never IMPOSSIBLE TO COUNTERFEIT, UNHACKABLE, UNCLONABLE, TAMPER-PROOF, MILITARY-GRADE, BANK-GRADE, QUANTUM-SAFE, AI-POWERED |
 | « ORBES Client Services peut vous accompagner » | « contactez le support », « support technique », « erreur », « oups », « une erreur est survenue », « quelque chose s'est mal passé » | ORBES Client Services can assist you · never Contact support, Error, Oops, Something went wrong |
 | « pièce » (BRAND §4.1) | « produit » | piece, never product |
+| « tirage » (DRAW à l'écran), « s'inscrire au tirage », « place réservée » (les sorties, P-R03) | « loterie » | DRAW, ENTER THE DRAW, a place held · never lottery |
 
 « AUTHENTIC » reste le seul mot fort, toujours qualifié : il dit ce qui a été signé, et la même page dit ce qu'un code imprimé ne prouve pas (BRAND §4.5 et §4.6).
 

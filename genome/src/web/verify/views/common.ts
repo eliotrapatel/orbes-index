@@ -1,14 +1,16 @@
 /**
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
- * rows, the contact of ORBES Client Services, the links to MY PIECES and to
- * THE COLLECTION, the links to the legal pages, the app's paths, the figures
- * of a title set in the reading face, and the view shell.
+ * rows, the contact of ORBES Client Services, the links to MY PIECES, to
+ * THE COLLECTION and to THE RELEASES, the links to the legal pages, the
+ * app's paths, the figures of a title set in the reading face, and the view
+ * shell.
  */
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
-import { CONTACT, LEGAL, LOOKBOOK, PIECES } from '../copy.js';
+import { CONTACT, LEGAL, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
 import { LOOKBOOK_PATH, lookbookSheetPath } from '../lookbook-model.js';
+import { releasePath, RELEASES_PATH } from '../releases-model.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
 
 /** A <main> view root with its modifier class. */
@@ -106,6 +108,8 @@ export const PIECES_PATH = '/verify/pieces';
 export const CERTIFICATE_PATH = '/verify/c';
 /** THE COLLECTION (P-R02): the lookbook's grid; a model's sheet is `/verify/lookbook/<slug>`. */
 export { LOOKBOOK_PATH } from '../lookbook-model.js';
+/** THE RELEASES (P-R03): the list; a release's page is `/verify/releases/<id>`. */
+export { RELEASES_PATH } from '../releases-model.js';
 
 /**
  * A link of this app (`href`, a real address: a click that opens a new tab or window is left to the browser); a plain
@@ -132,6 +136,14 @@ function appLink(href: string, text: string, onOpen?: () => void, extraClass?: s
  */
 export function lookbookLink(onOpen?: () => void, opts: { slug?: string; extraClass?: string } = {}): HTMLAnchorElement {
   return opts.slug ? appLink(lookbookSheetPath(opts.slug), LOOKBOOK.seeModel, onOpen, opts.extraClass) : appLink(LOOKBOOK_PATH, LOOKBOOK.link, onOpen, opts.extraClass);
+}
+
+/**
+ * THE RELEASES (P-R03): a text link to /verify/releases, on the landing, in MY PIECES and at the foot of a release's
+ * page; or, with `id`, SEE THE RELEASE, a text link to that release's page (each release of the list).
+ */
+export function releasesLink(onOpen?: () => void, opts: { id?: string; extraClass?: string } = {}): HTMLAnchorElement {
+  return opts.id ? appLink(releasePath(opts.id), RELEASES.see, onOpen, opts.extraClass) : appLink(RELEASES_PATH, RELEASES.link, onOpen, opts.extraClass);
 }
 
 /**

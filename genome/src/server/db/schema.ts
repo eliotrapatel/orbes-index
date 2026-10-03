@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0014) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0015) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -105,6 +105,14 @@ export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
  */
 export const LOOKBOOK_STATES = ['HIDDEN', 'PUBLIC', 'RESERVED'] as const;
 export type LookbookState = (typeof LOOKBOOK_STATES)[number];
+
+/**
+ * An entry of a drop (drop_entries.status, migration 0015, P-R03): ENTERED, then WITHDRAWN by its account (an entry
+ * again sets the same row back to ENTERED), or, by the draw, SELECTED (a place held until respond_by) or WAITLISTED
+ * (its rank); then CONFIRMED (the sale concluded by ORBES Client Services) or LAPSED (after respond_by).
+ */
+export const DROP_ENTRY_STATUSES = ['ENTERED', 'SELECTED', 'WAITLISTED', 'CONFIRMED', 'LAPSED', 'WITHDRAWN'] as const;
+export type DropEntryStatus = (typeof DROP_ENTRY_STATUSES)[number];
 
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
@@ -530,6 +538,56 @@ export interface MediaObjectsTable {
   created_at: TimestampDefault;
 }
 
+/**
+ * A drop (migration 0015, P-R03): a release of a model in `quantity` pieces, entered from /verify by ORBES accounts,
+ * then drawn by tier, seniority and a seed committed at creation. Its state (DRAFT, UPCOMING, OPEN, CLOSED, DRAWN,
+ * CANCELLED) is computed from its dates (services/drops.ts `dropState`). The seed is sealed (`seed_enc`) and committed
+ * (`seed_hash`, its SHA-256) at creation, both immutable; `seed` is written by the draw only, which reveals it.
+ */
+export interface DropsTable {
+  id: Generated<string>;
+  model_id: string;
+  title: string;                       // 1..120 characters
+  description: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 2 000 characters
+  quantity: number;                    // int ≥ 1
+  opens_at: Timestamp;
+  closes_at: Timestamp;                // > opens_at
+  /** How long a place drawn is held (drop_entries.respond_by): 1..336 hours, 48 by default. */
+  purchase_window_hours: WithDefault<number>;
+  published_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  /** secretbox `v1.<iv>.<ciphertext>` of the 32-byte seed, the drop's id as associated data; never changes. */
+  seed_enc: string;
+  /** SHA-256 of the seed, 32 bytes, public from the publication on; never changes. */
+  seed_hash: Uint8Array;
+  /** The 32-byte seed in clear, written by the draw only (sha256(seed) = seed_hash). */
+  seed: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  drawn_at: TimestampNullable;
+  created_by: string | null;           // admin_users.id; null when a script created it
+  created_at: TimestampDefault;
+}
+
+/**
+ * An account's entry in a drop (migration 0015, P-R03): one per account and drop, reactivated rather than deleted and
+ * inserted again. `tier`, `seniority` and `rank` are written by the draw; `respond_by` by the draw or an offer to the
+ * next of the waiting list; `handled_by`, `handled_at` and `note` by the console. id, drop_id, account_id and
+ * created_at never change.
+ */
+export interface DropEntriesTable {
+  id: Generated<string>;
+  drop_id: string;
+  account_id: string;
+  created_at: TimestampDefault;
+  status: WithDefault<DropEntryStatus>;
+  tier: number | null;                 // smallint 0..3, the club's tier at the draw (0: no piece held)
+  seniority: number | null;            // smallint ≥ 0, full years since the account's first ownership, at the draw
+  rank: number | null;                 // int ≥ 1, the entry's place in the draw's order
+  respond_by: TimestampNullable;
+  handled_by: string | null;           // admin_users.id
+  handled_at: TimestampNullable;
+  note: string | null;                 // ≤ 500 characters, the console's
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -614,6 +672,8 @@ export interface Database {
   anomalies: AnomaliesTable;
   scan_reports: ScanReportsTable;
   media_objects: MediaObjectsTable;
+  drops: DropsTable;
+  drop_entries: DropEntriesTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -680,6 +740,11 @@ export type ScanReportRow = Selectable<ScanReportsTable>;
 export type NewScanReport = Insertable<ScanReportsTable>;
 export type MediaObjectRow = Selectable<MediaObjectsTable>;
 export type NewMediaObject = Insertable<MediaObjectsTable>;
+export type DropRow = Selectable<DropsTable>;
+export type NewDrop = Insertable<DropsTable>;
+export type DropUpdate = Updateable<DropsTable>;
+export type DropEntryRow = Selectable<DropEntriesTable>;
+export type NewDropEntry = Insertable<DropEntriesTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

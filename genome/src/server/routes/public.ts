@@ -2,14 +2,17 @@
  * Public routes (contract §3): health, public keys, categories, Client
  * Services contact, verify, the photographs an authentic result shows
  * (F-04), the lookbook of the models (P-R02: the PUBLIC ones and their
- * sheets), the report a customer may attach to a scan that was not
- * authentic, and the ownership certificate an owner shares (F-06: its
- * live record and its PDF, by the token of the link).
+ * sheets), the drops (P-R03: the published releases, a release's page
+ * and, once drawn, its entries by rank), the report a customer may attach
+ * to a scan that was not authentic, and the ownership certificate an owner
+ * shares (F-06: its live record and its PDF, by the token of the link).
  *
  * The photographs draw on their own budget, `media` (rate-limit.ts): a
  * lookbook sheet shows up to nine of them. The lookbook's answers depend on
  * no session (the owners' reserved models are routes/club.ts's), so they are
- * cached 5 minutes like the contact of Client Services.
+ * cached 5 minutes like the contact of Client Services. The drops' answers
+ * depend on none either (an account's entries are routes/club.ts's): kept a
+ * minute, so a release that opens, closes or is drawn shows within it.
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, and the console cookie only to tell a staff
@@ -36,7 +39,7 @@ import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { certificateTokenBody, lookbookParams, mediaParams, parse, reportBody, verifyBody } from '../http/schemas.js';
+import { certificateTokenBody, lookbookParams, mediaParams, pageOf, parse, publicDropParams, reportBody, verifyBody } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
@@ -70,6 +73,9 @@ export const MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 /** The lookbook's lists and sheets (P-R02): the same for everyone, so kept 5 minutes; a change shows within that time. */
 export const LOOKBOOK_CACHE_CONTROL = 'public, max-age=300';
+
+/** The drops (P-R03): the same for everyone, kept a minute, so an opening, a close or a draw shows within it. */
+export const DROPS_CACHE_CONTROL = 'public, max-age=60';
 
 /** Whether an If-None-Match header names `etag` (a list, weak validators and `*` included). */
 function matchesEtag(header: string | string[] | undefined, etag: string): boolean {
@@ -159,6 +165,30 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     const sheet = await ctx.services.lookbook.sheet(slug);
     reply.header('cache-control', LOOKBOOK_CACHE_CONTROL);
     return sheet;
+  });
+
+  // The drops (P-R03, §8.9): the published releases, the latest opening first; never a DRAFT.
+  app.get('/api/v1/drops', async (_request, reply) => {
+    const drops = await ctx.services.drops.listPublic();
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return { drops };
+  });
+
+  // A release's page: its model, pieces, dates and the SHA-256 of its seed; once drawn, the seed and how many took part.
+  // A DRAFT, an unknown or malformed id: one 404 DROP_NOT_FOUND, never cached.
+  app.get('/api/v1/drops/:id', async (request, reply) => {
+    const { id } = parse(publicDropParams, request.params);
+    const sheet = await ctx.services.drops.sheet(id);
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return sheet;
+  });
+
+  // Once drawn, its entries by rank: each one's id, tier and seniority at the draw, never its account (409 before).
+  app.get('/api/v1/drops/:id/entries', async (request, reply) => {
+    const { id } = parse(publicDropParams, request.params);
+    const page = await ctx.services.drops.drawEntries(id, pageOf(request.query));
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return page;
   });
 
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {

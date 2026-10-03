@@ -1,22 +1,30 @@
 /**
- * The owners' club (contract §3 extension; API §10.9; services/club.ts),
- * cookie `orbes_session`. P-R02 opens the lookbook's RESERVED models to the
- * owners of a piece:
+ * The owners' club (contract §3 extension; API §10.9, §10.10;
+ * services/club.ts, services/drops.ts), cookie `orbes_session`.
  *
- *   GET /api/v1/club/lookbook          the RESERVED models (no story)
- *   GET /api/v1/club/lookbook/:slug    a sheet, PUBLIC or RESERVED
+ * P-R02 opens the lookbook's RESERVED models to the owners of a piece:
+ *
+ *   GET  /api/v1/club/lookbook              the RESERVED models (no story)
+ *   GET  /api/v1/club/lookbook/:slug        a sheet, PUBLIC or RESERVED
+ *
+ * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
+ * the tiers):
+ *
+ *   GET  /api/v1/club/status                the account's tier, pieces and seniority, and its entries
+ *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal)
+ *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
  *
  * Every route needs a signed-in account (the scope's guard: 401 without one,
  * and for an unsafe method the CSRF token and a same-origin request); what
  * the account holds now decides the rest (403 OWNERS_ONLY for an account
- * that holds no piece). The club's mutations are POSTs only. Its answers
- * depend on the account, so they are never stored (`no-store`). Rate group
- * `api`, like the account's other reads.
+ * that holds no piece, on the lookbook's routes). The club's mutations are
+ * POSTs only. Its answers depend on the account, so they are never stored
+ * (`no-store`). Rate group `api`, like the account's other reads.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { lookbookParams, parse } from '../http/schemas.js';
-import { requireAccount, sessionGuard } from '../http/sessions.js';
+import { emptyBody, lookbookParams, parse, publicDropParams } from '../http/schemas.js';
+import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import type { RouteDeps } from './public.js';
 
 export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
@@ -27,7 +35,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     reply.header('cache-control', 'no-store');
     return payload;
   });
-  const { club } = ctx.services;
+  const { club, drops } = ctx.services;
 
   app.get('/api/v1/club/lookbook', async (request) => {
     const { account } = requireAccount(request);
@@ -38,5 +46,25 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { slug } = parse(lookbookParams, request.params);
     return club.lookbookSheet(account.id, slug);
+  });
+
+  // P-R03: the account's tier and its entries in the drops, for MY PIECES and a release's page.
+  app.get('/api/v1/club/status', async (request) => {
+    const { account } = requireAccount(request);
+    return club.status(account.id);
+  });
+
+  app.post('/api/v1/club/drops/:id/enter', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    parse(emptyBody, request.body);
+    return { entry: await drops.enter(account.id, id, accountActor(request)) };
+  });
+
+  app.post('/api/v1/club/drops/:id/withdraw', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    parse(emptyBody, request.body);
+    return { entry: await drops.withdraw(account.id, id, accountActor(request)) };
   });
 };

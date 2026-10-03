@@ -21,6 +21,12 @@
  *    months;
  *  - a signed-in verification: the account and a keyed pseudonym of the
  *    session (routes/public.ts `meta.sessionHash`, scan_events.session_hash);
+ *  - the entries in releases (P-R03, services/drops.ts): the account, the
+ *    release, the time, the status and the staff's note; the tier, the
+ *    seniority and the rank written at the draw, which the release's page
+ *    then publishes by entry id, never by account; the console's entries
+ *    show the account's email, masked for an AUDITOR; kept with the account
+ *    (no purge), and exported with it (AccountExport.dropEntries);
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com.
  *
@@ -84,6 +90,15 @@ const EN: LegalDocument = {
       ],
     },
     {
+      id: 'releases',
+      title: 'Your entries in releases',
+      blocks: [
+        'When you enter a release with your ORBES account, ORBES records your entry: the account, the release, the time, and what becomes of the entry (entered, withdrawn, place held, waiting list, sale concluded, place lapsed), with the note ORBES Client Services may add when it records the sale concluded or the place lapsed. ORBES processes these data to run the release you enter, under the [terms of use](/legal/terms).',
+        'At the draw, ORBES records with each entry the tier and the seniority of its account, read from the pieces registered to it, and its rank. The page of the release then publishes, for each entry, its identifier, its tier, its seniority and its rank, so that anyone can check the order of the draw: never the account, its email address or its name. MY PIECES shows you the identifier of your entry.',
+        'ORBES Client Services reads the entries of a release with the email address of their account, to conclude each sale with the accounts selected; a staff member with read-only access sees it masked. The service sends no email.',
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -120,6 +135,7 @@ const EN: LegalDocument = {
           '- **Verifications**: kept 90 days. Older verifications are deleted with everything attached to them, your answer included, and only the daily counts remain.',
           '- **Sessions**: deleted when they end, at sign-out or 30 days after sign-in at most.',
           '- **Your account and what it records**: as long as the account exists. The service does not yet let you delete your account: ask ORBES Client Services.',
+          '- **Entries in releases**: as long as the account exists. What the draw publishes (the identifier, tier, seniority and rank of each entry) stays on the page of the release.',
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
           '- **The audit log**: permanent; it names accounts by their identifier only.',
           '- **The device cookie**: 2 years on your device.',
@@ -203,6 +219,15 @@ const FR: LegalDocument = {
       ],
     },
     {
+      id: 'releases',
+      title: 'Vos inscriptions aux sorties',
+      blocks: [
+        "Quand vous vous inscrivez à une sortie avec votre compte ORBES, ORBES enregistre votre inscription : le compte, la sortie, l'heure, et ce que devient l'inscription (inscrite, retirée, place réservée, liste d'attente, vente conclue, place expirée), avec la note qu'ORBES Client Services peut y ajouter quand il enregistre la vente conclue ou la place expirée. ORBES traite ces données pour organiser la sortie à laquelle vous vous inscrivez, selon les [conditions générales d'utilisation](/legal/terms).",
+        "Au tirage, ORBES enregistre avec chaque inscription le palier et l'ancienneté de son compte, lus sur les pièces qui y sont enregistrées, et son rang. La page de la sortie publie alors, pour chaque inscription, son identifiant, son palier, son ancienneté et son rang, pour que chacun puisse vérifier l'ordre du tirage : jamais le compte, son adresse e-mail ni son nom. MY PIECES vous montre l'identifiant de votre inscription.",
+        "ORBES Client Services lit les inscriptions d'une sortie avec l'adresse e-mail de leur compte, pour conclure chaque vente avec les comptes sélectionnés ; un membre du personnel en lecture seule la voit masquée. Le service n'envoie aucun e-mail.",
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -239,6 +264,7 @@ const FR: LegalDocument = {
           "- **Vérifications** : conservées 90 jours. Les vérifications plus anciennes sont supprimées avec tout ce qui s'y rattache, votre réponse comprise, et seuls les comptes quotidiens restent.",
           '- **Sessions** : supprimées à leur fin, à la déconnexion ou 30 jours au plus après la connexion.',
           "- **Votre compte et ce qu'il enregistre** : tant que le compte existe. Le service ne permet pas encore de supprimer votre compte : adressez-vous à ORBES Client Services.",
+          "- **Inscriptions aux sorties** : tant que le compte existe. Ce que publie le tirage (l'identifiant, le palier, l'ancienneté et le rang de chaque inscription) reste sur la page de la sortie.",
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",
           "- **Journal d'audit** : permanent ; il ne désigne les comptes que par leur identifiant.",
           "- **Cookie d'appareil** : 2 ans sur votre appareil.",

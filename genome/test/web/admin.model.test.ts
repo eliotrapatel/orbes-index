@@ -111,6 +111,24 @@ import {
 import { formatCount } from '../../src/web/admin/format.js';
 import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
+import { DROP_STATES as SERVER_DROP_STATES, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import {
+  CLUB_TABS,
+  clubTab,
+  DROP_LIMITS,
+  dropActions,
+  dropChange,
+  dropFormValues,
+  dropInput,
+  dropPhrase,
+  dropProblem,
+  entryActions,
+  localUtc,
+  placesTaken,
+  releaseAddress,
+  tierName,
+  utcInstant,
+} from '../../src/web/admin/model/club.js';
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
@@ -155,6 +173,7 @@ describe('admin enums mirror the server', () => {
       'REPORT_CHANNELS',
       'REPORT_STATUSES',
       'LOOKBOOK_STATES',
+      'DROP_ENTRY_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -163,6 +182,7 @@ describe('admin enums mirror the server', () => {
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);
     expect([...web.SIGNAL_STATES]).toEqual([...SERVER_SIGNAL_STATES]);
     expect([...web.SALE_REFUSALS]).toEqual([...SERVER_SALE_REFUSALS]);
+    expect([...web.DROP_STATES]).toEqual([...SERVER_DROP_STATES]);
   });
 
   it('uses the server role ranks and artifact limits', () => {
@@ -271,6 +291,11 @@ describe('permissions', () => {
     expect(can('OPERATOR', 'editCatalog')).toBe(true);
     expect(can('OPERATOR', 'activateCategory')).toBe(false);
     expect(can('ADMIN', 'activateCategory')).toBe(true);
+    // The Club's drops (P-R03): an OPERATOR creates, publishes, cancels and concludes; the draw is an ADMIN's.
+    expect(can('AUDITOR', 'manageDrops')).toBe(false);
+    expect(can('OPERATOR', 'manageDrops')).toBe(true);
+    expect(can('OPERATOR', 'drawDrop')).toBe(false);
+    expect(can('ADMIN', 'drawDrop')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
   });
@@ -289,6 +314,94 @@ describe('permissions', () => {
     expect(saleOnly(null)).toBe(false);
     // A role this console does not know is refused everywhere, as on the server.
     expect(can('SELLER' as never, 'sell')).toBe(false);
+  });
+});
+
+describe('the Club\'s drops (P-R03)', () => {
+  const base: web.Drop = {
+    id: '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d',
+    title: 'MONOLITHE — release I',
+    description: null,
+    model: { id: 'm1', name: 'MONOLITHE', type: 'RING', active: true },
+    quantity: 2,
+    opensAt: '2026-10-12T10:00:00.000Z',
+    closesAt: '2026-10-14T10:00:00.000Z',
+    purchaseWindowHours: 48,
+    state: 'DRAFT',
+    publishedAt: null,
+    cancelledAt: null,
+    drawnAt: null,
+    createdAt: '2026-10-04T10:00:00.000Z',
+    createdBy: null,
+    seedHash: 'ab'.repeat(32),
+    seed: null,
+    entries: { ENTERED: 0, SELECTED: 0, WAITLISTED: 0, CONFIRMED: 0, LAPSED: 0, WITHDRAWN: 0 },
+  };
+  const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, new Date()), ...extra });
+
+  it('holds the server\'s bounds, and reads the times of the dialog in UTC', () => {
+    expect(DROP_LIMITS).toMatchObject({ title: DROP_TITLE_MAX, description: DROP_DESCRIPTION_MAX, quantity: DROP_QUANTITY_MAX, note: DROP_NOTE_MAX });
+    expect([DROP_LIMITS.windowMin, DROP_LIMITS.windowMax, DROP_LIMITS.windowDefault]).toEqual([PURCHASE_WINDOW_HOURS.min, PURCHASE_WINDOW_HOURS.max, PURCHASE_WINDOW_HOURS.default]);
+    expect(localUtc('2026-10-12T10:05:00.000Z')).toBe('2026-10-12T10:05');
+    expect(utcInstant('2026-10-12T10:05')).toBe('2026-10-12T10:05:00.000Z');
+    expect(utcInstant('12/10/2026')).toBeNull();
+    expect(localUtc(null)).toBe('');
+    // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours.
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48' });
+  });
+
+  it('says what the server would refuse before anything is sent, and sends only what changed', () => {
+    expect(dropProblem(values())).toBeNull();
+    expect(dropProblem(values({ modelId: '' }))).toBe('Choose the model of the release.');
+    expect(dropProblem(values({ title: ' ' }))).toBe('Give the release a title.');
+    expect(dropProblem(values({ quantity: '0' }))).toMatch(/^A release has 1 to/);
+    expect(dropProblem(values({ quantity: '1.5' }))).toMatch(/^A release has 1 to/);
+    expect(dropProblem(values({ closesAt: values().opensAt }))).toBe('Entries close after they open.');
+    expect(dropProblem(values({ opensAt: '' }))).toMatch(/^Use the date and time pickers/);
+    expect(dropProblem(values({ purchaseWindowHours: '337' }))).toBe('A place is held 1 to 336 hours.');
+    expect(dropInput(values({ description: '  ' }))).toMatchObject({ modelId: 'm1', quantity: 2, description: null, opensAt: base.opensAt, closesAt: base.closesAt, purchaseWindowHours: 48 });
+    expect(dropChange(base, values())).toEqual({});
+    expect(dropChange(base, values({ quantity: '3', closesAt: '2026-10-15T10:00', description: 'Three pieces.' }))).toEqual({ quantity: 3, closesAt: '2026-10-15T10:00:00.000Z', description: 'Three pieces.' });
+  });
+
+  it('offers each action to the role and in the state the server allows it', () => {
+    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false });
+    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false });
+    const published = { ...base, state: 'OPEN' as const, publishedAt: '2026-10-05T10:00:00.000Z' };
+    expect(dropActions(published, 'OPERATOR')).toMatchObject({ edit: false, describe: true, publish: false, cancel: true, draw: false });
+    const closed = { ...published, state: 'CLOSED' as const };
+    expect(dropActions(closed, 'OPERATOR').draw).toBe(false);
+    expect(dropActions(closed, 'ADMIN').draw).toBe(true);
+    const drawn = { ...closed, state: 'DRAWN' as const, drawnAt: '2026-10-14T11:00:00.000Z', entries: { ...base.entries, SELECTED: 1, CONFIRMED: 0, WAITLISTED: 3, LAPSED: 1 } };
+    expect(placesTaken(drawn)).toBe(1);
+    expect(dropActions(drawn, 'OPERATOR')).toMatchObject({ cancel: false, draw: false, offerNext: true });
+    expect(dropActions({ ...drawn, entries: { ...drawn.entries, CONFIRMED: 1 } }, 'OPERATOR').offerNext).toBe(false);
+    expect(dropActions({ ...drawn, entries: { ...drawn.entries, WAITLISTED: 0 } }, 'OPERATOR').offerNext).toBe(false);
+    expect(dropActions({ ...base, state: 'CANCELLED', cancelledAt: '2026-10-06T00:00:00.000Z' }, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: false });
+    expect(dropPhrase('draw', base)).toBe('DRAW 8A1D0C55');
+    expect(dropPhrase('cancel', base)).toBe('CANCEL 8A1D0C55');
+    expect(releaseAddress(base)).toBe(`/verify/releases/${base.id}`);
+  });
+
+  it('confirms a place held at any time, lapses it only once its time has passed', () => {
+    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', handledBy: null, handledAt: null, note: null };
+    expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T10:59:59Z'))).toEqual({ confirm: true, lapse: false });
+    expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'))).toEqual({ confirm: true, lapse: true });
+    expect(entryActions(entry, 'AUDITOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });
+    expect(entryActions({ ...entry, status: 'WAITLISTED' }, 'OPERATOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });
+    expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
+  });
+
+  it('opens on the Drops tab, the one tab of the Club so far', () => {
+    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops']);
+    expect(clubTab({})).toBe('drops');
+    expect(clubTab({ tab: 'nope' })).toBe('drops');
+  });
+
+  it('gives each state and status a tone: a place held waits for ORBES Client Services, as an open case does', () => {
+    expect(SERVER_DROP_STATES.map((s) => toneOf('drop', s))).toEqual(['outline', 'outline', 'solid', 'outline', 'solid', 'muted']);
+    expect(serverSchema.DROP_ENTRY_STATUSES.map((s) => toneOf('dropEntry', s))).toEqual(['outline', 'alert', 'outline', 'solid', 'muted', 'muted']);
+    expect(toneOf('dropEntry', 'SELECTED')).toBe(toneOf('case', 'OPEN'));
   });
 });
 
