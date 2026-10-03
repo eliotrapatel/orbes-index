@@ -44,3 +44,5 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 *.md
+# The staff documents the console shows (GET /api/admin/documents) ship with the server.
+!src/server/documents/*.md

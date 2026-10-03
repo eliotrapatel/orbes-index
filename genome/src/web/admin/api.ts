@@ -21,6 +21,8 @@ import type {
   AdminSessionInfo,
   AdminUser,
   AnalyticsData,
+  StaffDocument,
+  StaffDocumentSummary,
   AnomalyContext,
   AnomalyFilters,
   AnomalyRecord,
@@ -362,6 +364,14 @@ export class AdminApi {
   }
 
   /** Daily scan statistics: the `days` complete days to yesterday (UTC), or the days `from` to `to` (at most 366). */
+  documents(): Promise<{ documents: StaffDocumentSummary[] }> {
+    return this.get('/api/admin/documents');
+  }
+
+  document(id: string): Promise<StaffDocument> {
+    return this.get(`/api/admin/documents/${encodeURIComponent(id)}`);
+  }
+
   analytics(q: { days?: number; from?: string; to?: string } = {}): Promise<AnalyticsData> {
     return this.get('/api/admin/analytics', q);
   }

@@ -29,6 +29,8 @@ export const ROUTES = [
   { name: 'catalogue', path: '/catalogue' },
   { name: 'retailers', path: '/retailers' },
   { name: 'sale', path: '/sale' },
+  { name: 'documents', path: '/documents' },
+  { name: 'document', path: '/documents/:docId' },
 ] as const;
 
 export type RouteName = (typeof ROUTES)[number]['name'];

@@ -1100,6 +1100,36 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await shot(page, 'audit');
   }, STEP_TIMEOUT);
 
+  it('reads the staff documents in the console: the playbook with its contents and tables, the kit with its card', async () => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await go(page, '#/documents', 'Documents');
+    await expect.poll(() => page.locator('[data-testid=documents] .docs__card').count()).toBe(2);
+    await page.click('[data-testid=document-sales-playbook]');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Sales and shipping playbook');
+    const article = page.locator('.doc__article');
+    await expect.poll(() => article.locator('h2.md__h2').count()).toBeGreaterThan(5);
+    expect(await article.locator('table.md__table').count()).toBeGreaterThan(2);
+    expect(await article.locator('blockquote.md__quote').count()).toBeGreaterThan(0);
+    expect(await article.locator('pre.md__pre').count()).toBeGreaterThan(0);
+    expect(await article.textContent()).not.toMatch(/\*\*|\]\(|^#/m);
+    // The contents column scrolls to a section without leaving the route.
+    const before = await page.evaluate(() => location.hash);
+    await page.locator('.doc__toc-link').nth(3).click();
+    expect(await page.evaluate(() => location.hash)).toBe(before);
+    mkdirSync(OUT_DIR, { recursive: true });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: join(OUT_DIR, 'admin-documents-playbook.png') });
+    // A link to the other document opens it in the console; the kit shows the certificate card specimen.
+    await go(page, '#/documents/packaging-kit', 'Packaging kit');
+    const img = page.locator('.doc__article img.md__img').first();
+    await img.scrollIntoViewIfNeeded();
+    await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0);
+    await page.screenshot({ path: join(OUT_DIR, 'admin-documents-kit.png') });
+    await go(page, '#/documents', 'Documents');
+    await page.screenshot({ path: join(OUT_DIR, 'admin-documents.png') });
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+
   it('reads the scans of 90 days by result and the countries of the counterfeit signals on one page (Analytics)', async () => {
     // A history the daily statistics count: complete days, several countries, staff scans left out.
     const midnight = Math.floor(Date.now() / 86_400_000) * 86_400_000;

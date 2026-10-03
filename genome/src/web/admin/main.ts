@@ -41,6 +41,7 @@ import { failure, loading } from './ui/components.js';
 import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
 import { notify, notifyError } from './ui/toast.js';
 import { analyticsView } from './views/analytics.js';
+import { documentsView, documentView } from './views/documents.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
@@ -109,6 +110,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'team', label: 'Team', cap: 'manageAdmins' },
     ],
   },
+  { group: 'Library', items: [{ route: 'documents', label: 'Documents' }] },
 ];
 
 const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteName }>> = {
@@ -132,6 +134,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   team: { view: teamView, title: 'Team', nav: 'team' },
   retailers: { view: retailersView, title: 'Points of sale', nav: 'retailers' },
   sale: { view: saleView, title: 'Sale mode', nav: 'sale' },
+  documents: { view: documentsView, title: 'Documents', nav: 'documents' },
+  document: { view: documentView, title: 'Document', nav: 'documents' },
 };
 
 const app = byId('app');

@@ -160,6 +160,21 @@ export interface DashboardData {
 // ── Analytics ──────────────────────────────────────────────────────────────
 
 /** GET /api/admin/analytics: the daily scan statistics of a window of complete UTC days (API §16.16). */
+/** A staff document of the console (GET /api/admin/documents). */
+export interface StaffDocumentSummary {
+  id: string;
+  title: string;
+  summary: string;
+  lang: 'fr' | 'en';
+}
+
+export interface StaffDocument {
+  id: string;
+  title: string;
+  lang: 'fr' | 'en';
+  markdown: string;
+}
+
 export interface AnalyticsData {
   /** `YYYY-MM-DD`, both included. */
   from: string;

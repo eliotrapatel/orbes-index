@@ -38,6 +38,9 @@ const PHOTO = { body: Buffer.from(jpegPhoto(8, 8)), headers: { 'content-type': '
 const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics', min: 'AUDITOR' },
+  { group: 'documents', method: 'GET', url: '/api/admin/documents', min: 'AUDITOR' },
+  { group: 'documents', method: 'GET', url: '/api/admin/documents/sales-playbook', min: 'AUDITOR' },
+  { group: 'documents', method: 'GET', url: '/api/admin/documents/assets/certificate-card-specimen.svg', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics?from=2025-10-01&to=2026-10-01', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics?days=367', min: 'AUDITOR' },
   { group: 'categories', method: 'GET', url: '/api/admin/categories', min: 'AUDITOR' },
@@ -137,6 +140,7 @@ describe('admin role enforcement', () => {
     for (const g of [
       'dashboard',
       'analytics',
+      'documents',
       'categories',
       'models',
       'collections',
