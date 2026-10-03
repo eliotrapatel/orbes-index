@@ -9,8 +9,8 @@
  *    reads, or a file of the repository; outside the software only the
  *    identity's placeholder `O26-…`, the console's address, the server's
  *    directory and shell commands (checked against ADMIN_USAGE below). The
- *    labels of F-01 (`MY PIECES`, `PIECE FOUND`), whose track is merged after
- *    this one, are accepted until their code is here, then checked as well;
+ *    labels of MY PIECES (F-01), of the reception of a piece (F-03) and of
+ *    the ownership certificate (F-06) are among them;
  *  - the forbidden lexicon of the packaging kit's test (D-02: BRAND §4.5,
  *    "product", the kit's French lexicon) outside the playbook's marked
  *    lexicon block (§8), and no exclamation mark. One exemption, for the
@@ -25,8 +25,7 @@
  *    owner's unusual-activity variant), its served sentence word for word,
  *    and its phrase;
  *  - §0: the numbers equal to the code's constants, and the phrases saying
- *    the same numbers (§4's transfer window: F-03's TRANSFER_TOKEN_TTL_MS once
- *    that track is merged here, the scan's window until then);
+ *    the same numbers (§4's transfer window: F-03's TRANSFER_TOKEN_TTL_MS);
  *  - §4: F-03's refusal of another piece's transfer code, as served;
  *  - the sale's closing sentence (CLIENT_REGISTRATION), the second-hand
  *    sentence (RESALE_GUIDANCE, and the kit's French word for word), and the
@@ -47,7 +46,7 @@ import { ADMIN_LOCKOUT_MS, ADMIN_LOCKOUT_THRESHOLD, PASSWORD_MIN_LENGTH } from '
 import { UNUSUAL_ACTIVITY_OWNER_COPY, VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '../../src/server/services/ownership.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
-import * as scanTokens from '../../src/server/services/scan-tokens.js';
+import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { CLIENT_REGISTRATION } from '../../src/web/admin/model/sale.js';
 import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import {
@@ -64,7 +63,6 @@ import {
   withoutCodeSpans,
 } from './lexicon.js';
 
-const { SCAN_TOKEN_TTL_MS } = scanTokens;
 const PLAYBOOK = 'docs/launch/SALES-PLAYBOOK.md';
 const playbook = readDoc(PLAYBOOK);
 const terms = forbiddenTerms();
@@ -218,18 +216,24 @@ const NOT_QUOTED: readonly RegExp[] = [
 ];
 
 /**
- * F-01 (MY PIECES) is built on another track, merged after this one: the playbook names its labels for the merged
- * product. Accepted while its code is not here; once it is (its view, views/pieces.ts), checked like every span.
+ * The labels the playbook leans on for MY PIECES (F-01), the reception of a piece with the scan's window (F-03) and
+ * the ownership certificate (F-06), as /verify shows them.
  */
-const F01_LABELS: readonly string[] = ['MY PIECES', 'PIECE FOUND'];
-const F01_MERGED = existsSync(join(REPO, 'genome/src/web/verify/views/pieces.ts'));
-
-/**
- * F-03: a transfer code is accepted for the piece scanned only, within TRANSFER_TOKEN_TTL_MS of a signed-in scan.
- * Until that track is merged here, the scan's own window (the same 15 minutes) stands in for it.
- */
-const F03_TRANSFER_WINDOW = (scanTokens as unknown as Record<string, unknown>).TRANSFER_TOKEN_TTL_MS;
-const F03_MERGED = typeof F03_TRANSFER_WINDOW === 'number';
+const OWNER_LABELS: readonly string[] = [
+  'MY PIECES',
+  'REPORT LOST / STOLEN',
+  'CONFIRM REPORT',
+  'PIECE FOUND',
+  'CHANGE PASSWORD',
+  'RECEIVING THIS PIECE',
+  'VERIFY AGAIN',
+  'RECEIVE THIS PIECE',
+  'OWNERSHIP CERTIFICATE',
+  'CREATE CERTIFICATE',
+  'CREATE LINK',
+  'WITHDRAW',
+  'NO LONGER VALID',
+];
 /** F-03's 409 TRANSFER_PRODUCT_MISMATCH, as /verify serves it. */
 const TRANSFER_PRODUCT_MISMATCH = 'This transfer code is not for this piece. Check the code with the owner of this piece.';
 
@@ -345,9 +349,7 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
   });
 
   it('quotes the software in every code span: its labels, statuses, constants and files, word for word', () => {
-    const unquoted = codeSpans(playbook).filter(
-      (span) => !quotesSoftware(span) && !NOT_QUOTED.some((r) => r.test(span)) && !(F01_LABELS.includes(span) && !F01_MERGED),
-    );
+    const unquoted = codeSpans(playbook).filter((span) => !quotesSoftware(span) && !NOT_QUOTED.some((r) => r.test(span)));
     expect(unquoted).toEqual([]);
     // The spans the brief's sheets lean on, from the console and from /verify.
     for (const span of ['Activate warranty', 'READY TO SELL', 'Recovery code', 'This scan stays valid for … minutes.', 'REGISTRATION OPEN UNTIL …', 'UPLOAD A PHOTO']) {
@@ -360,14 +362,18 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     }
   });
 
-  it('names F-01 and F-03 as their code has them, once their tracks are merged here', () => {
-    for (const label of F01_LABELS) {
+  it('names MY PIECES (F-01), the reception of a piece (F-03) and the ownership certificate (F-06) as their code has them', () => {
+    for (const label of OWNER_LABELS) {
       expect(codeSpans(playbook), label).toContain(label);
-      if (F01_MERGED) expect(quotesSoftware(label), label).toBe(true);
+      expect(quotesSoftware(label), label).toBe(true);
     }
     // The buyer handed the code of another piece reads F-03's refusal (409 TRANSFER_PRODUCT_MISMATCH), word for word.
     expect(sheet(4)).toContain(`*${TRANSFER_PRODUCT_MISMATCH}*`);
-    if (F03_MERGED) expect(LITERALS.has(normalize(TRANSFER_PRODUCT_MISMATCH))).toBe(true);
+    expect(LITERALS.has(normalize(TRANSFER_PRODUCT_MISMATCH))).toBe(true);
+    // The certificate attests a record, not the object (BRAND §4.6): the resale sheet says so, and the buyer still scans.
+    const certificate = subsection(sheet(4), '### Le certificat de propriété (vente à distance)');
+    expect(certificate).toContain('il ne dit pas AUTHENTIC');
+    expect(quotes(certificate).join(' ')).toContain('scannez l\'ORBES CODE de la pièce');
   });
 
   it('holds every phrase to say to the lexicon without exemption: no code span, no forbidden term', () => {
@@ -432,8 +438,8 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     const said = (n: number) => quotes(sheet(n)).join(' ');
     expect(sheet(3)).toContain(`pendant ${expected.SCAN_TOKEN_TTL_MS} après le scan`);
     expect(said(4)).toContain(`valable ${expected.TRANSFER_TTL_MS}`);
-    // The buyer's window (F-03): its own constant once that track is merged here.
-    const transferWindowMs = F03_MERGED ? (F03_TRANSFER_WINDOW as number) : SCAN_TOKEN_TTL_MS;
+    // The buyer's window (F-03): the transfer token's own constant.
+    const transferWindowMs = TRANSFER_TOKEN_TTL_MS;
     expect(said(4)).toContain(`dans les ${transferWindowMs / MIN} minutes qui suivent le scan`);
     expect(sheet(4)).toContain(`plus de ${transferWindowMs / MIN} minutes ont passé`);
     expect(said(6)).toContain(`valable ${expected.RECOVERY_CODE_TTL_MS}`);

@@ -2,7 +2,7 @@
 
 Statut : **brouillon écrit à partir du code** (recommandation J-09). La vérification d'identité du §6 est à finaliser avec le juriste. La checklist du §9 est validée quand une personne qui n'a jamais vu la console l'a réalisée seule en moins de 30 minutes (§11).
 
-Liens : [LAUNCH](../LAUNCH.md) §4, §7 et §11 · [API](../API.md) §9.3, §14.4, §14.6 et §16.18 · [BRAND-DESIGN-SYSTEM](../BRAND-DESIGN-SYSTEM.md) §4 · [SECURITY-MODEL](../SECURITY-MODEL.md) §3.3 · [kit emballage](PACKAGING-KIT.md).
+Liens : [LAUNCH](../LAUNCH.md) §4, §7 et §11 · [API](../API.md) §9.3, §11.3, §11.5 à §11.7, §14.4, §14.6 et §16.18 · [BRAND-DESIGN-SYSTEM](../BRAND-DESIGN-SYSTEM.md) §4 · [SECURITY-MODEL](../SECURITY-MODEL.md) §3.3 · [kit emballage](PACKAGING-KIT.md).
 
 **Pourquoi ce guide.** Un client ne peut enregistrer sa pièce que si sa vente a été inscrite chez ORBES : la garantie activée, en mode Boutique ou dans la console. Sinon, chez lui, l'onglet `OWNERSHIP` du résultat dit `NOT YET DELIVERED` et ne propose aucun enregistrement : une pièce en règle devient un problème dès le premier scan. Ce guide donne, pour chaque situation, le geste dans la console et la phrase à dire. Il évite aussi de promettre ce que le système ne prouve pas (§8).
 
@@ -20,7 +20,9 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 | Mode Boutique, ses refus et la phrase de fin de vente | `genome/src/web/admin/views/sale.ts`, `CLIENT_REGISTRATION` dans `genome/src/web/admin/model/sale.ts`, API §16.18 |
 | Activation de la garantie depuis la fiche d'une pièce | `genome/src/web/admin/views/product.ts`, API §14.6 |
 | Titre et phrase de chaque résultat | `VERIFICATION_COPY` dans `genome/src/server/services/copy.ts`, API §9.3 et §9.4 |
-| Onglet `OWNERSHIP` : enregistrement, transfert, `NOT YET DELIVERED`, `STAFF SCAN` | `genome/src/web/verify/views/ownership.ts`, BRAND §4.4 |
+| Onglet `OWNERSHIP` : enregistrement, transfert, réception d'une pièce (`RECEIVING THIS PIECE`), `NOT YET DELIVERED`, `STAFF SCAN` | `genome/src/web/verify/views/ownership.ts`, BRAND §4.4, API §11.3 |
+| `MY PIECES` : les pièces du client, sa déclaration de perte ou de vol, `PIECE FOUND`, `CHANGE PASSWORD` | `genome/src/web/verify/views/pieces.ts`, API §10.5, §11.5 et §11.6 |
+| Le certificat de propriété (`OWNERSHIP CERTIFICATE`) | `genome/src/web/verify/views/pieces.ts`, `genome/src/web/verify/views/certificate.ts`, API §8.7 et §11.7 |
 | Transitions `LOST` et `STOLEN` | `genome/src/server/services/lifecycle.ts`, API §14.4 et §11.5 |
 | Code de récupération, verrouillage d'un compte client | `genome/src/web/admin/views/owners.ts`, `genome/src/web/admin/views/owner.ts`, API §10.8, §16.10 et §16.12 |
 | Comptes de la console | `genome/scripts/admin.ts`, `genome/src/web/admin/views/team.ts`, SECURITY-MODEL §3.3 |
@@ -161,9 +163,9 @@ Le client lit : *This ORBES identity was issued and signed by ORBES and is regis
 
 **Ce que cela veut dire.** La pièce est enregistrée à un compte ORBES qui n'est pas celui du lecteur, ou le lecteur n'est pas connecté. Sous la phrase, l'écran ajoute la consigne d'achat d'occasion et `I HAVE A TRANSFER CODE` (§4).
 
-**Ce que vous faites.** Si c'est le propriétaire : il se connecte dans l'onglet `OWNERSHIP` et scanne de nouveau. S'il achète la pièce : le code de transfert (§4).
+**Ce que vous faites.** Si c'est le propriétaire : il se connecte dans l'onglet `OWNERSHIP`, puis touche `VERIFY AGAIN`, qui vérifie de nouveau le même code avec sa session. S'il achète la pièce : le code de transfert (§4).
 
-> Cette pièce est enregistrée à un compte ORBES. Si c'est le vôtre, connectez-vous dans l'onglet OWNERSHIP, puis scannez-la de nouveau. Si vous l'achetez, demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un.
+> Cette pièce est enregistrée à un compte ORBES. Si c'est le vôtre, connectez-vous dans l'onglet OWNERSHIP, puis touchez VERIFY AGAIN. Si vous l'achetez, demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un.
 
 ### AUTHENTIC — OWNERSHIP VERIFIED
 
@@ -269,7 +271,7 @@ Une pièce enregistrée change de mains par un **code de transfert**, créé par
 
 **Le vendeur (le propriétaire enregistré).** Sur theorbes.com/verify, connecté, il scanne sa pièce (`AUTHENTIC — OWNERSHIP VERIFIED`), puis onglet `OWNERSHIP`, `TRANSFER OF OWNERSHIP` → `CREATE TRANSFER CODE`. Le code est valable 7 jours ; un seul transfert peut être en attente ; `CANCEL TRANSFER` l'annule tant qu'il n'a pas servi.
 
-**L'acheteur.** Il scanne la pièce : `AUTHENTIC — REGISTERED`, avec sous la phrase la consigne d'achat d'occasion (`RESALE_GUIDANCE`, `genome/src/web/verify/copy.ts`, J-02) et `I HAVE A TRANSFER CODE`, qui ouvre l'onglet `OWNERSHIP` sur `RECEIVING THIS PIECE`. Connecté à son compte ORBES, il saisit `TRANSFER CODE` → `RECEIVE THIS PIECE`. Le code n'est accepté que pour la pièce que l'acheteur vient de scanner, connecté, dans les 15 minutes qui suivent ce scan (F-03). Le transfert est alors définitif.
+**L'acheteur.** Il scanne la pièce : `AUTHENTIC — REGISTERED`, avec sous la phrase la consigne d'achat d'occasion (`RESALE_GUIDANCE`, `genome/src/web/verify/copy.ts`, J-02) et `I HAVE A TRANSFER CODE`, qui ouvre l'onglet `OWNERSHIP` sur `RECEIVING THIS PIECE`. Le code n'est accepté que pour la pièce que l'acheteur a scannée, connecté à son compte ORBES, dans les 15 minutes qui suivent ce scan (F-03). Connecté avant son scan, il trouve aussitôt `TRANSFER CODE` et l'heure limite (`RECEIVING OPEN UNTIL …`). Connecté seulement sur le résultat, il lit `To receive this piece, verify it again now that you are signed in.` et touche `VERIFY AGAIN` : le même code, vérifié de nouveau avec sa session, rouvre l'onglet `OWNERSHIP` avec `TRANSFER CODE`. Puis `RECEIVE THIS PIECE` : `REGISTERED TO YOU`, et le transfert est définitif.
 
 **Dans la console.** La fiche de la pièce, section `Ownership` : `Transfer` `PENDING` pendant l'attente, puis le nouveau propriétaire et la ligne du transfert dans l'historique.
 
@@ -277,7 +279,8 @@ Une pièce enregistrée change de mains par un **code de transfert**, créé par
 
 - Une pièce revendue avant tout enregistrement n'a pas de propriétaire : aucun code de transfert ne peut exister. Si la zone de la carte est intacte, l'acheteur l'enregistre avec le claim code (kit, §2).
 - Le vendeur a donné le code d'une autre pièce : l'acheteur lit *This transfer code is not for this piece. Check the code with the owner of this piece.* Il demande au vendeur le code de cette pièce-ci, avant de payer.
-- L'acheteur s'est connecté après son scan, ou plus de 15 minutes ont passé depuis : il scanne de nouveau la pièce, connecté, puis saisit le code. Un téléphone sans caméra lit le code d'une photo (`UPLOAD A PHOTO`, sur l'accueil de theorbes.com/verify).
+- L'acheteur s'est connecté après son scan : `VERIFY AGAIN`, comme ci-dessus. Si plus de 15 minutes ont passé depuis le scan, l'écran le dit (`The window to receive this piece from this scan has closed. Scan the code again to receive it.`) et n'envoie rien ; `SCAN AGAIN`, connecté, puis le code. Un téléphone sans caméra lit le code d'une photo (`UPLOAD A PHOTO`, sur l'accueil de theorbes.com/verify).
+- Un autre compte se connecte sur le même résultat : la fenêtre de 15 minutes reste celle du compte qui a scanné, et l'écran demande `VERIFY AGAIN`.
 - Après la récupération d'un mot de passe (§6), les transferts depuis ce compte sont suspendus 72 heures (`TRANSFERS_PAUSED`).
 
 Ce que vous dites à l'acheteur, mot pour mot comme l'écran (*Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.*) :
@@ -290,11 +293,27 @@ Au vendeur :
 
 À l'acheteur, ensuite :
 
-> Connecté à votre compte ORBES, scannez la pièce, touchez I HAVE A TRANSFER CODE, puis saisissez le code dans les 15 minutes qui suivent le scan. La pièce passe alors à votre nom.
+> Connecté à votre compte ORBES, scannez la pièce, touchez I HAVE A TRANSFER CODE, puis saisissez le code dans les 15 minutes qui suivent le scan. Si vous vous êtes connecté après le scan, touchez d'abord VERIFY AGAIN. La pièce passe alors à votre nom.
 
 Si le code est refusé parce qu'il n'est pas celui de cette pièce :
 
 > Ce code de transfert n'est pas celui de cette pièce. Avant de payer, demandez au vendeur le code de transfert de cette pièce-ci, puis saisissez-le après un nouveau scan, connecté à votre compte ORBES.
+
+### Le certificat de propriété (vente à distance)
+
+Un acheteur à distance, une plateforme de revente ou un assureur peut demander, avant la vente, ce que le registre ORBES dit de la pièce. Le propriétaire enregistré crée lui-même un lien (F-06) : `MY PIECES` → la pièce → onglet `OWNERSHIP` → `OWNERSHIP CERTIFICATE` → `CREATE CERTIFICATE` → la durée (`7 DAYS`, `30 DAYS` ou `90 DAYS`) → `CREATE LINK`, puis `COPY LINK`. Le lien ne s'affiche qu'une fois (`This link is shown once: copy it now. ORBES cannot show it again.`) ; `WITHDRAW` le retire à tout moment.
+
+- **Ce que lit celui qui ouvre le lien**, sans compte : `OWNERSHIP CERTIFICATE`, `VALID`, la pièce et son GENOME, la propriété (vérifiée ou non) et le jour où elle a commencé, la garantie, aucune perte ni aucun vol déclarés (`NONE REPORTED`), puis `DOWNLOAD PDF`. Jamais le nom ni l'e-mail du propriétaire.
+- **Quand il cesse de valoir** : la pièce change de mains, une perte ou un vol est déclaré (§5), ou le lien expire ; il se lit alors `NO LONGER VALID`. Un lien retiré par son propriétaire, ou par la récupération d'un mot de passe ou le verrouillage du compte (§6), se lit `NOT FOUND`. Une pièce dont la perte ou le vol est déclaré, ou qui est révoquée ou retirée, ne propose pas `OWNERSHIP CERTIFICATE`.
+- **Ce qu'il ne prouve pas.** Il atteste un enregistrement, jamais l'objet qu'on montre avec lui : il ne dit pas AUTHENTIC. L'acheteur scanne toujours la pièce elle-même à la remise, et la reçoit avec le code de transfert. Le personnel ne crée ni ne retire jamais un certificat à la place du client.
+
+Au vendeur qui demande comment rassurer un acheteur à distance :
+
+> Dans MY PIECES, ouvrez la pièce, puis OWNERSHIP CERTIFICATE et CREATE CERTIFICATE : vous choisissez sa durée et vous partagez le lien. Il montre ce que le registre ORBES dit de la pièce, sans votre nom ni votre e-mail, et cesse de valoir si la pièce change de mains ou si une perte ou un vol est déclaré. Vous pouvez le retirer à tout moment.
+
+À l'acheteur qui a reçu un certificat :
+
+> Ce certificat montre ce que le registre ORBES dit de cette pièce au moment où vous l'ouvrez ; il ne prouve pas que l'objet qu'on vous remet est cette pièce. À la remise, scannez l'ORBES CODE de la pièce, puis recevez-la avec le code de transfert du vendeur.
 
 ---
 
@@ -302,13 +321,14 @@ Si le code est refusé parce qu'il n'est pas celui de cette pièce :
 
 ### Le client déclare lui-même : MY PIECES
 
-Sur theorbes.com/verify, connecté, le client ouvre `MY PIECES` (sur l'accueil, ou dans la ligne de son compte de l'onglet `OWNERSHIP`), choisit la pièce et déclare sa perte ou son vol, puis confirme (F-01). Aussitôt :
+Sur theorbes.com/verify, connecté, le client ouvre `MY PIECES` (sur l'accueil, ou dans la ligne de son compte de l'onglet `OWNERSHIP`), puis, sous la pièce, `REPORT LOST / STOLEN` → `LOST` ou `STOLEN` → `CONFIRM REPORT` (F-01). Il n'a pas besoin de la pièce pour cela : il ne la scanne pas. Aussitôt :
 
 - un transfert en attente est annulé ;
+- ses certificats de propriété se lisent `NO LONGER VALID` (§4), pour toujours : une pièce retrouvée en demande un nouveau ;
 - chaque scan de la pièce affiche UNUSUAL ACTIVITY DETECTED, et ses codes ne peuvent plus être imprimés ;
 - le premier scan qui suit ouvre dans `Anomalies` un signal `LOST STOLEN SCAN`, et les scans suivants s'y ajoutent ; son panneau `Details` liste ces scans, leurs jours et leurs pays (`Scans in the window`, `Countries`).
 
-Une perte que le client a déclarée lui-même, il la lève lui-même : `PIECE FOUND` dans `MY PIECES` rend à la pièce son statut d'avant. Un vol, lui, n'est levé que par ORBES Client Services.
+Une perte que le client a déclarée lui-même, il la lève lui-même : `PIECE FOUND` → `CONFIRM` dans `MY PIECES` rend à la pièce son statut d'avant. Un vol, ou une perte inscrite par ORBES Client Services, n'est levé que par ORBES Client Services : `MY PIECES` montre alors leurs coordonnées, sans bouton.
 
 > Vous pouvez déclarer la perte ou le vol vous-même : sur theorbes.com/verify, connectez-vous, ouvrez MY PIECES, choisissez la pièce et confirmez la déclaration. Si vous retrouvez une pièce que vous aviez déclarée perdue, PIECE FOUND la rétablit ; après un vol, ORBES Client Services s'en charge avec vous.
 
@@ -352,14 +372,14 @@ SECURITY-MODEL §3.6 : un code de récupération, un verrouillage à la demande 
 `Owners` → l'adresse exacte → `Search` → la ligne du client → `Recovery code` → `Issue a recovery code` → `Issue code`. Le code s'affiche une fois (`Recovery code · shown once`) : lisez-le au client, au téléphone ou en face à face, puis `Given to the client — hide`. Un nouveau code annule le précédent.
 
 - `Recovery attempts throttled until …` sur la ligne du client : 5 essais manqués en une heure ont usé ce code. Donnez-en un nouveau, après la même vérification.
-- Un compte dont on soupçonne la prise de contrôle : `Lock account` sur sa fiche (ADMIN). Ses sessions se ferment, ses transferts en attente sont annulés et le code ouvert ne sert plus. `Unlock account` le rouvre.
+- Un compte dont on soupçonne la prise de contrôle : `Lock account` sur sa fiche (ADMIN). Ses sessions se ferment, ses transferts en attente sont annulés, ses liens de certificat de propriété sont retirés (§4) et le code ouvert ne sert plus. `Unlock account` le rouvre ; ce que le verrouillage a annulé ou retiré le reste.
 - Après une récupération, la ligne du client montre `Transfers paused until …`.
 
 ### Ce que vous dites
 
 > Nous n'envoyons jamais de lien par e-mail pour changer un mot de passe. Après avoir vérifié votre identité, je vous lis un code de récupération : il ne sert qu'une fois et reste valable 30 minutes. Sur theorbes.com/verify, touchez MY PIECES (ou, après un scan, l'onglet OWNERSHIP), puis FORGOTTEN PASSWORD? sous le formulaire de connexion, puis I HAVE A RECOVERY CODE, et saisissez l'adresse e-mail de votre compte, ce code et un nouveau mot de passe de 12 caractères au moins.
 
-> Pour votre sécurité, toutes vos sessions se ferment, vos transferts en attente sont annulés et aucun nouveau transfert n'est possible depuis votre compte pendant 72 heures.
+> Pour votre sécurité, toutes vos sessions se ferment, vos transferts en attente sont annulés, les liens de certificat de propriété que vous aviez partagés sont retirés, et aucun nouveau transfert n'est possible depuis votre compte pendant 72 heures.
 
 Un client connecté qui veut seulement changer son mot de passe le fait lui-même : `CHANGE PASSWORD`, dans `MY PIECES`, à côté de `SIGN OUT` (sur l'accueil de theorbes.com/verify, ou par `MY PIECES` dans la ligne de son compte de l'onglet `OWNERSHIP`).
 
@@ -438,7 +458,7 @@ Sur le téléphone, `SCAN ANOTHER` en bas du résultat, puis scannez de nouveau 
 
 ### Étape 5 — Transférer la pièce au compte test B (7 min)
 
-Toujours connecté en A, onglet `OWNERSHIP`, `TRANSFER OF OWNERSHIP` → `CREATE TRANSFER CODE`. Notez le `TRANSFER CODE`, puis `SIGN OUT`. `SCAN ANOTHER` et scannez la pièce : `AUTHENTIC — REGISTERED`, avec sous la phrase la consigne d'achat d'occasion et `I HAVE A TRANSFER CODE`. Touchez-le : l'onglet `OWNERSHIP` s'ouvre sur `RECEIVING THIS PIECE`. `CREATE ACCOUNT` avec l'adresse test B. Connecté en B, scannez la pièce une dernière fois, puis sous `RECEIVING THIS PIECE` : `TRANSFER CODE` → `RECEIVE THIS PIECE`, dans les 15 minutes qui suivent ce scan. Attendu : `REGISTERED TO YOU`. Dans la console, la fiche de la pièce, section `Ownership`, nomme le nouveau propriétaire et montre le transfert dans l'historique.
+Toujours connecté en A, onglet `OWNERSHIP`, `TRANSFER OF OWNERSHIP` → `CREATE TRANSFER CODE`. Notez le `TRANSFER CODE`, puis `SIGN OUT`. `SCAN ANOTHER` et scannez la pièce : `AUTHENTIC — REGISTERED`, avec sous la phrase la consigne d'achat d'occasion et `I HAVE A TRANSFER CODE`. Touchez-le : l'onglet `OWNERSHIP` s'ouvre sur `RECEIVING THIS PIECE`. `CREATE ACCOUNT` avec l'adresse test B. Connecté en B après le scan, l'écran demande `VERIFY AGAIN` : touchez-le. Le résultat se rouvre sur l'onglet `OWNERSHIP`, avec `RECEIVING OPEN UNTIL …` et l'heure. `TRANSFER CODE` → `RECEIVE THIS PIECE`, dans les 15 minutes qui suivent cette vérification. Attendu : `REGISTERED TO YOU`. Dans la console, la fiche de la pièce, section `Ownership`, nomme le nouveau propriétaire et montre le transfert dans l'historique.
 
 ### Étape 6 — Lire un résultat UNKNOWN ORBES CODE (ici INVALID SIGNATURE) (2 min)
 
