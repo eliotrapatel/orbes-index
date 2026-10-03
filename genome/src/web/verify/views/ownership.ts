@@ -24,6 +24,9 @@
  * A piece registered to someone else shows RECEIVING THIS PIECE, the heading
  * the link under the result's second-hand guidance moves to (J-02).
  *
+ * Under CREATE ACCOUNT, one sentence and TERMS OF USE: creating an account
+ * means accepting the terms (their article 1), linked at /legal/terms (J-06).
+ *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
  * customers and never carry internal detail. The panel re-renders itself on
@@ -36,7 +39,7 @@ import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
 import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
-import { contactBlock, piecesLink, sectionLabel } from './common.js';
+import { contactBlock, piecesLink, sectionLabel, termsNote } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 
 export { MIN_PASSWORD } from './forms.js';
@@ -375,7 +378,8 @@ export class OwnershipPanel {
       h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
       h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'create' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('create') }, text: 'CREATE ACCOUNT' }),
     );
-    if (tab === 'create') return [this.text(lead), switcher, this.createForm()];
+    // Under CREATE ACCOUNT, the terms of use it accepts (J-06), in a new tab so the form and the scan's window stay.
+    if (tab === 'create') return [this.text(lead), switcher, this.createForm(), termsNote()];
     // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04).
     return [
       this.text(lead),

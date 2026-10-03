@@ -4,8 +4,9 @@
  * same everywhere the brand put it. Checked here: the paths are the master
  * file's; the ink box; the absolute path data the card's PDF draws covers the
  * very pixels of the master; the on-screen markup (an image named ORBES, or
- * decorative beside the typed word); the two tab icons, byte for byte what
- * scripts/favicons.ts writes. Its presence on each screen is in the brand
+ * decorative beside the typed word); the tab icons (/verify's, the legal
+ * pages' the same, the console's), byte for byte what scripts/favicons.ts
+ * writes. Its presence on each screen is in the brand
  * tests of both apps, on the card in test/render/certificate.test.ts.
  */
 import { readFileSync } from 'node:fs';
@@ -174,7 +175,7 @@ describe('tab icons (scripts/favicons.ts)', () => {
   const files = renderFavicons();
 
   it('the committed favicons are byte for byte what scripts/favicons.ts produces (run it after any change)', () => {
-    expect(files.map((f) => f.app)).toEqual(['verify', 'admin']);
+    expect(files.map((f) => f.app)).toEqual(['verify', 'admin', 'legal']);
     for (const f of files) {
       expect(readFileSync(join(WEB_DIR, f.path), 'utf8'), `${f.path} is stale: run npx tsx scripts/favicons.ts`).toBe(f.svg);
     }
@@ -197,8 +198,9 @@ describe('tab icons (scripts/favicons.ts)', () => {
     }
   });
 
-  it('keep the two apps apart: /verify on a white disc, the console on ivory with four corner moons', () => {
-    const [verify, admin] = files;
+  it('keep the two apps apart: /verify on a white disc, the console on ivory with four corner moons; the legal pages, public, take /verify\'s', () => {
+    const [verify, admin, legal] = files;
+    expect(legal.svg).toBe(verify.svg);
     expect(verify.svg).toContain(`<circle cx="16" cy="16" r="15" fill="#ffffff"/>`);
     expect(verify.svg).not.toContain('<rect');
     expect(admin.svg).toContain(`<rect width="32" height="32" fill="${ORBES_CODE_STYLES.ivory.paper.toLowerCase()}"/>`);

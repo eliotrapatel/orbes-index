@@ -116,11 +116,16 @@ h1[tabindex="-1"]:focus,
 
 /* ── Landing ───────────────────────────────────────────────────────────── */
 
+/* Two rows: the centre, then the foot in the page's flow (J-06), so a short
+   screen scrolls down to the legal links instead of laying them over the
+   actions. */
 .view--landing {
   display: grid;
+  grid-template-rows: 1fr auto;
   place-items: center;
+  row-gap: 40px;
   overflow: hidden;
-  padding: calc(88px + var(--safe-top)) 32px calc(88px + var(--safe-bottom));
+  padding: calc(88px + var(--safe-top)) 32px calc(26px + var(--safe-bottom));
 }
 
 .landing__center {
@@ -210,18 +215,25 @@ h1[tabindex="-1"]:focus,
   visibility: hidden;
 }
 
+/* The foot: the legal pages and DB-IP's attribution (J-06), then the
+   decorative line, 56 px from the edges as before (the view's 32 px, then 24). */
+.landing__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  width: 100%;
+  animation: brand-fade 1s ease 1.2s both;
+}
+
 .landing__meta {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(26px + var(--safe-bottom));
   display: flex;
   justify-content: space-between;
-  padding: 0 calc(56px + var(--safe-left)) 0 calc(56px + var(--safe-right));
+  align-self: stretch;
+  padding: 0 calc(24px + var(--safe-right)) 0 calc(24px + var(--safe-left));
   font-size: var(--fs-hint);
   letter-spacing: var(--track-display);
   opacity: 0.4;
-  animation: brand-fade 1s ease 1.2s both;
 }
 
 .landing__meta span:nth-child(2) {
@@ -1302,6 +1314,65 @@ h1[tabindex="-1"]:focus,
 
 /* Foot */
 
+/* The legal pages (J-06): PRIVACY · TERMS · LEGAL · HELP, then DB-IP's
+   attribution, at the foot of the landing and under every result. Text links
+   as they are (10 px, 44 px zones); a row that wraps keeps 12 px between its
+   lines, so the zones (4 px beyond each line) stay apart, and HELP, the
+   shortest word, is widened to the 44 px floor. */
+.legal-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.legal-links__pages {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 6px;
+}
+
+.legal-links__link {
+  min-width: 44px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.legal-links__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+}
+
+.legal-links__credit {
+  white-space: nowrap;
+}
+
+.result__legal {
+  margin-top: 6px;
+}
+
+/* Under CREATE ACCOUNT (J-06): the sentence, then TERMS OF USE, centred. */
+.terms-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 22px;
+  text-align: center;
+}
+
+.terms-note__text {
+  max-width: 34ch;
+  font-size: var(--fs-micro);
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
 .result__foot {
   display: flex;
   flex-direction: column;
@@ -1641,6 +1712,7 @@ h1[tabindex="-1"]:focus,
 .genome__label,
 .tabs__tab,
 .tabs__dot,
+.legal-links__dot,
 .rows__label,
 .section-label,
 .ownership__status,
@@ -1665,6 +1737,7 @@ h1[tabindex="-1"]:focus,
 /* ── Small screens & reduced motion ────────────────────────────────────── */
 
 @media (max-width: 350px) {
+  .view--landing,
   .view--result,
   .view--pieces,
   .view--certificate {

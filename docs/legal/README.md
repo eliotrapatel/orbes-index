@@ -1,6 +1,6 @@
 # Legal drafts
 
-Drafts of the terms of use and the legal notice of ORBES GENOME CODE (J-04), written from the code for counsel's review. **None of them is validated.** By the owner's decision, the legal pages go online before that review (J-06, under `/legal` of verify.theorbes.com); the announcement waits for it (LAUNCH §10).
+Drafts of the terms of use and the legal notice of ORBES GENOME CODE (J-04), written from the code for counsel's review. **None of them is validated.** By the owner's decision, the legal pages are online before that review (J-06: `/legal/terms`, `/legal/notice`, with the privacy policy and the FAQ, at verify.theorbes.com); the announcement waits for it (LAUNCH §10).
 
 | File | What it is | Language |
 |---|---|---|
@@ -25,3 +25,5 @@ Drafts of the terms of use and the legal notice of ORBES GENOME CODE (J-04), wri
 - the note for counsel covers the Toubon law and the consumer mediator.
 
 A change to the code that moves or changes a rule fails the test, whose message gives the new line: update TERMS-FACTS, then the terms if the rule itself changed.
+
+**The published pages** (J-06). The legal app, `genome/src/web/legal/`, publishes these drafts at `/legal/terms` and `/legal/notice`, in both languages, from `content/terms.ts` and `content/notice.ts`, beside the privacy policy (`content/privacy.ts`, written from the code) and the FAQ (`content/faq.ts`); `LEGAL_VERSION` (`content/index.ts`) dates them. A page keeps its draft's sections, paragraphs and items, word for word, with three differences only: the *Code: …* lines are not published; a field to complete never shows (the company's name and the publication director read "ORBES", `LEGAL_IDENTITY`; any other field is left out with the clause or the sentence that holds it); and the drafts' links lead to the pages (`/legal/notice`, `/legal/terms`, and the privacy policy they name). `genome/test/web/legal.content.test.ts` checks it clause by clause: a draft that changes fails the test until its page follows. When counsel completes a field, fill it in the draft, then in the page (the identity in `LEGAL_IDENTITY`), and move `LEGAL_VERSION`.

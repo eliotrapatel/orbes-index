@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { cacheControlFor, IMMUTABLE_CACHE, REVALIDATE_CACHE } from '../../src/server/http/static.js';
 import { createHarness, type Harness } from './support.js';
 
@@ -13,9 +14,11 @@ describe('static web apps', () => {
     dir = mkdtempSync(join(tmpdir(), 'orbes-web-'));
     mkdirSync(join(dir, 'verify'));
     mkdirSync(join(dir, 'admin'));
+    mkdirSync(join(dir, 'legal'));
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'verify', 'index.html'), '<!doctype html><title>VERIFY</title>');
     writeFileSync(join(dir, 'admin', 'index.html'), '<!doctype html><title>ADMIN</title>');
+    writeFileSync(join(dir, 'legal', 'index.html'), '<!doctype html><title>LEGAL</title>');
     writeFileSync(join(dir, 'assets', 'verify-4F2KQ7ZB.js'), 'console.log(1)');
     writeFileSync(join(dir, 'assets', 'gravesend-sans-500-JQUMMK2Q.woff2'), 'wOF2');
     writeFileSync(join(dir, 'assets', 'brand.css'), 'body{}');
@@ -45,6 +48,14 @@ describe('static web apps', () => {
       ['/verify/result/abc', 'VERIFY'],
       ['/admin', 'ADMIN'],
       ['/admin/products/O26-J-00001', 'ADMIN'],
+      // The legal pages (J-06): their index and the four pages; the app routes them, any other path to its index.
+      ['/legal', 'LEGAL'],
+      ['/legal/', 'LEGAL'],
+      ['/legal/privacy', 'LEGAL'],
+      ['/legal/terms', 'LEGAL'],
+      ['/legal/notice', 'LEGAL'],
+      ['/legal/faq', 'LEGAL'],
+      ['/legal/unknown', 'LEGAL'],
     ] as const) {
       const res = await c.get(url);
       expect(res.statusCode, url).toBe(200);
@@ -53,6 +64,23 @@ describe('static web apps', () => {
       expect(res.headers['cache-control']).toBe(REVALIDATE_CACHE);
       expect(res.headers['content-security-policy']).toMatch(/^default-src 'self'/);
     }
+  });
+
+  it('serves the privacy policy (J-06) at /legal/privacy: 200, no-cache, the CSP and the headers of every page, with its query', async () => {
+    const res = await h.client().get('/legal/privacy?lang=fr');
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^text\/html/);
+    expect(res.body).toContain('<title>LEGAL</title>');
+    expect(res.headers['cache-control']).toBe(REVALIDATE_CACHE);
+    expect(res.headers['content-security-policy']).toBe(CONTENT_SECURITY_POLICY);
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    const head = await h.app.inject({ method: 'HEAD', url: '/legal/privacy' });
+    expect(head.statusCode).toBe(200);
+    // Only GET (and HEAD): the pages take nothing.
+    expect((await h.app.inject({ method: 'POST', url: '/legal/privacy' })).statusCode).toBe(404);
+    // Paths outside /legal are not the legal pages'.
+    expect((await h.client().get('/legalese')).statusCode).toBe(404);
   });
 
   it('sends any spelling of the certificate route to /verify/c, as its PDF letters it in capitals (F-06)', async () => {
@@ -109,6 +137,7 @@ describe('static web apps without a build', () => {
     const h = await createHarness({ app: { serveStatic: true, staticDir: join(tmpdir(), 'orbes-no-such-dir') } });
     try {
       expect((await h.client().get('/verify')).statusCode).toBe(404);
+      expect((await h.client().get('/legal/privacy')).statusCode).toBe(404);
       expect((await h.client().get('/')).statusCode).toBe(404);
       expect((await h.client().get('/api/v1/health')).statusCode).toBe(200);
     } finally {

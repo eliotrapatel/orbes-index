@@ -493,15 +493,11 @@ export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';
 
 /**
- * The second-hand guidance (J-02), the notice under AUTHENTIC — REGISTERED. Once a piece is registered, every copy of
- * its code reads AUTHENTIC — REGISTERED as well (BRAND §4.6): only a transfer code, which the registered owner alone
- * can create, shows that the seller holds the registration. Never on OWNERSHIP VERIFIED (the viewer's own piece) nor
- * on FIRST REGISTRATION (no owner yet, so no transfer code can exist). The same sentence, word for word, is on the
- * certificate card's verso and in the FAQ (docs/launch/PACKAGING-KIT.md §3, checked by its test): changing it here
- * means changing it there.
+ * The second-hand guidance (J-02), the notice under AUTHENTIC — REGISTERED: never on OWNERSHIP VERIFIED nor on FIRST
+ * REGISTRATION. The same sentence, word for word, is on the certificate card's verso and in the FAQ of the legal pages
+ * (shared with them, J-06; docs/launch/PACKAGING-KIT.md §3, checked by its test): changing it here means changing it there.
  */
-export const RESALE_GUIDANCE =
-  'Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.';
+export { RESALE_GUIDANCE } from '../shared/resale.js';
 
 /** The text link under it, which opens the OWNERSHIP tab on RECEIVING THIS PIECE, where the transfer code is entered. */
 export const RESALE_ACTION = 'I HAVE A TRANSFER CODE';
@@ -509,3 +505,16 @@ export const RESALE_ACTION = 'I HAVE A TRANSFER CODE';
 /** The CARE tab of a piece whose model has no care instructions (shared with the console's care preview). */
 export { DEFAULT_CARE } from '../shared/care.js';
 
+/**
+ * The legal pages (J-06, src/web/legal/, served at /legal): their links at the foot of the landing and under every
+ * result (PRIVACY · TERMS · LEGAL · HELP, then DB-IP's attribution, shared/legal.ts), and the terms of use under
+ * CREATE ACCOUNT, whose article 1 says that creating an account means accepting them.
+ */
+export const LEGAL = Object.freeze({
+  /** The name of the links' navigation landmark. */
+  label: 'Legal information',
+  links: Object.freeze({ privacy: 'PRIVACY', terms: 'TERMS', notice: 'LEGAL', faq: 'HELP' }),
+  /** Under CREATE ACCOUNT, before its link to the terms. */
+  accept: 'Creating an ORBES account means accepting the ORBES terms of use.',
+  terms: 'TERMS OF USE',
+});

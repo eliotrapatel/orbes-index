@@ -55,7 +55,8 @@ One image (`genome/Dockerfile`) contains everything the service needs:
 |---|---|---|
 | `/verify`, `/verify/*` | Mobile scanner (`dist/web/verify`) | Needs HTTPS: browsers only open the camera in a secure context. |
 | `/admin`, `/admin/*` | Admin console (`dist/web/admin`) | Restrict at the edge (§14). |
-| `/assets/*` | Content-hashed bundles, CSS, favicons, the display font (WOFF2, preloaded by both shells) | `Cache-Control: public, max-age=31536000, immutable`. |
+| `/legal`, `/legal/*` | The legal pages (`dist/web/legal`, J-06): privacy policy, terms of use, legal notice, FAQ | Public, like `/verify`; also the target of theorbes.com's legal links. |
+| `/assets/*` | Content-hashed bundles, CSS, favicons, the display font (WOFF2, preloaded by every shell) | `Cache-Control: public, max-age=31536000, immutable`. |
 | `/api/v1/*` | Public and account API | `Cache-Control: no-store`, except `/api/v1/keys` and `/api/v1/client-services` (5 min) and `/api/v1/categories` (1 min). |
 | `/api/admin/*` | Admin API | Cookie sessions, CSRF, TOTP enforced in production. |
 | `/.well-known/orbes-keys.json` | Public signing keys (same document as `/api/v1/keys`) | CORS `*`, `max-age=300`. |

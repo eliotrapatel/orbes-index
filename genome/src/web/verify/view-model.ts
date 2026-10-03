@@ -18,6 +18,7 @@
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
+import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
 import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
@@ -410,36 +411,17 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
 
 const SCAN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The same rules as the server's CLIENT_SERVICES_* (config.ts), checked again before anything becomes a link. */
-const MAILBOX = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
-const PHONE = /^\+[1-9](?:[ .-]?[0-9]){6,14}$/;
-const HOURS = /^[^\p{Cc}]{1,120}$/u;
-
-/** The usable lines of GET /api/v1/client-services; null when neither an email nor a phone is usable. */
-function contactLines(cs: ClientServices): { email?: string; phone?: string; hours?: string } | null {
-  const text = (v: unknown, re: RegExp, max: number): string | undefined => {
-    if (typeof v !== 'string') return undefined;
-    const t = v.trim();
-    return t.length <= max && re.test(t) ? t : undefined;
-  };
-  const email = text(cs.email, MAILBOX, 254);
-  const phone = text(cs.phone, PHONE, 32);
-  if (!email && !phone) return null;
-  const hours = text(cs.hours, HOURS, 120);
-  return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
-}
-
 /**
  * The contact: an email with `subject`, whose body leaves the customer room to write above the facts that
  * have a value (RFC 6068 wants CRLF line breaks in a mailto body), then the phone and the hours.
  */
-function contactOf(lines: { email?: string; phone?: string; hours?: string }, placement: ContactModel['placement'], subject: string, facts: [string, string][]): ContactModel {
+function contactOf(lines: ContactLines, placement: ContactModel['placement'], subject: string, facts: [string, string][]): ContactModel {
   const contact: ContactModel = { placement };
   if (lines.email) {
     const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
     contact.mailto = `mailto:${lines.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
-  if (lines.phone) contact.phone = { label: lines.phone, href: `tel:+${lines.phone.replace(/\D/g, '')}` };
+  if (lines.phone) contact.phone = { label: lines.phone, href: phoneHref(lines.phone) };
   if (lines.hours) contact.hours = lines.hours;
   return contact;
 }

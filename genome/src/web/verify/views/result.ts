@@ -18,6 +18,9 @@
  *   └                      ┘
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP
+ *   SCAN ANOTHER · footnote · VERIFIED · REF
+ *   PRIVACY · TERMS · LEGAL · HELP   the legal pages (J-06), in a new tab,
+ *   IP GEOLOCATION BY DB-IP          and DB-IP's attribution
  *
  * Other results show no product lines and no tabs, only a line for ORBES
  * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
@@ -37,7 +40,7 @@ import { h } from '../../shared/dom.js';
 import { RECEIVING } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { initialTab, type ResultViewModel, type TabId } from '../view-model.js';
-import { contactBlock, toneMark, viewRoot } from './common.js';
+import { contactBlock, legalLinks, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { photoPlate } from './photos.js';
@@ -187,6 +190,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
       vm.verifiedAt ? h('span', { text: `VERIFIED ${vm.verifiedAt}` }) : null,
       vm.reference ? h('span', { text: `REF ${vm.reference}` }) : null,
     ),
+    // The legal pages (J-06), in a new tab: the result stays for the customer to come back to.
+    legalLinks({ newTab: true, extraClass: 'result__legal' }),
   );
 
   root.append(head, ...sections.filter((x): x is HTMLElement => x !== null), foot);

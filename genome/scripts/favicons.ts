@@ -1,5 +1,5 @@
 /**
- * Renders the browser-tab icons of both web apps from the ORBES monogram
+ * Renders the browser-tab icons of the web apps from the ORBES monogram
  * (BRAND-DESIGN-SYSTEM §3.5, §3.9).
  *
  *   npx tsx scripts/favicons.ts
@@ -9,6 +9,8 @@
  *   src/web/admin/favicon.svg    the monogram in ink on an ivory square, with
  *                                the four corner moons that tell the console
  *                                apart from the public app in a row of tabs
+ *   src/web/legal/favicon.svg    the legal pages (J-06), public like /verify:
+ *                                its icon, byte for byte
  *
  * The five outlines are the master's, verbatim (src/core/render/monogram.ts),
  * placed by one transform: the ink box 26 of 32 units wide, centred. The
@@ -56,8 +58,8 @@ function monogramGroup(): string {
   return `<g fill="${ink}" transform="matrix(${num(k)} 0 0 ${num(k)} ${num(tx)} ${num(ty)})">${MONOGRAM_PATHS.map((d) => `<path d="${d}"/>`).join('')}</g>`;
 }
 
-/** The two icons: path relative to src/web, and the SVG. */
-export function renderFavicons(): { app: 'verify' | 'admin'; path: string; svg: string }[] {
+/** The icons: path relative to src/web, and the SVG. */
+export function renderFavicons(): { app: 'verify' | 'admin' | 'legal'; path: string; svg: string }[] {
   const { size, paper, discRadius, ivory, moonRadius: r, moonInset: m } = FAVICON;
   const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">`;
   const c = size / 2;
@@ -69,9 +71,11 @@ export function renderFavicons(): { app: 'verify' | 'admin'; path: string; svg: 
   ]
     .map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${FAVICON.ink}"/>`)
     .join('');
+  const publicIcon = `${open}<circle cx="${c}" cy="${c}" r="${discRadius}" fill="${paper}"/>${monogramGroup()}</svg>\n`;
   return [
-    { app: 'verify', path: 'verify/favicon.svg', svg: `${open}<circle cx="${c}" cy="${c}" r="${discRadius}" fill="${paper}"/>${monogramGroup()}</svg>\n` },
+    { app: 'verify', path: 'verify/favicon.svg', svg: publicIcon },
     { app: 'admin', path: 'admin/favicon.svg', svg: `${open}<rect width="${size}" height="${size}" fill="${ivory}"/>${moons}${monogramGroup()}</svg>\n` },
+    { app: 'legal', path: 'legal/favicon.svg', svg: publicIcon },
   ];
 }
 

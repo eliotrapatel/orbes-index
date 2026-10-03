@@ -7,6 +7,8 @@
  *                                                     /verify/c#… an ownership certificate, its token in the fragment)
  *   /VERIFY/C and any other spelling of /verify/c → 301 /verify/c   (the certificate's PDF letters it in capitals)
  *   /admin,  /admin/*   → dist/web/admin/index.html
+ *   /legal,  /legal/*   → dist/web/legal/index.html    (the legal pages, J-06: /legal/privacy, /legal/terms,
+ *                                                     /legal/notice, /legal/faq; /legal is their index)
  *   /assets/*        → dist/web/assets/*
  *
  * Caching: content-hashed assets (`name-HASH.ext`) are immutable for a year;
@@ -62,7 +64,7 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
     },
   });
 
-  const page = (app: 'verify' | 'admin') => {
+  const page = (app: 'verify' | 'admin' | 'legal') => {
     const root = join(dir, app);
     return async (_request: FastifyRequest, reply: FastifyReply) => {
       // Checked per request: a build that lands after startup is picked up without a restart.
@@ -73,6 +75,7 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
   };
   const verify = page('verify');
   const admin = page('admin');
+  const legal = page('legal');
   // The ownership certificate's PDF letters its address in capitals (the stroked lettering has no lower case):
   // VERIFY.THEORBES.COM/VERIFY/C#… typed as printed reaches the certificate. Paths are case-sensitive, so any spelling
   // of /verify/c but the canonical one is sent there; the browser keeps the fragment (the token) across the redirect.
@@ -86,5 +89,7 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
   app.get('/verify/*', verify);
   app.get('/admin', admin);
   app.get('/admin/*', admin);
+  app.get('/legal', legal);
+  app.get('/legal/*', legal);
   return true;
 }

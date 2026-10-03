@@ -9,6 +9,8 @@
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
  * the scan, the photographs of an authentic piece above its GENOME (F-04),
+ * the links to the legal pages at the foot of the landing, under a result
+ * and under CREATE ACCOUNT (J-06),
  * the password (FORGOTTEN PASSWORD? through ORBES Client Services and a
  * recovery code, then CHANGE PASSWORD in MY PIECES), the second-hand
  * guidance under AUTHENTIC — REGISTERED and its link to RECEIVING THIS PIECE
@@ -159,6 +161,16 @@ async function openVerify(browser: Browser, srv: VerifyServer, opts: { reducedMo
   return { page, problems };
 }
 
+/** The links to the legal pages (J-06) at the foot of the landing and under every result, then DB-IP's attribution. */
+const LEGAL_LINKS = ['PRIVACY', 'TERMS', 'LEGAL', 'HELP', 'IP Geolocation by DB-IP'];
+
+/** The legal links of `scope`: their names, addresses and targets, in order. */
+async function legalLinksOf(scope: Locator): Promise<{ name: string; href: string | null; target: string | null }[]> {
+  return scope.getByRole('navigation', { name: 'Legal information' }).getByRole('link').evaluateAll((els) =>
+    els.map((el) => ({ name: (el.textContent ?? '').trim(), href: el.getAttribute('href'), target: el.getAttribute('target') })),
+  );
+}
+
 async function uploadPhoto(page: Page, file: string): Promise<void> {
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'UPLOAD A PHOTO' }).first().click()]);
   await chooser.setFiles(file);
@@ -239,7 +251,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(mono.y + mono.height + 24).toBeCloseTo(word.y, 0);
     expect(mono.y).toBeGreaterThan(emblem.y);
     await page.screenshot({ path: join(OUT_DIR, 'verify-landing.png') });
-    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO']);
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', ...LEGAL_LINKS]);
     // A phone held sideways, and a short portrait phone: the heading (monogram, word, AUTHENTICATION) stays inside
     // the emblem, whose size follows the height there, so it never reaches the resting orbit's ring.
     for (const viewport of [
@@ -295,9 +307,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.screenshot({ path: join(OUT_DIR, 'verify-result.png'), fullPage: true });
     // The four tabs at 10 px keep the width they had at 9 px: 44 px zones on this phone and on the
     // smallest in use (320 px, where they tighten), without scrolling sideways.
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
     await page.setViewportSize({ width: 320, height: 640 });
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
     await page.setViewportSize(MOBILE_VIEWPORT);
 
     // Keyboard: arrows move between tabs and show their panels.
@@ -323,6 +335,73 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
+  it('links the legal pages (J-06) at the foot of the landing and under a result, with the attribution of DB-IP', async () => {
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The landing: in the page itself; DB-IP's site apart.
+    expect(await legalLinksOf(page.locator('.view--landing'))).toEqual([
+      { name: 'PRIVACY', href: '/legal/privacy', target: null },
+      { name: 'TERMS', href: '/legal/terms', target: null },
+      { name: 'LEGAL', href: '/legal/notice', target: null },
+      { name: 'HELP', href: '/legal/faq', target: null },
+      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
+    ]);
+    // Text links in the display face, under the actions and above the foot's decorative line, in the page's flow.
+    const privacy = page.getByRole('link', { name: 'PRIVACY' });
+    expect(await privacy.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
+    const actions = (await page.locator('.landing__actions').boundingBox())!;
+    const links = (await page.locator('.landing__legal').boundingBox())!;
+    const meta = (await page.locator('.landing__meta').boundingBox())!;
+    expect(links.y).toBeGreaterThan(actions.y + actions.height);
+    expect(meta.y).toBeGreaterThan(links.y + links.height);
+    expect(await page.locator('.landing__legal').evaluate((el) => getComputedStyle(el).position)).toBe('static');
+    // The four pages on one line on this phone and on the smallest in use, the floors kept.
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      const rows = await page.locator('.landing__legal .legal-links__link').evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size);
+      expect(rows, `${width}`).toBe(1);
+      await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', ...LEGAL_LINKS]);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    // A short screen scrolls down to them rather than laying them over the actions.
+    await page.setViewportSize({ width: 320, height: 568 });
+    const upload = (await page.getByRole('button', { name: 'UPLOAD A PHOTO' }).boundingBox())!;
+    expect((await page.locator('.landing__legal').boundingBox())!.y).toBeGreaterThan(upload.y + upload.height);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // PRIVACY opens the privacy policy in English, the app's language here (en-GB).
+    await privacy.click();
+    await page.waitForURL(`${srv.origin}/legal/privacy`);
+    await textOf(page.locator('h1'), 'PRIVACY POLICY');
+    expect(await page.evaluate(() => document.documentElement.lang)).toBe('en');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+
+    // Under a result: the same links, in a new tab, so the result stays for the customer to come back to.
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'legal.png', plain));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    const foot = page.locator('.result__foot');
+    expect(await legalLinksOf(foot)).toEqual([
+      { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
+      { name: 'TERMS', href: '/legal/terms', target: '_blank' },
+      { name: 'LEGAL', href: '/legal/notice', target: '_blank' },
+      { name: 'HELP', href: '/legal/faq', target: '_blank' },
+      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
+    ]);
+    // Under the reference, the foot's last line.
+    const ref = (await foot.locator('.result__meta').boundingBox())!;
+    expect((await foot.locator('.result__legal').boundingBox())!.y).toBeGreaterThan(ref.y + ref.height);
+    for (const a of await foot.getByRole('link').all()) await attrOf(a, 'rel', 'noopener');
+    const [tab] = await Promise.all([page.context().waitForEvent('page'), foot.getByRole('link', { name: 'HELP' }).click()]);
+    await tab.waitForLoadState();
+    expect(tab.url()).toBe(`${srv.origin}/legal/faq`);
+    await textOf(tab.locator('h1'), 'FREQUENTLY ASKED QUESTIONS');
+    await tab.close();
+    // The result is still there.
+    await attrOf(page.locator('.view--result'), 'data-state', 'AUTHENTIC');
+    await keepsFloors(page, ['SCAN ANOTHER', ...LEGAL_LINKS]);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
   it('registers a piece at first registration: account, claim code, then the owner view', async () => {
     const issued = await srv.issue({ withClaimSecret: true, variant: 'SIZE 52' });
     await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
@@ -340,7 +419,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
 
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
-    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
+    // Under CREATE ACCOUNT, the terms it accepts (J-06), in a new tab: the form and the scan's window stay.
+    await textOf(page.locator('.terms-note__text'), 'Creating an ORBES account means accepting the ORBES terms of use.');
+    const terms = page.getByRole('link', { name: 'TERMS OF USE' });
+    await attrOf(terms, 'href', '/legal/terms');
+    await attrOf(terms, 'target', '_blank');
+    await attrOf(terms, 'rel', 'noopener');
+    expect(await page.locator('.terms-note').evaluate((el) => el.previousElementSibling?.matches('form.form--create'))).toBe(true);
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'TERMS OF USE']);
     // An ordinary address, longer than the line has room for beside SIGN OUT on a small phone.
     const email = 'marie-claire.dupont@example.com';
     await page.getByLabel('EMAIL').fill(email);

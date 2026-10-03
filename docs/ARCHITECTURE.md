@@ -121,7 +121,10 @@ genome/
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces);
                          an ownership certificate (/verify/c#token)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
-    shared/              brand CSS, display font, monogram and DOM helpers
+    legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
+                         and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
+    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share (the legal pages' paths,
+                         the second-hand sentence, the contact of ORBES Client Services)
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
 docs/                  specifications (this folder)

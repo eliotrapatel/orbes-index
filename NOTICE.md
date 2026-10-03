@@ -20,6 +20,11 @@ address of a scan. The location is used only for internal anomaly scoring
 
 The database file itself is not part of this repository.
 
+The attribution is shown to the public, as a link to db-ip.com, at the foot
+of the verification app's landing (`/verify`), under every result, at the
+foot of every legal page (`/legal`), and in the privacy policy and the
+credits of the legal notice (`/legal/privacy`, `/legal/notice`).
+
 ## Fonts
 
 **Gravesend Sans Medium** — Rian Hughes / Device, <http://devicefonts.co.uk>

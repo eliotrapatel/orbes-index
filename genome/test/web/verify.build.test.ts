@@ -121,7 +121,7 @@ describe('build-web: the display font, preloaded by both shells', () => {
   });
 
   it('preloads, in each shell, exactly the file its stylesheet loads', () => {
-    expect(result.apps.map((a) => a.name).sort()).toEqual(['admin', 'verify']);
+    expect(result.apps.map((a) => a.name).sort()).toEqual(['admin', 'legal', 'verify']);
     const urls = new Set<string>();
     for (const app of result.apps) {
       const page = readFileSync(join(result.outDir, app.name, 'index.html'), 'utf8');
@@ -141,8 +141,33 @@ describe('build-web: the display font, preloaded by both shells', () => {
       expect(css).toMatch(/font-display:\s?swap/);
       urls.add(href!);
     }
-    // One URL for both apps: a visitor of /verify and /admin downloads the font once.
+    // One URL for every app: a visitor of /verify, /legal and /admin downloads the font once.
     expect(urls.size).toBe(1);
+  });
+
+  it('builds the legal pages (J-06), discovered like the others: shell, bundle, stylesheet, tab icon, preloaded font, no decoder', () => {
+    const legal = result.apps.find((a) => a.name === 'legal')!;
+    expect(Object.keys(legal.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css']);
+    expect(legal.assets['main.ts']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.js$/);
+    expect(legal.assets['styles.css']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.css$/);
+    for (const url of Object.values(legal.assets)) expect(HASHED_ASSET_RE.test(url), url).toBe(true);
+    // The public apps share one tab icon: the same hashed file.
+    expect(legal.assets['favicon.svg']).toBe(result.apps.find((a) => a.name === 'verify')!.assets['favicon.svg']);
+    const page = readFileSync(join(result.outDir, 'legal', 'index.html'), 'utf8');
+    expect(page).toContain(`<script type="module" src="${legal.assets['main.ts']}"></script>`);
+    expect(page).not.toMatch(/\.ts"|orbes-worker/);
+    expect(() => assertCspSafeHtml(page)).not.toThrow();
+    const js = read(legal.assets['main.ts']).toString('utf8');
+    expect(js).not.toMatch(/node:crypto|node:fs|from"node:|require\("/);
+    expect(js).not.toMatch(/decodeCellsToCodeword|rsDecode|no code structure around the seal/);
+    // The FAQ carries the sentence /verify shows under AUTHENTIC — REGISTERED, from the shared module, without the
+    // verification app's client (copy.ts, api.ts): the pages read nothing but the contact of ORBES Client Services.
+    expect(js).toContain('Buying this piece? Ask the seller for a transfer code from their ORBES account');
+    expect(js).not.toContain('/api/v1/verify');
+    expect(js).toContain('/api/v1/client-services');
+    const css = read(legal.assets['styles.css']).toString('utf8');
+    expect(css).not.toMatch(/@import/);
+    expect(css).toMatch(/@media print/);
   });
 
   it('gives the console its own decoder worker (A-08): the sale mode reads codes, the main bundle carries no decoder', () => {

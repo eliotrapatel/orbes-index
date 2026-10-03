@@ -2,10 +2,11 @@
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
  * rows, the contact of ORBES Client Services, the link to MY PIECES, the
- * app's paths and the view shell.
+ * links to the legal pages, the app's paths and the view shell.
  */
 import { h, s } from '../../shared/dom.js';
-import { CONTACT, PIECES } from '../copy.js';
+import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
+import { CONTACT, LEGAL, PIECES } from '../copy.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
 
 /** A <main> view root with its modifier class. */
@@ -119,4 +120,38 @@ export function piecesLink(onOpen?: () => void, extraClass?: string): HTMLAnchor
     },
     text: PIECES.link,
   });
+}
+
+/** A link that opens in a new tab, so the screen it leaves (a result, a registration under way) stays as it was. */
+const NEW_TAB = { target: '_blank', rel: 'noopener' } as const;
+
+/**
+ * The legal pages (J-06): PRIVACY · TERMS · LEGAL · HELP (/legal/privacy, /legal/terms, /legal/notice, /legal/faq),
+ * then DB-IP's attribution, the licence of the location of scans (shared/legal.ts). Text links held to the floors of
+ * §3.8 like every other: 10 px type, 44 × 44 px zones, the shortest word (HELP) widened to 44 px. Under a result they
+ * open a new tab (`newTab`), so the result stays for the customer to come back to; on the landing, the page itself.
+ * DB-IP's site always opens apart.
+ */
+export function legalLinks(opts: { newTab?: boolean; extraClass?: string } = {}): HTMLElement {
+  const target = opts.newTab ? NEW_TAB : {};
+  const pages = LEGAL_PAGES.flatMap((page, i) => [
+    i > 0 ? h('span', { class: 'legal-links__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }) : null,
+    h('a', { class: 'textlink legal-links__link', attrs: { href: legalPath(page), ...target }, text: LEGAL.links[page] }),
+  ]);
+  return h(
+    'nav',
+    { class: ['legal-links', opts.extraClass], attrs: { 'aria-label': LEGAL.label } },
+    h('div', { class: 'legal-links__pages' }, ...pages),
+    h('a', { class: 'textlink legal-links__credit', attrs: { href: GEOIP_ATTRIBUTION.href, ...NEW_TAB }, text: GEOIP_ATTRIBUTION.text }),
+  );
+}
+
+/** Under CREATE ACCOUNT: creating an account means accepting the terms of use (their article 1), and the link to them. */
+export function termsNote(): HTMLElement {
+  return h(
+    'div',
+    { class: 'terms-note' },
+    h('p', { class: 'terms-note__text', text: LEGAL.accept }),
+    h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
+  );
 }

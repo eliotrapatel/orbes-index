@@ -46,7 +46,8 @@ genome/
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
                          (/verify/pieces) and an ownership certificate's page (/verify/c#token)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
-    shared/              brand CSS, display font, monogram and DOM helpers
+    legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
+    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
     support/             camera simulator, PRNG, raster/PNG/JPEG/Y4M helpers, test database
@@ -84,7 +85,7 @@ npm ci
 | `npm run dev` | Development server with reload (`tsx watch`). Listens on `127.0.0.1:8080`. In-memory PGlite and keys, migrated and keyed automatically. Everything is lost on restart. |
 | `npm start` | Same server without reload (`node --import tsx src/server/index.ts`), which is how the container runs it. In production add `-- --migrate` or `MIGRATE_ON_START=true` to apply migrations. |
 | `npm run demo` | The server in demo mode (`tsx src/server/index.ts --demo`, the same as `npm start -- --demo`): in-memory PGlite loaded with the demo dataset through the real services; a demo console sign-in is printed once. Development and test only. Serves the web apps when `dist/web/` has been built. |
-| `npm run build:web` | Builds `src/web/*` into `dist/web/` (esbuild, minified, content-hashed, CSP-checked; the shells' font preload points at the very file the CSS loads). The server serves `/verify`, `/admin` and `/assets/*` from there when it exists. `npx tsx scripts/build-web.ts --dev` gives unminified output with sourcemaps. |
+| `npm run build:web` | Builds `src/web/*` into `dist/web/` (esbuild, minified, content-hashed, CSP-checked; the shells' font preload points at the very file the CSS loads). The server serves `/verify`, `/admin`, `/legal` (the legal pages, J-06) and `/assets/*` from there when it exists. `npx tsx scripts/build-web.ts --dev` gives unminified output with sourcemaps. |
 
 For a persistent local setup, point `DATABASE_URL` at a directory or a PostgreSQL database, and keep keys on disk:
 
@@ -177,7 +178,7 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | `npx tsx scripts/payload-encodings.ts` | Payload size in the fixed layout vs deterministic CBOR and JSON → the table of CRYPTOGRAPHY §3.1 (`--json` for raw figures). |
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
 | `npx tsx scripts/certificate-specimen.ts` | Certificate card specimen of BRAND §7 (`docs/assets/certificate-card-specimen*.svg` and the production PDF). Re-run after any change to the card; `test/render/certificate.test.ts` fails on stale files. |
-| `npx tsx scripts/favicons.ts` | The tab icons of both apps (`src/web/verify/favicon.svg`, `src/web/admin/favicon.svg`), drawn from the brand monogram (BRAND §3.9). Re-run after any change to them; `test/web/monogram.test.ts` fails on stale files. |
+| `npx tsx scripts/favicons.ts` | The tab icons of the apps (`src/web/verify/favicon.svg`, the same for the legal pages, `src/web/legal/favicon.svg`, and `src/web/admin/favicon.svg`), drawn from the brand monogram (BRAND §3.9). Re-run after any change to them; `test/web/monogram.test.ts` fails on stale files. |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.
 

@@ -1,0 +1,359 @@
+/*
+ * ORBES legal pages (J-06) — layout, reading and print.
+ * Foundation (tokens, type, text links, grain, motion) in ../shared/brand.css.
+ *
+ * One column of reading, 640 px at most, in the house style: white paper,
+ * ink, hairlines, tracked capitals in the display face for the wordmark,
+ * the titles and the links; the text itself in --font (Helvetica Neue).
+ * French titles and links read in --font too: the display face ships Basic
+ * Latin only, so an accented capital would fall back glyph by glyph
+ * (BRAND-DESIGN-SYSTEM §3.1). Every text link keeps the floors of §3.8
+ * (10 px, 44 px zones); links inside a sentence are underlined words.
+ */
+@import "../shared/brand.css";
+
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+html {
+  background: var(--paper);
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.app {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(56px + var(--safe-top)) 32px calc(40px + var(--safe-bottom));
+}
+
+/* ── Head: the wordmark, the four pages, the language ──────────────────── */
+
+.legal-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  max-width: 640px;
+  text-align: center;
+}
+
+.legal-head__wordmark {
+  margin-bottom: 18px;
+}
+
+/* A row that wraps keeps 12 px between its lines, so the 44 px zones (4 px
+   beyond each line) stay apart; the shortest word is widened to 44 px. */
+.legal-nav,
+.legal-lang {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 8px;
+}
+
+.legal-nav {
+  column-gap: 22px;
+}
+
+.legal-nav__link,
+.legal-lang__link {
+  min-width: 44px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.legal-nav__link.is-current,
+.legal-lang__link.is-current {
+  opacity: 1;
+}
+
+.legal-nav__link.is-current::after,
+.legal-lang__link.is-current::after {
+  transform: scaleX(1);
+}
+
+.legal-lang__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+}
+
+/* ── The document ──────────────────────────────────────────────────────── */
+
+.legal {
+  width: 100%;
+  max-width: 640px;
+  margin-top: 56px;
+  animation: brand-rise var(--t-slow) var(--ease) both;
+}
+
+.legal__title {
+  font-size: var(--fs-heading-lg);
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  text-transform: uppercase;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.legal__version {
+  margin-top: 14px;
+  margin-bottom: 44px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+  text-transform: uppercase;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.legal__section {
+  margin-top: 44px;
+  padding-top: 26px;
+  border-top: 1px solid var(--hairline);
+}
+
+.legal__heading {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  scroll-margin-top: 24px;
+}
+
+.legal__text,
+.legal__list {
+  margin-top: 16px;
+  font-size: var(--fs-sub);
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  color: var(--ink-soft);
+}
+
+.legal__list {
+  list-style: none;
+}
+
+.legal__item {
+  position: relative;
+  padding-left: 22px;
+}
+
+.legal__item + .legal__item {
+  margin-top: 8px;
+}
+
+.legal__item::before {
+  content: "–";
+  position: absolute;
+  left: 0;
+  color: var(--ink-soft);
+}
+
+/* Set apart: the lead of a clause, a cookie's name. In ink, never a bold the
+   reading face would not have in the brand (§3.1, weights). */
+.legal__strong {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.legal__link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* The figures of a heading (ARTICLE 8) in the reading face: Gravesend's one is its capital I. */
+.legal__figure {
+  font-family: var(--font);
+}
+
+/* The contact of ORBES Client Services, as the server publishes it: an
+   address and a number are read, so they stay in --font, and each link is a
+   44 px zone. */
+.legal__contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 24px;
+  margin-top: 8px;
+}
+
+.legal__contact[hidden] {
+  display: none;
+}
+
+.legal__contact-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: var(--fs-sub);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legal__contact-hours {
+  flex-basis: 100%;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* ── The index (/legal) ────────────────────────────────────────────────── */
+
+.legal-index {
+  margin-top: 36px;
+  list-style: none;
+}
+
+.legal-index__item {
+  padding: 22px 0;
+  border-top: 1px solid var(--hairline);
+  text-align: center;
+}
+
+.legal-index__item:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.legal-index__summary {
+  max-width: 44ch;
+  margin: 6px auto 0;
+  font-size: var(--fs-body);
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
+/* ── Foot ──────────────────────────────────────────────────────────────── */
+
+.legal-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin-top: 64px;
+  padding-top: 26px;
+  border-top: 1px solid var(--hairline);
+}
+
+.legal-foot__link {
+  white-space: nowrap;
+}
+
+.legal-foot__meta {
+  margin-top: 14px;
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-display);
+  text-indent: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ── Display type ──────────────────────────────────────────────────────── */
+
+/* Titles, section headings and tracked-capital labels in the display face
+   (brand.css --font-display, BRAND-DESIGN-SYSTEM §3.1), with the wordmark
+   and the text links of brand.css. What is read stays in --font. */
+.legal__title,
+.legal__heading,
+.legal-lang__dot,
+.legal-foot__meta {
+  font-family: var(--font-display);
+}
+
+/* French: the same roles in the reading face, whose capitals carry accents
+   (the display face's subset has none: CONFIDENTIALITÉ would mix two faces).
+   A language named in its own words follows its own: FRANÇAIS reads in
+   --font on the English page too (lang="fr"). The wordmark stays. */
+.legal__title:lang(fr),
+.legal__heading:lang(fr),
+.textlink:lang(fr) {
+  font-family: var(--font);
+}
+
+/* ── Small screens & print ─────────────────────────────────────────────── */
+
+@media (max-width: 350px) {
+  .app {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+}
+
+/* Printed as a document: the text alone, black on white, the addresses of
+   the links outside this site written after them. */
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  .grain,
+  .legal-nav,
+  .legal-lang,
+  .legal-foot__link {
+    display: none;
+  }
+
+  html,
+  body {
+    background: var(--white);
+  }
+
+  .app {
+    display: block;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .legal-head,
+  .legal,
+  .legal-foot {
+    max-width: none;
+    margin-top: 0;
+    animation: none;
+  }
+
+  .legal__text,
+  .legal__list,
+  .legal-index__summary {
+    color: var(--ink);
+    orphans: 3;
+    widows: 3;
+  }
+
+  .legal__heading {
+    break-after: avoid;
+  }
+
+  .legal__section {
+    break-inside: auto;
+  }
+
+  .legal__link[href^="https:"]::after {
+    content: " (" attr(href) ")";
+  }
+}

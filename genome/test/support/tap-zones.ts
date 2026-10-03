@@ -9,7 +9,9 @@
  *
  * Shared by the verify E2E suites (test/web/verify.e2e.test.ts and
  * test/e2e/fallbacks.test.ts), which call it on each screen at the phone
- * viewport.
+ * viewport, and by the legal pages' (test/web/legal.e2e.test.ts), which
+ * leave out the links inside a sentence (`skip`): a word of a sentence is
+ * not a control, and WCAG 2.5.8 exempts it from a target size.
  */
 import type { Page } from 'playwright-core';
 
@@ -23,9 +25,9 @@ export interface TapZoneReport {
   problems: string[];
 }
 
-export async function tapZoneFloors(page: Page): Promise<TapZoneReport> {
+export async function tapZoneFloors(page: Page, opts: { skip?: string } = {}): Promise<TapZoneReport> {
   return page.evaluate(
-    async ({ zone, type }) => {
+    async ({ zone, type, skip }) => {
       await document.fonts.ready;
       const name = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim() || el.tagName.toLowerCase();
       /** The lines the element's text takes: its text fragments, a new line each time one starts below all those before it. */
@@ -46,7 +48,7 @@ export async function tapZoneFloors(page: Page): Promise<TapZoneReport> {
         }
         return lines;
       };
-      const targets = [...document.querySelectorAll('button, a[href], [role="tab"]')].filter((el) => el.checkVisibility());
+      const targets = [...document.querySelectorAll('button, a[href], [role="tab"]')].filter((el) => el.checkVisibility() && !(skip && el.matches(skip)));
       const problems: string[] = [];
       const boxes = targets.map((el) => {
         const r = el.getBoundingClientRect();
@@ -76,6 +78,6 @@ export async function tapZoneFloors(page: Page): Promise<TapZoneReport> {
       if (overflow > 0) problems.push(`the page scrolls sideways by ${overflow} px`);
       return { checked: boxes.map((b) => b.name), problems };
     },
-    { zone: TAP_ZONE_PX, type: ACTION_TYPE_PX },
+    { zone: TAP_ZONE_PX, type: ACTION_TYPE_PX, skip: opts.skip ?? '' },
   );
 }

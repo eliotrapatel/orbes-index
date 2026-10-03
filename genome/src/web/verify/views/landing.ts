@@ -11,11 +11,16 @@
  * is lost or stolen reaches it without scanning it. Its place is kept while
  * the session is asked for, so nothing moves when it appears; it stays
  * hidden if the account service cannot be reached.
+ *
+ * At the foot (J-06), under the centre and in the page's flow, so a short
+ * screen scrolls to them rather than covering the actions: the legal pages,
+ * PRIVACY · TERMS · LEGAL · HELP, and DB-IP's attribution, then the
+ * decorative line © ORBES · GENOME CODE · PARIS.
  */
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
 import type { SessionStore } from '../session.js';
-import { orbitReticle, piecesLink, viewRoot } from './common.js';
+import { legalLinks, orbitReticle, piecesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
@@ -70,10 +75,9 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
     ),
     h(
       'footer',
-      { class: 'landing__meta nano' },
-      h('span', { text: '© ORBES' }),
-      h('span', { text: 'GENOME CODE' }),
-      h('span', { text: 'PARIS' }),
+      { class: 'landing__foot' },
+      legalLinks({ extraClass: 'landing__legal' }),
+      h('div', { class: 'landing__meta nano' }, h('span', { text: '© ORBES' }), h('span', { text: 'GENOME CODE' }), h('span', { text: 'PARIS' })),
     ),
   );
   return root;
