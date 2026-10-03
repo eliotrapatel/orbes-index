@@ -210,7 +210,7 @@ a {
 }
 
 .wordmark--small {
-  font-size: 12px;
+  font-size: var(--fs-line);
   letter-spacing: 0.55em;
   text-indent: 0.55em;
 }
@@ -603,8 +603,8 @@ a {
 }
 
 .field__input--code {
-  font-size: 18px;
-  letter-spacing: 0.28em;
+  font-size: var(--fs-heading-lg);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 

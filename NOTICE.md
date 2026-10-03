@@ -29,9 +29,11 @@ credits of the legal notice (`/legal/privacy`, `/legal/notice`).
 
 **Gravesend Sans Medium** — Rian Hughes / Device, <http://devicefonts.co.uk>
 
-The verification app (`/verify`) and the console (`/admin`) set their
-wordmark, titles and labels in Gravesend Sans Medium, the brand's display
-face (BRAND-DESIGN-SYSTEM §3.1).
+The verification app (`/verify`), the console (`/admin`) and the legal
+pages (`/legal`, J-06, in French and English) set their wordmark, titles,
+labels and text links in Gravesend Sans Medium, the brand's display face
+(BRAND-DESIGN-SYSTEM §3.1). All three preload and load the same file from
+`/assets/`.
 
 - File: `genome/src/web/shared/fonts/gravesend-sans-500.woff2`, served from
   `/assets/` of the verification service. theorbes.com does not use it; a

@@ -119,7 +119,7 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(favicon).toContain('<circle cx="16" cy="16" r="15" fill="#ffffff"/>');
   });
 
-  it('sets type from brand.css tokens wherever a token has the same value', () => {
+  it('sets type from brand.css tokens wherever a token has the same value, in the app and in brand.css itself', () => {
     const bySize: Record<string, string> = {};
     const byTrack: Record<string, string> = {};
     for (const [t, v] of Object.entries(tokens)) {
@@ -127,17 +127,26 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       if (t.startsWith('--track-')) byTrack[v] = t;
     }
     const literal: string[] = [];
-    for (const m of styles.matchAll(/^\s*(font-size|letter-spacing|text-indent):\s*([^;]+);/gm)) {
-      const [, prop, value] = m;
-      if (prop === 'font-size' && bySize[value]) literal.push(`${prop}: ${value} → var(${bySize[value]})`);
-      if (prop !== 'font-size' && byTrack[value]) literal.push(`${prop}: ${value} → var(${byTrack[value]})`);
+    // brand.css sets the shared roles of every app (.wordmark--small on the result, scanner, MY PIECES,
+    // certificate and legal headers; .field__input--code), so it is held to the rule it defines.
+    for (const [file, css] of Object.entries({ 'verify/styles.css': styles, 'shared/brand.css': brand })) {
+      for (const m of css.matchAll(/^\s*(font-size|letter-spacing|text-indent):\s*([^;]+);/gm)) {
+        const [, prop, value] = m;
+        if (prop === 'font-size' && bySize[value]) literal.push(`${file} ${prop}: ${value} → var(${bySize[value]})`);
+        if (prop !== 'font-size' && byTrack[value]) literal.push(`${file} ${prop}: ${value} → var(${byTrack[value]})`);
+      }
     }
     expect(literal).toEqual([]);
   });
 
-  it('sets every fixed font size of both apps from a brand.css token (no off-scale literal sizes)', () => {
-    const admin = readFileSync(join(WEB, 'admin/styles.css'), 'utf8');
-    const literal = [styles, admin].flatMap((css) => [...css.matchAll(/^\s*font-size:\s*([0-9.]+px)\s*;/gm)].map((m) => m[1]));
+  it('sets every fixed font size of brand.css and of every app from a brand.css token (no off-scale literal sizes)', () => {
+    const sheets = {
+      'shared/brand.css': brand,
+      'verify/styles.css': styles,
+      'admin/styles.css': readFileSync(join(WEB, 'admin/styles.css'), 'utf8'),
+      'legal/styles.css': readFileSync(join(WEB, 'legal/styles.css'), 'utf8'),
+    };
+    const literal = Object.entries(sheets).flatMap(([file, css]) => [...css.matchAll(/^\s*font-size:\s*([0-9.]+px)\s*;/gm)].map((m) => `${file} ${m[1]}`));
     expect(literal).toEqual([]);
   });
 
