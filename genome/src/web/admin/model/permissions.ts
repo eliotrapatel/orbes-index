@@ -51,7 +51,7 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageRetailers: 'ADMIN',
   /** A one-time recovery code for a client who forgot the password (after an identity check). */
   issueRecoveryCode: 'ADMIN',
-  /** Lock a client's account (sessions end, pending transfers cancelled) and unlock it. */
+  /** Lock a client's account (sessions end, pending transfers cancelled, certificate links withdrawn) and unlock it. */
   lockAccount: 'ADMIN',
   /** Everything held about a client's account, for a request under the right of access. */
   exportAccount: 'ADMIN',

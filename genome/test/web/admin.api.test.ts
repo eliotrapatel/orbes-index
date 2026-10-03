@@ -382,7 +382,7 @@ describe('AdminApi', () => {
       json(200, { items: [], page: 1, pageSize: 50, total: 0 }),
       json(200, { items: [], page: 1, pageSize: 50, total: 0, scans: [] }),
       json(200, { owner: { id } }),
-      json(200, { status: 'LOCKED', sessionsRevoked: 1, transfersCancelled: 0, recoveryCodesRevoked: 1 }),
+      json(200, { status: 'LOCKED', sessionsRevoked: 1, transfersCancelled: 0, recoveryCodesRevoked: 1, certificatesRevoked: 0 }),
       json(200, { status: 'ACTIVE' }),
       new Response('{"format":"orbes.account-export"}', {
         status: 200,

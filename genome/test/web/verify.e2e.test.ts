@@ -598,7 +598,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SET NEW PASSWORD' }).click();
 
     // Back to SIGN IN, the email filled in, with what the recovery did.
-    await textOf(page.locator('.form__notice'), /^Your password has been changed: sign in with it\. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d\.$/);
+    await textOf(page.locator('.form__notice'), /^Your password has been changed: sign in with it\. For your security, every session of your account has ended, its pending transfers were cancelled, its certificate links were withdrawn and new transfers are paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d\.$/);
     await valueOf(panel.getByLabel('EMAIL', { exact: true }), email);
     await panel.getByLabel('PASSWORD', { exact: true }).fill('a brand new passphrase');
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
@@ -920,9 +920,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     buyer.on('pageerror', (e) => buyerProblems.push(`pageerror: ${e.message}`));
     const requests: string[] = [];
     const bodies: string[] = [];
+    const lookups: string[] = [];
     buyer.on('request', (r) => {
       requests.push(r.url());
       if (r.url().includes('/api/v1/certificates/')) bodies.push(r.postData() ?? '');
+      if (new URL(r.url()).pathname === '/api/v1/certificates/lookup') lookups.push(r.postData() ?? '');
     });
     const res = await buyer.goto(url);
     expect(res?.status()).toBe(200);
@@ -995,14 +997,25 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       ['ownership.certificate.create', owner.account.id],
     ]);
 
-    // Withdrawn, the link reads as one that never existed; an edited fragment is read again at once.
+    // Withdrawn, the link reads as one that never existed.
     await buyer.reload();
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
     await textOf(buyer.locator('.certificate__lead'), /This link does not lead to a certificate: it may be incomplete, or withdrawn by its owner\./);
+    // An edited fragment is read again at once, each way: the token of a new link, then one that leads nowhere.
+    const fresh = await srv.ctx.services.ownershipCertificates.create(owner.account.id, productId, {}, { type: 'account', id: owner.account.id });
+    const asked = lookups.length;
+    await buyer.evaluate((t) => {
+      location.hash = `#${t}`;
+    }, fresh.token);
+    await textOf(buyer.locator('.certificate__state'), 'VALID');
+    await textOf(buyer.locator('.certificate__plate .genome__id'), productId);
+    expect(lookups.slice(asked)).toEqual([JSON.stringify({ token: fresh.token })]);
     await buyer.evaluate(() => {
       location.hash = '#not-a-link';
     });
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
+    await countOf(buyer.locator('.certificate__plate'), 0);
+    expect(lookups.slice(asked)).toEqual([JSON.stringify({ token: fresh.token }), JSON.stringify({ token: 'not-a-link' })]);
     // A link without its fragment leads nowhere; opened directly, back returns to the landing rather than out of the app.
     await buyer.goto(`${srv.origin}/verify/c`);
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');

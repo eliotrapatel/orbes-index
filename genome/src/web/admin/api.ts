@@ -536,7 +536,7 @@ export class AdminApi {
     return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}`);
   }
 
-  /** ADMIN: lock the account (its sessions end, its pending transfers are cancelled). */
+  /** ADMIN: lock the account (its sessions end, its pending transfers are cancelled, its certificate links withdrawn). */
   lockOwner(accountId: string): Promise<OwnerLock> {
     return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/lock`);
   }

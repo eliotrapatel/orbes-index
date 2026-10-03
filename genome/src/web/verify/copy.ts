@@ -240,7 +240,7 @@ export const ACCOUNT_PASSWORD = Object.freeze({
   recover: 'SET NEW PASSWORD',
   /** After a recovery: every session ended, so the customer signs in again; `until` is in their own time zone. */
   recovered: (until: string) =>
-    `Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until ${until}.`,
+    `Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled, its certificate links were withdrawn and new transfers are paused until ${until}.`,
   change: 'CHANGE PASSWORD',
   changeLead: 'Enter your current password, then a new one. Your other sessions will end; you stay signed in here.',
   cancel: 'CANCEL',

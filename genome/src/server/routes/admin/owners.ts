@@ -75,7 +75,13 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(ownerParams, request.params);
     parse(emptyBody, request.body);
     const r = await owners.lock(id, adminActor(request));
-    return { status: 'LOCKED' as const, sessionsRevoked: r.sessionsRevoked, transfersCancelled: r.transfersCancelled.length, recoveryCodesRevoked: r.recoveryCodesRevoked };
+    return {
+      status: 'LOCKED' as const,
+      sessionsRevoked: r.sessionsRevoked,
+      transfersCancelled: r.transfersCancelled.length,
+      recoveryCodesRevoked: r.recoveryCodesRevoked,
+      certificatesRevoked: r.certificatesRevoked,
+    };
   });
 
   app.post('/api/admin/owners/:id/unlock', { config: ADMIN }, async (request) => {

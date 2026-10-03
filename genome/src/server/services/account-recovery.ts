@@ -32,7 +32,8 @@
  *            does), so such attempts hold neither the account's row lock nor
  *            a pool connection while they hash. Then,
  *            in one transaction: the new password, every session of the
- *            account revoked, its pending transfers cancelled, new transfers
+ *            account revoked, its pending transfers cancelled, its open links
+ *            to ownership certificates withdrawn (F-06), new transfers
  *            paused for 72 hours (`accounts.transfers_frozen_until`, 409
  *            TRANSFERS_PAUSED) against a takeover by social engineering, and
  *            the code marked used. Audited `account.recover`. A LOCKED
@@ -40,8 +41,9 @@
  *            the lock itself (A-06, services/owners.ts) revokes the open
  *            code, so a code checked just before a lock fails after it.
  *
- * Lock order: the account row, then the products of its pending transfers
- * (OwnershipService.cancelPendingTransfersFrom), as in initiateTransfer.
+ * Lock order: the account row, its open certificate links, then the products
+ * of its pending transfers (OwnershipService.cancelPendingTransfersFrom), as
+ * in initiateTransfer.
  *
  * The audit log is permanent: entries name the account id, never the email
  * or the code.
@@ -55,6 +57,7 @@ import type { AuditService } from './audit.js';
 import { checkPasswordPolicy, customerAccountLocked, normalizeEmail, type ClientMeta } from './auth.js';
 import { formatGrouped, normalizeCrockford, randomCrockford } from './claim-codes.js';
 import type { OwnershipService } from './ownership.js';
+import { auditWithdrawnCertificates, withdrawAccountCertificates } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
 
 /** A recovery code lives 30 minutes (the same delay as the A-06 brief, the safer of the two briefs). */
@@ -87,6 +90,8 @@ export interface RecoveryOutcome {
   sessionsRevoked: number;
   /** Ids of the pending transfers the recovery cancelled. */
   transfersCancelled: string[];
+  /** The account's links to ownership certificates the recovery withdrew (F-06). */
+  certificatesRevoked: number;
   /** New transfers out of the account are refused until then. */
   transfersFrozenUntil: Date;
 }
@@ -316,18 +321,22 @@ export class AccountRecoveryService {
         .where('id', '=', fresh.id)
         .execute();
       const sessionsRevoked = await this.sessions.revokeAllForSubject('account', fresh.id, {}, tx);
+      // Before any audit entry (no row is locked after the audit chain's lock): links created by whoever held the account.
+      const certificates = await withdrawAccountCertificates(tx, fresh.id, now);
       const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, fresh.id, actor, 'account_recovery');
+      await auditWithdrawnCertificates(this.audit, tx, actor, certificates, 'account_recovery');
+      const certificatesRevoked = certificates.length;
       await this.audit.record(
         {
           actor,
           action: 'account.recover',
           targetType: 'account',
           targetId: fresh.id,
-          details: { recoveryCodeId: attempt.codeId, sessionsRevoked, transfersCancelled: transfersCancelled.length, transfersFrozenUntil },
+          details: { recoveryCodeId: attempt.codeId, sessionsRevoked, transfersCancelled: transfersCancelled.length, certificatesRevoked, transfersFrozenUntil },
         },
         tx,
       );
-      return { accountId: fresh.id, sessionsRevoked, transfersCancelled, transfersFrozenUntil };
+      return { accountId: fresh.id, sessionsRevoked, transfersCancelled, certificatesRevoked, transfersFrozenUntil };
     });
   }
 

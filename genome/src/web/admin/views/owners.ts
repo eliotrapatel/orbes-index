@@ -12,8 +12,9 @@
  * sheet, after an identity check: the code is shown once, above the table,
  * until it is hidden; only its hash is kept. The client enters it on /verify
  * (FORGOTTEN PASSWORD?) with a new password: every session of the account
- * then ends, pending transfers are cancelled and new ones are paused for 72
- * hours, which the account's status line says, as it says while a code is open.
+ * then ends, pending transfers are cancelled, links to ownership certificates
+ * are withdrawn and new transfers are paused for 72 hours, which the
+ * account's status line says, as it says while a code is open.
  */
 import { bracket } from '../../shared/corners.js';
 import { h, mount } from '../../shared/dom.js';
@@ -178,7 +179,7 @@ export function issueRecoveryCode(ctx: ViewContext, o: OwnerRecord, slot: HTMLEl
       h(
         'p',
         { class: 'dialog__text' },
-        'When the client uses it on /verify with a new password, every session of the account ends, its pending transfers are cancelled and new transfers are paused for 72 hours. The issue is recorded in the audit log.',
+        'When the client uses it on /verify with a new password, every session of the account ends, its pending transfers are cancelled, the links it shared to ownership certificates are withdrawn and new transfers are paused for 72 hours. The issue is recorded in the audit log.',
       ),
     ],
     confirmLabel: 'Issue code',

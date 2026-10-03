@@ -13,7 +13,8 @@
  *            latest scans (`scan_events.account_id`).
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
  *            transaction with every session of the account revoked, its
- *            pending transfers cancelled and its open recovery code revoked.
+ *            pending transfers cancelled, its open links to ownership
+ *            certificates withdrawn and its open recovery code revoked.
  *            Sign-in is then refused (403 ACCOUNT_LOCKED) until it is
  *            unlocked, and a recovery code cannot be issued. Audited
  *            `account.lock`.
@@ -28,8 +29,9 @@
  * not a second mechanism. Emails are masked for an AUDITOR by the routes
  * (routes/admin/serialize.ts `clientEmail`): the service returns them as stored.
  *
- * Lock order: the account row, then the products of its pending transfers
- * (OwnershipService.cancelPendingTransfersFrom), as in an assisted recovery.
+ * Lock order: the account row, its open certificate links, then the
+ * products of its pending transfers (OwnershipService.cancelPendingTransfersFrom),
+ * as in an assisted recovery.
  * The audit log is permanent: entries name the account id, never its email.
  */
 import { sql } from 'kysely';
@@ -41,6 +43,7 @@ import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import type { OwnershipService } from './ownership.js';
+import { auditWithdrawnCertificates, withdrawAccountCertificates } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
 
 /** Latest scans shown on an owner's sheet. */
@@ -172,6 +175,8 @@ export interface LockOutcome {
   transfersCancelled: string[];
   /** The open recovery code the lock revoked (0 or 1). */
   recoveryCodesRevoked: number;
+  /** The account's links to ownership certificates the lock withdrew (F-06). */
+  certificatesRevoked: number;
 }
 
 /**
@@ -349,7 +354,8 @@ export class OwnerService {
 
   /**
    * Lock an ACTIVE account (an ADMIN of ORBES Client Services): every session ends, the pending transfers
-   * it offered are cancelled and its open recovery code is revoked, in one transaction.
+   * it offered are cancelled, its open certificate links are withdrawn and its open recovery code is revoked,
+   * in one transaction.
    * 409 ACCOUNT_ALREADY_LOCKED, ACCOUNT_NOT_ACTIVE (deleted).
    */
   async lock(accountId: string, actor: Actor): Promise<LockOutcome> {
@@ -375,19 +381,23 @@ export class OwnerService {
         .returning('id')
         .execute();
       const recoveryCodesRevoked = revoked.length;
+      // Links to ownership certificates created by whoever held the account stop showing the record (THREAT-MODEL Y).
+      const certificates = await withdrawAccountCertificates(tx, account.id, now);
       // Last of the writes: it audits each cancellation, and no row is locked after the audit chain's lock.
       const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
+      await auditWithdrawnCertificates(this.audit, tx, actor, certificates, 'account_locked');
+      const certificatesRevoked = certificates.length;
       await this.audit.record(
         {
           actor,
           action: 'account.lock',
           targetType: 'account',
           targetId: account.id,
-          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked },
+          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked, certificatesRevoked },
         },
         tx,
       );
-      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked };
+      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked };
     });
   }
 

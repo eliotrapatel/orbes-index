@@ -36,8 +36,11 @@
  *
  * Creation and withdrawal are the owner's (account session, CSRF), audited
  * `ownership.certificate.create` and `ownership.certificate.revoke` (the
- * certificate's id, never its token). Lookups are public and not audited:
- * they draw on the `verify` rate budget.
+ * certificate's id, never its token). A lock of the account by ORBES Client
+ * Services (A-06) and an assisted recovery of its password (C-04) withdraw
+ * its open links as well (withdrawAccountCertificates), as they cancel its
+ * pending transfers. Lookups are public and not audited: they draw on the
+ * `verify` rate budget.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -151,6 +154,13 @@ export interface OwnerCertificate {
   valid: boolean;
 }
 
+/** A link withdrawn with its account's lock or assisted recovery (withdrawAccountCertificates). */
+export interface WithdrawnCertificate {
+  certificateId: string;
+  /** The piece's public id: the target of its `ownership.certificate.revoke` entry. */
+  productId: string;
+}
+
 /** The piece as a certificate shows it: what a result's product lines and GENOME show, nothing about a person. */
 export interface CertificatePiece {
   productId: string;
@@ -216,6 +226,48 @@ async function lastEndingAt(db: Db, productUuid: string): Promise<Date | null> {
 }
 
 const after = (createdAt: Date, endedAt: Date | null) => endedAt === null || createdAt.getTime() > endedAt.getTime();
+
+/**
+ * Withdraw every link of the account still open (neither withdrawn nor expired, of a piece it owns now) when ORBES
+ * Client Services locks the account (A-06) or its password is recovered with their help (C-04): a link created by
+ * whoever held the account must not keep showing the record (THREAT-MODEL Y). Each then answers 404, as a link its
+ * owner withdrew. Runs in the caller's transaction, which already holds the account row, so a creation under way waits
+ * for it (creation reads the account FOR SHARE first; after a lock it is refused). It takes only the links' row locks:
+ * the caller runs it before its first audit entry, as no row is locked after the audit chain's lock (DATABASE §8.3),
+ * and records them afterwards with auditWithdrawnCertificates. Returns the links withdrawn, by piece then id.
+ */
+export async function withdrawAccountCertificates(tx: Db, accountId: string, now: Date): Promise<WithdrawnCertificate[]> {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw validationError('Invalid account.');
+  // UPDATE … FROM locks the links only, not the products it reads their public ids from.
+  const rows = await tx
+    .updateTable('ownership_certificates as c')
+    .from('products as p')
+    .set({ revoked_at: now })
+    .whereRef('p.id', '=', 'c.product_id')
+    .where('c.revoked_at', 'is', null)
+    .where('c.expires_at', '>', now)
+    .where('c.ownership_id', 'in', (eb) => eb.selectFrom('ownership').select('id').where('account_id', '=', accountId).where('ended_at', 'is', null))
+    .returning(['c.id', 'p.product_id'])
+    .execute();
+  const key = (c: WithdrawnCertificate) => `${c.productId} ${c.certificateId}`;
+  return rows.map((r) => ({ certificateId: r.id, productId: r.product_id })).sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+}
+
+/** One `ownership.certificate.revoke` per link withdrawAccountCertificates withdrew, with `reason`, as the owner's own. */
+export async function auditWithdrawnCertificates(
+  audit: AuditService,
+  tx: Db,
+  actor: Actor,
+  withdrawn: readonly WithdrawnCertificate[],
+  reason: 'account_locked' | 'account_recovery',
+): Promise<void> {
+  for (const c of withdrawn) {
+    await audit.record(
+      { actor, action: 'ownership.certificate.revoke', targetType: 'product', targetId: c.productId, details: { certificateId: c.certificateId, reason } },
+      tx,
+    );
+  }
+}
 
 // ── Service ────────────────────────────────────────────────────────────────
 

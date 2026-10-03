@@ -509,7 +509,7 @@ describe('verify view-model: FORGOTTEN PASSWORD? (C-04)', () => {
     expect(ACCOUNT_PASSWORD.change).toBe('CHANGE PASSWORD');
     expect(ACCOUNT_PASSWORD.forgottenLead).toMatch(/ORBES Client Services .* identity, .* one-time recovery code, valid for 30 minutes\.$/);
     expect(ACCOUNT_PASSWORD.recovered('5 October 2026, 11:00')).toBe(
-      'Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled and new transfers are paused until 5 October 2026, 11:00.',
+      'Your password has been changed: sign in with it. For your security, every session of your account has ended, its pending transfers were cancelled, its certificate links were withdrawn and new transfers are paused until 5 October 2026, 11:00.',
     );
     const words = Object.values(ACCOUNT_PASSWORD).map((v) => (typeof v === 'string' ? v : v('5 October 2026, 11:00'))).join(' ');
     expect(words).not.toMatch(/support|product|fake|counterfeit|!/i);

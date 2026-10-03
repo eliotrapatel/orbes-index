@@ -680,6 +680,8 @@ export interface OwnerLock {
   transfersCancelled: number;
   /** The open recovery code the lock revoked (0 or 1). */
   recoveryCodesRevoked: number;
+  /** The account's links to ownership certificates the lock withdrew. */
+  certificatesRevoked: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */

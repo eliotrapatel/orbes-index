@@ -2,7 +2,8 @@
  * The owner's sheet of ORBES Client Services (A-06): search by exact email
  * and by the REF printed under a result, the sheet (pieces, transfers in
  * progress, 20 latest scans), lock and unlock (ADMIN: sessions end, pending
- * transfers cancelled, the open recovery code revoked, sign-in refused), the
+ * transfers cancelled, links to ownership certificates withdrawn, the open
+ * recovery code revoked, sign-in refused), the
  * right-of-access export (ADMIN, no-store, audited, every audit entry that
  * names the account, no other owner's data on a piece sold, no internal
  * flag), emails masked for an AUDITOR everywhere, and the
@@ -159,7 +160,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
   });
 
   describe('POST /api/admin/owners/:id/lock and /unlock', () => {
-    it('locks: every session ends, pending transfers are cancelled, the open recovery code is revoked, sign-in is refused; unlocking restores sign-in', async () => {
+    it('locks: every session ends, pending transfers are cancelled, certificate links are withdrawn, the open recovery code is revoked, sign-in is refused; unlocking restores sign-in', async () => {
       const cs = await adminClient(h, 'ADMIN');
       const owner = await accountClient(h);
       const id = await accountIdOf(owner.email);
@@ -168,6 +169,9 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // A recipient has scanned the piece and holds the code (F-03), when the lock comes.
       const recipient = (await accountClient(h)).client;
       const scanned = await scanToReceive(recipient, data, offer.transferCode);
+      // A link to an ownership certificate of the piece, shared before the lock (F-06).
+      const link = safeJson(await owner.client.post('/api/v1/ownership/certificates', { productId })) as { token: string };
+      expect((await h.client().post('/api/v1/certificates/lookup', { token: link.token })).statusCode).toBe(200);
       const elsewhere = h.client({ ip: '203.0.113.77' });
       expect((await elsewhere.post('/api/v1/account/login', { email: owner.email, password: PASSWORD })).statusCode).toBe(200);
       const code = (safeJson(await cs.post(`/api/admin/owners/${id}/recovery-code`)) as { recoveryCode: string }).recoveryCode;
@@ -184,7 +188,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const locked = await cs.post(`/api/admin/owners/${id}/lock`);
       expect(locked.statusCode).toBe(200);
-      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1 });
+      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1 });
 
       // The sessions have ended; the right password is refused with the lock, a wrong one as ever.
       expect((await owner.client.get('/api/v1/account/me')).statusCode).toBe(401);
@@ -206,6 +210,10 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const taken = await recipient.post('/api/v1/ownership/transfers/accept', scanned);
       expect(taken.statusCode).toBe(410);
       expect(errorOf(taken).code).toBe('TRANSFER_CANCELLED');
+      // The certificate link answers as one that never existed.
+      const lookup = await h.client().post('/api/v1/certificates/lookup', { token: link.token });
+      expect(lookup.statusCode).toBe(404);
+      expect(errorOf(lookup).code).toBe('CERTIFICATE_NOT_FOUND');
 
       const again = await cs.post(`/api/admin/owners/${id}/lock`);
       expect(again.statusCode).toBe(409);
@@ -218,10 +226,11 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // The audit log names the account, the counts and the admin; never the email.
       const lockEntry = (await h.ctx.audit.list({ action: 'account.lock', targetId: id })).items;
       expect(lockEntry).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1 } }),
       ]);
       expect(JSON.stringify(lockEntry)).not.toContain(owner.email);
       expect((await h.ctx.audit.list({ action: 'ownership.transfer.cancel', targetId: productId })).items[0].details).toMatchObject({ reason: 'account_locked' });
+      expect((await h.ctx.audit.list({ action: 'ownership.certificate.revoke', targetId: productId })).items[0]).toMatchObject({ actorType: 'admin', details: { reason: 'account_locked' } });
 
       for (const role of ['AUDITOR', 'OPERATOR'] as const) {
         expect((await (await adminClient(h, role)).post(`/api/admin/owners/${id}/unlock`)).statusCode, role).toBe(403);

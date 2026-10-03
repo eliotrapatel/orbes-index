@@ -9,7 +9,8 @@
  *     `issueRecoveryCode`), shown once above the sheet;
  *   - Lock account / Unlock account: a locked client cannot sign in or use a
  *     recovery code; the lock ends every session, cancels the pending
- *     transfers and revokes an open recovery code;
+ *     transfers, withdraws the links to ownership certificates and revokes an
+ *     open recovery code;
  *   - Export data: everything held about the account, as a JSON file, for a
  *     request under the right of access.
  * An AUDITOR reads the sheet with the email masked, without the actions.
@@ -49,7 +50,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
             title: 'Lock this account',
             eyebrow: o.email,
             body: [
-              h('p', { class: 'dialog__text' }, 'Every session of the account ends now, the transfers it offered are cancelled and an open recovery code stops working.'),
+              h('p', { class: 'dialog__text' }, 'Every session of the account ends now, the transfers it offered are cancelled, the links it shared to ownership certificates are withdrawn and an open recovery code stops working.'),
               h(
                 'p',
                 { class: 'dialog__text' },
@@ -60,9 +61,10 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
             danger: true,
             submit: async () => {
               const r = await ctx.api.lockOwner(o.id);
+              const links = r.certificatesRevoked > 0 ? `, ${formatCount(r.certificatesRevoked)} certificate ${r.certificatesRevoked === 1 ? 'link' : 'links'} withdrawn` : '';
               const code = r.recoveryCodesRevoked > 0 ? ', the open recovery code revoked' : '';
               notify(
-                `Account locked. ${formatCount(r.sessionsRevoked)} ${r.sessionsRevoked === 1 ? 'session' : 'sessions'} ended, ${formatCount(r.transfersCancelled)} ${r.transfersCancelled === 1 ? 'transfer' : 'transfers'} cancelled${code}.`,
+                `Account locked. ${formatCount(r.sessionsRevoked)} ${r.sessionsRevoked === 1 ? 'session' : 'sessions'} ended, ${formatCount(r.transfersCancelled)} ${r.transfersCancelled === 1 ? 'transfer' : 'transfers'} cancelled${links}${code}.`,
               );
             },
           }).then((r) => r && ctx.reload(), notifyError),

@@ -1,8 +1,9 @@
 /**
  * AccountRecoveryService (C-04): the one-time code ORBES Client Services
  * issues after an identity check, and the recovery it allows: new password,
- * every session revoked, pending transfers cancelled, new transfers paused
- * for 72 hours, the code used once. One answer for an unknown email and a
+ * every session revoked, pending transfers cancelled, links to ownership
+ * certificates withdrawn, new transfers paused for 72 hours, the code used
+ * once. One answer for an unknown email and a
  * wrong, expired, used or replaced code; 5 wrong guesses per code per hour
  * (attempts without an open code spend nothing). A password change or a
  * sign-in with the old password that was under way when a recovery
@@ -25,6 +26,7 @@ import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
 import { normalizeClaimCode } from '../../src/server/services/claim-codes.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { OwnershipCertificateService } from '../../src/server/services/ownership-certificates.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
@@ -59,6 +61,7 @@ describe('AccountRecoveryService', () => {
   let auth: AuthService;
   let lifecycle: LifecycleService;
   let ownership: OwnershipService;
+  let certificates: OwnershipCertificateService;
   let recovery: AccountRecoveryService;
   let admin: Actor;
   let modelId: string;
@@ -73,6 +76,7 @@ describe('AccountRecoveryService', () => {
     auth = new AuthService({ db: t.db, audit, sessions, clock: clock.now, totpKey: deriveTotpEncryptionKey(testConfig()) });
     lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
     ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: new Uint8Array(32).fill(7) });
+    certificates = new OwnershipCertificateService({ db: t.db, audit, ownership, publicOrigin: 'https://verify.orbes.test', clock: clock.now });
     recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
     const a = await auth.createAdmin({ email: 'cs@orbes.test', password: PASSWORD, role: 'ADMIN' }, SYSTEM_ACTOR);
     admin = { type: 'admin', id: a.id, ipHash: 'ip-admin' };
@@ -221,6 +225,30 @@ describe('AccountRecoveryService', () => {
       expect(JSON.stringify(entry)).not.toContain(normalizeClaimCode(recoveryCode)!);
       const cancel = (await audit.list({ action: 'ownership.transfer.cancel', targetId: piece.productId })).items[0];
       expect(cancel.details).toMatchObject({ transferId: transfer.id, reason: 'account_recovery' });
+    });
+
+    it('withdraws the open links to ownership certificates of the account (F-06), audited before the recovery itself', async () => {
+      const c = await customer();
+      const piece = await ownedBy(c);
+      const links = [await certificates.create(c.id, piece.productId, {}, c.actor), await certificates.create(c.id, piece.productId, { validDays: 90 }, c.actor)];
+      const neighbour = await customer();
+      const theirs = await certificates.create(neighbour.id, (await ownedBy(neighbour)).productId, {}, neighbour.actor);
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      const before = (await t.db.selectFrom('audit_logs').select((eb) => eb.fn.max('id').as('id')).executeTakeFirstOrThrow()).id;
+
+      const r = await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD }, { ipHash: 'ip-client' });
+      expect(r.certificatesRevoked).toBe(2);
+      for (const link of links) await expectDomainError(certificates.lookup(link.token), 'CERTIFICATE_NOT_FOUND', 404);
+      expect((await certificates.lookup(theirs.token)).status).toBe('VALID');
+      expect(await certificates.listForAccount(c.id)).toEqual([]);
+      // One entry per link, by the account, with the reason; then the recovery's, which counts them.
+      const entries = await t.db.selectFrom('audit_logs').select(['action', 'actor_id', 'target_id', 'details']).where('id', '>', Number(before)).orderBy('id').execute();
+      expect(entries.map((e) => e.action)).toEqual(['ownership.certificate.revoke', 'ownership.certificate.revoke', 'account.recover']);
+      expect(new Set(entries.slice(0, 2).map((e) => (e.details as { certificateId: string }).certificateId))).toEqual(new Set(links.map((l) => l.id)));
+      for (const e of entries.slice(0, 2)) expect(e).toMatchObject({ actor_id: c.id, target_id: piece.productId, details: { reason: 'account_recovery' } });
+      expect(entries[2].details).toMatchObject({ transfersCancelled: 0, certificatesRevoked: 2 });
+      // The owner, signed in with the new password, shares a new link.
+      expect((await certificates.lookup((await certificates.create(c.id, piece.productId, {}, c.actor)).token)).status).toBe('VALID');
     });
 
     it('pauses new transfers out of the account for 72 hours, then lets them go', async () => {

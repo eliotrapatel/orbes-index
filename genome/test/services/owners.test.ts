@@ -1,9 +1,9 @@
 /**
  * OwnerService (A-06) and its helpers: the REF a customer reads under a
  * result, the email mask of an AUDITOR, the lock (staff only, sessions and
- * pending transfers ended and the open recovery code revoked in one
- * transaction, a transfer or a sign-in begun before the lock refused) and the
- * unlock.
+ * pending transfers ended, links to ownership certificates withdrawn and the
+ * open recovery code revoked in one transaction, a transfer or a sign-in
+ * begun before the lock refused) and the unlock.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -13,6 +13,7 @@ import { AccountRecoveryService, RECOVERY_CODE_TTL_MS } from '../../src/server/s
 import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { OwnershipCertificateService } from '../../src/server/services/ownership-certificates.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService, parseScanReference, scanReference } from '../../src/server/services/owners.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
@@ -59,6 +60,7 @@ describe('OwnerService', () => {
   let auth: AuthService;
   let lifecycle: LifecycleService;
   let ownership: OwnershipService;
+  let certificates: OwnershipCertificateService;
   let owners: OwnerService;
   let recovery: AccountRecoveryService;
   let admin: Actor;
@@ -74,6 +76,7 @@ describe('OwnerService', () => {
     auth = new AuthService({ db: t.db, audit, sessions, clock: clock.now, totpKey: deriveTotpEncryptionKey(testConfig()) });
     lifecycle = new LifecycleService({ db: t.db, audit, clock: clock.now });
     ownership = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: new Uint8Array(32).fill(7) });
+    certificates = new OwnershipCertificateService({ db: t.db, audit, ownership, publicOrigin: 'https://verify.orbes.test', clock: clock.now });
     owners = new OwnerService({ db: t.db, audit, sessions, ownership, clock: clock.now });
     recovery = new AccountRecoveryService({ db: t.db, audit, sessions, ownership, clock: clock.now });
     const a = await auth.createAdmin({ email: 'cs@orbes.test', password: PASSWORD, role: 'ADMIN' }, SYSTEM_ACTOR);
@@ -295,6 +298,64 @@ describe('OwnerService', () => {
     expect(entries.slice(0, 3).map((e) => e.target_id).sort()).toEqual([...pieces].sort());
     expect(new Set(entries.slice(0, 3).map((e) => (e.details as { transferId: string }).transferId))).toEqual(new Set(r.transfersCancelled));
     for (const e of entries.slice(0, 3)) expect(e.details).toMatchObject({ reason: 'account_locked' });
+  });
+
+  it('withdraws the open links to ownership certificates of the account (F-06): they answer 404 for good, the others are left as they were', async () => {
+    const c = await customer();
+    const [a, b] = [await ownedBy(c), await ownedBy(c)];
+    const open = [await certificates.create(c.id, b, {}, c.actor), await certificates.create(c.id, a, {}, c.actor), await certificates.create(c.id, a, { validDays: 7 }, c.actor)];
+    const short = await certificates.create(c.id, b, { validDays: 1 }, c.actor);
+    const withdrawn = await certificates.create(c.id, b, {}, c.actor);
+    await certificates.revoke(c.id, withdrawn.id, c.actor);
+    const neighbour = await customer();
+    const theirs = await certificates.create(neighbour.id, await ownedBy(neighbour), {}, neighbour.actor);
+    await ownership.initiateTransfer(c.id, a, c.actor);
+    clock.advance(86_400_000);
+    const revokedAt = async (id: string) => (await t.db.selectFrom('ownership_certificates').select('revoked_at').where('id', '=', id).executeTakeFirstOrThrow()).revoked_at;
+    const withdrawnAt = await revokedAt(withdrawn.id);
+    const before = (await t.db.selectFrom('audit_logs').select((eb) => eb.fn.max('id').as('id')).executeTakeFirstOrThrow()).id;
+
+    const r = await owners.lock(c.id, admin);
+    expect(r.certificatesRevoked).toBe(3);
+    for (const link of open) {
+      expect((await revokedAt(link.id))?.getTime()).toBe(clock.now().getTime());
+      await expectDomainError(certificates.lookup(link.token), 'CERTIFICATE_NOT_FOUND', 404);
+    }
+    // An expired link, one already withdrawn and another account's are left as they were.
+    expect(await revokedAt(short.id)).toBeNull();
+    expect((await certificates.lookup(short.token)).status).toBe('NO_LONGER_VALID');
+    expect(await revokedAt(withdrawn.id)).toEqual(withdrawnAt);
+    expect((await certificates.lookup(theirs.token)).status).toBe('VALID');
+    // The transfers' entries, then one per link (by piece, as the owner's own withdrawal, with the reason), then the lock's.
+    const entries = await t.db.selectFrom('audit_logs').select(['action', 'actor_id', 'target_id', 'details']).where('id', '>', Number(before)).orderBy('id').execute();
+    expect(entries.map((e) => e.action)).toEqual([
+      'ownership.transfer.cancel',
+      'ownership.certificate.revoke',
+      'ownership.certificate.revoke',
+      'ownership.certificate.revoke',
+      'account.lock',
+    ]);
+    const revokes = entries.slice(1, 4);
+    expect(revokes.map((e) => e.target_id)).toEqual([a, a, b]);
+    expect(new Set(revokes.map((e) => (e.details as { certificateId: string }).certificateId))).toEqual(new Set(open.map((l) => l.id)));
+    for (const e of revokes) {
+      expect(e.actor_id).toBe(admin.id);
+      expect(Object.keys(e.details as object).sort()).toEqual(['certificateId', 'reason']);
+      expect(e.details).toMatchObject({ reason: 'account_locked' });
+    }
+    expect(entries[4].details).toMatchObject({ transfersCancelled: 1, certificatesRevoked: 3 });
+
+    // They stay withdrawn after the unlock; the owner creates new links as before.
+    await owners.unlock(c.id, admin);
+    await expectDomainError(certificates.lookup(open[0].token), 'CERTIFICATE_NOT_FOUND', 404);
+    expect((await certificates.listForAccount(c.id)).map((l) => l.id)).toEqual([]);
+    const fresh = await certificates.create(c.id, b, {}, c.actor);
+    expect((await certificates.lookup(fresh.token)).status).toBe('VALID');
+    // Another account's lock withdraws its own link only; a lock with none open withdraws nothing.
+    expect((await owners.lock(neighbour.id, admin)).certificatesRevoked).toBe(1);
+    await expectDomainError(certificates.lookup(theirs.token), 'CERTIFICATE_NOT_FOUND', 404);
+    expect((await certificates.lookup(fresh.token)).status).toBe('VALID');
+    expect((await owners.lock((await customer()).id, admin)).certificatesRevoked).toBe(0);
   });
 
   it('revokes the open recovery code: a code handed out before the lock does not work after the unlock', async () => {
