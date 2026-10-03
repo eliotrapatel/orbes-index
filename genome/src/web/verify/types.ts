@@ -154,6 +154,11 @@ export interface OwnedPiece {
   /** A LOST its owner reported: PIECE FOUND withdraws it (POST /api/v1/ownership/incidents/resolve). */
   incidentResolvable: boolean;
   inService: boolean;
+  /**
+   * A link to an ownership certificate may be created (F-06): false while the piece is reported lost or stolen, or
+   * revoked or retired, where creation is refused (409 CERTIFICATE_NOT_ALLOWED). MY PIECES then leaves the section out.
+   */
+  certificateAllowed: boolean;
   /** `version` is an integer here (1), `pattern` the glyph ids joined by "·". */
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };

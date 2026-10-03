@@ -40,6 +40,12 @@ export interface PieceModel {
   ownershipNotes: string[];
   transferPending: boolean;
   incident: IncidentMode;
+  /**
+   * OWNERSHIP CERTIFICATE is offered (F-06): a piece not reported lost or stolen whose status allows a certificate
+   * (the server's `certificateAllowed`: not revoked nor retired). Otherwise the section is left out, its links with it:
+   * the server would refuse the creation, and every link of the piece reads NO LONGER VALID.
+   */
+  certificateOffered: boolean;
   warranty?: { status: string; rows: Row[]; note: string };
 }
 
@@ -103,6 +109,8 @@ export function pieceModel(p: OwnedPiece): PieceModel {
     ownershipNotes: notes,
     transferPending,
     incident,
+    // A server that predates the flag sends none: offered, as before (the server still refuses what it must).
+    certificateOffered: incident.kind === 'reportable' && p.certificateAllowed !== false,
   };
   const genome = pieceGenomeModel(p.genome);
   if (genome) model.genome = genome;

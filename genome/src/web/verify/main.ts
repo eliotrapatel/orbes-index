@@ -50,9 +50,12 @@ type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces'
 /** What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, or a certificate. */
 type Entry = 'landing' | 'app' | 'pieces' | 'certificate';
 
-/** The route of a path under /verify: MY PIECES, a certificate, or the landing (also for a path the app does not know). */
+/**
+ * The route of a path under /verify: MY PIECES, a certificate, or the landing (also for a path the app does not know).
+ * In any case: the certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
+ */
 function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' {
-  const path = pathname.replace(/\/+$/, '');
+  const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }

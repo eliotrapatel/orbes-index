@@ -66,6 +66,11 @@ export const CLAIM_FAILED_ACTION = 'ownership.claim_failed';
 export const REGISTRABLE_STATUSES: readonly ProductStatus[] = Object.freeze(['ACTIVATED', 'RESOLD', 'SERVICED']);
 /** Statuses in which an owner can hand a product over. */
 export const TRANSFERABLE_STATUSES: readonly ProductStatus[] = Object.freeze(['REGISTERED', 'OWNED', 'TRANSFERRED']);
+/**
+ * Statuses that end every ownership certificate created before the piece entered them, and in which none can be
+ * created (F-06, OwnershipCertificateService; `certificateAllowed` of the owner's list).
+ */
+export const CERTIFICATE_ENDING_STATUSES: readonly ProductStatus[] = Object.freeze(['LOST', 'STOLEN', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED']);
 export const INCIDENT_TYPES = ['LOST', 'STOLEN'] as const;
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
 
@@ -136,6 +141,12 @@ export interface OwnedProduct {
    */
   incidentResolvable: boolean;
   inService: boolean;
+  /**
+   * The owner may create a link to an ownership certificate of the piece (F-06): false in a status that ends them
+   * (CERTIFICATE_ENDING_STATUSES: reported lost or stolen, revoked, flagged or retired), where creation answers 409
+   * CERTIFICATE_NOT_ALLOWED. Names no status: MY PIECES only leaves the action out.
+   */
+  certificateAllowed: boolean;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: WarrantySummary;
 }
@@ -839,6 +850,7 @@ export class OwnershipService {
         incident: r.status === 'LOST' || r.status === 'STOLEN' ? r.status : null,
         incidentResolvable: resolvable.has(r.uuid),
         inService: r.status === 'SERVICED',
+        certificateAllowed: !CERTIFICATE_ENDING_STATUSES.includes(r.status),
         genome: g ? { id: g.genome_id, version: g.genome_version, fingerprint: g.fingerprint, glyphs: g.glyphs, pattern: g.pattern } : null,
         warranty: {
           status: ws,

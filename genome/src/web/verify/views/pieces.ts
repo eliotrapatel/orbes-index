@@ -479,8 +479,8 @@ class PieceCard {
     ];
     if (m.transferPending && this.confirm === null) out.push(this.actions(this.textButton(PIECES.cancelTransfer, () => this.cancelTransfer(), 'piece__transfer-action')));
     out.push(...this.incidentBlock());
-    // A piece reported lost or stolen takes no certificate: its links show NO LONGER VALID.
-    if (m.incident.kind === 'reportable' && this.confirm === null) out.push(...this.certificateBlock());
+    // A piece reported lost or stolen, revoked or retired takes no certificate (the server refuses one): no section.
+    if (m.certificateOffered && this.confirm === null) out.push(...this.certificateBlock());
     if (this.notice) out.push(h('p', { class: 'form__notice', attrs: { role: 'status' }, text: this.notice }));
     this.panel.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     const q = (sel: string) => this.panel.querySelector<HTMLElement>(sel);
@@ -780,13 +780,13 @@ class PieceCard {
       this.certificates = this.certificates?.map((c) => ({ ...c, valid: false })) ?? null;
       this.offer = null;
       this.creating = false;
-      return { ...p, incident: type, incidentResolvable: type === 'LOST', transfer: { pending: false } };
+      return { ...p, incident: type, incidentResolvable: type === 'LOST', certificateAllowed: false, transfer: { pending: false } };
     });
   }
 
   /** PIECE FOUND, once confirmed: the piece returns to the status it held before the loss. */
   private resolve(): void {
-    void this.run(() => this.deps.api.resolveIncident(this.model.productId).then(() => undefined), PIECES.resolved, (p) => ({ ...p, incident: null, incidentResolvable: false }));
+    void this.run(() => this.deps.api.resolveIncident(this.model.productId).then(() => undefined), PIECES.resolved, (p) => ({ ...p, incident: null, incidentResolvable: false, certificateAllowed: true }));
   }
 
   private cancelTransfer(): void {

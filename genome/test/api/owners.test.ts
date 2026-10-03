@@ -354,6 +354,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.scans[2]).toMatchObject({ userAgentFamily: family, clientMetrics: null });
       expect(x.sessions).toEqual([expect.objectContaining({ userAgent: expect.stringContaining('iPhone') })]);
       expect(x.recoveryCodes).toEqual([expect.objectContaining({ usedAt: null, revokedAt: null })]);
+      // No link to an ownership certificate here (the service test lists open and withdrawn ones).
+      expect(x.certificates).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -370,7 +372,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       ]);
       const declared = await h.ctx.audit.list({ action: 'ownership.incident', targetId: productId });
       expect(x.activity[7].occurredAt).toBe(declared.items[0].occurredAt.toISOString());
-      expect(x.notIncluded).toHaveLength(2);
+      expect(x.notIncluded).toHaveLength(3);
+      expect(x.notIncluded[1]).toMatch(/ownership certificates: only a one-way SHA-256 of their token/);
       // No secret and no pseudonym: neither the password hash, the code's hash, nor the scan's IP or device keys.
       const stored = await h.ctx.db.selectFrom('scan_events').select(['ip_hash', 'device_hash']).where('id', '=', bad.scanId).executeTakeFirstOrThrow();
       expect(res.body).not.toContain('scrypt$');
@@ -382,7 +385,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

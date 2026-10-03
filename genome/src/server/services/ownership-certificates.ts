@@ -1,6 +1,6 @@
 /**
  * OwnershipCertificateService — the shareable ownership certificate (F-06;
- * API §8.6 and §11.7, DATABASE §5.26, SECURITY-MODEL §3.6).
+ * API §8.6 and §11.7, DATABASE §5.27, SECURITY-MODEL §3.6).
  *
  * The current owner of a piece creates a link to a certificate of its record,
  * for a buyer at a distance or an insurer, without handing the piece over to
@@ -39,18 +39,20 @@
  * certificate's id, never its token). A lock of the account by ORBES Client
  * Services (A-06) and an assisted recovery of its password (C-04) withdraw
  * its open links as well (withdrawAccountCertificates), as they cancel its
- * pending transfers. Lookups are public and not audited: they draw on the
+ * pending transfers; a creation still on its way when they commit is refused
+ * (the lock: 403 ACCOUNT_LOCKED; the recovery: 401, the session that asked
+ * for it is gone). Lookups are public and not audited: they draw on the
  * `verify` rate budget.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { ProductStatus } from '../db/schema.js';
-import { DomainError, forbidden, validationError } from '../errors.js';
+import { DomainError, forbidden, unauthorized, validationError } from '../errors.js';
 import { renderOwnershipCertificatePdf, type RenderedCertificates } from '../render/certificate.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { CROCKFORD_ALPHABET, normalizeCrockford } from './claim-codes.js';
-import { lockForOwnerAction, notOwner, readActingAccount, type OwnershipService } from './ownership.js';
+import { CERTIFICATE_ENDING_STATUSES, lockForOwnerAction, notOwner, readActingAccount, type OwnershipService } from './ownership.js';
 import { utcDate, type WarrantySummary } from './warranty.js';
 
 export const CERTIFICATE_TOKEN_BYTES = 32;
@@ -63,8 +65,8 @@ export const CERTIFICATE_DEFAULT_DAYS = 30;
 export const MAX_OPEN_CERTIFICATES = 10;
 /** The verify app's route of the public certificate (the token follows in the fragment). */
 export const CERTIFICATE_PATH = '/verify/c';
-/** Statuses that end every certificate created before the piece entered them. */
-export const CERTIFICATE_ENDING_STATUSES: readonly ProductStatus[] = Object.freeze(['LOST', 'STOLEN', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED']);
+/** Statuses that end every certificate created before the piece entered them (defined beside the owner's list of pieces). */
+export { CERTIFICATE_ENDING_STATUSES };
 
 const DAY_MS = 86_400_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -227,6 +229,23 @@ async function lastEndingAt(db: Db, productUuid: string): Promise<Date | null> {
 
 const after = (createdAt: Date, endedAt: Date | null) => endedAt === null || createdAt.getTime() > endedAt.getTime();
 
+/** The 32 bytes of a session's id (SessionInfo.id: hex SHA-256 of its token); 401 when it cannot be one. */
+function sessionIdHash(sessionId: unknown): Uint8Array {
+  if (typeof sessionId !== 'string' || !/^[0-9a-f]{64}$/i.test(sessionId)) throw unauthorized();
+  return new Uint8Array(Buffer.from(sessionId, 'hex'));
+}
+
+/** Whether the session is still a live one of the account, read under a share lock in the caller's transaction. */
+async function liveAccountSession(tx: Db, idHash: Uint8Array, accountId: string, now: Date): Promise<boolean> {
+  const row = await tx
+    .selectFrom('sessions')
+    .select(['subject_type', 'subject_id', 'expires_at'])
+    .where('id_hash', '=', idHash)
+    .forShare()
+    .executeTakeFirst();
+  return !!row && row.subject_type === 'account' && row.subject_id === accountId && row.expires_at.getTime() > now.getTime();
+}
+
 /**
  * Withdraw every link of the account still open (neither withdrawn nor expired, of a piece it owns now) when ORBES
  * Client Services locks the account (A-06) or its password is recovered with their help (C-04): a link created by
@@ -251,6 +270,53 @@ export async function withdrawAccountCertificates(tx: Db, accountId: string, now
     .execute();
   const key = (c: WithdrawnCertificate) => `${c.productId} ${c.certificateId}`;
   return rows.map((r) => ({ certificateId: r.id, productId: r.product_id })).sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+}
+
+/** What a link is now, as its account's export names it: as the public lookup would answer, or withdrawn (404 there). */
+export type AccountCertificateStatus = 'VALID' | 'NO_LONGER_VALID' | 'WITHDRAWN';
+
+/** A link the account created (AccountExport.certificates): never its token, the token's hash or the link's id. */
+export interface AccountCertificate {
+  productId: string;
+  createdAt: Date;
+  expiresAt: Date;
+  /** When it was withdrawn: by the owner, or with the account's lock or assisted recovery. */
+  revokedAt: Date | null;
+  status: AccountCertificateStatus;
+}
+
+/**
+ * Every link created in one of the account's ownership periods, current or past, oldest first, with its state now
+ * (computed as `lookup` does: withdrawn, else expired, the period ended, or the piece LOST, STOLEN, REVOKED,
+ * COUNTERFEIT_FLAGGED or RETIRED since its creation, else VALID). For the right of access (OwnerService.exportData).
+ */
+export async function accountCertificates(db: Db, accountId: string, now: Date): Promise<AccountCertificate[]> {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw validationError('Invalid account.');
+  const rows = await db
+    .selectFrom('ownership_certificates as c')
+    .innerJoin('ownership as o', 'o.id', 'c.ownership_id')
+    .innerJoin('products as p', 'p.id', 'c.product_id')
+    .select(['c.created_at', 'c.expires_at', 'c.revoked_at', 'o.ended_at', 'p.id as uuid', 'p.product_id', 'p.status'])
+    .where('o.account_id', '=', accountId)
+    .orderBy('c.created_at')
+    .orderBy('c.id')
+    .execute();
+  const endings = new Map<string, Date | null>();
+  // One after the other: the caller's transaction holds a single connection.
+  for (const uuid of new Set(rows.map((r) => r.uuid))) endings.set(uuid, await lastEndingAt(db, uuid));
+  return rows.map((r) => {
+    let status: AccountCertificateStatus = 'VALID';
+    if (r.revoked_at !== null) status = 'WITHDRAWN';
+    else if (
+      r.expires_at.getTime() <= now.getTime() ||
+      r.ended_at !== null ||
+      CERTIFICATE_ENDING_STATUSES.includes(r.status) ||
+      !after(r.created_at, endings.get(r.uuid) ?? null)
+    ) {
+      status = 'NO_LONGER_VALID';
+    }
+    return { productId: r.product_id, createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at, status };
+  });
 }
 
 /** One `ownership.certificate.revoke` per link withdrawAccountCertificates withdrew, with `reason`, as the owner's own. */
@@ -297,17 +363,26 @@ export class OwnershipCertificateService {
    * revoked, flagged or retired (409 CERTIFICATE_NOT_ALLOWED), MAX_OPEN_CERTIFICATES links still valid (409
    * CERTIFICATE_LIMIT), an account locked by ORBES Client Services meanwhile (403 ACCOUNT_LOCKED). In one
    * transaction under the account's share lock, then the piece's row lock (lock order account → product).
+   *
+   * `sessionId` (the route always gives it: SessionInfo.id, the hex SHA-256 the sessions table is keyed by) binds the
+   * creation to the session that asked for it, read again under the account's share lock: a request already on its
+   * way when an assisted recovery or a password change ended that session (both delete the account's sessions under
+   * its row lock, and leave it ACTIVE) is refused with 401, so no link reaches whoever held the account after the
+   * recovery has withdrawn the others (withdrawAccountCertificates).
    */
-  async create(accountId: string, productId: string, opts: { validDays?: number }, actor: Actor): Promise<CertificateOffer> {
+  async create(accountId: string, productId: string, opts: { validDays?: number; sessionId?: string }, actor: Actor): Promise<CertificateOffer> {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw validationError('Invalid account.');
     const days = opts.validDays ?? CERTIFICATE_DEFAULT_DAYS;
     if (!Number.isInteger(days) || days < CERTIFICATE_MIN_DAYS || days > CERTIFICATE_MAX_DAYS) {
       throw validationError(`A certificate is valid for ${CERTIFICATE_MIN_DAYS} to ${CERTIFICATE_MAX_DAYS} days.`);
     }
+    const sessionHash = opts.sessionId === undefined ? undefined : sessionIdHash(opts.sessionId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const account = await readActingAccount(tx, accountId);
       if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
+      // After the account's share lock: a recovery or a password change that committed meanwhile has deleted it.
+      if (sessionHash !== undefined && !(await liveAccountSession(tx, sessionHash, accountId, now))) throw unauthorized();
       const p = await lockForOwnerAction(tx, productId);
       const current = await tx.selectFrom('ownership').select(['id', 'account_id']).where('product_id', '=', p.id).where('ended_at', 'is', null).executeTakeFirst();
       if (!current || current.account_id !== accountId) throw notOwner();

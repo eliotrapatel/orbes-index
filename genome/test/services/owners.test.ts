@@ -358,6 +358,83 @@ describe('OwnerService', () => {
     expect((await owners.lock((await customer()).id, admin)).certificatesRevoked).toBe(0);
   });
 
+  it('exports the links to ownership certificates the account created, open, ended and withdrawn, with their state and never a token (F-06)', async () => {
+    const c = await customer();
+    const [a, b, d] = [await ownedBy(c), await ownedBy(c), await ownedBy(c)];
+    const step = () => clock.advance(1000);
+    const open = await certificates.create(c.id, a, {}, c.actor);
+    step();
+    const withdrawn = await certificates.create(c.id, a, { validDays: 7 }, c.actor);
+    step();
+    await certificates.revoke(c.id, withdrawn.id, c.actor);
+    const withdrawnAt = clock.now();
+    step();
+    const reported = await certificates.create(c.id, b, {}, c.actor);
+    step();
+    await ownership.reportIncident(c.id, b, 'LOST', c.actor);
+    step();
+    // A link of a piece the account no longer owns: it stays the account's, ended with its ownership period.
+    const sold = await certificates.create(c.id, d, { validDays: 90 }, c.actor);
+    step();
+    const buyer = await customer();
+    const offer = await ownership.initiateTransfer(c.id, d, c.actor);
+    await ownership.acceptTransfer(buyer.id, await receive(buyer, offer.transferCode, d), buyer.actor);
+    const theirs = await certificates.create(buyer.id, d, {}, buyer.actor);
+    step();
+
+    const x = await owners.exportData(c.id, admin);
+    const row = (l: { createdAt: Date; expiresAt: Date }, productId: string, revokedAt: Date | null, status: string) => ({
+      productId,
+      createdAt: l.createdAt,
+      expiresAt: l.expiresAt,
+      revokedAt,
+      status,
+    });
+    expect(x.certificates).toEqual([
+      row(open, a, null, 'VALID'),
+      row(withdrawn, a, withdrawnAt, 'WITHDRAWN'),
+      row(reported, b, null, 'NO_LONGER_VALID'),
+      row(sold, d, null, 'NO_LONGER_VALID'),
+    ]);
+    expect(x.notIncluded).toContain('The links to ownership certificates: only a one-way SHA-256 of their token is stored.');
+    const text = JSON.stringify(x);
+    for (const l of [open, withdrawn, reported, sold, theirs]) {
+      expect(text).not.toContain(l.token);
+      expect(text).not.toContain(l.id);
+    }
+    const hashes = await t.db.selectFrom('ownership_certificates').select('token_hash').execute();
+    for (const { token_hash } of hashes) {
+      expect(text).not.toContain(Buffer.from(token_hash).toString('hex'));
+      expect(text).not.toContain(Buffer.from(token_hash).toString('base64'));
+    }
+    // The buyer's link is in the buyer's export, not the seller's.
+    expect((await owners.exportData(buyer.id, admin)).certificates).toEqual([row(theirs, d, null, 'VALID')]);
+
+    // Links withdrawn by the lock of the account (every one not withdrawn nor expired, of a piece it owns now, an
+    // ended one too): their audit entries name the ADMIN and the piece, not the account, so the activity does not show
+    // them; the list does, WITHDRAWN at the lock's time.
+    const lockedAt = clock.now();
+    expect((await owners.lock(c.id, admin)).certificatesRevoked).toBe(2);
+    await owners.unlock(c.id, admin);
+    step();
+    const after = await owners.exportData(c.id, admin);
+    expect(after.certificates).toEqual([
+      row(open, a, lockedAt, 'WITHDRAWN'),
+      row(withdrawn, a, withdrawnAt, 'WITHDRAWN'),
+      row(reported, b, lockedAt, 'WITHDRAWN'),
+      row(sold, d, null, 'NO_LONGER_VALID'),
+    ]);
+    expect(after.activity.filter((e) => e.action.startsWith('ownership.certificate.')).map((e) => [e.action, e.by, e.productId])).toEqual([
+      ['ownership.certificate.create', 'account', a],
+      ['ownership.certificate.create', 'account', a],
+      ['ownership.certificate.revoke', 'account', a],
+      ['ownership.certificate.create', 'account', b],
+      ['ownership.certificate.create', 'account', d],
+    ]);
+    const audited = (await audit.list({ action: 'account.export', targetId: c.id })).items;
+    expect(audited.map((e) => e.details.certificates)).toEqual([4, 4]);
+  });
+
   it('revokes the open recovery code: a code handed out before the lock does not work after the unlock', async () => {
     const c = await customer();
     const email = `client.${n}@example.com`;

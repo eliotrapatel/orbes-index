@@ -5,6 +5,7 @@
  *   /                → 302 /verify
  *   /verify, /verify/*  → dist/web/verify/index.html   (client-side routes: /verify/pieces is MY PIECES,
  *                                                     /verify/c#… an ownership certificate, its token in the fragment)
+ *   /VERIFY/C and any other spelling of /verify/c → 301 /verify/c   (the certificate's PDF letters it in capitals)
  *   /admin,  /admin/*   → dist/web/admin/index.html
  *   /assets/*        → dist/web/assets/*
  *
@@ -16,11 +17,15 @@ import { existsSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { CERTIFICATE_PATH } from '../services/ownership-certificates.js';
 
 /** esbuild's default `[name]-[hash]` naming: an 8+ character base32-ish hash before the extension. */
 export const HASHED_ASSET_RE = /-[A-Z0-9]{8,}\.[a-z0-9]+$/;
 export const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 export const REVALIDATE_CACHE = 'no-cache';
+
+/** Any spelling of it: `/VERIFY/C`, as the certificate's PDF letters it, `/Verify/c/`… */
+const CERTIFICATE_ADDRESS_RE = /^\/verify\/c\/?$/i;
 
 export function cacheControlFor(path: string): string {
   return HASHED_ASSET_RE.test(basename(path)) ? IMMUTABLE_CACHE : REVALIDATE_CACHE;
@@ -68,6 +73,14 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
   };
   const verify = page('verify');
   const admin = page('admin');
+  // The ownership certificate's PDF letters its address in capitals (the stroked lettering has no lower case):
+  // VERIFY.THEORBES.COM/VERIFY/C#… typed as printed reaches the certificate. Paths are case-sensitive, so any spelling
+  // of /verify/c but the canonical one is sent there; the browser keeps the fragment (the token) across the redirect.
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return;
+    const path = request.url.split('?', 1)[0];
+    if (path !== CERTIFICATE_PATH && path !== `${CERTIFICATE_PATH}/` && CERTIFICATE_ADDRESS_RE.test(path)) return reply.redirect(CERTIFICATE_PATH, 301);
+  });
   app.get('/', async (_request, reply) => reply.redirect('/verify', 302));
   app.get('/verify', verify);
   app.get('/verify/*', verify);

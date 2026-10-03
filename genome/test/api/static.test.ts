@@ -55,6 +55,23 @@ describe('static web apps', () => {
     }
   });
 
+  it('sends any spelling of the certificate route to /verify/c, as its PDF letters it in capitals (F-06)', async () => {
+    const c = h.client();
+    for (const url of ['/VERIFY/C', '/VERIFY/C/', '/Verify/C', '/verify/C', '/VERIFY/c?x=1']) {
+      for (const method of ['GET', 'HEAD'] as const) {
+        const res = await h.app.inject({ method, url });
+        expect(res.statusCode, `${method} ${url}`).toBe(301);
+        // No fragment in the Location: the browser keeps the one it was given (the token), which never reaches the server.
+        expect(res.headers.location, url).toBe('/verify/c');
+      }
+    }
+    expect((await c.get('/verify/c')).statusCode).toBe(200);
+    expect((await c.get('/verify/c/')).statusCode).toBe(200);
+    // Other paths keep their case: only the lettered address is forgiven.
+    for (const url of ['/VERIFY', '/VERIFY/PIECES', '/VERIFY/CC', '/verify/cx']) expect((await c.get(url)).statusCode, url).not.toBe(301);
+    expect((await h.app.inject({ method: 'POST', url: '/VERIFY/C' })).statusCode).not.toBe(301);
+  });
+
   it('serves hashed assets as immutable and others with revalidation', async () => {
     const c = h.client();
     const hashed = await c.get('/assets/verify-4F2KQ7ZB.js');

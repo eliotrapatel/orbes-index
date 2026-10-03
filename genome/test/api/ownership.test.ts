@@ -152,8 +152,8 @@ describe('ownership API', () => {
     expect((await owner.post('/api/v1/ownership/incidents', { productId: stolen.product.productId, type: 'STOLEN' })).statusCode).toBe(201);
     const listed = (safeJson(await owner.get('/api/v1/account/products')) as { products: any[] }).products;
     const byId = new Map(listed.map((p) => [p.productId, p]));
-    expect(byId.get(lost.product.productId)).toMatchObject({ incident: 'LOST', incidentResolvable: true });
-    expect(byId.get(stolen.product.productId)).toMatchObject({ incident: 'STOLEN', incidentResolvable: false });
+    expect(byId.get(lost.product.productId)).toMatchObject({ incident: 'LOST', incidentResolvable: true, certificateAllowed: false });
+    expect(byId.get(stolen.product.productId)).toMatchObject({ incident: 'STOLEN', incidentResolvable: false, certificateAllowed: false });
     // A stranger's scan of the lost piece: UNUSUAL ACTIVITY.
     expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('SUSPICIOUS_ACTIVITY');
 
@@ -173,6 +173,9 @@ describe('ownership API', () => {
     expect(body).toEqual({ productId: lost.product.productId, type: 'LOST', resolvedAt: expect.any(String) });
     expect(found.body).not.toMatch(/OWNED|REGISTERED|status/); // no internal statuses
     expect((safeJson(await h.client().post('/api/v1/verify', { code: lost.code.data })) as any).state).toBe('AUTHENTIC_REGISTERED');
+    // Found again, it takes new certificate links (F-06; the earlier ones stay ended).
+    const relisted = (safeJson(await owner.get('/api/v1/account/products')) as { products: any[] }).products;
+    expect(relisted.find((p) => p.productId === lost.product.productId)).toMatchObject({ incident: null, certificateAllowed: true });
     const again = await owner.post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId });
     expect(again.statusCode).toBe(409);
     expect(errorOf(again).code).toBe('NO_INCIDENT');

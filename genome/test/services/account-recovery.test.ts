@@ -7,7 +7,8 @@
  * wrong, expired, used or replaced code; 5 wrong guesses per code per hour
  * (attempts without an open code spend nothing). A password change or a
  * sign-in with the old password that was under way when a recovery
- * committed is refused.
+ * committed is refused, and so is a certificate link asked for with a
+ * session the recovery ended.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -249,6 +250,24 @@ describe('AccountRecoveryService', () => {
       expect(entries[2].details).toMatchObject({ transfersCancelled: 0, certificatesRevoked: 2 });
       // The owner, signed in with the new password, shares a new link.
       expect((await certificates.lookup((await certificates.create(c.id, piece.productId, {}, c.actor)).token)).status).toBe('VALID');
+    });
+
+    it('gives no link to a creation still on its way with a session the recovery ended: 401, nothing created (F-06)', async () => {
+      const c = await customer();
+      const piece = await ownedBy(c);
+      // The request passed the session guard with this session before the recovery committed.
+      const before = (await sessions.validate(c.session.token, 'account'))!.id;
+      const { recoveryCode } = await recovery.issue(c.id, admin);
+      await recovery.recover({ email: c.email, recoveryCode, newPassword: NEW_PASSWORD });
+      // The account is still ACTIVE: only the session tells the request apart from the owner's.
+      expect((await accountRow(c.id)).status).toBe('ACTIVE');
+      await expectDomainError(certificates.create(c.id, piece.productId, { sessionId: before }, c.actor), 'UNAUTHORIZED', 401);
+      expect(await t.db.selectFrom('ownership_certificates').select('id').where('product_id', '=', piece.id).execute()).toEqual([]);
+      expect((await audit.list({ action: 'ownership.certificate.create', targetId: piece.productId })).items).toEqual([]);
+      // Signed in again with the new password, the owner creates one.
+      const after = (await sessions.validate((await auth.login({ email: c.email, password: NEW_PASSWORD }, {})).session.token, 'account'))!.id;
+      const offer = await certificates.create(c.id, piece.productId, { sessionId: after }, c.actor);
+      expect((await certificates.lookup(offer.token)).status).toBe('VALID');
     });
 
     it('pauses new transfers out of the account for 72 hours, then lets them go', async () => {

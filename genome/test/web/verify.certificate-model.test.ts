@@ -147,6 +147,7 @@ describe('certificate copy (BRAND §4.5, §4.6)', () => {
       incident: null,
       incidentResolvable: false,
       inService: false,
+      certificateAllowed: true,
       warranty: { status: 'ACTIVE' },
     });
     const s = certificateScreen(valid());

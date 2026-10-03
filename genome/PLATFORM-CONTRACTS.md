@@ -264,7 +264,7 @@ The service API: `transition(productId, to, { reason }, actor)`, `history(produc
 | `confirmOwnership(productId, actor /* admin */)` | `REGISTERED` becomes `OWNED` (proof reviewed by client services). |
 | `reportIncident(accountId, productId, 'LOST' \| 'STOLEN', actor)` | Owner only. Moves the product to `LOST` or `STOLEN`. |
 | `resolveIncident(accountId, productId, actor)` | Extension (F-01, PIECE FOUND). Current owner only (`NOT_OWNER` otherwise, an unknown id included), and only a `LOST` that this account declared (the last status move, into `LOST`, is its own): a `STOLEN`, or a `LOST` recorded by staff, answers `409 INCIDENT_NOT_RESOLVABLE`, a piece not reported `409 NO_INCIDENT`. In one transaction the product returns to the status before the loss (`returnTargetOf`, then `applyForService`); audited `ownership.incident.resolve`. |
-| `listForAccount(accountId, { productUuid? })` / `history(productId)` (admin) | `listForAccount` also says, per product, whether its incident is the owner's to withdraw (`incidentResolvable`); `productUuid` narrows it to one piece (the live record of an ownership certificate). |
+| `listForAccount(accountId, { productUuid? })` / `history(productId)` (admin) | `listForAccount` also says, per product, whether its incident is the owner's to withdraw (`incidentResolvable`) and whether a link to an ownership certificate may be created (`certificateAllowed`, F-06: not in a status that ends them); `productUuid` narrows it to one piece (the live record of an ownership certificate). |
 
 Ownership never changes any cryptographic identity: products, genomes and codes are untouched.
 
@@ -272,11 +272,12 @@ Ownership never changes any cryptographic identity: products, genomes and codes 
 
 | Method | Behaviour |
 |---|---|
-| `create(accountId, productId, { validDays? }, actor)` | Current owner only (`403 NOT_OWNER`, an unknown id alike); `validDays` 1–90 (30 by default). Refused for a piece LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED (`409 CERTIFICATE_NOT_ALLOWED`), past 10 links in use (`409 CERTIFICATE_LIMIT`), for a locked account (`403 ACCOUNT_LOCKED`). Returns `{ id, productId, token, url, createdAt, expiresAt }`: the token (32 random bytes, 52 Crockford characters) once, only its SHA-256 stored; audited `ownership.certificate.create`. |
+| `create(accountId, productId, { validDays?, sessionId? }, actor)` | Current owner only (`403 NOT_OWNER`, an unknown id alike); `validDays` 1–90 (30 by default). Refused for a piece LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED (`409 CERTIFICATE_NOT_ALLOWED`), past 10 links in use (`409 CERTIFICATE_LIMIT`), for a locked account (`403 ACCOUNT_LOCKED`), and, with `sessionId` (the route's session, `SessionInfo.id`), when that session is no longer a live one of the account, read under the account's share lock (`401 UNAUTHORIZED`: ended meanwhile by an assisted recovery or a password change). Returns `{ id, productId, token, url, createdAt, expiresAt }`: the token (32 random bytes, 52 Crockford characters) once, only its SHA-256 stored; audited `ownership.certificate.create`. |
 | `listForAccount(accountId)` | The account's open links (not withdrawn, not expired) of the pieces it owns now: `{ id, productId, createdAt, expiresAt, valid }`. |
 | `revoke(accountId, certificateId, actor)` | A link of one of the account's ownership periods; afterwards it answers as unknown. `404 CERTIFICATE_NOT_FOUND` otherwise. Audited `ownership.certificate.revoke`. |
 | `lookup(token)` | Live: `VALID` with the piece, its GENOME, the ownership (`verified`, `since` as a day), the warranty and `incidentReported: false`; `NO_LONGER_VALID` once expired, the ownership period ended, or the piece LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED since its creation; `404 CERTIFICATE_NOT_FOUND` for an unknown, malformed or withdrawn token. Never a name, an email or an account. |
 | `renderPdf(token)` | The A4 PDF of a `VALID` certificate (`render/certificate.ts`), its live link lettered and as an annotation; `409 CERTIFICATE_NO_LONGER_VALID` otherwise. |
+| `accountCertificates(db, accountId, now)` | Every link created in the account's current and past ownership periods, oldest first, with `{ productId, createdAt, expiresAt, revokedAt, status }` (`VALID`, `NO_LONGER_VALID`, `WITHDRAWN`); never the token, its hash or the id. The account's export (`OwnerService.exportData`, `certificates`). |
 
 ### 2.8 WarrantyService (`warranty.ts`)
 

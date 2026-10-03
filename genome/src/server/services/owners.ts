@@ -22,8 +22,9 @@
  *            `account.unlock`.
  *   export   GET  /api/admin/owners/:id/export (ADMIN): everything the registry
  *            holds about the account, for a request under the right of access,
- *            including every audit entry that names it, as target or as actor.
- *            Audited `account.export` with counts only.
+ *            including the links to ownership certificates it created (never
+ *            their tokens) and every audit entry that names it, as target or
+ *            as actor. Audited `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
  * not a second mechanism. Emails are masked for an AUDITOR by the routes
@@ -43,7 +44,7 @@ import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import type { OwnershipService } from './ownership.js';
-import { auditWithdrawnCertificates, withdrawAccountCertificates } from './ownership-certificates.js';
+import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
 
 /** Latest scans shown on an owner's sheet. */
@@ -228,6 +229,12 @@ export interface AccountExport {
   sessions: { createdAt: Date; lastSeenAt: Date; expiresAt: Date; userAgent: string | null }[];
   recoveryCodes: { createdAt: Date; expiresAt: Date; usedAt: Date | null; revokedAt: Date | null }[];
   /**
+   * The links to ownership certificates the account created (F-06), in its current and past ownership periods, oldest
+   * first: the piece, creation, expiry, withdrawal (by the owner, or with a lock or an assisted recovery) and the state
+   * a reader of the link meets now. Never the token.
+   */
+  certificates: AccountCertificate[];
+  /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
    */
@@ -250,6 +257,7 @@ export interface AccountExport {
 
 export const EXPORT_NOT_INCLUDED: readonly string[] = Object.freeze([
   'The password and the recovery codes, stored only as one-way scrypt hashes.',
+  'The links to ownership certificates: only a one-way SHA-256 of their token is stored.',
   'The IP address and device cookie behind each scan, session and audit entry: never stored; only keyed one-way pseudonyms (HMAC) are kept, which identify nothing on their own.',
 ]);
 
@@ -472,6 +480,9 @@ export class OwnerService {
         .where('account_id', '=', a.id)
         .orderBy('created_at')
         .execute();
+      // Withdrawn ones too: a withdrawal by a lock is audited with the ADMIN as actor and the piece as target, so the
+      // activity below does not name the account for it.
+      const certificates = await accountCertificates(tx, a.id, now);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -543,6 +554,7 @@ export class OwnerService {
         })),
         sessions: sessions.map((s) => ({ createdAt: s.created_at, lastSeenAt: s.last_seen_at, expiresAt: s.expires_at, userAgent: s.user_agent })),
         recoveryCodes: codes.map((c) => ({ createdAt: c.created_at, expiresAt: c.expires_at, usedAt: c.used_at, revokedAt: c.revoked_at })),
+        certificates,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -567,6 +579,7 @@ export class OwnerService {
             scans: out.scans.length,
             sessions: out.sessions.length,
             recoveryCodes: out.recoveryCodes.length,
+            certificates: out.certificates.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

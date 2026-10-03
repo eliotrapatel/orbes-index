@@ -17,7 +17,8 @@
  * then scanned by a stranger, a loss withdrawn; a direct link, a reload and
  * the back button), the ownership certificate (F-06: created in MY PIECES,
  * opened from its link by a visitor, its PDF, ended by a declaration,
- * withdrawn), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * withdrawn, its address typed back in capitals as the PDF letters it), and
+ * the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -32,6 +33,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
+import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { CLAIM_HELD, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
@@ -1016,6 +1018,19 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
     await countOf(buyer.locator('.certificate__plate'), 0);
     expect(lookups.slice(asked)).toEqual([JSON.stringify({ token: fresh.token }), JSON.stringify({ token: 'not-a-link' })]);
+    // The address as the PDF letters it under CHECK IT LIVE, typed back as printed: the path in capitals, the code in
+    // groups of four. The server sends the path to /verify/c, the browser keeps the fragment, the app reads the code.
+    const lettered = certificateLinkLettering(fresh.url);
+    const typed = `${new URL(srv.origin).protocol}//${lettered.address}${lettered.code}`;
+    expect(typed).toMatch(/\/VERIFY\/C#[0-9A-Z]{4}(-[0-9A-Z]{4}){12}$/);
+    const opened = await buyer.goto(typed);
+    expect(opened?.status()).toBe(200);
+    expect(opened?.request().redirectedFrom()?.url()).toMatch(/\/VERIFY\/C(#.*)?$/);
+    await textOf(buyer.locator('.certificate__state'), 'VALID');
+    await textOf(buyer.locator('.certificate__plate .genome__id'), productId);
+    expect(new URL(buyer.url()).pathname).toBe('/verify/c');
+    expect(new URL(buyer.url()).hash).toBe(`#${lettered.code}`);
+    expect(lookups.at(-1)).toBe(JSON.stringify({ token: lettered.code }));
     // A link without its fragment leads nowhere; opened directly, back returns to the landing rather than out of the app.
     await buyer.goto(`${srv.origin}/verify/c`);
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');

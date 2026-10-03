@@ -809,6 +809,7 @@ describe('OwnershipService', () => {
         incident: null,
         incidentResolvable: false,
         inService: false,
+        certificateAllowed: true,
         genome: { id: p.productId, version: 1, glyphs: [1, 2, 3, 4, 10, 11, 12, 13] },
         warranty: { status: 'ACTIVE', startDate: '2026-06-01', endDate: '2028-06-01' },
       });

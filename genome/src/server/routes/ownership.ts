@@ -90,11 +90,13 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
   });
 
   // Ownership certificates (F-06, MY PIECES): the owner's links to the live record of a piece. The link is answered once,
-  // at creation: only the hash of its token is kept.
+  // at creation: only the hash of its token is kept. The session is read again in the creation's transaction: one ended
+  // meanwhile by an assisted recovery or a password change gets no link (401).
   app.post('/api/v1/ownership/certificates', async (request, reply) => {
-    const { account } = requireAccount(request);
+    const { account, session } = requireAccount(request);
     const b = parse(createCertificateBody, request.body);
-    const offer = await ownershipCertificates.create(account.id, b.productId, b.validDays !== undefined ? { validDays: b.validDays } : {}, accountActor(request));
+    const opts = { sessionId: session.id, ...(b.validDays !== undefined ? { validDays: b.validDays } : {}) };
+    const offer = await ownershipCertificates.create(account.id, b.productId, opts, accountActor(request));
     reply.code(201);
     return offer;
   });

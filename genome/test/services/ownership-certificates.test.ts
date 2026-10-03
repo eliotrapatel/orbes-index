@@ -192,6 +192,30 @@ describe('OwnershipCertificateService', () => {
     await expectDomainError(certificates.create(other.owner.id, other.p.productId, {}, other.owner.actor), 'ACCOUNT_LOCKED', 403);
   });
 
+  it('is bound to a live session of the account when one is named (the route always names it): an ended one gets 401 and no link', async () => {
+    const { p, owner } = await owned();
+    const session = async (subjectId: string, expiresAt: Date) => {
+      const idHash = new Uint8Array(createHash('sha256').update(randomUUID()).digest());
+      await t.db
+        .insertInto('sessions')
+        .values({ id_hash: idHash, subject_type: 'account', subject_id: subjectId, csrf_token: 'csrf', created_at: clock.now(), expires_at: expiresAt, last_seen_at: clock.now() })
+        .execute();
+      return Buffer.from(idHash).toString('hex');
+    };
+    const live = await session(owner.id, new Date(clock.now().getTime() + DAY));
+    const offer = await certificates.create(owner.id, p.productId, { sessionId: live }, owner.actor);
+    expect((await certificates.lookup(offer.token)).status).toBe('VALID');
+    const ended = await session(owner.id, new Date(clock.now().getTime() + DAY));
+    await t.db.deleteFrom('sessions').where('id_hash', '=', new Uint8Array(Buffer.from(ended, 'hex'))).execute();
+    const expired = await session(owner.id, new Date(clock.now().getTime() + MIN));
+    clock.advance(MIN);
+    const another = await session((await account()).id, new Date(clock.now().getTime() + DAY));
+    for (const sessionId of [ended, expired, another, 'not-a-session', live.slice(1)]) {
+      await expectDomainError(certificates.create(owner.id, p.productId, { sessionId }, owner.actor), 'UNAUTHORIZED', 401);
+    }
+    expect((await t.db.selectFrom('ownership_certificates').select('id').where('product_id', '=', p.id).execute()).map((r) => r.id)).toEqual([offer.id]);
+  });
+
   it(`keeps at most ${MAX_OPEN_CERTIFICATES} links in use per piece; a withdrawn or expired one makes room`, async () => {
     const { p, owner } = await owned();
     const made = [];
@@ -286,12 +310,17 @@ describe('OwnershipCertificateService', () => {
     ['REVOKED', ['REVOKED']],
     ['COUNTERFEIT_FLAGGED', ['COUNTERFEIT_FLAGGED']],
     ['RETIRED', ['RETIRED']],
-  ])('NO_LONGER_VALID once the piece is %s (a transition of ORBES Client Services)', async (_name, path) => {
+  ])('NO_LONGER_VALID once the piece is %s (a transition of ORBES Client Services), and no new link is offered or made', async (_name, path) => {
     const { p, owner } = await owned();
     const offer = await certificates.create(owner.id, p.productId, {}, owner.actor);
+    const listed = async () => (await ownership.listForAccount(owner.id)).map((x) => [x.productId, x.certificateAllowed]);
+    expect(await listed()).toEqual([[p.productId, true]]);
     clock.advance(MIN);
     for (const to of path) await lifecycle.transition(p.productId, to, { reason: 'test' }, admin);
     expect((await certificates.lookup(offer.token)).status).toBe('NO_LONGER_VALID');
+    // MY PIECES leaves OWNERSHIP CERTIFICATE out (certificateAllowed false), as the server refuses a new link.
+    expect(await listed()).toEqual([[p.productId, false]]);
+    await expectDomainError(certificates.create(owner.id, p.productId, {}, owner.actor), 'CERTIFICATE_NOT_ALLOWED', 409);
   });
 
   it('NO_LONGER_VALID once expired', async () => {
