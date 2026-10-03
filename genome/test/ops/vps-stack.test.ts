@@ -208,7 +208,7 @@ describe('deploy/vps/compose.yaml', () => {
     // Compose/tooling-only names, CLI-only secrets, and modes this stack does not use.
     const notForTheApp = new Set([
       'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'APP_BIND', 'APP_PORT', 'ORBES_IMAGE_TAG', 'ORBES_ENV_FILE',
-      'DEMO_ACCOUNT_PASSWORD', 'ADMIN_PASSWORD', 'ORBES_DEMO', 'GEO_COUNTRY_HEADER', 'GEO_LAT_HEADER', 'GEO_LON_HEADER',
+      'DEMO_ACCOUNT_PASSWORD', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET', 'ORBES_DEMO', 'GEO_COUNTRY_HEADER', 'GEO_LAT_HEADER', 'GEO_LON_HEADER',
     ]);
     const missing = [...genomeVars].filter((n) => !notForTheApp.has(n) && !appEnv.has(n)).sort();
     expect(missing).toEqual([]);

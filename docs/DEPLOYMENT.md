@@ -288,6 +288,7 @@ Each is optional. While neither an email nor a phone is set, the verification ap
 | `ORBES_ENV_FILE` | `.env` | Compose: path of the env file, e.g. `/etc/orbes/genome.env`. Export it in the shell. |
 | `DEMO_ACCOUNT_PASSWORD` | random, printed once | `db seed` / `db reset-demo` only, ≥ 12 characters. Both commands refuse production. |
 | `ADMIN_PASSWORD` | unset | `scripts/admin.ts create` only: the new admin's password (12–1024 characters), read from the environment so it never appears in argv or shell history. |
+| `ADMIN_TOTP_SECRET` | unset | `scripts/admin.ts totp-enable` only: the TOTP secret printed by `totp-setup`, read from the environment so it never appears in argv (the process list) or shell history. `--secret` still works, with that exposure. |
 
 `genome/.env.example` lists every variable above with the production template values. The test `test/ops/deployment-files.test.ts` keeps it in sync with the code.
 
@@ -781,7 +782,10 @@ Procedure:
    ```sh
    docker compose exec app node --import tsx scripts/admin.ts totp-setup --email admin@theorbes.com
    #   prints the secret and the otpauth:// URI once; hand them to the admin in person
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email admin@theorbes.com --secret <SECRET> --code <current code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing is echoed, nothing reaches the history
+   clear                                                    # the secret leaves the screen
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email admin@theorbes.com --code <current code>
+   unset ADMIN_TOTP_SECRET
    ```
    Or when the console asks:
    - the console calls `POST /api/admin/auth/totp/setup` and shows the `otpauth://` URI / QR code;
@@ -804,7 +808,7 @@ Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `
 docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role ADMIN
 docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, active/locked/disabled/temporary password
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email ops@theorbes.com
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>   # ends that admin's sessions
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --code <code>   # secret read with read -rs (§8.1); ends that admin's sessions
 docker compose exec app node --import tsx scripts/admin.ts reset-totp --email ops@theorbes.com --yes   # lost device
 docker compose exec app node --import tsx scripts/admin.ts role --email ops@theorbes.com --role ADMIN  # the only way to grant ADMIN
 docker compose exec app node --import tsx scripts/admin.ts disable --email ops@theorbes.com --yes      # sign-in refused, sessions end
@@ -1177,7 +1181,10 @@ In production every admin must pass TOTP. Enrol the bootstrap admin **from the s
 cd /opt/orbes/orbes-index/deploy/vps
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <first admin>
 #   prints the secret and an otpauth:// URI once: hand them to the admin in person
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <current code>
+read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing is echoed, nothing reaches the history
+clear                                                    # the secret leaves the screen
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <first admin> --code <current code>
+unset ADMIN_TOTP_SECRET
 ```
 
 Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env` (**space**-separated; a comma makes the configuration invalid), then `scripts/deploy.sh`: `/admin*` and `/api/admin*` answer 403 elsewhere. The sale mode (A-08) runs on the boutiques' phones, which open `/admin` too: with the allowlist on, add every boutique's fixed IP or CIDR, or leave it off while counter phones use mobile data or a shop Wi-Fi whose address changes, or the sale mode answers 403 at the counter (LAUNCH §4, §7). `deploy.sh` validates the Caddy configuration with the new values before changing anything; a bare `docker compose up -d caddy` does not, and an invalid value stops Caddy, which takes the whole site down.

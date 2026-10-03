@@ -89,6 +89,24 @@ describe('admin CLI', () => {
     expect((await run(['reset-totp', '--email', 'ghost@orbes.test', '--yes'])).code).toBe(1);
   });
 
+  it('reads the TOTP secret of totp-enable from ADMIN_TOTP_SECRET, so it stays out of argv', async () => {
+    const setup = await run(['totp-setup', '--email', 'ops@orbes.test', '--json']);
+    const { secret } = JSON.parse(setup.io.stdout[0]) as { secret: string };
+    // Neither the environment nor --secret: a usage error that names the variable, before any database work.
+    const missing = await run(['totp-enable', '--email', 'ops@orbes.test', '--code', '000000']);
+    expect(missing.code).toBe(2);
+    expect(missing.io.text()).toMatch(/ADMIN_TOTP_SECRET/);
+    // totp-setup's own hint sends the secret through the environment, not argv.
+    const hint = await run(['totp-setup', '--email', 'ops@orbes.test']);
+    expect(hint.io.text()).toMatch(/ADMIN_TOTP_SECRET/);
+    expect(hint.io.text()).not.toMatch(/--secret/);
+
+    const ok = await run(['totp-enable', '--email', 'ops@orbes.test', '--code', totp(base32Decode(secret), Date.now())], { ...ENV, ADMIN_TOTP_SECRET: secret.toLowerCase() });
+    expect(ok.code, ok.io.text()).toBe(0);
+    expect((await run(['list'])).io.text()).toMatch(/ops@orbes\.test\s+OPERATOR\s+2FA on/);
+    expect((await run(['reset-totp', '--email', 'ops@orbes.test', '--yes'])).code).toBe(0);
+  });
+
   it('changes roles, disables and enables from the shell, keeping one active ADMIN', async () => {
     expect((await run(['role', '--email', 'ops@orbes.test'])).code).toBe(2); // no role
     expect((await run(['role', '--email', 'ops@orbes.test', '--role', 'ROOT'])).code).toBe(2);

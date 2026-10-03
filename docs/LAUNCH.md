@@ -79,7 +79,10 @@ The admin console requires 2-factor authentication in production.
 2. Add the printed secret (or `otpauth://` link) to an authenticator app (1Password, Google Authenticator, …), then confirm with a current code:
 
    ```bash
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <6-digit code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing shows, nothing enters the shell history
+   clear                                                    # the secret leaves the screen
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <first admin> --code <6-digit code>
+   unset ADMIN_TOTP_SECRET
    ```
 
 3. Remove the bootstrap credentials:
@@ -95,7 +98,10 @@ The admin console requires 2-factor authentication in production.
    docker compose exec -e ADMIN_PASSWORD app node --import tsx scripts/admin.ts create --email <second admin> --role ADMIN
    unset ADMIN_PASSWORD
    docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <second admin>
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <second admin> --secret <SECRET> --code <6-digit code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret printed above, then clear the screen
+   clear
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <second admin> --code <6-digit code>
+   unset ADMIN_TOTP_SECRET
    ```
 
    The person stores their password in their own password manager and never pastes it in a conversation; they can replace it from the console at any time (step 4).
