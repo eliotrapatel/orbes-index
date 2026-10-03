@@ -451,6 +451,8 @@ describe('verify app: OWNERSHIP heading follows the registration window', () => 
     expect(block).toContain('registrationOpen(t.expiresAt, this.now())');
     expect(block).toContain('RECEIVING.until(');
     expect(block).toContain('this.transferForm(m.productId, t)');
+    // The window is the scan's account's: another account signed in on the result is offered VERIFY AGAIN instead.
+    expect(block).toContain('this.windowAccount === s.account.email ? m.transfer : undefined');
     const form = src.slice(src.indexOf('private transferForm'), src.indexOf('// ── Actions'));
     expect(form).toContain('registrationOpen(scan.expiresAt, this.now())');
     expect(form).toContain('this.deps.api.acceptTransfer(code.value, productId, scan.token)');

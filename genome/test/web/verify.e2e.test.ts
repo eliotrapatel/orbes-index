@@ -451,10 +451,30 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // VIEW AS OWNER verifies again: the buyer's own piece.
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+
+    // The new owner scans the piece signed out, then signs in on the result: no transfer is pending, and VERIFY AGAIN
+    // shows the piece as theirs.
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    await panel.getByRole('button', { name: 'SIGN OUT' }).click();
+    await visible(panel.getByLabel('EMAIL', { exact: true }));
+    await page.goto(`${srv.origin}/verify`);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'receive-owner.png', sold));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    await textOf(panel.locator('.ownership__meta'), 'If this piece is already registered to you, sign in and scan it again to see it as its owner.');
+    await panel.getByLabel('EMAIL', { exact: true }).fill('buyer.f03@example.com');
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(panel.locator('.ownership__email'), 'buyer.f03@example.com');
+    await textOf(panel.locator('.ownership__text').last(), 'No transfer of this piece is pending. Once its owner has created a transfer code, scan this piece again to receive it.');
+    await textOf(panel.locator('.ownership__meta'), 'If this piece is registered to you, verify it again to see it as its owner.');
+    await keepsFloors(page, ['VERIFY AGAIN', 'MY PIECES', 'SIGN OUT']);
+    await page.getByRole('button', { name: 'VERIFY AGAIN' }).click();
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('closes the window to receive a piece 15 minutes after the scan (F-03): SCAN AGAIN, and nothing is sent', async () => {
+  it('keeps the window to receive a piece to the account of the scan, and closes it 15 minutes after the scan (F-03): SCAN AGAIN, and nothing is sent', async () => {
     const seller = await srv.ctx.services.auth.registerAccount({ email: 'seller.late@example.com', password: PASSWORD }, {});
     const sellerActor = { type: 'account', id: seller.account.id } as const;
     const piece = await srv.issue();
@@ -475,6 +495,24 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'receive-late.png', piece));
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await visible(page.getByLabel('TRANSFER CODE'));
+
+    // The window is the scan's account's: another account signed in on the same result is asked to verify the piece
+    // again (the server would refuse the window to it), and the scan's account finds the form again.
+    await srv.ctx.services.auth.registerAccount({ email: 'other.late@example.com', password: PASSWORD }, {});
+    const panel = page.locator('.ownership');
+    const signInAs = async (email: string) => {
+      await panel.getByRole('button', { name: 'SIGN OUT' }).click();
+      await panel.getByLabel('EMAIL', { exact: true }).fill(email);
+      await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+      await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+      await textOf(panel.locator('.ownership__email'), email);
+    };
+    await signInAs('other.late@example.com');
+    await textOf(panel.locator('.ownership__text').last(), 'To receive this piece, verify it again now that you are signed in.');
+    await countOf(page.getByLabel('TRANSFER CODE'), 0);
+    await visible(page.getByRole('button', { name: 'VERIFY AGAIN' }));
+    await signInAs('buyer.late@example.com');
     await visible(page.getByLabel('TRANSFER CODE'));
 
     // The buyer takes longer than the 15 minutes of the scan, then sends the code: the panel says to scan again.

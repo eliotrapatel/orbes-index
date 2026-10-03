@@ -266,7 +266,7 @@ Each is optional. While neither an email nor a phone is set, the verification ap
 
 | Variable | Default | Rules |
 |---|---|---|
-| `TRANSFER_ACCEPT_REQUIRE_PRODUCT` | `true` | Same boolean syntax as `ADMIN_REQUIRE_MFA` (`config.transferAcceptRequireProduct`). `true`: a transfer code is accepted only with the piece the recipient scanned (`productId`; a code of another piece answers `409 TRANSFER_PRODUCT_MISMATCH`) and the 15-minute token of that scan, signed in (`transferToken`). `false` makes both optional, for an acceptance assisted by ORBES Client Services (whatever is sent is still checked); production logs a `risky configuration` warning at every start. Set it back once the assisted acceptance is done. |
+| `TRANSFER_ACCEPT_REQUIRE_PRODUCT` | `true` | Same boolean syntax as `ADMIN_REQUIRE_MFA` (`config.transferAcceptRequireProduct`). `true`: a transfer code is accepted only with the piece the recipient scanned (`productId`; a code of another piece answers `409 TRANSFER_PRODUCT_MISMATCH`) and the 15-minute token of that scan, signed in (`transferToken`). `false` makes both optional, for an acceptance assisted by ORBES Client Services (whatever is sent is still checked); production logs a `risky configuration` warning at every start. It acts on the API only: the verify app still asks for a signed-in scan of the piece and neither it nor the console accepts a transfer without one, so it does not help a client whose piece cannot be scanned (LAUNCH §11); while it is set, the check is off for every pending transfer. Set it back once the assisted acceptance is done. |
 
 **Anomaly thresholds** (internal, never exposed by the API). Any other `ANOMALY_*` name is rejected.
 

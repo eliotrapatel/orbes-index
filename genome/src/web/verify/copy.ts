@@ -329,6 +329,8 @@ export const RECEIVING = Object.freeze({
   verifyAgain: 'VERIFY AGAIN',
   /** No transfer of the piece is pending: there is no code to enter for it. */
   noTransfer: 'No transfer of this piece is pending. Once its owner has created a transfer code, scan this piece again to receive it.',
+  /** Signed in with no transfer pending: an owner who scanned signed out, then signed in, reaches the owner view. */
+  ownerAgain: 'If this piece is registered to you, verify it again to see it as its owner.',
   /** The time the window of this scan closes, as REGISTRATION OPEN UNTIL. */
   until: (time: string) => `RECEIVING OPEN UNTIL ${time}`,
   closed: 'The window to receive this piece from this scan has closed. Scan the code again to receive it.',

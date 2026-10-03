@@ -1035,13 +1035,17 @@ describe('F-03: the transfer token of a signed-in recipient', () => {
     expect((await verify(w, late.r.code.data, { accountId: reader })).transfer).toBeUndefined();
     w.clock.set(start);
 
-    // Not authentic: unusual activity from the scan history, while the transfer is pending.
+    // Not authentic: unusual activity from the scan history, while the transfer is pending (the scans
+    // run within its 7 days, so only the state can withhold the token).
     const travelled = await offered();
-    const t0 = Date.parse('2026-11-01T10:00:00.000Z');
+    const t0 = start + 60 * MIN;
     for (const [i, c] of ['FR', 'JP', 'US'].entries()) {
       w.clock.set(t0 + i * MIN);
       await verify(w, travelled.r.code.data, { deviceHash: `t-${c}`, geo: { country: c } });
     }
+    const pending = await w.t.db.selectFrom('ownership_transfers').select(['status', 'expires_at']).where('product_id', '=', travelled.r.product.id).executeTakeFirstOrThrow();
+    expect(pending.status).toBe('PENDING');
+    expect(pending.expires_at.getTime()).toBeGreaterThan(w.clock.now().getTime());
     const suspicious = await verify(w, travelled.r.code.data, { accountId: reader, geo: { country: 'US' } });
     w.clock.set(start);
     expect(suspicious.state).toBe('SUSPICIOUS_ACTIVITY');

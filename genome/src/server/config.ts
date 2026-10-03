@@ -70,7 +70,8 @@ export interface AppConfig {
    * TRANSFER_ACCEPT_REQUIRE_PRODUCT (default true, F-03): an acceptance of a transfer must name the piece the
    * recipient scanned (`productId`, refused with 409 TRANSFER_PRODUCT_MISMATCH when the code is another piece's)
    * and carry the TRANSFER_ACCEPT token of that scan. false makes both optional, for an acceptance assisted by
-   * ORBES Client Services; whichever is sent is still checked. Production warns while it is false.
+   * ORBES Client Services; whichever is sent is still checked. It acts on the API only: the verify app still asks
+   * for a signed-in scan of the piece. Production warns while it is false.
    */
   transferAcceptRequireProduct: boolean;
 }
@@ -499,7 +500,7 @@ export function configWarnings(c: AppConfig): string[] {
     warnings.push('SCAN_RETENTION_DAYS: not set in production; pseudonymous scan history is kept indefinitely (set the retention period agreed with counsel, at least 30 days)');
   }
   if (c.env === 'production' && !c.transferAcceptRequireProduct) {
-    warnings.push('TRANSFER_ACCEPT_REQUIRE_PRODUCT: disabled in production; a transfer code is accepted without a scan of its piece (keep it for an acceptance assisted by ORBES Client Services, then remove the override)');
+    warnings.push('TRANSFER_ACCEPT_REQUIRE_PRODUCT: disabled in production; the API accepts the code of any pending transfer without a scan of its piece (the verify app still asks for one: keep it only for an acceptance assisted by ORBES Client Services, then remove the override)');
   }
   return warnings;
 }

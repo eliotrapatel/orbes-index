@@ -83,6 +83,12 @@ export class OwnershipPanel {
   private unsubscribe: (() => void) | null = null;
   /** The session probe could not be reached: offer the sign-in forms rather than wait forever. */
   private sessionUnavailable = false;
+  /**
+   * The account (its email) whose signed-in scan earned this result's transfer window (F-03): the first one this
+   * panel sees signed in. The server takes the window from that account only, so another account signed in on the
+   * same result is asked to verify the piece again, which earns it a window of its own.
+   */
+  private windowAccount: string | null = null;
 
   constructor(
     mode: OwnershipMode,
@@ -237,7 +243,8 @@ export class OwnershipPanel {
   /**
    * A piece registered to someone else: RECEIVING THIS PIECE (F-03). The transfer code is accepted for this piece
    * only, with this scan's transfer window: signed out, the sign-in first; signed in without a window (the scan was
-   * made signed out), VERIFY AGAIN; no transfer pending, nothing to enter; the window closed, SCAN AGAIN.
+   * made signed out, or by another account), VERIFY AGAIN; no transfer pending, nothing to enter, and VERIFY AGAIN
+   * for an owner who signed in after the scan; the window closed, SCAN AGAIN.
    */
   private registeredBlock(m: Extract<OwnershipMode, { kind: 'registered' }>, s: SessionState): (HTMLElement | null)[] {
     const out: (HTMLElement | null)[] = [
@@ -250,14 +257,20 @@ export class OwnershipPanel {
       out.push(h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerHint }));
       return out;
     }
+    // The same code, verified again with the session: the owner's view, or this account's own transfer window.
+    const again = this.deps.onRefresh ?? this.deps.onRescan;
     if (!m.transferPending) {
-      out.push(this.text(RECEIVING.noTransfer));
+      out.push(
+        this.text(RECEIVING.noTransfer),
+        h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerAgain }),
+        h('div', { class: 'ownership__actions' }, this.textButton(RECEIVING.verifyAgain, () => again())),
+      );
       return out;
     }
-    const t = m.transfer;
+    if (m.transfer) this.windowAccount ??= s.account.email;
+    const t = this.windowAccount === s.account.email ? m.transfer : undefined;
     if (!t) {
-      // Signed in after the scan: the same code, verified again with the session, brings the window.
-      const again = this.deps.onRefresh ?? this.deps.onRescan;
+      // Signed in after the scan, or as another account than the scan's: no window for this account yet.
       out.push(
         this.text(RECEIVING.verifyAgainLead),
         h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => again() }, text: RECEIVING.verifyAgain })),
