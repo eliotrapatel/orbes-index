@@ -618,6 +618,12 @@ describe('OwnershipService', () => {
       // A piece named: still its own code only.
       await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: sold.productId }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);
       await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: 'O26-J-99999' }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);
+      // A well-formed code that is no one's: an issued id and one never issued get the same answer, so no account can
+      // learn from it which ids exist (product ids are sequential).
+      const wrong = 'ZZZZ-ZZZZ-ZZZZ';
+      const existing = await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: wrong, productId: sold.productId }, buyer.actor), 'TRANSFER_NOT_FOUND', 404);
+      const unknown = await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: wrong, productId: 'O26-J-99999' }, buyer.actor), 'TRANSFER_NOT_FOUND', 404);
+      expect(unknown.publicMessage).toBe(existing.publicMessage);
       // A scan alone: the piece is the scan's.
       const token = await transferToken(sold.id, buyer.id);
       await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, transferToken: token }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);

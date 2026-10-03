@@ -490,11 +490,15 @@ export class OwnershipService {
 
     // The piece the recipient scanned: the one named, else the one of the scan's token (an assisted acceptance may name none).
     let pieceUuid: string | null = null;
+    // An unknown id names no piece: no scan can be of it, and no code hands it over. Without a scan token (an assisted
+    // acceptance) it is refused only once the code has been read, as the id of another piece is: answered at once, it
+    // would tell any account which ids exist (product ids are sequential: production volumes, as lockForOwnerAction).
+    let unknownPiece = false;
     if (productRef !== null) {
       const named = await findProduct(this.db, productRef);
-      // An unknown id is not this code's piece, and no scan can be of it.
-      if (!named) throw scanToken !== null ? transferTokenError('WRONG_PRODUCT') : transferProductMismatch();
-      pieceUuid = named.id;
+      if (!named && scanToken !== null) throw transferTokenError('WRONG_PRODUCT');
+      if (named) pieceUuid = named.id;
+      else unknownPiece = true;
     }
     if (scanToken !== null) {
       const peek = await checkTransferToken(this.db, scanToken, { accountId, now: this.clock(), consume: false, ...(pieceUuid !== null ? { productUuid: pieceUuid } : {}) });
@@ -503,8 +507,9 @@ export class OwnershipService {
 
     const found = await this.db.selectFrom('ownership_transfers').selectAll().where('token_hash', '=', tokenHash).executeTakeFirst();
     if (!found) throw notFound('Transfer', 'TRANSFER_NOT_FOUND');
-    // Another piece's code says nothing more about itself: not its state, nor which piece it hands over.
-    if (pieceUuid !== null && found.product_id !== pieceUuid) throw transferProductMismatch();
+    // Another piece's code says nothing more about itself: not its state, nor which piece it hands over. An unknown id
+    // gets the same answer as the id of another piece, for any code.
+    if (unknownPiece || (pieceUuid !== null && found.product_id !== pieceUuid)) throw transferProductMismatch();
     if (found.status === 'PENDING' && found.expires_at.getTime() <= this.clock().getTime()) {
       // Record the expiry (committed) before refusing, so the product leaves TRANSFER_PENDING.
       await inTransaction(this.db, async (tx) => {

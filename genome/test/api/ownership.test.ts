@@ -258,6 +258,22 @@ describe('ownership API', () => {
       const buyer = (await accountClient(assisted)).client;
       const mismatch = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: codes[1], productId: pieces[0].product.productId });
       expect(errorOf(mismatch).code).toBe('TRANSFER_PRODUCT_MISMATCH');
+      // An id never issued gets what an issued one gets, with the code of another piece and with a code that is no
+      // one's: no account learns which ids exist.
+      const unissued = `${pieces[1].product.productId.slice(0, -5)}99999`;
+      expect(await assisted.ctx.db.selectFrom('products').select('id').where('product_id', '=', unissued).executeTakeFirst()).toBeUndefined();
+      const pairs: [string, string][] = [];
+      for (const transferCode of [codes[1], 'ZZZZ-ZZZZ-ZZZZ']) {
+        const issued = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode, productId: pieces[0].product.productId });
+        const never = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode, productId: unissued });
+        expect(never.statusCode, transferCode).toBe(issued.statusCode);
+        expect(errorOf(never), transferCode).toEqual(errorOf(issued));
+        pairs.push([String(issued.statusCode), errorOf(issued).code]);
+      }
+      expect(pairs).toEqual([
+        ['409', 'TRANSFER_PRODUCT_MISMATCH'],
+        ['404', 'TRANSFER_NOT_FOUND'],
+      ]);
       const ok = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: codes[1] });
       expect(ok.statusCode, ok.body).toBe(200);
       expect(safeJson(ok)).toMatchObject({ productId: pieces[1].product.productId });
