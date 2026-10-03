@@ -28,7 +28,7 @@
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { genomeBlock } from '../genome-view.js';
-import type { ResultViewModel, TabId } from '../view-model.js';
+import { initialTab, type ResultViewModel, type TabId } from '../view-model.js';
 import { contactBlock, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
@@ -98,7 +98,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
           return h('div', { class: 'panel' }, ownership.root);
       }
     };
-    sections.push(tabsView(vm.tabs, build, vm.ownership.kind === 'register' ? 'ownership' : 'product').root);
+    // Registration, and the transfer of a piece to its recipient (F-03), open straight on OWNERSHIP.
+    sections.push(tabsView(vm.tabs, build, initialTab(vm)).root);
   } else if (vm.tone !== 'authentic') {
     // The help line, then (when Client Services is configured) the prefilled email, the phone and the hours.
     sections.push(

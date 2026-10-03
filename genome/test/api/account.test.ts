@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashSessionToken } from '../../src/server/services/sessions.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('account API', () => {
   let h: Harness;
@@ -143,12 +143,12 @@ describe('password change and assisted recovery (C-04)', () => {
   }
 
   /** A piece registered to the customer behind `c`, through a scan and its registration token. */
-  async function ownedPiece(c: Client): Promise<string> {
+  async function ownedPiece(c: Client): Promise<{ productId: string; data: string }> {
     const p = await issue(h.ctx, catalog);
     await h.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
     const scan = safeJson(await c.post('/api/v1/verify', { code: p.code.data })) as { registration: { token: string } };
     expect((await c.post('/api/v1/ownership/register', { registrationToken: scan.registration.token })).statusCode).toBe(201);
-    return p.product.productId;
+    return { productId: p.product.productId, data: p.code.data };
   }
 
   describe('POST /api/v1/account/password', () => {
@@ -196,9 +196,12 @@ describe('password change and assisted recovery (C-04)', () => {
   describe('POST /api/v1/account/recover', () => {
     it('sets a new password with the code of ORBES Client Services: sessions end, transfers are cancelled and paused 72 h', async () => {
       const { client, email } = await accountClient(h);
-      const productId = await ownedPiece(client);
+      const { productId, data } = await ownedPiece(client);
       const offer = await client.post('/api/v1/ownership/transfers', { productId });
       expect(offer.statusCode).toBe(201);
+      // Someone has scanned the piece and holds the code (F-03) when the owner's password is recovered.
+      const taker = (await accountClient(h)).client;
+      const scanned = await scanToReceive(taker, data, (safeJson(offer) as { transferCode: string }).transferCode);
       const code = await issueCode(email);
 
       const anon = h.client({ ip: '203.0.113.50' });
@@ -221,10 +224,9 @@ describe('password change and assisted recovery (C-04)', () => {
       expect(paused.statusCode).toBe(409);
       expect(errorOf(paused).code).toBe('TRANSFERS_PAUSED');
       expect(errorOf(paused).message).toMatch(/ORBES Client Services can assist you\.$/);
-      const accept = await h.client().post('/api/v1/ownership/transfers/accept', { transferCode: (safeJson(offer) as { transferCode: string }).transferCode });
+      const accept = await h.client().post('/api/v1/ownership/transfers/accept', scanned);
       expect(accept.statusCode).toBe(401); // a session is needed first…
-      const taker = (await accountClient(h)).client;
-      const taken = await taker.post('/api/v1/ownership/transfers/accept', { transferCode: (safeJson(offer) as { transferCode: string }).transferCode });
+      const taken = await taker.post('/api/v1/ownership/transfers/accept', scanned);
       expect(taken.statusCode).toBe(410); // …and the cancelled code no longer completes
       expect(errorOf(taken).code).toBe('TRANSFER_CANCELLED');
 

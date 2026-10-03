@@ -5,7 +5,11 @@
  * The verification service mints one with an AUTHENTIC_FIRST_REGISTRATION
  * result; OwnershipService.registerFirst consumes it. This ties a first
  * registration to a fresh, successful scan of THAT product instead of just
- * knowing its product id.
+ * knowing its product id. The same holds for the other purposes: a sale
+ * lookup's SALE_ACTIVATION token (SaleService, A-08) and the TRANSFER_ACCEPT
+ * token of a signed-in reader's scan of a piece whose transfer is pending
+ * (OwnershipService.acceptTransfer, F-03). A token of one purpose is refused
+ * for another.
  *
  * - Token: 32 random bytes, base64url (43 chars), handed to the client once.
  * - Stored: sha256(token bytes) only, so a database reader cannot use them.
@@ -20,6 +24,8 @@ import { systemClock } from '../types.js';
 
 export const SCAN_TOKEN_BYTES = 32;
 export const SCAN_TOKEN_TTL_MS = 15 * 60 * 1000;
+/** Lifetime of a TRANSFER_ACCEPT token (F-03): the time between the recipient's scan and the transfer code they enter. */
+export const TRANSFER_TOKEN_TTL_MS = SCAN_TOKEN_TTL_MS;
 const MAX_TTL_MS = 24 * 60 * 60 * 1000;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

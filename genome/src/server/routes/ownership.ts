@@ -1,7 +1,9 @@
 /**
  * Ownership routes (contract §3, cookie `orbes_session`): first registration
  * with a scan token (+ claim code), transfers, incident reports and the
- * withdrawal of a loss the owner reported (PIECE FOUND, MY PIECES).
+ * withdrawal of a loss the owner reported (PIECE FOUND, MY PIECES). A transfer
+ * is accepted for the piece the recipient scanned, with the transfer token of
+ * that scan (F-03): both required unless TRANSFER_ACCEPT_REQUIRE_PRODUCT=false.
  *
  * All are account-authenticated mutations, so the scope guard enforces the
  * session, CSRF token and same-origin checks. Registration and transfer
@@ -13,7 +15,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { acceptTransferBody, incidentBody, parse, productRefBody, registerOwnershipBody } from '../http/schemas.js';
+import { acceptTransferBody, assistedAcceptTransferBody, incidentBody, parse, productRefBody, registerOwnershipBody } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import type { OwnershipResult } from '../services/ownership.js';
 import type { RouteDeps } from './public.js';
@@ -26,6 +28,8 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
   const { ownership } = ctx.services;
+  // F-03: the scanned piece is required, unless ORBES Client Services assists acceptances (TRANSFER_ACCEPT_REQUIRE_PRODUCT=false).
+  const acceptBody = ctx.config.transferAcceptRequireProduct ? acceptTransferBody : assistedAcceptTransferBody;
 
   app.post('/api/v1/ownership/register', { config: { rateGroup: 'auth' } }, async (request, reply) => {
     const { account } = requireAccount(request);
@@ -45,8 +49,9 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
 
   app.post('/api/v1/ownership/transfers/accept', { config: { rateGroup: 'auth' } }, async (request) => {
     const { account } = requireAccount(request);
-    const b = parse(acceptTransferBody, request.body);
-    return ownershipJson(await ownership.acceptTransfer(account.id, b.transferCode, accountActor(request)));
+    const b = parse(acceptBody, request.body);
+    const input = { transferCode: b.transferCode, productId: b.productId ?? null, transferToken: b.transferToken ?? null };
+    return ownershipJson(await ownership.acceptTransfer(account.id, input, accountActor(request)));
   });
 
   app.post('/api/v1/ownership/transfers/cancel', async (request) => {

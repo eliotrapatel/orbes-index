@@ -36,8 +36,12 @@ export type OwnershipMode =
   | { kind: 'register'; token: string; expiresAt: string; claimCodeRequired: boolean; underReview: boolean }
   /** The viewer owns it. */
   | { kind: 'yours'; productId: string; transferPending: boolean }
-  /** Someone else owns it; the viewer may hold a transfer code. */
-  | { kind: 'registered'; productId: string; transferPending: boolean }
+  /**
+   * Someone else owns it; the viewer may hold a transfer code. `transfer` (F-03): this scan's window to receive it,
+   * which the server gives a signed-in reader who is not the owner while a transfer is pending; the code is then
+   * accepted for this piece only, with this scan.
+   */
+  | { kind: 'registered'; productId: string; transferPending: boolean; transfer?: { token: string; expiresAt: string } }
   /** No owner and registration is not open: the piece has not been delivered by ORBES or an authorised retailer yet. */
   | { kind: 'unregistered' }
   /**
@@ -450,11 +454,27 @@ function ownershipMode(o: VerifyOutcome): OwnershipMode {
   }
   const own = o.ownership;
   if (own?.you) return { kind: 'yours', productId, transferPending: own.transferPending === true };
-  if (own?.registered) return { kind: 'registered', productId, transferPending: own.transferPending === true };
+  if (own?.registered) {
+    const transferPending = own.transferPending === true;
+    // F-03: the server's transfer window of this scan, only beside the pending transfer it is for.
+    const t = o.transfer;
+    const scanWindow = transferPending && t && typeof t.token === 'string' && t.token !== '' && typeof t.expiresAt === 'string' ? { transfer: { token: t.token, expiresAt: t.expiresAt } } : {};
+    return { kind: 'registered', productId, transferPending, ...scanWindow };
+  }
   return { kind: 'unregistered' };
 }
 
-/** Whether a registration window (ISO expiry) is still open at `now` (ms). */
+/**
+ * The tab a result opens on: OWNERSHIP when it offers what the reader most likely scanned for, a first
+ * registration (the scan's token) or the transfer of the piece to them (F-03: the scan's transfer window,
+ * given to a signed-in reader who is not the owner while a transfer is pending); PRODUCT otherwise.
+ */
+export function initialTab(vm: Pick<ResultViewModel, 'ownership'>): TabId {
+  const m = vm.ownership;
+  return m.kind === 'register' || (m.kind === 'registered' && m.transfer !== undefined) ? 'ownership' : 'product';
+}
+
+/** Whether a registration window (ISO expiry) is still open at `now` (ms); the same for a transfer window (F-03). */
 export function registrationOpen(expiresAt: string, now: number): boolean {
   const t = Date.parse(expiresAt);
   return Number.isFinite(t) && t > now;

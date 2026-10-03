@@ -1036,6 +1036,12 @@ function storyFor(productId: string, add: AddStep): Story {
       add(when, `transfer offered by ${from}`, (w) => offerTransfer(w, productId, from));
       if (accept) {
         const acceptAt = at(accept.at);
+        // F-03: the recipient scans the piece, signed in, then enters its transfer code with the token of that scan.
+        add(new Date(acceptAt.getTime() - 4 * 60_000), `transfer scan by ${accept.to}`, async (w) => {
+          const outcome = await scan(w, productId, { account: accept.to }, accountDef(accept.to).home, 'AUTHENTIC_REGISTERED');
+          if (!outcome.transfer) throw new Error('no transfer token in the scan of a piece whose transfer is pending');
+          w.pending.set(`transfer-scan:${productId}`, outcome.transfer.token);
+        });
         add(acceptAt, `transfer accepted by ${accept.to}`, (w) => acceptTransfer(w, productId, accept.to));
         add(new Date(acceptAt.getTime() + 10 * 60_000), `scan by new owner ${accept.to}`, async (w) => {
           await scan(w, productId, { account: accept.to }, accountDef(accept.to).home, 'AUTHENTIC_OWNERSHIP_VERIFIED');
@@ -1288,9 +1294,12 @@ async function offerTransfer(w: World, productId: string, from: AccountKey): Pro
 
 async function acceptTransfer(w: World, productId: string, to: AccountKey): Promise<void> {
   const code = w.pending.get(`transfer:${productId}`);
+  const token = w.pending.get(`transfer-scan:${productId}`);
   if (!code) throw new Error('no transfer code');
+  if (!token) throw new Error('no transfer scan');
   w.pending.delete(`transfer:${productId}`);
-  await w.ctx.services.ownership.acceptTransfer(accountId(w, to), code, accountActor(w, to));
+  w.pending.delete(`transfer-scan:${productId}`);
+  await w.ctx.services.ownership.acceptTransfer(accountId(w, to), { transferCode: code, productId, transferToken: token }, accountActor(w, to));
 }
 
 async function openService(w: World, productId: string, type: ServiceType, location: string, notes: string): Promise<void> {

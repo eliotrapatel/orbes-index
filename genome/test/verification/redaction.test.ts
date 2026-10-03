@@ -179,6 +179,23 @@ describe('public response redaction', () => {
     assertNoLeak(out!, [r.product.id, r.claimCode!, 'burst-21', 'burst-ip-21']);
   });
 
+  it('a signed-in reader of a piece whose transfer is pending (F-03) adds only `transfer` and `ownership.transferPending`', async () => {
+    const r = await issueActivated(w);
+    const owner = await createAccount(w);
+    await registerOwner(w, r, owner);
+    await w.ownership.initiateTransfer(owner, r.product.productId, { type: 'account', id: owner });
+    const buyer = await createAccount(w);
+    const out = await verify(w, r.code.data, { accountId: buyer, deviceHash: 'buyer-device', ipHash: 'buyer-ip' });
+    expect(out.state).toBe('AUTHENTIC_REGISTERED');
+    expect(keyPaths(out)).toEqual(sorted(EXPECTED_KEYS.AUTHENTIC_REGISTERED, ['ownership.transferPending', 'transfer', 'transfer.expiresAt', 'transfer.token']));
+    // The token itself, never its hash, the scan's account or the owner's.
+    const row = await w.t.db.selectFrom('scan_tokens').selectAll().where('scan_event_id', '=', out.scanId).executeTakeFirstOrThrow();
+    assertNoLeak(out, [owner, buyer, r.product.id, Buffer.from(row.id_hash).toString('hex'), Buffer.from(row.id_hash).toString('base64url'), 'buyer-device', 'buyer-ip']);
+    // Signed out, the same piece: no token, the same keys as any registered piece with a pending transfer.
+    const anon = await verify(w, r.code.data);
+    expect(keyPaths(anon)).toEqual(sorted(EXPECTED_KEYS.AUTHENTIC_REGISTERED, ['ownership.transferPending']));
+  });
+
   it('threshold values never appear as numbers in any body', () => {
     for (const out of seen.values()) {
       const body = JSON.stringify({ ...out, scanId: '', verifiedAt: '', registration: undefined, genome: undefined, verification: undefined });

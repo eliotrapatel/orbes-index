@@ -262,6 +262,12 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 Each is optional. While neither an email nor a phone is set, the verification app shows no contact at all (the help sentence asking the customer to quote the reference stays). The contact appears on every caution and void result and in the WARRANTY tab of a warranty that no longer applies. Values are public once served; `redactConfig` still logs only `[set]`. Browsers may keep the details for 5 minutes (`Cache-Control: public, max-age=300`). On the VPS (`deploy/vps/.env`), quote a value that contains ` #`.
 
+**Ownership transfers** (F-03, API §11.3)
+
+| Variable | Default | Rules |
+|---|---|---|
+| `TRANSFER_ACCEPT_REQUIRE_PRODUCT` | `true` | Same boolean syntax as `ADMIN_REQUIRE_MFA` (`config.transferAcceptRequireProduct`). `true`: a transfer code is accepted only with the piece the recipient scanned (`productId`; a code of another piece answers `409 TRANSFER_PRODUCT_MISMATCH`) and the 15-minute token of that scan, signed in (`transferToken`). `false` makes both optional, for an acceptance assisted by ORBES Client Services (whatever is sent is still checked); production logs a `risky configuration` warning at every start. Set it back once the assisted acceptance is done. |
+
 **Anomaly thresholds** (internal, never exposed by the API). Any other `ANOMALY_*` name is rejected.
 
 | Variable | Default | Range |
@@ -840,7 +846,7 @@ docker compose exec app node --import tsx scripts/admin.ts enable --email ops@th
 ### 9.2 Logging
 
 - **Format.** JSON lines (pino) on **stdout**. Lines written before the HTTP logger exists (migrations, bootstrap, key self-test) are JSON on **stderr**. Configuration errors are plain text on stderr, followed by exit code 78.
-- **Level.** `LOG_LEVEL` (default `info` in production). Accepted but risky settings (`ADMIN_REQUIRE_MFA=false`, or no `SCAN_RETENTION_DAYS`, in production) are logged as `risky configuration` warnings at every start.
+- **Level.** `LOG_LEVEL` (default `info` in production). Accepted but risky settings (`ADMIN_REQUIRE_MFA=false`, `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false`, or no `SCAN_RETENTION_DAYS`, in production) are logged as `risky configuration` warnings at every start.
 - **Contents.** Each request logs the method, the path **without the query string**, a server-generated request id (`reqId`; client-supplied ids are ignored), the status code and the response time. **Never logged:** client IPs, cookies, the CSRF header, `Set-Cookie`, request bodies or secrets. The startup line carries a redacted configuration summary (database password masked, secrets shown as `[set]`, no anomaly thresholds).
 - **Shipping.** Collect stdout and stderr with the platform's log driver. With plain Docker, cap local logs in a compose override:
   ```yaml

@@ -99,7 +99,13 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const offer = safeJson(await owner.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as any;
     const buyer = client();
     await buyer.post('/api/v1/account/register', { email: 'buyer@example.com', password: PASSWORD });
-    expect((await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode })).statusCode).toBe(200);
+    // F-03: the buyer scans the piece signed in, then enters the code with that scan (the TRANSFER_ACCEPT purpose of 0011).
+    const toReceive = safeJson(await buyer.post('/api/v1/verify', { code: p.code.data })) as any;
+    expect(toReceive.transfer?.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const unknownCode = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: '0000-0000-0000', productId: p.product.productId, transferToken: toReceive.transfer.token });
+    expect(unknownCode.statusCode).toBe(404);
+    const received = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode, productId: p.product.productId, transferToken: toReceive.transfer.token });
+    expect(received.statusCode, received.body).toBe(200);
     expect((safeJson(await buyer.get('/api/v1/account/products')) as any).products).toHaveLength(1);
 
     // ── MY PIECES (F-01): the new owner reports it lost, then finds it again (the status history read on pg) ──

@@ -19,6 +19,14 @@
  *   they reported themselves (a theft stays with ORBES Client Services); the
  *   recipient of a transfer cannot be the current owner; expired transfers
  *   cannot be accepted.
+ * - A transfer is accepted for the piece the recipient scanned (F-03): the
+ *   code must be that piece's (409 TRANSFER_PRODUCT_MISMATCH otherwise, which
+ *   names no piece), and the TRANSFER_ACCEPT token of the recipient's scan of
+ *   it is used up in the acceptance's transaction, for that piece and that
+ *   account, so no transfer completes without a scan of the piece it hands
+ *   over. `requireScannedPiece` false (TRANSFER_ACCEPT_REQUIRE_PRODUCT=false)
+ *   makes both optional, for an acceptance assisted by ORBES Client Services;
+ *   whichever is given is still checked.
  *
  * Transfer codes are 12 Crockford base32 characters (60 bits), shown once
  * as XXXX-XXXX-XXXX; only HMAC-SHA256 of the canonical form under a server
@@ -41,7 +49,7 @@ import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, type LifecycleService, type StatusChange } from './lifecycle.js';
-import { consumeScanToken, inspectScanToken, type ScanTokenFailure } from './scan-tokens.js';
+import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
 export const TRANSFER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -70,6 +78,16 @@ export const TRANSFER_CODE_KEY_INFO = 'orbes/transfer-code/v1';
 export interface RegisterFirstInput {
   registrationToken: string;
   claimCode?: string | null;
+}
+
+/** What the recipient of a transfer sends (POST /api/v1/ownership/transfers/accept, F-03). */
+export interface AcceptTransferInput {
+  /** The transfer code the owner gave, any accepted spelling. */
+  transferCode: string;
+  /** The piece the recipient scanned (canonical id or uuid): the code must be this piece's. */
+  productId?: string | null;
+  /** The TRANSFER_ACCEPT token of the recipient's scan of that piece (VerifyOutcome.transfer.token). */
+  transferToken?: string | null;
 }
 
 export interface OwnershipResult {
@@ -191,6 +209,54 @@ function tokenError(reason: ScanTokenFailure): DomainError {
   }
 }
 
+/**
+ * Refusals of the transfer token (F-03). Every reason that is not "used" or "expired" (unknown, malformed, another
+ * purpose, another piece, another account's scan) reads the same: scan the piece again.
+ */
+function transferTokenError(reason: ScanTokenFailure | 'WRONG_ACCOUNT'): DomainError {
+  switch (reason) {
+    case 'USED':
+      return new DomainError('TRANSFER_TOKEN_USED', 409, 'This scan has already been used. Scan the piece again, then enter its transfer code.');
+    case 'EXPIRED':
+      return new DomainError(
+        'TRANSFER_TOKEN_EXPIRED',
+        410,
+        `This scan is more than ${TRANSFER_TOKEN_TTL_MS / 60_000} minutes old. Scan the piece again, then enter its transfer code.`,
+      );
+    default:
+      return new DomainError('TRANSFER_TOKEN_INVALID', 400, 'This scan cannot be used to receive this piece. Scan the piece again, then enter its transfer code.', {
+        detail: reason,
+      });
+  }
+}
+
+/** No scan of the piece came with the code (F-03): the recipient scans it, signed in, first. */
+const transferScanRequired = () =>
+  new DomainError('TRANSFER_SCAN_REQUIRED', 400, 'Scan this piece while signed in to your ORBES account, then enter its transfer code.');
+
+/** The code is another piece's (F-03). The answer names no piece: neither the one scanned nor the one the code hands over. */
+const transferProductMismatch = () =>
+  new DomainError('TRANSFER_PRODUCT_MISMATCH', 409, 'This transfer code is not for this piece. Check the code with the owner of this piece.');
+
+/**
+ * The transfer token of a scan, checked (`inspect`) or used up (`consume`, in the acceptance's transaction): a
+ * TRANSFER_ACCEPT token bound to `productUuid` (when given) whose scan event names `accountId`. A refusal of
+ * `consume` inside the transaction rolls the use back with it.
+ */
+async function checkTransferToken(
+  db: Db,
+  token: string,
+  opts: { accountId: string; productUuid?: string; now: Date; consume: boolean },
+): Promise<Extract<ScanTokenResult, { ok: true }>> {
+  const check = { purpose: 'TRANSFER_ACCEPT' as const, now: opts.now, ...(opts.productUuid !== undefined ? { productId: opts.productUuid } : {}) };
+  const r = opts.consume ? await consumeScanToken(db, token, check) : await inspectScanToken(db, token, check);
+  if (!r.ok) throw transferTokenError(r.reason);
+  // Bound to the account whose scan earned it: a token seen by anyone else is worthless.
+  const scan = await db.selectFrom('scan_events').select('account_id').where('id', '=', r.scanEventId).executeTakeFirst();
+  if (!scan || scan.account_id === null || scan.account_id.toLowerCase() !== opts.accountId.toLowerCase()) throw transferTokenError('WRONG_ACCOUNT');
+  return r;
+}
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 /** 72 hours after an assisted recovery (TRANSFER_FREEZE_MS), new transfers out of the account are refused. */
@@ -254,12 +320,16 @@ export class OwnershipService {
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
   private readonly transferKey: Uint8Array;
+  private readonly requireScannedPiece: boolean;
 
   /**
    * `transferKey`: 32-byte HMAC key for transfer codes (deriveTransferCodeKey; the context always passes it).
    * Without it a random per-instance key is used, which only suits single-instance tests.
+   * `requireScannedPiece` (default true; TRANSFER_ACCEPT_REQUIRE_PRODUCT, F-03): an acceptance must name the scanned
+   * piece and carry the transfer token of that scan; false makes both optional (an acceptance assisted by ORBES
+   * Client Services).
    */
-  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock; transferKey?: Uint8Array }) {
+  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock; transferKey?: Uint8Array; requireScannedPiece?: boolean }) {
     const key = deps.transferKey ?? new Uint8Array(randomBytes(32));
     if (!(key instanceof Uint8Array) || key.length !== 32) throw new RangeError('transferKey must be 32 bytes');
     this.transferKey = key;
@@ -267,6 +337,7 @@ export class OwnershipService {
     this.audit = deps.audit;
     this.lifecycle = deps.lifecycle;
     this.clock = deps.clock ?? systemClock;
+    this.requireScannedPiece = deps.requireScannedPiece ?? true;
   }
 
   /**
@@ -394,15 +465,46 @@ export class OwnershipService {
     });
   }
 
-  /** The recipient redeems a transfer code: ownership moves, `verified` carries over, status → TRANSFERRED. */
-  async acceptTransfer(accountId: string, transferCode: string, actor: Actor): Promise<OwnershipResult> {
+  /**
+   * The recipient redeems a transfer code: ownership moves, `verified` carries over, status → TRANSFERRED.
+   *
+   * F-03: the code must be the code of the piece the recipient scanned (`productId`), else 409
+   * TRANSFER_PRODUCT_MISMATCH, which names no piece; and the TRANSFER_ACCEPT token of that scan
+   * (`transferToken`) is used up in the acceptance's transaction, for the same piece and the same account
+   * (refusals TRANSFER_TOKEN_INVALID, _EXPIRED, _USED; none sent: TRANSFER_SCAN_REQUIRED). Both are required
+   * unless `requireScannedPiece` is false (an acceptance assisted by ORBES Client Services), and whichever is
+   * given is checked. The token is checked before the code is read, so trying piece ids against a code
+   * needs a scan of each: nothing is learnt about the piece a code hands over without the piece's own scan.
+   */
+  async acceptTransfer(accountId: string, input: AcceptTransferInput, actor: Actor): Promise<OwnershipResult> {
     assertAccountId(accountId);
-    const tokenHash = hashTransferCode(transferCode, this.transferKey);
+    const tokenHash = hashTransferCode(input?.transferCode, this.transferKey);
     if (!tokenHash) throw validationError('The transfer code is not valid.');
+    const productRef = input.productId ?? null;
+    const scanToken = input.transferToken ?? null;
+    if (productRef !== null && typeof productRef !== 'string') throw validationError('Invalid piece.');
+    if (scanToken !== null && typeof scanToken !== 'string') throw validationError('Invalid scan.');
+    if (this.requireScannedPiece && productRef === null) throw validationError('The scanned piece is required.');
+    if (this.requireScannedPiece && scanToken === null) throw transferScanRequired();
     await this.requireActiveAccount(this.db, accountId);
+
+    // The piece the recipient scanned: the one named, else the one of the scan's token (an assisted acceptance may name none).
+    let pieceUuid: string | null = null;
+    if (productRef !== null) {
+      const named = await findProduct(this.db, productRef);
+      // An unknown id is not this code's piece, and no scan can be of it.
+      if (!named) throw scanToken !== null ? transferTokenError('WRONG_PRODUCT') : transferProductMismatch();
+      pieceUuid = named.id;
+    }
+    if (scanToken !== null) {
+      const peek = await checkTransferToken(this.db, scanToken, { accountId, now: this.clock(), consume: false, ...(pieceUuid !== null ? { productUuid: pieceUuid } : {}) });
+      pieceUuid = peek.productId;
+    }
 
     const found = await this.db.selectFrom('ownership_transfers').selectAll().where('token_hash', '=', tokenHash).executeTakeFirst();
     if (!found) throw notFound('Transfer', 'TRANSFER_NOT_FOUND');
+    // Another piece's code says nothing more about itself: not its state, nor which piece it hands over.
+    if (pieceUuid !== null && found.product_id !== pieceUuid) throw transferProductMismatch();
     if (found.status === 'PENDING' && found.expires_at.getTime() <= this.clock().getTime()) {
       // Record the expiry (committed) before refusing, so the product leaves TRANSFER_PENDING.
       await inTransaction(this.db, async (tx) => {
@@ -422,6 +524,8 @@ export class OwnershipService {
       const t = await tx.selectFrom('ownership_transfers').selectAll().where('id', '=', found.id).forUpdate().executeTakeFirstOrThrow();
       if (t.status !== 'PENDING') throw transferClosedError(t.status);
       if (t.expires_at.getTime() <= now.getTime()) throw transferClosedError('EXPIRED');
+      // The scan of this piece by this account, used up with the acceptance (a refusal below rolls the use back).
+      const scan = scanToken !== null ? await checkTransferToken(tx, scanToken, { accountId, productUuid: p.id, now, consume: true }) : null;
 
       const current = await this.currentOwnership(tx, p.id);
       if (current && current.account_id === accountId) {
@@ -460,7 +564,8 @@ export class OwnershipService {
           action: 'ownership.transfer.accept',
           targetType: 'product',
           targetId: p.product_id,
-          details: { transferId: t.id, fromAccountId: current.account_id, toAccountId: accountId, verified: current.verified },
+          // The scan the acceptance used (F-03); null for an acceptance assisted by ORBES Client Services without one.
+          details: { transferId: t.id, fromAccountId: current.account_id, toAccountId: accountId, verified: current.verified, scanEventId: scan?.scanEventId ?? null },
         },
         tx,
       );

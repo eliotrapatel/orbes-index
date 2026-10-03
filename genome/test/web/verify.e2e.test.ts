@@ -9,7 +9,10 @@
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
  * the scan, the password (FORGOTTEN PASSWORD? through ORBES Client Services
- * and a recovery code, then CHANGE PASSWORD in MY PIECES), MY PIECES (F-01:
+ * and a recovery code, then CHANGE PASSWORD in MY PIECES), the reception of
+ * a piece with its transfer code (F-03: signed in after the scan, VERIFY
+ * AGAIN; the code of another piece refused; the window of the scan closed),
+ * MY PIECES (F-01:
  * sign-in, the list, its tabs from the keyboard, a piece reported stolen
  * then scanned by a stranger, a loss withdrawn; a direct link, a reload and
  * the back button), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
@@ -374,6 +377,119 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('receives a piece with its transfer code (F-03): scan, sign in, VERIFY AGAIN, the code of this piece only, then the owner view', async () => {
+    // A seller owns two pieces and has offered both: the buyer of one is handed the code of the other first.
+    const seller = await srv.ctx.services.auth.registerAccount({ email: 'seller.f03@example.com', password: PASSWORD }, {});
+    const sellerActor = { type: 'account', id: seller.account.id } as const;
+    const [sold, kept] = [await srv.issue({ variant: 'SIZE 54' }), await srv.issue({ variant: 'SIZE 50' })];
+    const codes: string[] = [];
+    for (const piece of [sold, kept]) {
+      await srv.ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+      const scan = await srv.ctx.services.verification.verify({ code: piece.code.data }, {});
+      await srv.ctx.services.ownership.registerFirst(seller.account.id, { registrationToken: scan.registration!.token }, sellerActor);
+      codes.push((await srv.ctx.services.ownership.initiateTransfer(seller.account.id, piece.product.id, sellerActor)).transferCode);
+    }
+    const [soldCode, keptCode] = codes;
+
+    // The buyer scans the piece signed out: a registered piece, its transfer in progress; the result opens on PRODUCT.
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'receive.png', sold));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+    await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
+    const panel = page.locator('.ownership');
+    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(panel.locator('.section-label'), 'RECEIVING THIS PIECE');
+    await textOf(panel.locator('.ownership__text').first(), 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.');
+    await countOf(page.getByLabel('TRANSFER CODE'), 0);
+
+    // Signed in after the scan: this scan carries no transfer window, so the panel asks to verify the piece again.
+    await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await panel.getByLabel('EMAIL').fill('buyer.f03@example.com');
+    await panel.getByLabel('PASSWORD').fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await textOf(panel.locator('.ownership__email'), 'buyer.f03@example.com');
+    await textOf(panel.locator('.ownership__text').last(), 'To receive this piece, verify it again now that you are signed in.');
+    await countOf(page.getByLabel('TRANSFER CODE'), 0);
+    await keepsFloors(page, ['VERIFY AGAIN', 'MY PIECES', 'SIGN OUT']);
+    await page.getByRole('button', { name: 'VERIFY AGAIN' }).click();
+
+    // The scan of a signed-in reader who is not the owner: the result opens straight on OWNERSHIP, with this scan's window.
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC REGISTERED');
+    await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await textOf(panel.locator('.ownership__meta'), /^RECEIVING OPEN UNTIL \d\d:\d\d$/);
+    expect(await panel.locator('.ownership__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
+    await textOf(page.locator('#transfer-code-hint'), 'Created by its owner in their ORBES account.');
+    await keepsFloors(page, ['RECEIVE THIS PIECE', 'MY PIECES', 'SIGN OUT']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['RECEIVE THIS PIECE', 'MY PIECES', 'SIGN OUT']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-receive.png'), fullPage: true });
+
+    // The code of the other piece: refused, in the server's words, which name neither piece.
+    await page.getByLabel('TRANSFER CODE').fill(keptCode);
+    await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
+    await textOf(panel.getByRole('alert'), 'This transfer code is not for this piece. Check the code with the owner of this piece.');
+    expect((await srv.ctx.services.ownership.currentOwner(kept.product.id))?.accountId).toBe(seller.account.id);
+
+    // The piece's own code, typed loosely: the piece is the buyer's.
+    await page.getByLabel('TRANSFER CODE').fill(soldCode.replace(/-/g, '').toLowerCase());
+    await valueOf(page.getByLabel('TRANSFER CODE'), soldCode);
+    await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
+    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(panel, new RegExp(`The ownership of ${sold.product.productId} has been transferred to your ORBES account\\.`));
+    const buyer = (await srv.ctx.services.ownership.currentOwner(sold.product.id))!;
+    expect(buyer.accountId).not.toBe(seller.account.id);
+    expect(buyer.acquiredVia).toBe('TRANSFER');
+    expect((await srv.ctx.services.ownership.currentOwner(kept.product.id))?.accountId).toBe(seller.account.id);
+
+    // VIEW AS OWNER verifies again: the buyer's own piece.
+    await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('closes the window to receive a piece 15 minutes after the scan (F-03): SCAN AGAIN, and nothing is sent', async () => {
+    const seller = await srv.ctx.services.auth.registerAccount({ email: 'seller.late@example.com', password: PASSWORD }, {});
+    const sellerActor = { type: 'account', id: seller.account.id } as const;
+    const piece = await srv.issue();
+    await srv.ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await srv.ctx.services.verification.verify({ code: piece.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(seller.account.id, { registrationToken: scan.registration!.token }, sellerActor);
+    const { transferCode } = await srv.ctx.services.ownership.initiateTransfer(seller.account.id, piece.product.id, sellerActor);
+    await srv.ctx.services.auth.registerAccount({ email: 'buyer.late@example.com', password: PASSWORD }, {});
+
+    // Signed in before the scan: the result opens on OWNERSHIP with the form at once.
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await page.goto(`${srv.origin}/verify/pieces`);
+    await page.getByLabel('EMAIL').fill('buyer.late@example.com');
+    await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await page.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await visible(page.getByRole('button', { name: 'CHANGE PASSWORD' }));
+    await page.goto(`${srv.origin}/verify`);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'receive-late.png', piece));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+    await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await visible(page.getByLabel('TRANSFER CODE'));
+
+    // The buyer takes longer than the 15 minutes of the scan, then sends the code: the panel says to scan again.
+    let sent = 0;
+    page.on('request', (r) => {
+      if (r.url().endsWith('/api/v1/ownership/transfers/accept')) sent++;
+    });
+    await page.clock.setFixedTime(Date.now() + 16 * 60_000);
+    await page.getByLabel('TRANSFER CODE').fill(transferCode);
+    await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
+    await textOf(page.locator('.ownership__text').last(), 'The window to receive this piece from this scan has closed. Scan the code again to receive it.');
+    await countOf(page.getByLabel('TRANSFER CODE'), 0);
+    await keepsFloors(page, ['SCAN AGAIN']);
+    expect(sent).toBe(0);
+    expect((await srv.ctx.services.ownership.currentOwner(piece.product.id))?.accountId).toBe(seller.account.id);
     expect(problems).toEqual([]);
   }, 120_000);
 

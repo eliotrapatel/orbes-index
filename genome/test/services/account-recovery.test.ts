@@ -122,6 +122,17 @@ describe('AccountRecoveryService', () => {
     return { id: row.id, productId };
   }
 
+  /** F-03: `who` scans the piece, signed in, then enters the transfer code with that scan. */
+  async function receive(who: { id: string; actor: Actor }, transferCode: string, piece: { id: string; productId: string }) {
+    const scan = await t.db
+      .insertInto('scan_events')
+      .values({ product_id: piece.id, account_id: who.id, event_type: 'VERIFY', result_state: 'AUTHENTIC_REGISTERED', occurred_at: clock.now() })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const { token } = await createScanToken(t.db, { productId: piece.id, scanEventId: scan.id, purpose: 'TRANSFER_ACCEPT', now: clock.now() });
+    return ownership.acceptTransfer(who.id, { transferCode, productId: piece.productId, transferToken: token }, who.actor);
+  }
+
   const codeRows = (accountId: string) => t.db.selectFrom('account_recovery_codes').selectAll().where('account_id', '=', accountId).orderBy('created_at').execute();
   const accountRow = (id: string) => t.db.selectFrom('accounts').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
 
@@ -198,7 +209,7 @@ describe('AccountRecoveryService', () => {
       expect(transfer.status).toBe('CANCELLED');
       expect((await t.db.selectFrom('products').select('ownership_state').where('id', '=', piece.id).executeTakeFirstOrThrow()).ownership_state).toBe('REGISTERED');
       const stranger = await customer();
-      await expectDomainError(ownership.acceptTransfer(stranger.id, offer.transferCode, stranger.actor), 'TRANSFER_CANCELLED', 410);
+      await expectDomainError(receive(stranger, offer.transferCode, piece), 'TRANSFER_CANCELLED', 410);
 
       // The code is used, once.
       expect((await codeRows(c.id))[0].used_at?.getTime()).toBe(clock.now().getTime());
@@ -224,7 +235,7 @@ describe('AccountRecoveryService', () => {
       const giver = await customer();
       const gift = await ownedBy(giver);
       const offer = await ownership.initiateTransfer(giver.id, gift.productId, giver.actor);
-      expect((await ownership.acceptTransfer(c.id, offer.transferCode, c.actor)).accountId).toBe(c.id);
+      expect((await receive(c, offer.transferCode, gift)).accountId).toBe(c.id);
 
       clock.advance(TRANSFER_FREEZE_MS - 1000);
       await expectDomainError(ownership.initiateTransfer(c.id, piece.productId, c.actor), 'TRANSFERS_PAUSED', 409);

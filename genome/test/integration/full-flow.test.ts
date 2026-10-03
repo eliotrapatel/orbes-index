@@ -279,7 +279,14 @@ describe('full flow: issue → print → scan → verify → own → transfer �
     minutes(90);
     s.bob = new Client(app, { ip: '203.0.113.22' });
     json(await s.bob.post('/api/v1/account/register', BOB), 201);
-    const accepted = json(await s.bob.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode }), 200);
+    // F-03: Bob scans the piece signed in; the code is accepted for this piece, with this scan.
+    const toReceive = await verify(s.bob, s.scan);
+    expect(toReceive).toMatchObject({ state: 'AUTHENTIC_REGISTERED', ownership: { registered: true, you: false, transferPending: true } });
+    expect(toReceive.transfer?.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const accepted = json(
+      await s.bob.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode, productId: s.productId, transferToken: toReceive.transfer!.token }),
+      200,
+    );
     expect(accepted).toMatchObject({ productId: 'O26-J-00184', verified: true });
 
     minutes(5);

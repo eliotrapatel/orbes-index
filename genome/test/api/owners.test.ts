@@ -10,7 +10,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const NEW_PASSWORD = 'a brand new passphrase';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -123,7 +123,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // One piece handed on to a buyer, the other offered and still pending.
       const handed = safeJson(await owner.client.post('/api/v1/ownership/transfers', { productId: sold.productId })) as { transferCode: string };
       const buyer = await accountClient(h);
-      expect((await buyer.client.post('/api/v1/ownership/transfers/accept', { transferCode: handed.transferCode })).statusCode).toBe(200);
+      expect((await buyer.client.post('/api/v1/ownership/transfers/accept', await scanToReceive(buyer.client, sold.data, handed.transferCode))).statusCode).toBe(200);
       expect((await owner.client.post('/api/v1/ownership/transfers', { productId: kept.productId })).statusCode).toBe(201);
       for (let i = 0; i < 21; i++) {
         h.clock.advance(1_000);
@@ -163,8 +163,11 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const cs = await adminClient(h, 'ADMIN');
       const owner = await accountClient(h);
       const id = await accountIdOf(owner.email);
-      const { productId } = await ownedPiece(owner.client);
+      const { productId, data } = await ownedPiece(owner.client);
       const offer = safeJson(await owner.client.post('/api/v1/ownership/transfers', { productId })) as { transferCode: string };
+      // A recipient has scanned the piece and holds the code (F-03), when the lock comes.
+      const recipient = (await accountClient(h)).client;
+      const scanned = await scanToReceive(recipient, data, offer.transferCode);
       const elsewhere = h.client({ ip: '203.0.113.77' });
       expect((await elsewhere.post('/api/v1/account/login', { email: owner.email, password: PASSWORD })).statusCode).toBe(200);
       const code = (safeJson(await cs.post(`/api/admin/owners/${id}/recovery-code`)) as { recoveryCode: string }).recoveryCode;
@@ -200,7 +203,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const codeRow = await h.ctx.db.selectFrom('account_recovery_codes').select(['used_at', 'revoked_at']).where('account_id', '=', id).executeTakeFirstOrThrow();
       expect(codeRow).toEqual({ used_at: null, revoked_at: h.clock.now() });
       // The transfer code handed out before the lock no longer completes.
-      const taken = await (await accountClient(h)).client.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode });
+      const taken = await recipient.post('/api/v1/ownership/transfers/accept', scanned);
       expect(taken.statusCode).toBe(410);
       expect(errorOf(taken).code).toBe('TRANSFER_CANCELLED');
 
@@ -401,7 +404,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const sold = await ownedPiece(seller.client);
       const offer = safeJson(await seller.client.post('/api/v1/ownership/transfers', { productId: sold.productId })) as { transferCode: string };
       const buyer = await accountClient(h);
-      expect((await buyer.client.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode })).statusCode).toBe(200);
+      expect((await buyer.client.post('/api/v1/ownership/transfers/accept', await scanToReceive(buyer.client, sold.data, offer.transferCode))).statusCode).toBe(200);
       // What happens to the piece afterwards is the buyer's: a STOLEN declaration and a transfer under way.
       expect((await buyer.client.post('/api/v1/ownership/incidents', { productId: sold.productId, type: 'STOLEN' })).statusCode).toBe(201);
       // A piece the seller still owns, flagged by staff: an internal status, which reads REVOKED for the public.

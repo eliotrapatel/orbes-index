@@ -1,7 +1,10 @@
 /**
  * OWNERSHIP tab: sign in / create an account, register a piece at its first
  * registration (scan token + claim code), create or cancel a transfer code,
- * and receive a piece with a transfer code. The same panel, in its register
+ * and receive a piece with a transfer code: for the piece this scan read and
+ * with this scan's transfer window (F-03), which the server gives a signed-in
+ * reader while a transfer is pending (signed in after the scan: VERIFY AGAIN;
+ * the window closed: SCAN AGAIN). The same panel, in its register
  * mode alone, is the certificate-card section of an UNUSUAL ACTIVITY result
  * (`underReview`: the claim code is required), and, in its account mode, the
  * sign-in of MY PIECES when signed out (F-01).
@@ -27,7 +30,7 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, PIECES, STAFF_SCAN_NOTE } from '../copy.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
 import { contactBlock, piecesLink, sectionLabel } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 
@@ -231,19 +234,47 @@ export class OwnershipPanel {
     return out;
   }
 
+  /**
+   * A piece registered to someone else: RECEIVING THIS PIECE (F-03). The transfer code is accepted for this piece
+   * only, with this scan's transfer window: signed out, the sign-in first; signed in without a window (the scan was
+   * made signed out), VERIFY AGAIN; no transfer pending, nothing to enter; the window closed, SCAN AGAIN.
+   */
   private registeredBlock(m: Extract<OwnershipMode, { kind: 'registered' }>, s: SessionState): (HTMLElement | null)[] {
     const out: (HTMLElement | null)[] = [
       this.status('REGISTERED TO ITS OWNER'),
       this.text(m.transferPending ? 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.' : 'This piece is registered to an ORBES account.'),
-      sectionLabel('RECEIVING THIS PIECE'),
-      this.text('If its owner has given you a transfer code, enter it to register this piece in your name.'),
+      sectionLabel(RECEIVING.title),
     ];
     if (s.status !== 'signed-in') {
-      out.push(...this.authBlock('Sign in or create an ORBES account to receive it.'));
-      out.push(h('p', { class: 'ownership__meta prose', text: 'If this piece is already registered to you, sign in and scan it again to see it as its owner.' }));
+      out.push(this.text(RECEIVING.lead), ...this.authBlock(RECEIVING.signIn));
+      out.push(h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerHint }));
       return out;
     }
-    out.push(this.transferForm());
+    if (!m.transferPending) {
+      out.push(this.text(RECEIVING.noTransfer));
+      return out;
+    }
+    const t = m.transfer;
+    if (!t) {
+      // Signed in after the scan: the same code, verified again with the session, brings the window.
+      const again = this.deps.onRefresh ?? this.deps.onRescan;
+      out.push(
+        this.text(RECEIVING.verifyAgainLead),
+        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => again() }, text: RECEIVING.verifyAgain })),
+      );
+      return out;
+    }
+    if (!registrationOpen(t.expiresAt, this.now())) {
+      out.push(
+        this.text(RECEIVING.closed),
+        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
+      );
+      return out;
+    }
+    out.push(this.text(RECEIVING.lead));
+    const until = timeOf(t.expiresAt);
+    if (until) out.push(h('p', { class: 'ownership__meta micro soft', text: RECEIVING.until(until) }));
+    out.push(this.transferForm(m.productId, t));
     return out;
   }
 
@@ -472,14 +503,19 @@ export class OwnershipPanel {
     });
   }
 
-  private transferForm(): HTMLFormElement {
+  /** The transfer code, sent for this piece with this scan's window (F-03): the server refuses a code of another piece. */
+  private transferForm(productId: string, scan: { token: string; expiresAt: string }): HTMLFormElement {
     const code = this.codeInput('transfer-code');
-    return this.form('transfer', [this.field('transfer-code', 'TRANSFER CODE', code)], 'RECEIVE THIS PIECE', async () => {
+    return this.form('transfer', [this.field('transfer-code', RECEIVING.code, code, RECEIVING.codeHint)], RECEIVING.submit, async () => {
       if (normalizeCodeInput(code.value).length !== 14) {
         code.setAttribute('aria-invalid', 'true');
-        throw new FormError('Enter the 12 characters of the transfer code.');
+        throw new FormError(RECEIVING.codeIncomplete);
       }
-      const r = await this.deps.api.acceptTransfer(code.value);
+      if (!registrationOpen(scan.expiresAt, this.now())) {
+        this.render();
+        return;
+      }
+      const r = await this.deps.api.acceptTransfer(code.value, productId, scan.token);
       this.state.confirmation = { verified: r.verified, via: 'transfer', productId: r.productId };
       this.state.mode = { kind: 'yours', productId: r.productId, transferPending: false };
       this.render();

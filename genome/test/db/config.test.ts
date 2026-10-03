@@ -262,6 +262,20 @@ describe('loadConfig — operations settings', () => {
     expect(redactConfig(loadConfig({ SCAN_RETENTION_DAYS: '400' }))).toMatchObject({ scanRetentionDays: 400 });
   });
 
+  it('TRANSFER_ACCEPT_REQUIRE_PRODUCT (F-03): on by default everywhere, a switch, and a warning while production turns it off', () => {
+    expect(loadConfig({}).transferAcceptRequireProduct).toBe(true);
+    expect(loadConfig(PROD).transferAcceptRequireProduct).toBe(true);
+    expect(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'false' }).transferAcceptRequireProduct).toBe(false);
+    expect(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'NO' }).transferAcceptRequireProduct).toBe(false);
+    expect(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'yes' }).transferAcceptRequireProduct).toBe(true);
+    expect(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: '' }).transferAcceptRequireProduct).toBe(true);
+    expect(issues({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'sometimes' })).toEqual(['TRANSFER_ACCEPT_REQUIRE_PRODUCT: must be true or false']);
+    expect(configWarnings(loadConfig({ ...PROD, TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'false' }))).toEqual([expect.stringMatching(/^TRANSFER_ACCEPT_REQUIRE_PRODUCT: .*ORBES Client Services/)]);
+    expect(configWarnings(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'false' }))).toEqual([]);
+    expect(redactConfig(loadConfig({ TRANSFER_ACCEPT_REQUIRE_PRODUCT: 'false' }))).toMatchObject({ transferAcceptRequireProduct: false });
+    expect(testConfig().transferAcceptRequireProduct).toBe(true);
+  });
+
   it('warns in production while no scan retention period is set (scan history would grow without bound)', () => {
     expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: undefined }))).toEqual([expect.stringMatching(/^SCAN_RETENTION_DAYS: /)]);
     expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: '395' }))).toEqual([]);

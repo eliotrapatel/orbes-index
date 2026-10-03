@@ -245,6 +245,8 @@ describe('deploy/vps/compose.yaml', () => {
     expect(example.active.get('POSTGRES_APP_USER')).not.toBe(example.active.get('POSTGRES_USER'));
     // ORBES Client Services: empty in the template, so the app shows no contact until the brand's details are set.
     expect(c.clientServices).toEqual({});
+    // F-03: unset in the template, so a transfer is accepted for the piece scanned only.
+    expect(c.transferAcceptRequireProduct).toBe(true);
   });
 
   it('hands the ORBES Client Services details from .env to the app, empty meaning unset', () => {

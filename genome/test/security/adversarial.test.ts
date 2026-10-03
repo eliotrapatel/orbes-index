@@ -15,6 +15,7 @@ import {
   errorOf,
   issue,
   safeJson,
+  scanToReceive,
   seedCatalog,
   type Catalog,
   type Client,
@@ -270,11 +271,38 @@ describe('sessions, CSRF and authorisation under attack', () => {
     expect((await owner.post('/api/v1/ownership/register', { registrationToken: token })).statusCode).toBe(201);
     const { transferCode } = safeJson(await owner.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as any;
 
+    // The thief holds the code and had scanned the piece (F-03) when its owner reports it stolen.
     const thief = (await accountClient(h)).client;
+    const scanned = await scanToReceive(thief, p.code.data, transferCode);
     expect((await owner.post('/api/v1/ownership/incidents', { productId: p.product.productId, type: 'STOLEN' })).statusCode).toBe(201);
-    const late = await thief.post('/api/v1/ownership/transfers/accept', { transferCode });
+    const late = await thief.post('/api/v1/ownership/transfers/accept', scanned);
     expect(late.statusCode).toBe(410);
     expect(errorOf(late).code).toBe('TRANSFER_CANCELLED');
+    // A new scan of a stolen piece reads UNUSUAL ACTIVITY and earns no transfer token.
+    const after = safeJson(await thief.post('/api/v1/verify', { code: p.code.data })) as any;
+    expect(after.state).toBe('SUSPICIOUS_ACTIVITY');
+    expect(after.transfer).toBeUndefined();
+  });
+
+  it("a seller's code for one piece never hands over another, and a scan of one piece cannot probe which piece a code is for (F-03)", async () => {
+    const owner = (await accountClient(h)).client;
+    const [sold, kept] = [await sellable(false), await sellable(false)];
+    for (const p of [sold, kept]) expect((await owner.post('/api/v1/ownership/register', { registrationToken: await tokenFor(owner, p.code.data) })).statusCode).toBe(201);
+    const codeOf = async (p: typeof sold) => ((safeJson(await owner.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as any).transferCode as string);
+    const [soldCode, keptCode] = [await codeOf(sold), await codeOf(kept)];
+    const buyer = (await accountClient(h)).client;
+    const scanned = await scanToReceive(buyer, sold.code.data, soldCode);
+    // The cheaper piece's code given for the piece sold: refused, and the seller keeps the other.
+    expect(errorOf(await buyer.post('/api/v1/ownership/transfers/accept', { ...scanned, transferCode: keptCode })).code).toBe('TRANSFER_PRODUCT_MISMATCH');
+    // Naming other pieces with this scan: one answer whatever the code, so nothing about the code's piece leaks.
+    for (const productId of [kept.product.productId, 'O26-J-99999']) {
+      for (const transferCode of [soldCode, keptCode]) {
+        const res = await buyer.post('/api/v1/ownership/transfers/accept', { ...scanned, productId, transferCode });
+        expect(errorOf(res).code, `${productId} ${transferCode}`).toBe('TRANSFER_TOKEN_INVALID');
+      }
+    }
+    expect((await buyer.post('/api/v1/ownership/transfers/accept', scanned)).statusCode).toBe(200);
+    expect((safeJson(await owner.get('/api/v1/account/products')) as any).products.map((x: { productId: string }) => x.productId)).toEqual([kept.product.productId]);
   });
 
   it('a registration token is bound to its product and single-use', async () => {
@@ -562,7 +590,7 @@ describe('hostile input', () => {
       requests.push([admin, 'POST', '/api/admin/revocations', { targetType: 'KEY', targetId: n, reason: 'x' }]);
       requests.push([admin, 'POST', '/api/admin/revocations', { targetType: 'PRODUCT', targetId: n, reason: 'x' }]);
       requests.push([account, 'GET', `/api/v1/products/${n}/service-history`]);
-      requests.push([account, 'POST', '/api/v1/ownership/transfers/accept', { transferCode: n }]);
+      requests.push([account, 'POST', '/api/v1/ownership/transfers/accept', { transferCode: n, productId: n, transferToken: n }]);
       requests.push([account, 'POST', '/api/v1/ownership/register', { registrationToken: n, claimCode: n }]);
     }
     requests.push([admin, 'GET', '/api/admin/products?page=99999999999999999999&pageSize=-5']);

@@ -444,6 +444,17 @@ describe('verify app: OWNERSHIP heading follows the registration window', () => 
     expect(block).toContain('registrationStatus(');
     expect(block).not.toMatch(/this\.status\('REGISTRATION OPEN'\)/);
   });
+
+  it('offers RECEIVE THIS PIECE only within the transfer window of the scan, and sends the code for this piece with it (F-03)', () => {
+    const src = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
+    const block = src.slice(src.indexOf('private registeredBlock'), src.indexOf('private confirmationBlock'));
+    expect(block).toContain('registrationOpen(t.expiresAt, this.now())');
+    expect(block).toContain('RECEIVING.until(');
+    expect(block).toContain('this.transferForm(m.productId, t)');
+    const form = src.slice(src.indexOf('private transferForm'), src.indexOf('// ── Actions'));
+    expect(form).toContain('registrationOpen(scan.expiresAt, this.now())');
+    expect(form).toContain('this.deps.api.acceptTransfer(code.value, productId, scan.token)');
+  });
 });
 
 describe('GENOME-01 vocabulary specimen (docs/assets/genome-01-vocabulary.svg)', () => {

@@ -313,6 +313,32 @@ export const PIECES = Object.freeze({
 });
 
 /**
+ * RECEIVING THIS PIECE, in the OWNERSHIP tab of a piece registered to someone else (F-03, API §11.3): the transfer
+ * code is accepted for the piece scanned only, with that scan. The server gives the scan's transfer window (15
+ * minutes) to a signed-in reader who is not the owner while a transfer of the piece is pending; a reader who signs
+ * in after the scan verifies the piece again (VERIFY AGAIN, the same code), and a window that has closed asks for
+ * a new scan (SCAN AGAIN). The window is the scan's: never a "token" to the customer (BRAND §4.5).
+ */
+export const RECEIVING = Object.freeze({
+  title: 'RECEIVING THIS PIECE',
+  lead: 'If its owner has given you a transfer code, enter it to register this piece in your name.',
+  signIn: 'Sign in or create an ORBES account to receive it.',
+  ownerHint: 'If this piece is already registered to you, sign in and scan it again to see it as its owner.',
+  /** Signed in, and a transfer is pending, but this scan was made signed out: it carries no transfer window. */
+  verifyAgainLead: 'To receive this piece, verify it again now that you are signed in.',
+  verifyAgain: 'VERIFY AGAIN',
+  /** No transfer of the piece is pending: there is no code to enter for it. */
+  noTransfer: 'No transfer of this piece is pending. Once its owner has created a transfer code, scan this piece again to receive it.',
+  /** The time the window of this scan closes, as REGISTRATION OPEN UNTIL. */
+  until: (time: string) => `RECEIVING OPEN UNTIL ${time}`,
+  closed: 'The window to receive this piece from this scan has closed. Scan the code again to receive it.',
+  code: 'TRANSFER CODE',
+  codeHint: 'Created by its owner in their ORBES account.',
+  codeIncomplete: 'Enter the 12 characters of the transfer code.',
+  submit: 'RECEIVE THIS PIECE',
+});
+
+/**
  * The question under the contact of ORBES Client Services on every result that was not authentic
  * (C-02, API §8.5): where the piece was seen or bought, kept with the scan's reference for ORBES
  * Client Services and its Cases queue. Optional, never an accusation (§4.5: no "fake", no

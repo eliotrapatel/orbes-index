@@ -14,7 +14,7 @@ import {
   ownershipStateFor,
   TRANSFER_TTL_MS,
 } from '../../src/server/services/ownership.js';
-import { createScanToken, inspectScanToken } from '../../src/server/services/scan-tokens.js';
+import { createScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
 import { generateClaimCode, hashClaimCode } from '../../src/server/services/claim-codes.js';
 import type { ProductStatus } from '../../src/server/db/schema.js';
@@ -112,6 +112,22 @@ describe('OwnershipService', () => {
       .returning('id')
       .executeTakeFirstOrThrow();
     return (await createScanToken(t.db, { productId: productUuid, scanEventId: scan.id, now: clock.now(), ttlMs })).token;
+  }
+
+  /** F-03: a signed-in scan of the piece by `accountId` (null: signed out) and its TRANSFER_ACCEPT token, as VerificationService mints it. */
+  async function transferToken(productUuid: string, accountId: string | null, opts: { ttlMs?: number; purpose?: 'TRANSFER_ACCEPT' | 'FIRST_REGISTRATION' } = {}) {
+    const scan = await t.db
+      .insertInto('scan_events')
+      .values({ product_id: productUuid, account_id: accountId, event_type: 'VERIFY', result_state: 'AUTHENTIC_REGISTERED', occurred_at: clock.now() })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const purpose = opts.purpose ?? 'TRANSFER_ACCEPT';
+    return (await createScanToken(t.db, { productId: productUuid, scanEventId: scan.id, purpose, now: clock.now(), ttlMs: opts.ttlMs })).token;
+  }
+
+  /** The recipient scans the piece, signed in, then enters the transfer code with that scan (F-03). */
+  async function accept(who: { id: string; actor: Actor }, transferCode: string, p: { id: string; productId: string }, actor: Actor = who.actor) {
+    return ownership.acceptTransfer(who.id, { transferCode, productId: p.productId, transferToken: await transferToken(p.id, who.id) }, actor);
   }
 
   async function owned(opts: { claimCode?: string; path?: ProductStatus[] } = {}) {
@@ -299,7 +315,7 @@ describe('OwnershipService', () => {
 
       const buyer = await account();
       clock.advance(HOUR);
-      const r = await ownership.acceptTransfer(buyer.id, offer.transferCode.toLowerCase().replace(/-/g, ''), buyer.actor);
+      const r = await accept(buyer, offer.transferCode.toLowerCase().replace(/-/g, ''), p);
       expect(r).toMatchObject({ productId: p.productId, accountId: buyer.id, acquiredVia: 'TRANSFER', verified: true, ownershipState: 'OWNED' });
       expect(r.statusChange).toMatchObject({ from: 'OWNED', to: 'TRANSFERRED' });
       expect(await productRow(p.id)).toMatchObject({ status: 'TRANSFERRED', ownership_state: 'OWNED' });
@@ -312,19 +328,19 @@ describe('OwnershipService', () => {
       const done = await t.db.selectFrom('ownership_transfers').selectAll().where('id', '=', tr.id).executeTakeFirstOrThrow();
       expect(done).toMatchObject({ status: 'ACCEPTED', to_account_id: buyer.id });
 
-      await expectDomainError(ownership.acceptTransfer((await account()).id, offer.transferCode, admin), 'TRANSFER_ALREADY_ACCEPTED', 409);
+      await expectDomainError(accept(await account(), offer.transferCode, p, admin), 'TRANSFER_ALREADY_ACCEPTED', 409);
 
       // TRANSFERRED → TRANSFERRED: the new owner can pass it on again.
       const next = await ownership.initiateTransfer(buyer.id, p.productId, buyer.actor);
       const third = await account();
-      expect((await ownership.acceptTransfer(third.id, next.transferCode, third.actor)).statusChange).toMatchObject({ from: 'TRANSFERRED', to: 'TRANSFERRED' });
+      expect((await accept(third, next.transferCode, p)).statusChange).toMatchObject({ from: 'TRANSFERRED', to: 'TRANSFERRED' });
     });
 
     it('an unverified owner hands over an unverified ownership (REGISTERED)', async () => {
       const { p, owner } = await owned();
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
       const buyer = await account();
-      const r = await ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor);
+      const r = await accept(buyer, offer.transferCode, p);
       expect(r).toMatchObject({ verified: false, ownershipState: 'REGISTERED' });
     });
 
@@ -343,7 +359,7 @@ describe('OwnershipService', () => {
     it('the current owner cannot accept their own transfer', async () => {
       const { p, owner } = await owned();
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
-      await expectDomainError(ownership.acceptTransfer(owner.id, offer.transferCode, owner.actor), 'CANNOT_ACCEPT_OWN_TRANSFER', 409);
+      await expectDomainError(accept(owner, offer.transferCode, p), 'CANNOT_ACCEPT_OWN_TRANSFER', 409);
       expect((await currentRows(p.id))[0].account_id).toBe(owner.id);
     });
 
@@ -352,11 +368,11 @@ describe('OwnershipService', () => {
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
       clock.advance(TRANSFER_TTL_MS);
       const buyer = await account();
-      await expectDomainError(ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor), 'TRANSFER_EXPIRED', 410);
+      await expectDomainError(accept(buyer, offer.transferCode, p), 'TRANSFER_EXPIRED', 410);
       expect(await productRow(p.id)).toMatchObject({ ownership_state: 'REGISTERED' });
       const tr = await t.db.selectFrom('ownership_transfers').select('status').where('product_id', '=', p.id).executeTakeFirstOrThrow();
       expect(tr.status).toBe('EXPIRED');
-      await expectDomainError(ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor), 'TRANSFER_EXPIRED', 410);
+      await expectDomainError(accept(buyer, offer.transferCode, p), 'TRANSFER_EXPIRED', 410);
       // A new transfer can be started after expiry.
       expect((await ownership.initiateTransfer(owner.id, p.productId, owner.actor)).transferCode).not.toBe(offer.transferCode);
     });
@@ -378,15 +394,16 @@ describe('OwnershipService', () => {
       await expectDomainError(ownership.cancelTransfer(stranger.id, p.productId, stranger.actor), 'NOT_OWNER', 403);
       await ownership.cancelTransfer(owner.id, p.productId, owner.actor);
       expect(await productRow(p.id)).toMatchObject({ ownership_state: 'REGISTERED' });
-      await expectDomainError(ownership.acceptTransfer(stranger.id, offer.transferCode, stranger.actor), 'TRANSFER_CANCELLED', 410);
+      await expectDomainError(accept(stranger, offer.transferCode, p), 'TRANSFER_CANCELLED', 410);
       await expectDomainError(ownership.cancelTransfer(owner.id, p.productId, owner.actor), 'NO_PENDING_TRANSFER', 404);
     });
 
     it('rejects malformed and unknown transfer codes', async () => {
       const a = await account();
-      await expectDomainError(ownership.acceptTransfer(a.id, 'ABCD', a.actor), 'VALIDATION_FAILED', 400);
-      await expectDomainError(ownership.acceptTransfer(a.id, 'UUUU-UUUU-UUUU', a.actor), 'VALIDATION_FAILED', 400);
-      await expectDomainError(ownership.acceptTransfer(a.id, '0000-0000-0000', a.actor), 'TRANSFER_NOT_FOUND', 404);
+      await expectDomainError(ownership.acceptTransfer(a.id, { transferCode: 'ABCD' }, a.actor), 'VALIDATION_FAILED', 400);
+      await expectDomainError(ownership.acceptTransfer(a.id, { transferCode: 'UUUU-UUUU-UUUU' }, a.actor), 'VALIDATION_FAILED', 400);
+      const { p } = await owned();
+      await expectDomainError(accept(a, '0000-0000-0000', p), 'TRANSFER_NOT_FOUND', 404);
     });
 
     it('refuses transfers of products that are not transferable, and stale transfers', async () => {
@@ -395,7 +412,7 @@ describe('OwnershipService', () => {
       // Client services moves the product into service meanwhile.
       await warranty.openService(p.productId, { type: 'INSPECTION' }, admin);
       const buyer = await account();
-      await expectDomainError(ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor), 'TRANSFER_NOT_ALLOWED', 409);
+      await expectDomainError(accept(buyer, offer.transferCode, p), 'TRANSFER_NOT_ALLOWED', 409);
       await ownership.cancelTransfer(owner.id, p.productId, owner.actor);
       await expectDomainError(ownership.initiateTransfer(owner.id, p.productId, owner.actor), 'TRANSFER_NOT_ALLOWED', 409);
 
@@ -405,7 +422,216 @@ describe('OwnershipService', () => {
       await t.db.updateTable('ownership').set({ ended_at: clock.now(), ended_reason: 'ADMIN' }).where('product_id', '=', q.p.id).execute();
       await t.db.insertInto('ownership').values({ product_id: q.p.id, account_id: buyer.id, acquired_via: 'ADMIN', started_at: clock.now() }).execute();
       const other = await account();
-      await expectDomainError(ownership.acceptTransfer(other.id, offer2.transferCode, other.actor), 'TRANSFER_STALE', 409);
+      await expectDomainError(accept(other, offer2.transferCode, q.p), 'TRANSFER_STALE', 409);
+    });
+  });
+
+  // ── transfers bound to the scanned piece (F-03) ──────────────────────────
+
+  describe('acceptTransfer: the code of the piece scanned, with that scan (F-03)', () => {
+    /** Two pieces of one seller, each offered for transfer: the cheaper one's code must not hand over the other. */
+    async function twoPieces() {
+      const { p: sold, owner: seller } = await owned();
+      const kept = await product();
+      await ownership.registerFirst(seller.id, { registrationToken: await scanToken(kept.id) }, seller.actor);
+      const soldOffer = await ownership.initiateTransfer(seller.id, sold.productId, seller.actor);
+      const keptOffer = await ownership.initiateTransfer(seller.id, kept.productId, seller.actor);
+      return { seller, sold, kept, soldOffer, keptOffer, buyer: await account() };
+    }
+    const transferOf = (productUuid: string) => t.db.selectFrom('ownership_transfers').selectAll().where('product_id', '=', productUuid).orderBy('created_at', 'desc').executeTakeFirstOrThrow();
+    const unused = async (token: string) => (await inspectScanToken(t.db, token, { purpose: 'TRANSFER_ACCEPT', now: clock.now() })).ok;
+
+    it('refuses the code of another piece (409 TRANSFER_PRODUCT_MISMATCH, naming neither piece) and changes nothing', async () => {
+      const { seller, sold, kept, keptOffer, soldOffer, buyer } = await twoPieces();
+      const token = await transferToken(sold.id, buyer.id);
+      const e = await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: sold.productId, transferToken: token }, buyer.actor),
+        'TRANSFER_PRODUCT_MISMATCH',
+        409,
+      );
+      expect(e.publicMessage).toBe('This transfer code is not for this piece. Check the code with the owner of this piece.');
+      for (const id of [sold.productId, kept.productId, sold.id, kept.id]) expect(e.publicMessage).not.toContain(id);
+      // Nothing moved: both transfers pending, both pieces the seller's, the scan still usable.
+      expect((await transferOf(kept.id)).status).toBe('PENDING');
+      expect((await currentRows(kept.id))[0].account_id).toBe(seller.id);
+      expect((await currentRows(sold.id))[0].account_id).toBe(seller.id);
+      expect(await unused(token)).toBe(true);
+      // A code of another piece says nothing more about itself: cancelled or expired, the answer is the same.
+      await ownership.cancelTransfer(seller.id, kept.productId, seller.actor);
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: sold.productId, transferToken: token }, buyer.actor),
+        'TRANSFER_PRODUCT_MISMATCH',
+        409,
+      );
+      // The piece's own code, with the same scan, hands it over.
+      const r = await ownership.acceptTransfer(buyer.id, { transferCode: soldOffer.transferCode, productId: sold.productId, transferToken: token }, buyer.actor);
+      expect(r).toMatchObject({ productId: sold.productId, accountId: buyer.id, acquiredVia: 'TRANSFER' });
+      expect((await currentRows(kept.id))[0].account_id).toBe(seller.id);
+    });
+
+    it('uses up the scan in the acceptance, and the audit entry names it', async () => {
+      const { p, owner } = await owned();
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      const token = await transferToken(p.id, buyer.id);
+      const scan = (await inspectScanToken(t.db, token, { purpose: 'TRANSFER_ACCEPT', now: clock.now() })) as { ok: true; scanEventId: string };
+      await ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.id, transferToken: token }, buyer.actor);
+      expect(await inspectScanToken(t.db, token, { purpose: 'TRANSFER_ACCEPT', now: clock.now() })).toEqual({ ok: false, reason: 'USED' });
+      const entry = (await audit.list({ action: 'ownership.transfer.accept', targetId: p.productId })).items[0];
+      expect(entry.details).toMatchObject({ toAccountId: buyer.id, scanEventId: scan.scanEventId });
+      expect(JSON.stringify(entry.details)).not.toContain(token);
+    });
+
+    it('refuses an acceptance without the scan (400 TRANSFER_SCAN_REQUIRED) or without the piece (400 VALIDATION_FAILED)', async () => {
+      const { p, owner } = await owned();
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      const e = await expectDomainError(ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId }, buyer.actor), 'TRANSFER_SCAN_REQUIRED', 400);
+      expect(e.publicMessage).toBe('Scan this piece while signed in to your ORBES account, then enter its transfer code.');
+      await expectDomainError(ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: null }, buyer.actor), 'TRANSFER_SCAN_REQUIRED', 400);
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, transferToken: await transferToken(p.id, buyer.id) }, buyer.actor),
+        'VALIDATION_FAILED',
+        400,
+      );
+      expect((await transferOf(p.id)).status).toBe('PENDING');
+    });
+
+    it('refuses an expired scan (410 TRANSFER_TOKEN_EXPIRED: 15 minutes)', async () => {
+      const { p, owner } = await owned();
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      const token = await transferToken(p.id, buyer.id, { ttlMs: TRANSFER_TOKEN_TTL_MS });
+      clock.advance(TRANSFER_TOKEN_TTL_MS);
+      const e = await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: token }, buyer.actor),
+        'TRANSFER_TOKEN_EXPIRED',
+        410,
+      );
+      expect(e.publicMessage).toBe('This scan is more than 15 minutes old. Scan the piece again, then enter its transfer code.');
+      expect((await transferOf(p.id)).status).toBe('PENDING');
+      // A new scan works.
+      expect((await accept(buyer, offer.transferCode, p)).accountId).toBe(buyer.id);
+    });
+
+    it('refuses the scan of another piece (400 TRANSFER_TOKEN_INVALID), before the code is read: no piece can be probed', async () => {
+      const { sold, kept, keptOffer, soldOffer, buyer } = await twoPieces();
+      const other = await transferToken(kept.id, buyer.id);
+      // The code is the named piece's or not: one answer, so a scan of one piece never tests codes against others.
+      for (const code of [soldOffer.transferCode, keptOffer.transferCode, '0000-0000-0000']) {
+        const e = await expectDomainError(
+          ownership.acceptTransfer(buyer.id, { transferCode: code, productId: sold.productId, transferToken: other }, buyer.actor),
+          'TRANSFER_TOKEN_INVALID',
+          400,
+        );
+        expect(e.publicMessage).toBe('This scan cannot be used to receive this piece. Scan the piece again, then enter its transfer code.');
+      }
+      // An unknown piece named with a scan: the scan is not of it.
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: soldOffer.transferCode, productId: 'O26-J-99999', transferToken: other }, buyer.actor),
+        'TRANSFER_TOKEN_INVALID',
+        400,
+      );
+      expect((await transferOf(sold.id)).status).toBe('PENDING');
+      expect(await unused(other)).toBe(true);
+    });
+
+    it("refuses another account's scan (400 TRANSFER_TOKEN_INVALID), which stays usable by the account that scanned", async () => {
+      const { p, owner } = await owned();
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      const onlooker = await account();
+      const token = await transferToken(p.id, buyer.id);
+      await expectDomainError(
+        ownership.acceptTransfer(onlooker.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: token }, onlooker.actor),
+        'TRANSFER_TOKEN_INVALID',
+        400,
+      );
+      // A scan made signed out names no account: it takes no transfer either.
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: await transferToken(p.id, null) }, buyer.actor),
+        'TRANSFER_TOKEN_INVALID',
+        400,
+      );
+      expect(await unused(token)).toBe(true);
+      expect((await ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: token }, buyer.actor)).accountId).toBe(buyer.id);
+    });
+
+    it('refuses a scan already used (409 TRANSFER_TOKEN_USED), a registration token, and malformed or unknown scans', async () => {
+      const { p, owner } = await owned();
+      const first = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const buyer = await account();
+      const token = await transferToken(p.id, buyer.id);
+      await ownership.acceptTransfer(buyer.id, { transferCode: first.transferCode, productId: p.productId, transferToken: token }, buyer.actor);
+      // The piece goes on to a third owner, then back towards the buyer: their old scan is spent.
+      const third = await account();
+      await accept(third, (await ownership.initiateTransfer(buyer.id, p.productId, buyer.actor)).transferCode, p);
+      const back = await ownership.initiateTransfer(third.id, p.productId, third.actor);
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: back.transferCode, productId: p.productId, transferToken: token }, buyer.actor),
+        'TRANSFER_TOKEN_USED',
+        409,
+      );
+      // A token of another purpose is no transfer scan, and a transfer scan registers nothing.
+      const registration = await transferToken(p.id, buyer.id, { purpose: 'FIRST_REGISTRATION' });
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: back.transferCode, productId: p.productId, transferToken: registration }, buyer.actor),
+        'TRANSFER_TOKEN_INVALID',
+        400,
+      );
+      const fresh = await product();
+      await expectDomainError(ownership.registerFirst(buyer.id, { registrationToken: await transferToken(fresh.id, buyer.id) }, buyer.actor), 'REGISTRATION_TOKEN_INVALID', 400);
+      for (const bogus of ['A'.repeat(43), 'not a scan']) {
+        await expectDomainError(
+          ownership.acceptTransfer(buyer.id, { transferCode: back.transferCode, productId: p.productId, transferToken: bogus }, buyer.actor),
+          'TRANSFER_TOKEN_INVALID',
+          400,
+        );
+      }
+      expect((await accept(buyer, back.transferCode, p)).accountId).toBe(buyer.id);
+    });
+
+    it('a refusal inside the transaction leaves the scan unused (the current owner, a piece gone into service)', async () => {
+      const { p, owner } = await owned();
+      const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
+      const own = await transferToken(p.id, owner.id);
+      await expectDomainError(
+        ownership.acceptTransfer(owner.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: own }, owner.actor),
+        'CANNOT_ACCEPT_OWN_TRANSFER',
+        409,
+      );
+      expect(await unused(own)).toBe(true);
+      await warranty.openService(p.productId, { type: 'INSPECTION' }, admin);
+      const buyer = await account();
+      const token = await transferToken(p.id, buyer.id);
+      await expectDomainError(
+        ownership.acceptTransfer(buyer.id, { transferCode: offer.transferCode, productId: p.productId, transferToken: token }, buyer.actor),
+        'TRANSFER_NOT_ALLOWED',
+        409,
+      );
+      expect(await unused(token)).toBe(true);
+    });
+
+    it('with requireScannedPiece false (an acceptance assisted by ORBES Client Services), the piece and the scan are optional, and checked when sent', async () => {
+      const assisted = new OwnershipService({ db: t.db, audit, lifecycle, clock: clock.now, transferKey: TRANSFER_KEY, requireScannedPiece: false });
+      const { seller, sold, kept, keptOffer, soldOffer, buyer } = await twoPieces();
+      // A piece named: still its own code only.
+      await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: sold.productId }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);
+      await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, productId: 'O26-J-99999' }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);
+      // A scan alone: the piece is the scan's.
+      const token = await transferToken(sold.id, buyer.id);
+      await expectDomainError(assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode, transferToken: token }, buyer.actor), 'TRANSFER_PRODUCT_MISMATCH', 409);
+      await expectDomainError(
+        assisted.acceptTransfer(seller.id, { transferCode: soldOffer.transferCode, transferToken: token }, seller.actor),
+        'TRANSFER_TOKEN_INVALID',
+        400,
+      );
+      const viaScan = await assisted.acceptTransfer(buyer.id, { transferCode: soldOffer.transferCode, transferToken: token }, buyer.actor);
+      expect(viaScan.productId).toBe(sold.productId);
+      // Nothing but the code, as before F-03; the audit entry names no scan.
+      const r = await assisted.acceptTransfer(buyer.id, { transferCode: keptOffer.transferCode }, buyer.actor);
+      expect(r).toMatchObject({ productId: kept.productId, accountId: buyer.id });
+      expect((await audit.list({ action: 'ownership.transfer.accept', targetId: kept.productId })).items[0].details).toMatchObject({ scanEventId: null });
     });
   });
 
@@ -426,7 +652,7 @@ describe('OwnershipService', () => {
       const { p, owner } = await owned();
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
       const buyer = await account();
-      await ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor);
+      await accept(buyer, offer.transferCode, p);
       await ownership.initiateTransfer(buyer.id, p.productId, buyer.actor);
       const r = await ownership.confirmOwnership(p.productId, admin);
       expect(r.statusChange).toBeNull();
@@ -442,7 +668,7 @@ describe('OwnershipService', () => {
       expect(change).toMatchObject({ from: 'REGISTERED', to: 'LOST' });
       expect(await productRow(p.id)).toMatchObject({ status: 'LOST', ownership_state: 'REGISTERED' });
       const thief = await account();
-      await expectDomainError(ownership.acceptTransfer(thief.id, offer.transferCode, thief.actor), 'TRANSFER_CANCELLED', 410);
+      await expectDomainError(accept(thief, offer.transferCode, p), 'TRANSFER_CANCELLED', 410);
       // LOST → STOLEN is not in the table.
       await expectDomainError(ownership.reportIncident(owner.id, p.productId, 'STOLEN', owner.actor), 'TRANSITION_NOT_ALLOWED', 409);
       // Recovery (admin) returns to the pre-incident status.
@@ -488,7 +714,7 @@ describe('OwnershipService', () => {
       expect((await ownership.resolveIncident(owner.id, p.productId, owner.actor)).to).toBe('REGISTERED');
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
       const buyer = await account();
-      await ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor);
+      await accept(buyer, offer.transferCode, p);
       await ownership.reportIncident(buyer.id, p.productId, 'LOST', buyer.actor);
       expect((await ownership.resolveIncident(buyer.id, p.productId, buyer.actor)).to).toBe('TRANSFERRED');
       expect(await productRow(p.id)).toMatchObject({ status: 'TRANSFERRED', ownership_state: 'REGISTERED' });
@@ -590,7 +816,7 @@ describe('OwnershipService', () => {
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
       const buyer = await account();
       clock.advance(MIN);
-      await ownership.acceptTransfer(buyer.id, offer.transferCode, buyer.actor);
+      await accept(buyer, offer.transferCode, p);
       const h = await ownership.history(p.productId);
       expect(h.owners.map((o) => [o.accountId, o.acquiredVia, o.endedReason])).toEqual([
         [owner.id, 'FIRST_REGISTRATION', 'TRANSFERRED_OUT'],
@@ -607,7 +833,7 @@ describe('OwnershipService', () => {
       const { p, owner } = await owned();
       const before = await productRow(p.id);
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);
-      await ownership.acceptTransfer((await account()).id, offer.transferCode, admin);
+      await accept(await account(), offer.transferCode, p, admin);
       const after = await productRow(p.id);
       for (const k of ['product_id', 'packed_identity', 'year', 'category_id', 'serial', 'claim_secret_hash'] as const) {
         expect(after[k]).toEqual(before[k]);

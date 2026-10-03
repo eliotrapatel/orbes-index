@@ -260,6 +260,11 @@ Ownership:
 | `TRANSFER_NOT_ALLOWED` | 409 | The product's status does not allow a transfer. |
 | `TRANSFERS_PAUSED` | 409 | (§11.2) New transfers out of the account are paused for 72 hours after an assisted recovery of its password (§10.8). The message gives the end of the pause. |
 | `TRANSFER_NOT_FOUND` | 404 | No transfer matches the code. |
+| `TRANSFER_PRODUCT_MISMATCH` | 409 | (§11.3, F-03) The transfer code is not the code of the piece scanned (`productId`). The message names no piece: *This transfer code is not for this piece. Check the code with the owner of this piece.* |
+| `TRANSFER_SCAN_REQUIRED` | 400 | (§11.3, F-03) No `transferToken`: the recipient scans the piece, signed in, first (unless `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false`). |
+| `TRANSFER_TOKEN_INVALID` | 400 | (§11.3, F-03) Unknown or malformed transfer token, one bound to another purpose (a registration or sale token) or another piece, or one earned by another account's scan (or a scan made signed out). |
+| `TRANSFER_TOKEN_USED` | 409 | (§11.3, F-03) The transfer token was already used: scan the piece again. |
+| `TRANSFER_TOKEN_EXPIRED` | 410 | (§11.3, F-03) The transfer token expired (15 minutes after the scan). |
 | `TRANSFER_EXPIRED` | 410 | The transfer code expired (7 days). |
 | `TRANSFER_CANCELLED` | 410 | The sender cancelled the transfer. |
 | `TRANSFER_ALREADY_ACCEPTED` | 409 | The transfer code was already used. |
@@ -581,7 +586,7 @@ The place and the note are the customer's own words: **personal data**. They are
 
 ## 9. Verification: `POST /api/v1/verify`
 
-Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner. If it carries a console session (`orbes_admin`) the console would let in, the scan is a **staff scan** (§9.7): recorded as `ADMIN_TEST` under that console user, outside `UNSOLD_PIECE_SCAN` and the history rules (the code's own findings of steps 6–7 are still recorded), without a registration token. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring (a staff scan only reads it).
+Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner and, for a reader who is not the owner of a piece whose transfer is pending, to give the scan's transfer token (`transfer`, §9.2, F-03). If it carries a console session (`orbes_admin`) the console would let in, the scan is a **staff scan** (§9.7): recorded as `ADMIN_TEST` under that console user, outside `UNSOLD_PIECE_SCAN` and the history rules (the code's own findings of steps 6–7 are still recorded), without a registration or transfer token. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring (a staff scan only reads it).
 
 ### 9.1 Request
 
@@ -660,6 +665,9 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `registration.token` | string | Single-use registration token (base64url, 43 characters) for `POST /api/v1/ownership/register`. |
 | `registration.expiresAt` | ISO timestamp | 15 minutes after the scan. |
 | `registration.claimCodeRequired` | boolean | The product ships with a claim code that must be supplied at registration. |
+| `transfer` | object | (F-03) `AUTHENTIC_*` states only, when the request carries the session of an account that is **not the owner** of a piece **whose transfer is pending** (`ownership.transferPending`): in practice `AUTHENTIC_REGISTERED`. **Never on a staff scan** (§9.7), never signed out, never for the owner, never on a result that is not authentic (a piece reported lost or stolen, unusual activity). |
+| `transfer.token` | string | Single-use transfer token (base64url, 43 characters, purpose `TRANSFER_ACCEPT`) for `POST /api/v1/ownership/transfers/accept` (§11.3): it ties the acceptance to this scan of this piece by this account. Only its SHA-256 is stored, next to the scan, which names the account. |
+| `transfer.expiresAt` | ISO timestamp | 15 minutes after the scan. |
 | `staffScan` | `true` | Only on a **staff scan** (§9.7): the request carried a console session, so the scan was recorded as `ADMIN_TEST`. It then has no `registration` and takes no report (§8.5). Only the browser that holds the console cookie ever receives it. |
 
 Note on `product.collection`: the product's own collection, else its model's — the same rule as `product_overview` and the owner's product list.
@@ -702,7 +710,7 @@ The first step that decides the state ends the decision; the scan event, authent
 | 8 | Product status LOST or STOLEN. | `SUSPICIOUS_ACTIVITY` |
 | 9 | A public scan of a piece ORBES has not sold yet (product status ISSUED, or SERVICED in a pre-sale service entered from ISSUED) of a code that passed steps 1–6 records the MEDIUM anomaly `UNSOLD_PIECE_SCAN` with the scan's country, once per piece and per UTC day, with weight 0 (§9.7). | unchanged |
 | 9 | Anomaly scoring over the code's recent scan history, this scan included (impossible travel, scan velocity, source diversity, geographic dispersion, lost/stolen and post-revocation scans; a staff scan only reads the history, §9.7). It runs for every code that passed steps 1–6. When the state is still undecided and the risk score is at or above the configured threshold: | `SUSPICIOUS_ACTIVITY`; for the logged-in current owner, `AUTHENTIC_OWNERSHIP_VERIFIED` with `notice` |
-| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token (none on a staff scan, §9.7); otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true` (not on a staff scan), so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. | as stated |
+| 10 | Still undecided: the viewer is the current owner → `AUTHENTIC_OWNERSHIP_VERIFIED`; another account owns it → `AUTHENTIC_REGISTERED`; no owner and product status ACTIVATED, RESOLD or SERVICED (not a pre-sale service entered from ISSUED) → `AUTHENTIC_FIRST_REGISTRATION` with a registration token (none on a staff scan, §9.7); otherwise `AUTHENTIC`. **Exception:** `SUSPICIOUS_ACTIVITY` from step 9 alone (no status, genome or code finding) on a product with no owner, open for registration as above and shipped with a claim code still carries a registration token with `claimCodeRequired: true` (not on a staff scan), so copies scanned by strangers cannot lock out the buyer holding the certificate claim code. **Transfer token (F-03):** when the state is an `AUTHENTIC*` one, another account owns the piece, its transfer is pending and the request carries the session of an account that is not that owner (not on a staff scan), the scan also mints a 15-minute `TRANSFER_ACCEPT` token (`transfer`, §9.2), which the acceptance of that transfer uses up (§11.3). | as stated |
 | 11 | Authenticator policy: may set `assurance: "CODE_ONLY"` and `hardwareProofRequired`. Never changes the state. | — |
 | 12 | The authentication record and the final scan state are persisted and the outcome returned. | — |
 
@@ -944,7 +952,7 @@ When `SUSPICIOUS_ACTIVITY` results from a payload-hash mismatch (step 6), `genom
 - one scan event of type `ADMIN_TEST` naming the console user (`scan_events.admin_id`, shown as *by email* in the console's verification events, §16.1), with the IP pseudonym, coarse location and browser family but **no device, session or account pseudonym**;
 - **no `UNSOLD_PIECE_SCAN`** and no history finding: the scan takes no part in step 9, the code's public history is scored as it stands, so the state is the one a customer would see now, and ADMIN_TEST scans never count in any later scoring;
 - the findings of steps 6–7 are **still recorded**, with `staffScan: true` in their `details`: `VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH` and `GENOME_MISMATCH` describe the code, not who scanned it. A forged but validly signed code most likely reaches ORBES when Client Services checks a suspicious piece a customer brought in, from a browser signed in to the console: that scan pages on a possible key compromise (§16.4) as any other would;
-- **no registration token**, also under step 10's exception: a console user's test is never a buyer's scan. The state stays the one a customer would see (`AUTHENTIC_FIRST_REGISTRATION` included); the verify app's OWNERSHIP tab then says **STAFF SCAN**: *This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered.*
+- **no registration token**, also under step 10's exception, and **no transfer token** (F-03; the scan event names no account): a console user's test is never a buyer's scan. The state stays the one a customer would see (`AUTHENTIC_FIRST_REGISTRATION` included); the verify app's OWNERSHIP tab then says **STAFF SCAN**: *This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered.*
 - the response carries **`staffScan: true`** (§9.2), which the verify app reads to show STAFF SCAN rather than a registration, and to leave out **WHERE DID YOU SEE OR BUY THIS PIECE?** on a result that was not authentic: a staff scan takes **no report** (`POST /api/v1/reports` answers `409 REPORT_NOT_ALLOWED` with its own message, §8.5). A customer's words belong to a customer's scan. Nothing leaks: the flag reaches only the browser that holds the console cookie.
 
 A member of the team who buys a piece therefore scans and registers it from a browser that is not signed in to the console. The admin cookie is `SameSite=Strict`: a cross-site request never carries it, so no other site can make a visitor's scan count as a staff scan, and a console session that the guard would refuse (temporary password, second factor missing when required, disabled account) leaves the scan public.
@@ -1176,7 +1184,7 @@ The current owner offers the product for transfer. Body `{ "productId": string }
 { "transferCode": "2KRJ-RW75-58PH", "expiresAt": "2026-10-08T08:13:21.929Z" }
 ```
 
-The offer expires after 7 days. While it is pending, verifications show `ownership.transferPending: true`.
+The offer expires after 7 days. While it is pending, verifications show `ownership.transferPending: true`, and the verification of a signed-in reader who is not the owner carries the transfer token that §11.3 requires (`transfer`, §9.2, F-03): the code is accepted for this piece only.
 
 For 72 hours after an assisted recovery of the account's password (§10.8), new transfers out of it are refused with `409 TRANSFERS_PAUSED`, whose message gives the end of the pause (*… transfers from this account are paused until 5 October 2026, 09:00 UTC. ORBES Client Services can assist you.*).
 
@@ -1186,15 +1194,33 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOU
 
 ### 11.3 `POST /api/v1/ownership/transfers/accept`
 
-The recipient redeems a transfer code. Body `{ "transferCode": string (1–32) }`; any accepted spelling of the 12-character code works. Rate group `auth`.
+The recipient redeems a transfer code **for the piece they scanned, with that scan** (F-03). Rate group `auth`.
 
-The previous ownership ends (`TRANSFERRED_OUT`), a new one starts (`acquiredVia: TRANSFER`, `verified` carried over) and the product becomes TRANSFERRED.
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `transferCode` | string | yes | 1–32 characters; any accepted spelling of the 12-character code. |
+| `productId` | string | yes (unless `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false`) | The piece the recipient scanned: canonical id or uuid (`product.productId` of the verification). |
+| `transferToken` | string | yes (unless `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false`) | base64url, 1–128 characters: `transfer.token` of the recipient's verification of that piece, signed in (§9.2). A missing one answers `400 TRANSFER_SCAN_REQUIRED` (*Scan this piece while signed in to your ORBES account, then enter its transfer code.*). |
+
+```json
+{ "transferCode": "2KRJ-RW75-58PH", "productId": "O26-J-00002", "transferToken": "q1xV0cTzW3kQm8yBf4PpH7sLr2aNd9eGu6jKw5vXc0Y" }
+```
+
+Why: the code alone used to be enough, so a seller who owns two pieces could give the buyer of the dearer one the code of the cheaper one, keep the piece sold, and later report it stolen. Now:
+
+- **The code must be the scanned piece's.** A code of another piece answers `409 TRANSFER_PRODUCT_MISMATCH` (*This transfer code is not for this piece. Check the code with the owner of this piece.*), which names neither piece and says nothing more about the other code (whether it is pending, cancelled or expired); nothing changes, and the scan stays usable.
+- **The scan is required and used up.** The `TRANSFER_ACCEPT` token is checked before the code is read: it must be of that piece (`productId`), unexpired, unused, and earned by **this account's** scan (the scan event names the account). Refusals: `400 TRANSFER_TOKEN_INVALID` (unknown, malformed, another purpose, another piece, another account, a scan made signed out), `409 TRANSFER_TOKEN_USED`, `410 TRANSFER_TOKEN_EXPIRED` (15 minutes). Because the token is checked first, a scan of one piece cannot be used to try piece ids against a code: every other id gets the same `TRANSFER_TOKEN_INVALID`. The token is used up **in the acceptance's transaction**, under the piece's and the transfer's row locks: any refusal there (`CANNOT_ACCEPT_OWN_TRANSFER`, `TRANSFER_NOT_ALLOWED`, a lock of the account…) leaves it unused.
+- **`TRANSFER_ACCEPT_REQUIRE_PRODUCT=false`** (DEPLOYMENT §3.1; a production start logs a warning) makes `productId` and `transferToken` optional, for an acceptance assisted by ORBES Client Services: whichever is sent is still checked (a `productId` of another piece is still `409 TRANSFER_PRODUCT_MISMATCH`; a token alone stands for its piece).
+
+The previous ownership ends (`TRANSFERRED_OUT`), a new one starts (`acquiredVia: TRANSFER`, `verified` carried over) and the product becomes TRANSFERRED. The audit entry `ownership.transfer.accept` names the scan used (`details.scanEventId`, `null` for an assisted acceptance without one).
 
 **200** `{ "productId": "O26-J-00002", "verified": true, "since": "2026-10-01T08:13:21.929Z" }`
 
 An acceptance that was already on its way when ORBES Client Services locked the recipient's account (§16.12) is refused with `403 ACCOUNT_LOCKED`; the transfer stays pending.
 
-Errors: `400 VALIDATION_FAILED` (including a malformed transfer code), `401 UNAUTHORIZED`, `403 ACCOUNT_LOCKED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 TRANSFER_NOT_FOUND`, `409 TRANSFER_ALREADY_ACCEPTED`, `409 CANNOT_ACCEPT_OWN_TRANSFER`, `409 TRANSFER_STALE`, `409 TRANSFER_NOT_ALLOWED`, `410 TRANSFER_EXPIRED`, `410 TRANSFER_CANCELLED`, `429 RATE_LIMITED`.
+In the verify app: **RECEIVING THIS PIECE** in the OWNERSHIP tab of a piece registered to someone else (BRAND §4.4). A reader signed in when they scan gets the result on that tab, with *RECEIVING OPEN UNTIL hh:mm* and the TRANSFER CODE field; one who signs in after the scan is asked to **VERIFY AGAIN** (the same code, now with the session); after 15 minutes the panel asks to **SCAN AGAIN**, without sending the code. With no transfer pending, there is nothing to enter.
+
+Errors: `400 VALIDATION_FAILED` (including a malformed transfer code, a missing or malformed `productId`, a malformed `transferToken`, an unknown field), `400 TRANSFER_SCAN_REQUIRED`, `400 TRANSFER_TOKEN_INVALID`, `401 UNAUTHORIZED`, `403 ACCOUNT_LOCKED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 TRANSFER_NOT_FOUND`, `409 TRANSFER_PRODUCT_MISMATCH`, `409 TRANSFER_TOKEN_USED`, `409 TRANSFER_ALREADY_ACCEPTED`, `409 CANNOT_ACCEPT_OWN_TRANSFER`, `409 TRANSFER_STALE`, `409 TRANSFER_NOT_ALLOWED`, `410 TRANSFER_TOKEN_EXPIRED`, `410 TRANSFER_EXPIRED`, `410 TRANSFER_CANCELLED`, `429 RATE_LIMITED`.
 
 ### 11.4 `POST /api/v1/ownership/transfers/cancel`
 

@@ -22,7 +22,13 @@
  * `verify` with a console session (S-07: `ScanMeta.adminId`) is a staff scan
  * too: ADMIN_TEST, outside UNSOLD_PIECE_SCAN and the history rules (the code's
  * own findings of steps 6–7 are still recorded, marked `staffScan`), no
- * registration token, the public wording.
+ * registration or transfer token, the public wording.
+ *
+ * Scan tokens (scan-tokens.ts) tie an action to this scan of this piece: the
+ * registration token of a first registration (step 10), and the transfer token
+ * (F-03) of a signed-in reader who is not the owner of a piece whose transfer
+ * is pending, on an authentic result, which the acceptance of that transfer
+ * uses up for that piece and that account.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -52,7 +58,7 @@ import { ANOMALY_WEIGHTS, type ServiceFindingType } from './anomaly-rules.js';
 import type { AnomalyFinding, AnomalyService } from './anomaly.js';
 import { copyFor } from './copy.js';
 import { isPreSaleService } from './lifecycle.js';
-import { createScanToken, SCAN_TOKEN_TTL_MS } from './scan-tokens.js';
+import { createScanToken, SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantyStatus } from './warranty.js';
 
 export type { VerificationState } from '../db/schema.js';
@@ -121,6 +127,12 @@ export interface VerifyOutcome {
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
+  /**
+   * F-03: the TRANSFER_ACCEPT token of this scan, for POST /api/v1/ownership/transfers/accept with the transfer code
+   * of this piece. Only on an AUTHENTIC_* result read by a signed-in account that is not the owner of a piece whose
+   * transfer is pending (never on a staff scan); valid 15 minutes, single use, for this piece and this account.
+   */
+  transfer?: { token: string; expiresAt: string };
   /**
    * Present (true) only on a staff scan: the request carried a console session (S-07), so the scan was
    * recorded as ADMIN_TEST. /verify then offers no report form (a staff scan takes none) and no
@@ -269,6 +281,12 @@ interface Work {
   policy?: PolicyEvaluation;
 }
 
+/** The scan tokens a verification minted in its transaction, handed to the public outcome. */
+interface ScanTokens {
+  registration?: VerifyOutcome['registration'];
+  transfer?: VerifyOutcome['transfer'];
+}
+
 interface CleanGenome {
   glyphs: (number | null)[];
   confidence?: number[];
@@ -306,7 +324,7 @@ export class VerificationService {
    * staff scan: the same decision, recorded as ADMIN_TEST under that console user without the
    * device, session or account pseudonyms; it raises no UNSOLD_PIECE_SCAN, takes no part in the
    * scoring of step 9 (which still reads the public history, so the state is the one a customer
-   * would see) and earns no registration token. The findings of steps 6–7 describe the code, not
+   * would see) and earns no registration or transfer token. The findings of steps 6–7 describe the code, not
    * who scanned it (VALID_SIGNATURE_UNREGISTERED and CODE_MISMATCH page on a possible key
    * compromise): a staff scan records them too, with `staffScan: true` in their details. A public
    * scan of a piece ORBES has not sold yet (ISSUED, or in a pre-sale service, its warranty not
@@ -419,6 +437,16 @@ export class VerificationService {
           w.reasons.push('REGISTRATION_WITH_CLAIM_CODE');
         }
 
+        // F-03: the recipient of a pending transfer reads the piece signed in, and it reads as authentic: this scan
+        // earns the token that the acceptance of the transfer uses up, for this piece and this account. A staff scan
+        // never does (its scan event names no account), nor the owner, nor a result that is not authentic.
+        let transfer: VerifyOutcome['transfer'];
+        const authentic = w.state !== undefined && AUTHENTIC_STATES.includes(w.state);
+        if (!staff && m.accountId !== null && !w.isOwner && reg.ownerAccountId !== null && reg.transferPending && authentic) {
+          const t = await createScanToken(trx, { productId: reg.productUuid, scanEventId: scanId, purpose: 'TRANSFER_ACCEPT', now, ttlMs: TRANSFER_TOKEN_TTL_MS });
+          transfer = { token: t.token, expiresAt: t.expiresAt.toISOString() };
+        }
+
         // Step 11: authenticator policy (never changes the state).
         w.policy = await this.authenticators.evaluate(reg.authPolicy, undefined, {
           product: { id: reg.productUuid, productId: reg.productId, authPolicy: reg.authPolicy },
@@ -426,10 +454,10 @@ export class VerificationService {
           checks: { signatureValid: true, registered: true },
         });
 
-        return this.finish(trx, w, scanId, now, started, registration, staff);
+        return this.finish(trx, w, scanId, now, started, { registration, transfer }, staff);
       }
 
-      return this.finish(trx, w, scanId, now, started, undefined, staff);
+      return this.finish(trx, w, scanId, now, started, {}, staff);
     });
     return result;
   }
@@ -709,7 +737,7 @@ export class VerificationService {
     scanId: string,
     now: Date,
     started: number,
-    registration: VerifyOutcome['registration'],
+    tokens: ScanTokens,
     staff: boolean,
   ): Promise<VerifyOutcome> {
     const state: VerificationState = w.state ?? 'AUTHENTIC';
@@ -731,7 +759,7 @@ export class VerificationService {
         'validly signed code with an unsupported genome version: this server is outdated',
       );
     }
-    return this.outcome(state, w, scanId, now, registration, staff);
+    return this.outcome(state, w, scanId, now, tokens, staff);
   }
 
   /** The public body, from an allow-list of fields per state. */
@@ -740,9 +768,10 @@ export class VerificationService {
     w: Work,
     scanId: string,
     now: Date,
-    registration: VerifyOutcome['registration'],
+    tokens: ScanTokens,
     staff: boolean,
   ): VerifyOutcome {
+    const { registration, transfer } = tokens;
     const copy = copyFor(state, w.notice);
     const out: VerifyOutcome = { state, scanId, verifiedAt: now.toISOString(), title: copy.title, message: copy.message };
     if (staff) out.staffScan = true;
@@ -801,6 +830,7 @@ export class VerificationService {
         ...(reg.ownerAccountId !== null && reg.transferPending ? { transferPending: true } : {}),
       };
       if (state === 'AUTHENTIC_FIRST_REGISTRATION' && registration) out.registration = registration;
+      if (transfer) out.transfer = transfer;
     }
     // SUSPICIOUS from the risk score alone on an unregistered product with a claim secret (step 10).
     if (state === 'SUSPICIOUS_ACTIVITY' && registration?.claimCodeRequired === true) out.registration = registration;

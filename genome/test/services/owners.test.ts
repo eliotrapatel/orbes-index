@@ -117,6 +117,18 @@ describe('OwnerService', () => {
     return { productId, token };
   }
 
+  /** F-03: `who` scans the piece (by product id), signed in: the transfer code is then accepted with that scan. */
+  async function receive(who: { id: string; actor: Actor }, transferCode: string, productId: string) {
+    const piece = await t.db.selectFrom('products').select('id').where('product_id', '=', productId).executeTakeFirstOrThrow();
+    const scan = await t.db
+      .insertInto('scan_events')
+      .values({ product_id: piece.id, account_id: who.id, event_type: 'VERIFY', result_state: 'AUTHENTIC_REGISTERED', occurred_at: clock.now() })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const { token } = await createScanToken(t.db, { productId: piece.id, scanEventId: scan.id, purpose: 'TRANSFER_ACCEPT', now: clock.now() });
+    return { transferCode, productId, transferToken: token };
+  }
+
   const status = async (id: string) => (await t.db.selectFrom('accounts').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status;
 
   it('locks in one transaction: sessions end and pending transfers are cancelled; only staff may', async () => {
@@ -134,7 +146,7 @@ describe('OwnerService', () => {
     const t1 = await t.db.selectFrom('ownership_transfers').select(['status']).where('id', '=', r.transfersCancelled[0]).executeTakeFirstOrThrow();
     expect(t1.status).toBe('CANCELLED');
     const other = await customer();
-    await expectDomainError(ownership.acceptTransfer(other.id, offer.transferCode, other.actor), 'TRANSFER_CANCELLED', 410);
+    await expectDomainError(ownership.acceptTransfer(other.id, await receive(other, offer.transferCode, piece), other.actor), 'TRANSFER_CANCELLED', 410);
     // The pieces stay registered to the account.
     expect((await owners.sheet(c.id)).pieces.map((p) => [p.productId, p.until])).toEqual([[piece, null]]);
   });
@@ -241,10 +253,11 @@ describe('OwnerService', () => {
     const piece = await ownedBy(seller);
     const { transferCode } = await ownership.initiateTransfer(seller.id, piece, seller.actor);
     const buyer = await customer();
+    const scanned = await receive(buyer, transferCode, piece);
     await expectDomainError(
       interleaved(
         () => owners.lock(buyer.id, admin),
-        () => ownership.acceptTransfer(buyer.id, transferCode, buyer.actor),
+        () => ownership.acceptTransfer(buyer.id, scanned, buyer.actor),
       ),
       'ACCOUNT_LOCKED',
       403,
@@ -253,7 +266,7 @@ describe('OwnerService', () => {
     expect((await owners.sheet(seller.id)).pieces.map((p) => [p.productId, p.until])).toEqual([[piece, null]]);
     expect((await owners.sheet(buyer.id)).pieces).toEqual([]);
     await owners.unlock(buyer.id, admin);
-    expect((await ownership.acceptTransfer(buyer.id, transferCode, buyer.actor)).productId).toBe(piece);
+    expect((await ownership.acceptTransfer(buyer.id, scanned, buyer.actor)).productId).toBe(piece);
   });
 
   it('refuses a LOST or STOLEN declaration that was on its way when the lock took effect', async () => {

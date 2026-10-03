@@ -202,6 +202,27 @@ describe('ApiClient', () => {
     await expect(api.products()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });
 
+  it('RECEIVE THIS PIECE (F-03): sends the code with the piece scanned and the transfer token of that scan, with the CSRF token', async () => {
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(409, { error: { code: 'TRANSFER_PRODUCT_MISMATCH', message: 'This transfer code is not for this piece. Check the code with the owner of this piece.' } }),
+      () => json(200, { productId: 'O26-J-00184', verified: true, since: '2026-10-03T09:00:00.000Z' }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    const token = 'T'.repeat(43);
+    await expect(api.acceptTransfer(' AAAA-BBBB-CCCC ', 'O26-J-00184', token)).rejects.toMatchObject({ status: 409, code: 'TRANSFER_PRODUCT_MISMATCH' });
+    expect(f.calls[1]).toMatchObject({
+      url: '/api/v1/ownership/transfers/accept',
+      method: 'POST',
+      body: { transferCode: 'AAAA-BBBB-CCCC', productId: 'O26-J-00184', transferToken: token },
+    });
+    expect(f.calls[1].headers['x-csrf-token']).toBe('t1');
+    // A refusal is no sign-out.
+    expect(api.hasSession).toBe(true);
+    expect(await api.acceptTransfer('2KRJ-RW75-58PH', 'O26-J-00184', token)).toMatchObject({ productId: 'O26-J-00184', verified: true });
+  });
+
   it('puts a product id in the service-history path encoded', async () => {
     const f = fakeFetch([() => json(200, { productId: 'x', services: [] })]);
     await new ApiClient({ fetch: f.impl }).serviceHistory('a/../b?c');
@@ -269,7 +290,7 @@ describe('ApiClient', () => {
     ]);
     const api = new ApiClient({ fetch: f.impl });
     await api.me();
-    const e = await api.acceptTransfer('AAAA-BBBB-CCCC').catch((x: unknown) => x);
+    const e = await api.acceptTransfer('AAAA-BBBB-CCCC', 'O26-J-00184', 'T'.repeat(43)).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(ApiError);
     expect(e).toMatchObject({ status: 401, code: 'UNAUTHORIZED', message: 'Your session has ended.' });
     expect(api.hasSession).toBe(false);

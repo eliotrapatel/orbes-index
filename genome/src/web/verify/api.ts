@@ -192,8 +192,12 @@ export class ApiClient {
     return this.request<TransferOffer>('POST', '/api/v1/ownership/transfers', { productId }, { csrf: true });
   }
 
-  acceptTransfer(transferCode: string): Promise<OwnershipConfirmation> {
-    return this.request<OwnershipConfirmation>('POST', '/api/v1/ownership/transfers/accept', { transferCode: transferCode.trim() }, { csrf: true });
+  /**
+   * RECEIVE THIS PIECE (F-03): the transfer code, for the piece this scan read (`productId`), with the transfer
+   * window of that scan (`transferToken`, VerifyOutcome.transfer). A code of another piece is refused (409).
+   */
+  acceptTransfer(transferCode: string, productId: string, transferToken: string): Promise<OwnershipConfirmation> {
+    return this.request<OwnershipConfirmation>('POST', '/api/v1/ownership/transfers/accept', { transferCode: transferCode.trim(), productId, transferToken }, { csrf: true });
   }
 
   async cancelTransfer(productId: string): Promise<void> {

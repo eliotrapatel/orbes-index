@@ -78,6 +78,9 @@ describe('.env.example', () => {
     // The Client Services contact is the brand's to supply: empty in the template, so no contact is shown.
     for (const name of ['CLIENT_SERVICES_EMAIL', 'CLIENT_SERVICES_PHONE', 'CLIENT_SERVICES_HOURS']) expect(example.active.get(name), name).toBe('');
     expect(c.clientServices).toEqual({});
+    // A transfer is accepted for the piece scanned, with that scan (F-03): on unless an operator turns it off.
+    expect(c.transferAcceptRequireProduct).toBe(true);
+    expect(example.active.has('TRANSFER_ACCEPT_REQUIRE_PRODUCT')).toBe(false);
     // The commented anomaly defaults match the code's defaults.
     const text = read('.env.example');
     for (const [, name, value] of [...text.matchAll(/^#\s*(ANOMALY_[A-Z_]+)=(\d+)/gm)]) {

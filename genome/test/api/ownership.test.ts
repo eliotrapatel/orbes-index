@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { accountClient, createHarness, errorOf, issue, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('ownership API', () => {
   let h: Harness;
@@ -67,9 +67,11 @@ describe('ownership API', () => {
     const notTheOwner = await b.post('/api/v1/ownership/transfers', { productId: p.product.productId });
     expect(notTheOwner.statusCode).toBe(403);
 
-    const badCode = await b.post('/api/v1/ownership/transfers/accept', { transferCode: '0000-0000-0000' });
+    // B scans the piece, signed in, and enters the code with that scan (F-03).
+    const scanned = await scanToReceive(b, p.code.data, transferCode);
+    const badCode = await b.post('/api/v1/ownership/transfers/accept', { ...scanned, transferCode: '0000-0000-0000' });
     expect(badCode.statusCode).toBe(404);
-    const accepted = await b.post('/api/v1/ownership/transfers/accept', { transferCode });
+    const accepted = await b.post('/api/v1/ownership/transfers/accept', scanned);
     expect(accepted.statusCode).toBe(200);
     expect(safeJson(accepted)).toMatchObject({ productId: p.product.productId, verified: true });
 
@@ -178,6 +180,90 @@ describe('ownership API', () => {
     // A session and the CSRF token, like every ownership mutation.
     expect((await h.client().post('/api/v1/ownership/incidents/resolve', { productId: lost.product.productId })).statusCode).toBe(401);
     expect(errorOf(await owner.post('/api/v1/ownership/incidents/resolve', { productId: stolen.product.productId }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+  });
+
+  it('F-03: a transfer is accepted for the piece scanned, with the transfer token of that scan', async () => {
+    // A seller owns two pieces and offers both: the buyer of one must not be handed the other's code.
+    const sold = await sellable(false);
+    const kept = await sellable(false);
+    const seller = (await accountClient(h)).client;
+    for (const p of [sold, kept]) {
+      expect((await seller.post('/api/v1/ownership/register', { registrationToken: (await scanForToken(seller, p.code.data)).token })).statusCode).toBe(201);
+    }
+    const offer = async (p: typeof sold) => (safeJson(await seller.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as { transferCode: string }).transferCode;
+    const soldCode = await offer(sold);
+    const keptCode = await offer(kept);
+    const buyer = (await accountClient(h)).client;
+    const accept = (body: unknown) => buyer.post('/api/v1/ownership/transfers/accept', body);
+
+    // The scan of a signed-in reader who does not own the piece carries its transfer token; the owner's and a signed-out reader's do not.
+    const scan = safeJson(await buyer.post('/api/v1/verify', { code: sold.code.data })) as any;
+    expect(scan).toMatchObject({ state: 'AUTHENTIC_REGISTERED', ownership: { registered: true, you: false, transferPending: true } });
+    expect(scan.transfer).toEqual({ token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expiresAt: new Date(h.clock.now().getTime() + 15 * 60_000).toISOString() });
+    expect((safeJson(await seller.post('/api/v1/verify', { code: sold.code.data })) as any).transfer).toBeUndefined();
+    expect((safeJson(await h.client().post('/api/v1/verify', { code: sold.code.data })) as any).transfer).toBeUndefined();
+    const scanned = { transferCode: soldCode, productId: sold.product.productId, transferToken: scan.transfer.token as string };
+
+    // The piece is required (schema), and so is the scan (service): a code alone is refused.
+    const noPiece = await accept({ transferCode: soldCode, transferToken: scanned.transferToken });
+    expect(noPiece.statusCode).toBe(400);
+    expect(errorOf(noPiece).code).toBe('VALIDATION_FAILED');
+    const noScan = await accept({ transferCode: soldCode, productId: sold.product.productId });
+    expect(noScan.statusCode).toBe(400);
+    expect(errorOf(noScan)).toEqual({ code: 'TRANSFER_SCAN_REQUIRED', message: 'Scan this piece while signed in to your ORBES account, then enter its transfer code.' });
+    expect((await accept({ ...scanned, transferToken: 'not a scan!' })).statusCode).toBe(400);
+    expect((await accept({ ...scanned, extra: true })).statusCode).toBe(400);
+
+    // The code of the other piece: 409, naming neither piece.
+    const mismatch = await accept({ ...scanned, transferCode: keptCode });
+    expect(mismatch.statusCode).toBe(409);
+    expect(errorOf(mismatch)).toEqual({ code: 'TRANSFER_PRODUCT_MISMATCH', message: 'This transfer code is not for this piece. Check the code with the owner of this piece.' });
+    expect(mismatch.body).not.toContain(kept.product.productId);
+    // The scan of another piece, or another account's scan: refused before the code is read.
+    const keptScan = await scanToReceive(buyer, kept.code.data, keptCode);
+    expect(errorOf(await accept({ ...scanned, transferToken: keptScan.transferToken })).code).toBe('TRANSFER_TOKEN_INVALID');
+    const onlooker = (await accountClient(h)).client;
+    const stolenToken = await onlooker.post('/api/v1/ownership/transfers/accept', scanned);
+    expect(stolenToken.statusCode).toBe(400);
+    expect(errorOf(stolenToken).code).toBe('TRANSFER_TOKEN_INVALID');
+
+    // 15 minutes later the scan has expired: scan again.
+    h.clock.advance(15 * 60_000);
+    const late = await accept(scanned);
+    expect(late.statusCode).toBe(410);
+    expect(errorOf(late).code).toBe('TRANSFER_TOKEN_EXPIRED');
+
+    const ok = await accept(await scanToReceive(buyer, sold.code.data, soldCode));
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(safeJson(ok)).toMatchObject({ productId: sold.product.productId, verified: false });
+    expect(ok.body).not.toContain('transferToken');
+    // The kept piece is still the seller's, its transfer still pending.
+    expect((safeJson(await h.client().post('/api/v1/verify', { code: kept.code.data })) as any).ownership).toEqual({ registered: true, you: false, transferPending: true });
+    expect((safeJson(await buyer.post('/api/v1/verify', { code: sold.code.data })) as any).state).toBe('AUTHENTIC_OWNERSHIP_VERIFIED');
+  });
+
+  it('F-03: TRANSFER_ACCEPT_REQUIRE_PRODUCT=false (an acceptance assisted by ORBES Client Services) makes the piece and the scan optional, still checked when sent', async () => {
+    const assisted = await createHarness({ config: { transferAcceptRequireProduct: false } });
+    try {
+      const cat = await seedCatalog(assisted.ctx);
+      const pieces = [await issue(assisted.ctx, cat), await issue(assisted.ctx, cat)];
+      const seller = (await accountClient(assisted)).client;
+      const codes: string[] = [];
+      for (const p of pieces) {
+        await assisted.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+        const reg = (safeJson(await seller.post('/api/v1/verify', { code: p.code.data })) as any).registration.token as string;
+        expect((await seller.post('/api/v1/ownership/register', { registrationToken: reg })).statusCode).toBe(201);
+        codes.push((safeJson(await seller.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as { transferCode: string }).transferCode);
+      }
+      const buyer = (await accountClient(assisted)).client;
+      const mismatch = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: codes[1], productId: pieces[0].product.productId });
+      expect(errorOf(mismatch).code).toBe('TRANSFER_PRODUCT_MISMATCH');
+      const ok = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: codes[1] });
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(safeJson(ok)).toMatchObject({ productId: pieces[1].product.productId });
+    } finally {
+      await assisted.close();
+    }
   });
 
   it('every ownership mutation needs a session and the CSRF token', async () => {

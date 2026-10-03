@@ -65,8 +65,12 @@ export type ServiceType = (typeof SERVICE_TYPES)[number];
 export const SERVICE_STATUSES = ['OPEN', 'COMPLETED', 'CANCELLED'] as const;
 export type ServiceStatus = (typeof SERVICE_STATUSES)[number];
 
-/** SALE_ACTIVATION (migration 0008): the token of a sale lookup, used up by the warranty activation it allows. */
-export const SCAN_TOKEN_PURPOSES = ['FIRST_REGISTRATION', 'SALE_ACTIVATION'] as const;
+/**
+ * SALE_ACTIVATION (migration 0008): the token of a sale lookup, used up by the warranty activation it allows.
+ * TRANSFER_ACCEPT (migration 0011, F-03): the token of a signed-in reader's scan of a piece whose transfer is pending,
+ * used up by the acceptance of that transfer, by that account.
+ */
+export const SCAN_TOKEN_PURPOSES = ['FIRST_REGISTRATION', 'SALE_ACTIVATION', 'TRANSFER_ACCEPT'] as const;
 export type ScanTokenPurpose = (typeof SCAN_TOKEN_PURPOSES)[number];
 
 export const SCAN_EVENT_TYPES = ['VERIFY', 'REGISTER', 'TRANSFER', 'ADMIN_TEST'] as const;

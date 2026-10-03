@@ -13,6 +13,7 @@ import {
   NOT_DELIVERED_NOTE,
   PROBLEMS,
   problemForApiError,
+  RECEIVING,
   REPORT,
   STAFF_SCAN_NOTE,
   STATUS,
@@ -24,6 +25,7 @@ import {
   formatDateLong,
   formatDateTime,
   formatDateTimeLong,
+  initialTab,
   isAuthenticState,
   normalizeCodeInput,
   recoveryContactModel,
@@ -230,6 +232,45 @@ describe('verify view-model: ownership modes', () => {
   it('REGISTERED belongs to someone else', () => {
     const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false } }));
     expect(vm.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: false });
+    expect(initialTab(vm)).toBe('product');
+  });
+
+  describe('REGISTERED with the transfer window of this scan (F-03)', () => {
+    const transfer = { token: 'tok_transfer', expiresAt: '2026-10-01T08:45:00.000Z' };
+
+    it('carries the window beside the pending transfer it is for, and opens on OWNERSHIP', () => {
+      const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false, transferPending: true }, transfer }));
+      expect(vm.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: true, transfer });
+      expect(initialTab(vm)).toBe('ownership');
+      // Without a window (signed out, or signed in after the scan), the result opens on PRODUCT as before.
+      const pending = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false, transferPending: true } }));
+      expect(pending.ownership).toEqual({ kind: 'registered', productId: 'O26-J-00184', transferPending: true });
+      expect(initialTab(pending)).toBe('product');
+    });
+
+    it('never infers a window the server did not give with a pending transfer', () => {
+      expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false }, transfer })).ownership).toEqual({
+        kind: 'registered',
+        productId: 'O26-J-00184',
+        transferPending: false,
+      });
+      for (const bad of [{ ...transfer, token: '' }, { token: 7, expiresAt: transfer.expiresAt }, { token: 'x' }]) {
+        const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false, transferPending: true }, transfer: bad as unknown as typeof transfer }));
+        expect(vm.ownership).not.toHaveProperty('transfer');
+      }
+      // The owner's own piece, a first registration and a result that is not authentic take no transfer, whatever they carry.
+      expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ownership: { registered: true, you: true, transferPending: true }, transfer })).ownership.kind).toBe('yours');
+      expect(resultViewModel(outcome('SUSPICIOUS_ACTIVITY', { transfer })).ownership).toEqual({ kind: 'unregistered' });
+      expect(initialTab(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { registration: { token: 't', expiresAt: transfer.expiresAt, claimCodeRequired: false } })))).toBe('ownership');
+    });
+
+    it('speaks of the piece and of a scan, never of a token, a product or blame (BRAND §4.5)', () => {
+      expect(RECEIVING.title).toBe('RECEIVING THIS PIECE');
+      expect(RECEIVING.submit).toBe('RECEIVE THIS PIECE');
+      expect(RECEIVING.until('13:14')).toBe('RECEIVING OPEN UNTIL 13:14');
+      const words = Object.values(RECEIVING).map((v) => (typeof v === 'string' ? v : v('13:14'))).join(' ');
+      expect(words).not.toMatch(/token|\bproducts?\b|fake|counterfeit|fraud|stolen|support|genuine|!/i);
+    });
   });
 });
 

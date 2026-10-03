@@ -5,6 +5,7 @@ import { isCheckViolation, isGuardViolation, isUniqueViolation } from '../../src
 import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
+import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
@@ -307,6 +308,8 @@ describe('migrations', () => {
       // 0005 account_recovery_codes.created_by do on the integration branch: the rollback must not trip on it.
       await sql`CREATE TABLE down_test_ref (admin_id uuid NOT NULL REFERENCES admin_users (id) ON DELETE RESTRICT)`.execute(tx);
       await sql`INSERT INTO down_test_ref (admin_id) VALUES (${admin.id})`.execute(tx);
+      // 0011 (F-03) re-creates the purpose CHECK after 0008: it goes first, as Kysely would take it down first.
+      await m0011.down(tx);
       await m.down!(tx);
       const seller = (await sql<{ role: string; disabled: boolean }>`SELECT role, disabled_at IS NOT NULL AS disabled FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(tx)).rows;
       expect(seller).toEqual([{ role: 'AUDITOR', disabled: true }]);
@@ -320,14 +323,57 @@ describe('migrations', () => {
       expect(await columns('warranties', tx)).not.toContain('retailer_id');
       expect(await columns('scan_events', tx)).not.toContain('admin_id');
       await m.up(tx);
+      await m0011.up(tx);
     });
     expect(await roleCheck()).toContain("'RETAIL'::text");
+    expect(await purposeCheck()).toContain("'TRANSFER_ACCEPT'::text");
     expect(await tables()).toContain('retailers');
     await sql`DELETE FROM scan_events`.execute(t.db);
     await sql`DELETE FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(t.db);
   });
 
-  it('each migration of the 2026-10-02 plan (0004 to 0010) goes down to exactly the schema a fresh database has one migration earlier', async () => {
+  it('0011 adds TRANSFER_ACCEPT to the scan token purposes; its down step restores the CHECK of 0008, SALE_ACTIVATION working, and up again', async () => {
+    const purposeCheck = async () =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'scan_tokens_purpose_check'`.execute(t.db)).rows[0]?.def ?? '';
+    const latest = await snapshot();
+    expect(await purposeCheck()).toBe("CHECK ((purpose = ANY (ARRAY['FIRST_REGISTRATION'::text, 'SALE_ACTIVATION'::text, 'TRANSFER_ACCEPT'::text])))");
+
+    // A piece, a scan and one token of each purpose.
+    await sql`INSERT INTO categories (id, code, name) VALUES (29, 'P', 'Purpose test')`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (29, 'M', 'RING', 'PURP') RETURNING id`.execute(t.db)).rows[0];
+    const product = (
+      await sql<{ id: string }>`INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, material)
+        VALUES ('O26-P-00001', ${(26 << 25) | (29 << 20) | 1}, 2026, 29, 1, 'PURP-1', ${model.id}, 'SILVER') RETURNING id`.execute(t.db)
+    ).rows[0];
+    const scan = (await sql<{ id: string }>`INSERT INTO scan_events (event_type, result_state, product_id) VALUES ('VERIFY', 'AUTHENTIC_REGISTERED', ${product.id}) RETURNING id`.execute(t.db)).rows[0];
+    const token = (n: number, purpose: string) =>
+      sql`INSERT INTO scan_tokens (id_hash, product_id, scan_event_id, purpose, expires_at) VALUES (decode(repeat(${n.toString(16).padStart(2, '0')}, 32), 'hex'), ${product.id}, ${scan.id}, ${purpose}, now() + interval '15 minutes')`.execute(t.db);
+    const purposes = async () =>
+      (await sql<{ purpose: string }>`SELECT purpose FROM scan_tokens WHERE product_id = ${product.id} ORDER BY purpose`.execute(t.db)).rows.map((r) => r.purpose);
+    await token(1, 'FIRST_REGISTRATION');
+    await token(2, 'SALE_ACTIVATION');
+    await token(3, 'TRANSFER_ACCEPT');
+    await expect(token(4, 'OTHER')).rejects.toSatisfy((e) => isCheckViolation(e, 'scan_tokens_purpose_check'));
+
+    // Down: the outstanding transfer tokens go, the CHECK is 0008's again, and a sale token still goes in.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0011_scan_token_transfer_accept']);
+    expect(await purposeCheck()).toBe("CHECK ((purpose = ANY (ARRAY['FIRST_REGISTRATION'::text, 'SALE_ACTIVATION'::text])))");
+    expect(await purposes()).toEqual(['FIRST_REGISTRATION', 'SALE_ACTIVATION']);
+    await token(5, 'SALE_ACTIVATION');
+    await expect(token(6, 'TRANSFER_ACCEPT')).rejects.toSatisfy((e) => isCheckViolation(e, 'scan_tokens_purpose_check'));
+
+    // Up again: the three purposes, the tokens kept, the schema as before.
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0011_scan_token_transfer_accept']);
+    await token(7, 'TRANSFER_ACCEPT');
+    await token(8, 'SALE_ACTIVATION');
+    expect(await purposes()).toEqual(['FIRST_REGISTRATION', 'SALE_ACTIVATION', 'SALE_ACTIVATION', 'SALE_ACTIVATION', 'TRANSFER_ACCEPT']);
+    expect(await snapshot()).toEqual(latest);
+
+    await sql`DELETE FROM scan_tokens WHERE product_id = ${product.id}`.execute(t.db);
+    await sql`DELETE FROM scan_events WHERE id = ${scan.id}`.execute(t.db);
+  });
+
+  it('each migration of the 2026-10-02 plan (0004 to 0011) goes down to exactly the schema a fresh database has one migration earlier', async () => {
     // The tracks wrote them apart; deployed together, every down step must still land on its predecessor's schema.
     const names = Object.keys(MIGRATIONS);
     const first = names.indexOf('0004_scan_reports');
@@ -339,6 +385,7 @@ describe('migrations', () => {
       '0008_retail_mode',
       '0009_scan_daily_stats',
       '0010_models_active',
+      '0011_scan_token_transfer_accept',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

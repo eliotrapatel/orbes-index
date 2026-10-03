@@ -234,7 +234,21 @@ export const registerOwnershipBody = body({
 
 export const productRefBody = body({ productId: productRef });
 
-export const acceptTransferBody = body({ transferCode: z.string().trim().min(1, 'Required').max(32, 'Invalid transfer code') });
+const transferCode = z.string().trim().min(1, 'Required').max(32, 'Invalid transfer code');
+/** VerifyOutcome.transfer.token (F-03): a scan token, base64url. A missing one is the service's to refuse (TRANSFER_SCAN_REQUIRED). */
+const transferToken = z.string().trim().min(1, 'Required').max(128, 'Invalid scan').regex(BASE64URL_RE, 'Invalid scan').optional();
+
+/**
+ * POST /api/v1/ownership/transfers/accept (§11.3, F-03): the transfer code, the piece the recipient scanned
+ * (`productId`, required) and the transfer token of that scan.
+ */
+export const acceptTransferBody = body({ transferCode, productId: productRef, transferToken });
+
+/**
+ * The same body with TRANSFER_ACCEPT_REQUIRE_PRODUCT=false: an acceptance assisted by ORBES Client Services may
+ * name no piece. Whatever is sent is still checked by the service.
+ */
+export const assistedAcceptTransferBody = body({ transferCode, productId: productRef.optional(), transferToken });
 
 export const incidentBody = body({ productId: productRef, type: z.enum(['LOST', 'STOLEN']) });
 

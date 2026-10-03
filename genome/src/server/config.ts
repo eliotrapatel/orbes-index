@@ -66,6 +66,13 @@ export interface AppConfig {
    * an email nor a phone set (the default), the verification app shows no contact at all.
    */
   clientServices: ClientServicesConfig;
+  /**
+   * TRANSFER_ACCEPT_REQUIRE_PRODUCT (default true, F-03): an acceptance of a transfer must name the piece the
+   * recipient scanned (`productId`, refused with 409 TRANSFER_PRODUCT_MISMATCH when the code is another piece's)
+   * and carry the TRANSFER_ACCEPT token of that scan. false makes both optional, for an acceptance assisted by
+   * ORBES Client Services; whichever is sent is still checked. Production warns while it is false.
+   */
+  transferAcceptRequireProduct: boolean;
 }
 
 /** Public contact details of ORBES Client Services (all optional, validated at start). */
@@ -394,6 +401,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
+  // Transfers (F-03): the scanned piece and its scan, required unless ORBES Client Services assists an acceptance.
+  const transferAcceptRequireProduct = field('TRANSFER_ACCEPT_REQUIRE_PRODUCT', zSwitch, e.TRANSFER_ACCEPT_REQUIRE_PRODUCT) ?? true;
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -416,6 +426,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     adminRequireMfa,
     scanRetentionDays,
     clientServices,
+    transferAcceptRequireProduct,
   };
 
   if (prod) {
@@ -475,7 +486,9 @@ export function productionIssues(c: AppConfig): string[] {
  * reach every console action: it is allowed for a first-run enrolment window,
  * not as a steady state. An unset SCAN_RETENTION_DAYS in production keeps
  * pseudonymous scan history without limit (the period is a legal decision,
- * so it has no default).
+ * so it has no default). TRANSFER_ACCEPT_REQUIRE_PRODUCT=false in production
+ * lets a transfer code complete without a scan of its piece (F-03): allowed
+ * while ORBES Client Services assists an acceptance, not as a steady state.
  */
 export function configWarnings(c: AppConfig): string[] {
   const warnings: string[] = [];
@@ -484,6 +497,9 @@ export function configWarnings(c: AppConfig): string[] {
   }
   if (c.env === 'production' && c.scanRetentionDays === null) {
     warnings.push('SCAN_RETENTION_DAYS: not set in production; pseudonymous scan history is kept indefinitely (set the retention period agreed with counsel, at least 30 days)');
+  }
+  if (c.env === 'production' && !c.transferAcceptRequireProduct) {
+    warnings.push('TRANSFER_ACCEPT_REQUIRE_PRODUCT: disabled in production; a transfer code is accepted without a scan of its piece (keep it for an acceptance assisted by ORBES Client Services, then remove the override)');
   }
   return warnings;
 }
@@ -544,6 +560,7 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
       phone: c.clientServices.phone ? '[set]' : undefined,
       hours: c.clientServices.hours ? '[set]' : undefined,
     },
+    transferAcceptRequireProduct: c.transferAcceptRequireProduct,
   };
 }
 

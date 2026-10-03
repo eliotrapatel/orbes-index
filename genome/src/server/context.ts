@@ -134,7 +134,14 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
     const auth = new AuthService({ db, audit, sessions, totpKey: deriveTotpEncryptionKey(config), clock });
     const lifecycle = new LifecycleService({ db, audit, clock });
-    const ownership = new OwnershipService({ db, audit, lifecycle, clock, transferKey: deriveTransferCodeKey(config) });
+    const ownership = new OwnershipService({
+      db,
+      audit,
+      lifecycle,
+      clock,
+      transferKey: deriveTransferCodeKey(config),
+      requireScannedPiece: config.transferAcceptRequireProduct,
+    });
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
     const issuance = new IssuanceService({ db, keys, audit, categories, clock, log });
     const catalog = new CatalogService({ db, audit, categories, clock });

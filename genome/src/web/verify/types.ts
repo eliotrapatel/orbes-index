@@ -72,6 +72,11 @@ export interface VerifyOutcome {
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
+  /**
+   * F-03: this scan's transfer window, for the transfer code of this piece (POST /api/v1/ownership/transfers/accept).
+   * Only for a signed-in reader who is not the owner, while a transfer of the piece is pending.
+   */
+  transfer?: { token: string; expiresAt: string };
   /** A staff scan (S-07): this browser is signed in to the ORBES console. No report, no registration. */
   staffScan?: true;
 }

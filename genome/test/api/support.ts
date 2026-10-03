@@ -197,6 +197,17 @@ export async function accountClient(h: Harness, clientOpts: ClientOptions = {}):
   return { client: c, email };
 }
 
+/**
+ * F-03: the recipient of a transfer scans the piece signed in (POST /api/v1/verify with `c`'s session), which earns
+ * the scan's transfer token; returns the body of POST /api/v1/ownership/transfers/accept for `transferCode`: the code,
+ * the piece scanned and that scan. Throws when the scan earned no token.
+ */
+export async function scanToReceive(c: Client, codeData: string, transferCode: string): Promise<{ transferCode: string; productId: string; transferToken: string }> {
+  const out = safeJson(await c.post('/api/v1/verify', { code: codeData })) as { state?: string; product?: { productId: string }; transfer?: { token: string } } | undefined;
+  if (!out?.transfer || !out.product) throw new Error(`the scan earned no transfer token: ${out?.state}`);
+  return { transferCode, productId: out.product.productId, transferToken: out.transfer.token };
+}
+
 /** Assert the generic error shape: `{ error: { code, message } }` and nothing else. */
 export function errorOf(res: LightMyRequestResponse): { code: string; message: string } {
   const body = safeJson(res) as { error?: { code: string; message: string } } | undefined;
