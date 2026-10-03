@@ -23,13 +23,16 @@
 # of each ISO week hard-linked into weekly/ (newest BACKUP_KEEP_WEEKLY kept).
 # Scheduled archives (nightly) and event archives (pre-deploy-*, pre-restore,
 # other --reason values) are counted separately: many deploys in one day never
-# push the nightly history out.
+# push the nightly history out. Event archives, which come at no fixed pace,
+# are also bounded by age: none is kept, in daily/ or weekly/, beyond the age
+# of the oldest weekly copy, BACKUP_KEEP_WEEKLY × 7 + 7 days (63): the "about
+# two months" of the privacy policy (/legal/privacy).
 # Off-site: with BACKUP_RCLONE_DEST (e.g. ovh-s3:orbes-backups/verify) the
 # archives missing remotely are copied with rclone, the new one is checked, and
 # remote copies older than the remote retention age are deleted: daily/ after
 # BACKUP_KEEP_DAILY + 1 days (15), weekly/ after BACKUP_KEEP_WEEKLY × 7 + 7 days
 # (63). Only archives younger than that age are copied (--max-age): an event
-# archive kept longer locally (pruned by count) is never sent again once the
+# archive kept longer locally (up to 63 days) is never sent again once the
 # remote pruning has removed it.
 #
 # Disk: every run logs "photos: <count>, <size> MB" (media_objects, F-04: the
@@ -75,6 +78,9 @@ KEEP_DAILY="$(env_get BACKUP_KEEP_DAILY 14)"
 KEEP_WEEKLY="$(env_get BACKUP_KEEP_WEEKLY 8)"
 RCLONE_DEST="$(env_get BACKUP_RCLONE_DEST)"
 [[ "$KEEP_DAILY" =~ ^[1-9][0-9]*$ && "$KEEP_WEEKLY" =~ ^[0-9]+$ ]] || die "BACKUP_KEEP_DAILY / BACKUP_KEEP_WEEKLY must be integers (daily ≥ 1)"
+# The age of the oldest weekly copy (BACKUP_KEEP_WEEKLY weeks, and the current one): the remote
+# weekly retention, and the longest an event archive is kept locally.
+WEEKLY_MAX_AGE_DAYS=$((KEEP_WEEKLY * 7 + 7))
 
 # Recipients: at least one age public key (age1…) or SSH public key; never a private identity.
 [[ -s "$RECIPIENTS" ]] || die "no age recipients file at $RECIPIENTS (scripts/setup.sh creates it)"
@@ -104,7 +110,7 @@ OUT="$DAILY/$NAME"
 
 if [[ "$DRY_RUN" == true ]]; then
   log "[dry-run] would dump database + volume $KEYS_VOLUME, encrypt to $N_RECIPIENTS recipient(s) from $RECIPIENTS"
-  log "[dry-run] would write $OUT (+ .sha256), keep $KEEP_DAILY daily / $KEEP_WEEKLY weekly${RCLONE_DEST:+, copy to $RCLONE_DEST}"
+  log "[dry-run] would write $OUT (+ .sha256), keep $KEEP_DAILY daily / $KEEP_WEEKLY weekly (event archives $WEEKLY_MAX_AGE_DAYS days at most)${RCLONE_DEST:+, copy to $RCLONE_DEST}"
   exit 0
 fi
 
@@ -186,16 +192,20 @@ if ! compgen -G "$WEEKLY/orbes-$WEEK-*.tar.age" >/dev/null; then
   log "weekly copy for $WEEK"
 fi
 
+# archive_kind NAME: scheduled (nightly, or no reason) or event (pre-deploy-*, pre-restore,
+# post-rotation, any other --reason).
+archive_kind() {
+  if [[ "$1" =~ ^orbes-([0-9]{4}-W[0-9]{2}-)?[0-9]{8}T[0-9]{6}Z(-nightly)?\.tar\.age$ ]]; then printf scheduled; else printf event; fi
+}
+
 # prune DIR KEEP scheduled|event: keep the newest KEEP archives of one kind. Scheduled
-# (nightly, or no reason) and event backups (pre-deploy-*, pre-restore, manual reasons)
-# are counted separately, so a day of many deploys never pushes the nightly history out.
+# and event backups are counted separately, so a day of many deploys never pushes the nightly
+# history out.
 prune() {
   local dir=$1 keep=$2 kind=$3 f name
   local -a files=()
   while IFS= read -r name; do
-    local this=event
-    if [[ "$name" =~ ^orbes-([0-9]{4}-W[0-9]{2}-)?[0-9]{8}T[0-9]{6}Z(-nightly)?\.tar\.age$ ]]; then this=scheduled; fi
-    if [[ "$this" == "$kind" ]]; then files+=("$name"); fi
+    if [[ "$(archive_kind "$name")" == "$kind" ]]; then files+=("$name"); fi
   done < <(find "$dir" -maxdepth 1 -type f -name 'orbes-*.tar.age' -printf '%f\n' | sort -r)
   local i
   for ((i = keep; i < ${#files[@]}; i++)); do
@@ -204,10 +214,24 @@ prune() {
     log "pruned ${files[i]}"
   done
 }
+
+# prune_old_events DIR DAYS: remove the event archives older than DAYS days. Scheduled archives
+# come every night, so their count bounds their age; event archives come at no fixed pace, and
+# the newest BACKUP_KEEP_DAILY of them could otherwise be kept for months.
+prune_old_events() {
+  local dir=$1 days=$2 name
+  while IFS= read -r name; do
+    [[ -n "$name" && "$(archive_kind "$name")" == event ]] || continue
+    rm -f -- "${dir:?}/$name" "$dir/$name.sha256"
+    log "pruned $name (an event archive older than $days days)"
+  done < <(find "$dir" -maxdepth 1 -type f -name 'orbes-*.tar.age' -mmin "+$((days * 1440))" -printf '%f\n' | sort)
+}
 prune "$DAILY" "$KEEP_DAILY" scheduled
 prune "$DAILY" "$KEEP_DAILY" event
 prune "$WEEKLY" "$KEEP_WEEKLY" scheduled
 prune "$WEEKLY" "$KEEP_WEEKLY" event
+prune_old_events "$DAILY" "$WEEKLY_MAX_AGE_DAYS"
+prune_old_events "$WEEKLY" "$WEEKLY_MAX_AGE_DAYS"
 
 # ── Off-site copy (rclone → OVH Object Storage) ────────────────────────────
 if [[ -n "$RCLONE_DEST" && "$UPLOAD" == true ]]; then
@@ -216,12 +240,12 @@ if [[ -n "$RCLONE_DEST" && "$UPLOAD" == true ]]; then
   # Remote retention mirrors the local one, by age. An Object Lock / versioning policy on
   # the bucket (docs/DEPLOYMENT.md §15.8) protects against a compromised server deleting backups.
   REMOTE_DAILY_AGE="$((KEEP_DAILY + 1))d"
-  REMOTE_WEEKLY_AGE="$((KEEP_WEEKLY * 7 + 7))d"
+  REMOTE_WEEKLY_AGE="${WEEKLY_MAX_AGE_DAYS}d"
   # copy (never sync): only archives missing remotely are sent, so a missed upload
   # (network outage, remote added later) catches up on the next run. Only those younger
-  # than the remote retention age (--max-age): event archives (pre-deploy-*…) are pruned
-  # locally by count, not by age, and one older than that would otherwise be sent again
-  # every night, then deleted by the pruning below.
+  # than the remote retention age (--max-age): event archives (pre-deploy-*…) stay locally
+  # up to the weekly age (63 days), and one older than the daily age would otherwise be sent
+  # again every night, then deleted by the pruning below.
   rclone copy -q --max-age "$REMOTE_DAILY_AGE" "$DAILY" "$RCLONE_DEST/daily" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
   rclone copy -q --max-age "$REMOTE_WEEKLY_AGE" "$WEEKLY" "$RCLONE_DEST/weekly" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
   rclone check -q --one-way "$DAILY" "$RCLONE_DEST/daily" --include "$NAME"

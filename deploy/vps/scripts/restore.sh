@@ -37,7 +37,10 @@
 # (scripts/deploy.sh --image <current tag> after a transient incident,
 # otherwise a corrective commit); restores and the restore drill run on a
 # separate, disposable server, where RESTORE_ALLOWED keeps its default, true
-# (docs/DEPLOYMENT.md §15.9). The value is read from .env only.
+# (docs/DEPLOYMENT.md §15.9). The value is read from the stack's own .env
+# (deploy/vps/.env), and also from the file ORBES_STACK_ENV_FILE names when it
+# is exported: either one saying false refuses, so neither the shell nor a copy
+# of .env can lift it.
 # Shared host: also refuses while COMPOSE_PROJECT_NAME (another value than the
 # stack's) or ORBES_IMAGE_TAG is exported in the shell.
 set -Eeuo pipefail
@@ -70,14 +73,23 @@ while (($#)); do
 done
 
 # ── 0. Allowed on this server? (before anything else) ──────────────────────
+# Read from the env file the scripts use and from the stack's own .env, when they differ: an
+# exported ORBES_STACK_ENV_FILE naming a copy of .env with RESTORE_ALLOWED=true must not lift the
+# refusal of the shared server (compose would still act on its project, and its pgdata volume).
 require_env_file
-RESTORE_ALLOWED="$(env_get RESTORE_ALLOWED true)"
-case "$RESTORE_ALLOWED" in
-  true) ;;
-  false)
-    die "restore.sh is disabled on this server (RESTORE_ALLOWED=false in $ENV_FILE). Decision of 2026-10-03: this shared server is never restored from a backup; it is repaired forward. After a transient incident: scripts/deploy.sh --image <current tag> (.state/deploys.log); otherwise a corrective commit, deployed normally (git pull && scripts/deploy.sh). Restores and restore drills run only on a separate, disposable server (docs/DEPLOYMENT.md §15.9). Nothing was done." ;;
-  *) die "RESTORE_ALLOWED in $ENV_FILE must be true or false, not \"$RESTORE_ALLOWED\": nothing was done" ;;
-esac
+ALLOWED_FILES=("$ENV_FILE")
+[[ "$STACK_DIR/.env" -ef "$ENV_FILE" ]] || ALLOWED_FILES+=("$STACK_DIR/.env")
+for allowed_file in "${ALLOWED_FILES[@]}"; do
+  [[ -e "$allowed_file" ]] || continue
+  [[ -r "$allowed_file" ]] || die "$allowed_file is not readable by $(id -un): whether restore.sh is allowed on this server (RESTORE_ALLOWED) cannot be told, so nothing was done"
+  RESTORE_ALLOWED="$(ENV_FILE="$allowed_file" env_get RESTORE_ALLOWED true)"
+  case "$RESTORE_ALLOWED" in
+    true) ;;
+    false)
+      die "restore.sh is disabled on this server (RESTORE_ALLOWED=false in $allowed_file). Decision of 2026-10-03: this shared server is never restored from a backup; it is repaired forward. After a transient incident: scripts/deploy.sh --image <current tag> (.state/deploys.log); otherwise a corrective commit, deployed normally (git pull && scripts/deploy.sh). Restores and restore drills run only on a separate, disposable server (docs/DEPLOYMENT.md §15.9). Nothing was done." ;;
+    *) die "RESTORE_ALLOWED in $allowed_file must be true or false, not \"$RESTORE_ALLOWED\": nothing was done" ;;
+  esac
+done
 guard_shared_host_env
 
 [[ -n "$IDENTITY" ]] || { echo "--identity <age identity file> is required" >&2; usage >&2; exit 2; }

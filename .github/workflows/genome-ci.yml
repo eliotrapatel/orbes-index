@@ -7,8 +7,9 @@
 # built here.
 #
 #   test    npm ci → typecheck → the whole vitest suite, including the opt-in
-#           PostgreSQL suites (postgres:16 service container) and the Chromium
-#           E2E suites (Chromium installed by playwright-core, same version as
+#           PostgreSQL suites (postgres:16 service container; with psql, which
+#           runs the deploy scripts' own psql lines) and the Chromium E2E suites
+#           (Chromium installed by playwright-core, same version as
 #           package-lock.json) → web build → production dependency audit
 #           (report only, never blocks)
 #   image   docker build of genome/Dockerfile (no push), so the production
@@ -111,10 +112,14 @@ jobs:
 
       # Optional suite: the PDF artifacts are rasterised by an independent
       # renderer (poppler's pdftoppm); without it that suite is skipped.
-      - name: Install poppler-utils
+      # psql: test/ops/vps-scripts.test.ts pipes deploy/vps/scripts/lib.sh's
+      # psql lines (\gset, \if, \else) into a real psql against the service
+      # container; on CI that suite fails rather than skips without it.
+      - name: Install poppler-utils and the PostgreSQL client
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends poppler-utils
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils postgresql-client
+          psql --version
 
       - name: Test (vitest, PostgreSQL and Chromium suites included)
         run: npx vitest run

@@ -9,19 +9,26 @@
  *  - deploy.sh, a release that migrates: a failure after its migrations committed (health,
  *    Caddy, signing key, smoke tests, the grants) keeps the new image, started, with the way
  *    to repair forward, and never attempts the doomed rollback, nor when the applied migrations
- *    cannot be read after the migration step, nor when the previous image does not know them
- *    all; a release without migration, or whose migration failed (one transaction: nothing
- *    applied), still rolls back; the success message names the migrations and no longer
- *    offers a rollback, nor when the schema cannot be read afterwards;
+ *    cannot be read after the migration step, nor, before or after that step, when the
+ *    previous image does not know them all or cannot list them; a release without migration,
+ *    or whose migration failed (one transaction: nothing applied), still rolls back; the
+ *    success message names the migrations and no longer offers a rollback, nor when the schema
+ *    cannot be read afterwards, nor when the previous image cannot run on the schema; the
+ *    rollback hint (.state/previous-tag) is written only when it can be followed, and removed
+ *    by a kept release, its retry and a first deployment;
  *  - deploy.sh --image: an image that does not know every applied migration is refused before
  *    the pre-deploy backup and before anything is stopped (and an unreadable schema stops it,
  *    saying whether PostgreSQL was started for the check);
  *  - lib.sh: deploy.sh, backup.sh and restore.sh stop on an exported COMPOSE_PROJECT_NAME that
  *    is not the stack's, or on any exported ORBES_IMAGE_TAG;
- *  - restore.sh refuses everything, --dry-run included, when .env says RESTORE_ALLOWED=false;
- *  - backup.sh copies off-site only archives younger than the remote retention age, and logs
- *    "photos: N, X MB" on every run (0 before migration 0012), even with --quiet;
- *  - the SQL of those scripts and of the runbook runs on the real, migrated schema.
+ *  - restore.sh refuses everything, --dry-run included, when .env says RESTORE_ALLOWED=false,
+ *    the stack's own .env as well as a file an exported ORBES_STACK_ENV_FILE names;
+ *  - backup.sh copies off-site only archives younger than the remote retention age, keeps no
+ *    event archive past BACKUP_KEEP_WEEKLY × 7 + 7 days (the privacy policy's "about two
+ *    months"), and logs "photos: N, X MB" on every run (0 before migration 0012), even with
+ *    --quiet;
+ *  - the SQL of those scripts and of the runbook runs on the real, migrated schema, and (opt-in,
+ *    CI) lib.sh's psql lines run in a real psql against PostgreSQL.
  */
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -41,8 +48,10 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sql } from 'kysely';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { MIGRATIONS } from '../../src/server/db/migrate.js';
+import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
+import { createMigrator, migrateToLatest, MIGRATIONS } from '../../src/server/db/migrate.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
 const GENOME = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -302,6 +311,61 @@ describe('deploy.sh: a release that migrates is repaired forward, never rolled b
     expect(h.log('backup.log')).toBe('');
   });
 
+  it('a failure before the migration step is kept too when the previous image does not know the applied migrations', () => {
+    // Schema at 0013, nothing running, .env still on lot1 (what a failed rollback of before OPS-D2 left): PostgreSQL,
+    // healthy for the schema check, then fails its health check in the rollout, before any migration step. Rolling
+    // back to lot1 would write its tag into .env and fail at its migration step, then suggest --image lot1.
+    const h = host({ env: { ORBES_IMAGE_TAG: 'lot1' } }).image('lot1', LOT1).image('fix', ALL).running(null).fail('unhealthy-postgres-after-schema');
+    h.applied(ALL);
+    mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
+    writeFileSync(join(h.stack, '.state', 'previous-tag'), 'lot1\n');
+    const r = h.run('deploy.sh', ['--image', 'fix']);
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/deployment of fix failed: the stack did not become healthy/);
+    expect(r.stderr).toMatch(new RegExp(`orbes-genome:lot1 does not know the migration\\(s\\) ${words(ADDED)} of this database: it cannot run on this schema, so no rollback is attempted`));
+    expect(r.stderr).toMatch(/deployment of fix failed \(the stack did not become healthy\) and is KEPT: ORBES_IMAGE_TAG=fix in \.env/);
+    expect(r.stderr).not.toMatch(/rollback to orbes-genome:lot1/);
+    expect(r.stderr).not.toMatch(/--image lot1/);
+    expect(r.stderr).toMatch(/scripts\/deploy\.sh --image fix\n/);
+    // Nothing migrated, nothing of lot1 started.
+    expect(migrateCalls(h)).toHaveLength(0);
+    expect(h.applied()).toEqual(ALL);
+    expect(h.envValue('ORBES_IMAGE_TAG')).toBe('fix');
+    expect(h.runningImage('app')).toBe('orbes-genome:fix');
+    expect(h.stateFile('previous-tag')).toBeNull();
+    expect(h.stateFile('deploys.log')).toMatch(/ deploy fix FAILED \(the stack did not become healthy\): kept, no rollback, repair forward\n$/);
+  });
+
+  it('a failure without new migration is kept when the migrations of the previous image cannot be listed', () => {
+    const h = productionBeforeDeployment2().image('lot1b', LOT1).fail('unhealthy-app-lot1b').fail('probe-lot1');
+    const r = h.run('deploy.sh', ['--image', 'lot1b']);
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/the migrations orbes-genome:lot1 knows cannot be listed: it may not run on this schema, so no rollback is attempted/);
+    expect(r.stderr).toMatch(/deployment of lot1b failed \(the stack did not become healthy\) and is KEPT: ORBES_IMAGE_TAG=lot1b in \.env/);
+    expect(r.stderr).not.toMatch(/rollback to orbes-genome:lot1/);
+    expect(migrateCalls(h)).toHaveLength(1);
+    expect(h.envValue('ORBES_IMAGE_TAG')).toBe('lot1b');
+  });
+
+  it('a kept release removes the rollback hint of an earlier deployment, and so does its successful retry', () => {
+    const h = productionBeforeDeployment2().fail('unhealthy-app-new');
+    mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
+    const hint = join(h.stack, '.state', 'previous-tag');
+    writeFileSync(hint, '1bd551d91832\n');
+    const kept = h.run('deploy.sh', ['--image', 'new']);
+    expect(kept.status, kept.stderr).toBe(1);
+    expect(kept.stderr).toMatch(/and is KEPT/);
+    expect(h.stateFile('previous-tag')).toBeNull();
+    // The incident fixed, the same image again (the way forward printed): a redeployment of the running image.
+    rmSync(join(h.state, 'fail', 'unhealthy-app-new'));
+    writeFileSync(hint, '1bd551d91832\n');
+    const retry = h.run('deploy.sh', ['--image', 'new']);
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toMatch(/redeployed orbes-genome:new \(same image as before\)\n/);
+    expect(retry.stderr).not.toMatch(/Manual rollback/);
+    expect(h.stateFile('previous-tag')).toBeNull();
+  });
+
   it('a retry of the kept release that fails again does not roll back either', () => {
     const h = host({ env: { ORBES_IMAGE_TAG: 'new' } }).image('lot1', LOT1).image('new', ALL).running('new').fail('unhealthy-app-new');
     h.applied(ALL);
@@ -338,6 +402,28 @@ describe('deploy.sh: a release that migrates is repaired forward, never rolled b
     expect(h.stateFile('deploys.log')).toMatch(/ deploy lot1b OK \(previous lot1\)\n$/);
   });
 
+  it('on success without migration, suggests no rollback to a previous image that cannot run on the schema (the stack was down, .env on an older tag)', () => {
+    const h = host({ env: { ORBES_IMAGE_TAG: 'lot1' } }).image('lot1', LOT1).image('fix', ALL).running(null);
+    h.applied(ALL);
+    mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
+    writeFileSync(join(h.stack, '.state', 'previous-tag'), 'lot1\n');
+    const r = h.run('deploy.sh', ['--image', 'fix']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(h.runningImage('app')).toBe('orbes-genome:fix');
+    expect(r.stderr).toMatch(/deployed orbes-genome:fix \(previous: lot1\)\.\n/);
+    expect(r.stderr).toMatch(new RegExp(`orbes-genome:lot1 does not know the migration\\(s\\) ${words(ADDED)} of this database: it cannot run on this schema, so no rollback is suggested\\. If anything goes wrong, repair forward: scripts/deploy\\.sh --image fix after a transient incident`));
+    expect(r.stderr).not.toMatch(/Manual rollback/);
+    expect(h.stateFile('previous-tag')).toBeNull();
+    expect(h.stateFile('deploys.log')).toMatch(/ deploy fix OK \(previous lot1\)\n$/);
+    // Nor when the migrations of the previous image cannot be listed.
+    const p = productionBeforeDeployment2().image('lot1b', LOT1).fail('probe-lot1');
+    const listed = p.run('deploy.sh', ['--image', 'lot1b']);
+    expect(listed.status, listed.stderr).toBe(0);
+    expect(listed.stderr).toMatch(/the migrations orbes-genome:lot1 knows cannot be listed, so no rollback is suggested\. If anything goes wrong, repair forward/);
+    expect(listed.stderr).not.toMatch(/Manual rollback/);
+    expect(p.stateFile('previous-tag')).toBeNull();
+  });
+
   it('on success, when the schema cannot be read afterwards, suggests no rollback and says so', () => {
     const h = productionBeforeDeployment2().fail('read-applied-after-migrate');
     mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
@@ -354,12 +440,16 @@ describe('deploy.sh: a release that migrates is repaired forward, never rolled b
 
   it('a first deployment migrates an empty database without a pre-deploy backup (PostgreSQL was not running)', () => {
     const h = host().image('new', ALL).running(null);
+    // A stale rollback hint (a host rebuilt from a copy of .state) never survives a release that migrated.
+    mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
+    writeFileSync(join(h.stack, '.state', 'previous-tag'), '1bd551d91832\n');
     const r = h.run('deploy.sh', ['--image', 'new']);
     expect(r.status, r.stderr).toBe(0);
     expect(h.applied()).toEqual(ALL);
     expect(h.log('backup.log')).toBe('');
     expect(r.stderr).toMatch(/starting PostgreSQL to read the schema/);
     expect(r.stderr).toMatch(new RegExp(`deployed orbes-genome:new \\(no previous image on this host to roll back to\\); it applied the migration\\(s\\) ${words(ALL)}`));
+    expect(h.stateFile('previous-tag')).toBeNull();
   });
 });
 
@@ -511,6 +601,28 @@ describe('restore.sh: never on the shared server (RESTORE_ALLOWED=false)', () =>
     expect(help.stdout).toMatch(/NEVER on the shared production server/);
   });
 
+  it('reads it from the stack\'s own .env too: an exported ORBES_STACK_ENV_FILE naming a copy that allows it changes nothing', () => {
+    const h = host({ env: { RESTORE_ALLOWED: 'false' } }).running('new');
+    mkdirSync(join(h.backups, 'daily'), { recursive: true });
+    const copy = join(h.dir, 'copy.env');
+    writeFileSync(copy, readFileSync(h.envFile, 'utf8').replace('RESTORE_ALLOWED=false', 'RESTORE_ALLOWED=true'), { mode: 0o600 });
+    chmodSync(copy, 0o600);
+    expect(readFileSync(copy, 'utf8')).toMatch(/^RESTORE_ALLOWED=true$/m);
+    const r = h.run('restore.sh', ['--identity', '/dev/null', '--latest', '--yes'], { ORBES_STACK_ENV_FILE: copy });
+    expect(r.status, r.stderr).toBe(1);
+    // The stack's own .env (its path resolved, as lib.sh resolves STACK_DIR).
+    expect(r.stderr).toMatch(/ERROR: restore\.sh is disabled on this server \(RESTORE_ALLOWED=false in \S*\/repo\/deploy\/vps\/\.env\)\./);
+    expect(h.log('docker.log')).toBe('');
+    expect(readdirSync(h.backups)).toEqual(['daily']);
+    // And the other way round: the file named says false, whatever the stack's .env says.
+    h.setEnv('RESTORE_ALLOWED', 'true');
+    writeFileSync(copy, readFileSync(h.envFile, 'utf8').replace('RESTORE_ALLOWED=true', 'RESTORE_ALLOWED=false'), { mode: 0o600 });
+    const named = h.run('restore.sh', ['--identity', '/dev/null', '--latest', '--yes'], { ORBES_STACK_ENV_FILE: copy });
+    expect(named.status, named.stderr).toBe(1);
+    expect(named.stderr).toContain(`ERROR: restore.sh is disabled on this server (RESTORE_ALLOWED=false in ${copy}).`);
+    expect(h.log('docker.log')).toBe('');
+  });
+
   it('refuses a value other than true or false', () => {
     const h = host({ env: { RESTORE_ALLOWED: 'no' } });
     const r = h.run('restore.sh', ['--identity', '/dev/null', '--latest']);
@@ -614,6 +726,53 @@ describe('backup.sh: the photographs on the disk, and the off-site copy', () => 
     expect(calls).toMatch(/^delete -q --min-age 4d /m);
     expect(calls).toMatch(/^delete -q --min-age 21d /m);
   });
+
+  it('keeps no event archive locally beyond the weekly age, BACKUP_KEEP_WEEKLY × 7 + 7 days (63): the "about two months" of the privacy policy', () => {
+    const h = backupHost();
+    const daily = join(h.backups, 'daily');
+    const weekly = join(h.backups, 'weekly');
+    mkdirSync(daily, { recursive: true });
+    mkdirSync(weekly, { recursive: true });
+    const now = Date.now();
+    const archive = (dir: string, name: string, ageDays: number) => {
+      for (const f of [name, `${name}.sha256`]) {
+        writeFileSync(join(dir, f), `${f}\n`);
+        const t = new Date(now - ageDays * DAY);
+        utimesSync(join(dir, f), t, t);
+      }
+    };
+    // Fewer than BACKUP_KEEP_DAILY (14) of each kind: the count prunes nothing, the age does.
+    archive(daily, 'orbes-20200101T120000Z-pre-deploy-1bd551d91832.tar.age', 70);
+    archive(daily, 'orbes-20200203T120000Z-post-rotation.tar.age', 64);
+    archive(daily, 'orbes-20200206T120000Z-pre-restore.tar.age', 62);
+    archive(daily, 'orbes-20200310T120000Z-pre-deploy-db4ffd0c0fd4.tar.age', 20);
+    // A weekly copy whose first archive of the week was an event archive is one too.
+    archive(weekly, 'orbes-2020-W01-20200101T120000Z-pre-deploy-1bd551d91832.tar.age', 70);
+    // Scheduled weekly copies are kept by count (8), and come every week.
+    archive(weekly, 'orbes-2020-W06-20200203T031700Z-nightly.tar.age', 62);
+    const r = h.run('backup.sh', ['--reason', 'nightly', '--no-upload']);
+    expect(r.status, r.stderr).toBe(0);
+    const left = (dir: string) => readdirSync(dir).filter((f) => f.endsWith('.tar.age') && f.startsWith('orbes-2020'));
+    expect(left(daily).sort()).toEqual(['orbes-20200206T120000Z-pre-restore.tar.age', 'orbes-20200310T120000Z-pre-deploy-db4ffd0c0fd4.tar.age']);
+    expect(left(weekly)).toEqual(['orbes-2020-W06-20200203T031700Z-nightly.tar.age']);
+    // Their checksums go with them.
+    for (const gone of ['orbes-20200101T120000Z-pre-deploy-1bd551d91832.tar.age', 'orbes-20200203T120000Z-post-rotation.tar.age']) {
+      expect(existsSync(join(daily, `${gone}.sha256`)), gone).toBe(false);
+      expect(r.stderr).toContain(`pruned ${gone} (an event archive older than 63 days)`);
+    }
+    expect(existsSync(join(weekly, 'orbes-2020-W01-20200101T120000Z-pre-deploy-1bd551d91832.tar.age.sha256'))).toBe(false);
+    expect(existsSync(join(daily, 'orbes-20200206T120000Z-pre-restore.tar.age.sha256'))).toBe(true);
+    // The bound follows BACKUP_KEEP_WEEKLY: with 2 weeks, 21 days.
+    const short = backupHost({ BACKUP_KEEP_WEEKLY: '2' });
+    mkdirSync(join(short.backups, 'daily'), { recursive: true });
+    const old = join(short.backups, 'daily', 'orbes-20200310T120000Z-pre-deploy-db4ffd0c0fd4.tar.age');
+    writeFileSync(old, 'x');
+    utimesSync(old, new Date(now - 22 * DAY), new Date(now - 22 * DAY));
+    const s = short.run('backup.sh', ['--reason', 'nightly', '--no-upload']);
+    expect(s.status, s.stderr).toBe(0);
+    expect(existsSync(old)).toBe(false);
+    expect(s.stderr).toContain('(an event archive older than 21 days)');
+  });
 });
 
 describe('the SQL of the scripts and of the runbook, on the migrated schema', () => {
@@ -667,6 +826,71 @@ describe('the SQL of the scripts and of the runbook, on the migrated schema', ()
   });
 });
 
+/**
+ * lib.sh's psql wrappers as a real psql runs them (opt-in: ORBES_TEST_POSTGRES_URL and psql on the PATH; CI has both,
+ * its runner installs postgresql-client): the exact lines db_applied_migrations and db_photo_usage pipe into psql
+ * (\gset, \if, \else, \endif), with db_query_owner's flags, on an empty database, one at deployment 1's schema
+ * (before migration 0012: no media_objects) and one fully migrated. The fake Docker host only pattern-matches them.
+ */
+const PG_URL = process.env.ORBES_TEST_POSTGRES_URL;
+const PSQL = spawnSync('sh', ['-c', 'command -v psql'], { encoding: 'utf8' }).stdout.trim();
+
+describe.skipIf(!PG_URL || (!PSQL && !process.env.CI))("lib.sh's psql wrappers on PostgreSQL (opt-in)", () => {
+  const dbName = `orbes_libsh_${randomBytes(6).toString('hex')}`;
+  let admin: Db;
+  let db: Db;
+  let url: string;
+
+  beforeAll(async () => {
+    admin = createDb(PG_URL!);
+    await sql`CREATE DATABASE ${sql.id(dbName)}`.execute(admin);
+    const u = new URL(PG_URL!);
+    u.pathname = `/${dbName}`;
+    url = u.toString();
+    db = createDb(url);
+  });
+
+  afterAll(async () => {
+    if (db) await closeDb(db);
+    if (admin) {
+      await sql`DROP DATABASE IF EXISTS ${sql.id(dbName)} WITH (FORCE)`.execute(admin);
+      await closeDb(admin);
+    }
+  });
+
+  /** A function of lib.sh, its db_query_owner pointed at the throwaway database with the same psql flags. */
+  function libsh(fn: 'db_applied_migrations' | 'db_photo_usage'): string {
+    const script = `set -Eeuo pipefail; source "$1"; db_query_owner() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$ORBES_PSQL_URL"; }; ${fn}`;
+    const r = spawnSync('bash', ['-c', script, 'bash', join(STACK, 'scripts', 'lib.sh')], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, ORBES_PSQL_URL: url, ORBES_STACK_ENV_FILE: join(tmpdir(), 'orbes-no-such.env') },
+    });
+    expect(r.status, `${fn}: ${r.stderr}`).toBe(0);
+    expect(r.stderr, fn).toBe('');
+    return r.stdout;
+  }
+
+  it('reads nothing, then deployment 1, then every migration; and the photographs as 0 0 until media_objects exists', async () => {
+    expect(PSQL, 'psql on the PATH (CI installs postgresql-client)').not.toBe('');
+    // Empty: no kysely_migration, no media_objects.
+    expect(libsh('db_applied_migrations')).toBe('');
+    expect(libsh('db_photo_usage')).toBe('0 0\n');
+    // Deployment 1's schema (0001–0003): the \else branch of the photographs.
+    const lot1 = await createMigrator(db).migrateTo(LOT1.at(-1)!);
+    expect(lot1.error).toBeUndefined();
+    expect(libsh('db_applied_migrations')).toBe(LOT1.map((m) => `${m}\n`).join(''));
+    expect(libsh('db_photo_usage')).toBe('0 0\n');
+    // Fully migrated: the table, empty, then two photographs.
+    await migrateToLatest(db);
+    expect(libsh('db_applied_migrations')).toBe(ALL.map((m) => `${m}\n`).join(''));
+    expect(libsh('db_photo_usage')).toBe('0 0\n');
+    await sql`INSERT INTO media_objects (sha256, mime, bytes, width, height) VALUES
+      (encode(sha256('\\x0102'::bytea), 'hex'), 'image/jpeg', '\\x0102'::bytea, 1, 1),
+      (encode(sha256('\\x030405'::bytea), 'hex'), 'image/webp', '\\x030405'::bytea, 1, 1)`.execute(db);
+    expect(libsh('db_photo_usage')).toBe('2 5\n');
+  }, 60_000);
+});
+
 describe('the decisions in the scripts and the runbook', () => {
   it('no scripted path leads to restore.sh on the shared server', () => {
     for (const f of ['deploy.sh', 'backup.sh', 'lib.sh']) {
@@ -674,7 +898,8 @@ describe('the decisions in the scripts and the runbook', () => {
         expect(line, `${f}: ${line}`).toMatch(/restore\.sh is not used on the shared server|restores\b|"pre-restore"|--reason pre-restore/);
       }
     }
-    expect(read(STACK, 'scripts', 'restore.sh')).toMatch(/RESTORE_ALLOWED="\$\(env_get RESTORE_ALLOWED true\)"/);
+    expect(read(STACK, 'scripts', 'restore.sh')).toMatch(/RESTORE_ALLOWED="\$\(ENV_FILE="\$allowed_file" env_get RESTORE_ALLOWED true\)"/);
+    expect(read(STACK, 'scripts', 'restore.sh')).toContain('[[ "$STACK_DIR/.env" -ef "$ENV_FILE" ]] || ALLOWED_FILES+=("$STACK_DIR/.env")');
     expect(read(STACK, '.env.example')).toMatch(/\nRESTORE_ALLOWED=true\n/);
   });
 

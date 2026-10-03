@@ -50,11 +50,14 @@
 #      (scripts/deploy.sh --image <new tag> after a transient incident,
 #      otherwise a corrective commit), then exit 1. The same when this cannot
 #      be told (the applied migrations cannot be read after the migration
-#      step), or when the previous image does not know every migration the
-#      database holds. On success, the rollback hint is given only when the
-#      schema was read and this release applied no migration. restore.sh is
-#      not used on the shared server (RESTORE_ALLOWED=false,
-#      docs/DEPLOYMENT.md §15.9).
+#      step), and, whether the failure came before or after the migration
+#      step, when the previous image does not know every migration the
+#      database holds or its migrations cannot be listed. On success, the
+#      rollback hint (.state/previous-tag) is written only when the schema was
+#      read, this release applied no migration and the previous image knows
+#      every migration of the database; in every other case, and whenever a
+#      release is kept, the file is removed. restore.sh is not used on the
+#      shared server (RESTORE_ALLOWED=false, docs/DEPLOYMENT.md §15.9).
 #
 # Exit codes: 0 deployed, 1 failed (rolled back, or kept to be repaired
 # forward, as printed), 2 usage error.
@@ -287,10 +290,12 @@ smoke() {
   log "/verify: 200"
 }
 
-# A failure after this release's migrations committed: the previous image cannot run on the
-# new schema (rolling back would stop the app and fail at its migration step, leaving the site
-# down with ORBES_IMAGE_TAG on the old tag). The release stays: ORBES_IMAGE_TAG keeps the new
-# tag, the stack is (re)started on it, and the way to repair forward is printed.
+# A failure that no rollback can undo: this release's migrations committed (the previous image
+# cannot run on the new schema: rolling back would stop the app and fail at its migration step,
+# leaving the site down with ORBES_IMAGE_TAG on the old tag), or the previous image does not know
+# every migration of the database. The release stays: ORBES_IMAGE_TAG keeps the new tag, the
+# stack is (re)started on it, the way to repair forward is printed, and the rollback hint of an
+# earlier deployment (.state/previous-tag) is removed: it may name an image that cannot come back.
 keep_release() {
   local why=$1 reason=$2
   step "no rollback: repair forward"
@@ -300,6 +305,7 @@ keep_release() {
   warn "deployment of $TAG failed ($why) and is KEPT: ORBES_IMAGE_TAG=$TAG in .env, the stack started on orbes-genome:$TAG."
   repair_forward_help "$TAG"
   printf '%s deploy %s FAILED (%s): kept, no rollback, repair forward\n' "$(_ts)" "$TAG" "$why" >>"$STATE_DIR/deploys.log"
+  rm -f -- "$STATE_DIR/previous-tag"
   exit 1
 }
 
@@ -307,8 +313,10 @@ rollback() {
   local why=$1 applied new prev_known unknown
   warn "deployment of $TAG failed: $why"
   compose logs --tail 60 app >&2 || true
-  # Did this release migrate? Only once the migration step was reached (all its migrations
-  # commit together, or none: a failed migration leaves the schema as it was).
+  # The migrations the database holds now. Before the migration step, those the schema check
+  # read; once it was reached, read again: did this release migrate? (All its migrations commit
+  # together, or none: a failed migration leaves the schema as it was.)
+  applied="$APPLIED_BEFORE"
   if [[ "$MIGRATE_REACHED" == true ]]; then
     if ! applied="$(db_applied_migrations)"; then
       keep_release "$why" "the migrations applied in the database cannot be read (is PostgreSQL down?): this release may have migrated, so no rollback is attempted."
@@ -317,20 +325,22 @@ rollback() {
     if [[ -n "$new" ]]; then
       keep_release "$why" "$TAG applied the migration(s) $(words "$new"): orbes-genome:$PREV_TAG cannot run on this schema, so no rollback is attempted."
     fi
-    # No new migration: the previous image normally knows them all. Make sure of it.
-    if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1 \
-      && prev_known="$(image_migrations "orbes-genome:$PREV_TAG")"; then
-      unknown="$(lines_not_in "$applied" "$prev_known")"
-      if [[ -n "$unknown" ]]; then
-        keep_release "$why" "orbes-genome:$PREV_TAG does not know the migration(s) $(words "$unknown") of this database: it cannot run on this schema, so no rollback is attempted."
-      fi
-    fi
   fi
   if [[ "$PREV_TAG" == "$TAG" ]] || ! docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
     warn "no previous image to roll back to (orbes-genome:$PREV_TAG)"
     repair_forward_help "$TAG"
     printf '%s deploy %s FAILED (no rollback)\n' "$(_ts)" "$TAG" >>"$STATE_DIR/deploys.log"
     exit 1
+  fi
+  # No new migration: the previous image normally knows them all. Make sure of it, whether the
+  # failure came before the migration step or after it (e.g. the stack was down with .env still
+  # on an older tag): an image that does not know them would stop at its migration step.
+  if ! prev_known="$(image_migrations "orbes-genome:$PREV_TAG")"; then
+    keep_release "$why" "the migrations orbes-genome:$PREV_TAG knows cannot be listed: it may not run on this schema, so no rollback is attempted."
+  fi
+  unknown="$(lines_not_in "$applied" "$prev_known")"
+  if [[ -n "$unknown" ]]; then
+    keep_release "$why" "orbes-genome:$PREV_TAG does not know the migration(s) $(words "$unknown") of this database: it cannot run on this schema, so no rollback is attempted."
   fi
   step "rollback to orbes-genome:$PREV_TAG"
   if rollout "$PREV_TAG"; then
@@ -376,8 +386,13 @@ elif [[ -n "$NEW_MIGRATIONS" ]]; then
   MIGRATED_NOTE="; migrations $(words "$NEW_MIGRATIONS")"
 fi
 printf '%s deploy %s OK (previous %s%s)\n' "$(_ts)" "$TAG" "$PREV_TAG" "$MIGRATED_NOTE" >>"$STATE_DIR/deploys.log"
+# The rollback hint, .state/previous-tag, is written in one place only: a release without migration
+# whose previous image knows every migration of the database. Everywhere else it is removed, so a
+# hint left by an earlier deployment never survives a release after which it could not be followed:
+# never suggest a rollback that may be impossible.
+FORWARD="If anything goes wrong, repair forward: scripts/deploy.sh --image $TAG after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7)."
 if [[ "$SCHEMA_READ" != true ]]; then
-  # Whether this release migrated is unknown: never suggest a rollback that may be impossible.
+  # Whether this release migrated is unknown.
   rm -f -- "$STATE_DIR/previous-tag"
   log "deployed $IMAGE (previous: $PREV_TAG)."
   warn "the schema could not be read after the rollout (kysely_migration): whether this release applied migrations is unknown, so no rollback is suggested. scripts/deploy.sh --image <tag> checks the schema before it stops anything; if anything goes wrong, repair forward: scripts/deploy.sh --image $TAG after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7)."
@@ -386,13 +401,24 @@ elif [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG
     # Rolling back is no longer possible: never suggest it.
     rm -f -- "$STATE_DIR/previous-tag"
     log "deployed $IMAGE (previous: $PREV_TAG). This release applied the migration(s) $(words "$NEW_MIGRATIONS"):"
-    log "orbes-genome:$PREV_TAG cannot run on this schema any more (scripts/deploy.sh --image $PREV_TAG refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image $TAG after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7)."
+    log "orbes-genome:$PREV_TAG cannot run on this schema any more (scripts/deploy.sh --image $PREV_TAG refuses it). $FORWARD"
+  elif ! PREV_KNOWN="$(image_migrations "orbes-genome:$PREV_TAG")"; then
+    rm -f -- "$STATE_DIR/previous-tag"
+    log "deployed $IMAGE (previous: $PREV_TAG)."
+    log "the migrations orbes-genome:$PREV_TAG knows cannot be listed, so no rollback is suggested. $FORWARD"
+  elif PREV_UNKNOWN="$(lines_not_in "$APPLIED_AFTER" "$PREV_KNOWN")" && [[ -n "$PREV_UNKNOWN" ]]; then
+    # e.g. the stack was down with .env still on an older tag: that image never ran on this schema.
+    rm -f -- "$STATE_DIR/previous-tag"
+    log "deployed $IMAGE (previous: $PREV_TAG)."
+    log "orbes-genome:$PREV_TAG does not know the migration(s) $(words "$PREV_UNKNOWN") of this database: it cannot run on this schema, so no rollback is suggested. $FORWARD"
   else
     printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
     log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
   fi
 elif [[ "$PREV_TAG" == "$TAG" ]]; then
+  rm -f -- "$STATE_DIR/previous-tag"
   log "redeployed $IMAGE (same image as before)${NEW_MIGRATIONS:+; it applied the migration(s) $(words "$NEW_MIGRATIONS")}"
 else
+  rm -f -- "$STATE_DIR/previous-tag"
   log "deployed $IMAGE (no previous image on this host to roll back to)${NEW_MIGRATIONS:+; it applied the migration(s) $(words "$NEW_MIGRATIONS")}"
 fi

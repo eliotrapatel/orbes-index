@@ -7,6 +7,8 @@
 SCRIPTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 STACK_DIR="$(cd -- "$SCRIPTS_DIR/.." && pwd -P)"
 REPO_DIR="$(cd -- "$STACK_DIR/../.." && pwd -P)"
+# ORBES_STACK_ENV_FILE and ORBES_STATE_DIR point the scripts elsewhere (their tests, genome/test/ops,
+# use them); never on the server. restore.sh reads RESTORE_ALLOWED from $STACK_DIR/.env as well.
 ENV_FILE="${ORBES_STACK_ENV_FILE:-$STACK_DIR/.env}"
 STATE_DIR="${ORBES_STATE_DIR:-$STACK_DIR/.state}"
 SCRIPT_NAME="$(basename -- "$0")"

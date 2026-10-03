@@ -11,6 +11,9 @@
 #   fail/grant          the GRANTs after the migrations fail (after their COMMIT)
 #   fail/read-applied   reading kysely_migration (the applied migrations) fails
 #   fail/read-applied-after-migrate   the same, once `db.ts migrate` has run
+#   fail/unhealthy-postgres-after-schema   PostgreSQL turns unhealthy once the applied migrations
+#                       have been read (the schema check), before any migration step
+#   fail/probe-<tag>    listing the migrations orbes-genome:<tag> knows fails
 #   fail/unhealthy-app-<tag>, fail/unhealthy-caddy, fail/keys
 #   docker.log          every call, one per line
 #
@@ -58,6 +61,7 @@ health() {
       if [[ -n "$(not_in "$(cat "$(image_file "$image")" 2>/dev/null)" "$(applied)")" ]]; then echo unhealthy; return; fi
       echo healthy ;;
     caddy) if [[ -f "$S/fail/unhealthy-caddy" ]]; then echo unhealthy; else echo healthy; fi ;;
+    postgres) if [[ -f "$S/fail/unhealthy-postgres-after-schema" && -f "$S/db/applied-read" ]]; then echo unhealthy; else echo healthy; fi ;;
     *) echo healthy ;;
   esac
 }
@@ -97,6 +101,7 @@ $input"
         echo "psql: error: fake failure reading kysely_migration" >&2
         return 2
       fi
+      touch "$S/db/applied-read"
       applied ;;
     *has_media*) if [[ -f "$S/db/media" ]]; then cat "$S/db/media"; else echo "0 0"; fi ;;
     *"json_agg(name order by name)"*) printf '[%s]\n' "$(applied | sed 's/.*/"&"/' | paste -sd, -)" ;;
@@ -194,6 +199,7 @@ run_container() {
     *"caddy validate"*) return 0 ;;
     node:*MIGRATIONS*)
       [[ -f "$(image_file "$image")" ]] || { echo "Unable to find image '$image' locally" >&2; return 125; }
+      [[ ! -f "$S/fail/probe-${image#orbes-genome:}" ]] || { echo "fake: cannot list the migrations of $image" >&2; return 1; }
       cat "$(image_file "$image")" ;;
     node:*accessSync*) return 0 ;;
     pg_restore:*--list*)
