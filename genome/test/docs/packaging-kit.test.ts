@@ -20,7 +20,9 @@
  *  - the kit linked from LAUNCH §10.
  *
  * CUSTOMER_COPY lists the documents held to the lexicon; a new public-facing
- * document under docs/launch/ joins it.
+ * document under docs/launch/ joins it. The staff's sales playbook
+ * (docs/launch/SALES-PLAYBOOK.md, J-09) has its own test with the same terms,
+ * sales-playbook.test.ts, since its code spans quote the console.
  */
 import { describe, expect, it } from 'vitest';
 import { CERTIFICATE_COPY } from '../../src/server/render/certificate.js';
