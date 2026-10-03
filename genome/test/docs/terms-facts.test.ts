@@ -1,0 +1,603 @@
+/**
+ * docs/legal/ (J-04), the drafts of the terms of use and of the legal notice,
+ * against the code they are written from:
+ *
+ *  - TERMS-FACTS.md: every value equal to its exported constant (recomputed
+ *    here, so a constant that changes fails this test), every code fragment
+ *    found at the line, or within the range, the table cites (the message
+ *    gives the line where it is now), every constant the rules lean on
+ *    holding what the rule says (the statuses that end a certificate, those
+ *    that allow a transfer), and every absence of §10 (no email, no reset
+ *    link, no undoing an accepted transfer, no account deletion, no age
+ *    check) holding in the code;
+ *  - the two production settings that would change a rule
+ *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
+ *    commented out in deploy/vps/.env.example and empty in compose.yaml;
+ *  - terms.fr.md and terms.en.md: the same articles, each ending with its
+ *    *Code : …* line, citing the same rules in both languages; every rule
+ *    cited, and the article that cites it giving its value in its language;
+ *    the result clauses of BRAND §4.5 and §4.6 (AUTHENTIC qualifies the
+ *    signed identity, a copy can verify like the original, registration is
+ *    not a title of ownership); the second-hand sentence as /verify shows it
+ *    (RESALE_GUIDANCE) and as the packaging kit translates it;
+ *  - legal-notice.fr.md and legal-notice.en.md: the [À COMPLÉTER] fields the
+ *    brief names (company name, RCS, share capital, publication director)
+ *    and both hosts, Vercel Inc. for theorbes.com and OVHcloud, in Canada,
+ *    for verify.theorbes.com;
+ *  - the terms and the notices held to the forbidden lexicon of the
+ *    packaging kit's test (BRAND §4.5 and §4.1, the kit's French lexicon),
+ *    without exception, and to no exclamation mark;
+ *  - the note for counsel on the Toubon law and the consumer mediator, the
+ *    README that lists every file, relative links that resolve, and the
+ *    drafts linked from LAUNCH §10 and BRAND §4.5.
+ */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
+import { registerAccountBody } from '../../src/server/http/schemas.js';
+import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
+import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
+import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
+import {
+  CERTIFICATE_DEFAULT_DAYS,
+  CERTIFICATE_ENDING_STATUSES,
+  CERTIFICATE_MAX_DAYS,
+  CERTIFICATE_MIN_DAYS,
+  MAX_OPEN_CERTIFICATES,
+} from '../../src/server/services/ownership-certificates.js';
+import {
+  CLAIM_ATTEMPT_LIMIT,
+  CLAIM_ATTEMPT_WINDOW_MS,
+  REGISTRABLE_STATUSES,
+  TRANSFER_TTL_MS,
+  TRANSFERABLE_STATUSES,
+} from '../../src/server/services/ownership.js';
+import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
+import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
+import { ASSURANCE_NOTE, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
+import { PACKAGING_KIT, REPO, findForbidden, forbiddenTerms, readDoc, section } from './lexicon.js';
+
+const LEGAL = 'docs/legal';
+const FACTS = `${LEGAL}/TERMS-FACTS.md`;
+const TERMS = { fr: `${LEGAL}/terms.fr.md`, en: `${LEGAL}/terms.en.md` } as const;
+const NOTICE = { fr: `${LEGAL}/legal-notice.fr.md`, en: `${LEGAL}/legal-notice.en.md` } as const;
+const COUNSEL = `${LEGAL}/counsel-note.fr.md`;
+const README = `${LEGAL}/README.md`;
+type Lang = keyof typeof TERMS;
+const LANGS: readonly Lang[] = ['fr', 'en'];
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+// ── TERMS-FACTS.md ─────────────────────────────────────────────────────────
+
+const FACT_HEADER = '| Id | Règle | Valeur | Constante | Code | Ligne |';
+const ABSENCE_HEADER = '| Id | Règle | Ce que le test vérifie |';
+
+interface Fact {
+  id: string;
+  rule: string;
+  value: string;
+  /** The constant cell, its code spans joined by ", " ('—' when none). */
+  constant: string;
+  fragments: string[];
+  /** Path relative to genome/src, and the 1-based line range the row cites. */
+  file: string;
+  start: number;
+  end: number;
+}
+
+const cells = (row: string): string[] => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+const spans = (cell: string): string[] => [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+
+/** Rows of every table of `md` whose header row is exactly `header`, as cells. */
+function tableRows(md: string, header: string): string[][] {
+  const lines = md.split('\n');
+  const rows: string[][] = [];
+  lines.forEach((line, i) => {
+    if (line !== header) return;
+    for (const row of lines.slice(i + 2)) {
+      if (!row.startsWith('|')) break;
+      rows.push(cells(row));
+    }
+  });
+  return rows;
+}
+
+/** `[server/services/auth.ts:176](../../genome/src/server/services/auth.ts#L176)`, or a range `…:323-326` / `#L323-L326`. */
+const LINE_CELL = /^\[([\w./-]+):(\d+)(?:-(\d+))?\]\(\.\.\/\.\.\/genome\/src\/([\w./-]+)#L(\d+)(?:-L(\d+))?\)$/;
+
+function parseFacts(md: string): Fact[] {
+  return tableRows(md, FACT_HEADER).map((c) => {
+    if (c.length !== 6) throw new Error(`a row of ${c.length} cells (a "|" inside a cell?): ${c.join(' | ')}`);
+    const [id, rule, value, constant, code, line] = c;
+    const m = LINE_CELL.exec(line);
+    if (!m) throw new Error(`${id}: the line cell is not [path:line](../../genome/src/path#Lline): ${line}`);
+    const [, textPath, textStart, textEnd, linkPath, linkStart, linkEnd] = m;
+    if (textPath !== linkPath || textStart !== linkStart || (textEnd ?? '') !== (linkEnd ?? '')) {
+      throw new Error(`${id}: the text and the target of the link differ: ${line}`);
+    }
+    return {
+      id,
+      rule,
+      value,
+      constant: constant === '—' ? '—' : spans(constant).join(', '),
+      fragments: spans(code),
+      file: linkPath,
+      start: Number(linkStart),
+      end: Number(linkEnd ?? linkStart),
+    };
+  });
+}
+
+const factsMd = readDoc(FACTS);
+const facts = parseFacts(factsMd);
+const absences = tableRows(factsMd, ABSENCE_HEADER).map(([id, rule, check]) => ({ id, rule, check }));
+
+/** Lines (1-based) of `lines` that hold `fragment`. */
+const where = (lines: readonly string[], fragment: string): number[] => lines.flatMap((l, i) => (l.includes(fragment) ? [i + 1] : []));
+
+/**
+ * What each constant of the table must say: the value cell, recomputed from the constant; the phrases the article
+ * citing the rule writes, in French and in English; and, for a constant that is not a number, what it must hold for
+ * the rule to be true.
+ */
+interface ConstantSpec {
+  value: string;
+  fr?: readonly string[];
+  en?: readonly string[];
+  holds?: () => void;
+}
+
+/** Minutes of a duration: a fraction would print as one ("15.5 minutes") and match no phrase. */
+const minutes = (ms: number): number => ms / MIN;
+const sameIn = (phrase: string) => ({ fr: [phrase], en: [phrase] });
+
+const CONSTANTS: Record<string, ConstantSpec> = {
+  VERIFICATION_COPY: {
+    value: '—',
+    holds: () => {
+      const authentic = Object.entries(VERIFICATION_COPY).filter(([state]) => state.startsWith('AUTHENTIC'));
+      expect(authentic.length).toBeGreaterThanOrEqual(4);
+      for (const [state, copy] of authentic) expect(copy.message, state).toMatch(/^This ORBES identity was issued and signed by ORBES /);
+      expect(VERIFICATION_COPY.SUSPICIOUS_ACTIVITY.message).toContain('requires review');
+      expect(VERIFICATION_COPY.SUSPICIOUS_ACTIVITY.message).toContain('ORBES Client Services');
+    },
+  },
+  ASSURANCE_NOTE: {
+    value: '—',
+    holds: () => {
+      expect(ASSURANCE_NOTE).toContain('A printed code alone cannot prove');
+      expect(ASSURANCE_NOTE).toContain('ORBES Client Services can inspect a piece on request');
+    },
+  },
+  PASSWORD_MIN_LENGTH: { value: `${PASSWORD_MIN_LENGTH} caractères`, fr: [`${PASSWORD_MIN_LENGTH} caractères`], en: [`${PASSWORD_MIN_LENGTH} characters`] },
+  DEFAULT_SESSION_TTL_HOURS: {
+    value: `${DEFAULT_SESSION_TTL_HOURS.account / 24} jours`,
+    fr: [`${DEFAULT_SESSION_TTL_HOURS.account / 24} jours`],
+    en: [`${DEFAULT_SESSION_TTL_HOURS.account / 24} days`],
+    holds: () => expect(DEFAULT_SESSION_TTL_HOURS.account % 24, 'whole days').toBe(0),
+  },
+  ACCOUNT_LOGIN_THROTTLE: {
+    value: `${ACCOUNT_LOGIN_THROTTLE.maxFailures} essais en ${minutes(ACCOUNT_LOGIN_THROTTLE.windowMs)} minutes`,
+    fr: [`${ACCOUNT_LOGIN_THROTTLE.maxFailures} essais`, `${minutes(ACCOUNT_LOGIN_THROTTLE.windowMs)} minutes`],
+    en: [`${ACCOUNT_LOGIN_THROTTLE.maxFailures} attempts`, `${minutes(ACCOUNT_LOGIN_THROTTLE.windowMs)} minutes`],
+  },
+  RECOVERY_CODE_TTL_MS: { value: `${minutes(RECOVERY_CODE_TTL_MS)} minutes`, ...sameIn(`${minutes(RECOVERY_CODE_TTL_MS)} minutes`) },
+  'RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS': {
+    value: `${RECOVERY_ATTEMPT_LIMIT} essais par heure`,
+    fr: [`${RECOVERY_ATTEMPT_LIMIT} essais`, 'par heure'],
+    en: [`${RECOVERY_ATTEMPT_LIMIT} attempts`, 'per hour'],
+    holds: () => expect(RECOVERY_ATTEMPT_WINDOW_MS).toBe(HOUR),
+  },
+  TRANSFER_FREEZE_MS: {
+    value: `${TRANSFER_FREEZE_MS / HOUR} heures`,
+    fr: [`${TRANSFER_FREEZE_MS / HOUR} heures`],
+    en: [`${TRANSFER_FREEZE_MS / HOUR} hours`],
+    holds: () => expect(TRANSFER_FREEZE_MS % HOUR).toBe(0),
+  },
+  SCAN_TOKEN_TTL_MS: { value: `${minutes(SCAN_TOKEN_TTL_MS)} minutes`, ...sameIn(`${minutes(SCAN_TOKEN_TTL_MS)} minutes`) },
+  REGISTRABLE_STATUSES: {
+    value: '—',
+    holds: () => {
+      // A piece is registrable once handed over (its warranty activated), never from stock.
+      expect(REGISTRABLE_STATUSES).toContain('ACTIVATED');
+      expect(REGISTRABLE_STATUSES).not.toContain('ISSUED');
+    },
+  },
+  'CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS': {
+    value: `${CLAIM_ATTEMPT_LIMIT} essais par heure`,
+    fr: [`${CLAIM_ATTEMPT_LIMIT} essais`, 'par heure'],
+    en: [`${CLAIM_ATTEMPT_LIMIT} attempts`, 'per hour'],
+    holds: () => expect(CLAIM_ATTEMPT_WINDOW_MS).toBe(HOUR),
+  },
+  TRANSFER_TTL_MS: {
+    value: `${TRANSFER_TTL_MS / DAY} jours`,
+    fr: [`${TRANSFER_TTL_MS / DAY} jours`],
+    en: [`${TRANSFER_TTL_MS / DAY} days`],
+    holds: () => expect(TRANSFER_TTL_MS % DAY).toBe(0),
+  },
+  TRANSFERABLE_STATUSES: {
+    value: '—',
+    holds: () => {
+      // In service, reported lost or stolen, revoked or withdrawn: not transferable (R35).
+      for (const s of ['SERVICED', 'LOST', 'STOLEN', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED', 'ISSUED'] as const) expect(TRANSFERABLE_STATUSES, s).not.toContain(s);
+    },
+  },
+  TRANSFER_TOKEN_TTL_MS: { value: `${minutes(TRANSFER_TOKEN_TTL_MS)} minutes`, ...sameIn(`${minutes(TRANSFER_TOKEN_TTL_MS)} minutes`) },
+  'CERTIFICATE_MIN_DAYS, CERTIFICATE_MAX_DAYS, CERTIFICATE_DEFAULT_DAYS': {
+    value: `${CERTIFICATE_MIN_DAYS} à ${CERTIFICATE_MAX_DAYS} jours, ${CERTIFICATE_DEFAULT_DAYS} par défaut`,
+    fr: [`${CERTIFICATE_MIN_DAYS} à ${CERTIFICATE_MAX_DAYS} jours`, `${CERTIFICATE_DEFAULT_DAYS} jours`],
+    en: [`${CERTIFICATE_MIN_DAYS} to ${CERTIFICATE_MAX_DAYS} days`, `${CERTIFICATE_DEFAULT_DAYS} days`],
+  },
+  MAX_OPEN_CERTIFICATES: { value: `${MAX_OPEN_CERTIFICATES} liens`, fr: [`${MAX_OPEN_CERTIFICATES} liens`], en: [`${MAX_OPEN_CERTIFICATES} links`] },
+  CERTIFICATE_ENDING_STATUSES: {
+    value: '—',
+    holds: () => {
+      // A loss or theft reported, a revocation or a withdrawal ends a certificate (R49).
+      for (const s of ['LOST', 'STOLEN', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const) expect(CERTIFICATE_ENDING_STATUSES, s).toContain(s);
+    },
+  },
+  SALE_TOKEN_TTL_MS: { value: `${minutes(SALE_TOKEN_TTL_MS)} minutes`, ...sameIn(`${minutes(SALE_TOKEN_TTL_MS)} minutes`) },
+};
+
+/** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
+const PLAN_RULES: Readonly<Record<string, string>> = {
+  'one pending transfer': "'TRANSFER_ALREADY_PENDING'",
+  'acceptance is final': "ended_reason: 'TRANSFERRED_OUT'",
+  'confirmation by ORBES Client Services': 'set({ verified: true })',
+  'no reset by email, the assisted recovery (C-04)': "app.post('/api/v1/account/recover'",
+  'the 72-hour pause (C-04)': 'new Date(now.getTime() + TRANSFER_FREEZE_MS)',
+  'the transfer bound to the scan (F-03)': 'throw transferProductMismatch()',
+  'the shareable certificate (F-06)': 'days > CERTIFICATE_MAX_DAYS',
+  'the account lock (A-06)': "set({ status: 'LOCKED', updated_at: now })",
+  'the boutique sale (A-08)': 'ttlMs: SALE_TOKEN_TTL_MS,',
+};
+
+// ── Sources, for the absences of §10 ───────────────────────────────────────
+
+function typescriptFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? typescriptFiles(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [],
+  );
+}
+const GENOME = join(REPO, 'genome');
+/** The server, the web apps and the scripts, migrations aside (their CHECKs name every value the schema allows). */
+const SOURCES = ['src', 'scripts']
+  .flatMap((d) => typescriptFiles(join(GENOME, d)))
+  .filter((f) => !f.includes(`${join('db', 'migrations')}`))
+  .map((f) => ({ file: f.slice(GENOME.length + 1), text: readFileSync(f, 'utf8') }));
+const matches = (re: RegExp): { file: string; match: RegExpMatchArray }[] =>
+  SOURCES.flatMap(({ file, text }) => [...text.matchAll(re)].map((match) => ({ file, match })));
+/** Every route the server declares: method and path. */
+const ROUTES = SOURCES.filter(({ file }) => file.startsWith(join('src', 'server', 'routes'))).flatMap(({ text }) =>
+  [...text.matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => ({ method: m[1], path: m[2] })),
+);
+
+const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
+  N1: () => {
+    const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+    expect(deps.length).toBeGreaterThan(5);
+    expect(deps.filter((d) => /mail|smtp|sendgrid|postmark|mailgun|mandrill|sparkpost|resend|client-ses/i.test(d))).toEqual([]);
+    expect(matches(/\b(?:smtp|nodemailer|createTransport|sendMail)\b/gi).map((m) => m.file)).toEqual([]);
+  },
+  N2: () => {
+    expect(ROUTES.length).toBeGreaterThan(50);
+    // The console's own routes (a staff member's second factor, /api/admin) are not the customer's.
+    const customerRoutes = ROUTES.filter((r) => !r.path.startsWith('/api/admin/'));
+    expect(customerRoutes.length).toBeGreaterThan(20);
+    expect(customerRoutes.filter((r) => /reset|forgot|magic|verify-email|confirm-email/i.test(r.path))).toEqual([]);
+    // The customer's only password routes: the change (signed in, with the current one) and the assisted recovery (R12).
+    const customer = ROUTES.filter((r) => r.path.startsWith('/api/v1/') && /password|recover/i.test(r.path)).map((r) => `${r.method} ${r.path}`);
+    expect(customer.sort()).toEqual(['post /api/v1/account/password', 'post /api/v1/account/recover']);
+  },
+  N3: () => {
+    // An ownership begins only by a first registration or a transfer, and ends only by a transfer.
+    expect(new Set(matches(/acquired_via:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['FIRST_REGISTRATION', 'TRANSFER']));
+    expect(matches(/insertInto\('ownership'\)/g)).toHaveLength(matches(/acquired_via:\s*'(\w+)'/g).length);
+    expect(new Set(matches(/ended_reason:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['TRANSFERRED_OUT']));
+    // No other write to an ownership row than its end and its verification; no raw SQL that would bypass them.
+    const updated = matches(/updateTable\('ownership'\)\s*\.set\(\{([^}]*)\}\)/g).flatMap((m) => [...m.match[1].matchAll(/(\w+)\s*:/g)].map((k) => k[1]));
+    expect(new Set(updated)).toEqual(new Set(['ended_at', 'ended_reason', 'verified']));
+    expect(matches(/updateTable\('ownership'\)/g)).toHaveLength(matches(/updateTable\('ownership'\)\s*\.set\(\{/g).length);
+    expect(matches(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+ownership\b/g).map((m) => m.file)).toEqual([]);
+  },
+  N4: () => {
+    expect(ROUTES.filter((r) => r.method === 'delete' && r.path.startsWith('/api/v1/account'))).toEqual([]);
+    expect(matches(/status:\s*'DELETED'|status\s*=\s*'DELETED'/g).map((m) => m.file)).toEqual([]);
+  },
+  N5: () => {
+    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'password']);
+  },
+};
+
+// ── The drafts ─────────────────────────────────────────────────────────────
+
+interface Article {
+  n: number;
+  title: string;
+  body: string;
+  /** Ids of TERMS-FACTS the article cites; [] for a legal clause. */
+  refs: string[];
+}
+
+const CODE_LINE: Readonly<Record<Lang, RegExp>> = { fr: /^\*Code : (.+)\.\*$/, en: /^\*Code: (.+)\.\*$/ };
+const LEGAL_CLAUSE: Readonly<Record<Lang, string>> = { fr: '— (clause juridique)', en: '— (legal clause)' };
+
+function parseArticles(md: string, lang: Lang): Article[] {
+  return md
+    .split(/^## /m)
+    .slice(1)
+    .map((part) => {
+      const [heading, ...rest] = part.split('\n');
+      const h = /^Article (\d+) — (.+)$/.exec(heading);
+      if (!h) throw new Error(`${lang}: a section that is not an article: "## ${heading}"`);
+      const body = rest.join('\n').trim();
+      const last = body.split('\n').at(-1) ?? '';
+      const c = CODE_LINE[lang].exec(last);
+      if (!c) throw new Error(`${lang}: article ${h[1]} does not end with its code line: "${last}"`);
+      const refs = c[1] === LEGAL_CLAUSE[lang] ? [] : c[1].split(', ');
+      return { n: Number(h[1]), title: h[2], body, refs };
+    });
+}
+
+const terms = { fr: readDoc(TERMS.fr), en: readDoc(TERMS.en) };
+const articles = { fr: parseArticles(terms.fr, 'fr'), en: parseArticles(terms.en, 'en') };
+const notices = { fr: readDoc(NOTICE.fr), en: readDoc(NOTICE.en) };
+
+/** The text a reader sees: link targets are addresses, not words. */
+const prose = (md: string): string => md.replace(/\]\([^)\s]+\)/g, ']');
+/** The [À COMPLÉTER : …] fields of a draft, by their hint. */
+const placeholders = (md: string): string[] => [...md.matchAll(/\[À COMPLÉTER ?:([^\]]*)\]/g)].map((m) => m[1].trim());
+
+/** The French second-hand sentence, as the packaging kit's §3 table translates RESALE_GUIDANCE (J-02). */
+function kitResaleFr(): string {
+  const rows = section(readDoc(PACKAGING_KIT), '## 3. Second-hand purchase')
+    .split('\n')
+    .filter((l) => l.startsWith('|'))
+    .map(cells);
+  const [en, fr] = rows[2];
+  expect(en).toBe(RESALE_GUIDANCE);
+  return fr;
+}
+
+describe('TERMS-FACTS (docs/legal/TERMS-FACTS.md)', () => {
+  it('numbers its rules R01… in order, and its absences N1…', () => {
+    expect(facts.length).toBeGreaterThanOrEqual(40);
+    expect(facts.map((f) => f.id)).toEqual(facts.map((_, i) => `R${String(i + 1).padStart(2, '0')}`));
+    expect(absences.map((a) => a.id)).toEqual(absences.map((_, i) => `N${i + 1}`));
+    for (const f of facts) {
+      expect(f.rule.length, f.id).toBeGreaterThan(20);
+      expect(f.fragments.length, `${f.id}: a fragment of code`).toBeGreaterThan(0);
+    }
+  });
+
+  it('finds every fragment of code at the line it cites', () => {
+    const drift: string[] = [];
+    for (const f of facts) {
+      const path = join(GENOME, 'src', f.file);
+      if (!existsSync(path)) {
+        drift.push(`${f.id}: no file genome/src/${f.file}`);
+        continue;
+      }
+      const lines = readFileSync(path, 'utf8').split('\n');
+      const range = lines.slice(f.start - 1, f.end);
+      const at = `${f.file}:${f.start}${f.end === f.start ? '' : `-${f.end}`}`;
+      if (f.end < f.start || range.length !== f.end - f.start + 1) drift.push(`${f.id}: ${at} is not a range of the file`);
+      for (const fragment of f.fragments) {
+        if (!range.some((l) => l.includes(fragment))) drift.push(`${f.id}: \`${fragment}\` is not at ${at}; it is now at line ${where(lines, fragment).join(', ') || '(nowhere)'}`);
+      }
+      // A range is as tight as its fragments: the first opens it, the last closes it.
+      if (f.end !== f.start) {
+        if (!lines[f.start - 1]?.includes(f.fragments[0])) drift.push(`${f.id}: ${at} does not start on \`${f.fragments[0]}\``);
+        if (!lines[f.end - 1]?.includes(f.fragments.at(-1)!)) drift.push(`${f.id}: ${at} does not end on \`${f.fragments.at(-1)}\``);
+      }
+    }
+    expect(drift).toEqual([]);
+  });
+
+  it('gives each constant its value, recomputed from the exported constant, and the constants hold what the rules say', () => {
+    const cited = new Set(facts.map((f) => f.constant).filter((c) => c !== '—'));
+    expect([...cited].sort()).toEqual(Object.keys(CONSTANTS).sort());
+    for (const f of facts) {
+      const spec = f.constant === '—' ? { value: '—' } : CONSTANTS[f.constant];
+      expect(f.value, `${f.id} (${f.constant})`).toBe(spec.value);
+    }
+    for (const spec of Object.values(CONSTANTS)) spec.holds?.();
+    // The registration and the reception of a transfer share the scan's window (R22, R37).
+    expect(TRANSFER_TOKEN_TTL_MS).toBe(SCAN_TOKEN_TTL_MS);
+  });
+
+  it('covers every rule the plan names', () => {
+    const fragments = facts.flatMap((f) => f.fragments);
+    for (const [rule, fragment] of Object.entries(PLAN_RULES)) expect(fragments, rule).toContain(fragment);
+  });
+
+  it('keeps the production settings that would change a rule unset on the server', () => {
+    const env = readDoc('deploy/vps/.env.example');
+    expect(env).toMatch(new RegExp(`^# SESSION_TTL_ACCOUNT_HOURS=${DEFAULT_SESSION_TTL_HOURS.account}$`, 'm'));
+    expect(env).not.toMatch(/^SESSION_TTL_ACCOUNT_HOURS=/m);
+    expect(env).toMatch(/^# TRANSFER_ACCEPT_REQUIRE_PRODUCT=true\b/m);
+    expect(env).not.toMatch(/^TRANSFER_ACCEPT_REQUIRE_PRODUCT=/m);
+    const compose = readDoc('deploy/vps/compose.yaml');
+    expect(compose).toContain('SESSION_TTL_ACCOUNT_HOURS: ${SESSION_TTL_ACCOUNT_HOURS:-}');
+    expect(compose).toContain('TRANSFER_ACCEPT_REQUIRE_PRODUCT: ${TRANSFER_ACCEPT_REQUIRE_PRODUCT:-}');
+    // Unset, the account session takes the exported default.
+    expect(readDoc('genome/src/server/config.ts')).toContain('DEFAULT_SESSION_TTL_HOURS.account');
+  });
+
+  it('checks each absence of §10 in the code', () => {
+    expect(absences.map((a) => a.id)).toEqual(Object.keys(ABSENCE_CHECKS));
+  });
+
+  for (const [id, check] of Object.entries(ABSENCE_CHECKS)) {
+    it(`${id}: ${absences.find((a) => a.id === id)?.rule ?? '(missing from TERMS-FACTS)'}`, check);
+  }
+
+  it('reads every rule of N3 and N4 from real writes: the matchers find the code that registers, transfers and locks', () => {
+    expect(matches(/acquired_via:\s*'(\w+)'/g)).toHaveLength(2);
+    expect(matches(/status:\s*'LOCKED'/g).length).toBeGreaterThan(0);
+    expect(ROUTES).toContainEqual({ method: 'delete', path: '/api/v1/ownership/certificates/:id' });
+  });
+});
+
+describe('terms of use (docs/legal/terms.fr.md, terms.en.md)', () => {
+  it('have the same articles in both languages, each ending with the rules it describes, the same in both', () => {
+    expect(articles.fr.length).toBeGreaterThanOrEqual(12);
+    expect(articles.fr.map((a) => a.n)).toEqual(articles.fr.map((_, i) => i + 1));
+    expect(articles.en.map((a) => a.n)).toEqual(articles.fr.map((a) => a.n));
+    for (const [fr, en] of articles.fr.map((a, i) => [a, articles.en[i]] as const)) expect(en.refs, `article ${fr.n}`).toEqual(fr.refs);
+  });
+
+  it('cite every rule of TERMS-FACTS, and only rules that exist', () => {
+    const ids = [...facts.map((f) => f.id), ...absences.map((a) => a.id)];
+    const cited = new Set(articles.fr.flatMap((a) => a.refs));
+    expect(ids.filter((id) => !cited.has(id))).toEqual([]);
+    expect([...cited].filter((id) => !ids.includes(id))).toEqual([]);
+    // In order within an article: the rules first, then the absences, each by number.
+    const rank = (id: string): number => (id.startsWith('R') ? 0 : 1000) + Number(id.slice(1));
+    for (const a of articles.fr) expect([...a.refs].sort((x, y) => rank(x) - rank(y)), `article ${a.n}`).toEqual(a.refs);
+  });
+
+  for (const lang of LANGS) {
+    it(`${lang}: the article that cites a rule gives its value, as the code has it`, () => {
+      const missing: string[] = [];
+      for (const f of facts) {
+        if (f.constant === '—') continue;
+        const phrases = CONSTANTS[f.constant][lang] ?? [];
+        const text = articles[lang].filter((a) => a.refs.includes(f.id)).map((a) => a.body).join('\n');
+        for (const p of phrases) if (!text.includes(p)) missing.push(`${f.id}: "${p}"`);
+      }
+      expect(missing).toEqual([]);
+    });
+  }
+
+  it('say what a result proves as BRAND §4.5 and §4.6 do: the signed identity, a copy, registration is not a title', () => {
+    const limits = section(readDoc('docs/BRAND-DESIGN-SYSTEM.md'), '### 4.6');
+    expect(limits).toContain('**A copy verifies like the original.**');
+    const result = {
+      fr: articles.fr.find((a) => a.title === 'Ce que dit un résultat')!,
+      en: articles.en.find((a) => a.title === 'What a result says')!,
+    };
+    const said = {
+      fr: [
+        "**AUTHENTIC qualifie l'identité ORBES, pas l'objet.**",
+        'a été émise et signée par ORBES',
+        "**Une copie peut vérifier comme l'original.**",
+        'Un code imprimé peut être copié',
+        "ORBES Client Services peut examiner une pièce sur demande.",
+        "**UNUSUAL ACTIVITY DETECTED est une demande d'examen, jamais un verdict.**",
+        "**L'enregistrement n'est pas un titre de propriété.**",
+      ],
+      en: [
+        '**AUTHENTIC qualifies the ORBES identity, not the object.**',
+        'was issued and signed by ORBES',
+        '**A copy can verify like the original.**',
+        'A printed code can be copied',
+        'ORBES Client Services can inspect a piece on request.',
+        '**UNUSUAL ACTIVITY DETECTED is a request for review, never a verdict.**',
+        '**Registration is not a title of ownership.**',
+      ],
+    };
+    for (const lang of LANGS) {
+      expect(result[lang], lang).toBeDefined();
+      for (const s of said[lang]) expect(result[lang].body, `${lang}: ${s}`).toContain(s);
+      // The registration article says it again.
+      const registration = articles[lang].find((a) => a.refs.includes('R22'))!;
+      expect(registration.body).toContain(lang === 'fr' ? "L'enregistrement n'est pas un titre de propriété" : 'Registration is not a title of ownership');
+    }
+  });
+
+  it('give the second-hand sentence as /verify shows it and as the packaging kit translates it', () => {
+    const transfer = { fr: articles.fr.find((a) => a.refs.includes('R33'))!, en: articles.en.find((a) => a.refs.includes('R33'))! };
+    expect(transfer.en.body).toContain(`"${RESALE_GUIDANCE}"`);
+    expect(transfer.fr.body).toContain(`« ${kitResaleFr()} »`);
+  });
+
+  it('teach one address for the service, theorbes.com/verify', () => {
+    for (const lang of LANGS) {
+      expect(terms[lang]).toContain('theorbes.com/verify');
+      const hosts = new Set([...prose(terms[lang]).matchAll(/(?<![\w.-])(?:[a-z0-9-]+\.)+(?:com|net|org|fr|eu|io|app|co)(?![\w-])/gi)].map((m) => m[0].toLowerCase()));
+      expect([...hosts].sort(), lang).toEqual(['theorbes.com', 'verify.theorbes.com']);
+    }
+  });
+});
+
+describe('legal notice (docs/legal/legal-notice.fr.md, legal-notice.en.md)', () => {
+  const FIELDS: Readonly<Record<Lang, readonly string[]>> = {
+    fr: ['raison sociale', 'RCS', 'capital', 'directeur de la publication'],
+    en: ['company name', 'RCS', 'share capital', 'publication director'],
+  };
+
+  for (const lang of LANGS) {
+    it(`${lang}: keeps the [À COMPLÉTER] fields of the brief, each one well formed`, () => {
+      const fields = placeholders(notices[lang]);
+      for (const f of FIELDS[lang]) expect(fields.some((p) => p.includes(f)), f).toBe(true);
+      // Every marker opens a field that closes: an unclosed one would print as text.
+      expect(notices[lang].split('[À COMPLÉTER').length - 1).toBe(fields.length);
+      expect(terms[lang].split('[À COMPLÉTER').length - 1).toBe(placeholders(terms[lang]).length);
+    });
+
+    it(`${lang}: names the hosts, Vercel Inc. for theorbes.com and OVHcloud, in Canada, for verify.theorbes.com`, () => {
+      const lines = notices[lang].split('\n');
+      const site = lines.find((l) => l.startsWith('- **theorbes.com**'));
+      const verify = lines.find((l) => l.startsWith('- **verify.theorbes.com**'));
+      expect(site).toContain('Vercel Inc.');
+      expect(verify).toContain('OVHcloud');
+      expect(verify).toContain('Canada');
+      expect(notices[lang]).toContain('2004-575');
+      // The GeoIP data's attribution (CC BY 4.0, NOTICE.md).
+      expect(notices[lang]).toContain('IP Geolocation by DB-IP');
+    });
+  }
+});
+
+describe('customer copy of docs/legal', () => {
+  const COPY = [TERMS.fr, TERMS.en, NOTICE.fr, NOTICE.en] as const;
+  const lexicon = forbiddenTerms();
+
+  for (const doc of COPY) {
+    it(`${doc}: no forbidden term, English or French, and no exclamation mark`, () => {
+      const text = prose(readDoc(doc));
+      expect(findForbidden(text, lexicon)).toEqual([]);
+      expect(text.match(/!(?!\[)/g) ?? []).toEqual([]);
+    });
+  }
+});
+
+describe('note for counsel, README and links', () => {
+  it('raises the Toubon law on the warranty, the care and the instructions in English only, and the consumer mediator', () => {
+    const note = readDoc(COUNSEL);
+    const toubon = section(note, '## 2. Loi Toubon');
+    for (const s of ['loi n° 94-665 du 4 août 1994', 'la garantie', "l'entretien", "le mode d'emploi", 'lang="en"']) expect(toubon, s).toContain(s);
+    const mediator = section(note, '## 3. Médiateur de la consommation');
+    for (const s of ['L. 612-1', 'médiateur']) expect(mediator, s).toContain(s);
+    // Its table of fields names every field of the drafts.
+    expect(section(note, '## 1. Champs à compléter')).toContain('Directeur de la publication');
+  });
+
+  it('lists every file of docs/legal in the README, and is linked from LAUNCH §10 and BRAND §4.5', () => {
+    const readme = readDoc(README);
+    const files = readdirSync(join(REPO, LEGAL)).filter((f) => f.endsWith('.md') && f !== 'README.md');
+    expect(files.sort()).toEqual(['TERMS-FACTS.md', 'counsel-note.fr.md', 'legal-notice.en.md', 'legal-notice.fr.md', 'terms.en.md', 'terms.fr.md']);
+    for (const f of files) expect(readme, f).toContain(`](${f})`);
+    expect(readme).toContain('genome/test/docs/terms-facts.test.ts');
+    expect(section(readDoc('docs/LAUNCH.md'), '## 10.')).toContain('(legal/README.md)');
+    expect(section(readDoc('docs/BRAND-DESIGN-SYSTEM.md'), '### 4.5 Lexicon')).toContain('(legal/README.md)');
+  });
+
+  it('links only to files that exist', () => {
+    const dead: string[] = [];
+    for (const f of readdirSync(join(REPO, LEGAL)).filter((n) => n.endsWith('.md'))) {
+      const md = readDoc(`${LEGAL}/${f}`);
+      for (const [, target] of md.matchAll(/\]\(([^)\s]+)\)/g)) {
+        if (/^(?:[a-z]+:|#)/i.test(target)) continue;
+        if (!existsSync(resolve(dirname(join(REPO, LEGAL, f)), target.replace(/#.*$/, '')))) dead.push(`${f}: ${target}`);
+      }
+    }
+    expect(dead).toEqual([]);
+  });
+});

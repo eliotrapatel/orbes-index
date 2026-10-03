@@ -177,7 +177,7 @@ docker compose ps                                                # caddy, app, p
   - approximate location (country / ~10 km);
   - account data;
   - retention.
-- [ ] Terms for ORBES accounts, ownership registration and transfers.
+- [ ] Terms for ORBES accounts, ownership registration and transfers, and the legal notice of theorbes.com and verify.theorbes.com. Drafts in French and English are in [docs/legal](legal/README.md), each clause tied to the rule of the code it describes ([TERMS-FACTS](legal/TERMS-FACTS.md), held to the code by `genome/test/docs/terms-facts.test.ts`). Counsel completes the `[À COMPLÉTER]` fields (company name, RCS, share capital, publication director, the hosts' details, the consumer mediator) and settles the questions of the [note for counsel](legal/counsel-note.fr.md): the Toubon law (warranty, care and instructions in English only) and the consumer mediator.
 - [ ] Attribution for the GeoIP data: "IP Geolocation by DB-IP" (CC BY 4.0), see `NOTICE.md`. It can live in the privacy policy.
 - [ ] Customer copy reviewed by legal. The system never claims a scan proves an object is genuine; keep it that way in packaging and marketing.
 - [ ] ORBES Client Services contact, from the brand: set `CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE` and `CLIENT_SERVICES_HOURS` in `.env` ([DEPLOYMENT §3.1](DEPLOYMENT.md#31-variables)), then run `scripts/deploy.sh`. Until then, results that ask the customer to contact Client Services offer no contact link, no phone and no hours. Check with a test piece: void its warranty in the console, scan it on a phone, open the WARRANTY tab: CONTACT ORBES CLIENT SERVICES opens an email that quotes the result's REF.

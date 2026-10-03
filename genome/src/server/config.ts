@@ -140,7 +140,8 @@ const TEST_RATE_LIMITS = { verifyPerMinute: 10_000, authPerMinute: 10_000, admin
 
 const DEFAULT_LOG_LEVEL: Readonly<Record<OrbesEnv, LogLevel>> = { production: 'info', test: 'warn', development: 'debug' };
 
-const DEFAULT_SESSION_TTL_HOURS = { account: 720, admin: 8 };
+/** Absolute session lifetimes without SESSION_TTL_*_HOURS: 30 days for a customer, 8 hours in the console (docs/legal/TERMS-FACTS.md). */
+export const DEFAULT_SESSION_TTL_HOURS = Object.freeze({ account: 720, admin: 8 });
 
 /** SCAN_RETENTION_DAYS bounds (whole days). */
 export const SCAN_RETENTION_LIMITS = Object.freeze({ min: 30, max: 3_650 });

@@ -1,0 +1,121 @@
+# Faits du code pour les CGU
+
+Ce document est la source des [conditions générales d'utilisation](terms.fr.md) ([version anglaise](terms.en.md)). Il dit, règle par règle, ce que fait réellement le service ORBES GENOME CODE (la vérification sur theorbes.com/verify, servie par verify.theorbes.com, et le compte ORBES), avec la constante et la ligne de code qui l'appliquent. Il est écrit pour l'avocat qui relit les CGU et pour l'équipe qui modifie le code.
+
+- **Une règle, une ligne.** Chaque règle porte un identifiant (R01…), la valeur que le code applique, la constante exportée qui la fixe quand il y en a une, le fragment de code qui l'applique et la ligne où il se trouve (chemins relatifs à `genome/src/`). Quand une règle tient en plusieurs lignes voisines, la colonne cite la plage, et chaque fragment s'y trouve.
+- **Ce que le code ne fait pas** (N1…) est établi lui aussi, au §10 : aucun e-mail, aucune réinitialisation par lien, aucun retour sur un transfert accepté.
+- **Le test** `genome/test/docs/terms-facts.test.ts` lit ces tableaux. Il recalcule chaque valeur depuis la constante exportée, vérifie que chaque fragment se trouve à la ligne citée, et contrôle chaque absence dans le code. Une modification du code qui change une règle, ou qui déplace la ligne qui l'applique, fait échouer le test (son message donne la nouvelle ligne) : on met à jour ce document, puis les CGU si la règle a changé.
+- **Les CGU citent ces identifiants** à la fin de chaque article (la ligne *Code : …*). Le test vérifie que chaque règle est citée en français et en anglais, que l'article qui la cite donne sa valeur, et que les deux versions citent les mêmes règles, article par article.
+- **Les valeurs sont celles de la production.** Deux réglages du serveur pourraient en changer une, `SESSION_TTL_ACCOUNT_HOURS` (R09) et `TRANSFER_ACCEPT_REQUIRE_PRODUCT` (R40) : le test vérifie que `deploy/vps/.env.example`, le modèle du serveur, les laisse en commentaire.
+
+Ce qui relève d'une procédure humaine et non du code (la vérification d'identité avant un code de récupération, les motifs d'un verrouillage, les conditions de la garantie commerciale) est listé dans la [note pour l'avocat](counsel-note.fr.md).
+
+## 1. Le résultat d'une vérification
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R01 | La vérification d'un ORBES CODE est ouverte à tous : ni compte ni connexion. | — | — | `app.post('/api/v1/verify'` | [server/routes/public.ts:138](../../genome/src/server/routes/public.ts#L138) |
+| R02 | Un résultat AUTHENTIC dit qu'une identité ORBES a été émise et signée par ORBES, et ce que le registre ORBES en sait. Les messages servis ne disent rien de l'objet présenté. | — | `VERIFICATION_COPY` | `'This ORBES identity was issued and signed by ORBES and is registered to an active piece.'` | [server/services/copy.ts:25](../../genome/src/server/services/copy.ts#L25) |
+| R03 | Une copie parfaite d'un code vérifie comme l'original tant que ses scans restent plausibles pour un seul objet ([simulation](../reports/counterfeit-simulation.md)). La note servie sous chaque résultat positif le dit, et propose un examen de la pièce par ORBES Client Services. | — | `ASSURANCE_NOTE` | `A printed code alone cannot prove that an object is genuine` | [web/verify/copy.ts:493](../../genome/src/web/verify/copy.ts#L493) |
+| R04 | UNUSUAL ACTIVITY DETECTED demande un examen : le message invite à contacter ORBES Client Services avant de se fier à la pièce, sans accuser personne. | — | `VERIFICATION_COPY` | `requires review` | [server/services/copy.ts:43](../../genome/src/server/services/copy.ts#L43) |
+| R05 | Aucun contrôle matériel (NFC sécurisée, élément sécurisé, scellé) n'existe encore : une pièce dont la politique en prévoit un est vérifiée sur son seul code, et le résultat le dit. | — | — | `'CODE_AND_HARDWARE' : 'CODE_ONLY'` | [server/authenticators/index.ts:163](../../genome/src/server/authenticators/index.ts#L163) |
+| R06 | ORBES peut révoquer une identité ORBES (son code, ou la pièce) : chaque scan affiche alors REVOKED. | — | — | `REVOKING_PRODUCT.includes(reg.status)) return end(w, 'REVOKED'` | [server/services/verification.ts:646](../../genome/src/server/services/verification.ts#L646) |
+
+## 2. Le compte ORBES
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R07 | Le compte se crée avec une adresse e-mail et un mot de passe. ORBES ne vérifie pas l'adresse : le compte est actif aussitôt. | — | — | `status: 'ACTIVE',` | [server/services/auth.ts:280](../../genome/src/server/services/auth.ts#L280) |
+| R08 | Le mot de passe compte au moins 12 caractères ; il ne peut être ni l'adresse e-mail, ni fait de moins de 3 caractères différents. | 12 caractères | `PASSWORD_MIN_LENGTH` | `[...pw].length < PASSWORD_MIN_LENGTH` | [server/services/auth.ts:176](../../genome/src/server/services/auth.ts#L176) |
+| R09 | Une session dure 30 jours au plus depuis la connexion, sans prolongation ; le client se connecte ensuite de nouveau. | 30 jours | `DEFAULT_SESSION_TTL_HOURS` | `createdAt.getTime() + this.ttlMs[input.subjectType]` | [server/services/sessions.ts:170](../../genome/src/server/services/sessions.ts#L170) |
+| R10 | Après 10 mots de passe erronés en 15 minutes, les connexions au compte sont refusées, sans examen du mot de passe, jusqu'à la fin de ces 15 minutes. Une connexion réussie remet le compteur à zéro. | 10 essais en 15 minutes | `ACCOUNT_LOGIN_THROTTLE` | `if (this.accountThrottled(account))` | [server/services/auth.ts:308](../../genome/src/server/services/auth.ts#L308) |
+| R11 | Changer de mot de passe demande le mot de passe actuel. Les autres sessions du compte prennent fin ; celle en cours reste ouverte. | — | — | `revokeAllForSubject(subject.type, row.id, { exceptToken: opts.keepToken }, tx)` | [server/services/auth.ts:795](../../genome/src/server/services/auth.ts#L795) |
+
+## 3. Mot de passe oublié (C-04)
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R12 | Aucune réinitialisation par e-mail : un nouveau mot de passe se pose seulement avec un code de récupération remis par ORBES Client Services (voir N1 et N2). | — | — | `app.post('/api/v1/account/recover'` | [server/routes/account.ts:75](../../genome/src/server/routes/account.ts#L75) |
+| R13 | Le code de récupération est émis par un ADMIN d'ORBES Client Services, après vérification de l'identité du client. Cette vérification est une procédure humaine ([SALES-PLAYBOOK §6](../launch/SALES-PLAYBOOK.md)), à finaliser avec l'avocat. | — | — | `app.post('/api/admin/owners/:id/recovery-code', { config: ADMIN }` | [server/routes/admin/owners.ts:66](../../genome/src/server/routes/admin/owners.ts#L66) |
+| R14 | Le code vaut 30 minutes et sert une seule fois. Un nouveau code annule le précédent : un seul code est ouvert par compte. | 30 minutes | `RECOVERY_CODE_TTL_MS` | `new Date(now.getTime() + RECOVERY_CODE_TTL_MS)` | [server/services/account-recovery.ts:204](../../genome/src/server/services/account-recovery.ts#L204) |
+| R15 | 5 essais erronés par heure sur un même code ; au-delà, le code n'est plus examiné, et ORBES Client Services en émet un nouveau. | 5 essais par heure | `RECOVERY_ATTEMPT_LIMIT`, `RECOVERY_ATTEMPT_WINDOW_MS` | `failures >= RECOVERY_ATTEMPT_LIMIT` | [server/services/account-recovery.ts:266](../../genome/src/server/services/account-recovery.ts#L266) |
+| R16 | La récupération ferme toutes les sessions du compte, retire ses liens de certificat et annule ses transferts en attente, dans la transaction qui pose le nouveau mot de passe. | — | — | `revokeAllForSubject('account', fresh.id, {}, tx)` `withdrawAccountCertificates(tx, fresh.id, now)` `cancelPendingTransfersFrom(tx, fresh.id, actor, 'account_recovery')` | [server/services/account-recovery.ts:323-326](../../genome/src/server/services/account-recovery.ts#L323-L326) |
+| R17 | Elle suspend aussi les nouveaux transferts depuis le compte pendant 72 heures, contre la prise de contrôle d'un compte par une fausse demande. | 72 heures | `TRANSFER_FREEZE_MS` | `new Date(now.getTime() + TRANSFER_FREEZE_MS)` | [server/services/account-recovery.ts:317](../../genome/src/server/services/account-recovery.ts#L317) |
+| R18 | Pendant cette suspension, la création d'un code de transfert est refusée (409 `TRANSFERS_PAUSED`). | — | — | `throw transfersPaused(account.transfers_frozen_until)` | [server/services/ownership.ts:460](../../genome/src/server/services/ownership.ts#L460) |
+
+## 4. Verrouillage du compte (A-06)
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R19 | Un ADMIN d'ORBES Client Services peut verrouiller un compte : ses sessions prennent fin, son code de récupération ouvert est révoqué, ses liens de certificat sont retirés et ses transferts en attente annulés. Ses pièces restent enregistrées à son nom. | — | — | `set({ status: 'LOCKED', updated_at: now })` `withdrawAccountCertificates(tx, account.id, now)` `cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked')` | [server/services/owners.ts:378-395](../../genome/src/server/services/owners.ts#L378-L395) |
+| R20 | Un compte verrouillé ne se connecte plus, même avec le bon mot de passe ; seul un ADMIN le déverrouille. | — | — | `if (account.status === 'LOCKED') throw customerAccountLocked();` | [server/services/auth.ts:318](../../genome/src/server/services/auth.ts#L318) |
+| R21 | Un ADMIN d'ORBES Client Services peut exporter tout ce que le registre garde d'un compte (droit d'accès). | — | — | `app.get('/api/admin/owners/:id/export', { config: ADMIN }` | [server/routes/admin/owners.ts:94](../../genome/src/server/routes/admin/owners.ts#L94) |
+
+## 5. Enregistrement d'une pièce
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R22 | Une pièce s'enregistre au nom d'un compte connecté après un scan qui affiche AUTHENTIC — FIRST REGISTRATION, dans les 15 minutes qui suivent ce scan. | 15 minutes | `SCAN_TOKEN_TTL_MS` | `deps.registrationTtlMs ?? SCAN_TOKEN_TTL_MS` | [server/services/verification.ts:330](../../genome/src/server/services/verification.ts#L330) |
+| R23 | Ce scan sert une seule fois, et pour cette pièce seulement. | — | — | `consumeScanToken(tx, token, { now, productId: p.id })` | [server/services/ownership.ts:416](../../genome/src/server/services/ownership.ts#L416) |
+| R24 | Une pièce qu'ORBES ou un détaillant agréé n'a pas encore remise (en stock, ou en entretien avant sa vente) ne s'enregistre pas : elle doit d'abord être activée, ce que fait l'activation de sa garantie à la vente (R52). | — | `REGISTRABLE_STATUSES` | `throw registrationNotAllowed(product.status)` | [server/services/ownership.ts:394](../../genome/src/server/services/ownership.ts#L394) |
+| R25 | Une pièce n'a qu'un propriétaire enregistré à la fois : déjà enregistrée, elle ne s'enregistre plus, elle se transmet par un transfert. | — | — | `throw alreadyRegistered()` | [server/services/ownership.ts:393](../../genome/src/server/services/ownership.ts#L393) |
+| R26 | Pour une pièce livrée avec une carte certificat, le claim code imprimé sous la zone à gratter est exigé. | — | — | `'CLAIM_CODE_REQUIRED'` | [server/services/ownership.ts:399](../../genome/src/server/services/ownership.ts#L399) |
+| R27 | 5 claim codes erronés par heure et par pièce ; au-delà, les essais sont refusés sans examen jusqu'à la fin de l'heure. | 5 essais par heure | `CLAIM_ATTEMPT_LIMIT`, `CLAIM_ATTEMPT_WINDOW_MS` | `Number(recent.n) >= CLAIM_ATTEMPT_LIMIT` | [server/services/ownership.ts:970](../../genome/src/server/services/ownership.ts#L970) |
+| R28 | Avec le claim code, la propriété est enregistrée comme vérifiée ; sans carte, elle est seulement enregistrée. | — | — | `verified = true;` | [server/services/ownership.ts:402](../../genome/src/server/services/ownership.ts#L402) |
+| R29 | ORBES Client Services (rôle OPERATOR ou ADMIN) confirme une propriété non vérifiée, après examen d'une preuve d'achat. | — | — | `set({ verified: true })` | [server/services/ownership.ts:693](../../genome/src/server/services/ownership.ts#L693) |
+| R30 | Un scan fait dans un navigateur connecté à la console ORBES est un test interne : il n'ouvre pas l'enregistrement. | — | — | `if (!staff) registration = await issueToken(` | [server/services/verification.ts:442](../../genome/src/server/services/verification.ts#L442) |
+| R31 | Quand l'activité inhabituelle ne vient que de l'historique des scans, l'enregistrement reste ouvert, avec le claim code seulement. | — | — | `registration = await issueToken(true);` | [server/services/verification.ts:447](../../genome/src/server/services/verification.ts#L447) |
+
+## 6. Transfert
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R32 | Seul le propriétaire enregistré crée un code de transfert. | — | — | `current.account_id !== accountId) throw notOwner();` | [server/services/ownership.ts:463](../../genome/src/server/services/ownership.ts#L463) |
+| R33 | Le code de transfert vaut 7 jours ; expiré, il est refusé. | 7 jours | `TRANSFER_TTL_MS` | `new Date(now.getTime() + TRANSFER_TTL_MS)` | [server/services/ownership.ts:473](../../genome/src/server/services/ownership.ts#L473) |
+| R34 | Un seul transfert en attente par pièce (un index unique de la base le garantit aussi). | — | — | `'TRANSFER_ALREADY_PENDING'` | [server/services/ownership.ts:466](../../genome/src/server/services/ownership.ts#L466) |
+| R35 | Seule une pièce enregistrée, hors entretien et hors déclaration, se transfère (REGISTERED, OWNED ou TRANSFERRED) : pas une pièce en entretien, déclarée perdue ou volée, révoquée, signalée ou retirée. | — | `TRANSFERABLE_STATUSES` | `if (!TRANSFERABLE_STATUSES.includes(p.status))` | [server/services/ownership.ts:468](../../genome/src/server/services/ownership.ts#L468) |
+| R36 | Le propriétaire annule un transfert tant qu'il n'est pas accepté. | — | — | `set({ status: 'CANCELLED', completed_at: now }).where('id', '=', pending.id)` | [server/services/ownership.ts:628](../../genome/src/server/services/ownership.ts#L628) |
+| R37 | Le destinataire accepte avec son propre compte, après avoir scanné la pièce en étant connecté, dans les 15 minutes qui suivent ce scan (F-03). | 15 minutes | `TRANSFER_TOKEN_TTL_MS` | `purpose: 'TRANSFER_ACCEPT', now, ttlMs: TRANSFER_TOKEN_TTL_MS` | [server/services/verification.ts:460](../../genome/src/server/services/verification.ts#L460) |
+| R38 | Le code doit être celui de la pièce scannée ; sinon le transfert est refusé, sans nommer de pièce. | — | — | `throw transferProductMismatch()` | [server/services/ownership.ts:545](../../genome/src/server/services/ownership.ts#L545) |
+| R39 | Le scan doit être celui du compte qui accepte : le scan d'un autre ne sert à rien. | — | — | `throw transferTokenError('WRONG_ACCOUNT')` | [server/services/ownership.ts:286](../../genome/src/server/services/ownership.ts#L286) |
+| R40 | Ce lien au scan est la règle par défaut. Seul `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false` l'assouplirait, pour une acceptation assistée par ORBES Client Services : la production ne le pose pas, et aucun écran ne le propose. | — | — | `field('TRANSFER_ACCEPT_REQUIRE_PRODUCT', zSwitch, e.TRANSFER_ACCEPT_REQUIRE_PRODUCT) ?? true` | [server/config.ts:407](../../genome/src/server/config.ts#L407) |
+| R41 | L'acceptation est définitive : la propriété précédente prend fin et la nouvelle commence dans la même transaction ; aucune route ne la défait (N3). | — | — | `ended_reason: 'TRANSFERRED_OUT'` | [server/services/ownership.ts:581](../../genome/src/server/services/ownership.ts#L581) |
+| R42 | La propriété reste vérifiée, ou non, chez le nouveau propriétaire. La garantie reste attachée à la pièce (une garantie par pièce) : le transfert ne la change pas. | — | — | `acquired_via: 'TRANSFER', verified: current.verified` | [server/services/ownership.ts:584](../../genome/src/server/services/ownership.ts#L584) |
+
+## 7. Perte et vol
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R43 | Le propriétaire déclare sa pièce perdue ou volée depuis MY PIECES ; un transfert en attente est annulé. | — | — | `incidentReportable(p.status)` `set({ status: 'CANCELLED', completed_at: now }).where('id', '=', pending.id)` | [server/services/ownership.ts:739-743](../../genome/src/server/services/ownership.ts#L739-L743) |
+| R44 | Ensuite chaque scan de la pièce affiche UNUSUAL ACTIVITY DETECTED, et la pièce ne se transfère plus (R35). | — | — | `INCIDENT_PRODUCT.includes(reg.status)) return end(w, 'SUSPICIOUS_ACTIVITY'` | [server/services/verification.ts:647](../../genome/src/server/services/verification.ts#L647) |
+| R45 | Une perte qu'il a déclarée lui-même, le propriétaire la retire (PIECE FOUND) en tapant le mot de passe de son compte. Un vol, ou une perte enregistrée par ORBES Client Services, seul ORBES Client Services le retire. | — | — | `lostDeclaredBy(tx, p, accountId)` | [server/services/ownership.ts:784](../../genome/src/server/services/ownership.ts#L784) |
+
+## 8. Certificat de propriété (F-06)
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R46 | Le propriétaire enregistré crée un lien vers un certificat de sa pièce, valable 1 à 90 jours (30 par défaut). | 1 à 90 jours, 30 par défaut | `CERTIFICATE_MIN_DAYS`, `CERTIFICATE_MAX_DAYS`, `CERTIFICATE_DEFAULT_DAYS` | `days > CERTIFICATE_MAX_DAYS` | [server/services/ownership-certificates.ts:381](../../genome/src/server/services/ownership-certificates.ts#L381) |
+| R47 | 10 liens valides au plus par pièce à la fois. | 10 liens | `MAX_OPEN_CERTIFICATES` | `>= MAX_OPEN_CERTIFICATES) throw certificateLimit()` | [server/services/ownership-certificates.ts:403](../../genome/src/server/services/ownership-certificates.ts#L403) |
+| R48 | Le lien n'est montré qu'une fois : ORBES n'en garde que l'empreinte (SHA-256). | — | — | `createHash('sha256').update(bytes).digest()` | [server/services/ownership-certificates.ts:407](../../genome/src/server/services/ownership-certificates.ts#L407) |
+| R49 | Le certificat est lu en direct. Il cesse d'être valide à son expiration, quand la pièce change de propriétaire, ou quand elle passe en LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED ou RETIRED (déclarée perdue ou volée, révoquée, signalée ou retirée), même si elle en sort ensuite. | — | `CERTIFICATE_ENDING_STATUSES` | `row.ended_at !== null` | [server/services/ownership-certificates.ts:497](../../genome/src/server/services/ownership-certificates.ts#L497) |
+| R50 | Un lien retiré par le propriétaire répond comme un lien qui n'a jamais existé. | — | — | `row.revoked_at !== null) throw certificateNotFound()` | [server/services/ownership-certificates.ts:494](../../genome/src/server/services/ownership-certificates.ts#L494) |
+| R51 | Le certificat ne montre ni nom, ni e-mail, ni compte, et jamais le mot AUTHENTIC : il atteste un enregistrement, pas l'objet présenté. | — | — | `ownership: { verified: owned.verified, since: utcDate(owned.since) },` | [server/services/ownership-certificates.ts:517](../../genome/src/server/services/ownership-certificates.ts#L517) |
+
+## 9. Garantie et vente
+
+| Id | Règle | Valeur | Constante | Code | Ligne |
+|---|---|---|---|---|---|
+| R52 | La garantie commence à son activation par ORBES ou un détaillant agréé, à la date d'achat, pour la durée fixée pour la catégorie de la pièce. | — | — | `addMonthsClamped(purchaseDate, months)` | [server/services/warranty.ts:260](../../genome/src/server/services/warranty.ts#L260) |
+| R53 | Le point de vente d'une activation est pris dans le registre des points de vente agréés d'ORBES (mode Boutique, liste de la console) ; l'API garde un champ libre, pour l'historique, que la console n'envoie plus. | — | — | `requireActiveRetailer(tx, input.retailerId)` | [server/services/warranty.ts:236](../../genome/src/server/services/warranty.ts#L236) |
+| R54 | En boutique (mode Boutique, A-08), l'activation suit un scan de la pièce par le vendeur, dans les 10 minutes, à la date du jour et au pays du point de vente. | 10 minutes | `SALE_TOKEN_TTL_MS` | `ttlMs: SALE_TOKEN_TTL_MS,` | [server/services/sale.ts:116](../../genome/src/server/services/sale.ts#L116) |
+| R55 | ORBES peut annuler la garantie d'une pièce (VOID). | — | — | `set({ voided_at: now, void_reason: why, updated_at: now })` | [server/services/warranty.ts:343](../../genome/src/server/services/warranty.ts#L343) |
+
+## 10. Ce que le code ne fait pas
+
+| Id | Règle | Ce que le test vérifie |
+|---|---|---|
+| N1 | Le service n'envoie aucun e-mail. | Aucune bibliothèque d'envoi d'e-mail parmi les dépendances de `genome/package.json`, aucun client SMTP dans `genome/src`. |
+| N2 | Aucune route ne réinitialise le mot de passe d'un client par e-mail ou par lien. | Hors de la console (`/api/admin`), aucun chemin de route de `genome/src/server/routes` ne parle de reset, forgot ou magic link ; les seules routes du mot de passe d'un client sont le changement (R11) et la récupération (R12). |
+| N3 | Aucune route ne défait un transfert accepté, ni n'attribue une pièce à un compte autrement que par l'enregistrement ou le transfert. | Les seules valeurs écrites de `acquired_via` sont `FIRST_REGISTRATION` et `TRANSFER`, la seule valeur écrite de `ended_reason` est `TRANSFERRED_OUT`. |
+| N4 | Aucune route ne supprime un compte client : le statut `DELETED` existe dans le schéma, aucun code ne l'écrit. | Aucune route DELETE sous `/api/v1/account`, aucune écriture de `status: 'DELETED'`. |
+| N5 | Ni l'âge ni l'identité ne sont vérifiés à la création d'un compte : seuls l'e-mail, le mot de passe, et un nom affiché et un pays facultatifs sont demandés. | Les champs de `registerAccountBody`. |
