@@ -1,0 +1,10 @@
+#!/bin/bash
+# macOS only, for genome/test/ops/vps-scripts.test.ts: the GNU `stat -c FORMAT` the deploy/vps
+# scripts use on Ubuntu (%a: octal mode, %s: size), on top of the BSD stat.
+if [[ "${1:-}" == -c ]]; then
+  case "$2" in
+    %a) shift 2; exec /usr/bin/stat -f '%Lp' "$@" ;;
+    %s) shift 2; exec /usr/bin/stat -f '%z' "$@" ;;
+  esac
+fi
+exec /usr/bin/stat "$@"

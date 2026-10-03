@@ -30,6 +30,16 @@
 # Needs the same KEY_ENCRYPTION_KEY (.env, from escrow) as when the backup was
 # taken: the key files are encrypted under it. Exit codes: 0 ok, 1 failure,
 # 2 usage error, 3 aborted by the operator.
+#
+# NEVER on the shared production server (owner decision of 2026-10-03): its
+# .env holds RESTORE_ALLOWED=false, and this script then refuses before doing
+# anything, --dry-run included. Problems there are repaired forward
+# (scripts/deploy.sh --image <current tag> after a transient incident,
+# otherwise a corrective commit); restores and the restore drill run on a
+# separate, disposable server, where RESTORE_ALLOWED keeps its default, true
+# (docs/DEPLOYMENT.md §15.9). The value is read from .env only.
+# Shared host: also refuses while COMPOSE_PROJECT_NAME (another value than the
+# stack's) or ORBES_IMAGE_TAG is exported in the shell.
 set -Eeuo pipefail
 umask 077
 # shellcheck source=deploy/vps/scripts/lib.sh
@@ -58,12 +68,23 @@ while (($#)); do
     *) usage >&2; exit 2 ;;
   esac
 done
+
+# ── 0. Allowed on this server? (before anything else) ──────────────────────
+require_env_file
+RESTORE_ALLOWED="$(env_get RESTORE_ALLOWED true)"
+case "$RESTORE_ALLOWED" in
+  true) ;;
+  false)
+    die "restore.sh is disabled on this server (RESTORE_ALLOWED=false in $ENV_FILE). Decision of 2026-10-03: this shared server is never restored from a backup; it is repaired forward. After a transient incident: scripts/deploy.sh --image <current tag> (.state/deploys.log); otherwise a corrective commit, deployed normally (git pull && scripts/deploy.sh). Restores and restore drills run only on a separate, disposable server (docs/DEPLOYMENT.md §15.9). Nothing was done." ;;
+  *) die "RESTORE_ALLOWED in $ENV_FILE must be true or false, not \"$RESTORE_ALLOWED\": nothing was done" ;;
+esac
+guard_shared_host_env
+
 [[ -n "$IDENTITY" ]] || { echo "--identity <age identity file> is required" >&2; usage >&2; exit 2; }
 [[ "$DO_DB" == true || "$DO_KEYS" == true ]] || { echo "--db-only and --keys-only exclude each other" >&2; exit 2; }
 [[ -r "$IDENTITY" ]] || die "cannot read the identity file $IDENTITY"
 
 need_cmd docker age sha256sum tar
-require_env_file
 check_db_names
 BACKUP_DIR="$(env_get BACKUP_DIR /var/backups/orbes)"
 DOMAIN="$(env_get APP_DOMAIN)"

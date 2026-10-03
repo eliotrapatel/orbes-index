@@ -1,0 +1,15 @@
+#!/bin/bash
+# macOS only, for genome/test/ops/vps-scripts.test.ts: the GNU `find … -printf '%f\n'` of
+# backup.sh's pruning, on top of the BSD find (which has no -printf).
+args=()
+while (($#)); do
+  if [[ "$1" == -printf ]]; then
+    [[ "$2" == '%f\n' ]] || { echo "fake find: unhandled -printf $2" >&2; exit 2; }
+    args+=(-exec basename {} ';')
+    shift 2
+  else
+    args+=("$1")
+    shift
+  fi
+done
+exec /usr/bin/find "${args[@]}"

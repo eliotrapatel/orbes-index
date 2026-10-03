@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fake `curl` for genome/test/ops/vps-scripts.test.ts: deploy.sh's smoke tests through Caddy
+# (lib.sh https_get). $FAKE_STATE/fail/smoke makes every request fail, as a 502 would.
+S=${FAKE_STATE:?FAKE_STATE is not set}
+printf '%s\n' "$*" >>"$S/curl.log"
+url="${*: -1}"
+if [[ -f "$S/fail/smoke" ]]; then
+  echo "curl: (22) The requested URL returned error: 502" >&2
+  exit 22
+fi
+case "$url" in
+  */api/v1/health) printf '{"ok":true,"version":"0.1.0"}' ;;
+  */.well-known/orbes-keys.json) printf '{"keys":[{"keyId":1,"kid":"orbes-k001-fake","status":"ACTIVE"}]}' ;;
+  *) : ;;
+esac

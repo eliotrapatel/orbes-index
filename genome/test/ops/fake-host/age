@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fake `age` for genome/test/ops/vps-scripts.test.ts. `age -R <recipients>` writes an
+# age-shaped header (one "-> " stanza per recipient line) followed by the input unchanged;
+# `age -d -i <identity> <file>` strips that header again.
+if [[ "${1:-}" == -d ]]; then
+  file="${*: -1}"
+  end="$(head -n 64 "$file" | grep -a -n -m1 '^--- ' | cut -d: -f1)"
+  [[ -n "$end" ]] || { echo "age: error: not an age file" >&2; exit 1; }
+  tail -n +"$((end + 1))" "$file"
+  exit 0
+fi
+[[ "${1:-}" == -R ]] || { echo "fake age: unhandled: $*" >&2; exit 99; }
+printf 'age-encryption.org/v1\n'
+grep -E '^(age1|ssh-)' "$2" | while IFS= read -r _; do printf -- '-> X25519 fakestanza\n'; done
+printf -- '--- fakemac\n'
+cat

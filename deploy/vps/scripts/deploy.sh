@@ -3,10 +3,15 @@
 #
 #   scripts/deploy.sh [<git-ref> | --ref <git-ref>] [--worktree] [--no-backup] [--skip-smoke]
 #                     [--timeout <s>] [--dry-run]
-#   scripts/deploy.sh --image <tag>      roll out an image that already exists (e.g. a previous
-#                                        tag from .state/deploys.log), without building
+#   scripts/deploy.sh --image <tag>      roll out an image that already exists (e.g. a tag
+#                                        from .state/deploys.log), without building; refused
+#                                        when it does not know every migration the database
+#                                        holds (it cannot run on that schema: repair forward)
 #   scripts/deploy.sh --rebuild          rebuild the same commit with fresh base images
 #                                        (docker build --pull; tag <commit>-r<time>)
+#
+# Shared host: refuses to run while COMPOSE_PROJECT_NAME (another value than the
+# stack's) or ORBES_IMAGE_TAG is exported in the shell (lib.sh guard_shared_host_env).
 #
 # Steps
 #   1. Export the ref (default HEAD) with `git archive` into a temporary build
@@ -21,23 +26,33 @@
 #      its sources (built under umask 077 before step 1 normalised them).
 #   3. The Caddy configuration is made readable by the Caddy container (it has
 #      no capabilities) and validated with the values of .env (a typo
-#      must not take the only public entry point down), then an encrypted
-#      backup (scripts/backup.sh) when the stack is already running and holds
-#      data (--no-backup skips it).
+#      must not take the only public entry point down). Then the schema
+#      check: the migrations applied in the database (PostgreSQL is started
+#      for it when it is down) must all be known to the image, or the
+#      deployment stops here, before any backup and with nothing stopped.
+#      Then an encrypted backup (scripts/backup.sh) when the stack was already
+#      running and holds data (--no-backup skips it).
 #   4. ORBES_IMAGE_TAG=<tag> in .env; PostgreSQL up; the app role
 #      (POSTGRES_APP_USER, DML only) ensured; pending migrations applied with
-#      the new image as the schema owner (the app is stopped first when its
-#      image changes, so old code never runs on a newer schema); privileges
-#      granted; `docker compose up -d`; wait until everything is healthy.
+#      the new image as the schema owner, all in one transaction (the app is
+#      stopped first when its image changes, so old code never runs on a
+#      newer schema); privileges granted; `docker compose up -d`; wait until
+#      everything is healthy.
 #   5. First signing key if none is ACTIVE (npm run keys:generate in the app).
 #   6. Smoke tests through Caddy: https://$APP_DOMAIN/api/v1/health,
 #      /.well-known/orbes-keys.json (an ACTIVE key), /verify.
-#   7. Any failure in 4–6: automatic rollback to the previous image tag, then
-#      exit 1. A release whose migration already ran may refuse to roll back
-#      (older code, newer schema): restore the pre-deploy backup then
-#      (scripts/restore.sh, docs/DEPLOYMENT.md §15.9).
+#   7. Any failure in 4–6, when this release applied no migration: automatic
+#      rollback to the previous image tag, then exit 1. When it did (its
+#      migrations committed, then health, Caddy, the signing key or the smoke
+#      tests failed), the previous image cannot run on the new schema: no
+#      rollback is attempted, ORBES_IMAGE_TAG stays on the new image with the
+#      stack started on it, and the way to repair forward is printed
+#      (scripts/deploy.sh --image <new tag> after a transient incident,
+#      otherwise a corrective commit), then exit 1. restore.sh is not used on
+#      the shared server (RESTORE_ALLOWED=false, docs/DEPLOYMENT.md §15.9).
 #
-# Exit codes: 0 deployed, 1 failed (rolled back when possible), 2 usage error.
+# Exit codes: 0 deployed, 1 failed (rolled back, or kept to be repaired
+# forward, as printed), 2 usage error.
 set -Eeuo pipefail
 # shellcheck source=deploy/vps/scripts/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -74,6 +89,7 @@ done
 need_cmd docker curl git tar sha256sum
 docker compose version >/dev/null 2>&1 || die "the docker compose plugin is missing"
 require_env_file
+guard_shared_host_env
 check_db_names
 ensure_state_dir
 DOMAIN="$(env_get APP_DOMAIN)"
@@ -147,7 +163,7 @@ else
   fi
 fi
 
-# ── 3. Caddy configuration, pre-deploy backup ─────────────────────────────
+# ── 3. Caddy configuration, schema check, pre-deploy backup ───────────────
 step "Caddy configuration"
 ensure_caddy_config_readable
 caddy_validate || die "fix $ENV_FILE (or the Caddyfile) first: nothing was changed"
@@ -158,7 +174,51 @@ if [[ -n "$APP_CID" ]]; then
   PREV_TAG="$(docker inspect -f '{{.Config.Image}}' "$APP_CID" | sed 's/^orbes-genome://')"
 fi
 log "previous image tag: $PREV_TAG"
-if [[ "$BACKUP" == true && -n "$(service_container postgres)" ]]; then
+
+# The way out of a failed release that migrated: never a rollback (the previous image cannot
+# run on the new schema), never restore.sh on the shared server (RESTORE_ALLOWED=false).
+repair_forward_help() {
+  local tag=$1
+  printf '%s\n' \
+    "  Repair forward:" \
+    "  - after a transient incident (network, full disk, a service briefly down): fix it, then" \
+    "      scripts/deploy.sh --image $tag" \
+    "  - otherwise: a corrective commit, deployed normally (git pull && scripts/deploy.sh)." \
+    "  restore.sh is not used on the shared server (RESTORE_ALLOWED=false; docs/DEPLOYMENT.md §15.7, §15.9)." >&2
+}
+
+# Schema check, before any backup and before anything is stopped.
+# An image that does not know every migration applied in the database cannot migrate, so it
+# cannot run here (e.g. `--image <tag of an older release>` after a release that migrated):
+# without this check, the rollout would stop the app, write .env, fail at the migration step
+# and leave the site down, after a pre-deploy backup named after the wrong image.
+step "schema"
+PG_WAS_RUNNING=false
+if [[ -n "$(service_container postgres)" ]]; then PG_WAS_RUNNING=true; fi
+APPLIED_BEFORE=""
+if [[ "$DRY_RUN" == true && "$PG_WAS_RUNNING" != true ]]; then
+  log "[dry-run] PostgreSQL is not running: the schema check would start it"
+elif [[ "$DRY_RUN" == true ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  log "[dry-run] $IMAGE is not built: schema check skipped"
+else
+  if [[ "$PG_WAS_RUNNING" != true ]]; then
+    log "starting PostgreSQL to read the schema"
+    compose up -d postgres || die "PostgreSQL did not start: nothing else was changed"
+    wait_healthy postgres "$TIMEOUT" || die "PostgreSQL is not healthy: nothing else was changed"
+  fi
+  APPLIED_BEFORE="$(db_applied_migrations)" || die "cannot read the applied migrations (kysely_migration): nothing was changed"
+  KNOWN="$(image_migrations "$IMAGE")" || die "cannot list the migrations $IMAGE knows: nothing was changed"
+  UNKNOWN="$(lines_not_in "$APPLIED_BEFORE" "$KNOWN")"
+  if [[ -n "$UNKNOWN" ]]; then
+    err "this image cannot run on this schema: repair forward. The database holds migration(s) that $IMAGE does not know: $(words "$UNKNOWN")."
+    warn "nothing was stopped and no backup was written; the stack stays on orbes-genome:$PREV_TAG."
+    repair_forward_help "$PREV_TAG"
+    exit 1
+  fi
+  log "schema: $(grep -c . <<<"$APPLIED_BEFORE" || true) migration(s) applied, all known to $IMAGE"
+fi
+
+if [[ "$BACKUP" == true && "$PG_WAS_RUNNING" == true ]]; then
   step "pre-deploy backup"
   run "$SCRIPTS_DIR/backup.sh" --reason "pre-deploy-$TAG"
 fi
@@ -173,6 +233,8 @@ CADDY_CONFIG_HASH="$(cat "$STACK_DIR/Caddyfile" "$STACK_DIR"/caddy.d/*.caddy | s
 export CADDY_CONFIG_HASH
 
 # Called as `rollout … || rollback …` (errexit is off in there): every step checks itself.
+# MIGRATE_REACHED: the migration step has started, so this release may have migrated.
+MIGRATE_REACHED=false
 rollout() {
   local tag=$1 running
   env_set ORBES_IMAGE_TAG "$tag"
@@ -183,6 +245,7 @@ rollout() {
     log "stopping the running app before migrating to $tag"
     compose stop app >/dev/null || return 1
   fi
+  MIGRATE_REACHED=true
   db_prepare || return 1
   compose up -d --remove-orphans || return 1
   recreate_caddy_if_fixed || return 1
@@ -214,12 +277,48 @@ smoke() {
   log "/verify: 200"
 }
 
+# A failure after this release's migrations committed: the previous image cannot run on the
+# new schema (rolling back would stop the app and fail at its migration step, leaving the site
+# down with ORBES_IMAGE_TAG on the old tag). The release stays: ORBES_IMAGE_TAG keeps the new
+# tag, the stack is (re)started on it, and the way to repair forward is printed.
+keep_release() {
+  local why=$1 reason=$2
+  step "no rollback: repair forward"
+  warn "$reason"
+  if [[ "$(env_get ORBES_IMAGE_TAG)" != "$TAG" ]]; then env_set ORBES_IMAGE_TAG "$TAG"; fi
+  compose up -d --remove-orphans >/dev/null || warn "docker compose up -d failed: see docker compose ps and docker compose logs app"
+  warn "deployment of $TAG failed ($why) and is KEPT: ORBES_IMAGE_TAG=$TAG in .env, the stack started on orbes-genome:$TAG."
+  repair_forward_help "$TAG"
+  printf '%s deploy %s FAILED (%s): kept, no rollback, repair forward\n' "$(_ts)" "$TAG" "$why" >>"$STATE_DIR/deploys.log"
+  exit 1
+}
+
 rollback() {
-  local why=$1
+  local why=$1 applied new prev_known unknown
   warn "deployment of $TAG failed: $why"
   compose logs --tail 60 app >&2 || true
+  # Did this release migrate? Only once the migration step was reached (all its migrations
+  # commit together, or none: a failed migration leaves the schema as it was).
+  if [[ "$MIGRATE_REACHED" == true ]]; then
+    if ! applied="$(db_applied_migrations)"; then
+      keep_release "$why" "the migrations applied in the database cannot be read (is PostgreSQL down?): this release may have migrated, so no rollback is attempted."
+    fi
+    new="$(lines_not_in "$applied" "$APPLIED_BEFORE")"
+    if [[ -n "$new" ]]; then
+      keep_release "$why" "$TAG applied the migration(s) $(words "$new"): orbes-genome:$PREV_TAG cannot run on this schema, so no rollback is attempted."
+    fi
+    # No new migration: the previous image normally knows them all. Make sure of it.
+    if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1 \
+      && prev_known="$(image_migrations "orbes-genome:$PREV_TAG")"; then
+      unknown="$(lines_not_in "$applied" "$prev_known")"
+      if [[ -n "$unknown" ]]; then
+        keep_release "$why" "orbes-genome:$PREV_TAG does not know the migration(s) $(words "$unknown") of this database: it cannot run on this schema, so no rollback is attempted."
+      fi
+    fi
+  fi
   if [[ "$PREV_TAG" == "$TAG" ]] || ! docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
     warn "no previous image to roll back to (orbes-genome:$PREV_TAG)"
+    repair_forward_help "$TAG"
     printf '%s deploy %s FAILED (no rollback)\n' "$(_ts)" "$TAG" >>"$STATE_DIR/deploys.log"
     exit 1
   fi
@@ -228,7 +327,8 @@ rollback() {
     warn "rolled back to $PREV_TAG; the stack is healthy"
     printf '%s deploy %s FAILED, rolled back to %s\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_DIR/deploys.log"
   else
-    warn "rollback to $PREV_TAG is NOT healthy either. If $TAG applied a migration, restore the pre-deploy backup (scripts/restore.sh)."
+    warn "rollback to $PREV_TAG is NOT healthy either: docker compose ps, docker compose logs app."
+    repair_forward_help "$PREV_TAG"
     printf '%s deploy %s FAILED, rollback to %s FAILED\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_DIR/deploys.log"
   fi
   exit 1
@@ -251,12 +351,28 @@ if [[ "$SMOKE" == true ]]; then
   [[ "$ok" == true ]] || rollback "smoke tests failed"
 fi
 
-printf '%s deploy %s OK (previous %s)\n' "$(_ts)" "$TAG" "$PREV_TAG" >>"$STATE_DIR/deploys.log"
-if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
-  printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
-  log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
-elif [[ "$PREV_TAG" == "$TAG" ]]; then
-  log "redeployed $IMAGE (same image as before)"
+# The migrations this release applied (none when it only changed code).
+NEW_MIGRATIONS=""
+if APPLIED_AFTER="$(db_applied_migrations)"; then
+  NEW_MIGRATIONS="$(lines_not_in "$APPLIED_AFTER" "$APPLIED_BEFORE")"
 else
-  log "deployed $IMAGE (no previous image on this host to roll back to)"
+  warn "could not read the applied migrations after the rollout (scripts/deploy.sh --image checks the schema before any rollback)"
+fi
+MIGRATED_NOTE=""
+if [[ -n "$NEW_MIGRATIONS" ]]; then MIGRATED_NOTE="; migrations $(words "$NEW_MIGRATIONS")"; fi
+printf '%s deploy %s OK (previous %s%s)\n' "$(_ts)" "$TAG" "$PREV_TAG" "$MIGRATED_NOTE" >>"$STATE_DIR/deploys.log"
+if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
+  if [[ -n "$NEW_MIGRATIONS" ]]; then
+    # Rolling back is no longer possible: never suggest it.
+    rm -f -- "$STATE_DIR/previous-tag"
+    log "deployed $IMAGE (previous: $PREV_TAG). This release applied the migration(s) $(words "$NEW_MIGRATIONS"):"
+    log "orbes-genome:$PREV_TAG cannot run on this schema any more (scripts/deploy.sh --image $PREV_TAG refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image $TAG after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7)."
+  else
+    printf '%s\n' "$PREV_TAG" >"$STATE_DIR/previous-tag"
+    log "deployed $IMAGE (previous: $PREV_TAG). Manual rollback: scripts/deploy.sh --image $PREV_TAG"
+  fi
+elif [[ "$PREV_TAG" == "$TAG" ]]; then
+  log "redeployed $IMAGE (same image as before)${NEW_MIGRATIONS:+; it applied the migration(s) $(words "$NEW_MIGRATIONS")}"
+else
+  log "deployed $IMAGE (no previous image on this host to roll back to)${NEW_MIGRATIONS:+; it applied the migration(s) $(words "$NEW_MIGRATIONS")}"
 fi

@@ -16,7 +16,8 @@
 #   ${…} interpolation below; each container gets only the variables listed.
 #
 # Day-to-day commands (run from deploy/vps/, as the `orbes` user):
-#   scripts/deploy.sh                       build the current commit, migrate, roll out, smoke test, roll back on failure
+#   scripts/deploy.sh                       build the current commit, migrate, roll out, smoke test; on failure roll back
+#                                           (no migration) or keep the release to repair forward (migrations)
 #   docker compose ps                       state and health of the three services
 #   docker compose logs -f app caddy        logs (JSON lines)
 #   scripts/backup.sh / scripts/restore.sh  encrypted backups (docs/DEPLOYMENT.md §15)

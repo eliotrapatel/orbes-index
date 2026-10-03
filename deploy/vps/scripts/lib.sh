@@ -18,8 +18,11 @@ QUIET="${QUIET:-false}"
 
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { [[ "$QUIET" == true ]] || printf '%s [%s] %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; }
+# Like log, but printed even with --quiet: lines that monitoring reads (backup.sh's photos: line).
+notice() { printf '%s [%s] %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; }
 warn() { printf '%s [%s] WARNING: %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; }
-die() { printf '%s [%s] ERROR: %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; exit 1; }
+err() { printf '%s [%s] ERROR: %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; }
+die() { err "$@"; exit 1; }
 step() { [[ "$QUIET" == true ]] || printf '\n%s [%s] ── %s\n' "$(_ts)" "$SCRIPT_NAME" "$*" >&2; }
 
 # Print the location of an unexpected failure (set -E propagates the ERR trap).
@@ -93,6 +96,27 @@ require_env_file() {
   mode="$(stat -c '%a' "$ENV_FILE")"
   if [[ "$mode" != 600 && "$mode" != 400 ]]; then
     die "$ENV_FILE has mode $mode; it holds secrets: chmod 600 $ENV_FILE"
+  fi
+}
+
+# ── Shared host: no stray exported setting ─────────────────────────────────
+# This stack shares its Docker host with other projects. Two variables left exported in the
+# operator's shell (by other work on the host, a profile, a copied command) would redirect it
+# without a word, because docker compose prefers the environment to .env:
+#   COMPOSE_PROJECT_NAME  another project's containers and volumes (restore.sh deletes the
+#                         pgdata volume of the project it names);
+#   ORBES_IMAGE_TAG       compose would run that image, not the one deploy.sh records in .env.
+# deploy.sh, backup.sh and restore.sh call this right after require_env_file, before any
+# docker command. A COMPOSE_PROJECT_NAME equal to the stack's own (orbes, or the value of
+# .env) changes nothing and is accepted.
+guard_shared_host_env() {
+  local stack
+  stack="$(env_get COMPOSE_PROJECT_NAME orbes)"
+  if [[ -n "${COMPOSE_PROJECT_NAME+x}" && "${COMPOSE_PROJECT_NAME}" != "$stack" ]]; then
+    die "COMPOSE_PROJECT_NAME is exported in this shell (\"${COMPOSE_PROJECT_NAME}\"), but this stack is the compose project \"$stack\": docker compose would act on another project's containers and volumes. Run: unset COMPOSE_PROJECT_NAME (and remove the export from your shell profile), then run the script again. Nothing was changed."
+  fi
+  if [[ -n "${ORBES_IMAGE_TAG+x}" ]]; then
+    die "ORBES_IMAGE_TAG is exported in this shell (\"${ORBES_IMAGE_TAG}\"): docker compose would prefer it to $ENV_FILE and run that image, not the one this stack records. Run: unset ORBES_IMAGE_TAG, then run the script again (scripts/deploy.sh --image <tag> rolls out a given image). Nothing was changed."
   fi
 }
 
@@ -221,6 +245,57 @@ db_prepare() {
   db_migrate || return 1
   db_grant_app_role || return 1
   log "database ready: migrations applied, app role $(db_app_user) has DML rights only"
+}
+
+# ── Schema: the migrations a database holds, the migrations an image knows ──
+# `db.ts migrate` applies every pending migration in ONE transaction (docs/DATABASE.md §9.2)
+# and Kysely records each in kysely_migration. An image can migrate, and so be deployed, only
+# on a schema whose applied migrations it all knows ("previously executed migration … is
+# missing" otherwise). Once a release's migrations have committed, the previous image cannot
+# come back: deploy.sh repairs forward instead of rolling back (docs/DEPLOYMENT.md §15.7).
+# The SELECTs are plain SQL, also run against a migrated database by genome/test/ops.
+APPLIED_MIGRATIONS_SQL='SELECT name FROM kysely_migration ORDER BY name'
+PHOTO_USAGE_SQL="SELECT count(*) || ' ' || coalesce(sum(octet_length(bytes)), 0) FROM media_objects"
+
+# psql as the owner, SQL on stdin, unaligned tuples only: one value per line, nothing else.
+db_query_owner() {
+  # shellcheck disable=SC2016 # expanded by the container's shell
+  compose exec -T postgres sh -c 'exec psql -X -q -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+}
+
+# db_applied_migrations: the migrations applied in the database, one name per line, oldest
+# first; nothing at all before the first migration (no kysely_migration table yet).
+db_applied_migrations() {
+  printf '%s\n' \
+    "SELECT to_regclass('public.kysely_migration') IS NOT NULL AS has_table \\gset" \
+    '\if :has_table' "$APPLIED_MIGRATIONS_SQL;" '\endif' | db_query_owner
+}
+
+# image_migrations IMAGE: the migrations IMAGE knows (MIGRATIONS of src/server/db/migrate.ts),
+# one name per line, read from the image itself (throw-away container: no network, no database).
+IMAGE_MIGRATIONS_JS='import("./src/server/db/migrate.ts").then((m) => { process.stdout.write(Object.keys(m.MIGRATIONS).join("\n") + "\n"); }, (e) => { console.error(String(e)); process.exit(1); })'
+image_migrations() {
+  docker run --rm --network none --entrypoint node "$1" --import tsx -e "$IMAGE_MIGRATIONS_JS"
+}
+
+# lines_not_in A B: the non-empty lines of A that are not a line of B, in A's order.
+lines_not_in() {
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    grep -Fxq -- "$line" <<<"$2" || printf '%s\n' "$line"
+  done <<<"$1"
+}
+
+# words LINES: the lines of LINES joined with ", " (for messages).
+words() { local s="${1//$'\n'/, }"; printf '%s' "${s%, }"; }
+
+# db_photo_usage: "<count> <bytes>" of the photographs (media_objects, F-04: bytea inside the
+# pgdata volume, so in every backup); "0 0" on a schema older than migration 0012 (no table).
+db_photo_usage() {
+  printf '%s\n' \
+    "SELECT to_regclass('public.media_objects') IS NOT NULL AS has_media \\gset" \
+    '\if :has_media' "$PHOTO_USAGE_SQL;" '\else' "SELECT '0 0';" '\endif' | db_query_owner
 }
 
 # Validate Caddyfile + caddy.d with the values of .env BEFORE Caddy is (re)created: a typo

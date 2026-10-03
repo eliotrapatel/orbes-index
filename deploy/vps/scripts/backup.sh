@@ -24,9 +24,21 @@
 # Scheduled archives (nightly) and event archives (pre-deploy-*, pre-restore,
 # other --reason values) are counted separately: many deploys in one day never
 # push the nightly history out.
-# Off-site: with BACKUP_RCLONE_DEST (e.g. ovh-s3:orbes-backups/verify) each new
-# archive is copied with rclone, checked, and remote copies older than the
-# local retention are deleted.
+# Off-site: with BACKUP_RCLONE_DEST (e.g. ovh-s3:orbes-backups/verify) the
+# archives missing remotely are copied with rclone, the new one is checked, and
+# remote copies older than the remote retention age are deleted: daily/ after
+# BACKUP_KEEP_DAILY + 1 days (15), weekly/ after BACKUP_KEEP_WEEKLY × 7 + 7 days
+# (63). Only archives younger than that age are copied (--max-age): an event
+# archive kept longer locally (pruned by count) is never sent again once the
+# remote pruning has removed it.
+#
+# Disk: every run logs "photos: <count>, <size> MB" (media_objects, F-04: the
+# photographs are bytea in the database, so every archive holds all of them;
+# MB = 1 048 576 bytes), printed even with --quiet; 0 before migration 0012
+# (docs/DEPLOYMENT.md §15.12).
+#
+# Shared host: refuses to run while COMPOSE_PROJECT_NAME (another value than
+# the stack's) or ORBES_IMAGE_TAG is exported in the shell.
 #
 # Plaintext handling: the dump and the key tar are staged in a 0700 work
 # directory inside BACKUP_DIR for the duration of the run and removed on exit
@@ -56,6 +68,7 @@ done
 
 need_cmd docker age sha256sum tar
 require_env_file
+guard_shared_host_env
 BACKUP_DIR="$(env_get BACKUP_DIR /var/backups/orbes)"
 RECIPIENTS="$(env_get BACKUP_AGE_RECIPIENTS_FILE /opt/orbes/backup-recipients.txt)"
 KEEP_DAILY="$(env_get BACKUP_KEEP_DAILY 14)"
@@ -73,6 +86,15 @@ N_RECIPIENTS="$(grep -cE '^(age1[0-9a-z]+|ssh-(ed25519|rsa) )' "$RECIPIENTS" || 
 KEYS_VOLUME="$(volume_name keys)"
 docker volume inspect "$KEYS_VOLUME" >/dev/null 2>&1 || die "volume $KEYS_VOLUME not found"
 PG_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$(service_container postgres)")"
+
+# ── Disk: the photographs (F-04), in the database and so in every archive ──
+# The nightly journal (journalctl -u orbes-backup) carries this line: the thresholds of
+# docs/DEPLOYMENT.md §15.12 are read from it. Never a reason to skip the backup itself.
+if PHOTOS="$(db_photo_usage)" && [[ "$PHOTOS" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+  notice "photos: ${BASH_REMATCH[1]}, $(awk -v b="${BASH_REMATCH[2]}" 'BEGIN { printf "%.1f", b / 1048576 }') MB"
+else
+  warn "photos: unknown (the count and size of media_objects could not be read)"
+fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NAME="orbes-${STAMP}${REASON:+-$REASON}.tar.age"
@@ -191,16 +213,21 @@ prune "$WEEKLY" "$KEEP_WEEKLY" event
 if [[ -n "$RCLONE_DEST" && "$UPLOAD" == true ]]; then
   step "off-site copy to $RCLONE_DEST"
   need_cmd rclone
-  # copy (never sync): only archives missing remotely are sent, so a missed upload
-  # (network outage, remote added later) catches up on the next run.
-  rclone copy -q "$DAILY" "$RCLONE_DEST/daily" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
-  rclone copy -q "$WEEKLY" "$RCLONE_DEST/weekly" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
-  rclone check -q --one-way "$DAILY" "$RCLONE_DEST/daily" --include "$NAME"
   # Remote retention mirrors the local one, by age. An Object Lock / versioning policy on
   # the bucket (docs/DEPLOYMENT.md §15.8) protects against a compromised server deleting backups.
-  rclone delete -q --min-age "$((KEEP_DAILY + 1))d" "$RCLONE_DEST/daily" || warn "remote daily pruning failed"
-  rclone delete -q --min-age "$((KEEP_WEEKLY * 7 + 7))d" "$RCLONE_DEST/weekly" || warn "remote weekly pruning failed"
-  log "copied and checked off-site"
+  REMOTE_DAILY_AGE="$((KEEP_DAILY + 1))d"
+  REMOTE_WEEKLY_AGE="$((KEEP_WEEKLY * 7 + 7))d"
+  # copy (never sync): only archives missing remotely are sent, so a missed upload
+  # (network outage, remote added later) catches up on the next run. Only those younger
+  # than the remote retention age (--max-age): event archives (pre-deploy-*…) are pruned
+  # locally by count, not by age, and one older than that would otherwise be sent again
+  # every night, then deleted by the pruning below.
+  rclone copy -q --max-age "$REMOTE_DAILY_AGE" "$DAILY" "$RCLONE_DEST/daily" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
+  rclone copy -q --max-age "$REMOTE_WEEKLY_AGE" "$WEEKLY" "$RCLONE_DEST/weekly" --include 'orbes-*.tar.age' --include 'orbes-*.tar.age.sha256'
+  rclone check -q --one-way "$DAILY" "$RCLONE_DEST/daily" --include "$NAME"
+  rclone delete -q --min-age "$REMOTE_DAILY_AGE" "$RCLONE_DEST/daily" || warn "remote daily pruning failed"
+  rclone delete -q --min-age "$REMOTE_WEEKLY_AGE" "$RCLONE_DEST/weekly" || warn "remote weekly pruning failed"
+  log "copied and checked off-site (archives younger than $REMOTE_DAILY_AGE / $REMOTE_WEEKLY_AGE)"
 fi
 
 ensure_state_dir

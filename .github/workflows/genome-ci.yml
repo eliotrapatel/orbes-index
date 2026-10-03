@@ -1,8 +1,10 @@
 # ORBES GENOME CODE: continuous integration.
 #
 # Runs on every push and pull request that touches the authentication system
-# (genome/), its specifications (docs/) or this workflow. The ORBES website
-# (index.html at the repository root) is static and is not built here.
+# (genome/), its specifications (docs/), its production stack (deploy/: the
+# scripts run in genome/test/ops against a fake Docker host) or this workflow.
+# The ORBES website (index.html at the repository root) is static and is not
+# built here.
 #
 #   test    npm ci → typecheck → the whole vitest suite, including the opt-in
 #           PostgreSQL suites (postgres:16 service container) and the Chromium
@@ -19,11 +21,13 @@ on:
     paths:
       - 'genome/**'
       - 'docs/**'
+      - 'deploy/**'
       - '.github/workflows/genome-ci.yml'
   pull_request:
     paths:
       - 'genome/**'
       - 'docs/**'
+      - 'deploy/**'
       - '.github/workflows/genome-ci.yml'
   workflow_dispatch:
 

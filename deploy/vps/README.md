@@ -16,8 +16,8 @@ internet ──80/443──▶ caddy ──edge (internal)──▶ app:8080 ─
 | `.env.example` | Every stack variable. `scripts/setup.sh` turns it into `.env` (mode 0600, never committed). |
 | `scripts/bootstrap-ubuntu.sh` | Once, as root: updates, Docker, ufw, fail2ban, unattended-upgrades, time sync, swap, the `orbes` user, systemd timers, optional SSH hardening. |
 | `scripts/setup.sh` | Once, as `orbes`: `.env` with generated secrets, backup key, first deployment, GeoIP database. |
-| `scripts/deploy.sh` | Build a git ref, validate the Caddy configuration, back up, migrate (as the schema owner), roll out, first signing key, smoke tests, automatic rollback. |
-| `scripts/backup.sh` / `restore.sh` | Encrypted (age) database + key-volume archives, retention, optional copy to OVH Object Storage; restore with checks and confirmation. |
+| `scripts/deploy.sh` | Build a git ref, validate the Caddy configuration, check that the image knows the schema, back up, migrate (as the schema owner), roll out, first signing key, smoke tests; automatic rollback for a release without migration, repair forward for one that migrated (DEPLOYMENT §15.7). |
+| `scripts/backup.sh` / `restore.sh` | Encrypted (age) database + key-volume archives, retention, optional copy to OVH Object Storage, the `photos:` disk line; restore with checks and confirmation, on a dedicated or test server only (`RESTORE_ALLOWED=false` on the shared production server). |
 | `scripts/geoip-update.sh` | DB-IP City Lite refresh into the `geoip` volume (weekly timer; a new edition appears monthly). |
 | `systemd/` | `orbes-backup.timer` (nightly), `orbes-geoip.timer` (weekly). |
 
@@ -51,8 +51,8 @@ scripts/deploy.sh                        # applies .env after validating it
 Day to day (as `orbes`, in this directory):
 
 ```bash
-git pull && scripts/deploy.sh            # update (backup first, automatic rollback on failure)
-scripts/deploy.sh --image <previous tag> # manual rollback to an image still on the host
+git pull && scripts/deploy.sh            # update (backup first; on failure: rollback, or repair forward after migrations)
+scripts/deploy.sh --image <tag>          # an image still on the host (refused if it does not know the schema)
 docker compose ps                        # health of caddy / app / postgres
 docker compose logs -f --tail 100 app    # JSON logs
 scripts/backup.sh                        # on-demand encrypted backup (nightly via systemd anyway)

@@ -957,6 +957,7 @@ The service is stateless apart from a few per-process pieces. Sessions, scan tok
   - An older image refuses to apply migrations to a database that holds migrations it does not know (Kysely "corrupted migrations"). Roll back with `MIGRATE_ON_START=false`.
   - That only works if the new migration is backward compatible with the old code (additive changes).
   - Otherwise, restore the pre-upgrade backup or PITR timestamp (§10). Everything written since the upgrade is lost: prefer a forward fix when you can.
+  - **On the shared OVH VPS (§15), neither applies**: a release that migrated is never undone by changing the image (`scripts/deploy.sh` runs the migrations itself, and refuses an image that does not know them), and that server is never restored from a backup (`RESTORE_ALLOWED=false`). It is repaired forward: §15.7, §15.9.
   - A down step may also stop accounts that the older schema cannot represent ([DATABASE §9.1](DATABASE.md#91-layout)): rolling back past `0008` disables the sellers' (RETAIL) accounts, and past `0006` the staff accounts that have not yet replaced their temporary password (the forced change would be lost). Before such a rollback, look at the Team page for TEMPORARY PASSWORD rows; afterwards, create new accounts for those members rather than re-enabling these.
 - **Never** run `migrateDown` or `db reset-demo` against production. They drop the schema, and both refuse production anyway.
 
@@ -1220,13 +1221,15 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 |---|---|
 | Source | `git archive <ref> genome` into a temporary build context: the checkout is never modified, and uncommitted changes are never deployed by accident (warned; `--worktree` builds the working tree as is, tagged `<commit>-dirty-<time>`). |
 | Build | `docker build` → `orbes-genome:<commit12>` (an existing tag is reused). `BUILD_EXTRA_CA_FILE` in `.env` passes a proxy CA as the `extra_ca` BuildKit secret (§5.2); not needed on OVH. |
+| Shell | Refuses to start while `ORBES_IMAGE_TAG` is exported in the shell, or `COMPOSE_PROJECT_NAME` with another value than the stack's (`orbes`): compose prefers the environment to `.env`, so on a shared host either would run another image, or touch another project's containers and volumes. `backup.sh` and `restore.sh` refuse the same. Run `unset ORBES_IMAGE_TAG COMPOSE_PROJECT_NAME` and start again. |
 | Caddy | `caddy validate` of `Caddyfile` + `caddy.d/` with the values of `.env` (`TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`…), in a throw-away `caddy:2` container: an invalid configuration stops the deployment before anything changes. |
-| Backup | When the stack is running: `backup.sh --reason pre-deploy-<tag>` first (`--no-backup` skips it). |
+| Schema | The migrations applied in the database (`kysely_migration`; PostgreSQL is started for it when it is down) must all be known to the image (`MIGRATIONS`, read from the image in a throw-away container). Otherwise: "this image cannot run on this schema: repair forward", exit 1, before the backup and with nothing stopped (below). |
+| Backup | When the stack was running: `backup.sh --reason pre-deploy-<tag>` first (`--no-backup` skips it). |
 | Database | `ORBES_IMAGE_TAG=<tag>` written to `.env`; PostgreSQL started; the app role ensured (created if missing, attributes and password re-applied); when the image changes, the running app is stopped first (old code never runs on a newer schema); pending migrations applied by a one-off container of the **new** image as the schema owner (`scripts/db.ts migrate`; the owner URL is passed through the environment, never on a command line); privileges granted again. |
 | Roll out | `docker compose up -d`; waits for the app (healthcheck = `/api/v1/health`; the app itself refuses to start while a migration is pending) and Caddy; a crash loop fails fast. A changed `Caddyfile`/`caddy.d` recreates Caddy (config hash label). |
 | Keys | Runs `npm run keys:generate` in the app when no key is ACTIVE (first deployment only; idempotent). |
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
-| Rollback | Any failure of the last three steps redeploys the previous image tag and waits for health; the outcome is appended to `.state/deploys.log`. |
+| Rollback, or repair forward | A failure of the last three steps (health, Caddy, the signing key, the smoke tests) in a release that applied **no** migration redeploys the previous image tag and waits for health. A release that **did** (its migrations committed together, then something failed) is kept: the previous image cannot run on the new schema, so no rollback is attempted, `ORBES_IMAGE_TAG` stays on the new tag with the stack started on it, and the way to repair forward is printed (below). A migration that fails applies nothing (one transaction): the previous image then comes back as usual. The outcome is appended to `.state/deploys.log`. |
 
 **The photograph uploads at the edge (F-04, lot 5).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on two routes only: `POST /api/admin/models/:id/image` and `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths included, the 64 KB it had:
 
@@ -1256,7 +1259,51 @@ head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 
 #   413
 ```
 
-Manual rollback to any image still on the host: `scripts/deploy.sh --image <tag>` (tags in `.state/deploys.log`, `docker images orbes-genome`). **Migrations:** an older image refuses a schema with migrations it does not know (§12.2). If a release applied a migration and must be rolled back, restore its pre-deploy backup (§15.9) instead. Clean up old images now and then: `docker image prune` (keep the last two tags).
+**Repair forward: the decision of 2026-10-03 for the shared server.** This server is never restored from a backup (`restore.sh` refuses there, `RESTORE_ALLOWED=false`, §15.9), and a release that migrated is never undone by changing the image. This is a declared deviation from the rollback by restore that this runbook described until then (§12.2; COMPLIANCE §7, H3). The facts behind it:
+
+- `scripts/db.ts migrate` applies all the pending migrations of a release in **one transaction**, under an advisory lock ([DATABASE §9.2](DATABASE.md#92-behaviour)). If one fails, none is applied, the schema stays as it was, and the automatic rollback to the previous image works.
+- Once they have committed, an image that does not know them can no longer migrate: Kysely stops it with "previously executed migration … is missing". Before 2026-10-03, `deploy.sh` still tried to roll back in that case: it stopped the new app, wrote the old tag into `.env`, failed at the old image's migration step and left the site down. Its success message ("Manual rollback: `scripts/deploy.sh --image <previous>`") led to the same dead end, after a pre-deploy backup named after the old tag but holding the new schema.
+
+What `deploy.sh` does now:
+
+| Situation | What happens |
+|---|---|
+| A failure after the release's migrations committed (health, Caddy, the signing key, the smoke tests, the grants) | No rollback is attempted. `ORBES_IMAGE_TAG` stays on the new tag, the stack is started on it, and the message names the migrations and prints the way forward (below). `.state/deploys.log`: `deploy <tag> FAILED (…): kept, no rollback, repair forward`. |
+| A failure in a release without migrations, or whose migration failed | The automatic rollback to the previous image, as before. |
+| Success, the release migrated | The message names the migrations and says that the previous image cannot run on this schema any more; it suggests no rollback (and `.state/previous-tag` is removed). |
+| Success, no migration | Unchanged: "Manual rollback: `scripts/deploy.sh --image <previous>`". |
+| `scripts/deploy.sh --image <tag>` (or a build of an older ref) whose image does not know every migration applied in the database | Refused before the pre-deploy backup and with nothing stopped: "this image cannot run on this schema: repair forward", with the migrations it does not know. No misleading backup is written. |
+
+**The way forward**, printed by `deploy.sh` whenever it applies:
+
+1. After a transient incident (network, a full disk, a service briefly down): fix it, then `scripts/deploy.sh --image <the new tag>` (the same image again: it knows the schema).
+2. Otherwise: a corrective commit, deployed normally (`git pull && scripts/deploy.sh`).
+3. Never `restore.sh` on the shared server. A restore, and the quarterly restore drill, run on a separate, disposable server (§15.9).
+
+Rolling back to an image still on the host (`scripts/deploy.sh --image <tag>`, tags in `.state/deploys.log`, `docker images orbes-genome`) therefore works only while no migration has run since that image: the script checks it first.
+
+**Old images.** Remove them by exact tag, keeping the current image and the previous one (the rollback target of a release without migration):
+
+```bash
+docker images orbes-genome                 # the tags on the host; the current one is ORBES_IMAGE_TAG in .env
+docker image rm orbes-genome:<tag>         # one old tag at a time
+```
+
+Never run `docker image prune`, `docker system prune` or `docker volume prune` on the shared host. A bare `docker image prune` deletes the dangling images of the other stacks on the same Docker daemon, and does not even remove old `orbes-genome` tags. With `-a` or `--volumes`, and the stack stopped, they delete the rollback images, the database and the signing keys (COMPLIANCE §7, house rules).
+
+**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`):
+
+1. Not between 03:00 and 05:30 UTC (the nightly backups of the host). Tell the host owner first.
+2. Check `.env`: `RESTORE_ALLOWED=false` (add the line if it is missing; deployment 2 adds it), and nothing exported in the shell (`env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='` prints nothing).
+3. The pre-check, run and kept before and after the deployment:
+   ```bash
+   free -h
+   docker stats --no-stream
+   df -h /
+   du -sh /var/backups/orbes
+   ```
+   Above the thresholds of §15.12 (75 % of `/`), talk to the host owner before deploying.
+4. `umask 022`, then `git pull && scripts/deploy.sh`. After the deployment, the smoke tests of §13 and the next nightly `photos:` line (§15.12).
 
 Operating system updates arrive through unattended-upgrades (`live-restore` keeps containers running across a Docker daemon restart). Rebuild regularly for `node:22-slim` security patches, even without code changes: `scripts/deploy.sh --rebuild` (same commit, `docker build --pull`, new tag `<commit>-r<time>`, so the previous image stays available for rollback).
 
@@ -1269,7 +1316,8 @@ Operating system updates arrive through unattended-upgrades (`live-restore` keep
 3. `manifest.json` (time, reason, image, schema migrations, key ids and status, SHA-256 of both parts);
 4. one tar of the three, **encrypted with age** to every public key in `BACKUP_AGE_RECIPIENTS_FILE`, written to `/var/backups/orbes/daily/orbes-<UTC time>[-<reason>].tar.age` plus a `.sha256` file. The bytes on disk are re-read and compared with the bytes streamed, and the age header and recipient count are checked;
 5. retention: the newest `BACKUP_KEEP_DAILY` (14) archives in `daily/`, and the first archive of each ISO week hard-linked into `weekly/` (newest `BACKUP_KEEP_WEEKLY`, 8). Scheduled archives (nightly) and event archives (`pre-deploy-*`, `pre-restore`, other `--reason` values) are counted separately, so a day with many deployments never pushes the nightly history out;
-6. optional off-site copy with rclone (below).
+6. optional off-site copy with rclone (below);
+7. a line `photos: <count>, <size> MB` in the log of **every** run (printed even with `--quiet`): the photographs of the catalogue and of the pieces (F-04), stored in the database and so in every archive. It reads `photos: 0, 0.0 MB` before migration `0012` creates their table. The thresholds that watch it: §15.12.
 
 The server holds only the public key: it **cannot decrypt its own backups**, and a stolen backup is useless without the offline identity. The plaintext dump exists only in a `0700` work directory under `/var/backups/orbes` while the backup runs (removed on exit, also on failure). `--verify-identity <file>` additionally decrypts the new archive and compares checksums (restore drills; do not leave the identity on the server). Check freshness with `cat .state/last-backup`, `systemctl list-timers 'orbes-*'` and `journalctl -u orbes-backup`.
 
@@ -1291,9 +1339,11 @@ The server holds only the public key: it **cannot decrypt its own backups**, and
    acl = private
    ```
    Check with `rclone lsd ovh-s3:` (the bucket is listed) and `rclone ls ovh-s3:orbes-backups`.
-5. In `.env`: `BACKUP_RCLONE_DEST=ovh-s3:orbes-backups/verify`. The next backup copies every local archive missing remotely into `…/daily` and `…/weekly` (copy, never sync), checks the new one, and deletes remote copies older than the local retention (`--min-age`). With Object Lock, those deletions are refused until the lock expires (logged as a warning): set the bucket's retention accordingly.
+5. In `.env`: `BACKUP_RCLONE_DEST=ovh-s3:orbes-backups/verify`. The next backup copies the local archives missing remotely into `…/daily` and `…/weekly` (copy, never sync), checks the new one, and deletes remote copies older than the remote retention age (`--min-age`): `BACKUP_KEEP_DAILY` + 1 days in `daily/` (15 by default), `BACKUP_KEEP_WEEKLY` × 7 + 7 days in `weekly/` (63). Only archives **younger** than that age are copied (`--max-age`): event archives (`pre-deploy-*`…) are pruned locally by count, not by age, so one that stays longer locally would otherwise be sent again every night, then deleted again. With Object Lock, those deletions are refused until the lock expires (logged as a warning): set the bucket's retention accordingly.
 
 ### 15.9 Restore and the restore drill
+
+**Never on the shared production server (owner decision of 2026-10-03).** Its `.env` holds `RESTORE_ALLOWED=false`, and `restore.sh` then refuses before doing anything, `--dry-run` included, with this decision and the way forward. Problems there are repaired forward (§15.7): `scripts/deploy.sh --image <current tag>` after a transient incident, otherwise a corrective commit. Restores, and the restore drill below, run only on a **separate, disposable server**, where `RESTORE_ALLOWED` keeps its default, `true` (`.env.example`). The value is read from `.env` only: exporting `RESTORE_ALLOWED=true` in the shell changes nothing, and any value other than `true` or `false` is refused. No script calls `restore.sh`, and `deploy.sh` never suggests it. This replaces the rollback by restore described until then (§12.2): a declared deviation, COMPLIANCE §7 (H3). The pre-deploy and nightly backups are still taken: they feed the drill, a move to another server (COMPLIANCE §7, H1), and the investigation of an incident.
 
 `scripts/restore.sh --identity <age identity file> (--archive <file> | --latest) [--db-only | --keys-only] [--yes] [--dry-run]`:
 
@@ -1305,7 +1355,7 @@ The server holds only the public key: it **cannot decrypt its own backups**, and
 
 The restored stack needs the **same `KEY_ENCRYPTION_KEY`** as the backup (from escrow); with another one the key files cannot be decrypted (verification still works, issuance does not, §7.3).
 
-**Restore drill (quarterly, on a separate VPS):**
+**Restore drill (quarterly, on a separate, disposable VPS, never the production server):**
 
 ```bash
 # New VPS: §15.4 step 1, then as orbes, BEFORE setup: put the escrowed secrets into .env
@@ -1354,7 +1404,7 @@ The app's `TRUST_PROXY` stays Caddy's address in both modes: Caddy always hands 
 |---|---|
 | Availability | An external uptime checker (any HTTP monitor) on `https://verify.theorbes.com/api/v1/health`, every 1–5 min, expecting `200` and `"ok":true` (a `503` means the database is unreachable). Alert after 2 failures. |
 | Containers | `docker compose ps` (all `healthy`); `docker compose logs --since 1h app | grep '"level":50'` for errors; the alert list of §9.3 applies. |
-| Disk | `df -h / /var/lib/docker /var/backups/orbes` weekly, or the uptime checker's agent; alert above 80 %. Logs are capped (json-file 10 MB × 5 per container). Old images: `docker image prune`. |
+| Disk | `df -h / /var/lib/docker /var/backups/orbes` weekly, or the uptime checker's agent; on the shared server, the thresholds below (75 %: talk to the host owner; alert at 80 %). Logs are capped (json-file 10 MB × 5 per container). Old images: by exact tag (§15.7), never `docker image prune`. |
 | Backups | `cat deploy/vps/.state/last-backup` younger than 26 h; `journalctl -u orbes-backup --since yesterday`; the off-site bucket lists the latest archive. Restore drill quarterly (§15.9). |
 | Certificates | Automatic: Caddy renews well before expiry (about a third of the lifetime remaining). `docker compose logs caddy | grep -i certificate` shows renewals; an uptime checker that reports certificate expiry is a cheap extra alarm. |
 | GeoIP | `journalctl -u orbes-geoip`; `scripts/geoip-update.sh --check`. |
@@ -1362,6 +1412,48 @@ The app's `TRUST_PROXY` stays Caddy's address in both modes: Caddy always hands 
 | Security updates | `/var/log/unattended-upgrades/`; `cat /var/run/reboot-required` after kernel updates (or `--auto-reboot`). |
 
 **Key rotation and compromise:** the runbooks of §7.4 and §7.5 apply unchanged; run their commands from `deploy/vps` as `orbes` (`docker compose exec app npm run keys:rotate`, `docker compose exec app node --import tsx scripts/keys.ts revoke …`). Back up right after any rotation: `scripts/backup.sh --reason post-rotation`. On suspicion of a host compromise also rotate `POSTGRES_PASSWORD`, `COOKIE_SECRET` (§4.3) and the backup age key (new key pair; re-encrypting old archives is not needed, but they stay readable with the old identity).
+
+#### Disk used by the photographs (F-04)
+
+**The decision (2026-10-03): the photographs stay as they are**, 2 000 px at most on the longer side and 1 MB at most (the console's re-encoding, [API §13.4](API.md#134-models)), **and the disk is watched**, as follows.
+
+**Where they are.** In the database: the `bytea` column of `media_objects` ([DATABASE §5.26](DATABASE.md#526-media_objects)), inside the `orbes_pgdata` volume. They are therefore in every `pg_dump`, so in **every** backup archive, and a JPEG or WebP does not compress any further. With `P` the size of the photographs in use and `A` the number of archives kept in `/var/backups/orbes` (14 nightly + up to 14 event archives + the weekly copies that are no longer hard links to a daily one: about 20 to 35), the photographs take about **P × (1 + A)** of the disk: 300 MB of photographs with 30 archives is about 9.3 GB. On the shared server, the database and the archives are both on `/`.
+
+**The nightly line.** Every run of `backup.sh` logs `photos: <count>, <size> MB` (MB = 1 048 576 bytes; §15.8):
+
+```bash
+journalctl -u orbes-backup --since yesterday | grep 'photos:'      # last night
+journalctl -u orbes-backup | grep 'photos:' | tail -n 30           # the trend
+```
+
+**The queries** (from `deploy/vps`, as `orbes`): the photographs in use, the table on disk, the orphans (a photograph no model and no piece uses: normally none, the service deletes it at once; a few left by an interrupted request are harmless, a growing number is a bug to report), and the largest ones:
+
+```bash
+docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+-- P: the photographs, their count and size in MB (1 048 576 bytes), as the backup's photos: line
+SELECT count(*) AS photos, round(coalesce(sum(octet_length(bytes)), 0) / 1048576.0, 1) AS mb FROM media_objects;
+-- the table on disk, TOAST and indexes included
+SELECT pg_size_pretty(pg_total_relation_size('media_objects')) AS on_disk;
+-- orphans: used by no model and no piece
+SELECT count(*) AS orphans, round(coalesce(sum(octet_length(m.bytes)), 0) / 1048576.0, 1) AS mb
+  FROM media_objects m
+ WHERE NOT EXISTS (SELECT 1 FROM models WHERE image_sha256 = m.sha256)
+   AND NOT EXISTS (SELECT 1 FROM products WHERE photo_sha256 = m.sha256);
+-- the ten largest
+SELECT sha256, mime, width, height, octet_length(bytes) AS bytes, created_at
+  FROM media_objects ORDER BY octet_length(bytes) DESC LIMIT 10;
+SQL
+du -sh /var/backups/orbes; df -h /
+```
+
+**Thresholds, agreed with the host owner** (a full `/` also stops the other stacks of the shared server: their fate is shared):
+
+| Threshold | Action |
+|---|---|
+| `/` above **75 %**, or the photographs above **300 MB** | Tell the host owner **before** acting, and choose one lever together: fewer local nightly archives (`BACKUP_KEEP_DAILY`); the photographs out of the frequent `pg_dump`, backed up once (they are content-addressed and never change; a code change); the off-site copy switched on (`BACKUP_RCLONE_DEST`, §15.8), then fewer local copies; smaller photographs (a code change). |
+| `/` above **80 %** | Alert. The host owner adds a disk alert of its own on the host. |
+
+Before and after each deployment, the pre-check of §15.7 (`free -h`, `docker stats --no-stream`, `df -h /`, `du -sh /var/backups/orbes`) keeps the before and after figures.
 
 ### 15.13 How this stack was validated
 
@@ -1385,4 +1477,4 @@ Last full run: 2026-10-01, in a sandbox (Docker 29.6, Compose 5.3, `caddy:2` = 2
 | Least-privilege database (2026-10-01) | Stack redeployed with the two roles (`setup.sh`, `deploy.sh`); as the app role: `SET session_replication_role`, `COPY … TO PROGRAM`, `DELETE`/`TRUNCATE audit_logs`, `ALTER TABLE … DISABLE TRIGGER`, `CREATE TABLE` | all refused (with the former superuser connection, `SET session_replication_role = replica` let a `DELETE` empty `audit_logs` (rolled back) and `COPY … TO PROGRAM` ran a shell command in the database container); issuance, verification, TOTP login, key generation, audit verify all work under the app role |
 | Full drill (2026-10-01) | backup (`--verify-identity`, off-site copy) → `down -v`, local archives, image and `.state` deleted → archive fetched back with rclone → `restore.sh --latest --yes` → `deploy.sh` (rebuild) → second `restore.sh` with the image present; `deploy.sh --image <crash-looping image>`; 5 backups with `BACKUP_KEEP_DAILY=2` | counts, key file (SHA-256, 0600, uid 1000) identical; pre-backup code AUTHENTIC, post-backup code UNKNOWN; TOTP login; audit chain verified; new issuance with the restored key AUTHENTIC; `keys:generate` "already ACTIVE"; `--latest` skipped the newer `pre-restore` safety archive; crash loop rolled back with migrations run as the owner each way; 2 nightly + 2 event archives kept; a scan from a GB address with a forged JP `X-Forwarded-For`/`CF-IPCountry` stored `GB 51.5/-0.1` and only the IP hash; Caddy log `81.2.69.0`; no password in any log, image history or config |
 
-`genome/test/ops/vps-stack.test.ts` guards the static properties (vercel.json, compose isolation and hardening, TRUST_PROXY pinning, Caddyfile client-IP and log rules, scripts, timers) in CI.
+`genome/test/ops/vps-stack.test.ts` guards the static properties (vercel.json, compose isolation and hardening, TRUST_PROXY pinning, Caddyfile client-IP and log rules, scripts, timers) in CI. `genome/test/ops/vps-scripts.test.ts` runs `deploy.sh`, `backup.sh` and `restore.sh` themselves in CI, against a fake Docker host (`genome/test/ops/fake-host/`: `docker`, `curl`, `age`, `rclone` stand-ins that keep Kysely's refusal of an unknown migration and the app's refusal of a pending one): every branch of the repair-forward rule of §15.7 (a failure after the migrations in health, Caddy, the signing key, the smoke tests or the grants; a release without migration; a failed migration; success with and without migrations; `--image` of an image that cannot run on the schema, the stack up or down; a first deployment), the shared-host guard of the three scripts, `RESTORE_ALLOWED`, the off-site ages and the `photos:` line; the SQL of `lib.sh` and of §15.12 runs on the migrated schema (PGlite).

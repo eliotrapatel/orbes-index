@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# Fake `docker` for genome/test/ops/vps-scripts.test.ts: the deploy/vps scripts run against it
+# instead of a Docker daemon (none in CI or on a laptop). Bash 3.2 compatible. It emulates the
+# behaviour the scripts rely on, with its state in $FAKE_STATE:
+#
+#   images/<tag>        the image orbes-genome:<tag> exists; its lines: the migrations it knows
+#   db/migrations       the migrations applied in the database (kysely_migration), one per line
+#   db/media            "<count> <bytes>" of media_objects; absent: no such table (before 0012)
+#   running/<service>   the service is running; its content: the service's image
+#   fail/migrate        `db.ts migrate` fails: one transaction, so nothing is applied
+#   fail/grant          the GRANTs after the migrations fail (after their COMMIT)
+#   fail/unhealthy-app-<tag>, fail/unhealthy-caddy, fail/keys
+#   docker.log          every call, one per line
+#
+# Like Kysely, `db.ts migrate` refuses a database holding a migration the image does not know
+# ("previously executed migration … is missing"), and like the app, a container whose image has
+# pending migrations never becomes healthy.
+S=${FAKE_STATE:?FAKE_STATE is not set}
+mkdir -p "$S/images" "$S/db" "$S/running" "$S/fail"
+printf '%s\n' "$*" >>"$S/docker.log"
+
+ENV_FILE_ARG=""
+
+# The app's image: the shell's ORBES_IMAGE_TAG wins over the env file, as in docker compose.
+app_image() {
+  local tag
+  if [[ -n "${ORBES_IMAGE_TAG+x}" ]]; then
+    tag=$ORBES_IMAGE_TAG
+  else
+    tag="$(grep -E '^ORBES_IMAGE_TAG=' "$ENV_FILE_ARG" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  fi
+  printf 'orbes-genome:%s' "${tag:-latest}"
+}
+
+image_file() { printf '%s/images/%s' "$S" "${1#orbes-genome:}"; }
+
+applied() { [[ -f "$S/db/migrations" ]] && cat "$S/db/migrations"; return 0; }
+
+# not_in A B: lines of A that are not lines of B.
+not_in() {
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    grep -Fxq -- "$line" <<<"$2" || printf '%s\n' "$line"
+  done <<<"$1"
+}
+
+health() {
+  local svc=$1 image tag
+  case "$svc" in
+    app)
+      image="$(cat "$S/running/app")"
+      tag="${image#orbes-genome:}"
+      if [[ -f "$S/fail/unhealthy-app-$tag" ]]; then echo unhealthy; return; fi
+      # The app refuses to start while a migration it knows is pending.
+      if [[ -n "$(not_in "$(cat "$(image_file "$image")" 2>/dev/null)" "$(applied)")" ]]; then echo unhealthy; return; fi
+      echo healthy ;;
+    caddy) if [[ -f "$S/fail/unhealthy-caddy" ]]; then echo unhealthy; else echo healthy; fi ;;
+    *) echo healthy ;;
+  esac
+}
+
+migrate() {
+  local image known missing pending
+  image="$(app_image)"
+  [[ -f "$(image_file "$image")" ]] || { echo "Unable to find image '$image' locally" >&2; return 125; }
+  known="$(cat "$(image_file "$image")")"
+  missing="$(not_in "$(applied)" "$known")"
+  if [[ -n "$missing" ]]; then
+    echo "db migrate: corrupted migrations: previously executed migration $(head -n1 <<<"$missing") is missing" >&2
+    return 1
+  fi
+  pending="$(not_in "$known" "$(applied)")"
+  if [[ -f "$S/fail/migrate" && -n "$pending" ]]; then
+    echo "db migrate: migration $(head -n1 <<<"$pending") failed: fake failure" >&2
+    return 1
+  fi
+  if [[ -n "$pending" ]]; then
+    printf '%s\n' "$pending" >>"$S/db/migrations"
+    echo "Applied $(grep -c . <<<"$pending") migration(s): $(tr '\n' ' ' <<<"$pending")"
+  else
+    echo "Schema is up to date."
+  fi
+}
+
+# psql as the owner: the SQL is in the -c of the shell script, or on stdin.
+psql_owner() {
+  local script=$1 input all
+  input="$(cat)"
+  all="$script
+$input"
+  case "$all" in
+    *has_table*) applied ;;
+    *has_media*) if [[ -f "$S/db/media" ]]; then cat "$S/db/media"; else echo "0 0"; fi ;;
+    *"json_agg(name order by name)"*) printf '[%s]\n' "$(applied | sed 's/.*/"&"/' | paste -sd, -)" ;;
+    *cryptographic_keys*) echo '[{"keyId":1,"kid":"orbes-k001-fake","status":"ACTIVE"}]' ;;
+    *server_version*) echo '17.0' ;;
+    *"GRANT SELECT, INSERT, UPDATE, DELETE"*)
+      if [[ -f "$S/fail/grant" ]]; then echo "ERROR:  fake failure of the GRANTs" >&2; return 3; fi ;;
+    *) : ;;
+  esac
+}
+
+compose() {
+  while (($#)); do
+    case "$1" in
+      --project-directory | -f) shift 2 ;;
+      --env-file) ENV_FILE_ARG=$2; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  local sub=$1 svc s
+  shift
+  case "$sub" in
+    version) echo "Docker Compose version v2.40.0 (fake)" ;;
+    ps)
+      svc="${*: -1}"
+      if [[ -f "$S/running/$svc" ]]; then echo "cid-$svc"; fi ;;
+    up)
+      local -a services=()
+      for s in "$@"; do [[ "$s" == -* ]] || services+=("$s"); done
+      if [[ ${#services[@]} -eq 0 ]]; then services=(postgres app caddy); fi
+      for s in "${services[@]}"; do
+        case "$s" in
+          app)
+            [[ -f "$(image_file "$(app_image)")" ]] || { echo "pull access denied for $(app_image)" >&2; return 1; }
+            app_image >"$S/running/app" ;;
+          postgres) echo postgres:17 >"$S/running/postgres" ;;
+          caddy) echo caddy:2 >"$S/running/caddy" ;;
+        esac
+      done ;;
+    stop | rm)
+      for s in "$@"; do [[ "$s" == -* ]] || rm -f "$S/running/$s"; done ;;
+    run)
+      # run --rm --no-deps -T -e DATABASE_URL app node --import tsx scripts/db.ts migrate
+      case "$*" in
+        *"scripts/db.ts migrate"*) migrate ;;
+        *) echo "fake docker compose run: unhandled: $*" >&2; return 99 ;;
+      esac ;;
+    exec)
+      local -a args=("$@")
+      local i=0 target=""
+      while ((i < ${#args[@]})); do
+        case "${args[i]}" in
+          -T) i=$((i + 1)) ;;
+          -e) i=$((i + 2)) ;;
+          *) target=${args[i]}; i=$((i + 1)); break ;;
+        esac
+      done
+      [[ -f "$S/running/$target" ]] || { echo "service \"$target\" is not running" >&2; return 1; }
+      local rest="${args[*]:i}"
+      case "$target" in
+        postgres)
+          case "$rest" in
+            *pg_dump*) printf 'PGDMP fake dump\n' ;;
+            *pg_restore*) cat >/dev/null ;;
+            *) psql_owner "${args[${#args[@]} - 1]}" ;;
+          esac ;;
+        app)
+          case "$rest" in
+            *keys.ts\ list\ --json* | *keys:generate*) [[ ! -f "$S/fail/keys" ]] || { echo "fake: no usable signing key" >&2; return 1; } ;;
+            *) echo "fake app command: $rest" ;;
+          esac ;;
+        caddy)
+          case "$rest" in
+            *root.crt*) echo "FAKE LOCAL ROOT CA" ;;
+            *) : ;;
+          esac ;;
+      esac ;;
+    logs) echo "fake app log line" ;;
+    *) echo "fake docker compose: unhandled: $sub $*" >&2; return 99 ;;
+  esac
+}
+
+run_container() {
+  local entry="" image=""
+  while (($#)); do
+    case "$1" in
+      --rm | -i | -t) shift ;;
+      --entrypoint) entry=$2; shift 2 ;;
+      --network | --user | -v | -w | -e) shift 2 ;;
+      -*) shift ;;
+      *) image=$1; shift; break ;;
+    esac
+  done
+  case "$entry:$*" in
+    *"caddy validate"*) return 0 ;;
+    node:*MIGRATIONS*)
+      [[ -f "$(image_file "$image")" ]] || { echo "Unable to find image '$image' locally" >&2; return 125; }
+      cat "$(image_file "$image")" ;;
+    node:*accessSync*) return 0 ;;
+    pg_restore:*--list*)
+      cat >/dev/null
+      printf ';\n; Archive created by the fake docker\n;\n3; 0 0 TABLE DATA public cryptographic_keys orbes\n4; 0 0 TABLE DATA public products orbes\n' ;;
+    tar:*)
+      mkdir -p "$S/keys-volume"
+      [[ -f "$S/keys-volume/orbes-k001.key.json" ]] || echo '{"fake":true}' >"$S/keys-volume/orbes-k001.key.json"
+      tar -C "$S/keys-volume" -cf - . ;;
+    *) echo "fake docker run: unhandled: entrypoint $entry, image $image, $*" >&2; return 99 ;;
+  esac
+}
+
+case "${1:-}" in
+  compose) shift; compose "$@" ;;
+  image)
+    [[ "$2" == inspect ]] || { echo "fake docker image: unhandled: $*" >&2; exit 99; }
+    [[ -f "$(image_file "$3")" ]] || { echo "Error: No such image: $3" >&2; exit 1; } ;;
+  inspect)
+    # docker inspect -f FORMAT cid-<service>
+    svc="${4#cid-}"
+    [[ -f "$S/running/$svc" ]] || { echo "Error: No such object: $4" >&2; exit 1; }
+    case "$3" in
+      *Config.Image*) cat "$S/running/$svc" ;;
+      *RestartCount*) echo 0 ;;
+      *State.Health*) health "$svc" ;;
+      *) echo "fake docker inspect: unhandled format $3" >&2; exit 99 ;;
+    esac ;;
+  run) shift; run_container "$@" ;;
+  volume) exit 0 ;;
+  *) echo "fake docker: unhandled: $*" >&2; exit 99 ;;
+esac

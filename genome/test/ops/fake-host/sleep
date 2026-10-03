@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake `sleep` for genome/test/ops/vps-scripts.test.ts: the scripts' retry loops (smoke tests,
+# health polling) run instantly against the fake docker.
+exit 0

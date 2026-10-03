@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Fake `rclone` for genome/test/ops/vps-scripts.test.ts: the remote is a directory,
+# "<remote>:<path>" = $FAKE_STATE/remote/<path>. It honours what backup.sh relies on: copy
+# (files missing or different remotely, modification time kept), --include globs, --max-age
+# and --min-age in days ("15d"), check --one-way, delete.
+S=${FAKE_STATE:?FAKE_STATE is not set}
+printf '%s\n' "$*" >>"$S/rclone.log"
+cmd=$1
+shift
+maxage=""
+minage=""
+includes=()
+pos=()
+while (($#)); do
+  case "$1" in
+    -q | --one-way) shift ;;
+    --max-age) maxage=$2; shift 2 ;;
+    --min-age) minage=$2; shift 2 ;;
+    --include) includes+=("$2"); shift 2 ;;
+    -*) echo "fake rclone: unhandled flag $1" >&2; exit 2 ;;
+    *) pos+=("$1"); shift ;;
+  esac
+done
+
+remote() { printf '%s/remote/%s' "$S" "${1#*:}"; }
+minutes() {
+  [[ "$1" =~ ^([0-9]+)d$ ]] || { echo "fake rclone: unhandled age $1" >&2; exit 2; }
+  printf '%s' "$((BASH_REMATCH[1] * 1440))"
+}
+included() {
+  local p
+  [[ ${#includes[@]} -gt 0 ]] || return 0
+  for p in "${includes[@]}"; do
+    # shellcheck disable=SC2053 # a glob, as rclone's --include
+    [[ "$1" == $p ]] && return 0
+  done
+  return 1
+}
+# files DIR [find age test…]: the regular files directly in DIR, one name per line.
+files() {
+  local dir=$1
+  shift
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -mindepth 1 -maxdepth 1 -type f "$@" | sed 's#.*/##'
+}
+
+case "$cmd" in
+  copy)
+    src=${pos[0]}
+    dst="$(remote "${pos[1]}")"
+    mkdir -p "$dst"
+    if [[ -n "$maxage" ]]; then list="$(files "$src" -mmin "-$(minutes "$maxage")")"; else list="$(files "$src")"; fi
+    while IFS= read -r name; do
+      [[ -n "$name" ]] && included "$name" || continue
+      cmp -s "$src/$name" "$dst/$name" || cp -p "$src/$name" "$dst/$name"
+    done <<<"$list" ;;
+  check)
+    src=${pos[0]}
+    dst="$(remote "${pos[1]}")"
+    while IFS= read -r name; do
+      [[ -n "$name" ]] && included "$name" || continue
+      cmp -s "$src/$name" "$dst/$name" || { echo "fake rclone check: $name differs or is missing" >&2; exit 1; }
+    done <<<"$(files "$src")" ;;
+  delete)
+    dst="$(remote "${pos[0]}")"
+    if [[ -n "$minage" ]]; then list="$(files "$dst" -mmin "+$(minutes "$minage")")"; else list="$(files "$dst")"; fi
+    while IFS= read -r name; do
+      [[ -n "$name" ]] && included "$name" || continue
+      rm -f "$dst/$name"
+    done <<<"$list" ;;
+  *) echo "fake rclone: unhandled command $cmd" >&2; exit 99 ;;
+esac
