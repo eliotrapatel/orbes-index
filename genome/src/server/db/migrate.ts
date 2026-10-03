@@ -22,6 +22,7 @@ import * as m0008 from './migrations/0008_retail_mode.js';
 import * as m0009 from './migrations/0009_scan_daily_stats.js';
 import * as m0010 from './migrations/0010_models_active.js';
 import * as m0011 from './migrations/0011_scan_token_transfer_accept.js';
+import * as m0012 from './migrations/0012_media.js';
 import * as m0013 from './migrations/0013_ownership_certificates.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
@@ -37,6 +38,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0009_scan_daily_stats': m0009,
   '0010_models_active': m0010,
   '0011_scan_token_transfer_accept': m0011,
+  '0012_media': m0012,
   '0013_ownership_certificates': m0013,
 });
 

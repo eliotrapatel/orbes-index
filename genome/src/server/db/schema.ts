@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0011, 0013) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0013) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -99,6 +99,10 @@ export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
 
+/** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
+export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
+export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
+
 /** Where the customer saw or bought the piece of a reported scan (scan_reports.channel, migration 0004). */
 export const REPORT_CHANNELS = ['BOUTIQUE', 'ONLINE', 'PRIVATE', 'OTHER'] as const;
 export type ReportChannel = (typeof REPORT_CHANNELS)[number];
@@ -160,6 +164,8 @@ export interface ModelsTable {
   care_instructions: string | null;
   /** Offered for new products (migration 0010); an inactive model's pieces verify as before. category_id and sku_prefix never change. */
   active: WithDefault<boolean>;
+  /** Migration 0012: the model's reference photograph (media_objects.sha256), shown on the authentic results of its pieces. */
+  image_sha256: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
 }
 
@@ -181,6 +187,8 @@ export interface ProductsTable {
   ownership_state: WithDefault<OwnershipState>;
   auth_policy: WithDefault<string>;
   claim_secret_hash: string | null;
+  /** Migration 0012: the photograph of this piece (media_objects.sha256), taken at issuance and shown on its authentic results. */
+  photo_sha256: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -477,6 +485,20 @@ export interface ScanReportsTable {
   resolution_note: string | null;      // ≤ 2 000 characters
 }
 
+/**
+ * A stored photograph (migration 0012, F-04): keyed by the hex SHA-256 of its bytes, JPEG or WebP of at most
+ * 1 MiB with EXIF and XMP stripped; never updated. Used by models.image_sha256 and products.photo_sha256.
+ */
+export interface MediaObjectsTable {
+  sha256: string;                      // lower-case hex SHA-256 of `bytes` (CHECK)
+  mime: MediaMimeType;
+  bytes: Uint8Array;                   // ≤ 1 048 576
+  width: number;                       // 1..4096
+  height: number;                      // 1..4096
+  created_by: string | null;           // admin_users.id; null when a script stored it
+  created_at: TimestampDefault;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -559,6 +581,7 @@ export interface Database {
   authentication_events: AuthenticationEventsTable;
   anomalies: AnomaliesTable;
   scan_reports: ScanReportsTable;
+  media_objects: MediaObjectsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -621,6 +644,8 @@ export type NewAnomaly = Insertable<AnomaliesTable>;
 export type AnomalyUpdate = Updateable<AnomaliesTable>;
 export type ScanReportRow = Selectable<ScanReportsTable>;
 export type NewScanReport = Insertable<ScanReportsTable>;
+export type MediaObjectRow = Selectable<MediaObjectsTable>;
+export type NewMediaObject = Insertable<MediaObjectsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

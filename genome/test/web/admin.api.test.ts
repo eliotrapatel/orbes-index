@@ -44,6 +44,36 @@ describe('AdminApi', () => {
     expect(calls[2].url).toBe('/api/admin/keys/rotate');
   });
 
+  it('sends a photograph as itself (F-04): its own Content-Type, the CSRF token, never JSON; and retries it once after a CSRF refusal', async () => {
+    const photo = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' });
+    const { fetch, calls } = fakeFetch(
+      json(200, SESSION),
+      json(200, { id: 'm1', imageUrl: '/api/v1/media/aa' }),
+      json(403, { error: { code: 'CSRF_FAILED', message: 'x' } }),
+      json(200, { ...SESSION, csrfToken: 'tok-2' }),
+      json(200, { productId: 'O26-J-00184', photoUrl: '/api/v1/media/bb' }),
+      json(200, { productId: 'O26-J-00184', photoUrl: null }),
+      json(200, { id: 'm1', imageUrl: null }),
+    );
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.setModelImage('m1', photo);
+    expect(calls[1]).toMatchObject({ url: '/api/admin/models/m1/image', init: { method: 'POST', body: photo } });
+    expect(header(calls[1], 'content-type')).toBe('image/jpeg');
+    expect(header(calls[1], 'x-csrf-token')).toBe('tok-1');
+    expect(await api.setProductPhoto('O26-J-00184', photo)).toEqual({ productId: 'O26-J-00184', photoUrl: '/api/v1/media/bb' });
+    // The token rotated: refreshed through /me, then the same photograph sent again.
+    expect(calls[3].url).toBe('/api/admin/auth/me');
+    expect(calls[4]).toMatchObject({ url: '/api/admin/products/O26-J-00184/photo', init: { method: 'POST', body: photo } });
+    expect(header(calls[4], 'x-csrf-token')).toBe('tok-2');
+    await api.removeProductPhoto('O26-J-00184');
+    await api.removeModelImage('m1');
+    expect(calls.slice(5).map((c) => [c.init.method, c.url, c.init.body])).toEqual([
+      ['DELETE', '/api/admin/products/O26-J-00184/photo', undefined],
+      ['DELETE', '/api/admin/models/m1/image', undefined],
+    ]);
+  });
+
   it('sends the TOTP only when given', async () => {
     const { fetch, calls } = fakeFetch(json(200, SESSION));
     await new AdminApi({ fetch }).login('a@b.c', 'pw', '123456');

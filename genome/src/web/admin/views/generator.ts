@@ -5,9 +5,11 @@
  *
  * Result: genome, on-screen code (rendered in the browser from the signed
  * data with the core encoder: the exact cells that will be printed),
- * SVG / PNG / PDF downloads with print options, and the one-time claim
- * code. The claim code exists only in this page's memory: it is never
- * stored client-side and disappears when the operator leaves or hides it.
+ * SVG / PNG / PDF downloads with print options, the photograph of this
+ * piece (F-04: "Add a photo of this piece", shown on its authentic
+ * results), and the one-time claim code. The claim code exists only in
+ * this page's memory: it is never stored client-side and disappears when
+ * the operator leaves or hides it.
  * While it is shown, the certificate card that carries it (PDF, claim code
  * under the scratch-off panel) can be downloaded; the server checks the code
  * against its hash before printing it, and the button goes with Copy when
@@ -65,6 +67,7 @@ import {
   type IssueForm,
 } from '../model/generator.js';
 import { can } from '../model/permissions.js';
+import { PIECE_PHOTO_IMPACT } from '../model/photo.js';
 import type { Tone } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import type { Category, Collection, IssueResponse, Model } from '../types.js';
@@ -90,7 +93,8 @@ import {
 import { saveDownload } from '../ui/download.js';
 import { genomeFigure } from '../ui/figures.js';
 import { confirmLeave, holdPage } from '../ui/leave-guard.js';
-import { notifyError } from '../ui/toast.js';
+import { photoDialog, photoThumb } from '../ui/photo.js';
+import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
@@ -359,7 +363,47 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
       note: 'Preview rendered from the signed data',
       id: 'artifacts',
     }),
+    can(ctx.session.admin.role, 'photograph') ? piecePhotoPanel(ctx, p.productId) : null,
   ].filter((x): x is HTMLElement => x !== null);
+}
+
+/**
+ * The photograph of this piece, proposed at issuance (F-04, phase 2): taken now, while the piece is at hand, it is
+ * shown above the GENOME of its authentic results, for the client to compare with the piece. Added (or replaced) in
+ * place; the product page offers the same later.
+ */
+function piecePhotoPanel(ctx: ViewContext, productId: string): HTMLElement {
+  let url: string | null = null;
+  const shown = h('div', { class: 'piece-photo__shown', data: { testid: 'piece-photo' } });
+  const add = button('Add a photo of this piece', { kind: 'secondary', testId: 'add-piece-photo' });
+  const draw = () => {
+    mount(shown, photoThumb(url, `${productId}: the photograph of this piece`, 'lg'));
+    add.textContent = url ? 'Replace the photo of this piece' : 'Add a photo of this piece';
+  };
+  add.addEventListener('click', () => {
+    void photoDialog({
+      title: url ? 'Replace the photo of this piece' : 'Add a photo of this piece',
+      eyebrow: productId,
+      impact: PIECE_PHOTO_IMPACT,
+      current: url,
+      currentAlt: `${productId}: the current photograph`,
+      save: async (photo) => {
+        url = (await ctx.api.setProductPhoto(productId, photo)).photoUrl;
+      },
+      remove: async () => {
+        url = (await ctx.api.removeProductPhoto(productId)).photoUrl;
+      },
+    }).then((r) => {
+      if (!r) return;
+      draw();
+      notify(r === 'removed' ? 'Photograph removed.' : 'Photograph saved.');
+    });
+  });
+  draw();
+  return section('Photograph of this piece', h('div', { class: 'piece-photo' }, shown, h('div', { class: 'piece-photo__text' }, h('p', { class: 'piece-photo__lead' }, PIECE_PHOTO_IMPACT), add)), {
+    id: 'piece-photo',
+    note: 'Shown on /verify',
+  });
 }
 
 function claimPanel(ctx: ViewContext, productId: string, code: string): HTMLElement {

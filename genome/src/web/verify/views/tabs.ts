@@ -13,6 +13,10 @@ import { TAB_LABELS, type TabId } from '../view-model.js';
 
 export interface TabsView<T extends string = TabId> {
   root: HTMLElement;
+  /**
+   * Show a tab's panel (built on first selection); `focus` also moves keyboard focus to the tab. The result's link
+   * under the second-hand guidance (J-02) opens OWNERSHIP with it.
+   */
   select(id: T, focus?: boolean): void;
 }
 

@@ -27,6 +27,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
+import { mediaUrl } from './media.js';
 
 export interface CatalogServiceDeps {
   db: Db;
@@ -56,6 +57,11 @@ export interface ModelRecord {
   careInstructions: string | null;
   /** Offered for new products; an inactive model's pieces verify as before. */
   active: boolean;
+  /**
+   * The model's reference photograph (F-04, MediaService): `/api/v1/media/<sha256>`, shown above the GENOME on the
+   * authentic results of its pieces; null without one.
+   */
+  imageUrl: string | null;
   /** Pieces issued with this model: a change of its name, care instructions or collection reaches each of their public results. */
   products: number;
   createdAt: Date;
@@ -338,6 +344,7 @@ export class CatalogService {
         'm.default_material',
         'm.care_instructions',
         'm.active',
+        'm.image_sha256',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -415,6 +422,7 @@ type ModelQueryRow = {
   default_material: string | null;
   care_instructions: string | null;
   active: boolean;
+  image_sha256: string | null;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -435,6 +443,7 @@ function toModelRecord(r: ModelQueryRow): ModelRecord {
     defaultMaterial: r.default_material,
     careInstructions: r.care_instructions,
     active: r.active,
+    imageUrl: mediaUrl(r.image_sha256),
     products: Number(r.products ?? 0),
     createdAt: r.created_at,
   };

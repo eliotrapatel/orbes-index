@@ -58,6 +58,7 @@ import { ANOMALY_WEIGHTS, type ServiceFindingType } from './anomaly-rules.js';
 import type { AnomalyFinding, AnomalyService } from './anomaly.js';
 import { copyFor } from './copy.js';
 import { isPreSaleService } from './lifecycle.js';
+import { mediaUrl } from './media.js';
 import { createScanToken, SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantyStatus } from './warranty.js';
 
@@ -122,6 +123,10 @@ export interface VerifyOutcome {
     createdYear: number;
     productionDate?: string;
     care?: string;
+    /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, when the model has one. AUTHENTIC* states only. */
+    imageUrl?: string;
+    /** The photograph of this piece, taken at issuance (F-04): `/api/v1/media/<sha256>`, when it has one. AUTHENTIC* states only. */
+    photoUrl?: string;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
@@ -252,6 +257,9 @@ interface Registered {
   modelType: string;
   care: string | null;
   collection: string | null;
+  /** media_objects.sha256 of the model's reference photograph and of the piece's own (F-04), or null. */
+  modelImage: string | null;
+  piecePhoto: string | null;
   code: { id: string; status: CodeStatus; createdAt: Date; payloadHash: Uint8Array } | null;
   warranty: { start_date: string | null; end_date: string | null; voided_at: Date | null; duration_months: number } | null;
   ownerAccountId: string | null;
@@ -659,6 +667,8 @@ export class VerificationService {
         'm.name as modelName',
         'm.type as modelType',
         'm.care_instructions as care',
+        'm.image_sha256 as modelImage',
+        'p.photo_sha256 as piecePhoto',
         'col.name as collection',
         'c.id as codeId',
         'c.status as codeStatus',
@@ -691,6 +701,8 @@ export class VerificationService {
       modelType: r.modelType,
       care: r.care,
       collection: r.collection,
+      modelImage: r.modelImage,
+      piecePhoto: r.piecePhoto,
       code:
         r.codeId !== null && r.codeStatus !== null && r.codeCreatedAt !== null && r.payloadHash !== null
           ? { id: r.codeId, status: r.codeStatus, createdAt: r.codeCreatedAt, payloadHash: r.payloadHash }
@@ -805,6 +817,9 @@ export class VerificationService {
     }
 
     if (reg && AUTHENTIC_STATES.includes(state)) {
+      // The photographs (F-04) are shown on authentic results only: a caution or void result says nothing of the piece.
+      const imageUrl = mediaUrl(reg.modelImage);
+      const photoUrl = mediaUrl(reg.piecePhoto);
       out.product = {
         productId: reg.productId,
         category: { code: reg.categoryCode, name: reg.categoryName },
@@ -816,6 +831,8 @@ export class VerificationService {
         createdYear: reg.year,
         ...(reg.productionDate ? { productionDate: reg.productionDate } : {}),
         ...(reg.care ? { care: reg.care } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
+        ...(photoUrl ? { photoUrl } : {}),
       };
       const today = utcDate(now);
       const wr = reg.warranty;

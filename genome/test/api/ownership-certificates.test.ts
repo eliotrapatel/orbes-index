@@ -1,5 +1,5 @@
 /**
- * Ownership certificates over HTTP (F-06, API §8.6 and §11.7): the owner's routes behind the session and CSRF
+ * Ownership certificates over HTTP (F-06, API §8.7 and §11.7): the owner's routes behind the session and CSRF
  * rules, the public lookup and PDF with the token in the body, one 404 for an unknown and a withdrawn link, no
  * personal data in any public answer, and a certificate that ends with a transfer or a declaration.
  */

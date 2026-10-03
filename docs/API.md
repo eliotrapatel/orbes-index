@@ -58,8 +58,8 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 1.2 Requests
 
-- **JSON only.** Request bodies must be sent with `Content-Type: application/json` (a `charset` parameter is accepted). Any other content type, including `text/plain` and form encodings, is refused with `415 UNSUPPORTED_MEDIA_TYPE`.
-- **Body limit: 16 KB** (16 384 bytes). Larger bodies get `413 PAYLOAD_TOO_LARGE`.
+- **JSON only.** Request bodies must be sent with `Content-Type: application/json` (a `charset` parameter is accepted). Any other content type, including `text/plain` and form encodings, is refused with `415 UNSUPPORTED_MEDIA_TYPE`. **One exception**: the photograph routes of the console (`POST /api/admin/models/:id/image`, §13.4, and `POST /api/admin/products/:productId/photo`, §14.12) take the image itself, as `image/jpeg` or `image/webp`, and nothing else (`415`, "Send the image itself, as image/jpeg or image/webp (at most 1 MB)."); no other route accepts an image.
+- **Body limit: 16 KB** (16 384 bytes). Larger bodies get `413 PAYLOAD_TOO_LARGE`. On the two photograph routes only, the limit is **1 MiB** (1 048 576 bytes).
 - An empty body with `Content-Type: application/json` is treated as "no body". Routes without a body accept no body, an empty body or `{}`; any field is an unknown field.
 - Invalid JSON, and JSON with `__proto__` or `constructor` keys, gets `400 INVALID_JSON`.
 - Bodies are **strict**: unknown fields are rejected with `400 VALIDATION_FAILED` ("The request contains unknown fields: …"). Query strings tolerate unknown parameters but validate the values of known ones.
@@ -73,7 +73,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 - JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`, from year 0001: PostgreSQL has no year 0000, so a date or a date-time before `0001-01-01` (UTC) is `400 VALIDATION_FAILED`, never sent to the database. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
 - Wherever a path or body takes a product reference (`productId`), both the canonical id (case-insensitive) and the product's row UUID are accepted.
-- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise.
+- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise (the public keys, the categories, the contact of Client Services, and the photographs of §8.6, cached for a year as they never change).
 - Security headers on every response include: the Content-Security-Policy `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `Permissions-Policy: camera=(self)`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (except the public key list), and in production `Strict-Transport-Security: max-age=63072000; includeSubDomains`. `X-Powered-By` is removed.
 - No CORS headers are sent, except on the public key list (§8.2). Browser code on another origin can therefore only read the public keys.
 
@@ -118,7 +118,7 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR > RETAIL**; a role may do everythi
 |---|---|
 | RETAIL | A seller (A-08, migration 0008). The sale mode of a phone (§16.18: look a scanned piece up, start its warranty at a point of sale) and the list of points of sale it chooses from (`GET /api/admin/retailers`, §16.17). Manage its own session, password and second factor. **Nothing else**: no product, code, scan, owner, warranty list or dashboard, no download. |
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2), the list of points of sale included. Manage its own session, password and second factor. **Nothing it does changes the registry**: although ranked above RETAIL, it does not use the sale mode (`403 FORBIDDEN` on `/api/admin/sale/*`; the console shows it no Sale mode link). |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
 | ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
 ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
@@ -133,7 +133,7 @@ When MFA is enforced, an admin session that has not passed TOTP may use **only**
 
 ### 2.5 Request pipeline
 
-For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON) and validated in the handler.
+For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON; on the two photograph routes, the image itself, ≤ 1 MiB) and validated in the handler.
 
 ---
 
@@ -143,7 +143,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 | Group | Routes | Budget per minute (variable, default) |
 |---|---|---|
-| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (the ownership certificate a link opens, §8.6), `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
+| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (the ownership certificate a link opens, §8.7), `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
 | `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/admin/auth/login`, `POST /api/admin/auth/password`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
 | `api` | Every other `/api/v1/…` route, and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
@@ -197,8 +197,8 @@ Transport and framework:
 | `INVALID_JSON` | 400 | The body is not valid JSON, or contains `__proto__` / `constructor` keys. |
 | `VALIDATION_FAILED` | 400 | A field is missing, mistyped, out of range, unknown, or fails a business validation rule. |
 | `NOT_FOUND` | 404 | Unknown route or method. |
-| `PAYLOAD_TOO_LARGE` | 413 | Body over 16 KB. |
-| `UNSUPPORTED_MEDIA_TYPE` | 415 | Body not sent as `application/json`. |
+| `PAYLOAD_TOO_LARGE` | 413 | Body over 16 KB; on the photograph routes (§13.4, §14.12), over 1 MiB. |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | Body not sent as `application/json`; on the photograph routes, not sent as `image/jpeg` or `image/webp` (a JSON body included). |
 | `RATE_LIMITED` | 429 | Rate limit exceeded (§3), too many claim-code attempts for a product, or a certificate request or batch of the same admin still in progress (§15.7, §14.11). |
 | `INTERNAL_ERROR` | 500 | Unexpected failure. Details go to the server log only. |
 | `SERVICE_UNAVAILABLE` | 503 | The server is shutting down; retry (another instance will answer). |
@@ -273,8 +273,8 @@ Ownership:
 | `NO_PENDING_TRANSFER` | 404 | Nothing to cancel. |
 | `NO_INCIDENT` | 409 | (§11.6) The piece is not reported lost: there is nothing to withdraw. |
 | `INCIDENT_NOT_RESOLVABLE` | 409 | (§11.6) A STOLEN, or a LOST that ORBES Client Services recorded: only Client Services withdraw it, once they have checked the piece. |
-| `CERTIFICATE_NOT_FOUND` | 404 | (§8.6, §11.7) The certificate link is unknown, malformed or withdrawn by its owner: one answer for all, so a withdrawn link says no more than one that never existed (*This certificate link is not valid: it may be incomplete, or withdrawn by its owner. Ask the owner of the piece for a new link.*). For `DELETE /api/v1/ownership/certificates/:id`: no open link of this account has this id. |
-| `CERTIFICATE_NO_LONGER_VALID` | 409 | (§8.6) The PDF of a certificate that is no longer valid: expired, its piece transferred, or reported, revoked, flagged or retired since it was created. |
+| `CERTIFICATE_NOT_FOUND` | 404 | (§8.7, §11.7) The certificate link is unknown, malformed or withdrawn by its owner: one answer for all, so a withdrawn link says no more than one that never existed (*This certificate link is not valid: it may be incomplete, or withdrawn by its owner. Ask the owner of the piece for a new link.*). For `DELETE /api/v1/ownership/certificates/:id`: no open link of this account has this id. |
+| `CERTIFICATE_NO_LONGER_VALID` | 409 | (§8.7) The PDF of a certificate that is no longer valid: expired, its piece transferred, or reported, revoked, flagged or retired since it was created. |
 | `CERTIFICATE_NOT_ALLOWED` | 409 | (§11.7) A certificate of a piece that is LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED (the message names no status). |
 | `CERTIFICATE_LIMIT` | 409 | (§11.7) The piece already has 10 certificate links in use (valid, neither expired nor withdrawn). |
 | `NO_OWNER` | 409 | (Admin) the product has no owner to confirm. |
@@ -351,6 +351,14 @@ Reports and cases:
 | `REPORT_NOT_FOUND` | 404 | (§16.9) No case with this id. |
 | `REPORT_ALREADY_CLOSED` | 409 | (§16.9) The case is already closed. |
 
+Photographs (F-04, §8.6, §13.4, §14.12):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `IMAGE_INVALID` | 400 | The bytes are not a JPEG or a WebP (an SVG, a PNG, text…), do not match the declared type (a JPEG sent as `image/webp`), are damaged or truncated, use a kind of JPEG no browser draws (hierarchical, JPEG-LS), or the image is over 4 096 pixels on a side. The message says which. |
+| `IMAGE_ANIMATED` | 400 | An animated WebP (its animation flag, or ANIM / ANMF chunks): a photograph is a still image. |
+| `MEDIA_NOT_FOUND` | 404 | (§8.6) No stored photograph with this SHA-256: never uploaded, or removed and no longer used by any model or piece. |
+
 ---
 
 ## 6. Pagination
@@ -378,6 +386,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/.well-known/orbes-keys.json` | — | — | api | 8.2 |
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
+| GET | `/api/v1/media/:sha256` | — | — | api | 8.6 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.6 |
@@ -416,6 +425,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/models` | AUDITOR | — | admin | 13.4 |
 | POST | `/api/admin/models` | OPERATOR | yes | admin | 13.4 |
 | PATCH | `/api/admin/models/:id` | OPERATOR | yes | admin | 13.4 |
+| POST | `/api/admin/models/:id/image` | OPERATOR | yes | admin | 13.4 |
+| DELETE | `/api/admin/models/:id/image` | OPERATOR | yes | admin | 13.4 |
 | GET | `/api/admin/products` | AUDITOR | — | admin | 14.1 |
 | POST | `/api/admin/products` | OPERATOR | yes | admin | 14.2 |
 | POST | `/api/admin/products/batch` | OPERATOR | yes | admin | 14.11 |
@@ -429,6 +440,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/products/:productId/services` | OPERATOR | yes | admin | 14.8 |
 | POST | `/api/admin/services/:id/complete` | OPERATOR | yes | admin | 14.9 |
 | POST | `/api/admin/products/:productId/ownership/confirm` | OPERATOR | yes | admin | 14.10 |
+| POST | `/api/admin/products/:productId/photo` | OPERATOR | yes | admin | 14.12 |
+| DELETE | `/api/admin/products/:productId/photo` | OPERATOR | yes | admin | 14.12 |
 | GET | `/api/admin/codes/:codeId/artifact.:format` | **OPERATOR** | — | admin | 15.2 |
 | POST | `/api/admin/codes/print-sheet` | OPERATOR | yes | admin | 15.3 |
 | POST | `/api/admin/codes/print-sheet/manifest` | OPERATOR | yes | admin | 15.8 |
@@ -475,7 +488,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, the photographs (`GET /api/v1/media/:sha256`, `/api/admin/models/:id/image`, `/api/admin/products/:productId/photo`; F-04), `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -591,8 +604,25 @@ The place and the note are the customer's own words: **personal data**. They are
 
 **What the verification app does with it.** Under the contact of ORBES Client Services (and under the certificate-card section when there is one), every result that was not authentic asks **WHERE DID YOU SEE OR BUY THIS PIECE?**, optional, unless it is a staff scan (`staffScan`, §9.2), which takes no report: one sentence, then the four answers BOUTIQUE, ONLINE, PRIVATE SALE and OTHER (pressed like the sign-in switch); once one is chosen, PLACE (OPTIONAL), NOTE (OPTIONAL, its hint asking the customer to leave out their name and contact details) and SEND ANSWER, a text link (the result's hairline button stays SCAN AGAIN). Sent, the section reads THANK YOU and the reference the answer is kept with; a refusal is shown as the server wrote it, and nothing typed is lost (`genome/src/web/verify/views/report.ts`).
 
+### 8.6 `GET /api/v1/media/:sha256`
 
-### 8.6 `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (extension of the contract)
+A photograph that an authentic result names (§9.2 `product.imageUrl` and `product.photoUrl`, F-04): a model's reference photograph or the photograph of one piece, uploaded in the console (§13.4, §14.12). Public, no session, rate group `api`; `HEAD` too.
+
+`:sha256` is the lower-case hexadecimal SHA-256 of the image's bytes (upper case is accepted and read as lower case): the URL names its content, so the answer never changes.
+
+**200** — the image itself, `Content-Type: image/jpeg` or `image/webp`, with:
+
+| Header | Value |
+|---|---|
+| `Cache-Control` | `public, max-age=31536000, immutable`: a browser keeps it for a year and never asks again. |
+| `ETag` | `"<sha256>"`. A request with `If-None-Match` naming it answers **304** with no body, once the image is known to exist. |
+| `X-Content-Type-Options` | `nosniff`, with the Content-Security-Policy of every response (§1.3). |
+
+What is served is what was stored: a JPEG or a WebP of at most 1 MiB and 4 096 px a side, with its EXIF and XMP removed when it was uploaded (§13.4). An image that no model and no piece uses any more (replaced or removed) is deleted and answers 404.
+
+Errors: `400 VALIDATION_FAILED` (not 64 hexadecimal characters), `404 MEDIA_NOT_FOUND`, both `Cache-Control: no-store`.
+
+### 8.7 `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (extension of the contract)
 
 The **ownership certificate** (F-06): what a buyer at a distance, a resale platform or an insurer reads when the owner of a piece shares a link created in MY PIECES (§11.7). No session, no CSRF token (they only read); rate group `verify`, like a scan. Implementation: `services/ownership-certificates.ts`, `render/certificate.ts` (`renderOwnershipCertificatePdf`).
 
@@ -715,6 +745,8 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `product.createdYear` | integer | Year of the identity. |
 | `product.productionDate` | date | When set. |
 | `product.care` | string | The model's care instructions, when set. |
+| `product.imageUrl` | string | The model's reference photograph (F-04), when the model has one: `/api/v1/media/<sha256>`, a path of this origin (§8.6). |
+| `product.photoUrl` | string | The photograph of this piece, taken by ORBES at issuance (F-04), when it has one: `/api/v1/media/<sha256>`. The verification app shows it first, then the model's, above the GENOME. |
 | `warranty` | object | `AUTHENTIC*` states only. |
 | `warranty.status` | `"NOT_STARTED"` \| `"ACTIVE"` \| `"EXPIRED"` \| `"VOID"` | Computed at the request's UTC date. |
 | `warranty.startDate`, `warranty.endDate` | date | When the warranty is activated. |
@@ -732,6 +764,8 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `staffScan` | `true` | Only on a **staff scan** (§9.7): the request carried a console session, so the scan was recorded as `ADMIN_TEST`. It then has no `registration` and takes no report (§8.5). Only the browser that holds the console cookie ever receives it. |
 
 Note on `product.collection`: the product's own collection, else its model's — the same rule as `product_overview` and the owner's product list.
+
+Note on the photographs (F-04): `product.imageUrl` and `product.photoUrl` come with the `product` block, so on the four `AUTHENTIC*` states only. A result that is not authentic (`UNKNOWN`, `INVALID_SIGNATURE`, `SUSPICIOUS_ACTIVITY`, `REVOKED`, `MALFORMED_CODE`) never names a photograph, even of a piece that has one: an image would say something of a piece the result cannot vouch for. **What the verification app does with them**: at the head of an authentic result, under the title and its sentence and above the GENOME, an ivory plate framed like the GENOME's shows the piece's own photograph, then its model's, each in a square frame, contained (never cropped), with its caption (THIS PIECE, THE MODEL) and an alternative text (*This piece, O26-J-00184, photographed by ORBES at issuance*; *The MONOLITHE RING model, photographed by ORBES*), then one sentence: *Photographed by ORBES. Compare them with the piece in your hands.* A photograph that cannot be loaded takes its frame with it (`genome/src/web/verify/views/photos.ts`). The app takes a photograph only from this origin's `/api/v1/media/` path.
 
 ### 9.3 States and public wording
 
@@ -1105,7 +1139,9 @@ The caller's current products, newest acquisition first.
         "glyphs": [11, 2, 4, 10, 14, 11, 10, 2],
         "pattern": "ARC_PAIR_NWSE·SMALL_ORBIT·HALF_ARC_N·ARC_PAIR_EW·QUARTER_ORB_SW·ARC_PAIR_NWSE·ARC_PAIR_EW·SMALL_ORBIT"
       },
-      "warranty": { "status": "ACTIVE", "startDate": "2026-10-01", "endDate": "2028-10-01" }
+      "warranty": { "status": "ACTIVE", "startDate": "2026-10-01", "endDate": "2028-10-01" },
+      "imageUrl": "/api/v1/media/9f2c4e…",
+      "photoUrl": null
     }
   ]
 }
@@ -1114,6 +1150,7 @@ The caller's current products, newest acquisition first.
 | Field | Notes |
 |---|---|
 | `collection` | The product's collection, or else its model's; `null` when neither has one. |
+| `imageUrl`, `photoUrl` | The model's reference photograph and the piece's own (F-04, §8.6), or `null`: the owner's list of pieces shows them as an authentic result does. |
 | `acquiredVia` | `FIRST_REGISTRATION` or `TRANSFER`. |
 | `verified` | Ownership proven by claim code or confirmed by client services. |
 | `transfer` | `{ "pending": true, "expiresAt": … }` while an unexpired transfer offer is pending. |
@@ -1187,7 +1224,7 @@ No session is opened and no cookie is set: the customer then signs in with the n
 1. the new password is stored and the account's login throttle is cleared;
 2. **every session of the account ends**, including any held by whoever had taken it over;
 3. its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_recovery"`), so a transfer code handed out meanwhile no longer completes (`410 TRANSFER_CANCELLED`);
-4. its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_recovery"`): a link created by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.6) like one its owner withdrew, and the owner creates new ones once signed in. A creation already on its way when the recovery commits gets no link: it reads its session again under the account's share lock, finds it ended and answers `401 UNAUTHORIZED` (§11.7);
+4. its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_recovery"`): a link created by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.7) like one its owner withdrew, and the owner creates new ones once signed in. A creation already on its way when the recovery commits gets no link: it reads its session again under the account's share lock, finds it ended and answers `401 UNAUTHORIZED` (§11.7);
 5. **new transfers out of the account are paused for 72 hours** (`transfersPausedUntil`; §11.2 then answers `409 TRANSFERS_PAUSED`), against a takeover of the account by social engineering of Client Services; transfers offered *to* the account are not affected;
 6. the code is marked used. Audited `account.recover` with the account as target and the code's id, the sessions, transfers and certificate links ended (`certificatesRevoked`) and the end of the pause; never the code or the email.
 
@@ -1325,7 +1362,7 @@ In the verify app: **PIECE FOUND** in MY PIECES (§10.5), under a loss the owner
 
 ### 11.7 Ownership certificates (extension of the contract)
 
-The current owner creates, lists and withdraws the links of §8.6 (F-06). In the verify app: OWNERSHIP CERTIFICATE in the OWNERSHIP tab of each piece of MY PIECES (§10.5) that is not reported lost or stolen and whose `certificateAllowed` is `true` (not revoked nor retired; BRAND §4.4, §5).
+The current owner creates, lists and withdraws the links of §8.7 (F-06). In the verify app: OWNERSHIP CERTIFICATE in the OWNERSHIP tab of each piece of MY PIECES (§10.5) that is not reported lost or stolen and whose `certificateAllowed` is `true` (not revoked nor retired; BRAND §4.4, §5).
 
 **`POST /api/v1/ownership/certificates`**: body `{ "productId": string, "validDays"?: integer }` (canonical id or uuid; `validDays` 1 to 90, 30 when omitted; MY PIECES offers 7, 30 or 90 days).
 
@@ -1357,7 +1394,7 @@ Audited `ownership.certificate.create` (`targetType` `product`, the product id; 
 
 `valid` is `false` once the piece has been reported lost or stolen (or revoked, flagged, retired) since the link was created: the link then reads NO_LONGER_VALID, and MY PIECES shows it so, with WITHDRAW.
 
-**`DELETE /api/v1/ownership/certificates/:id`** (`:id` a uuid): the owner withdraws a link of one of the account's ownership periods. **200** `{ "ok": true }`; from then on the link answers `404 CERTIFICATE_NOT_FOUND` (§8.6). Another account's link, an unknown id and a link already withdrawn answer the same `404 CERTIFICATE_NOT_FOUND`. Audited `ownership.certificate.revoke` (`details: { certificateId }`).
+**`DELETE /api/v1/ownership/certificates/:id`** (`:id` a uuid): the owner withdraws a link of one of the account's ownership periods. **200** `{ "ok": true }`; from then on the link answers `404 CERTIFICATE_NOT_FOUND` (§8.7). Another account's link, an unknown id and a link already withdrawn answer the same `404 CERTIFICATE_NOT_FOUND`. Audited `ownership.certificate.revoke` (`details: { certificateId }`).
 
 The account's open links are also withdrawn, all at once, by an assisted recovery of its password (§10.8) and by a lock by ORBES Client Services (§16.12), as its pending transfers are cancelled: a link created by whoever held the account does not keep showing the record. Each is audited `ownership.certificate.revoke` with `details: { certificateId, reason }` (`"account_recovery"`, `"account_locked"`); the links stay withdrawn after an unlock.
 
@@ -1522,6 +1559,7 @@ AUDITOR. Landing counts.
       "defaultMaterial": "925 STERLING SILVER",
       "careInstructions": "Polish with a soft dry cloth.",
       "active": true,
+      "imageUrl": "/api/v1/media/9f2c4e8a…",
       "products": 184,
       "createdAt": "2026-10-01T08:13:22.220Z"
     }
@@ -1529,7 +1567,7 @@ AUDITOR. Landing counts.
 }
 ```
 
-`collection` is `null` when the model has none. `active`: the model is offered for new products (§13.4, `PATCH`). `products`: the pieces issued with the model, whose public results read its name, type, care instructions and collection.
+`collection` is `null` when the model has none. `active`: the model is offered for new products (§13.4, `PATCH`). `imageUrl`: the model's reference photograph (below), `null` without one. `products`: the pieces issued with the model, whose public results read its name, type, care instructions, collection and reference photograph.
 
 **`POST /api/admin/models`** (OPERATOR):
 
@@ -1543,7 +1581,7 @@ AUDITOR. Landing counts.
 | `defaultMaterial` | string | no | ≤ 200 characters |
 | `careInstructions` | string | no | ≤ 2 000 characters; shown publicly as `product.care`. |
 
-**201** — the model object (`active: true`, `products: 0`). Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 SKU_PREFIX_TAKEN`.
+**201** — the model object (`active: true`, `imageUrl: null`, `products: 0`). Errors: `400 VALIDATION_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 SKU_PREFIX_TAKEN`.
 
 **`PATCH /api/admin/models/:id`** (OPERATOR; extension of the contract) — changes what a model shows or offers, at least one field:
 
@@ -1556,6 +1594,19 @@ AUDITOR. Landing counts.
 | `active` | boolean | `false`: no new product with this model (`POST /api/admin/products` answers `409 MODEL_INACTIVE`, the generator hides it); its pieces keep verifying as before. `true` offers it again. An issuance under way reads `active` again under a share lock in its transaction (§14.2), so it never completes with a model deactivated meanwhile. |
 
 **Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once (the collection only on the pieces without one of their own): the console says how many (`products`) before saving, and shows the care block as the client reads it. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`.
+
+**`POST /api/admin/models/:id/image`** (OPERATOR; extension of the contract, F-04) — sets the model's **reference photograph**, shown above the GENOME on the authentic result (§9.2 `product.imageUrl`) of every piece issued with the model, at once. The body is **the image itself**, not JSON:
+
+- `Content-Type: image/jpeg` or `image/webp` (anything else, a JSON body included: `415 UNSUPPORTED_MEDIA_TYPE`), at most **1 MiB** (`413 PAYLOAD_TOO_LARGE`); the CSRF rules of §2.2 apply as to any mutation. These two photograph routes are the only ones with this parser and this limit (`genome/src/server/routes/admin/media.ts`).
+- The type is read from the bytes (`genome/src/server/media/image.ts`): a JPEG (`FF D8 FF`) sent as `image/jpeg` or a WebP (`RIFF…WEBP`) sent as `image/webp`, still, at most 4 096 px on each side; anything else is `400 IMAGE_INVALID` (an SVG or a PNG under either name, a damaged or truncated file), an animated WebP `400 IMAGE_ANIMATED`.
+- **Metadata removed** before anything is stored: from a JPEG, every APP1 segment (EXIF with its GPS position and thumbnail, XMP), every other application segment but the JFIF header (without its thumbnail), the ICC colour profile and the Adobe marker, every comment, and whatever follows the end of the image; from a WebP, the EXIF and XMP chunks (and their flags), every chunk that is not part of the picture, and whatever follows the container. The picture itself is not re-encoded: its pixels are the file's.
+- Stored once under the SHA-256 of what remains (`media_objects`, DATABASE §5.26): the same photograph uploaded for two models or pieces is one row.
+
+The console re-encodes every photograph through a canvas before sending it (2 000 px at most on the longer side, a JPEG whose quality steps down until it fits 1 MiB), which carries no metadata in the first place; the Catalogue's **Photo** dialog previews what will be sent, its size and the number of issued pieces it reaches. Audited `model.image.set` (target the model) with `{ sha256, mime, width, height, bytes, previous, issuedPieces }`: the facts of the image, never its bytes, the photograph it replaced (`null` for the first) and the pieces it reaches. The same photograph again writes nothing. The one it replaced, used by no other model or piece, is deleted (§8.6 then answers 404). **200** — the model object, `imageUrl` set. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `400 IMAGE_INVALID`, `400 IMAGE_ANIMATED`, `404 MODEL_NOT_FOUND` (checked after the image), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`.
+
+**`DELETE /api/admin/models/:id/image`** (OPERATOR; extension of the contract) — removes the reference photograph: the results of the model's pieces no longer show it. No body (or `{}`). Audited `model.image.remove` with `{ previous, issuedPieces }`; removing where there is none writes nothing. The image, used by no other model or piece, is deleted. **200** — the model object, `imageUrl: null`. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`.
+
+At the edge of the VPS stack, the two photograph uploads, and only they, may carry 1 200 KB instead of 64 KB ([DEPLOYMENT §15](DEPLOYMENT.md#15-ovh-vps-deployment), `deploy/vps/Caddyfile`).
 
 The narrative fields of a model (workshop, materials, repairability) are a later phase (A-10 phase 2).
 
@@ -1716,8 +1767,9 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
   "product": {
     "…": "every field of the issuance response's product object, plus:",
     "category": { "index": 1, "code": "J", "name": "Jewelry" },
-    "model": { "id": "73c6…", "name": "MONOLITHE", "type": "RING", "skuPrefix": "MNL-RG", "care": "Polish with a soft dry cloth." },
-    "collection": "ORBIT"
+    "model": { "id": "73c6…", "name": "MONOLITHE", "type": "RING", "skuPrefix": "MNL-RG", "care": "Polish with a soft dry cloth.", "imageUrl": "/api/v1/media/9f2c4e8a…" },
+    "collection": "ORBIT",
+    "photoUrl": null
   },
   "genome": { "…": "current genome (highest version), same shape as in the issuance response" },
   "genomes": [ "…all genomes…" ],
@@ -1752,6 +1804,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
 - `codes[].verification` re-verifies each stored code live (payload fields against the row, payload hash, Ed25519 signature, key trust). It is `{ "valid": true, "keyStatus" }` or `{ "valid": false, "reason", "keyStatus" }` with `reason` one of `UNKNOWN_KEY`, `PAYLOAD_INVALID`, `PAYLOAD_MISMATCH`, `PAYLOAD_HASH_MISMATCH`, `SIGNATURE_INVALID`, `KEY_REVOKED`. A row tampered with in the database shows up here as invalid. Read views never include `data`.
 - `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email (masked for an AUDITOR, §16.2) and display name; each account opens its sheet in the console (§16.11); `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
 - `anomalies` lists up to 100 anomalies of the product, most severe first (shape and order of §16.4); `services` the service records (§14.8).
+- `product.photoUrl` is the piece's own photograph (§14.12) and `product.model.imageUrl` its model's reference photograph (§13.4), each `/api/v1/media/<sha256>` or `null`: the product page shows both as /verify does (F-04).
 - `lifecycle.allowed` lists the statuses `transitions` accepts now; `returnTo` is where a return, recovery or reinstatement would lead; `canReinstate` is true for a REVOKED product whose previous status is known.
 
 Errors: `400 VALIDATION_FAILED`, `404 PRODUCT_NOT_FOUND`.
@@ -1943,6 +1996,20 @@ Audited: `product.issue` for every piece issued (as §14.2), then `product.issue
 **In the console** (Generator → BATCH, `#/generator?mode=batch`): the template, then *Pieces from* a CSV file or a quantity. The CSV holds one row per piece, its first line naming the columns `variant`, `sku` and `serial` (each optional, any order, case-insensitive; no other column); comma or semicolon (the one the first line that is not blank uses most), a byte-order mark and CRLF are accepted, blank lines skipped, at most 1 000 pieces and 1 MB. A first line that names one column holds no delimiter: each line is then one value, so `7,5 ML` stays one variant. The file is read as UTF-8; a file that is not UTF-8 is read as Windows-1252, the encoding of Excel's plain *CSV* (in France *CSV (séparateur : point-virgule)*), and the console says so above the preview, where its accents can be checked. A value that still holds U+FFFD (a letter lost before the file reached the console) is refused on its line. The browser checks the file and every piece with the single form's rules before anything is signed (control characters as the server counts them, C1 included), each problem with its line (*Line 4 · SKU: …*), then shows the plan (*120 pieces · 3 requests of up to 50*) and the first ten rows; a named serial that would leave the allocated pieces none is refused there too. **SIGN 120 PRODUCTS** sends the pieces that name their serial first, as the server signs a request, so an allocated serial never takes one a later request names, in requests one after the other (at most 50 pieces and 15 000 bytes each), and stops at the first request that fails; the result gives every piece its outcome, in the file's order: ISSUED, NOT SIGNED, NOT ATTEMPTED, NOT SENT (an earlier request failed), or NO ANSWER (look in Products before signing again). While the batch's claim codes are on screen, the page offers the **certificate cards** (§15.7, in requests of 50: cards, A4 sheets or the print shop's CSV) and a **results file** (CSV: line, piece, status, productId, sku, variant, serial, codeId, claimCode, message), and *"I have recorded them — hide"*; until one is saved or the codes are hidden, closing the tab (`beforeunload`), navigating in the console or signing out asks first. The codes are held in the page's memory only, as for one product. **A session that ends** (`401`) while the batch is being signed or its codes are on screen does not take the page: the console says the session has ended and keeps it, the pieces already signed and their codes included (a request refused for the session is NOT SIGNED: *the session ended before this request*); the results file, made in the browser, can still be saved, and leaving the page (which asks first) signs in again.
 
 Errors (the whole request; nothing signed): `400 VALIDATION_FAILED`, `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 CATEGORY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 CATEGORY_INACTIVE`, `409 MODEL_INACTIVE`, `413 PAYLOAD_TOO_LARGE`, `429 RATE_LIMITED` (a batch of the same admin still in progress, or the `admin` group's limit).
+
+### 14.12 `POST` and `DELETE /api/admin/products/:productId/photo` (extension of the contract)
+
+OPERATOR (F-04, phase 2). The **photograph of one piece**, taken when it is issued: a close view of what makes it unique (the grain of the leather, the stone), which the client compares with the piece in hand. It is shown first, before the model's reference photograph, above the GENOME of the piece's authentic results (§9.2 `product.photoUrl`). `:productId` is the canonical id or the uuid.
+
+**`POST`** — the body is the image itself, with the same type, size, metadata and storage rules as a model's reference photograph (§13.4): `image/jpeg` or `image/webp`, at most 1 MiB, still, at most 4 096 px a side, EXIF and XMP removed, stored once by SHA-256. The console offers it **at issuance**, on the generator's result (*Add a photo of this piece*), and on the product page (*Add a photo of this piece*, then *Replace the photo of this piece*). Audited `product.photo.set` (target the product id) with `{ sha256, mime, width, height, bytes, previous }`; the same photograph again writes nothing; the one it replaced, used by nothing else, is deleted.
+
+```json
+{ "productId": "O26-J-00184", "photoUrl": "/api/v1/media/4b7d0c1e…" }
+```
+
+**`DELETE`** — removes it: no body (or `{}`); audited `product.photo.remove` with `{ previous }`; removing where there is none writes nothing. **200** `{ "productId": "O26-J-00184", "photoUrl": null }`.
+
+Errors: `400 VALIDATION_FAILED`, `400 IMAGE_INVALID`, `400 IMAGE_ANIMATED`, `404 PRODUCT_NOT_FOUND` (checked after the image), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`.
 
 ---
 
@@ -2352,7 +2419,7 @@ OPERATOR. Closes a case. Body `{ "status": "CLOSED", "note": string }`: the note
 
 ### 16.10 `POST /api/admin/owners/:id/recovery-code` (extension of the contract)
 
-**ADMIN**. A one-time recovery code for a customer who forgot the password (C-04), issued by ORBES Client Services **after checking the customer's identity** (the procedure is written with counsel). `:id` is the account id (`accounts.id`, uuid, as listed by §16.2). No body (or `{}`).
+**ADMIN**. A one-time recovery code for a customer who forgot the password (C-04), issued by ORBES Client Services **after checking the customer's identity** (SECURITY-MODEL §3.6; the procedure is written with counsel, and outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6). `:id` is the account id (`accounts.id`, uuid, as listed by §16.2). No body (or `{}`).
 
 **201** — the code is in this response only:
 
@@ -2401,7 +2468,7 @@ In the console: `#/owners/:id`, reached from Owners, from a REF search and from 
 
 **ADMIN**. No body (or `{}`).
 
-**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request. In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`), and its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_locked"`), so a link shared by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.6). Until it is unlocked the customer cannot sign in: a sign-in with the right password answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*, §10.2). Nor can they use a recovery code: the lock revoked the open one and none can be issued while the account is locked, so a code answers `400 RECOVERY_CODE_INVALID` like a replaced one (§10.8); `403 ACCOUNT_LOCKED` comes only when the lock lands between the check of a code and its use. A request already on its way when the lock takes effect is refused with `403 ACCOUNT_LOCKED`: a transfer (§11.2), a LOST or STOLEN declaration (§11.5), a first registration (§11.1, its claim code's check included) and the acceptance of a transfer by the locked account (§11.3), each of which reads the account again under a share lock before it locks the piece, so no piece reaches a LOCKED account; a password change (§10.7) and a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
+**Lock** an ACTIVE account, for example while a takeover is suspected or at the customer's request (then after the identity check of SECURITY-MODEL §3.6, outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6). In **one transaction**: the status becomes `LOCKED`, **every session of the account ends**, and its **pending transfers are cancelled** (audited `ownership.transfer.cancel` with `details.reason: "account_locked"`), so a transfer code already handed out no longer completes (`410 TRANSFER_CANCELLED`), and its **open links to ownership certificates are withdrawn** (§11.7; audited `ownership.certificate.revoke` with `details.reason: "account_locked"`), so a link shared by whoever held the account answers `404 CERTIFICATE_NOT_FOUND` (§8.7). Until it is unlocked the customer cannot sign in: a sign-in with the right password answers `403 ACCOUNT_LOCKED` (*This account is locked. ORBES Client Services can assist you.*, §10.2). Nor can they use a recovery code: the lock revoked the open one and none can be issued while the account is locked, so a code answers `400 RECOVERY_CODE_INVALID` like a replaced one (§10.8); `403 ACCOUNT_LOCKED` comes only when the lock lands between the check of a code and its use. A request already on its way when the lock takes effect is refused with `403 ACCOUNT_LOCKED`: a transfer (§11.2), a LOST or STOLEN declaration (§11.5), a first registration (§11.1, its claim code's check included) and the acceptance of a transfer by the locked account (§11.3), each of which reads the account again under a share lock before it locks the piece, so no piece reaches a LOCKED account; a password change (§10.7) and a sign-in whose password check was under way (§10.2). The pieces stay registered to the account; its scans keep showing them as registered. The **open recovery code is revoked** in the same transaction: a code obtained by fooling the identity check is the takeover a lock is for (THREAT-MODEL U), so it does not outlive the lock; it then fails like a replaced code (§10.8). A new one cannot be issued while the account is locked (`409 ACCOUNT_NOT_ACTIVE`).
 
 **200** `{ "status": "LOCKED", "sessionsRevoked": 2, "transfersCancelled": 1, "recoveryCodesRevoked": 1, "certificatesRevoked": 1 }` (`recoveryCodesRevoked`: 0 or 1; a code already expired is left as it was; `certificatesRevoked`: the links withdrawn, an expired one left as it was). Audited `account.lock` with the account as target and `{ sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked }`; never the email.
 
@@ -2413,7 +2480,7 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 
 ### 16.13 `GET /api/admin/owners/:id/export` (extension of the contract)
 
-**ADMIN** (a `GET`, but it hands over a customer's personal data). Everything the registry holds about one account, readable, for a request under the **right of access** (GDPR art. 15), after the same identity check as a recovery code (SECURITY-MODEL §3.6). A `Cache-Control: no-store` JSON attachment, `orbes-account-<first 8 characters of the id>-<YYYY-MM-DD>.json`:
+**ADMIN** (a `GET`, but it hands over a customer's personal data). Everything the registry holds about one account, readable, for a request under the **right of access** (GDPR art. 15), after the same identity check as a recovery code (SECURITY-MODEL §3.6, outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6). A `Cache-Control: no-store` JSON attachment, `orbes-account-<first 8 characters of the id>-<YYYY-MM-DD>.json`:
 
 | Field | Content |
 |---|---|
@@ -2424,7 +2491,7 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `scans` | Every scan made while signed in, oldest first: `reference` (the REF), time, event, result, piece, `country`, `region`, `lat`/`lon` (rounded to 0.1°, §4), `userAgentFamily` (the browser family, e.g. `Safari/iOS`; the whole user agent of a scan is never stored), `clientMetrics` (what the app measured while decoding, as stored: corrections, module size, decode time, camera or upload; or `null`), and the customer's `report` on it (§8.5: `channel`, `place`, `note`, `createdAt`) or `null`. The scan's whole id is never given, only its REF. |
 | `sessions` | The account's sessions still stored: `createdAt`, `lastSeenAt`, `expiresAt`, `userAgent`. |
 | `recoveryCodes` | The recovery codes issued (§16.10): `createdAt`, `expiresAt`, `usedAt`, `revokedAt`. |
-| `certificates` | The links to ownership certificates the account created (§11.7, F-06), in its current and past ownership periods, oldest first: `productId`, `createdAt`, `expiresAt`, `revokedAt` (withdrawn by the owner, or with the account's lock or assisted recovery, whose audit entries name the ADMIN or the piece rather than the account) and `status`, what a reader of the link meets now: `VALID`, `NO_LONGER_VALID` (expired, its ownership period ended, or the piece lost, stolen, revoked, flagged or retired since; computed as in §8.6) or `WITHDRAWN` (§8.6's 404). Never the token, its hash or the link's id. |
+| `certificates` | The links to ownership certificates the account created (§11.7, F-06), in its current and past ownership periods, oldest first: `productId`, `createdAt`, `expiresAt`, `revokedAt` (withdrawn by the owner, or with the account's lock or assisted recovery, whose audit entries name the ADMIN or the piece rather than the account) and `status`, what a reader of the link meets now: `VALID`, `NO_LONGER_VALID` (expired, its ownership period ended, or the piece lost, stolen, revoked, flagged or retired since; computed as in §8.7) or `WITHDRAWN` (§8.7's 404). Never the token, its hash or the link's id. |
 | `activity` | Every audit entry that names the account, oldest first: those **about** it (target: `account.register`, `account.login`, `account.login_failed`, `account.password_change`, `account.recover`, `account.recover_failed`, `account.lock`, …) and those it **made** (actor: `ownership.register`, `ownership.claim_failed`, `ownership.transfer.initiate`, `.accept`, `.cancel`, `ownership.incident`, `ownership.incident.resolve`, `ownership.certificate.create`, `ownership.certificate.revoke` (the owner's withdrawals and those of its assisted recovery; a lock's withdrawals name the ADMIN, and show in `certificates`), `product.transition`, `scan.report`, …). Each gives `occurredAt`, `action`, `by` (`account`, `admin` or `system`; never the staff member's identity), what it was about (`productId`, the piece's canonical id, or `reference`, a scan's REF, never its whole id; else `null`) and `status`, the status it gave the piece (`LOST` or `STOLEN` for a declared incident, the status it returned to for a loss withdrawn by its owner, `ownership.incident.resolve`, §11.6, the new status for a change of status) or `null`. Nothing else of an entry's details, which can name staff or other accounts. The audit log has no index on the actor, so the second half reads the whole log: accepted for this rare ADMIN request (DATABASE §5.21). A transfer the account offered and another account accepted is in `transfers`; its `ownership.transfer.accept` entry names the buyer as actor. |
 | `truncated` | The lists cut at 50 000 entries (`scans`, `activity`); empty when the export is complete. |
 | `notIncluded` | What the registry holds but cannot give back readably: the password and recovery codes (one-way scrypt hashes), the tokens of the certificate links (a one-way SHA-256 each), and the IP and device pseudonyms of scans, sessions and audit entries (keyed one-way hashes; no IP address or device cookie is stored). |
@@ -2752,8 +2819,8 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | Path | Serves | Caching |
 |---|---|---|
 | `/` | `302` redirect to `/verify` | |
-| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5) and `/verify/c#{token}` (an ownership certificate, §8.6: the token in the fragment, which the server never receives); any other path shows the landing, its address put back to `/verify` | `no-cache` |
-| `/VERIFY/C`, and any other spelling of `/verify/c` | `301` redirect to `/verify/c` (`GET`, `HEAD`): the ownership certificate's PDF letters its address in capitals (§8.6). A browser keeps the fragment, the certificate's token, across the redirect | |
+| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5) and `/verify/c#{token}` (an ownership certificate, §8.7: the token in the fragment, which the server never receives); any other path shows the landing, its address put back to `/verify` | `no-cache` |
+| `/VERIFY/C`, and any other spelling of `/verify/c` | `301` redirect to `/verify/c` (`GET`, `HEAD`): the ownership certificate's PDF letters its address in capitals (§8.7). A browser keeps the fragment, the certificate's token, across the redirect | |
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/assets/*` | Bundles and stylesheets | Content-hashed names: `public, max-age=31536000, immutable`; others `no-cache`. Dotfiles are never served. |
 

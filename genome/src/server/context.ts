@@ -30,6 +30,7 @@ import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
+import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
 import { OwnerService } from './services/owners.js';
@@ -69,6 +70,8 @@ export interface AppServices {
   retailers: RetailerService;
   /** The sale mode: staff scan, then warranty activation through a sale token (A-08). */
   sale: SaleService;
+  /** Reference photographs of models and photographs of pieces, stored once and served publicly (F-04). */
+  media: MediaService;
 }
 
 export interface AppContext {
@@ -158,6 +161,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
     const retailers = new RetailerService({ db, audit, clock });
     const sale = new SaleService({ db, verification, warranty, clock });
+    const media = new MediaService({ db, audit, clock, log });
 
     const services: AppServices = {
       issuance,
@@ -176,6 +180,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       owners,
       retailers,
       sale,
+      media,
       ...overrides.services,
     };
 

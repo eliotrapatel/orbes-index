@@ -5,7 +5,8 @@
  *   ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts list [--json]
  *   tsx scripts/admin.ts totp-setup --email <email>              new TOTP secret + otpauth:// URI (nothing stored yet)
- *   tsx scripts/admin.ts totp-enable --email <email> --secret <base32> --code <6 digits>   (ends the sessions opened without it)
+ *   ADMIN_TOTP_SECRET=… tsx scripts/admin.ts totp-enable --email <email> --code <6 digits>   (ends the sessions opened without it;
+ *                                                                 or --secret <base32>)
  *   tsx scripts/admin.ts reset-totp --email <email> --yes        lost device: remove the enrolment, end the sessions
  *   tsx scripts/admin.ts role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
  *   tsx scripts/admin.ts disable --email <email> --yes           a departure: sign-in refused, every session ends
@@ -20,7 +21,9 @@
  * process lists). `totp-setup` + `totp-enable` is the recommended first
  * enrolment of a new admin (SECURITY-MODEL §3): the secret is handed over in
  * person or over a trusted channel instead of being set up by whoever holds
- * the password first (trust on first use in the console).
+ * the password first (trust on first use in the console). `totp-enable` reads
+ * that secret from ADMIN_TOTP_SECRET in the same way (`--secret`, kept for
+ * scripts, puts it in argv: the shell history and the process list).
  *
  * Exit codes: 0 success, 1 failure, 2 usage error, 78 configuration error.
  */
@@ -41,8 +44,9 @@ Commands
                                     Create a console user; the password is read from ADMIN_PASSWORD
   list                              List console users (role, second factor, lock state)
   totp-setup --email <email>        Generate a TOTP secret and its otpauth:// URI (nothing is stored)
-  totp-enable --email <email> --secret <base32> --code <digits>
-                                    Enrol the secret after checking a current code from the app;
+  totp-enable --email <email> --code <digits> [--secret <base32>]
+                                    Enrol the secret (read from ADMIN_TOTP_SECRET unless --secret
+                                    is given) after checking a current code from the app;
                                     that admin's sessions, opened without it, end
   reset-totp --email <email> --yes  Remove a lost second factor; that admin's sessions end
   role --email <email> --role <ADMIN|OPERATOR|AUDITOR|RETAIL>
@@ -55,7 +59,8 @@ Options
   --verbose   Service logs on stderr
   --help      This text
 
-Environment: the server's (see .env.example); ADMIN_PASSWORD for create.`;
+Environment: the server's (see .env.example); ADMIN_PASSWORD for create; ADMIN_TOTP_SECRET for
+totp-enable (both stay out of argv, so out of the shell history and the process list).`;
 
 const ADMIN_OPTIONS = {
   email: { type: 'string' },
@@ -107,7 +112,12 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
     password = env.ADMIN_PASSWORD;
     if (!password) return usage('set the password in ADMIN_PASSWORD (it is never taken from the command line)');
   }
-  if (cmd === 'totp-enable' && (typeof values.secret !== 'string' || typeof values.code !== 'string')) return usage('--secret and --code are required');
+  let totpSecret: string | undefined;
+  if (cmd === 'totp-enable') {
+    // From the environment, like the password; --secret (argv) only when it is given.
+    totpSecret = typeof values.secret === 'string' ? values.secret : env.ADMIN_TOTP_SECRET;
+    if (!totpSecret || typeof values.code !== 'string') return usage('--code is required, and the secret in ADMIN_TOTP_SECRET (or --secret)');
+  }
   if (cmd === 'reset-totp' && values.yes !== true) {
     io.err('admin reset-totp: the second factor is removed and every session of that admin ends; re-run with --yes to confirm.');
     return EXIT.USAGE;
@@ -154,12 +164,12 @@ export async function runAdminCli(argv: string[], deps: CliDeps = {}): Promise<n
         else {
           io.out(`Secret (shown once, add it to the authenticator app): ${e.secret}`);
           io.out(`otpauth URI: ${e.otpauthUri}`);
-          io.out(`Then: tsx scripts/admin.ts totp-enable --email ${admin.email} --secret <secret> --code <current code>`);
+          io.out(`Then, with the secret in ADMIN_TOTP_SECRET: tsx scripts/admin.ts totp-enable --email ${admin.email} --code <current code>`);
         }
         return EXIT.OK;
       }
       if (cmd === 'totp-enable') {
-        const secret = (values.secret as string).replace(/[\s=]/g, '').toUpperCase();
+        const secret = totpSecret!.replace(/[\s=]/g, '').toUpperCase();
         // The sessions opened with the password alone end with the enrolment (AuthService.enableTotp).
         const { sessionsRevoked } = await auth.enableTotp(admin.id, { secret, code: (values.code as string).replace(/\s/g, '') }, actor);
         io.out(

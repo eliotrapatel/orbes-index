@@ -11,7 +11,8 @@
  *  - the three steps and the "verify only" line word for word as the
  *    certificate card draws them (CERTIFICATE_COPY), so card and packaging
  *    never drift apart;
- *  - the second-hand sentence (J-02) in both languages;
+ *  - the second-hand sentence (J-02) in both languages, its English the very
+ *    RESALE_GUIDANCE that /verify shows under AUTHENTIC — REGISTERED;
  *  - the announcement held until the H1/H2 review of COMPLIANCE §7; each of
  *    its drafts, website, social and e-mail, in both languages, says that a
  *    printed code can be copied and names ORBES Client Services (BRAND §4.6),
@@ -19,10 +20,13 @@
  *  - the kit linked from LAUNCH §10.
  *
  * CUSTOMER_COPY lists the documents held to the lexicon; a new public-facing
- * document under docs/launch/ joins it.
+ * document under docs/launch/ joins it. The staff's sales playbook
+ * (docs/launch/SALES-PLAYBOOK.md, J-09) has its own test with the same terms,
+ * sales-playbook.test.ts, since its code spans quote the console.
  */
 import { describe, expect, it } from 'vitest';
 import { CERTIFICATE_COPY } from '../../src/server/render/certificate.js';
+import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import {
   EXTRA_FORBIDDEN_EN,
   LEXICON_BEGIN,
@@ -50,9 +54,9 @@ const parts = {
 
 const ADDRESS = 'theorbes.com/verify';
 const VERIFY_ONLY = { en: 'Verify only at theorbes.com/verify', fr: 'Vérifiez uniquement sur theorbes.com/verify' };
-/** The J-02 sentence (RESALE_GUIDANCE once /verify shows it), and its French. */
+/** The J-02 sentence, as /verify shows it under AUTHENTIC — REGISTERED (RESALE_GUIDANCE), and its French. */
 const RESALE = {
-  en: 'Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.',
+  en: RESALE_GUIDANCE,
   fr: 'Vous achetez cette pièce ? Demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un.',
 };
 /** The terms the brief names for the French lexicon. */
@@ -149,6 +153,19 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
       expect(parts.card, `card verso, ${lang}`).toContain(RESALE[lang]);
       expect(parts.resale, `§3, ${lang}`).toContain(RESALE[lang]);
     }
+  });
+
+  it('writes in §3 the very sentence /verify shows under AUTHENTIC — REGISTERED (RESALE_GUIDANCE, J-02)', () => {
+    // §3's table holds the sentence once: its English cell is RESALE_GUIDANCE, nothing more, nothing less.
+    const rows = parts.resale
+      .split('\n')
+      .filter((l) => l.startsWith('|'))
+      .map((l) => l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim()));
+    expect(rows[0]).toEqual(['EN', 'FR']);
+    expect(rows.slice(2)).toEqual([[RESALE_GUIDANCE, RESALE.fr]]);
+    expect(RESALE_GUIDANCE).toBe('Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.');
+    // And the kit names its source in the code.
+    expect(kit).toContain('`RESALE_GUIDANCE`, `genome/src/web/verify/copy.ts` (J-02)');
   });
 
   it('holds the announcement until the H1/H2 review of COMPLIANCE §7, which names H1 and H2', () => {

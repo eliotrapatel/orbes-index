@@ -175,6 +175,14 @@ export const reportBody = body({
   note: optionalText(500),
 });
 
+/** GET /api/v1/media/:sha256 (§8.6): a stored photograph, named by the hex SHA-256 of its bytes. */
+export const mediaParams = z.object({
+  sha256: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'Must be a SHA-256 in hexadecimal')
+    .transform((s) => s.toLowerCase()),
+});
+
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
 const email = z.string().trim().min(3, 'Required').max(254, 'At most 254 characters');
@@ -272,7 +280,7 @@ export const createCertificateBody = body({
 export const certificateParams = z.object({ id: uuid });
 
 /**
- * POST /api/v1/certificates/lookup and /pdf (§8.6): the token of the link's fragment, in any spelling. Only its type
+ * POST /api/v1/certificates/lookup and /pdf (§8.7): the token of the link's fragment, in any spelling. Only its type
  * and a size bound are checked here: a token that cannot be one answers 404, as an unknown one does (the service's).
  */
 export const certificateTokenBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid certificate link') });

@@ -454,9 +454,40 @@ export const NOT_DELIVERED_NOTE =
 export const STAFF_SCAN_NOTE =
   'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered. To register a piece of your own, scan it in a browser that is not signed in to the console.';
 
+/**
+ * The photographs above the GENOME of an authentic result (F-04): the piece's own, taken by ORBES at issuance, then
+ * its model's reference photograph. They show what ORBES registered under this identity, for the customer to compare
+ * with the piece in hand: a code copied onto another object would not match them. Nothing here says the object is
+ * genuine (§4.6).
+ */
+export const PHOTOS = Object.freeze({
+  /** The section's accessible name. */
+  label: 'Photographs of this piece',
+  piece: 'THIS PIECE',
+  model: 'THE MODEL',
+  pieceAlt: (productId: string) => `This piece, ${productId}, photographed by ORBES at issuance`,
+  modelAlt: (model: string, type: string) => `The ${[model, type].filter((x) => x.length > 0).join(' ')} model, photographed by ORBES`,
+  note: (count: number) =>
+    count > 1 ? 'Photographed by ORBES. Compare them with the piece in your hands.' : 'Photographed by ORBES. Compare it with the piece in your hands.',
+});
+
 /** The honest limit of a code-based verification, shown under every positive result. */
 export const ASSURANCE_NOTE =
   'This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.';
+
+/**
+ * The second-hand guidance (J-02), the notice under AUTHENTIC — REGISTERED. Once a piece is registered, every copy of
+ * its code reads AUTHENTIC — REGISTERED as well (BRAND §4.6): only a transfer code, which the registered owner alone
+ * can create, shows that the seller holds the registration. Never on OWNERSHIP VERIFIED (the viewer's own piece) nor
+ * on FIRST REGISTRATION (no owner yet, so no transfer code can exist). The same sentence, word for word, is on the
+ * certificate card's verso and in the FAQ (docs/launch/PACKAGING-KIT.md §3, checked by its test): changing it here
+ * means changing it there.
+ */
+export const RESALE_GUIDANCE =
+  'Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.';
+
+/** The text link under it, which opens the OWNERSHIP tab on RECEIVING THIS PIECE, where the transfer code is entered. */
+export const RESALE_ACTION = 'I HAVE A TRANSFER CODE';
 
 /** The CARE tab of a piece whose model has no care instructions (shared with the console's care preview). */
 export { DEFAULT_CARE } from '../shared/care.js';

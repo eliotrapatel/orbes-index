@@ -8,19 +8,20 @@
  * copies, then the holder of the certificate card), the contact of ORBES
  * Client Services (an INVALID SIGNATURE result, a warranty that no longer
  * applies), the answer to WHERE DID YOU SEE OR BUY THIS PIECE? attached to
- * the scan, the password (FORGOTTEN PASSWORD? through ORBES Client Services
- * and a recovery code, then CHANGE PASSWORD in MY PIECES), the reception of
- * a piece with its transfer code (F-03: signed in after the scan, VERIFY
- * AGAIN; the code of another piece refused; the window of the scan closed),
- * MY PIECES (F-01:
- * sign-in, the list, its tabs from the keyboard, a piece reported stolen
- * then scanned by a stranger, a loss withdrawn; a direct link, a reload and
- * the back button), the ownership certificate (F-06: created in MY PIECES,
- * opened from its link by a visitor, its PDF, ended by a declaration,
- * withdrawn, its address typed back in capitals as the PDF letters it), and
- * the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
- * are measured: 10 px type and 44 × 44 px tap zones for every button, link
- * and tab. Mobile screenshots of the landing and result screens are written
+ * the scan, the photographs of an authentic piece above its GENOME (F-04),
+ * the password (FORGOTTEN PASSWORD? through ORBES Client Services and a
+ * recovery code, then CHANGE PASSWORD in MY PIECES), the second-hand
+ * guidance under AUTHENTIC — REGISTERED and its link to RECEIVING THIS PIECE
+ * (J-02), the reception of a piece with its transfer code (F-03: signed in
+ * after the scan, VERIFY AGAIN; the code of another piece refused; the
+ * window of the scan closed), MY PIECES (F-01: sign-in, the list, its tabs
+ * from the keyboard, a piece reported stolen then scanned by a stranger, a
+ * loss withdrawn; a direct link, a reload and the back button), the
+ * ownership certificate (F-06: created in MY PIECES, opened from its link by
+ * a visitor, its PDF, ended by a declaration, withdrawn, its address typed
+ * back in capitals as the PDF letters it), and the problem screens. On each
+ * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
+ * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
  *
  * Skipped (not failed) when the Chromium binary is absent.
@@ -35,8 +36,9 @@ import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CLAIM_HELD, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
 
@@ -323,6 +325,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'claim.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
+    // No owner yet, so no transfer code can exist: no second-hand guidance (J-02).
+    await countOf(page.locator('.result__notice'), 0);
     // Registration opens straight on the OWNERSHIP tab.
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(page.locator('.ownership__status'), 'REGISTRATION OPEN');
@@ -366,6 +370,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Re-verify as the owner: the server now reports the ownership.
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await countOf(page.locator('.result__notice'), 0);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await page.getByRole('button', { name: 'CREATE TRANSFER CODE' }).click();
     await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
@@ -533,6 +538,87 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(sent).toBe(0);
     expect((await srv.ctx.services.ownership.currentOwner(piece.product.id))?.accountId).toBe(seller.account.id);
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('tells a buyer of a registered piece to ask the seller for a transfer code (J-02); I HAVE A TRANSFER CODE opens OWNERSHIP on RECEIVING THIS PIECE', async () => {
+    // A piece sold and registered by its owner; a buyer scans it, signed out.
+    const email = 'antoine.seller@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    const issued = await srv.issue({ withClaimSecret: true });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(owner.account.id, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, { type: 'account', id: owner.account.id });
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'resale.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
+
+    // Under the server's message, between the notice's hairlines, the sentence of the packaging kit, read in Helvetica Neue.
+    const notice = page.locator('.result__head .result__notice');
+    await textOf(notice, RESALE_GUIDANCE);
+    await attrOf(notice, 'role', 'note');
+    expect(await notice.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
+    // Then its link, a text link: the page keeps one hairline button, SCAN ANOTHER. The tabs open on PRODUCT.
+    const link = page.getByRole('button', { name: RESALE_ACTION });
+    await visible(link);
+    await attrOf(link, 'class', /\btextlink\b/);
+    await countOf(page.locator('.btn'), 1);
+    await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
+    const controls = [RESALE_ACTION, 'PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER'];
+    await keepsFloors(page, controls);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, controls);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-resale-guidance.png'), fullPage: true });
+
+    // The link selects OWNERSHIP and brings RECEIVING THIS PIECE into view, the selected tab still in sight above it,
+    // keyboard focus on that heading, without a ring.
+    const heading = page.locator('#receiving-title');
+    const ownershipTab = page.getByRole('tab', { name: 'OWNERSHIP' });
+    const inView = async () => {
+      const boxes = await Promise.all([heading.boundingBox(), ownershipTab.boundingBox()]);
+      return boxes.every((b) => b !== null && b.y >= 0 && b.y + b.height <= MOBILE_VIEWPORT.height);
+    };
+    // Before: the panel is not built yet, and the tabs are below the fold.
+    await countOf(heading, 0);
+    expect((await ownershipTab.boundingBox())!.y).toBeGreaterThan(MOBILE_VIEWPORT.height);
+    await link.click();
+    await attrOf(ownershipTab, 'aria-selected', 'true');
+    await textOf(heading, 'RECEIVING THIS PIECE');
+    await expect.poll(inView, POLL).toBe(true);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+    expect(await heading.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
+    await textOf(page.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(page.locator('.ownership__text').first(), 'This piece is registered to an ORBES account.');
+    // Below it, sign-in to receive the piece; the focus stays on the heading while the panel learns the session.
+    const panel = page.locator('.ownership');
+    await visible(panel.getByLabel('PASSWORD', { exact: true }));
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+    await page.screenshot({ path: join(OUT_DIR, 'verify-resale-receiving.png') });
+
+    // From the keyboard, once the panel is built: back to PRODUCT, then Enter on the link.
+    await page.getByRole('tab', { name: 'PRODUCT' }).click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await attrOf(ownershipTab, 'aria-selected', 'true');
+    await expect.poll(inView, POLL).toBe(true);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
+
+    // The owner, signed in and scanning again, reads OWNERSHIP VERIFIED: the guidance is for others, never for them.
+    await panel.getByLabel('EMAIL', { exact: true }).fill(email);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(page.locator('.ownership__email'), email);
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'resale-owner.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await countOf(page.locator('.result__notice'), 0);
+    await countOf(page.getByRole('button', { name: RESALE_ACTION }), 0);
+    expect(problems).toEqual([]);
+    await page.context().close();
   }, 120_000);
 
   it('recovers a forgotten password with the code of ORBES Client Services, then changes it in MY PIECES', async () => {
@@ -1419,6 +1505,70 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
     await countOf(page.getByRole('tab'), 0);
     await countOf(page.locator('.result__footnote'), 0);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('shows the photographs of an authentic piece above its GENOME (F-04): its own, then its model\'s, with their alternative text; none on an invalid signature', async () => {
+    // A model of its own, so that no other result of this suite shows a photograph.
+    const category = (await srv.ctx.categories.getByCode('J'))!;
+    const model = await srv.ctx.db
+      .insertInto('models')
+      .values({ category_id: category.index, name: 'ECLIPSE', type: 'PENDANT', sku_prefix: 'ECL-PD', default_material: '18K YELLOW GOLD' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model.id, material: '18K YELLOW GOLD', year: 2026 }, SYSTEM_ACTOR);
+    const { media } = srv.ctx.services;
+    await media.setModelImage(model.id, { mime: 'image/jpeg', bytes: withJpegSegments(jpegPhoto(640, 480), [SEGMENTS.exif()]) }, SYSTEM_ACTOR);
+    await media.setProductPhoto(issued.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    const plate = page.getByRole('region', { name: 'Photographs of this piece' });
+    await visible(plate);
+    const images = plate.locator('img.photo__img');
+    await countOf(images, 2);
+    expect(await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt')))).toEqual([
+      `This piece, ${issued.product.productId}, photographed by ORBES at issuance`,
+      'The ECLIPSE PENDANT model, photographed by ORBES',
+    ]);
+    await textsOf(plate.locator('.photo__caption'), ['THIS PIECE', 'THE MODEL']);
+    await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare them with the piece in your hands.');
+    // Both decoded by the browser from the stripped files, side by side in square frames on the ivory plate.
+    await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
+      [true, 480],
+      [true, 640],
+    ]);
+    const [own, ref] = [(await images.nth(0).boundingBox())!, (await images.nth(1).boundingBox())!];
+    expect(own.width).toBeCloseTo(own.height, 0);
+    expect(Math.abs(own.y - ref.y)).toBeLessThan(1);
+    expect(own.x + own.width).toBeLessThan(ref.x);
+    expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    // At the head of the result: under the title and its sentence, above the GENOME.
+    const plateBox = (await plate.boundingBox())!;
+    expect(plateBox.y).toBeGreaterThan((await page.locator('.result__message').boundingBox())!.y);
+    expect(plateBox.y + plateBox.height).toBeLessThan((await page.locator('.result__genome').boundingBox())!.y);
+    expect(await plate.locator('.photo__caption').first().evaluate((el) => [getComputedStyle(el).fontFamily, getComputedStyle(el).fontSize])).toEqual([
+      expect.stringMatching(/^"?Gravesend Sans"?,/),
+      '10px',
+    ]);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-result-photographs.png'), fullPage: true });
+    // The same frames on the smallest phone in use, without scrolling sideways.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // The same piece's code with its signature altered: no photograph, nothing of the piece.
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[3] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed-forged.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await countOf(page.locator('.result__photos, img'), 0);
     expect(problems).toEqual([]);
   }, 120_000);
 

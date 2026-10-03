@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { isCheckViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
 import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
@@ -9,9 +10,9 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
-  'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_certificates', 'ownership_transfers', 'product_status_history',
-  'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records',
-  'sessions', 'warranties',
+  'collections', 'cryptographic_keys', 'genomes', 'media_objects', 'models', 'ownership', 'ownership_certificates', 'ownership_transfers',
+  'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens',
+  'service_records', 'sessions', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -93,6 +94,10 @@ describe('migrations', () => {
     // 0007: printing by production batch, codes by issue day.
     expect(has(/INDEX products_production_batch_idx ON public\.products USING btree \(production_batch\)$/)).toBe(true);
     expect(has(/INDEX codes_created_at_idx ON public\.codes USING btree \(created_at\)$/)).toBe(true);
+    // 0012: the photographs, each foreign key at the head of its own index.
+    expect(has(/INDEX models_image_sha256_idx ON public\.models USING btree \(image_sha256\)$/)).toBe(true);
+    expect(has(/INDEX products_photo_sha256_idx ON public\.products USING btree \(photo_sha256\)$/)).toBe(true);
+    expect(has(/INDEX media_objects_created_by_idx ON public\.media_objects USING btree \(created_by\)$/)).toBe(true);
     // 0013: one certificate per token hash; a piece's certificates, an ownership period's.
     expect(has(/UNIQUE INDEX ownership_certificates_token_hash_key ON public\.ownership_certificates USING btree \(token_hash\)$/)).toBe(true);
     expect(has(/INDEX ownership_certificates_product_idx ON public\.ownership_certificates USING btree \(product_id, created_at\)$/)).toBe(true);
@@ -126,6 +131,50 @@ describe('migrations', () => {
     expect(withIt, name).toBeDefined();
     return { with: withIt!, without: await snapshot() };
   }
+
+  it('0012 down drops media_objects, models.image_sha256 and products.photo_sha256, and nothing else; up again restores them', async () => {
+    const latest = await snapshot();
+    const { with: withMedia, without: before } = await rollBackTo('0012_media');
+    const touched = (o: string) => o.includes('media_objects') || o.includes('image_sha256') || o.includes('photo_sha256');
+    const added = withMedia.filter((o) => !before.includes(o));
+    expect(added.filter((o) => o.startsWith('table ') && !o.startsWith('table media_objects '))).toEqual([
+      'table models image_sha256 text YES ',
+      'table products photo_sha256 text YES ',
+    ]);
+    expect(added.filter((o) => o.startsWith('table media_objects ')).map((o) => o.split(' ')[2])).toEqual(['bytes', 'created_at', 'created_by', 'height', 'mime', 'sha256', 'width']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger media_objects media_objects_immutable']);
+    // Nothing of 0012 is left, and nothing else changed.
+    expect(before.filter(touched)).toEqual([]);
+    expect(withMedia.filter((o) => !touched(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied[0]).toBe('0012_media');
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0012: a photograph is named by the SHA-256 of its bytes, JPEG or WebP of at most 1 MiB and 4 096 px, never changed, and kept while a model or a piece uses it', async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    const insert = (v: Partial<{ sha256: string; mime: string; bytes: Uint8Array; width: number; height: number }> = {}) =>
+      sql`INSERT INTO media_objects (sha256, mime, bytes, width, height)
+          VALUES (${v.sha256 ?? sha}, ${v.mime ?? 'image/jpeg'}, ${v.bytes ?? bytes}, ${v.width ?? 10}, ${v.height ?? 10})`.execute(t.db);
+    await expect(insert({ sha256: 'ab'.repeat(32) })).rejects.toSatisfy((e) => isCheckViolation(e, 'media_objects_sha256_consistent'));
+    await expect(insert({ sha256: sha.toUpperCase() })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ mime: 'image/svg+xml' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ width: 4097 })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ height: 0 })).rejects.toSatisfy((e) => isCheckViolation(e));
+    const big = new Uint8Array(1024 * 1024 + 1);
+    await expect(insert({ bytes: big, sha256: createHash('sha256').update(big).digest('hex') })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await insert();
+    await expect(insert()).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(sql`UPDATE media_objects SET width = 11`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    // Used by a model: the photograph cannot be deleted under it.
+    await sql`INSERT INTO categories (id, code, name) VALUES (29, 'P', 'Media test')`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, image_sha256) VALUES (29, 'M', 'RING', 'MEDIA', ${sha}) RETURNING id`.execute(t.db)).rows[0];
+    await expect(sql`DELETE FROM media_objects`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`UPDATE models SET image_sha256 = ${'cd'.repeat(32)} WHERE id = ${model.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await sql`UPDATE models SET image_sha256 = NULL WHERE id = ${model.id}`.execute(t.db);
+    await sql`DELETE FROM media_objects`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
+  });
 
   it('0010 down drops models.active and the guard on a model\'s identity, and nothing else; up again restores them', async () => {
     const latest = await snapshot();
@@ -343,11 +392,11 @@ describe('migrations', () => {
     expect(await purposeCheck()).toBe("CHECK ((purpose = ANY (ARRAY['FIRST_REGISTRATION'::text, 'SALE_ACTIVATION'::text, 'TRANSFER_ACCEPT'::text])))");
 
     // A piece, a scan and one token of each purpose.
-    await sql`INSERT INTO categories (id, code, name) VALUES (29, 'P', 'Purpose test')`.execute(t.db);
-    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (29, 'M', 'RING', 'PURP') RETURNING id`.execute(t.db)).rows[0];
+    await sql`INSERT INTO categories (id, code, name) VALUES (28, 'T', 'Purpose test')`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (28, 'M', 'RING', 'PURP') RETURNING id`.execute(t.db)).rows[0];
     const product = (
       await sql<{ id: string }>`INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, material)
-        VALUES ('O26-P-00001', ${(26 << 25) | (29 << 20) | 1}, 2026, 29, 1, 'PURP-1', ${model.id}, 'SILVER') RETURNING id`.execute(t.db)
+        VALUES ('O26-T-00001', ${(26 << 25) | (28 << 20) | 1}, 2026, 28, 1, 'PURP-1', ${model.id}, 'SILVER') RETURNING id`.execute(t.db)
     ).rows[0];
     const scan = (await sql<{ id: string }>`INSERT INTO scan_events (event_type, result_state, product_id) VALUES ('VERIFY', 'AUTHENTIC_REGISTERED', ${product.id}) RETURNING id`.execute(t.db)).rows[0];
     const token = (n: number, purpose: string) =>
@@ -414,6 +463,7 @@ describe('migrations', () => {
       '0009_scan_daily_stats',
       '0010_models_active',
       '0011_scan_token_transfer_accept',
+      '0012_media',
       '0013_ownership_certificates',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.

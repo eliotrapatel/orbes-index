@@ -6,7 +6,8 @@
  * floors of what is acted on (10 px type, 44 px tap zones; measured in a real
  * page by the E2E suites, test/support/tap-zones.ts), and the shipped display
  * face (Gravesend Sans) on titles and labels of both apps, never on what is
- * read.
+ * read; the copy against the lexicon of §4.5, and the second-hand guidance
+ * under AUTHENTIC — REGISTERED (J-02) as §4.3 and §4.4 quote it.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -18,8 +19,11 @@ import { computeGenome, genomeLayout } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
+import * as verifyCopy from '../../src/web/verify/copy.js';
+import { RESALE_ACTION, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
+import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden, readDoc, section } from '../docs/lexicon.js';
 import { parseUnicodeRange, readWoff2, woff2CodePoints, woff2Names, woff2WeightClass } from '../support/woff2.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
@@ -320,11 +324,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.photos__note', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -444,6 +448,93 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
     // The ivory plate keeps its margins (§2.5: 34 / 22 / 28 px).
     expect(rule(styles, '.result__genome').padding).toBe('34px 22px 28px');
     expect(rule(styles, '.result__genome')['margin-top']).toBe('52px');
+  });
+});
+
+describe('verify app: the photographs of an authentic piece (F-04)', () => {
+  const photosView = readFileSync(join(WEB, 'verify/views/photos.ts'), 'utf8');
+
+  it('sets them at the head of the result, above the GENOME, on an ivory plate framed like it', () => {
+    const at = (needle: string) => resultView.indexOf(needle);
+    expect(at('sections.push(photoPlate(vm.photos));')).toBeGreaterThan(0);
+    expect(at('sections.push(photoPlate(vm.photos));')).toBeLessThan(at("class: 'result__genome'"));
+    expect(rule(styles, '.photos__plate').background).toBe('var(--ivory)');
+    expect(rule(styles, '.result__photos')['margin-top']).toBe(rule(styles, '.result__genome')['margin-top']);
+    expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
+  });
+
+  it('never crops a photograph, gives each its alternative text, and hides one that cannot be loaded', () => {
+    expect(rule(styles, '.photo__img')).toMatchObject({ width: '100%', 'aspect-ratio': '1', 'object-fit': 'contain' });
+    expect(photosView).toContain("attrs: { src: p.src, alt: p.alt, decoding: 'async' }");
+    expect(photosView).toContain("addEventListener(\n      'error',");
+    // [hidden] must win over the plate's own display.
+    expect(rule(styles, '.photo[hidden],\n.result__photos[hidden]').display).toBe('none');
+  });
+
+  it('captions them at 10 px in the display face, and says the sentence under them in the reading face', () => {
+    expect(Number.parseFloat(resolve(rule(styles, '.photo__caption')['font-size']))).toBeGreaterThanOrEqual(10);
+    expect(rule(styles, '.photo__caption').color).toBe('var(--ink-soft)');
+    expect(rule(styles, '.photos__note')).toMatchObject({ 'font-size': 'var(--fs-line)', color: 'var(--ink-soft)' });
+  });
+});
+
+describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-hand guidance (J-02)', () => {
+  /** The sentences and labels under `root`: nested functions are called with stand-in values. */
+  const linesOf = (root: unknown): string[] => {
+    const out: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === 'string') out.push(v);
+      else if (typeof v === 'function') {
+        const r: unknown = (v as (...args: unknown[]) => unknown)('O26-J-00184', 'RING');
+        if (typeof r === 'string') out.push(r);
+      } else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+    };
+    walk(root);
+    return out;
+  };
+  /** Every sentence and label of the verify app's copy (copy.ts). */
+  const copyLines = (): string[] =>
+    // The module's own functions (camera and API classifiers) return kinds, not copy.
+    Object.values(verifyCopy).flatMap((v) => (typeof v === 'function' ? [] : linesOf(v)));
+  const terms = [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN];
+
+  it('writes no word of §4.5 (nor "product", §4.1) anywhere in the copy; "genuine" only where the footnote says what a code cannot prove', () => {
+    const lines = copyLines();
+    expect(lines.length).toBeGreaterThan(100);
+    expect(lines).toContain(RESALE_GUIDANCE);
+    expect(lines).toContain(RESALE_ACTION);
+    // MY PIECES is the owner's own page (F-01): it names the owner's own declaration in their words, LOST or STOLEN
+    // (§4.5, LOST and STOLEN in MY PIECES), and no other word of the table.
+    const ownPage = new Set(linesOf(verifyCopy.PIECES));
+    expect(ownPage.size).toBeGreaterThan(20);
+    expect(findForbidden([...ownPage].join('\n'), terms.filter((t) => t !== 'STOLEN'))).toEqual([]);
+    // §4.5 forbids GENUINE as a verdict: the footnote's one use is the limitation itself (§4.6).
+    expect(findForbidden(lines.filter((l) => l !== verifyCopy.ASSURANCE_NOTE && !ownPage.has(l)).join('\n'), terms)).toEqual([]);
+    expect(findForbidden(verifyCopy.ASSURANCE_NOTE, terms)).toEqual([expect.stringContaining('"GENUINE"')]);
+    expect(verifyCopy.ASSURANCE_NOTE).toMatch(/cannot prove that an object is genuine/);
+    expect(lines.join('\n')).not.toContain('!');
+  });
+
+  it('asks a buyer for the seller\'s transfer code in one calm sentence, quoted in BRAND §4.3, its link in §4.3 and §4.4', () => {
+    // A request, never an accusation: it names the transfer code, the seller's ORBES account and the registered owner.
+    expect(RESALE_GUIDANCE).toMatch(/^Buying this piece\? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one\.$/);
+    const doc = readDoc('docs/BRAND-DESIGN-SYSTEM.md');
+    expect(section(doc, '### 4.3')).toContain(`| ${RESALE_GUIDANCE} · Then **${RESALE_ACTION}**`);
+    expect(section(doc, '### 4.4')).toMatch(new RegExp(`^\\| Owned by someone else, reached from the second-hand guidance.*\\| ${RESALE_ACTION},`, 'm'));
+    expect(section(doc, '### 4.4')).toContain('RECEIVING THIS PIECE');
+  });
+
+  it('puts the sentence in the result\'s notice and its link under it, a text link (the hairline button stays the foot\'s)', () => {
+    const at = (needle: string) => resultView.indexOf(needle);
+    expect(at("class: 'result__notice'")).toBeGreaterThan(0);
+    expect(at("class: 'textlink result__notice-link'")).toBeGreaterThan(at("class: 'result__notice'"));
+    // It takes the text link's 10 px, tracking and 44 px zone as they are: only its distance to the notice is set.
+    expect(Object.keys(rule(styles, '.result__notice-link'))).toEqual(['margin-top']);
+    // RECEIVING THIS PIECE, where it leads, is a heading focused on purpose: no ring (§3.8).
+    const ownershipView = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
+    expect(ownershipView).toContain('sectionLabel(RECEIVING.title, RECEIVING_ID)');
+    expect(verifyCopy.RECEIVING.title).toBe('RECEIVING THIS PIECE');
+    expect(styles).toMatch(/\.section-label\[tabindex="-1"\]:focus/);
   });
 });
 

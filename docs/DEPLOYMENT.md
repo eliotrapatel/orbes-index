@@ -138,7 +138,7 @@ verify.theorbes.com {
 | Client IP forwarded in `X-Forwarded-For`, and the proxy's address listed in `TRUST_PROXY` | Rate limits and IP pseudonyms are per client. Without trust, every client shares the proxy's IP and one rate-limit bucket. |
 | Origin cache headers honoured. Never cache `/api/*` beyond what the app allows. | API responses can carry session-bound data (`no-store`). |
 | `Set-Cookie` passed through untouched on `/api/*` | Sessions and the device cookie. |
-| Request bodies ≥ 16 KB allowed, upstream timeout > 30 s | The app limits JSON bodies to 16 KB and requests to 30 s. |
+| Request bodies ≥ 16 KB allowed, and ≥ 1 MiB on the two photograph uploads (`POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo`); upstream timeout > 30 s | The app limits JSON bodies to 16 KB, the photographs of the console (F-04, [API §13.4](API.md#134-models)) to 1 MiB, and requests to 30 s. With nginx, `client_max_body_size 1200k;` in the `location` that proxies `/api/` (the default, 1 MiB, would refuse the largest photographs with their headers). |
 | No iframe embedding | The CSP has `frame-ancestors 'none'`. Link or redirect to `/verify`; do not embed it. |
 | With Cloudflare and `GEO_MODE=cloudflare`: the origin only accepts Cloudflare (firewall on Cloudflare's published ranges, Authenticated Origin Pulls or a Tunnel). The reverse proxy restores the client IP from Cloudflare (nginx `set_real_ip_from <Cloudflare ranges>` + `real_ip_header CF-Connecting-IP`; Caddy `trusted_proxies`). | Otherwise anyone can send forged `cf-ipcountry` headers straight to the origin, and every client shares Cloudflare's IPs. |
 
@@ -294,6 +294,7 @@ Each is optional. While neither an email nor a phone is set, the verification ap
 | `ORBES_ENV_FILE` | `.env` | Compose: path of the env file, e.g. `/etc/orbes/genome.env`. Export it in the shell. |
 | `DEMO_ACCOUNT_PASSWORD` | random, printed once | `db seed` / `db reset-demo` only, ≥ 12 characters. Both commands refuse production. |
 | `ADMIN_PASSWORD` | unset | `scripts/admin.ts create` only: the new admin's password (12–1024 characters), read from the environment so it never appears in argv or shell history. |
+| `ADMIN_TOTP_SECRET` | unset | `scripts/admin.ts totp-enable` only: the TOTP secret printed by `totp-setup`, read from the environment so it never appears in argv (the process list) or shell history. `--secret` still works, with that exposure. |
 
 `genome/.env.example` lists every variable above with the production template values. The test `test/ops/deployment-files.test.ts` keeps it in sync with the code.
 
@@ -787,7 +788,10 @@ Procedure:
    ```sh
    docker compose exec app node --import tsx scripts/admin.ts totp-setup --email admin@theorbes.com
    #   prints the secret and the otpauth:// URI once; hand them to the admin in person
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email admin@theorbes.com --secret <SECRET> --code <current code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing is echoed, nothing reaches the history
+   clear                                                    # the secret leaves the screen
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email admin@theorbes.com --code <current code>
+   unset ADMIN_TOTP_SECRET
    ```
    Or when the console asks:
    - the console calls `POST /api/admin/auth/totp/setup` and shows the `otpauth://` URI / QR code;
@@ -810,7 +814,7 @@ Lockout: 10 failed sign-ins lock the admin for 15 minutes. Admin sessions last `
 docker compose exec -e ADMIN_PASSWORD='…' app node --import tsx scripts/admin.ts create --email ops@theorbes.com --role ADMIN
 docker compose exec app node --import tsx scripts/admin.ts list                      # role, 2FA on/off, active/locked/disabled/temporary password
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email ops@theorbes.com
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --secret <SECRET> --code <code>   # ends that admin's sessions
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email ops@theorbes.com --code <code>   # secret read with read -rs (§8.1); ends that admin's sessions
 docker compose exec app node --import tsx scripts/admin.ts reset-totp --email ops@theorbes.com --yes   # lost device
 docker compose exec app node --import tsx scripts/admin.ts role --email ops@theorbes.com --role ADMIN  # the only way to grant ADMIN
 docker compose exec app node --import tsx scripts/admin.ts disable --email ops@theorbes.com --yes      # sign-in refused, sessions end
@@ -1088,7 +1092,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
 |---|---|---|
 | Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. Caddy publishes 80/443 on **IPv4 only** (§15.2). |
 | Database roles | `deploy/vps/scripts/lib.sh` (`db_*`) | §6.2 applied: the app connects as **`POSTGRES_APP_USER`** (`orbes_app`: `SELECT`/`INSERT`/`UPDATE`/`DELETE` on the tables, sequence use, read-only on `kysely_migration*`; no superuser, no DDL, `MIGRATE_ON_START=false`). The superuser `POSTGRES_USER` owns the schema and is used only by the scripts: migrations (`deploy.sh`, `restore.sh`), backups and restores. A compromised app therefore cannot `SET session_replication_role` or `ALTER … DISABLE TRIGGER` to rewrite the append-only audit log, nor run `COPY … TO PROGRAM`. |
-| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. |
+| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. Request bodies: 64 KB, except the console's two photograph uploads (F-04), 1 200 KB (§15.7). |
 | Configuration | `deploy/vps/.env` (from `.env.example`) | Mode `0600`, owner `orbes`, git-ignored. Parsed by the scripts, never sourced. |
 | Scripts | `deploy/vps/scripts/` | `bootstrap-ubuntu.sh`, `setup.sh`, `deploy.sh`, `backup.sh`, `restore.sh`, `geoip-update.sh`; each has `--help`. |
 | Timers | `deploy/vps/systemd/` | Installed by `bootstrap-ubuntu.sh` (`--units-only` to refresh). |
@@ -1183,7 +1187,10 @@ In production every admin must pass TOTP. Enrol the bootstrap admin **from the s
 cd /opt/orbes/orbes-index/deploy/vps
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <first admin>
 #   prints the secret and an otpauth:// URI once: hand them to the admin in person
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <current code>
+read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing is echoed, nothing reaches the history
+clear                                                    # the secret leaves the screen
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <first admin> --code <current code>
+unset ADMIN_TOTP_SECRET
 ```
 
 Then remove `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `.env` and recreate the app with `docker compose up -d`. Sign in at `https://verify.theorbes.com/admin`. Optionally restrict the console to known networks: `ADMIN_ALLOWED_IPS="<office CIDR> <VPN CIDR>"` in `.env` (**space**-separated; a comma makes the configuration invalid), then `scripts/deploy.sh`: `/admin*` and `/api/admin*` answer 403 elsewhere. The sale mode (A-08) runs on the boutiques' phones, which open `/admin` too: with the allowlist on, add every boutique's fixed IP or CIDR, or leave it off while counter phones use mobile data or a shop Wi-Fi whose address changes, or the sale mode answers 403 at the counter (LAUNCH §4, §7). `deploy.sh` validates the Caddy configuration with the new values before changing anything; a bare `docker compose up -d caddy` does not, and an invalid value stops Caddy, which takes the whole site down.
@@ -1219,6 +1226,34 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 | Keys | Runs `npm run keys:generate` in the app when no key is ACTIVE (first deployment only; idempotent). |
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback | Any failure of the last three steps redeploys the previous image tag and waits for health; the outcome is appended to `.state/deploys.log`. |
+
+**The photograph uploads at the edge (F-04, lot 5).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on two routes only: `POST /api/admin/models/:id/image` and `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths included, the 64 KB it had:
+
+```caddyfile
+@photo_upload {
+	method POST
+	path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+}
+request_body @photo_upload {
+	max_size 1200KB
+}
+@not_photo_upload {
+	not {
+		method POST
+		path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+	}
+}
+request_body @not_photo_upload {
+	max_size 64KB
+}
+```
+
+The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's two upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. This change of the shared VPS's edge goes out with lot 5, announced to the other session first; `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo) is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
+
+```bash
+head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @- "https://$APP_DOMAIN/api/v1/verify"
+#   413
+```
 
 Manual rollback to any image still on the host: `scripts/deploy.sh --image <tag>` (tags in `.state/deploys.log`, `docker images orbes-genome`). **Migrations:** an older image refuses a schema with migrations it does not know (§12.2). If a release applied a migration and must be rolled back, restore its pre-deploy backup (§15.9) instead. Clean up old images now and then: `docker image prune` (keep the last two tags).
 

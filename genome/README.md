@@ -36,7 +36,8 @@ genome/
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
-                         the sale mode
+                         the sale mode, photographs of models and pieces (media)
+    media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
@@ -118,7 +119,7 @@ All of them read the server's configuration and exit with `0` success, `1` failu
 | `npm run keys:rotate` | `tsx scripts/keys.ts rotate [--kid <label>]`: new ACTIVE key, the previous one RETIRED |
 | `npm run keys:list` | `tsx scripts/keys.ts list`: every key with status, dates and fingerprint |
 | (no npm alias) | `tsx scripts/keys.ts retire <keyId> --yes` and `tsx scripts/keys.ts revoke <keyId> --reason <text> [--compromised-at <ISO 8601>] --yes` |
-| (no npm alias) | `ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <e> --role ADMIN\|OPERATOR\|AUDITOR`, `list`, `totp-setup --email <e>`, `totp-enable --email <e> --secret <s> --code <c>`, `reset-totp --email <e> --yes`, `role --email <e> --role <r>`, `disable --email <e> --yes`, `enable --email <e>`: console users, the fallback of the console's Team page and the only way to grant ADMIN ([DEPLOYMENT §8](../docs/DEPLOYMENT.md#8-admin-accounts)) |
+| (no npm alias) | `ADMIN_PASSWORD=… tsx scripts/admin.ts create --email <e> --role ADMIN\|OPERATOR\|AUDITOR`, `list`, `totp-setup --email <e>`, `ADMIN_TOTP_SECRET=… tsx scripts/admin.ts totp-enable --email <e> --code <c>` (or `--secret <s>`), `reset-totp --email <e> --yes`, `role --email <e> --role <r>`, `disable --email <e> --yes`, `enable --email <e>`: console users, the fallback of the console's Team page and the only way to grant ADMIN ([DEPLOYMENT §8](../docs/DEPLOYMENT.md#8-admin-accounts)) |
 
 `keys:generate` and `keys:rotate` refuse `KEY_PROVIDER=memory`, because the key would vanish when the command exits. Runbooks: [DEPLOYMENT §7](../docs/DEPLOYMENT.md#7-signing-keys).
 

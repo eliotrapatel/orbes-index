@@ -79,7 +79,10 @@ The admin console requires 2-factor authentication in production.
 2. Add the printed secret (or `otpauth://` link) to an authenticator app (1Password, Google Authenticator, …), then confirm with a current code:
 
    ```bash
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <6-digit code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret: nothing shows, nothing enters the shell history
+   clear                                                    # the secret leaves the screen
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <first admin> --code <6-digit code>
+   unset ADMIN_TOTP_SECRET
    ```
 
 3. Remove the bootstrap credentials:
@@ -95,7 +98,10 @@ The admin console requires 2-factor authentication in production.
    docker compose exec -e ADMIN_PASSWORD app node --import tsx scripts/admin.ts create --email <second admin> --role ADMIN
    unset ADMIN_PASSWORD
    docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <second admin>
-   docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <second admin> --secret <SECRET> --code <6-digit code>
+   read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret printed above, then clear the screen
+   clear
+   docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <second admin> --code <6-digit code>
+   unset ADMIN_TOTP_SECRET
    ```
 
    The person stores their password in their own password manager and never pastes it in a conversation; they can replace it from the console at any time (step 4).
@@ -140,6 +146,7 @@ docker compose ps                                                # caddy, app, p
    - Leave the 2 u quiet zone around the code.
 4. **Claim code:** it is shown **once**. While it is on screen, click **Download certificate card**: the server checks the code against its hash and returns the card (PDF, 85 × 55 mm) with the code under its scratch-off panel. Nobody copies the 12 characters by hand. For a print run, `POST /api/admin/certificates` also gives A4 sheets of ten and a CSV for the print shop's variable-data printing (API §15.7). Ask the shop to lay the scratch-off ink on the **ORBES SCRATCH-OFF** spot plate. Until the brand validates the card layout (BRAND §7), every card says **PROOF**, and so does every file name, the print shop's CSV included: do not print final cards before that, and do not send a file whose name says PROOF for a production run.
 5. **Points of sale and the sale mode** (A-08): on **POINTS OF SALE** (Clients group, ADMIN), add every boutique, department store and the online shop (name, city, two-letter country; the online shop without a country). A warranty's point of sale is then chosen from this list, in the product page's *Activate warranty* and in the sale mode; a closed boutique is deactivated, never deleted. Give each seller a nominative **RETAIL** account (§4 step 6). On the counter phone, the seller opens `https://<origin>/admin` (with `ADMIN_ALLOWED_IPS` set, the boutique's network must be in the list, §4), signs in (password, then the authenticator in production) and lands on **SALE MODE**: choose the point of sale once (the phone remembers it), **SCAN THE PIECE**, check the piece shown (READY TO SELL), **ACTIVATE WARRANTY**, then hand over the certificate card and tell the client the sentence on the screen: *Register your piece with its card at theorbes.com/verify*. Every scan is recorded under the seller's name (Verification events, event ADMIN TEST) and every activation in the audit log with the point of sale. Check stock the same way, from a phone or browser signed in to the console: a scan of a piece not sold yet from anywhere else raises **UNSOLD PIECE SCANNED** in *Anomalies* (S-07, the first sign of diverted stock). A member of the team who buys a piece scans and registers it from a browser that is **not** signed in to the console: with a console session, the scan is a staff test and registration is not offered.
+6. **Before the first sale: the sales playbook** (J-09). The [sales and shipping playbook](launch/SALES-PLAYBOOK.md), in French, gives one sheet per situation, each with the gesture in the console and the sentence to say: a sale in a boutique (sale mode or console) and an online order (console, before the parcel leaves), a worried client (every result of API §9.3), a resale (the transfer code), a loss or a theft, a forgotten password (with the identity check, to finalise with counsel), the staff's own pieces and the forbidden words. Everyone who will sell or answer clients runs its 30-minute checklist on a test piece once, alone, before the first sale; its §10 creates their nominative OPERATOR account, the second factor enrolled from the shell.
 
 ## 8. Validate on real phones before the public launch
 
@@ -195,7 +202,7 @@ docker compose ps                                                # caddy, app, p
 | Yearly / on staff change | Rotate the signing key: Admin → *Keys* → *Rotate*. Old products stay verifiable. |
 | Suspected key compromise | Admin → *Keys* → *Revoke* with the compromise time, then rotate. See DEPLOYMENT.md, key compromise runbook. |
 | Lost admin authenticator | Another ADMIN resets it in the console, or on the VPS run `node --import tsx scripts/admin.ts reset-totp --email … --yes` |
-| A client forgot the password | After checking the client's identity (the procedure is to finalise with counsel): Admin → *Owners* → *Recovery code* on the client's row (ADMIN). Read the code to the client, who enters it on `/verify` under FORGOTTEN PASSWORD? within 30 minutes, with a new password. Never write it down or send it on. The recovery ends every session of the account and pauses transfers out of it for 72 hours. |
+| A client forgot the password | After checking the client's identity (outlined for staff in the [sales playbook](launch/SALES-PLAYBOOK.md), §6; to finalise with counsel): Admin → *Owners* → *Recovery code* on the client's row (ADMIN). Read the code to the client, who enters it on `/verify` under FORGOTTEN PASSWORD? within 30 minutes, with a new password. Never write it down or send it on. The recovery ends every session of the account and pauses transfers out of it for 72 hours. |
 | A client asks to lock the account, or for the data held about it | After the same identity check: Admin → *Owners* → the client's sheet → *Lock account* (sessions end, pending transfers are cancelled, links to ownership certificates are withdrawn, the open recovery code is revoked) or *Export data* (a JSON file of everything held about the account, to hand over under the right of access). Both ADMIN, both audited. |
 | A client cannot receive a piece with its transfer code | The code is accepted only for the piece the client scans, signed in to their ORBES account, within 15 minutes of that scan (F-03): *This transfer code is not for this piece* means the seller gave the code of another piece; ask the seller for the code of this one. Signed in after the scan, or past the 15 minutes, the client verifies or scans the piece again. A phone without a camera reads the code from a photo (UPLOAD A PHOTO). A code too damaged to read is replaced as any damaged code: Admin → the piece → *Re-issue code* (OPERATOR), then the new code is put on the piece and the client scans it. Do not set `TRANSFER_ACCEPT_REQUIRE_PRODUCT=false` for a client who cannot scan: it only lets `POST /api/v1/ownership/transfers/accept` take a code without the piece and the scan; the verify app still offers RECEIVE THIS PIECE only after a signed-in scan of the piece, neither the console nor a script accepts a transfer for a client, and while it is set the check is off for every pending transfer of the platform. |
 

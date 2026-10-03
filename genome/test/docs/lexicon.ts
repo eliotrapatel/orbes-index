@@ -13,6 +13,11 @@
  * Matching is by whole word (Unicode letters), case-insensitive, with spaces
  * and hyphens interchangeable, letters and digits split ("Web3", "Web 3"),
  * and plural, feminine or verb endings allowed on every word of a term.
+ *
+ * Held to it: the packaging kit (packaging-kit.test.ts) and the sales
+ * playbook, docs/launch/SALES-PLAYBOOK.md (sales-playbook.test.ts), whose
+ * staff instructions may also hold such a word inside a code span that quotes
+ * the software itself (`Products`, `STOLEN`): see `codeSpans`.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -107,6 +112,23 @@ export function termPattern(term: string): RegExp {
     .map((w) => `${w.replace(/al$/i, 'a(?:l|ux)')}${ENDING}`);
   if (words.length === 0) throw new Error('empty term');
   return new RegExp(`(?<![\\p{L}\\p{N}])${words.join('[\\s-]*')}(?![\\p{L}\\p{N}])`, 'giu');
+}
+
+/** Fenced code blocks (```…```) of a markdown text, from the opening fence to the closing one. */
+const FENCE = /^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm;
+/** An inline code span on one line: `Products`. */
+const CODE_SPAN = /`([^`\n]+)`/g;
+
+/** The contents of the inline code spans of a markdown text, fenced blocks left out: `Products` → Products. */
+export function codeSpans(md: string): string[] {
+  return [...md.replace(FENCE, '').matchAll(CODE_SPAN)].map((m) => m[1]);
+}
+
+/** The text with each inline code span replaced by a space; fenced blocks are kept, as text. */
+export function withoutCodeSpans(md: string): string {
+  const fences: string[] = [];
+  const held = md.replace(FENCE, (f) => `\u0000${fences.push(f) - 1}\u0000`);
+  return held.replace(CODE_SPAN, ' ').replace(/\u0000(\d+)\u0000/g, (_, i: string) => fences[Number(i)]);
 }
 
 /** Forbidden terms found in `text`, each with a little context: [] when the text is clean. */

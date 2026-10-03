@@ -1,6 +1,6 @@
 /**
  * OwnershipCertificateService — the shareable ownership certificate (F-06;
- * API §8.6 and §11.7, DATABASE §5.27, SECURITY-MODEL §3.6).
+ * API §8.7 and §11.7, DATABASE §5.27, SECURITY-MODEL §3.6).
  *
  * The current owner of a piece creates a link to a certificate of its record,
  * for a buyer at a distance or an insurer, without handing the piece over to
@@ -176,7 +176,7 @@ export interface CertificatePiece {
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
 }
 
-/** POST /api/v1/certificates/lookup (API §8.6). */
+/** POST /api/v1/certificates/lookup (API §8.7). */
 export type CertificateLookup =
   | {
       status: 'VALID';

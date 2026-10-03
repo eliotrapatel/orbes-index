@@ -1,8 +1,9 @@
 /**
  * Public routes (contract §3): health, public keys, categories, Client
- * Services contact, verify, the report a customer may attach to a scan
- * that was not authentic, and the ownership certificate an owner shares
- * (F-06: its live record and its PDF, by the token of the link).
+ * Services contact, verify, the photographs an authentic result shows
+ * (F-04), the report a customer may attach to a scan that was not
+ * authentic, and the ownership certificate an owner shares (F-06: its
+ * live record and its PDF, by the token of the link).
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, and the console cookie only to tell a staff
@@ -29,8 +30,9 @@ import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { certificateTokenBody, parse, reportBody, verifyBody } from '../http/schemas.js';
+import { certificateTokenBody, mediaParams, parse, reportBody, verifyBody } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
+import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
 import { safeFilename } from './admin/codes.js';
@@ -56,6 +58,19 @@ export const APP_VERSION: string = (() => {
 })();
 
 const HEALTH_DB_TIMEOUT_MS = 2_000;
+
+/** A stored photograph never changes (its name is the SHA-256 of its bytes): browsers keep it for a year. */
+export const MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+/** Whether an If-None-Match header names `etag` (a list, weak validators and `*` included). */
+function matchesEtag(header: string | string[] | undefined, etag: string): boolean {
+  const value = Array.isArray(header) ? header.join(',') : header;
+  if (!value) return false;
+  return value.split(',').some((t) => {
+    const tag = t.trim().replace(/^W\//, '');
+    return tag === '*' || tag === etag;
+  });
+}
 
 export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { ctx, limiters, requireAdminMfa }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
@@ -105,6 +120,21 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
   });
 
+  // The photographs of an authentic result (§8.6): a model's reference photograph, a piece's own. Public, like the
+  // result that names them; the URL is the SHA-256 of the bytes, so the answer never changes and is cached for good.
+  app.get('/api/v1/media/:sha256', async (request, reply) => {
+    const { sha256 } = parse(mediaParams, request.params);
+    const etag = `"${sha256}"`;
+    const revalidating = matchesEtag(request.headers['if-none-match'], etag);
+    const found = await ctx.services.media.get(sha256, { withBytes: !revalidating });
+    if (!found) throw notFound('Image', 'MEDIA_NOT_FOUND');
+    reply.header('cache-control', MEDIA_CACHE_CONTROL);
+    reply.header('etag', etag);
+    if (revalidating || !found.bytes) return reply.code(304).send();
+    const bytes = found.bytes;
+    return reply.type(found.mime).send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  });
+
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {
     const input = parse(verifyBody, request.body);
     const viewer = await loadAccount(ctx, request);
@@ -141,7 +171,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     return { ok: true };
   });
 
-  // The ownership certificate (F-06, §8.6): VALID with the record read now, or NO_LONGER_VALID; never a name or an email.
+  // The ownership certificate (F-06, §8.7): VALID with the record read now, or NO_LONGER_VALID; never a name or an email.
   app.post('/api/v1/certificates/lookup', { config: { rateGroup: 'verify' } }, async (request) => {
     const { token } = parse(certificateTokenBody, request.body);
     return ctx.services.ownershipCertificates.lookup(token);

@@ -677,6 +677,87 @@ h1[tabindex="-1"]:focus,
   letter-spacing: 0.02em;
 }
 
+/* Under the second-hand guidance of AUTHENTIC — REGISTERED (J-02): I HAVE A
+   TRANSFER CODE, a text link (§3.8: the hairline button stays the foot's
+   SCAN ANOTHER) to the OWNERSHIP tab, on RECEIVING THIS PIECE, centred under
+   the notice's lower hairline. */
+.result__notice-link {
+  margin-top: 6px;
+}
+
+/* Photographs (F-04) — the piece's own, then its model's, on an ivory plate
+   above the GENOME and framed like it: square frames, each photograph
+   contained, never cropped, its caption beneath; one sentence under the
+   plate. Two side by side, one alone up to 300 px. */
+.result__photos {
+  margin-top: 52px;
+}
+
+.photos__plate {
+  display: grid;
+  gap: 18px;
+  padding: 26px 22px 22px;
+  background: var(--ivory);
+  color: var(--ink);
+}
+
+.photos__plate--pair {
+  grid-template-columns: 1fr 1fr;
+}
+
+.photos__plate--single .photo {
+  width: min(100%, 300px);
+  margin: 0 auto;
+}
+
+.photos__plate .bracket {
+  color: var(--hairline-strong);
+}
+
+.photos__plate .bracket--tl { top: 10px; left: 10px; }
+.photos__plate .bracket--tr { top: 10px; right: 10px; }
+.photos__plate .bracket--bl { bottom: 10px; left: 10px; }
+.photos__plate .bracket--br { bottom: 10px; right: 10px; }
+
+.photo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.photo[hidden],
+.result__photos[hidden] {
+  display: none;
+}
+
+.photo__img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
+
+.photo__caption {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.photos__note {
+  max-width: 34ch;
+  margin: 16px auto 0;
+  font-size: var(--fs-line);
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--ink-soft);
+}
+
 /* GENOME — a specimen on ivory, framed by brackets. */
 .result__genome {
   margin-top: 52px;
@@ -1549,6 +1630,7 @@ h1[tabindex="-1"]:focus,
 .certificate__title,
 .certificate__state,
 .certificate__footnote,
+.photo__caption,
 .genome__label,
 .tabs__tab,
 .tabs__dot,
