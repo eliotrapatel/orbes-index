@@ -1295,7 +1295,7 @@ docker image rm orbes-genome:<tag>         # one old tag at a time
 
 Never run `docker image prune`, `docker system prune` or `docker volume prune` on the shared host. A bare `docker image prune` deletes the dangling images of the other stacks on the same Docker daemon, and does not even remove old `orbes-genome` tags. With `-a` or `--volumes`, and the stack stopped, they delete the rollback images, the database and the signing keys (COMPLIANCE §7, house rules).
 
-**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`):
+**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md)):
 
 1. Not between 03:00 and 05:30 UTC (the nightly backups of the host). Tell the host owner first.
 2. Check `.env`: `RESTORE_ALLOWED=false` (add the line if it is missing; deployment 2 adds it), and nothing exported in the shell (`env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='` prints nothing).
