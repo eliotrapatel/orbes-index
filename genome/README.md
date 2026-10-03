@@ -36,13 +36,15 @@ genome/
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
-                         the sale mode, photographs of models and pieces (media)
+                         the sale mode, photographs of models and pieces (media), ownership
+                         certificates (shared links)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
-    verify/              mobile scanner: camera capture, decoder worker, result views
+    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
+                         (/verify/pieces) and an ownership certificate's page (/verify/c#token)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)

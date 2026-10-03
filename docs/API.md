@@ -389,8 +389,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/v1/media/:sha256` | — | — | api | 8.6 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
-| POST | `/api/v1/certificates/lookup` | — | — | verify | 8.6 |
-| POST | `/api/v1/certificates/pdf` | — | — | verify | 8.6 |
+| POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
+| POST | `/api/v1/certificates/pdf` | — | — | verify | 8.7 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
 | POST | `/api/v1/account/logout` | Account (optional) | yes | api | 10.3 |
