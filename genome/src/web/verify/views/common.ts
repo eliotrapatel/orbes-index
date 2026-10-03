@@ -1,8 +1,8 @@
 /**
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
- * rows, the contact of ORBES Client Services, the link to MY PIECES and the
- * view shell.
+ * rows, the contact of ORBES Client Services, the link to MY PIECES, the
+ * app's paths and the view shell.
  */
 import { h, s } from '../../shared/dom.js';
 import { CONTACT, PIECES } from '../copy.js';
@@ -99,6 +99,8 @@ export function sectionLabel(text: string, id?: string): HTMLHeadingElement {
 /** The app's own paths (static.ts serves the shell at /verify and /verify/*; main.ts routes them). */
 export const LANDING_PATH = '/verify';
 export const PIECES_PATH = '/verify/pieces';
+/** The ownership certificate (F-06): its token follows in the fragment, `/verify/c#…`, never in the path. */
+export const CERTIFICATE_PATH = '/verify/c';
 
 /**
  * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the

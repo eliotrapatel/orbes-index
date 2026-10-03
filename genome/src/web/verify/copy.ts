@@ -310,6 +310,66 @@ export const PIECES = Object.freeze({
   noService: 'No service has been recorded for this piece.',
   serviceFailed: 'The service history could not be shown just now.',
   serviceStatus: Object.freeze({ OPEN: 'IN PROGRESS', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED' }),
+  // The ownership certificate (F-06), in the OWNERSHIP tab of a piece that is not reported lost or stolen.
+  certificateTitle: 'OWNERSHIP CERTIFICATE',
+  certificateLead:
+    'Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.',
+  createCertificate: 'CREATE CERTIFICATE',
+  /** Accessible name of the 7 DAYS · 30 DAYS · 90 DAYS choice. */
+  certificateValidity: 'How long the link stays valid',
+  certificateDays: Object.freeze({ 7: '7 DAYS', 30: '30 DAYS', 90: '90 DAYS' }),
+  certificateHow: 'Anyone who has the link sees the certificate, read live, until it expires or you withdraw it. You can have up to ten at a time for this piece.',
+  confirmCertificate: 'CREATE LINK',
+  certificateLink: 'CERTIFICATE LINK',
+  certificateUntil: (until: string) => `VALID UNTIL ${until}`,
+  certificateShown: 'This link is shown once: copy it now. ORBES cannot show it again.',
+  copyLink: 'COPY LINK',
+  copied: 'The link has been copied.',
+  copyFailed: 'The link could not be copied: select it, then copy it.',
+  openLink: 'OPEN LINK',
+  /** One open link of the piece: when it was created, until when it is valid. */
+  certificateLine: (created: string, until: string) => `CREATED ${created} · VALID UNTIL ${until}`,
+  certificateEnded: (created: string) => `CREATED ${created} · NO LONGER VALID`,
+  withdraw: 'WITHDRAW',
+  withdrawn: 'The link has been withdrawn: it no longer leads to the certificate.',
+  certificatesFailed: 'Your certificate links could not be shown just now.',
+});
+
+/**
+ * The ownership certificate's own page (F-06, /verify/c#…): what a buyer or an insurer reads when an owner shares
+ * the link. It attests a record, not the object it is shown with: never AUTHENTIC, never a name or an email.
+ */
+export const CERTIFICATE = Object.freeze({
+  title: 'OWNERSHIP CERTIFICATE',
+  loading: 'ONE MOMENT…',
+  state: Object.freeze({ valid: 'VALID', ended: 'NO LONGER VALID', unknown: 'NOT FOUND' }),
+  lead: Object.freeze({
+    valid:
+      'What the ORBES registry records about this piece, read just now. It attests this record, not the object it is shown with: to check an object, scan its ORBES CODE.',
+    ended: 'This certificate has expired, or the record of its piece has changed since it was issued. Ask the owner of the piece for a new certificate.',
+    unknown: 'This link does not lead to a certificate: it may be incomplete, or withdrawn by its owner. Ask the owner of the piece for a new link.',
+  }),
+  failed: 'The certificate could not be checked just now.',
+  retry: 'TRY AGAIN',
+  record: 'THE RECORD',
+  certificate: 'THIS CERTIFICATE',
+  rows: Object.freeze({
+    ownership: 'OWNERSHIP',
+    since: 'SINCE',
+    warranty: 'WARRANTY',
+    incidents: 'LOSS OR THEFT',
+    checked: 'CHECKED',
+    issued: 'ISSUED',
+    validUntil: 'VALID UNTIL',
+  }),
+  verified: 'VERIFIED',
+  unverified: 'REGISTERED · NOT YET VERIFIED',
+  noIncident: 'NONE REPORTED',
+  note: 'A certificate names no owner. It stops being valid once the piece changes hands or a loss or theft is reported, and when it expires.',
+  pdf: 'DOWNLOAD PDF',
+  pdfFailed: 'The PDF could not be prepared just now. Please try again in a moment.',
+  scan: 'SCAN ORBES CODE',
+  verifyOnly: 'VERIFY ONLY AT THEORBES.COM/VERIFY',
 });
 
 /**

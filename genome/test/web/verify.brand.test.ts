@@ -81,6 +81,23 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(rule(styles, '.view--pieces').padding).toBe(rule(styles, '.view--result').padding);
   });
 
+  it('sets the piece of an ownership certificate in the same écrin, in the column of a result, titled like MY PIECES (F-06)', () => {
+    const view = readFileSync(join(WEB, 'verify/views/certificate.ts'), 'utf8');
+    expect(view).toContain("{ class: 'piece__plate certificate__plate' }");
+    expect(view).toContain('genomeBlock(s.genome, { titleId })');
+    expect(view).toContain('bracket(\n');
+    // No rule of its own restyles the plate: it is the écrin of MY PIECES as it is.
+    expect(rules(styles).filter((r) => r.selectors.some((s) => s.includes('certificate__plate')))).toEqual([]);
+    expect(rule(styles, '.view--certificate')['max-width']).toBe(rule(styles, '.view--result')['max-width']);
+    expect(rule(styles, '.view--certificate').padding).toBe(rule(styles, '.view--result').padding);
+    for (const k of ['font-size', 'font-weight', 'letter-spacing', 'text-indent']) expect(rule(styles, '.certificate__title')[k], k).toBe(rule(styles, '.pieces__title')[k]);
+    // One hairline button per screen (§3.8): DOWNLOAD PDF on a valid certificate, SCAN ORBES CODE otherwise.
+    expect(view).toContain("class: 'btn certificate__pdf'");
+    expect(view).toContain("this.scanButton('textlink')");
+    // The link just created in MY PIECES sits on ivory, like a transfer code.
+    expect(rule(styles, '.certificate-link').background).toBe(rule(styles, '.transfer-code').background);
+  });
+
   it('sets the customer-quotable reference (VERIFIED · REF) at ≥ 10 px in a readable tone', () => {
     const meta = rule(styles, '.result__meta');
     const px = Number.parseFloat(resolve(meta['font-size']));
@@ -230,9 +247,9 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.genome__meta')['font-size'])).toBeGreaterThanOrEqual(10);
     // The views set these lines with the 10 px .micro class: the closing time of registration, the
     // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
-    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
+    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/certificate.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
     const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
-    for (const line of ['ownership__meta', 'transfer-code__label', 'ownership__who', 'genome__meta']) {
+    for (const line of ['ownership__meta', 'transfer-code__label', 'certificate-link__label', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
       const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
       expect(set.length, line).toBeGreaterThan(0);
       for (const c of set) expect(c.split(' '), c).toContain('micro');
@@ -303,11 +320,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {

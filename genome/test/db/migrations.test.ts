@@ -9,7 +9,7 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
-  'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_transfers', 'product_status_history',
+  'collections', 'cryptographic_keys', 'genomes', 'models', 'ownership', 'ownership_certificates', 'ownership_transfers', 'product_status_history',
   'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'service_records',
   'sessions', 'warranties',
 ];
@@ -93,6 +93,10 @@ describe('migrations', () => {
     // 0007: printing by production batch, codes by issue day.
     expect(has(/INDEX products_production_batch_idx ON public\.products USING btree \(production_batch\)$/)).toBe(true);
     expect(has(/INDEX codes_created_at_idx ON public\.codes USING btree \(created_at\)$/)).toBe(true);
+    // 0013: one certificate per token hash; a piece's certificates, an ownership period's.
+    expect(has(/UNIQUE INDEX ownership_certificates_token_hash_key ON public\.ownership_certificates USING btree \(token_hash\)$/)).toBe(true);
+    expect(has(/INDEX ownership_certificates_product_idx ON public\.ownership_certificates USING btree \(product_id, created_at\)$/)).toBe(true);
+    expect(has(/INDEX ownership_certificates_ownership_idx ON public\.ownership_certificates USING btree \(ownership_id, created_at\)$/)).toBe(true);
   });
 
   /**
@@ -355,7 +359,10 @@ describe('migrations', () => {
     await token(3, 'TRANSFER_ACCEPT');
     await expect(token(4, 'OTHER')).rejects.toSatisfy((e) => isCheckViolation(e, 'scan_tokens_purpose_check'));
 
-    // Down: the outstanding transfer tokens go, the CHECK is 0008's again, and a sale token still goes in.
+    // Down (the migrations after it first, as Kysely takes them down): the outstanding transfer tokens go, the CHECK
+    // is 0008's again, and a sale token still goes in.
+    const later = Object.keys(MIGRATIONS).filter((n) => n > '0011_scan_token_transfer_accept');
+    for (const name of [...later].reverse()) expect((await migrateDown(t.db)).reverted).toEqual([name]);
     expect((await migrateDown(t.db)).reverted).toEqual(['0011_scan_token_transfer_accept']);
     expect(await purposeCheck()).toBe("CHECK ((purpose = ANY (ARRAY['FIRST_REGISTRATION'::text, 'SALE_ACTIVATION'::text])))");
     expect(await purposes()).toEqual(['FIRST_REGISTRATION', 'SALE_ACTIVATION']);
@@ -363,7 +370,7 @@ describe('migrations', () => {
     await expect(token(6, 'TRANSFER_ACCEPT')).rejects.toSatisfy((e) => isCheckViolation(e, 'scan_tokens_purpose_check'));
 
     // Up again: the three purposes, the tokens kept, the schema as before.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0011_scan_token_transfer_accept']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0011_scan_token_transfer_accept', ...later]);
     await token(7, 'TRANSFER_ACCEPT');
     await token(8, 'SALE_ACTIVATION');
     expect(await purposes()).toEqual(['FIRST_REGISTRATION', 'SALE_ACTIVATION', 'SALE_ACTIVATION', 'SALE_ACTIVATION', 'TRANSFER_ACCEPT']);
@@ -373,7 +380,28 @@ describe('migrations', () => {
     await sql`DELETE FROM scan_events WHERE id = ${scan.id}`.execute(t.db);
   });
 
-  it('each migration of the 2026-10-02 plan (0004 to 0011) goes down to exactly the schema a fresh database has one migration earlier', async () => {
+  it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
+    const added = withCertificates.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !o.includes('ownership_certificates'))).toEqual([]);
+    expect(before.filter((o) => o.includes('ownership_certificates'))).toEqual([]);
+    expect(withCertificates.filter((o) => !o.includes('ownership_certificates'))).toEqual(before);
+    // The token's hash (32 bytes, unique), the piece, the ownership period, at most 90 days, withdrawn after creation.
+    for (const c of [
+      /^constraint ownership_certificates ownership_certificates_lifetime CHECK \(\(\(expires_at > created_at\) AND \(\(expires_at - created_at\) <= '90 days'::interval\)\)\)$/,
+      /^constraint ownership_certificates ownership_certificates_token_hash_check CHECK \(\(octet_length\(token_hash\) = 32\)\)$/,
+      /^constraint ownership_certificates ownership_certificates_product_id_fkey FOREIGN KEY \(product_id\) REFERENCES products\(id\) ON DELETE RESTRICT$/,
+      /^constraint ownership_certificates ownership_certificates_ownership_id_fkey FOREIGN KEY \(ownership_id\) REFERENCES ownership\(id\) ON DELETE RESTRICT$/,
+      /^constraint ownership_certificates ownership_certificates_check CHECK \(\(\(revoked_at IS NULL\) OR \(revoked_at >= created_at\)\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0013_ownership_certificates']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('each migration of the 2026-10-02 plan (0004 to 0013) goes down to exactly the schema a fresh database has one migration earlier', async () => {
     // The tracks wrote them apart; deployed together, every down step must still land on its predecessor's schema.
     const names = Object.keys(MIGRATIONS);
     const first = names.indexOf('0004_scan_reports');
@@ -386,6 +414,7 @@ describe('migrations', () => {
       '0009_scan_daily_stats',
       '0010_models_active',
       '0011_scan_token_transfer_accept',
+      '0013_ownership_certificates',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

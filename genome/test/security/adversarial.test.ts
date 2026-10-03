@@ -205,10 +205,13 @@ describe('sessions, CSRF and authorisation under attack', () => {
       ['/api/v1/ownership/transfers/cancel', { productId: pid }],
       ['/api/v1/ownership/incidents', { productId: pid, type: 'STOLEN' }],
       ['/api/v1/ownership/incidents/resolve', { productId: pid }],
+      ['/api/v1/ownership/certificates', { productId: pid }],
     ] as const) {
       const res = await other.post(url, body);
       expect([403, 404]).toContain(res.statusCode);
     }
+    // No certificate of someone else's piece was made (F-06).
+    expect(await h.ctx.db.selectFrom('ownership_certificates').select('id').where('product_id', '=', p.product.id).execute()).toEqual([]);
     const history = await other.get(`/api/v1/products/${pid}/service-history`);
     expect(history.statusCode).toBe(403);
     expect(history.body).not.toMatch(/CLEANING|PARIS|staff/);
@@ -236,6 +239,7 @@ describe('sessions, CSRF and authorisation under attack', () => {
         ['/api/v1/ownership/transfers/cancel', { productId: pid }],
         ['/api/v1/ownership/incidents', { productId: pid, type: 'LOST' }],
         ['/api/v1/ownership/incidents/resolve', { productId: pid }],
+        ['/api/v1/ownership/certificates', { productId: pid }],
       ] as const) {
         const res = await stranger.post(url, body);
         out.push(`${res.statusCode} ${res.body}`);

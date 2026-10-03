@@ -509,6 +509,48 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
 
+  it('ownership_certificates (0013): a 32-byte token hash, unique; a piece and its ownership period; at most 90 days', async () => {
+    const { product } = await seedProduct(t.db);
+    const account = await t.db
+      .insertInto('accounts')
+      .values({ email: 'certificate@example.com', email_normalized: 'certificate@example.com', password_hash: 'scrypt$x' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const period = await t.db.insertInto('ownership').values({ product_id: product.id, account_id: account.id, acquired_via: 'FIRST_REGISTRATION' }).returning('id').executeTakeFirstOrThrow();
+    const now = new Date('2026-10-03T09:00:00.000Z');
+    const day = 86_400_000;
+    const cert = (over: Partial<S.NewOwnershipCertificate> = {}): S.NewOwnershipCertificate => ({
+      token_hash: new Uint8Array(32).fill(1),
+      product_id: product.id,
+      ownership_id: period.id,
+      created_at: now,
+      expires_at: new Date(now.getTime() + 30 * day),
+      ...over,
+    });
+    const first = await t.db.insertInto('ownership_certificates').values(cert()).returningAll().executeTakeFirstOrThrow();
+    expect(first).toMatchObject({ product_id: product.id, ownership_id: period.id, revoked_at: null });
+    expect(first.token_hash).toEqual(new Uint8Array(32).fill(1));
+    // One certificate per token.
+    await expect(t.db.insertInto('ownership_certificates').values(cert()).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ownership_certificates_token_hash_key'));
+    // Exactly 90 days is the longest; a SHA-256 is 32 bytes; it expires after it was created, and is withdrawn after too.
+    await t.db.insertInto('ownership_certificates').values(cert({ token_hash: new Uint8Array(32).fill(2), expires_at: new Date(now.getTime() + 90 * day) })).execute();
+    for (const [bad, constraint] of [
+      [{ expires_at: new Date(now.getTime() + 90 * day + 1) }, 'ownership_certificates_lifetime'],
+      [{ expires_at: now }, 'ownership_certificates_lifetime'],
+      [{ token_hash: new Uint8Array(31).fill(3) }, 'ownership_certificates_token_hash_check'],
+      [{ revoked_at: new Date(now.getTime() - 1) }, 'ownership_certificates_check'],
+    ] as const) {
+      await expect(t.db.insertInto('ownership_certificates').values(cert({ token_hash: new Uint8Array(32).fill(4), ...bad })).execute(), constraint).rejects.toSatisfy((e) =>
+        isCheckViolation(e, constraint),
+      );
+    }
+    // The piece and the ownership period exist, and stay while a certificate names them.
+    await expect(t.db.insertInto('ownership_certificates').values(cert({ token_hash: new Uint8Array(32).fill(5), ownership_id: '00000000-0000-4000-8000-000000000000' })).execute()).rejects.toSatisfy((e) =>
+      isForeignKeyViolation(e),
+    );
+    await expect(t.db.deleteFrom('ownership').where('id', '=', period.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

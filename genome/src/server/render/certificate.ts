@@ -38,7 +38,16 @@
  * Until the brand validates the layout (BRAND-DESIGN-SYSTEM §7), every card,
  * sheet and file name (PDF and CSV) carries the mention PROOF: CERTIFICATE_LAYOUT_STATUS
  * moves to 'VALIDATED' on the brand's sign-off, and only then.
+ *
+ * The same lettering, GENOME geometry and monogram draw the OWNERSHIP
+ * CERTIFICATE (F-06, `renderOwnershipCertificatePdf`, at the end of this
+ * file): the A4 page a piece's owner shares with a buyer or an insurer, the
+ * PDF of the live record at `/verify/c#…` (services/ownership-certificates.ts).
+ * It names no owner, never says AUTHENTIC (it attests a record, not the
+ * object it is shown with) and carries its live address, lettered and as a
+ * link, so whoever holds the page can check that it is still valid.
  */
+import { ORBES_CODE_STYLES } from '../../core/code/styles.js';
 import { genomeLayout } from '../../core/genome/render.js';
 import type { Genome } from '../../core/genome/genome.js';
 import { MONOGRAM_BOUNDS, monogramPathData } from '../../core/render/monogram.js';
@@ -481,4 +490,255 @@ export function certificateCardSvg(item: CertificateItem, opts: { status?: Certi
     '</svg>',
     '',
   ].join('\n');
+}
+
+// ── Ownership certificate (F-06) ───────────────────────────────────────────
+
+/** The fixed lettering of the ownership certificate (house voice: uppercase, tracked; never AUTHENTIC, never a name). */
+export const OWNERSHIP_CERTIFICATE_COPY = Object.freeze({
+  title: 'OWNERSHIP CERTIFICATE',
+  genome: 'GENOME',
+  piece: 'THE PIECE',
+  record: 'THE RECORD',
+  certificate: 'THIS CERTIFICATE',
+  rows: Object.freeze({
+    model: 'MODEL',
+    type: 'TYPE',
+    category: 'CATEGORY',
+    collection: 'COLLECTION',
+    variant: 'VARIANT',
+    material: 'MATERIAL',
+    created: 'CREATED',
+    ownership: 'OWNERSHIP',
+    since: 'SINCE',
+    warranty: 'WARRANTY',
+    from: 'FROM',
+    until: 'UNTIL',
+    incidents: 'LOSS OR THEFT',
+    status: 'STATUS',
+    issued: 'ISSUED',
+    validUntil: 'VALID UNTIL',
+  }),
+  verified: 'VERIFIED',
+  unverified: 'REGISTERED · NOT YET VERIFIED',
+  noIncident: 'NONE REPORTED',
+  warranty: Object.freeze({ NOT_STARTED: 'NOT YET STARTED', ACTIVE: 'ACTIVE', EXPIRED: 'EXPIRED', VOID: 'NO LONGER VALID' }),
+  valid: (when: string) => `VALID ON ${when}`,
+  statement: Object.freeze([
+    'THIS CERTIFICATE ATTESTS WHAT THE ORBES REGISTRY RECORDED ABOUT THIS PIECE ON THE DATE ABOVE.',
+    'IT DOES NOT ATTEST THE OBJECT IT IS SHOWN WITH: SCAN THE ORBES CODE OF AN OBJECT TO CHECK IT.',
+    'IT NAMES NO OWNER. IT IS NO LONGER VALID ONCE THE PIECE CHANGES HANDS OR A LOSS OR THEFT IS REPORTED.',
+  ] as const),
+  checkLive: 'CHECK IT LIVE',
+  verifyOnly: 'VERIFY ONLY AT THEORBES.COM/VERIFY',
+});
+
+/** Page geometry in millimetres (A4 portrait, y down). */
+export const OWNERSHIP_CERTIFICATE_LAYOUT = Object.freeze({
+  page: 'A4' as const,
+  left: 22,
+  right: 188,
+  brand: { text: 'ORBES', cap: 4, tracking: 0.9, baseline: 30 },
+  title: { cap: 1.8, tracking: 0.6, baseline: 37 },
+  /** The monogram against the right margin, from the cap line of ORBES (30 − 4) to the title's baseline. */
+  monogram: { top: 26, bottom: 37 },
+  ruleTop: 46,
+  /** The ivory plate of the GENOME, as on screen (BRAND §2.5). */
+  plate: { x: 22, y: 54, w: 166, h: 82 },
+  genomeLabel: { cap: 1.3, tracking: 0.6, baseline: 63 },
+  id: { cap: 5, tracking: 0.3, baseline: 73 },
+  /** The glyphs in their orbit around the SEAL, as the screen and the piece show them. */
+  orbit: { sizeMm: 44, centreY: 99 },
+  fingerprint: { cap: 1.6, tracking: 0.3, baseline: 130 },
+  /** Two columns, THE PIECE and THE RECORD: label, then value at `valueOffset`. */
+  columns: [22, 110] as const,
+  columnWidth: 78,
+  valueOffset: 26,
+  section: { cap: 1.3, tracking: 0.6, baseline: 150 },
+  rows: { first: 158, pitch: 6, labelCap: 1.15, labelTracking: 0.45, valueCap: 1.6, minValueCap: 1.1, valueTracking: 0.25 },
+  ruleMiddle: 202,
+  certificate: { baseline: 212, first: 220, valueOffset: 30 },
+  statement: { cap: 1.3, tracking: 0.25, baselines: [246, 252, 258] as const },
+  live: { labelBaseline: 268, addressBaseline: 275, codeBaseline: 282, cap: 1.8, minCap: 1.2, tracking: 0.2 },
+  verifyOnly: { cap: 1.2, tracking: 0.35, baseline: 290 },
+});
+
+export type WarrantySummaryStatus = keyof typeof OWNERSHIP_CERTIFICATE_COPY.warranty;
+
+/** What the ownership certificate shows: the live record of a VALID certificate (services/ownership-certificates.ts). */
+export interface OwnershipCertificateDocument {
+  productId: string;
+  /** The category's name, e.g. 'Jewelry'. Free text from here on: drawn through toLabelText. */
+  category: string;
+  collection: string | null;
+  model: string;
+  type: string;
+  variant: string | null;
+  material: string;
+  createdYear: number;
+  genome: Pick<Genome, 'glyphs' | 'version' | 'fingerprint'> | null;
+  verified: boolean;
+  /** The day the ownership began, 'YYYY-MM-DD' (UTC). */
+  since: string;
+  warranty: { status: WarrantySummaryStatus; startDate?: string; endDate?: string };
+  issuedAt: Date;
+  expiresAt: Date;
+  /** When the record was read: the PDF's date (CreationDate, file name). */
+  checkedAt: Date;
+  /** The certificate's live address, `https://host/verify/c#` and its 52-character token. */
+  link: string;
+}
+
+const LONG_MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+
+/** 'YYYY-MM-DD' or a Date → '3 OCTOBER 2026' (UTC). */
+function longDate(v: string | Date): string {
+  const iso = typeof v === 'string' ? v : v.toISOString();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m || !LONG_MONTHS[Number(m[2]) - 1]) throw new CertificateInputError('not a date');
+  return `${Number(m[3])} ${LONG_MONTHS[Number(m[2]) - 1]} ${m[1]}`;
+}
+
+const CERTIFICATE_LINK_RE = /^(https?:\/\/[A-Za-z0-9.:-]{1,253})\/verify\/c#([0-9A-HJKMNP-TV-Z]{52})$/;
+
+/** The lettered form of a certificate's link: its address up to the '#', and its code in groups of four. */
+export function certificateLinkLettering(link: string): { address: string; code: string } {
+  const m = CERTIFICATE_LINK_RE.exec(link);
+  if (!m) throw new CertificateInputError('not a certificate link');
+  const host = m[1].replace(/^https?:\/\//, '');
+  return { address: toLabelText(`${host}/VERIFY/C#`), code: m[2].match(/.{1,4}/g)!.join('-') };
+}
+
+/** The A4 page of an ownership certificate. Throws CertificateInputError on input it cannot draw. */
+export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): PdfPage {
+  if (!PRODUCT_ID_RE.test(d.productId)) throw new CertificateInputError('not a canonical product id');
+  if (d.genome && !FINGERPRINT_RE.test(d.genome.fingerprint)) throw new CertificateInputError('not a genome fingerprint');
+  if (!(d.warranty.status in OWNERSHIP_CERTIFICATE_COPY.warranty)) throw new CertificateInputError('unknown warranty status');
+  const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+  const C = OWNERSHIP_CERTIFICATE_COPY;
+  const [pw, ph] = SHEET_PAGES[L.page];
+  const live = certificateLinkLettering(d.link);
+  const strokes: StrokePath[] = [];
+  const line = (text: string, s: LineSpec) => strokes.push(stroked(textRun(text, { capHeight: s.cap, tracking: s.tracking, x: s.x, baseline: s.baseline, align: s.align ?? 'start' })));
+  const fitted = (text: string, s: LineSpec & { minCap: number; maxWidth: number }) => {
+    const t = toLabelText(text);
+    if (t !== '') strokes.push(stroked(fittedRun(t, s)));
+  };
+  const centre = pw / 2;
+
+  // Header: the word, OWNERSHIP CERTIFICATE under it, the monogram at the right margin, a hairline.
+  line(L.brand.text, { cap: L.brand.cap, tracking: L.brand.tracking, x: L.left, baseline: L.brand.baseline });
+  line(C.title, { cap: L.title.cap, tracking: L.title.tracking, x: L.left, baseline: L.title.baseline });
+  const mh = L.monogram.bottom - L.monogram.top;
+  const mw = (mh * MONOGRAM_BOUNDS.w) / MONOGRAM_BOUNDS.h;
+  const monogram = monogramPathData({ x: L.right - mw, y: L.monogram.top, width: mw });
+  const rule = (y: number) => strokes.push({ d: `M${fmt(L.left)} ${fmt(y)}L${fmt(L.right)} ${fmt(y)}`, width: MIN_STROKE_MM });
+  rule(L.ruleTop);
+
+  // The plate: GENOME, the product id, the glyphs in their orbit around the SEAL, the fingerprint.
+  const P = L.plate;
+  line(C.genome, { cap: L.genomeLabel.cap, tracking: L.genomeLabel.tracking, x: centre, baseline: L.genomeLabel.baseline, align: 'middle' });
+  line(d.productId, { cap: L.id.cap, tracking: L.id.tracking, x: centre, baseline: L.id.baseline, align: 'middle' });
+  const placements: PdfPlacement[] = [];
+  if (d.genome) {
+    const orbit = genomeLayout(d.genome, 'orbit');
+    const vb = orbit.viewBox;
+    const scene: ArtifactScene = {
+      viewBox: vb,
+      widthMm: L.orbit.sizeMm,
+      heightMm: (L.orbit.sizeMm * vb.h) / vb.w,
+      ink: ORBES_CODE_STYLES.ivory.ink,
+      paper: null,
+      primitives: orbit.primitives,
+      strokes: [],
+      title: `ORBES GENOME ${d.genome.fingerprint}`,
+    };
+    placements.push({ scene, xMm: centre - scene.widthMm / 2, yMm: L.orbit.centreY - scene.heightMm / 2 });
+    line(`${d.genome.fingerprint} · GENOME-${String(d.genome.version).padStart(2, '0')}`, {
+      cap: L.fingerprint.cap,
+      tracking: L.fingerprint.tracking,
+      x: centre,
+      baseline: L.fingerprint.baseline,
+      align: 'middle',
+    });
+  }
+
+  // Two columns of rows: the piece, and what the registry records about it.
+  const R = L.rows;
+  const column = (x: number, title: string, rows: readonly (readonly [string, string])[]) => {
+    line(title, { cap: L.section.cap, tracking: L.section.tracking, x, baseline: L.section.baseline });
+    rows.forEach(([label, value], i) => {
+      const baseline = R.first + i * R.pitch;
+      line(label, { cap: R.labelCap, tracking: R.labelTracking, x, baseline });
+      fitted(value, { cap: R.valueCap, minCap: R.minValueCap, tracking: R.valueTracking, x: x + L.valueOffset, baseline, maxWidth: L.columnWidth - L.valueOffset });
+    });
+  };
+  const piece: [string, string][] = [
+    [C.rows.model, d.model],
+    [C.rows.type, d.type],
+    [C.rows.category, d.category],
+    ...(d.collection ? [[C.rows.collection, d.collection] as [string, string]] : []),
+    ...(d.variant ? [[C.rows.variant, d.variant] as [string, string]] : []),
+    [C.rows.material, d.material],
+    [C.rows.created, String(d.createdYear)],
+  ];
+  const record: [string, string][] = [
+    [C.rows.ownership, d.verified ? C.verified : C.unverified],
+    [C.rows.since, longDate(d.since)],
+    [C.rows.warranty, C.warranty[d.warranty.status]],
+    ...(d.warranty.startDate ? [[C.rows.from, longDate(d.warranty.startDate)] as [string, string]] : []),
+    ...(d.warranty.endDate ? [[C.rows.until, longDate(d.warranty.endDate)] as [string, string]] : []),
+    [C.rows.incidents, C.noIncident],
+  ];
+  column(L.columns[0], C.piece, piece);
+  column(L.columns[1], C.record, record);
+  rule(L.ruleMiddle);
+
+  // This certificate: valid when, issued, until; what it attests; its live address.
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const at = d.checkedAt;
+  const certificate: [string, string][] = [
+    [C.rows.status, C.valid(`${longDate(at)} · ${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())} UTC`)],
+    [C.rows.issued, longDate(d.issuedAt)],
+    [C.rows.validUntil, longDate(d.expiresAt)],
+  ];
+  line(C.certificate, { cap: L.section.cap, tracking: L.section.tracking, x: L.left, baseline: L.certificate.baseline });
+  certificate.forEach(([label, value], i) => {
+    const baseline = L.certificate.first + i * R.pitch;
+    line(label, { cap: R.labelCap, tracking: R.labelTracking, x: L.left, baseline });
+    line(value, { cap: R.valueCap, tracking: R.valueTracking, x: L.left + L.certificate.valueOffset, baseline });
+  });
+  C.statement.forEach((text, i) =>
+    strokes.push(stroked(fittedRun(text, { cap: L.statement.cap, minCap: L.statement.cap * 0.8, tracking: L.statement.tracking, x: L.left, baseline: L.statement.baselines[i], maxWidth: L.right - L.left }))),
+  );
+  const V = L.live;
+  line(C.checkLive, { cap: L.section.cap, tracking: L.section.tracking, x: L.left, baseline: V.labelBaseline });
+  strokes.push(stroked(fittedRun(live.address, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.addressBaseline, maxWidth: L.right - L.left })));
+  strokes.push(stroked(fittedRun(live.code, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.codeBaseline, maxWidth: L.right - L.left })));
+  line(C.verifyOnly, { cap: L.verifyOnly.cap, tracking: L.verifyOnly.tracking, x: L.left, baseline: L.verifyOnly.baseline });
+
+  const top = V.addressBaseline - V.cap - 1;
+  return {
+    widthMm: pw,
+    heightMm: ph,
+    placements,
+    marks: strokes,
+    markColor: INK,
+    fills: [{ d: `M${fmt(P.x)} ${fmt(P.y)}L${fmt(P.x + P.w)} ${fmt(P.y)}L${fmt(P.x + P.w)} ${fmt(P.y + P.h)}L${fmt(P.x)} ${fmt(P.y + P.h)}Z`, color: ORBES_CODE_STYLES.ivory.paper }],
+    shapes: monogram.map((m) => ({ d: m, color: INK })),
+    links: [{ xMm: L.left, yMm: top, wMm: L.right - L.left, hMm: V.codeBaseline + 1 - top, url: d.link }],
+  };
+}
+
+/** The ownership certificate as a one-page A4 PDF (RGB: a document, not a print run). Deterministic for one input. */
+export async function renderOwnershipCertificatePdf(d: OwnershipCertificateDocument): Promise<RenderedCertificates> {
+  const page = layoutOwnershipCertificate(d);
+  const day = d.checkedAt.toISOString().slice(0, 10);
+  const body = await renderPdf([page], {
+    title: `ORBES OWNERSHIP CERTIFICATE ${d.productId}`,
+    subject: `The ORBES record of ${d.productId} on ${day}. It attests a record, not the object it is shown with.`,
+    keywords: ['ORBES', 'ownership certificate', d.productId].join(', '),
+    creationDate: d.checkedAt,
+  });
+  return { contentType: PDF_TYPE, body, filename: `ORBES-ownership-certificate-${d.productId}-${day}.pdf` };
 }

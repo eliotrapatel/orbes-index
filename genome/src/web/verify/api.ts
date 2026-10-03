@@ -12,13 +12,19 @@
  * - Every failure becomes an ApiError with the server's public `{ code,
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
+ * - The ownership certificate's PDF (F-06) is the one answer that is not
+ *   JSON: it comes back as a blob with its file name, for the page to save.
  */
 import type {
+  CertificateLookup,
+  CertificateOffer,
   ClientServices,
+  DownloadedFile,
   IncidentReport,
   IncidentResolution,
   IncidentType,
   OwnedPiece,
+  OwnerCertificate,
   OwnershipConfirmation,
   RecoveryResult,
   ReportInput,
@@ -73,6 +79,10 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 export const CONTACT_TIMEOUT_MS = 4_000;
 /** Largest response body we are willing to parse (verify outcomes are ~2 KB). */
 const MAX_RESPONSE_CHARS = 256 * 1024;
+/** Largest file we are willing to take (a certificate's PDF is about 40 KB). */
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+type Method = 'GET' | 'POST' | 'DELETE';
 
 export class ApiClient {
   private csrfToken: string | undefined;
@@ -230,22 +240,56 @@ export class ApiClient {
     return this.request<IncidentResolution>('POST', '/api/v1/ownership/incidents/resolve', { productId }, { csrf: true });
   }
 
+  // ── Ownership certificates (F-06) ────────────────────────────────────────
+
+  /** CREATE CERTIFICATE (MY PIECES): a link to the live record of one of the owner's pieces, valid `validDays` days; shown once. */
+  createCertificate(productId: string, validDays: number): Promise<CertificateOffer> {
+    return this.request<CertificateOffer>('POST', '/api/v1/ownership/certificates', { productId, validDays }, { csrf: true });
+  }
+
+  /** The owner's links still open (not withdrawn, not expired), newest first. */
+  async certificates(): Promise<OwnerCertificate[]> {
+    const r = await this.request<{ certificates?: unknown }>('GET', '/api/v1/ownership/certificates');
+    if (!Array.isArray(r?.certificates)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.certificates as OwnerCertificate[];
+  }
+
+  /** WITHDRAW: the link then answers as one that never existed. */
+  async revokeCertificate(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/ownership/certificates/${encodeURIComponent(id)}`, undefined, { csrf: true });
+  }
+
+  /** The certificate behind a link (no session needed): the token, from the link's fragment, travels in the body. */
+  lookupCertificate(token: string): Promise<CertificateLookup> {
+    return this.request<CertificateLookup>('POST', '/api/v1/certificates/lookup', { token });
+  }
+
+  /** The certificate as a PDF, to save (a 409 once it is no longer valid). */
+  async certificatePdf(token: string): Promise<DownloadedFile> {
+    const res = await this.send('POST', '/api/v1/certificates/pdf', { token }, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-ownership-certificate.pdf') };
+  }
+
   // ── Transport ────────────────────────────────────────────────────────────
 
   private remember(s: SessionInfo): void {
     if (typeof s?.csrfToken === 'string' && s.csrfToken.length > 0) this.csrfToken = s.csrfToken;
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
+  /** One request on the wire: transport failures become NETWORK or TIMEOUT. The response is the caller's to read. */
+  private async send(method: Method, path: string, body: unknown, opts: RequestOptions): Promise<Response> {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (opts.csrf && this.csrfToken) headers['x-csrf-token'] = this.csrfToken;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.timeoutMs);
-    let res: Response;
     try {
-      res = await this.fetchImpl(this.base + path, {
+      const res = await this.fetchImpl(this.base + path, {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -254,6 +298,7 @@ export class ApiClient {
         redirect: 'error',
         signal: controller.signal,
       });
+      return res;
     } catch (e) {
       const aborted = controller.signal.aborted || (e instanceof Error && e.name === 'AbortError');
       throw aborted
@@ -262,7 +307,10 @@ export class ApiClient {
     } finally {
       clearTimeout(timer);
     }
+  }
 
+  private async request<T>(method: Method, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
+    const res = await this.send(method, path, body, opts);
     const payload = await readJson(res);
     if (res.ok) {
       if (payload === undefined && res.status !== 204) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
@@ -293,6 +341,12 @@ async function readJson(res: Response): Promise<unknown> {
   } catch {
     return undefined;
   }
+}
+
+/** The file name of a `Content-Disposition: attachment; filename="…"` header, else `fallback`. */
+export function filenameOf(disposition: string | null, fallback: string): string {
+  const m = /filename="([A-Za-z0-9._-]{1,120})"/.exec(disposition ?? '');
+  return m ? m[1] : fallback;
 }
 
 /** Map an error response to an ApiError, tolerating bodies that are not the contract shape. */

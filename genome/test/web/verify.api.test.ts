@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiClient, ApiError, CONTACT_TIMEOUT_MS, settledWithin, toApiError } from '../../src/web/verify/api.js';
+import { ApiClient, ApiError, CONTACT_TIMEOUT_MS, filenameOf, settledWithin, toApiError } from '../../src/web/verify/api.js';
 import { SessionStore } from '../../src/web/verify/session.js';
 
 interface Call {
@@ -221,6 +221,55 @@ describe('ApiClient', () => {
     // A refusal is no sign-out.
     expect(api.hasSession).toBe(true);
     expect(await api.acceptTransfer('2KRJ-RW75-58PH', 'O26-J-00184', token)).toMatchObject({ productId: 'O26-J-00184', verified: true });
+  });
+
+  it('ownership certificates (F-06): creates, lists and withdraws with the CSRF token; reads one and its PDF with none, the token in the body', async () => {
+    const offer = { id: '5a864af8-0d6b-4c1e-9f2a-3b7c1d2e4f5a', productId: 'O26-J-00184', token: 'T'.repeat(52), url: `https://verify.theorbes.com/verify/c#${'T'.repeat(52)}`, createdAt: 'a', expiresAt: 'b' };
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(201, offer),
+      () => json(200, { certificates: [{ id: offer.id, productId: offer.productId, createdAt: 'a', expiresAt: 'b', valid: true }] }),
+      () => json(200, { ok: true }),
+      () => json(200, { status: 'NO_LONGER_VALID', checkedAt: 'c' }),
+      () => new Response(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf"' } }),
+      () => json(409, { error: { code: 'CERTIFICATE_NO_LONGER_VALID', message: 'This certificate is no longer valid. Ask the owner of the piece for a new one.' } }),
+      () => json(404, { error: { code: 'CERTIFICATE_NOT_FOUND', message: 'This certificate link is not valid.' } }),
+      () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+      () => json(200, { unexpected: true }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect(await api.createCertificate('O26-J-00184', 30)).toEqual(offer);
+    expect(f.calls[1]).toMatchObject({ url: '/api/v1/ownership/certificates', method: 'POST', body: { productId: 'O26-J-00184', validDays: 30 } });
+    expect(f.calls[1].headers['x-csrf-token']).toBe('t1');
+    expect((await api.certificates()).map((c) => c.id)).toEqual([offer.id]);
+    expect(f.calls[2]).toMatchObject({ url: '/api/v1/ownership/certificates', method: 'GET', body: undefined });
+    await api.revokeCertificate(offer.id);
+    expect(f.calls[3]).toMatchObject({ url: `/api/v1/ownership/certificates/${offer.id}`, method: 'DELETE', body: undefined });
+    expect(f.calls[3].headers['x-csrf-token']).toBe('t1');
+    expect(f.calls[3].headers['content-type']).toBeUndefined();
+    // The public reads: the token in the body (never in the address), no CSRF header.
+    expect(await api.lookupCertificate(offer.token)).toEqual({ status: 'NO_LONGER_VALID', checkedAt: 'c' });
+    expect(f.calls[4]).toMatchObject({ url: '/api/v1/certificates/lookup', method: 'POST', body: { token: offer.token } });
+    expect(f.calls[4].headers['x-csrf-token']).toBeUndefined();
+    const file = await api.certificatePdf(offer.token);
+    expect(file.filename).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
+    expect(new Uint8Array(await file.blob.arrayBuffer())).toEqual(pdf);
+    expect(f.calls[5]).toMatchObject({ url: '/api/v1/certificates/pdf', method: 'POST', body: { token: offer.token } });
+    expect(f.calls[5].headers['x-csrf-token']).toBeUndefined();
+    // The server's refusals as it wrote them; a body that is not a PDF is a bad response.
+    await expect(api.certificatePdf(offer.token)).rejects.toMatchObject({ status: 409, code: 'CERTIFICATE_NO_LONGER_VALID' });
+    await expect(api.lookupCertificate(offer.token)).rejects.toMatchObject({ status: 404, code: 'CERTIFICATE_NOT_FOUND' });
+    await expect(api.certificatePdf(offer.token)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.certificates()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(api.hasSession).toBe(true);
+  });
+
+  it('filenameOf: the attachment\'s name when it is a plain one, else the fallback', () => {
+    expect(filenameOf('attachment; filename="ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf"', 'x.pdf')).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
+    expect(filenameOf('attachment; filename="../../etc/passwd"', 'x.pdf')).toBe('x.pdf');
+    expect(filenameOf(null, 'x.pdf')).toBe('x.pdf');
   });
 
   it('puts a product id in the service-history path encoded', async () => {

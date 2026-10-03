@@ -273,7 +273,7 @@ export const transfersPaused = (until: Date) => {
 const alreadyRegistered = () => new DomainError('ALREADY_REGISTERED', 409, 'This product is already registered to an owner.');
 const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
-const notOwner = () => new DomainError('NOT_OWNER', 403, 'Only the current owner can do this.');
+export const notOwner = () => new DomainError('NOT_OWNER', 403, 'Only the current owner can do this.');
 const noIncident = () => new DomainError('NO_INCIDENT', 409, 'This piece is not reported lost.');
 const incidentNotResolvable = () =>
   new DomainError('INCIDENT_NOT_RESOLVABLE', 409, 'Only a loss you reported yourself can be withdrawn here. ORBES Client Services can assist you.');
@@ -294,7 +294,7 @@ async function lostDeclaredBy(db: Db, product: Pick<ProductRow, 'id' | 'status'>
  * the caller does not own: product ids are sequential, so "not found" vs "not yours" would let any
  * account enumerate the issued serials (production volumes per category and year).
  */
-async function lockForOwnerAction(tx: Db, productId: string): Promise<ProductRow> {
+export async function lockForOwnerAction(tx: Db, productId: string): Promise<ProductRow> {
   const p = await findProduct(tx, productId, { forUpdate: true });
   if (!p) throw notOwner();
   return p;
@@ -306,7 +306,7 @@ async function lockForOwnerAction(tx: Db, productId: string): Promise<ProductRow
  * (A-06: the lock ends the sessions, but the session guard ran before it) is refused here: the lock still
  * in progress is waited for, and one that starts now waits for this request.
  */
-async function readActingAccount(tx: Db, accountId: string): Promise<{ status: AccountStatus; transfers_frozen_until: Date | null } | undefined> {
+export async function readActingAccount(tx: Db, accountId: string): Promise<{ status: AccountStatus; transfers_frozen_until: Date | null } | undefined> {
   const account = await tx.selectFrom('accounts').select(['status', 'transfers_frozen_until']).where('id', '=', accountId).forShare().executeTakeFirst();
   if (account?.status === 'LOCKED') throw customerAccountLocked();
   return account;
@@ -770,11 +770,14 @@ export class OwnershipService {
     };
   }
 
-  /** Products the account currently owns, newest acquisition first, with genome and warranty summary. */
-  async listForAccount(accountId: string): Promise<OwnedProduct[]> {
+  /**
+   * Products the account currently owns, newest acquisition first, with genome and warranty summary. `productUuid`
+   * narrows the list to one piece (products.id): the live record an ownership certificate shows (F-06).
+   */
+  async listForAccount(accountId: string, opts: { productUuid?: string } = {}): Promise<OwnedProduct[]> {
     assertAccountId(accountId);
     const now = this.clock();
-    const rows = await this.db
+    let query = this.db
       .selectFrom('ownership as o')
       .innerJoin('products as p', 'p.id', 'o.product_id')
       .innerJoin('categories as c', 'c.id', 'p.category_id')
@@ -786,10 +789,9 @@ export class OwnershipService {
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
-      .where('o.ended_at', 'is', null)
-      .orderBy('o.started_at', 'desc')
-      .orderBy('p.product_id')
-      .execute();
+      .where('o.ended_at', 'is', null);
+    if (opts.productUuid !== undefined) query = query.where('p.id', '=', opts.productUuid);
+    const rows = await query.orderBy('o.started_at', 'desc').orderBy('p.product_id').execute();
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.uuid);
 

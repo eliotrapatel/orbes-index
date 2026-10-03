@@ -31,6 +31,7 @@ import { CertificateService } from './services/certificates.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
+import { OwnershipCertificateService } from './services/ownership-certificates.js';
 import { OwnerService } from './services/owners.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
@@ -49,6 +50,8 @@ export interface AppServices {
   anomaly: AnomalyService;
   lifecycle: LifecycleService;
   ownership: OwnershipService;
+  /** Shareable ownership certificates (F-06): the owner's links to the live record of a piece. */
+  ownershipCertificates: OwnershipCertificateService;
   warranty: WarrantyService;
   auth: AuthService;
   authenticators: AuthenticatorRegistry;
@@ -142,6 +145,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       transferKey: deriveTransferCodeKey(config),
       requireScannedPiece: config.transferAcceptRequireProduct,
     });
+    const ownershipCertificates = new OwnershipCertificateService({ db, audit, ownership, publicOrigin: config.publicOrigin, clock });
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
     const issuance = new IssuanceService({ db, keys, audit, categories, clock, log });
     const catalog = new CatalogService({ db, audit, categories, clock });
@@ -161,6 +165,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       anomaly,
       lifecycle,
       ownership,
+      ownershipCertificates,
       warranty,
       auth,
       authenticators,

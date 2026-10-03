@@ -40,6 +40,8 @@ describe('static web apps', () => {
       ['/verify', 'VERIFY'],
       ['/verify/', 'VERIFY'],
       ['/verify/pieces', 'VERIFY'],
+      // An ownership certificate (F-06): its token is the fragment, which never reaches the server.
+      ['/verify/c', 'VERIFY'],
       ['/verify/result/abc', 'VERIFY'],
       ['/admin', 'ADMIN'],
       ['/admin/products/O26-J-00001', 'ADMIN'],

@@ -1,12 +1,15 @@
 /**
  * Ownership routes (contract §3, cookie `orbes_session`): first registration
  * with a scan token (+ claim code), transfers, incident reports and the
- * withdrawal of a loss the owner reported (PIECE FOUND, MY PIECES). A transfer
+ * withdrawal of a loss the owner reported (PIECE FOUND, MY PIECES), and the
+ * owner's ownership certificates (F-06: create, list, withdraw; read through
+ * the public `/api/v1/certificates/*`, routes/public.ts). A transfer
  * is accepted for the piece the recipient scanned, with the transfer token of
  * that scan (F-03): both required unless TRANSFER_ACCEPT_REQUIRE_PRODUCT=false.
  *
- * All are account-authenticated mutations, so the scope guard enforces the
- * session, CSRF token and same-origin checks. Registration and transfer
+ * All are account-authenticated (the list of certificates is the one read),
+ * so the scope guard enforces the session, and for every mutation the CSRF
+ * token and same-origin checks. Registration and transfer
  * acceptance take secrets (claim codes, transfer codes) and therefore draw
  * from the `auth` rate-limit budget on top of the service's own per-product
  * claim-attempt limit.
@@ -15,7 +18,16 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { acceptTransferBody, assistedAcceptTransferBody, incidentBody, parse, productRefBody, registerOwnershipBody } from '../http/schemas.js';
+import {
+  acceptTransferBody,
+  assistedAcceptTransferBody,
+  certificateParams,
+  createCertificateBody,
+  incidentBody,
+  parse,
+  productRefBody,
+  registerOwnershipBody,
+} from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import type { OwnershipResult } from '../services/ownership.js';
 import type { RouteDeps } from './public.js';
@@ -27,7 +39,7 @@ function ownershipJson(r: OwnershipResult) {
 export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { ownership } = ctx.services;
+  const { ownership, ownershipCertificates } = ctx.services;
   // F-03: the scanned piece is required, unless ORBES Client Services assists acceptances (TRANSFER_ACCEPT_REQUIRE_PRODUCT=false).
   const acceptBody = ctx.config.transferAcceptRequireProduct ? acceptTransferBody : assistedAcceptTransferBody;
 
@@ -75,5 +87,28 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
     const b = parse(productRefBody, request.body);
     const change = await ownership.resolveIncident(account.id, b.productId, accountActor(request));
     return { productId: change.productId, type: 'LOST', resolvedAt: change.at };
+  });
+
+  // Ownership certificates (F-06, MY PIECES): the owner's links to the live record of a piece. The link is answered once,
+  // at creation: only the hash of its token is kept.
+  app.post('/api/v1/ownership/certificates', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const b = parse(createCertificateBody, request.body);
+    const offer = await ownershipCertificates.create(account.id, b.productId, b.validDays !== undefined ? { validDays: b.validDays } : {}, accountActor(request));
+    reply.code(201);
+    return offer;
+  });
+
+  app.get('/api/v1/ownership/certificates', async (request) => {
+    const { account } = requireAccount(request);
+    return { certificates: await ownershipCertificates.listForAccount(account.id) };
+  });
+
+  // Withdrawn, a link answers 404 as one that never existed. Another account's link, or one already withdrawn, is a 404 too.
+  app.delete('/api/v1/ownership/certificates/:id', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(certificateParams, request.params);
+    await ownershipCertificates.revoke(account.id, id, accountActor(request));
+    return { ok: true };
   });
 };

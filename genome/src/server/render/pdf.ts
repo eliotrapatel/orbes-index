@@ -20,6 +20,12 @@
  * its ink is then laid over what is under it instead of knocking it out, so
  * the claim code printed beneath the panel stays on its own plate.
  *
+ * Plates and links: a page may also carry flat fills drawn first, under
+ * everything else (`fills`: the ivory plate of the ownership certificate's
+ * GENOME), and link annotations (`links`: a rectangle that opens a URL, the
+ * certificate's live address). A link is the one piece of text a PDF here
+ * holds: its URL, in the annotation, never as lettering a font would draw.
+ *
  * Pages are sized in millimetres to the artifact (plus label) for single
  * artifacts, or to a standard paper size for multi-up sheets. Output is
  * deterministic for a given input and creation date (pdfkit derives the file
@@ -47,6 +53,19 @@ export interface PdfPage {
   markColor?: string;
   /** Flat fills in page millimetres, drawn last, over the placements and marks (a scratch-off panel). */
   shapes?: readonly PdfShape[];
+  /** Flat fills in page millimetres, drawn first, under the placements and marks (a plate). */
+  fills?: readonly PdfShape[];
+  /** Link annotations in page millimetres: a rectangle that opens `url` (http or https only). */
+  links?: readonly PdfLink[];
+}
+
+/** A link annotation: the rectangle (page millimetres, y down) a click opens `url` from. */
+export interface PdfLink {
+  xMm: number;
+  yMm: number;
+  wMm: number;
+  hMm: number;
+  url: string;
 }
 
 /** A named spot colour: a Separation colour space the print shop sees as its own plate. */
@@ -180,6 +199,16 @@ function drawShapes(doc: PDFKit.PDFDocument, shapes: readonly PdfShape[], spots:
   doc.restore();
 }
 
+const LINK_URL_RE = /^https?:\/\/[\x21-\x7e]{1,2000}$/;
+
+function addLinks(doc: PDFKit.PDFDocument, links: readonly PdfLink[]): void {
+  for (const l of links) {
+    if (!LINK_URL_RE.test(l.url)) throw new RangeError('a link opens an http(s) URL of printable ASCII');
+    if (![l.xMm, l.yMm, l.wMm, l.hMm].every(Number.isFinite) || l.wMm <= 0 || l.hMm <= 0) throw new RangeError('a link needs a positive rectangle');
+    doc.link(mmToPt(l.xMm), mmToPt(l.yMm), mmToPt(l.wMm), mmToPt(l.hMm), l.url);
+  }
+}
+
 /** Render pages to a PDF file. */
 export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promise<Uint8Array> {
   if (pages.length === 0) throw new RangeError('a PDF needs at least one page');
@@ -223,6 +252,7 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
     const spots = declareSpotColors(doc, meta.spotColors ?? []);
     for (const page of pages) {
       doc.addPage({ size: [mmToPt(page.widthMm), mmToPt(page.heightMm)], margin: 0 });
+      if (page.fills && page.fills.length > 0) drawShapes(doc, page.fills, spots, mode, overprint);
       for (const pl of page.placements) drawScene(doc, pl.scene, pl.xMm, pl.yMm, mode);
       if (page.marks && page.marks.length > 0) {
         doc.save();
@@ -235,6 +265,7 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
         doc.restore();
       }
       if (page.shapes && page.shapes.length > 0) drawShapes(doc, page.shapes, spots, mode, overprint);
+      if (page.links && page.links.length > 0) addLinks(doc, page.links);
     }
   } finally {
     // Always end the stream so a drawing error cannot leave the promise pending forever.

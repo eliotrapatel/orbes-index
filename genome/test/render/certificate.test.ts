@@ -10,7 +10,10 @@
  * master outlines, clear of the lettering; the sheet's geometry and cut
  * marks; never the ORBES
  * CODE on the card; the claim code never present as text; PROOF until the
- * brand validates the layout; CSV quoting and formula guards.
+ * brand validates the layout; CSV quoting and formula guards. And the
+ * ownership certificate (F-06): one A4 page of a piece's record, its GENOME on
+ * an ivory plate, its live link lettered and as an annotation, never a font,
+ * a name or the word AUTHENTIC, deterministic.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -30,23 +33,30 @@ import {
   CERTIFICATE_SHEET,
   CertificateInputError,
   MAX_CERTIFICATE_ITEMS,
+  OWNERSHIP_CERTIFICATE_COPY,
+  OWNERSHIP_CERTIFICATE_LAYOUT,
   SCRATCH_OFF_SPOT,
   certificateCardSvg,
+  certificateLinkLettering,
   certificatesCsv,
   csvField,
   gridCutMarks,
   layoutCertificateCard,
   layoutCertificateSheet,
+  layoutOwnershipCertificate,
   measureText,
   mmToPt,
   renderCertificateCsv,
   renderCertificatePdf,
+  renderOwnershipCertificatePdf,
   renderPdf,
   sheetFooter,
   textRun,
   toLabelText,
   type CertificateItem,
+  type OwnershipCertificateDocument,
 } from '../../src/server/render/index.js';
+import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
 import { STROKE_RATIO } from '../../src/server/render/label-font.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -488,5 +498,127 @@ describe('certificate specimen (BRAND §7)', () => {
       expect(existsSync(path), `${path} missing: run npx tsx scripts/certificate-specimen.ts`).toBe(true);
       expect(Buffer.from(readFileSync(path)).equals(Buffer.from(f.bytes)), `${f.name} is stale: run npx tsx scripts/certificate-specimen.ts`).toBe(true);
     }
+  });
+});
+
+// ── Ownership certificate (F-06) ───────────────────────────────────────────
+
+const TOKEN = '7Q2MZXKW4R8T1V0G3H5J6K9N2P4S6T8V0W2X4Y6Z8A1B3C5D7E9G';
+
+function ownershipDoc(extra: Partial<OwnershipCertificateDocument> = {}): OwnershipCertificateDocument {
+  return {
+    productId: 'O26-J-00184',
+    category: 'Jewelry',
+    collection: 'ORBIT',
+    model: 'Monolithe',
+    type: 'Ring',
+    variant: 'Size 54',
+    material: '925 Sterling Silver',
+    createdYear: 2026,
+    genome: computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 })),
+    verified: true,
+    since: '2026-10-01',
+    warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
+    issuedAt: new Date('2026-10-03T09:00:00.000Z'),
+    expiresAt: new Date('2027-01-01T09:00:00.000Z'),
+    checkedAt: new Date('2026-10-03T12:34:56.000Z'),
+    link: `https://verify.theorbes.com/verify/c#${TOKEN}`,
+    ...extra,
+  };
+}
+
+describe('ownership certificate (F-06)', () => {
+  it('letters the live link: the address up to its #, then the code in groups of four', () => {
+    expect(certificateLinkLettering(`https://verify.theorbes.com/verify/c#${TOKEN}`)).toEqual({
+      address: 'VERIFY.THEORBES.COM/VERIFY/C#',
+      code: TOKEN.match(/.{4}/g)!.join('-'),
+    });
+    expect(certificateLinkLettering(`http://127.0.0.1:8080/verify/c#${TOKEN}`).address).toBe('127.0.0.1:8080/VERIFY/C#');
+    for (const bad of [`https://x.test/verify/c/${TOKEN}`, `https://x.test/verify/c#${TOKEN.slice(1)}`, `javascript:alert(1)#${TOKEN}`, `https://x.test/verify/c#${TOKEN.toLowerCase()}`]) {
+      expect(() => certificateLinkLettering(bad), bad).toThrow(CertificateInputError);
+    }
+  });
+
+  it('lays out one A4 page: the plate first, the GENOME in its orbit on it, the monogram, the link as an annotation', () => {
+    const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+    const page = layoutOwnershipCertificate(ownershipDoc());
+    expect([page.widthMm, page.heightMm]).toEqual([210, 297]);
+    // The ivory plate under everything, the GENOME orbit centred on it in the ivory colourway's ink.
+    expect(page.fills).toEqual([{ d: 'M22 54L188 54L188 136L22 136Z', color: ORBES_CODE_STYLES.ivory.paper }]);
+    expect(page.placements).toHaveLength(1);
+    const orbit = page.placements[0];
+    expect(orbit.scene.ink).toBe(ORBES_CODE_STYLES.ivory.ink);
+    expect(orbit.scene.paper).toBeNull();
+    expect(orbit.scene.primitives).toEqual(genomeLayout(ownershipDoc().genome!, 'orbit').primitives);
+    expect(orbit.xMm + orbit.scene.widthMm / 2).toBeCloseTo(105, 6);
+    expect(orbit.yMm).toBeGreaterThan(L.id.baseline);
+    expect(orbit.yMm + orbit.scene.heightMm).toBeLessThan(L.fingerprint.baseline - L.fingerprint.cap);
+    // The monogram against the right margin, in ink.
+    expect(page.shapes?.map((x) => x.color)).toEqual(MONOGRAM_PATHS.map(() => '#0A0A0A'));
+    const mono = pathBounds(page.shapes!.map((x) => x.d));
+    expect(mono.x + mono.w).toBeCloseTo(L.right, 3);
+    expect(mono.y).toBeCloseTo(L.monogram.top, 3);
+    expect(mono.y + mono.h).toBeCloseTo(L.monogram.bottom, 3);
+    // Every stroke inside the page's margins.
+    for (const st of page.marks!) {
+      const b = bounds(st.d);
+      expect(b.x0).toBeGreaterThanOrEqual(L.left - 0.5);
+      expect(b.x1).toBeLessThanOrEqual(L.right + 0.5);
+      expect(b.y0).toBeGreaterThan(20);
+      expect(b.y1).toBeLessThan(292);
+    }
+    // The link covers its two lettered lines.
+    expect(page.links).toEqual([{ xMm: L.left, yMm: L.live.addressBaseline - L.live.cap - 1, wMm: L.right - L.left, hMm: L.live.codeBaseline + 1 - (L.live.addressBaseline - L.live.cap - 1), url: ownershipDoc().link }]);
+  });
+
+  it('draws the rows a piece has: no collection or variant row when there is none, no GENOME without one', () => {
+    const full = layoutOwnershipCertificate(ownershipDoc());
+    const bare = layoutOwnershipCertificate(ownershipDoc({ collection: null, variant: null, genome: null, warranty: { status: 'NOT_STARTED' } }));
+    // Two piece rows, the GENOME (and its fingerprint line), and FROM and UNTIL with their values fewer.
+    expect(full.marks!.length - bare.marks!.length).toBe(2 * 2 + 1 + 2 * 2);
+    expect(bare.placements).toEqual([]);
+  });
+
+  it('writes its copy in the lettering\'s capitals, names no owner and never says AUTHENTIC', () => {
+    const all = JSON.stringify(OWNERSHIP_CERTIFICATE_COPY) + OWNERSHIP_CERTIFICATE_COPY.valid('3 OCTOBER 2026 · 12:34 UTC');
+    expect(all).not.toMatch(/AUTHENTIC|GENUINE|REAL\b|STOLEN|COUNTERFEIT|OWNER'S|NAME:/);
+    for (const line of [...OWNERSHIP_CERTIFICATE_COPY.statement, OWNERSHIP_CERTIFICATE_COPY.title, OWNERSHIP_CERTIFICATE_COPY.verifyOnly, OWNERSHIP_CERTIFICATE_COPY.unverified]) {
+      expect(toLabelText(line), line).toBe(line);
+    }
+    expect(OWNERSHIP_CERTIFICATE_COPY.statement[1]).toMatch(/DOES NOT ATTEST THE OBJECT/);
+  });
+
+  it('renders a valid, deterministic PDF: no font, no text, RGB, the link as a URI annotation', async () => {
+    const a = await renderOwnershipCertificatePdf(ownershipDoc());
+    const b = await renderOwnershipCertificatePdf(ownershipDoc());
+    expect(a.contentType).toBe('application/pdf');
+    expect(a.filename).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
+    const pdf = a.body as Uint8Array;
+    expect(Buffer.from(pdf).equals(Buffer.from(b.body as Uint8Array))).toBe(true);
+    const text = latin1(pdf);
+    expect(text.startsWith('%PDF-1.4\n')).toBe(true);
+    expect(text).toMatch(/\/MediaBox \[0 0 595\.275591 841\.889764\]/);
+    expect(text).toMatch(/\/Count 1\b/);
+    expect(pdfObjects(pdf)).not.toMatch(/\/Font|\/Subtype\s*\/Image|\/XObject/);
+    expect(pdfObjects(pdf)).toMatch(/\/Subtype \/Link/);
+    expect(text).toContain(`/URI (https://verify.theorbes.com/verify/c#${TOKEN})`);
+    const content = pdfStreams(pdf);
+    expect(content).not.toMatch(/\bBT\b|\bTj\b|\bTJ\b/);
+    // The plate, the first thing painted, in ivory (#F6F2EA): before the GENOME, the lettering and the monogram.
+    const plate = /22 54 m\n188 54 l\n188 136 l\n22 136 l\nh\n\/DeviceRGB cs\n0\.9647\d* 0\.9490\d* 0\.9176\d* scn\nf\n/.exec(content);
+    expect(plate).not.toBeNull();
+    expect(plate!.index).toBeLessThan(content.search(/\bc\n/));
+    expect(plate!.index).toBeLessThan(content.search(/\bS\n/));
+    // Another moment, another file (its date is the record's).
+    const later = await renderOwnershipCertificatePdf(ownershipDoc({ checkedAt: new Date('2026-10-04T08:00:00.000Z') }));
+    expect(Buffer.from(later.body as Uint8Array).equals(Buffer.from(pdf))).toBe(false);
+    expect(later.filename).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-04.pdf');
+  });
+
+  it('refuses what it cannot draw', async () => {
+    await expect(renderOwnershipCertificatePdf(ownershipDoc({ productId: 'nope' }))).rejects.toThrow(CertificateInputError);
+    await expect(renderOwnershipCertificatePdf(ownershipDoc({ link: 'https://x.test/verify/c' }))).rejects.toThrow(CertificateInputError);
+    await expect(renderOwnershipCertificatePdf(ownershipDoc({ since: 'yesterday' }))).rejects.toThrow(CertificateInputError);
+    await expect(renderPdf([{ widthMm: 10, heightMm: 10, placements: [], links: [{ xMm: 0, yMm: 0, wMm: 1, hMm: 1, url: 'javascript:alert(1)' }] }], { title: 't', creationDate: DATE })).rejects.toThrow(RangeError);
   });
 });

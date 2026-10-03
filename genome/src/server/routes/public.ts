@@ -1,7 +1,8 @@
 /**
  * Public routes (contract §3): health, public keys, categories, Client
- * Services contact, verify, and the report a customer may attach to a scan
- * that was not authentic.
+ * Services contact, verify, the report a customer may attach to a scan
+ * that was not authentic, and the ownership certificate an owner shares
+ * (F-06: its live record and its PDF, by the token of the link).
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, and the console cookie only to tell a staff
@@ -15,6 +16,11 @@
  * /reports needs no session either, but it writes: a cross-site form must
  * not reach it (same-origin check, as for registration and login), and it
  * draws on the `verify` budget, like the scan it follows.
+ *
+ * /certificates/lookup and /certificates/pdf read only. The token travels in
+ * the body: the page takes it from the link's fragment (`/verify/c#…`), which
+ * no request line or proxy log ever holds. One 404 for an unknown, malformed
+ * or withdrawn link; the `verify` budget, like a scan.
  */
 import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';
@@ -23,10 +29,11 @@ import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { parse, reportBody, verifyBody } from '../http/schemas.js';
+import { certificateTokenBody, parse, reportBody, verifyBody } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
+import { safeFilename } from './admin/codes.js';
 
 export interface RouteDeps {
   ctx: AppContext;
@@ -132,5 +139,22 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     await ctx.services.reports.submit({ scanId: input.scanId, channel: input.channel, place: input.where ?? null, note: input.note ?? null }, actor);
     reply.code(201);
     return { ok: true };
+  });
+
+  // The ownership certificate (F-06, §8.6): VALID with the record read now, or NO_LONGER_VALID; never a name or an email.
+  app.post('/api/v1/certificates/lookup', { config: { rateGroup: 'verify' } }, async (request) => {
+    const { token } = parse(certificateTokenBody, request.body);
+    return ctx.services.ownershipCertificates.lookup(token);
+  });
+
+  // Its PDF, an attachment never stored: only while VALID (409 CERTIFICATE_NO_LONGER_VALID otherwise).
+  app.post('/api/v1/certificates/pdf', { config: { rateGroup: 'verify' } }, async (request, reply) => {
+    const { token } = parse(certificateTokenBody, request.body);
+    const file = await ctx.services.ownershipCertificates.renderPdf(token);
+    reply.header('content-type', file.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(file.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    const body = file.body as Uint8Array;
+    return reply.send(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
   });
 };

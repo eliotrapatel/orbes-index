@@ -143,7 +143,7 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 
 | Group | Routes | Budget per minute (variable, default) |
 |---|---|---|
-| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
+| `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (the ownership certificate a link opens, §8.6), `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
 | `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/admin/auth/login`, `POST /api/admin/auth/password`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
 | `api` | Every other `/api/v1/…` route, and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
@@ -216,7 +216,7 @@ Authentication and authorisation:
 | `PASSWORD_CHANGE_REQUIRED` | 403 | The admin signed in with a temporary password and must choose its own first (§2.4, §12.5). |
 | `CURRENT_PASSWORD_INVALID` | 400 | (Password change, §10.7 and §12.5) the current password is wrong, or, for a customer, the account is throttled (§10.2). A 400, never a 401: the caller is signed in, and the web apps end the session on any 401. It counts as a failed sign-in: in the customer's login throttle (§10.2), in an admin's lockout (§12.1). |
 | `FORBIDDEN` | 403 | Role too low; or a non-owner asking for a service history (also for an unknown product id, so ids cannot be enumerated); or an OPERATOR revoking or retiring a product; or an account that is not active. |
-| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a password change, a transfer, a registration, a transfer's acceptance, a LOST / STOLEN declaration or the withdrawal of a loss begun just before the lock (§10.7, §11.1–§11.3, §11.5, §11.6). 429: admin locked for 15 minutes after 10 consecutive failures. |
+| `ACCOUNT_LOCKED` | 403 / 429 | 403: customer account LOCKED by ORBES Client Services (§16.12): after a correct password (§10.2), a correct recovery code (§10.8), or a password change, a transfer, a registration, a transfer's acceptance, a LOST / STOLEN declaration, the withdrawal of a loss or an ownership certificate's creation begun just before the lock (§10.7, §11.1–§11.3, §11.5–§11.7). 429: admin locked for 15 minutes after 10 consecutive failures. |
 | `RECOVERY_CODE_INVALID` | 400 | (§10.8) Unknown email, wrong, malformed, expired, used or replaced recovery code, or a code refused after 5 wrong guesses within the hour. One answer for all. |
 | `ACCOUNT_NOT_FOUND` | 404 | (§16.10–16.13) No customer account with this id. |
 | `ACCOUNT_NOT_ACTIVE` | 409 | (§16.10, §16.12) A recovery code is issued, and a lock applied, only for an ACTIVE account. |
@@ -273,6 +273,10 @@ Ownership:
 | `NO_PENDING_TRANSFER` | 404 | Nothing to cancel. |
 | `NO_INCIDENT` | 409 | (§11.6) The piece is not reported lost: there is nothing to withdraw. |
 | `INCIDENT_NOT_RESOLVABLE` | 409 | (§11.6) A STOLEN, or a LOST that ORBES Client Services recorded: only Client Services withdraw it, once they have checked the piece. |
+| `CERTIFICATE_NOT_FOUND` | 404 | (§8.6, §11.7) The certificate link is unknown, malformed or withdrawn by its owner: one answer for all, so a withdrawn link says no more than one that never existed (*This certificate link is not valid: it may be incomplete, or withdrawn by its owner. Ask the owner of the piece for a new link.*). For `DELETE /api/v1/ownership/certificates/:id`: no open link of this account has this id. |
+| `CERTIFICATE_NO_LONGER_VALID` | 409 | (§8.6) The PDF of a certificate that is no longer valid: expired, its piece transferred, or reported, revoked, flagged or retired since it was created. |
+| `CERTIFICATE_NOT_ALLOWED` | 409 | (§11.7) A certificate of a piece that is LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED (the message names no status). |
+| `CERTIFICATE_LIMIT` | 409 | (§11.7) The piece already has 10 certificate links in use (valid, neither expired nor withdrawn). |
 | `NO_OWNER` | 409 | (Admin) the product has no owner to confirm. |
 | `ALREADY_VERIFIED` | 409 | (Admin) the ownership is already verified. |
 
@@ -376,6 +380,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
+| POST | `/api/v1/certificates/lookup` | — | — | verify | 8.6 |
+| POST | `/api/v1/certificates/pdf` | — | — | verify | 8.6 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
 | POST | `/api/v1/account/logout` | Account (optional) | yes | api | 10.3 |
@@ -391,6 +397,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/ownership/transfers/cancel` | Account (sender) | yes | api | 11.4 |
 | POST | `/api/v1/ownership/incidents` | Account (current owner) | yes | api | 11.5 |
 | POST | `/api/v1/ownership/incidents/resolve` | Account (current owner) | yes | api | 11.6 |
+| POST | `/api/v1/ownership/certificates` | Account (current owner) | yes | api | 11.7 |
+| GET | `/api/v1/ownership/certificates` | Account | — | api | 11.7 |
+| DELETE | `/api/v1/ownership/certificates/:id` | Account (the link's owner) | yes | api | 11.7 |
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
 | POST | `/api/admin/auth/logout` | RETAIL (optional) | yes | admin | 12.2 |
 | GET | `/api/admin/auth/me` | RETAIL | — | admin | 12.3 |
@@ -466,7 +475,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` of `GET /api/v1/account/products`, the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -581,6 +590,58 @@ Otherwise `409 REPORT_NOT_ALLOWED` (unknown scans, authentic results and old sca
 The place and the note are the customer's own words: **personal data**. They are stored with the scan (`scan_reports`, [DATABASE §5.22](DATABASE.md#522-scan_reports)), shown only to an admin session, never copied into the audit log, and deleted with the scan by the scan-history purge ([DATABASE §10](DATABASE.md#10-housekeeping-and-retention), SECURITY-MODEL §3.6). The audit entry `scan.report` names the scan alone (`targetType` `scan`, `targetId` the scan id, empty details); its actor is the signed-in account, else `system` `public` with the IP pseudonym.
 
 **What the verification app does with it.** Under the contact of ORBES Client Services (and under the certificate-card section when there is one), every result that was not authentic asks **WHERE DID YOU SEE OR BUY THIS PIECE?**, optional, unless it is a staff scan (`staffScan`, §9.2), which takes no report: one sentence, then the four answers BOUTIQUE, ONLINE, PRIVATE SALE and OTHER (pressed like the sign-in switch); once one is chosen, PLACE (OPTIONAL), NOTE (OPTIONAL, its hint asking the customer to leave out their name and contact details) and SEND ANSWER, a text link (the result's hairline button stays SCAN AGAIN). Sent, the section reads THANK YOU and the reference the answer is kept with; a refusal is shown as the server wrote it, and nothing typed is lost (`genome/src/web/verify/views/report.ts`).
+
+
+### 8.6 `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (extension of the contract)
+
+The **ownership certificate** (F-06): what a buyer at a distance, a resale platform or an insurer reads when the owner of a piece shares a link created in MY PIECES (§11.7). No session, no CSRF token (they only read); rate group `verify`, like a scan. Implementation: `services/ownership-certificates.ts`, `render/certificate.ts` (`renderOwnershipCertificatePdf`).
+
+**The link** is `{PUBLIC_ORIGIN}/verify/c#{token}`: the token rides in the **fragment**, which a browser never sends, so it is never in a request line nor in the reverse proxy's access log (a path such as `/verify/c/{token}` would be written there). The verify app takes it from `location.hash` and sends it in the body:
+
+```json
+{ "token": "7Q2MZXKW4R8T1V0G3H5J6K9N2P4S6T8V0W2X4Y6Z8A1B3C5D7E9G" }
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `token` | string | 1–128 characters. The 32 random bytes of the link, written as 52 Crockford base32 characters; read in any spelling (lower case, hyphens and spaces ignored, `I`/`L` as `1`, `O` as `0`), as the PDF letters it in groups of four. A string that cannot be a token answers like an unknown one (404). |
+
+**`lookup`, 200**, computed **live** at each request:
+
+```json
+{
+  "status": "VALID",
+  "checkedAt": "2026-10-03T12:34:56.000Z",
+  "certificate": { "issuedAt": "2026-10-03T09:00:00.000Z", "expiresAt": "2027-01-01T09:00:00.000Z" },
+  "piece": {
+    "productId": "O26-J-00184",
+    "category": { "code": "J", "name": "Jewelry" },
+    "collection": "ORBIT",
+    "model": "MONOLITHE",
+    "type": "RING",
+    "variant": null,
+    "material": "925 STERLING SILVER",
+    "createdYear": 2026,
+    "genome": { "id": "O26-J-00184", "version": 1, "fingerprint": "G1-E1DC-BE52", "glyphs": [0, 11, 10, 13, 15, 0, 0, 13], "pattern": "…" }
+  },
+  "ownership": { "verified": true, "since": "2026-10-01" },
+  "warranty": { "status": "ACTIVE", "startDate": "2026-09-20", "endDate": "2028-09-20" },
+  "incidentReported": false
+}
+```
+
+- **`VALID`**: the piece (the fields of a result's product lines and its GENOME), the ownership (`verified`: by its claim code or by ORBES Client Services; `since`: the **day** it began, UTC), the warranty (as in §10.5), and `incidentReported: false`, no loss or theft reported. `checkedAt` is the moment of the reading.
+- **`NO_LONGER_VALID`** (`{ "status": "NO_LONGER_VALID", "checkedAt": … }`, nothing else): the link has expired; or the piece **changed hands** (the ownership period the certificate was created in has ended: a transfer, or a change by ORBES Client Services); or the piece has been **LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED since the certificate was created** (read from the status history: a piece found again, or reinstated, does not bring an earlier certificate back; its owner creates a new one). RETIRED, the terminal status, ends a certificate too.
+- **`404 CERTIFICATE_NOT_FOUND`** for an unknown token, a malformed one and a link **withdrawn** by its owner: one code and one message, so a withdrawn link says no more than one that never existed.
+- **Never** a name, an email, an account, the ownership period's or the certificate's own id, nor the word AUTHENTIC: a certificate attests what the registry records, not the object it is shown with (BRAND §4.6). A scan of the piece's ORBES CODE, and the transfer bound to it (§11.3), remain what checks the object itself.
+
+**`pdf`, 200**: the certificate as one A4 page, `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="ORBES-ownership-certificate-{productId}-{YYYY-MM-DD}.pdf"` (the day of the reading), `Cache-Control: no-store`; never stored. Pure vector, no font: the lettering of the certificate card (stroked capitals), the GENOME in its orbit on an ivory plate, the monogram, the rows of the record (THE PIECE, THE RECORD), THIS CERTIFICATE (`VALID ON {day} · {hh:mm} UTC`, issued, valid until), what it does not attest, and **CHECK IT LIVE**: its link lettered (the address, then the token in groups of four) and as a link annotation, so whoever holds the page, printed or not, can check that it still holds. Deterministic for one record and one moment. `409 CERTIFICATE_NO_LONGER_VALID` when the certificate no longer holds (no PDF of it then); the same 404.
+
+Lookups are not audited (they would flood the log); creation and withdrawal are (§11.7).
+
+Errors: `400 VALIDATION_FAILED` (no `token`, not a string, over 128 characters, unknown field), `404 CERTIFICATE_NOT_FOUND`, `409 CERTIFICATE_NO_LONGER_VALID` (`pdf`), `429 RATE_LIMITED`.
+
+**In the verify app:** `/verify/c#…` (§18) shows OWNERSHIP CERTIFICATE, its state (VALID, NO LONGER VALID, NOT FOUND) and one sentence; when valid, the piece in its écrin (the GENOME plate of MY PIECES), its lines, THE RECORD (OWNERSHIP, SINCE, WARRANTY, FROM, UNTIL, LOSS OR THEFT · NONE REPORTED), THIS CERTIFICATE (CHECKED, in the reader's time; ISSUED; VALID UNTIL), *A certificate names no owner…*, then DOWNLOAD PDF (the page's hairline button) and SCAN ORBES CODE (BRAND §5).
 
 ---
 
@@ -1062,7 +1123,7 @@ The caller's current products, newest acquisition first.
 
 Errors: `401 UNAUTHORIZED`.
 
-In the verify app, this list is **MY PIECES** (`/verify/pieces`, F-01; BRAND-DESIGN-SYSTEM §5): each piece on its ivory plate with its GENOME in orbit (drawn from `glyphs`, checked against `fingerprint`; the glyph ids are `pattern` split at `·`), the product lines, then the tabs OWNERSHIP (since when, how it was acquired, whether the ownership is verified, a pending transfer, which CANCEL TRANSFER withdraws, §11.4, and REPORT LOST / STOLEN or PIECE FOUND, §11.5–§11.6), WARRANTY and SERVICE (§10.6). Signed out, the page offers the sign-in first: an owner whose piece is lost or stolen reaches it without scanning the piece. The landing links to it, and so does the signed-in account line of a result's OWNERSHIP tab.
+In the verify app, this list is **MY PIECES** (`/verify/pieces`, F-01; BRAND-DESIGN-SYSTEM §5): each piece on its ivory plate with its GENOME in orbit (drawn from `glyphs`, checked against `fingerprint`; the glyph ids are `pattern` split at `·`), the product lines, then the tabs OWNERSHIP (since when, how it was acquired, whether the ownership is verified, a pending transfer, which CANCEL TRANSFER withdraws, §11.4, REPORT LOST / STOLEN or PIECE FOUND, §11.5–§11.6, and OWNERSHIP CERTIFICATE, the links of §11.7 with the open ones listed, F-06), WARRANTY and SERVICE (§10.6). The page reads the open certificate links with the pieces (`GET /api/v1/ownership/certificates`); when they cannot be read, the pieces still show and each says so. Signed out, the page offers the sign-in first: an owner whose piece is lost or stolen reaches it without scanning the piece. The landing links to it, and so does the signed-in account line of a result's OWNERSHIP tab.
 
 ### 10.6 `GET /api/v1/products/:productId/service-history`
 
@@ -1258,6 +1319,43 @@ The current owner withdraws a loss they reported themselves: the piece has been 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `409 NO_INCIDENT`, `409 INCIDENT_NOT_RESOLVABLE`.
 
 In the verify app: **PIECE FOUND** in MY PIECES (§10.5), under a loss the owner reported, confirmed (CONFIRM). Under a theft, or a loss Client Services recorded, the page offers their contact instead (an email titled `ORBES — {product id} — REPORTED STOLEN` that names the piece, the phone, the hours).
+
+### 11.7 Ownership certificates (extension of the contract)
+
+The current owner creates, lists and withdraws the links of §8.6 (F-06). In the verify app: OWNERSHIP CERTIFICATE in the OWNERSHIP tab of each piece of MY PIECES (§10.5) that is not reported lost or stolen (BRAND §4.4, §5).
+
+**`POST /api/v1/ownership/certificates`**: body `{ "productId": string, "validDays"?: integer }` (canonical id or uuid; `validDays` 1 to 90, 30 when omitted; MY PIECES offers 7, 30 or 90 days).
+
+- **Only the current owner**, checked first: another account's piece and an unknown id answer the same `403 NOT_OWNER`.
+- Refused for a piece LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED (`409 CERTIFICATE_NOT_ALLOWED`), past **10 links in use** for the piece (`409 CERTIFICATE_LIMIT`: valid, neither expired nor withdrawn), and for an account ORBES Client Services locked while the request was on its way (`403 ACCOUNT_LOCKED`: the account row is read under its share lock before the piece's row lock, as for a transfer).
+- 32 random bytes make the token; only **SHA-256 of those bytes** is stored (`ownership_certificates.token_hash`, DATABASE §5.26), bound to the piece and to the current ownership period. The link is answered **once**:
+
+**201**:
+
+```json
+{
+  "id": "0b6f7c1e-2f43-4d55-9b1a-6a0e4c7f2d10",
+  "productId": "O26-J-00184",
+  "token": "7Q2MZXKW4R8T1V0G3H5J6K9N2P4S6T8V0W2X4Y6Z8A1B3C5D7E9G",
+  "url": "https://verify.theorbes.com/verify/c#7Q2MZXKW4R8T1V0G3H5J6K9N2P4S6T8V0W2X4Y6Z8A1B3C5D7E9G",
+  "createdAt": "2026-10-03T09:00:00.000Z",
+  "expiresAt": "2027-01-01T09:00:00.000Z"
+}
+```
+
+Audited `ownership.certificate.create` (`targetType` `product`, the product id; `details: { certificateId, expiresAt, validDays }`; never the token).
+
+**`GET /api/v1/ownership/certificates`**: the account's links still open (not withdrawn, not expired) for the pieces it owns now, newest first; never a token.
+
+```json
+{ "certificates": [ { "id": "0b6f7c1e-…", "productId": "O26-J-00184", "createdAt": "2026-10-03T09:00:00.000Z", "expiresAt": "2027-01-01T09:00:00.000Z", "valid": true } ] }
+```
+
+`valid` is `false` once the piece has been reported lost or stolen (or revoked, flagged, retired) since the link was created: the link then reads NO_LONGER_VALID, and MY PIECES shows it so, with WITHDRAW.
+
+**`DELETE /api/v1/ownership/certificates/:id`** (`:id` a uuid): the owner withdraws a link of one of the account's ownership periods. **200** `{ "ok": true }`; from then on the link answers `404 CERTIFICATE_NOT_FOUND` (§8.6). Another account's link, an unknown id and a link already withdrawn answer the same `404 CERTIFICATE_NOT_FOUND`. Audited `ownership.certificate.revoke` (`details: { certificateId }`).
+
+Errors: `400 VALIDATION_FAILED` (unknown field, `validDays` out of 1–90 or not an integer, malformed `productId` or `:id`), `401 UNAUTHORIZED`, `403 NOT_OWNER`, `403 ACCOUNT_LOCKED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 CERTIFICATE_NOT_FOUND`, `409 CERTIFICATE_NOT_ALLOWED`, `409 CERTIFICATE_LIMIT`.
 
 ---
 
@@ -2647,7 +2745,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | Path | Serves | Caching |
 |---|---|---|
 | `/` | `302` redirect to `/verify` | |
-| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan) and `/verify/pieces` (MY PIECES, §10.5); any other path shows the landing, its address put back to `/verify` | `no-cache` |
+| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5) and `/verify/c#{token}` (an ownership certificate, §8.6: the token in the fragment, which the server never receives); any other path shows the landing, its address put back to `/verify` | `no-cache` |
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/assets/*` | Bundles and stylesheets | Content-hashed names: `public, max-age=31536000, immutable`; others `no-cache`. Dotfiles are never served. |
 

@@ -182,3 +182,58 @@ export interface IncidentResolution {
   type: 'LOST';
   resolvedAt: string;
 }
+
+/** POST /api/v1/ownership/certificates (F-06): the link to a certificate of the piece, shown once. */
+export interface CertificateOffer {
+  id: string;
+  productId: string;
+  /** The link's token: 52 Crockford base32 characters, the fragment of `url`. */
+  token: string;
+  /** `{origin}/verify/c#{token}`. */
+  url: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** One open link of GET /api/v1/ownership/certificates: not withdrawn, not expired, of a piece the account owns. */
+export interface OwnerCertificate {
+  id: string;
+  productId: string;
+  createdAt: string;
+  expiresAt: string;
+  /** False once the piece has been reported lost or stolen since the link was created: it shows NO LONGER VALID. */
+  valid: boolean;
+}
+
+/** The piece as an ownership certificate shows it: never a name, an email or an account. */
+export interface CertificatePiece {
+  productId: string;
+  category: { code: string; name: string };
+  collection: string | null;
+  model: string;
+  type: string;
+  variant: string | null;
+  material: string;
+  createdYear: number;
+  genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
+}
+
+/** POST /api/v1/certificates/lookup (F-06): the record read now, or NO_LONGER_VALID; an unknown or withdrawn link is a 404. */
+export type CertificateLookup =
+  | {
+      status: 'VALID';
+      checkedAt: string;
+      certificate: { issuedAt: string; expiresAt: string };
+      piece: CertificatePiece;
+      /** `since`: the day the ownership began, YYYY-MM-DD. */
+      ownership: { verified: boolean; since: string };
+      warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
+      incidentReported: false;
+    }
+  | { status: 'NO_LONGER_VALID'; checkedAt: string };
+
+/** A file the server sends as an attachment (the certificate's PDF). */
+export interface DownloadedFile {
+  blob: Blob;
+  filename: string;
+}

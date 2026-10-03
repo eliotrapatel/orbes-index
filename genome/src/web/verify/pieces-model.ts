@@ -50,6 +50,22 @@ function genomeLabel(version: number): string {
   return `GENOME-${String(version).padStart(2, '0')}`;
 }
 
+/**
+ * The GENOME of a piece as the account and certificate routes send it (an integer version, the glyph ids as one
+ * pattern), for the plate; undefined when it is absent or the app cannot draw it faithfully.
+ */
+export function pieceGenomeModel(g: OwnedPiece['genome'] | undefined): GenomeModel | undefined {
+  if (!g || !validGlyphs(g.glyphs) || !Number.isInteger(g.version) || g.version <= 0) return undefined;
+  return {
+    id: g.id,
+    version: genomeLabel(g.version),
+    versionNumber: g.version,
+    fingerprint: g.fingerprint,
+    glyphs: [...g.glyphs],
+    ids: typeof g.pattern === 'string' && g.pattern ? g.pattern.split('·') : [],
+  };
+}
+
 export function pieceModel(p: OwnedPiece): PieceModel {
   const productId = typeof p.productId === 'string' && PRODUCT_ID.test(p.productId) ? p.productId : '';
   const incident: IncidentMode =
@@ -88,17 +104,8 @@ export function pieceModel(p: OwnedPiece): PieceModel {
     transferPending,
     incident,
   };
-  const g = p.genome;
-  if (g && validGlyphs(g.glyphs) && Number.isInteger(g.version) && g.version > 0) {
-    model.genome = {
-      id: g.id,
-      version: genomeLabel(g.version),
-      versionNumber: g.version,
-      fingerprint: g.fingerprint,
-      glyphs: [...g.glyphs],
-      ids: typeof g.pattern === 'string' && g.pattern ? g.pattern.split('·') : [],
-    };
-  }
+  const genome = pieceGenomeModel(p.genome);
+  if (genome) model.genome = genome;
   const warranty = warrantyModel(p.warranty);
   if (warranty) model.warranty = warranty;
   return model;

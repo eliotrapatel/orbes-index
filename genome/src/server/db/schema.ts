@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0005, 0010) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0011, 0013) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -327,6 +327,21 @@ export interface OwnershipTransfersTable {
   completed_at: TimestampNullable;
 }
 
+/**
+ * A shareable ownership certificate (migration 0013, F-06): a link to the live record of a piece, created by its
+ * current owner. Only SHA-256 of the link's 32-byte token is stored. Bound to the piece and to the ownership period
+ * it was created in; at most 90 days; withdrawn by its owner (`revoked_at`); never deleted.
+ */
+export interface OwnershipCertificatesTable {
+  id: Generated<string>;
+  token_hash: Uint8Array;              // sha256 of the 32 token bytes, 32 bytes, unique
+  product_id: string;
+  ownership_id: string;                // ownership.id of the period the certificate was created in
+  created_at: TimestampDefault;
+  expires_at: Timestamp;               // ≤ created_at + 90 days
+  revoked_at: TimestampNullable;
+}
+
 /** Points of sale (migration 0008), chosen from a list when a warranty starts; made inactive, never deleted. */
 export interface RetailersTable {
   id: Generated<string>;
@@ -534,6 +549,7 @@ export interface Database {
   sessions: SessionsTable;
   ownership: OwnershipTable;
   ownership_transfers: OwnershipTransfersTable;
+  ownership_certificates: OwnershipCertificatesTable;
   retailers: RetailersTable;
   warranties: WarrantiesTable;
   service_records: ServiceRecordsTable;
@@ -583,6 +599,8 @@ export type OwnershipRow = Selectable<OwnershipTable>;
 export type NewOwnership = Insertable<OwnershipTable>;
 export type OwnershipTransferRow = Selectable<OwnershipTransfersTable>;
 export type NewOwnershipTransfer = Insertable<OwnershipTransfersTable>;
+export type OwnershipCertificateRow = Selectable<OwnershipCertificatesTable>;
+export type NewOwnershipCertificate = Insertable<OwnershipCertificatesTable>;
 export type RetailerRow = Selectable<RetailersTable>;
 export type NewRetailer = Insertable<RetailersTable>;
 export type RetailerUpdate = Updateable<RetailersTable>;

@@ -4,6 +4,7 @@
  *   landing ──SCAN──▶ scanner ──code read──▶ VERIFYING… ──▶ result
  *      ├──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
  *      └──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
+ *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
  * The page only reads the code; the server verifies it. Nothing secret lives
@@ -12,14 +13,17 @@
  * Paths (a small router; static.ts serves the shell at /verify and /verify/*):
  *   /verify          the landing, and every screen of a scan (one URL);
  *   /verify/pieces   MY PIECES, which a link, a reload or a bookmark opens directly;
+ *   /verify/c#…      the ownership certificate of a link an owner shared: its token
+ *                    is the fragment, which no request line or proxy log holds;
  *   anything else    the landing, its address put back to /verify.
  *
  * History: the landing screen is the base entry and every other screen shares
- * one entry above it, MY PIECES included (with its own URL), so the back
- * button (or CLOSE) always returns to the landing screen and releases the
- * camera. Opened directly, MY PIECES puts a landing entry under itself, so
- * back still leads to the landing rather than out of the app; a reload keeps
- * the entry it is on.
+ * one entry above it, MY PIECES and the certificate included (with their own
+ * URL), so the back button (or CLOSE) always returns to the landing screen and
+ * releases the camera. Opened directly, MY PIECES or a certificate puts a
+ * landing entry under itself, so back still leads to the landing rather than
+ * out of the app; a reload keeps the entry it is on. A certificate's fragment
+ * edited in place reads the certificate again.
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
@@ -30,8 +34,10 @@ import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
 import type { ClientServices, VerifyInput } from './types.js';
+import { certificateTokenOf } from './certificate-model.js';
 import { resultViewModel } from './view-model.js';
-import { LANDING_PATH, PIECES_PATH } from './views/common.js';
+import { certificateView } from './views/certificate.js';
+import { CERTIFICATE_PATH, LANDING_PATH, PIECES_PATH } from './views/common.js';
 import { landingView } from './views/landing.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
@@ -39,14 +45,16 @@ import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate';
 
-/** What a history entry of the app holds: the landing, a screen of a scan, or MY PIECES. */
-type Entry = 'landing' | 'app' | 'pieces';
+/** What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, or a certificate. */
+type Entry = 'landing' | 'app' | 'pieces' | 'certificate';
 
-/** The route of a path under /verify: MY PIECES, or the landing (also for a path the app does not know). */
-function routeOf(pathname: string): 'landing' | 'pieces' {
-  return pathname.replace(/\/+$/, '') === PIECES_PATH ? 'pieces' : 'landing';
+/** The route of a path under /verify: MY PIECES, a certificate, or the landing (also for a path the app does not know). */
+function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' {
+  const path = pathname.replace(/\/+$/, '');
+  if (path === PIECES_PATH) return 'pieces';
+  return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
@@ -87,6 +95,8 @@ class App {
   /** The default zoom level of the open camera (≈ 2×), null when it has no useful zoom. */
   private zoomLevel: number | null = null;
   private resumeScan = false;
+  /** The token of the certificate on show (its fragment), to tell an edited fragment from the same one. */
+  private certificateToken: string | null = null;
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -95,22 +105,39 @@ class App {
       if (file) void this.verifyPhoto(file);
     });
     window.addEventListener('popstate', (ev) => {
-      // Back or forward onto MY PIECES shows it again; onto the landing, or onto a scan's entry (its screen is gone), the landing.
-      if (entryOf(ev.state) === 'pieces' || routeOf(location.pathname) === 'pieces') {
+      // Back or forward onto MY PIECES or a certificate shows it again; onto the landing, or onto a scan's entry (its
+      // screen is gone), the landing.
+      const entry = entryOf(ev.state);
+      const route = routeOf(location.pathname);
+      if (entry === 'pieces' || route === 'pieces') {
         if (this.screen !== 'pieces') void this.showPieces();
-      } else if (this.screen !== 'landing') this.showLanding();
+      } else if (entry === 'certificate' || route === 'certificate') this.onCertificateAddress();
+      else if (this.screen !== 'landing') this.showLanding();
+    });
+    // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
+    window.addEventListener('hashchange', () => {
+      if (routeOf(location.pathname) === 'certificate') this.onCertificateAddress();
     });
     document.addEventListener('visibilitychange', () => this.onVisibility());
     window.addEventListener('pagehide', () => this.stopCamera());
 
     document.body.prepend(viewportCorners());
-    if (routeOf(location.pathname) === 'pieces') {
+    const route = routeOf(location.pathname);
+    if (route === 'pieces') {
       // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES.
       if (entryOf(history.state) !== 'pieces') {
         history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
         history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
       }
       void this.showPieces(false);
+    } else if (route === 'certificate') {
+      // The same for a certificate, its fragment kept in its own address (the landing's has none).
+      if (entryOf(history.state) !== 'certificate') {
+        const address = `${CERTIFICATE_PATH}${location.hash}`;
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'certificate' }, '', address);
+      }
+      void this.showCertificate(false);
     } else {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       this.showLanding(false);
@@ -124,10 +151,13 @@ class App {
 
   // ── Screens ──────────────────────────────────────────────────────────────
 
-  /** Leave the landing entry (once) so back returns to it; from MY PIECES, the scan takes MY PIECES' entry, at /verify. */
+  /**
+   * Leave the landing entry (once) so back returns to it; from MY PIECES or a certificate, the scan takes their entry,
+   * at /verify (a certificate's token leaves the address bar with it).
+   */
   private enter(): void {
     const entry = entryOf(history.state);
-    if (entry === 'pieces') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
+    if (entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
     else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
   }
 
@@ -173,6 +203,28 @@ class App {
     else view.dispose();
   }
 
+  /** An ownership certificate (F-06), from the token of the address's fragment: no session needed. */
+  private async showCertificate(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.certificateToken = certificateTokenOf(location.hash);
+    const view = certificateView({
+      api: this.api,
+      token: this.certificateToken,
+      onScan: () => void this.startScan(),
+      offsetMinutes: -new Date().getTimezoneOffset(),
+    });
+    if (await this.swap(view.root, 'certificate', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** The address names a certificate (back, forward, an edited fragment): show it, unless it is the one on show. */
+  private onCertificateAddress(): void {
+    if (this.screen === 'certificate' && certificateTokenOf(location.hash) === this.certificateToken) return;
+    if (entryOf(history.state) !== 'certificate') history.replaceState({ screen: 'certificate' }, '', `${CERTIFICATE_PATH}${location.hash}`);
+    void this.showCertificate();
+  }
+
   private showProblem(kind: ProblemKind): void {
     this.generation++;
     this.stopCamera();
@@ -190,7 +242,7 @@ class App {
 
   private goHome(): void {
     const entry = entryOf(history.state);
-    if (entry === 'app' || entry === 'pieces') history.back();
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.back();
     else this.showLanding();
   }
 

@@ -95,6 +95,15 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     expect(reg.statusCode, reg.body).toBe(201);
     expect((safeJson(await owner.post('/api/v1/verify', { code: p.code.data })) as any).state).toBe('AUTHENTIC_OWNERSHIP_VERIFIED');
 
+    // ── Ownership certificate (F-06, the table of 0013 on pg): the owner's link reads VALID to anyone, its PDF renders ──
+    const certificate = safeJson(await owner.post('/api/v1/ownership/certificates', { productId: p.product.productId, validDays: 90 })) as any;
+    expect(certificate.url).toBe(`${ORIGIN}/verify/c#${certificate.token}`);
+    const visitor = client();
+    expect(safeJson(await visitor.post('/api/v1/certificates/lookup', { token: certificate.token }))).toMatchObject({ status: 'VALID', ownership: { verified: true }, incidentReported: false });
+    const certificatePdf = await visitor.post('/api/v1/certificates/pdf', { token: certificate.token });
+    expect(certificatePdf.statusCode, certificatePdf.body.slice(0, 200)).toBe(200);
+    expect(certificatePdf.headers['content-type']).toBe('application/pdf');
+
     // ── Transfer to a second customer ──
     const offer = safeJson(await owner.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as any;
     const buyer = client();
@@ -107,6 +116,10 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const received = await buyer.post('/api/v1/ownership/transfers/accept', { transferCode: offer.transferCode, productId: p.product.productId, transferToken: toReceive.transfer.token });
     expect(received.statusCode, received.body).toBe(200);
     expect((safeJson(await buyer.get('/api/v1/account/products')) as any).products).toHaveLength(1);
+    // The seller's certificate ended with the sale; the buyer makes their own.
+    expect((safeJson(await visitor.post('/api/v1/certificates/lookup', { token: certificate.token })) as any).status).toBe('NO_LONGER_VALID');
+    const buyerCertificate = safeJson(await buyer.post('/api/v1/ownership/certificates', { productId: p.product.productId })) as any;
+    expect((safeJson(await visitor.post('/api/v1/certificates/lookup', { token: buyerCertificate.token })) as any).status).toBe('VALID');
 
     // ── MY PIECES (F-01): the new owner reports it lost, then finds it again (the status history read on pg) ──
     expect((await buyer.post('/api/v1/ownership/incidents', { productId: p.product.productId, type: 'LOST' })).statusCode).toBe(201);
@@ -114,6 +127,11 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const found = await buyer.post('/api/v1/ownership/incidents/resolve', { productId: p.product.productId });
     expect(found.statusCode, found.body).toBe(200);
     expect((safeJson(await buyer.get('/api/v1/account/products')) as any).products[0]).toMatchObject({ incident: null, incidentResolvable: false });
+    // A certificate made before the loss stays ended once the piece is found (the status history read on pg), until withdrawn.
+    expect((safeJson(await visitor.post('/api/v1/certificates/lookup', { token: buyerCertificate.token })) as any).status).toBe('NO_LONGER_VALID');
+    expect((safeJson(await buyer.get('/api/v1/ownership/certificates')) as any).certificates).toMatchObject([{ id: buyerCertificate.id, valid: false }]);
+    expect((await buyer.request('DELETE', `/api/v1/ownership/certificates/${buyerCertificate.id}`)).statusCode).toBe(200);
+    expect((await visitor.post('/api/v1/certificates/lookup', { token: buyerCertificate.token })).statusCode).toBe(404);
 
     // ── Concurrency: a burst of verifications on the pool ──
     const burst = await Promise.all(Array.from({ length: 24 }, () => client().post('/api/v1/verify', { code: p.code.data })));

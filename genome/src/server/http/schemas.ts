@@ -25,6 +25,7 @@ import {
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
@@ -253,6 +254,28 @@ export const assistedAcceptTransferBody = body({ transferCode, productId: produc
 export const incidentBody = body({ productId: productRef, type: z.enum(['LOST', 'STOLEN']) });
 
 export const productParams = z.object({ productId: productRef });
+
+// ── Ownership certificates (F-06) ──────────────────────────────────────────
+
+/** POST /api/v1/ownership/certificates (§11.7): the piece, and how many days its link lives (1 to 90; 30 when omitted). */
+export const createCertificateBody = body({
+  productId: productRef,
+  validDays: z
+    .number()
+    .int('Must be a whole number of days')
+    .min(CERTIFICATE_MIN_DAYS, `At least ${CERTIFICATE_MIN_DAYS} day`)
+    .max(CERTIFICATE_MAX_DAYS, `At most ${CERTIFICATE_MAX_DAYS} days`)
+    .optional(),
+});
+
+/** DELETE /api/v1/ownership/certificates/:id (§11.7). */
+export const certificateParams = z.object({ id: uuid });
+
+/**
+ * POST /api/v1/certificates/lookup and /pdf (§8.6): the token of the link's fragment, in any spelling. Only its type
+ * and a size bound are checked here: a token that cannot be one answers 404, as an unknown one does (the service's).
+ */
+export const certificateTokenBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid certificate link') });
 
 // ── Admin: catalogue ───────────────────────────────────────────────────────
 

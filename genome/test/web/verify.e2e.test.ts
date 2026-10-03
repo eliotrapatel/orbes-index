@@ -15,14 +15,16 @@
  * MY PIECES (F-01:
  * sign-in, the list, its tabs from the keyboard, a piece reported stolen
  * then scanned by a stranger, a loss withdrawn; a direct link, a reload and
- * the back button), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
+ * the back button), the ownership certificate (F-06: created in MY PIECES,
+ * opened from its link by a visitor, its PDF, ended by a declaration,
+ * withdrawn), and the problem screens. On each screen the floors of BRAND-DESIGN-SYSTEM §3.8
  * are measured: 10 px type and 44 × 44 px tap zones for every button, link
  * and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, ConsoleMessage, Locator, Page } from 'playwright-core';
@@ -847,6 +849,172 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
     await ctx.close();
   }, 120_000);
+
+  it('OWNERSHIP CERTIFICATE (F-06): created in MY PIECES, read by anyone from its link (the token never in a URL the server sees), its PDF; ended by a declaration, then withdrawn', async () => {
+    const email = 'louise.martin@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD, displayName: 'Louise Martin' }, {});
+    const piece = await ownedPiece(owner.account.id);
+    const productId = piece.product.productId;
+
+    // The owner, in MY PIECES.
+    const ownerCtx = await mobileContext(browser, { reducedMotion: 'reduce' });
+    await ownerCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: srv.origin });
+    const page = await ownerCtx.newPage();
+    const problems: string[] = [];
+    page.on('console', (m) => {
+      if (!isExpectedConsole(m) || /Content Security Policy/i.test(m.text())) problems.push(`console ${m.type()}: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const signIn = page.locator('.pieces__signin');
+    await signIn.getByLabel('EMAIL').fill(email);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    const card = page.getByRole('article', { name: productId });
+    await visible(card);
+    await textOf(card.locator('.piece__certificate-title'), 'OWNERSHIP CERTIFICATE');
+    await textOf(card.locator('.piece__ownership'), /Share a link to a certificate of this piece with a buyer or an insurer/);
+
+    // CREATE CERTIFICATE: how long it stays valid (30 DAYS chosen), then CREATE LINK.
+    await card.getByRole('button', { name: 'CREATE CERTIFICATE' }).click();
+    const validity = card.getByRole('group', { name: 'How long the link stays valid' });
+    await textsOf(validity.getByRole('button'), ['7 DAYS', '30 DAYS', '90 DAYS']);
+    await attrOf(validity.getByRole('button', { name: '30 DAYS' }), 'aria-pressed', 'true');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('30 DAYS');
+    await validity.getByRole('button', { name: '90 DAYS' }).click();
+    await attrOf(validity.getByRole('button', { name: '90 DAYS' }), 'aria-pressed', 'true');
+    await attrOf(validity.getByRole('button', { name: '30 DAYS' }), 'aria-pressed', 'false');
+    await keepsFloors(page, ['7 DAYS', '30 DAYS', '90 DAYS', 'CREATE LINK', 'CANCEL']);
+    await card.getByRole('button', { name: 'CREATE LINK' }).click();
+
+    // The link, shown once, on ivory; COPY LINK takes the focus and copies it.
+    const value = card.locator('.certificate-link__value');
+    await visible(value);
+    const url = norm(await value.innerText());
+    expect(url).toMatch(new RegExp(`^${srv.origin.replace(/\./g, '\\.')}/verify/c#[0-9A-HJKMNP-TV-Z]{52}$`));
+    const token = url.split('#')[1];
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('COPY LINK');
+    await textOf(card.locator('.certificate-link .certificate-link__label').last(), /^VALID UNTIL \d{1,2} [A-Z]{3} \d{4}$/);
+    await card.getByRole('button', { name: 'COPY LINK' }).click();
+    await textOf(card.getByRole('status'), 'The link has been copied.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+    await attrOf(card.getByRole('link', { name: 'OPEN LINK' }), 'href', url);
+    await textsOf(card.locator('.piece__certificate-line'), [expect.stringMatching(/^CREATED \d{1,2} [A-Z]{3} \d{4} · VALID UNTIL \d{1,2} [A-Z]{3} \d{4}$/) as unknown as string]);
+    await keepsFloors(page, ['COPY LINK', 'OPEN LINK', 'WITHDRAW', 'CREATE CERTIFICATE']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, ['COPY LINK', 'OPEN LINK', 'WITHDRAW', 'CREATE CERTIFICATE']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-certificate.png'), fullPage: true });
+    const row = await srv.ctx.db.selectFrom('ownership_certificates').selectAll().where('product_id', '=', piece.product.id).executeTakeFirstOrThrow();
+    expect(row.expires_at.getTime() - row.created_at.getTime()).toBe(90 * 86_400_000);
+
+    // A buyer, with no account, opens the link: the record, read live; nothing about the owner; never AUTHENTIC.
+    const buyerCtx = await mobileContext(browser, { reducedMotion: 'reduce' });
+    const buyer = await buyerCtx.newPage();
+    const buyerProblems: string[] = [];
+    buyer.on('console', (m) => {
+      if (!isExpectedConsole(m) || /Content Security Policy/i.test(m.text())) buyerProblems.push(`console ${m.type()}: ${m.text()}`);
+    });
+    buyer.on('pageerror', (e) => buyerProblems.push(`pageerror: ${e.message}`));
+    const requests: string[] = [];
+    const bodies: string[] = [];
+    buyer.on('request', (r) => {
+      requests.push(r.url());
+      if (r.url().includes('/api/v1/certificates/')) bodies.push(r.postData() ?? '');
+    });
+    const res = await buyer.goto(url);
+    expect(res?.status()).toBe(200);
+    await textOf(buyer.locator('h1'), 'OWNERSHIP CERTIFICATE');
+    await textOf(buyer.locator('.certificate__state'), 'VALID');
+    await textOf(buyer.locator('.certificate__lead'), /It attests this record, not the object it is shown with: to check an object, scan its ORBES CODE\./);
+    await textOf(buyer.locator('.certificate__plate .genome__id'), productId);
+    expect(await buyer.locator('.certificate__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    await countOf(buyer.locator('.certificate__plate .genome-svg--orbit g[data-layer="genome"]'), 8);
+    await textOf(buyer.locator('.certificate__plate .genome__meta'), `${piece.genome.fingerprint} · GENOME-01`);
+    await textsOf(buyer.locator('.certificate__lines .lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    await textOf(buyer.locator('.certificate__section').first(), /^THE RECORD OWNERSHIP VERIFIED SINCE \d{1,2} [A-Z]{3} \d{4} WARRANTY ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 LOSS OR THEFT NONE REPORTED$/);
+    await textOf(buyer.locator('.certificate__section').last(), /^THIS CERTIFICATE CHECKED \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} ISSUED \d{1,2} [A-Z]{3} \d{4} VALID UNTIL \d{1,2} [A-Z]{3} \d{4}$/);
+    const text = await buyer.locator('main').innerText();
+    for (const secret of [email, 'Louise', 'Martin', owner.account.id, row.id]) expect(text).not.toContain(secret);
+    expect(text).not.toMatch(/AUTHENTIC/);
+    expect(await figuresInDisplayFace(buyer)).toEqual([]);
+    await keepsFloors(buyer, ['DOWNLOAD PDF', 'SCAN ORBES CODE']);
+    for (const width of PHONE_WIDTHS) {
+      await buyer.setViewportSize({ width, height: 640 });
+      await keepsFloors(buyer, ['DOWNLOAD PDF', 'SCAN ORBES CODE']);
+    }
+    await buyer.setViewportSize(MOBILE_VIEWPORT);
+    await buyer.screenshot({ path: join(OUT_DIR, 'verify-ownership-certificate.png'), fullPage: true });
+    // The token went in the body of a POST only: no URL the server received holds it.
+    expect(requests.filter((u) => u.includes(token))).toEqual([]);
+    expect(bodies).toEqual([JSON.stringify({ token })]);
+
+    // DOWNLOAD PDF: the certificate as it reads now.
+    const [download] = await Promise.all([buyer.waitForEvent('download'), buyer.getByRole('button', { name: 'DOWNLOAD PDF' }).click()]);
+    expect(download.suggestedFilename()).toMatch(new RegExp(`^ORBES-ownership-certificate-${productId}-\\d{4}-\\d{2}-\\d{2}\\.pdf$`));
+    const pdfPath = join(srv.workDir, 'certificate.pdf');
+    await download.saveAs(pdfPath);
+    const pdf = readFileSync(pdfPath).toString('latin1');
+    expect(pdf.startsWith('%PDF-1.4')).toBe(true);
+    expect(pdf).toContain(`/URI (${url})`);
+    expect(pdf).not.toContain(email);
+
+    // A reload keeps the certificate; back returns to the landing (the link put it under the certificate).
+    await buyer.reload();
+    await textOf(buyer.locator('.certificate__state'), 'VALID');
+    expect(new URL(buyer.url()).pathname).toBe('/verify/c');
+    expect(new URL(buyer.url()).hash).toBe(`#${token}`);
+
+    // The owner reports the piece lost: the section goes, and the link reads NO LONGER VALID, with no PDF.
+    await card.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
+    await card.getByRole('button', { name: 'LOST', exact: true }).click();
+    await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
+    await textOf(card.locator('.ownership__status'), 'REPORTED LOST');
+    await countOf(card.locator('.piece__certificate-title'), 0);
+    await buyer.reload();
+    await textOf(buyer.locator('.certificate__state'), 'NO LONGER VALID');
+    await textOf(buyer.locator('.certificate__lead'), 'This certificate has expired, or the record of its piece has changed since it was issued. Ask the owner of the piece for a new certificate.');
+    await countOf(buyer.locator('.certificate__plate'), 0);
+    await countOf(buyer.getByRole('button', { name: 'DOWNLOAD PDF' }), 0);
+    await keepsFloors(buyer, ['SCAN ORBES CODE']);
+
+    // Found again: the old link stays ended, listed as such, and the owner withdraws it.
+    await card.getByRole('button', { name: 'PIECE FOUND' }).click();
+    await card.getByRole('button', { name: 'CONFIRM', exact: true }).click();
+    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textsOf(card.locator('.piece__certificate-line'), [expect.stringMatching(/^CREATED \d{1,2} [A-Z]{3} \d{4} · NO LONGER VALID$/) as unknown as string]);
+    await card.getByRole('button', { name: /^WITHDRAW/ }).click();
+    await textOf(card.getByRole('status'), 'The link has been withdrawn: it no longer leads to the certificate.');
+    await countOf(card.locator('.piece__certificate'), 0);
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('OWNERSHIP CERTIFICATE');
+    const audit = await srv.ctx.audit.list({ targetId: productId });
+    expect(audit.items.filter((e) => e.action.startsWith('ownership.certificate.')).map((e) => [e.action, e.actorId])).toEqual([
+      ['ownership.certificate.revoke', owner.account.id],
+      ['ownership.certificate.create', owner.account.id],
+    ]);
+
+    // Withdrawn, the link reads as one that never existed; an edited fragment is read again at once.
+    await buyer.reload();
+    await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
+    await textOf(buyer.locator('.certificate__lead'), /This link does not lead to a certificate: it may be incomplete, or withdrawn by its owner\./);
+    await buyer.evaluate(() => {
+      location.hash = '#not-a-link';
+    });
+    await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
+    // A link without its fragment leads nowhere; opened directly, back returns to the landing rather than out of the app.
+    await buyer.goto(`${srv.origin}/verify/c`);
+    await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
+    await buyer.goBack();
+    await textOf(buyer.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    expect(new URL(buyer.url()).pathname).toBe('/verify');
+    expect(new URL(buyer.url()).hash).toBe('');
+    expect(buyerProblems).toEqual([]);
+    expect(problems).toEqual([]);
+    await buyerCtx.close();
+    await ownerCtx.close();
+  }, 180_000);
 
   it('scans as staff in a browser signed in to the console (S-07): no registration offered, the scan recorded under the console user', async () => {
     const issued = await srv.issue({ withClaimSecret: true });

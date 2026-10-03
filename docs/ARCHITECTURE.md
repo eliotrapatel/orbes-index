@@ -108,14 +108,16 @@ genome/
     services/            issuance, verification, anomaly, lifecycle, ownership, warranty, auth, audit,
                          certificate cards, scan tokens, scan reports (Cases), scan-history retention,
                          daily scan statistics, account recovery and the owner's sheet (Client Services),
-                         points of sale and the sale mode
+                         points of sale and the sale mode, ownership certificates (shared links)
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
     routes/              public, account, ownership, admin
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
-    render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards
+    render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
+                         the ownership certificate's PDF
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
-    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces)
+    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces);
+                         an ownership certificate (/verify/c#token)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
     shared/              brand CSS, display font, monogram and DOM helpers
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)

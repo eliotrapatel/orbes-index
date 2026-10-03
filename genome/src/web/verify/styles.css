@@ -1383,6 +1383,152 @@ h1[tabindex="-1"]:focus,
   margin-top: 60px;
 }
 
+/* ── Ownership certificate (F-06) ──────────────────────────────────────── */
+
+/* The page of a shared link (/verify/c#…): the column of a result and of MY
+   PIECES, the title tracked like theirs, its state under it (VALID, NO LONGER
+   VALID, NOT FOUND), then the piece in its écrin (.piece__plate, the GENOME
+   plate of a result), its lines and the rows of the record. */
+.view--certificate {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
+}
+
+.certificate__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.certificate__wordmark {
+  margin-bottom: 52px;
+}
+
+.certificate__title {
+  font-size: var(--fs-title);
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+}
+
+.certificate__state {
+  margin-top: 18px;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.certificate__state:empty {
+  display: none;
+}
+
+.certificate__lead {
+  max-width: 34ch;
+  margin-top: 22px;
+  text-wrap: balance;
+}
+
+.certificate__lead[hidden] {
+  display: none;
+}
+
+.certificate__body {
+  margin-top: 52px;
+}
+
+.certificate__body:empty {
+  display: none;
+}
+
+.certificate__waiting {
+  text-align: center;
+}
+
+.certificate__lines {
+  margin-top: 40px;
+  text-align: center;
+}
+
+.certificate__section {
+  margin-top: 40px;
+}
+
+.certificate__note {
+  margin-top: 32px;
+  color: var(--ink-soft);
+}
+
+.certificate__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  margin-top: 60px;
+  text-align: center;
+}
+
+.certificate__footnote {
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+}
+
+/* MY PIECES: the link just created, on ivory like a transfer code (it wraps
+   anywhere: one long address), then the open links, each with WITHDRAW at
+   the end of its line. */
+.certificate-link {
+  margin-top: 18px;
+  padding: 22px 16px;
+  background: var(--ivory);
+  text-align: center;
+}
+
+.certificate-link__value {
+  margin: 10px 0 8px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+.piece__certificates {
+  list-style: none;
+  margin-top: 22px;
+}
+
+/* 4 px above and below: WITHDRAW's 44 px zone (a text link reaches 4 px past
+   its box) stays inside its line, clear of the next one's. */
+.piece__certificate {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 4px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.piece__certificate:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.piece__certificate .ownership__meta {
+  flex: 1 1 14em;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.piece__certificate .textlink {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles, status lines and tracked-capital labels in the display face
@@ -1400,6 +1546,9 @@ h1[tabindex="-1"]:focus,
 .message__title,
 .result__title,
 .pieces__title,
+.certificate__title,
+.certificate__state,
+.certificate__footnote,
 .genome__label,
 .tabs__tab,
 .tabs__dot,
@@ -1428,7 +1577,8 @@ h1[tabindex="-1"]:focus,
 
 @media (max-width: 350px) {
   .view--result,
-  .view--pieces {
+  .view--pieces,
+  .view--certificate {
     padding-left: 22px;
     padding-right: 22px;
   }

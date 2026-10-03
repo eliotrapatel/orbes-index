@@ -1,4 +1,4 @@
-/** Server-side artifact rendering: SVG (core renderer), PNG (resvg), PDF (pdfkit, pure vector); certificate cards. */
+/** Server-side artifact rendering: SVG (core renderer), PNG (resvg), PDF (pdfkit, pure vector); certificate cards and ownership certificates. */
 export {
   ARTIFACT_DEFAULTS,
   ARTIFACT_FORMATS,
@@ -36,23 +36,29 @@ export {
   CERTIFICATE_SHEET,
   CertificateInputError,
   MAX_CERTIFICATE_ITEMS,
+  OWNERSHIP_CERTIFICATE_COPY,
+  OWNERSHIP_CERTIFICATE_LAYOUT,
   SCRATCH_OFF_SPOT,
   certificateCardSvg,
+  certificateLinkLettering,
   certificatesCsv,
   csvField,
   layoutCertificateCard,
   layoutCertificateSheet,
+  layoutOwnershipCertificate,
   renderCertificateCsv,
   renderCertificatePdf,
+  renderOwnershipCertificatePdf,
   type CertificateCard,
   type CertificateFormat,
   type CertificateItem,
   type CertificateLayout,
   type CertificateLayoutStatus,
   type CertificateOptions,
+  type OwnershipCertificateDocument,
   type RenderedCertificates,
 } from './certificate.js';
-export { renderPdf, sceneToPdf, type PdfMeta, type PdfPage, type PdfPlacement, type PdfShape, type PdfSpotColor } from './pdf.js';
+export { renderPdf, sceneToPdf, type PdfLink, type PdfMeta, type PdfPage, type PdfPlacement, type PdfShape, type PdfSpotColor } from './pdf.js';
 export { PNG_SIGNATURE, pixelsFor, readPngDpi, setPngDpi, svgToPng } from './png.js';
 export {
   ARTIFACT_LABEL_HEIGHT_U,

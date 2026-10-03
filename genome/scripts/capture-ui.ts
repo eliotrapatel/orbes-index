@@ -26,7 +26,8 @@
  *     UNUSUAL ACTIVITY with DO YOU HOLD THE CERTIFICATE CARD? (O26-L-00014,
  *     sold and unregistered, with a claim code, after a burst of scans of
  *     copies of its code from 22 sources) · MY PIECES (F-01) of the demo
- *     owner Camille Martin, signed in
+ *     owner Camille Martin, signed in · the OWNERSHIP CERTIFICATE (F-06)
+ *     of one of her pieces, opened by a visitor from its link
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -471,6 +472,47 @@ async function captureVerifyPieces(stage: Stage, shots: Shots): Promise<void> {
   }
 }
 
+/**
+ * The OWNERSHIP CERTIFICATE (F-06): the demo owner signs in through the account API and creates a link to a
+ * certificate of a piece of theirs; a visitor without any account opens it.
+ */
+async function captureVerifyCertificate(stage: Stage, shots: Shots): Promise<void> {
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const owner = await mobileContext(browser);
+    const page = await owner.newPage();
+    watchPage(page, 'verify-certificate-owner');
+    await page.goto(`${stage.origin}/verify`);
+    await page.waitForSelector('.landing__scan');
+    const url = await page.evaluate(async (c) => {
+      const json = { 'content-type': 'application/json' };
+      const login = await fetch('/api/v1/account/login', { method: 'POST', headers: json, body: JSON.stringify(c) });
+      if (login.status !== 200) throw new Error(`sign-in ${login.status}`);
+      const { csrfToken } = (await login.json()) as { csrfToken: string };
+      const { products } = (await (await fetch('/api/v1/account/products')).json()) as { products: { productId: string; incident: string | null }[] };
+      const piece = products.find((p) => p.incident === null);
+      if (!piece) throw new Error('no piece to certify');
+      const res = await fetch('/api/v1/ownership/certificates', { method: 'POST', headers: { ...json, 'x-csrf-token': csrfToken }, body: JSON.stringify({ productId: piece.productId, validDays: 90 }) });
+      if (res.status !== 201) throw new Error(`certificate ${res.status}`);
+      return ((await res.json()) as { url: string }).url;
+    }, OWNER);
+    await owner.close();
+
+    const visitor = await mobileContext(browser);
+    const view = await visitor.newPage();
+    watchPage(view, 'verify-certificate');
+    await view.goto(url);
+    await view.waitForSelector('.certificate__plate .genome-svg', { timeout: 20_000 });
+    await view.evaluate(() => document.fonts.ready);
+    await hideGrain(view);
+    await sleep(600);
+    await shots.viewport(view, 'verify-13-ownership-certificate');
+    await visitor.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 // ── Admin console ──────────────────────────────────────────────────────────
 
 async function captureAdmin(stage: Stage, shots: Shots): Promise<void> {
@@ -665,6 +707,8 @@ async function main(): Promise<void> {
     await captureVerifyCard(stage, shots);
     log('verify, my pieces:');
     await captureVerifyPieces(stage, shots);
+    log('verify, ownership certificate:');
+    await captureVerifyCertificate(stage, shots);
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);

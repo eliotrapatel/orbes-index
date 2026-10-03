@@ -15,6 +15,15 @@ function endpoints(d: string): [number, number][] {
 describe('label lettering', () => {
   it('covers the characters of product ids, the brand line, sheet captions and web addresses', () => {
     for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/·. ') expect(LABEL_CHARSET.has(ch), ch).toBe(true);
+    // The ownership certificate (F-06): a time (12:34 UTC) and its live link's fragment (/VERIFY/C#…).
+    for (const ch of ':#') expect(LABEL_CHARSET.has(ch), ch).toBe(true);
+    expect(toLabelText('verify.theorbes.com/verify/c#')).toBe('VERIFY.THEORBES.COM/VERIFY/C#');
+  });
+
+  it('sets the colon\'s lower dot on the baseline, as the full stop', () => {
+    const colon = endpoints(textRun(':', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d).map(([, y]) => y);
+    expect(Math.max(...colon)).toBeCloseTo(10, 6);
+    expect(Math.min(...colon)).toBeLessThan(5);
   });
 
   it('sits the full stop on the baseline, the middle dot at mid-height', () => {

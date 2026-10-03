@@ -15,6 +15,9 @@
  *     REGISTERED TO YOU · SINCE · ACQUIRED · OWNERSHIP · TRANSFER
  *     REPORT LOST / STOLEN  (confirmed: LOST · STOLEN, then CONFIRM REPORT)
  *     PIECE FOUND           (a loss the owner reported; confirmed)
+ *     OWNERSHIP CERTIFICATE (F-06: CREATE CERTIFICATE, 7 · 30 · 90 DAYS, then
+ *                           CREATE LINK; the link shown once, COPY LINK, OPEN;
+ *                           the open links, each with WITHDRAW)
  *   ── next piece ──
  *   SIGNED IN AS …     CHANGE PASSWORD   SIGN OUT
  *            [ SCAN ORBES CODE ]
@@ -32,12 +35,13 @@
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
+import { ownerCertificateLine } from '../certificate-model.js';
 import { ACCOUNT_PASSWORD, PIECES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClientServices, IncidentType, OwnedPiece, ServiceRecord } from '../types.js';
-import { pieceContactModel, recoveryContactModel } from '../view-model.js';
+import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
 import { contactBlock, rows, sectionLabel, viewRoot } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
@@ -156,9 +160,24 @@ class PiecesPage {
     this.load = { kind: 'loading' };
     this.renderBody();
     try {
-      const list = await this.deps.api.products();
+      // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so.
+      const [list, certificates] = await Promise.all([
+        this.deps.api.products(),
+        this.deps.api.certificates().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+      ]);
       if (gen !== this.loadGen || this.disposed) return;
-      this.cards = list.map((p, i) => new PieceCard(p, i, { api: this.deps.api, session: this.deps.session, contacts: this.contacts }));
+      this.cards = list.map(
+        (p, i) =>
+          new PieceCard(p, i, {
+            api: this.deps.api,
+            session: this.deps.session,
+            contacts: this.contacts,
+            certificates: certificates === null ? null : certificates.filter((c) => c.productId === p.productId),
+          }),
+      );
       this.load = { kind: 'ready' };
     } catch (e) {
       if (gen !== this.loadGen || this.disposed) return;
@@ -338,9 +357,15 @@ interface CardDeps {
   api: ApiClient;
   session: SessionStore;
   contacts: ClientServices;
+  /** The piece's open certificate links, newest first; null when they could not be read. */
+  certificates: OwnerCertificate[] | null;
 }
 
 type Confirm = null | 'report' | 'found';
+
+/** How long a new certificate link stays valid: the choice MY PIECES offers (the server takes 1 to 90 days). */
+export const CERTIFICATE_DAYS = [7, 30, 90] as const;
+type CertificateDays = (typeof CERTIFICATE_DAYS)[number];
 
 /** One piece: its plate, its lines and its tabs. The OWNERSHIP panel re-renders itself on each change of its own state. */
 class PieceCard {
@@ -355,6 +380,12 @@ class PieceCard {
   private notice: string | null = null;
   private services: { kind: 'loading' } | { kind: 'ready'; list: ServiceRecord[] } | { kind: 'failed'; message: string } | null = null;
   private readonly servicePanel = h('div', { class: 'panel' });
+  /** The open certificate links (F-06), null when they could not be read; the link just created, shown once. */
+  private certificates: OwnerCertificate[] | null;
+  private offer: CertificateOffer | null = null;
+  private creating = false;
+  private days: CertificateDays = 30;
+  private certificateError: string | null = null;
 
   constructor(
     /** The piece as the server described it; a change made here is applied to it, then read again through pieceModel. */
@@ -363,6 +394,7 @@ class PieceCard {
     private readonly deps: CardDeps,
   ) {
     this.model = pieceModel(piece);
+    this.certificates = deps.certificates;
     this.key = this.model.key || `piece-${index + 1}`;
     const titleId = `${this.key}-title`;
     const plate = bracket(
@@ -447,6 +479,8 @@ class PieceCard {
     ];
     if (m.transferPending && this.confirm === null) out.push(this.actions(this.textButton(PIECES.cancelTransfer, () => this.cancelTransfer(), 'piece__transfer-action')));
     out.push(...this.incidentBlock());
+    // A piece reported lost or stolen takes no certificate: its links show NO LONGER VALID.
+    if (m.incident.kind === 'reportable' && this.confirm === null) out.push(...this.certificateBlock());
     if (this.notice) out.push(h('p', { class: 'form__notice', attrs: { role: 'status' }, text: this.notice }));
     this.panel.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     const q = (sel: string) => this.panel.querySelector<HTMLElement>(sel);
@@ -500,6 +534,165 @@ class PieceCard {
       this.errorLine(),
       this.actions(this.confirmButton(PIECES.confirmReport, () => this.report()), this.textButton(PIECES.cancel, () => this.close())),
     ];
+  }
+
+  /**
+   * OWNERSHIP CERTIFICATE (F-06): a link to the live record of the piece, for a buyer or an insurer. CREATE CERTIFICATE
+   * opens the choice of its validity (7 · 30 · 90 DAYS) and CREATE LINK; the link is then shown once, with COPY LINK and
+   * OPEN; each open link has WITHDRAW.
+   */
+  private certificateBlock(): (HTMLElement | null)[] {
+    const out: (HTMLElement | null)[] = [
+      h('h3', { class: 'section-label piece__certificate-title', attrs: { tabindex: -1 }, text: PIECES.certificateTitle }),
+      this.text(PIECES.certificateLead),
+    ];
+    const offer = this.offer;
+    if (offer) {
+      out.push(
+        h(
+          'div',
+          { class: 'certificate-link' },
+          h('p', { class: 'certificate-link__label micro soft', text: PIECES.certificateLink }),
+          h('p', { class: 'certificate-link__value', text: offer.url }),
+          h('p', { class: 'certificate-link__label micro soft', text: PIECES.certificateUntil(formatDate(offer.expiresAt)) }),
+        ),
+        this.text(PIECES.certificateShown),
+        this.actions(
+          this.textButton(PIECES.copyLink, () => void this.copyLink(offer.url), 'certificate-link__copy'),
+          h('a', { class: 'textlink certificate-link__open', attrs: { href: offer.url, target: '_blank', rel: 'noopener noreferrer' }, text: PIECES.openLink }),
+        ),
+      );
+    }
+    if (this.certificates === null) out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: PIECES.certificatesFailed }));
+    else if (this.certificates.length > 0) {
+      out.push(
+        h(
+          'ul',
+          { class: 'piece__certificates', attrs: { 'aria-label': PIECES.certificateTitle } },
+          ...this.certificates.map((c) =>
+            h(
+              'li',
+              { class: 'piece__certificate' },
+              h('p', { class: 'ownership__meta micro piece__certificate-line', text: ownerCertificateLine(c) }),
+              h('button', {
+                class: 'textlink piece__certificate-withdraw',
+                attrs: { type: 'button', disabled: this.busy, 'aria-label': `${PIECES.withdraw} · ${ownerCertificateLine(c)}` },
+                data: { certificate: c.id },
+                on: { click: () => void this.withdraw(c.id) },
+                text: PIECES.withdraw,
+              }),
+            ),
+          ),
+        ),
+      );
+    }
+    if (!this.creating) {
+      out.push(this.certificateErrorLine(), this.actions(this.textButton(PIECES.createCertificate, () => this.openCertificate(), 'piece__certificate-action')));
+      return out;
+    }
+    const option = (days: CertificateDays) =>
+      h('button', {
+        class: 'auth__option',
+        attrs: { type: 'button', 'aria-pressed': this.days === days ? 'true' : 'false', disabled: this.busy },
+        data: { days },
+        on: { click: () => this.chooseDays(days) },
+        text: PIECES.certificateDays[days],
+      });
+    const choice: HTMLElement[] = [];
+    CERTIFICATE_DAYS.forEach((d, i) => {
+      if (i > 0) choice.push(h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }));
+      choice.push(option(d));
+    });
+    out.push(
+      h('div', { class: 'auth__switch piece__choice piece__validity', attrs: { role: 'group', 'aria-label': PIECES.certificateValidity } }, ...choice),
+      this.text(PIECES.certificateHow),
+      this.certificateErrorLine(),
+      this.actions(this.confirmButton(PIECES.confirmCertificate, () => void this.createCertificate()), this.textButton(PIECES.cancel, () => this.closeCertificate())),
+    );
+    return out;
+  }
+
+  private certificateErrorLine(): HTMLElement | null {
+    return this.certificateError ? h('p', { class: 'form__error', attrs: { role: 'alert' }, text: this.certificateError }) : null;
+  }
+
+  /** Re-render, then put the keyboard focus on `selector` of the panel. */
+  private renderFocus(selector: string): void {
+    this.render();
+    this.panel.querySelector<HTMLElement>(selector)?.focus();
+  }
+
+  private openCertificate(): void {
+    this.creating = true;
+    this.certificateError = null;
+    this.notice = null;
+    this.renderFocus('.piece__validity [aria-pressed="true"]');
+  }
+
+  private closeCertificate(): void {
+    this.creating = false;
+    this.certificateError = null;
+    this.renderFocus('.piece__certificate-action');
+  }
+
+  private chooseDays(days: CertificateDays): void {
+    this.days = days;
+    this.renderFocus(`.piece__validity [data-days="${days}"]`);
+  }
+
+  /** CREATE LINK: the link, shown once, then COPY LINK takes the focus; the new link joins the list. */
+  private async createCertificate(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.certificateError = null;
+    this.notice = null;
+    this.render();
+    let ok = false;
+    try {
+      const offer = await this.deps.api.createCertificate(this.model.productId, this.days);
+      this.offer = offer;
+      this.creating = false;
+      this.certificates = [{ id: offer.id, productId: offer.productId, createdAt: offer.createdAt, expiresAt: offer.expiresAt, valid: true }, ...(this.certificates ?? [])];
+      ok = true;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      this.certificateError = messageOf(e);
+    } finally {
+      this.busy = false;
+    }
+    this.renderFocus(ok ? '.certificate-link__copy' : '.piece__certificate-title ~ .ownership__actions .btn:not([disabled])');
+  }
+
+  private async copyLink(url: string): Promise<void> {
+    this.certificateError = null;
+    try {
+      await navigator.clipboard.writeText(url);
+      this.notice = PIECES.copied;
+    } catch {
+      this.certificateError = PIECES.copyFailed;
+    }
+    this.renderFocus('.certificate-link__copy');
+  }
+
+  /** WITHDRAW: from then on the link answers as one that never existed. */
+  private async withdraw(id: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.certificateError = null;
+    this.notice = null;
+    this.render();
+    try {
+      await this.deps.api.revokeCertificate(id);
+      this.certificates = (this.certificates ?? []).filter((c) => c.id !== id);
+      if (this.offer?.id === id) this.offer = null;
+      this.notice = PIECES.withdrawn;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      this.certificateError = messageOf(e);
+    } finally {
+      this.busy = false;
+    }
+    this.renderFocus('.piece__certificate-title');
   }
 
   private text(text: string): HTMLElement {
@@ -582,12 +775,13 @@ class PieceCard {
       this.panel.querySelector<HTMLElement>('.piece__choice .auth__option')?.focus();
       return;
     }
-    void this.run(() => this.deps.api.reportIncident(this.model.productId, type).then(() => undefined), PIECES.reported[type], (p) => ({
-      ...p,
-      incident: type,
-      incidentResolvable: type === 'LOST',
-      transfer: { pending: false },
-    }));
+    void this.run(() => this.deps.api.reportIncident(this.model.productId, type).then(() => undefined), PIECES.reported[type], (p) => {
+      // Its certificate links end with the report (F-06): the server reads them NO LONGER VALID from now on.
+      this.certificates = this.certificates?.map((c) => ({ ...c, valid: false })) ?? null;
+      this.offer = null;
+      this.creating = false;
+      return { ...p, incident: type, incidentResolvable: type === 'LOST', transfer: { pending: false } };
+    });
   }
 
   /** PIECE FOUND, once confirmed: the piece returns to the status it held before the loss. */
