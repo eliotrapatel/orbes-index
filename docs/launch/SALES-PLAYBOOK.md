@@ -8,7 +8,7 @@ Liens : [LAUNCH](../LAUNCH.md) §4, §7 et §11 · [API](../API.md) §9.3, §14.
 
 **Comment le lire.**
 
-- Les `mots entre accents graves` sont ceux de l'écran, en anglais, tels que la console ou theorbes.com/verify les affichent : un bouton, un champ, un statut, un fichier. Ce sont des mots internes : on ne les lit pas au client (BRAND §4.1).
+- Les mots entre accents graves, comme `Activate warranty`, sont ceux de l'écran, en anglais, tels que la console ou theorbes.com/verify les affichent : un bouton, un champ, un statut, un fichier. Ce sont des mots internes : on ne les lit pas au client (BRAND §4.1).
 - Les phrases en retrait sont à dire au client, telles quelles. Les mots de l'écran y restent en anglais et en capitales, comme le client les lit sur son téléphone.
 - Les rôles de la console (SECURITY-MODEL §3.3) : **RETAIL**, un vendeur, n'a que le mode Boutique ; **AUDITOR** lit ; **OPERATOR** émet les pièces, active les garanties, déclare une perte ou un vol, ouvre les entretiens ; **ADMIN** gère l'équipe, les points de vente et les gestes sensibles sur un compte client (code de récupération, verrouillage, export).
 - La console : `https://verify.theorbes.com/admin`. Le client : theorbes.com/verify, qu'il tape lui-même.
@@ -26,7 +26,7 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 | Comptes de la console | `genome/scripts/admin.ts`, `genome/src/web/admin/views/team.ts`, SECURITY-MODEL §3.3 |
 | Les chiffres du §0 | les constantes nommées dans leur tableau |
 
-`genome/test/docs/sales-playbook.test.ts` vérifie ce fichier : aucun mot interdit (BRAND §4.5 et le lexique français du kit, §4) hors du bloc lexique du §8, sauf dans les mots de l'écran entre accents graves, qui doivent alors se trouver tels quels dans le code ; aucune exception dans les phrases à dire ; un résultat de l'API §9.3 par section du §3, avec sa phrase en anglais mot pour mot ; les chiffres du §0 égaux aux constantes du code ; la phrase de fin de vente, la phrase sur l'achat d'occasion et les commandes du §10 telles que le logiciel les connaît ; une checklist de 30 minutes au plus.
+`genome/test/docs/sales-playbook.test.ts` vérifie ce fichier : chaque mot entre accents graves est un texte entier du logiciel (un libellé, un statut, une constante, un fichier du dépôt), sauf l'identité `O26-…`, les adresses et les commandes du shell ; aucun mot interdit (BRAND §4.5 et le lexique français du kit, §4) hors du bloc lexique du §8, sauf dans un libellé ou un statut de l'écran cité ainsi, ou une constante ; aucune exception dans les phrases à dire ; un résultat de l'API §9.3 par section du §3, avec sa phrase en anglais mot pour mot ; les chiffres du §0 égaux aux constantes du code ; la phrase de fin de vente, la phrase sur l'achat d'occasion et les commandes du §10 telles que le logiciel les connaît ; une checklist de 30 minutes au plus.
 
 ---
 
@@ -36,6 +36,7 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 - **Un compte par personne** (§10) : RETAIL pour chaque vendeur, OPERATOR pour l'atelier et ORBES Client Services. Jamais de compte partagé, même sur le téléphone d'un comptoir.
 - **Les coordonnées d'ORBES Client Services** sont configurées (`CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE`, `CLIENT_SERVICES_HOURS`, LAUNCH §10). Sans elles, un résultat qui demande de contacter ORBES Client Services n'offre ni e-mail ni téléphone.
 - **La carte certificat.** Tant qu'elle porte la mention PROOF, aucune carte n'est remise à un client (kit, §6) : la première vente attend la validation de la carte par la marque.
+- **Le claim code.** Toute pièce destinée à la vente est émise avec son claim code : dans `Generator`, la case `Issue a one-time claim code (shown once, stored as a hash)` (pour un lot : `Issue a one-time claim code for each piece (shown once, stored as a hash)`) reste cochée, comme par défaut. C'est lui qui prouve, à l'enregistrement, que le client tient la carte. Une pièce émise sans claim code s'enregistre sans preuve : une fois sa garantie activée, le premier compte connecté qui la scanne peut l'enregistrer à son nom. Si une telle pièce est vendue, le client l'enregistre au comptoir, aussitôt la garantie activée ; puis un OPERATOR, la facture vue, confirme la propriété sur la fiche de la pièce (`Actions`, groupe `Ownership` → `Confirm ownership`, API §14.10).
 - **La checklist du §9**, une fois, par chaque personne qui vendra ou répondra aux clients.
 
 **Les chiffres à connaître.**
@@ -63,7 +64,7 @@ La vente s'inscrit **au moment où la pièce est remise**, avec la date d'achat,
 
 Sur le téléphone du comptoir, avec votre compte RETAIL (ou OPERATOR) :
 
-1. Ouvrez `https://verify.theorbes.com/admin` et connectez-vous : `Email`, `Password`, puis `Authenticator code`, les six chiffres de votre application d'authentification. Un compte RETAIL arrive directement sur `Sale mode` ; un OPERATOR l'ouvre dans la barre latérale (groupe `Clients`).
+1. Ouvrez `https://verify.theorbes.com/admin` et connectez-vous : `Email`, `Password`, `Sign in`, puis `Authenticator code`, les six chiffres de votre application d'authentification, et de nouveau `Sign in`. Un compte RETAIL arrive directement sur `Sale mode` ; un OPERATOR l'ouvre dans la barre latérale (groupe `Clients`).
 2. `Point of sale` : choisissez votre boutique, une fois. Le téléphone s'en souvient pour la vente suivante.
 3. `Scan the piece`, et visez l'ORBES CODE de la pièce vendue (ou `Upload a photo`). Chaque scan est inscrit à votre nom (`Each scan here is recorded under your name.`).
 4. Lisez l'écran (tableau ci-dessous). Avec `READY TO SELL`, vérifiez que l'identité affichée (`O26-…`) est celle imprimée sur la carte certificat rangée avec la pièce.
@@ -80,7 +81,7 @@ Le mode Boutique inscrit la vente **aujourd'hui**, avec le pays du point de vent
 | `WARRANTY VOID` | La garantie a été annulée | Ne vendez pas. ORBES Client Services |
 | `NOT FOR SALE` | Le statut de la pièce ne permet pas la vente, ou elle est en entretien | Ne vendez pas. L'atelier clôt d'abord l'entretien |
 | `SUSPICIOUS ACTIVITY`, `REVOKED`, `UNKNOWN`, `INVALID SIGNATURE` | Le code n'a pas été reconnu comme celui d'une pièce qu'ORBES peut vendre | Ne vendez pas. Mettez la pièce de côté, notez son identité et prévenez un OPERATOR : le scan est inscrit à votre nom, il le retrouvera |
-| `MALFORMED CODE` | Le code n'a pas été lu | `Scan again` sous une lumière égale, ou `Upload a photo` |
+| `MALFORMED CODE` | Le code n'a pas été lu | `Scan another` sous une lumière égale ; sinon, `Upload a photo` sous l'image de la caméra |
 
 ### Sans le mode Boutique : la console
 
@@ -102,7 +103,10 @@ Si le client demande ce que prouve le résultat, la phrase est au §3. Ne promet
 
 ### Si la vente n'a pas été inscrite
 
-Le client voit `AUTHENTIC` et, dans l'onglet `OWNERSHIP`, `NOT YET DELIVERED` : l'enregistrement ne s'ouvre qu'après l'activation de la garantie. Activez-la dans la console avec **la date d'achat réelle** et le point de vente de la vente, puis demandez au client de scanner de nouveau la pièce : il lit `AUTHENTIC — FIRST REGISTRATION` et peut l'enregistrer.
+Le client voit `AUTHENTIC` et, dans l'onglet `OWNERSHIP`, `NOT YET DELIVERED` : l'enregistrement ne s'ouvre qu'après l'activation de la garantie, et son scan a ouvert `UNSOLD PIECE SCANNED` dans `Anomalies` (§3).
+
+- **La boutique retrouve la vente dans ses propres ventes** (sa date, l'identité `O26-…` de la pièce) : un OPERATOR l'inscrit dans la console (ci-dessus, jamais en mode Boutique, qui inscrirait la vente aujourd'hui) avec **la date de cette vente** et ce point de vente, classe le `UNSOLD PIECE SCANNED` avec une note qui cite la vente, puis le client scanne de nouveau la pièce : il lit `AUTHENTIC — FIRST REGISTRATION` et peut l'enregistrer.
+- **La demande vient du client, et rien n'en garde trace de votre côté** : n'activez rien sur sa seule parole. C'est la vérification du §3 (`AUTHENTIC`) : la facture, puis la vente confirmée par le point de vente qu'elle nomme.
 
 ---
 
@@ -124,7 +128,7 @@ Dans l'e-mail d'expédition, ou sur la notice glissée dans le colis :
 
 > Votre pièce voyage avec sa carte certificat. À réception, ouvrez theorbes.com/verify, scannez l'ORBES CODE de la pièce, puis enregistrez-la à votre nom avec le claim code de la carte. Vérifiez uniquement sur theorbes.com/verify.
 
-**Retour d'une commande expédiée.** Rien dans la console n'annule une garantie commencée ni ne remet une pièce en stock : `Void warranty` est définitif, et le mode Boutique refuse ensuite la pièce (`ALREADY SOLD`). Gardez la pièce à part et signalez-la à un ADMIN ; sa remise en vente se décide au cas par cas (§11).
+**Retour d'une commande expédiée.** Rien dans la console n'annule une garantie commencée ni ne remet une pièce en stock : `Void warranty` est définitif, et le mode Boutique refuse ensuite la pièce, avec `ALREADY SOLD` tant que sa garantie court et `WARRANTY VOID` une fois celle-ci annulée. Gardez la pièce à part et signalez-la à un ADMIN ; sa remise en vente se décide au cas par cas (§11).
 
 ---
 
@@ -145,7 +149,7 @@ Ce que prouve un résultat AUTHENTIC, si le client le demande :
 
 Le client lit : *This ORBES identity was issued and signed by ORBES and has not yet been registered. You may register it to your ORBES account.*
 
-**Ce que cela veut dire.** La vente est inscrite, la pièce n'a pas encore de propriétaire. L'onglet `OWNERSHIP` propose l'enregistrement pendant 15 minutes après le scan (`REGISTRATION OPEN UNTIL` et l'heure).
+**Ce que cela veut dire.** La vente est inscrite, la pièce n'a pas encore de propriétaire. L'onglet `OWNERSHIP` propose l'enregistrement pendant 15 minutes après le scan (`REGISTRATION OPEN UNTIL …`, suivi de l'heure).
 
 **Ce que vous faites.** Guidez le client : `OWNERSHIP` → `SIGN IN` ou `CREATE ACCOUNT` → `CLAIM CODE` → `REGISTER THIS PIECE`. Délai passé : il scanne de nouveau. Après 5 claim codes manqués en une heure, l'enregistrement de la pièce attend jusqu'à une heure.
 
@@ -187,12 +191,25 @@ Le client lit : *This ORBES identity was issued and signed by ORBES and is regis
 
 **Ce que cela veut dire.** La pièce n'est pas encore inscrite comme vendue : sa garantie n'a pas commencé (en stock, ou en entretien avant la vente). L'onglet `OWNERSHIP` dit `NOT YET DELIVERED` et n'offre pas d'enregistrement.
 
-**Ce que vous faites.**
+**Ce que vous faites.** Le scan du client vient d'ouvrir `UNSOLD PIECE SCANNED` dans `Anomalies` (S-07) : une pièce qu'ORBES n'a jamais vendue, scannée hors de la console, est le premier signe d'une pièce sortie du stock sans vente. Ne démarrez jamais sa garantie sur la seule parole du client : une garantie activée ouvre l'enregistrement, et ferait d'une pièce détournée une pièce vendue.
 
-- Le client l'a achetée chez ORBES ou chez un détaillant agréé : retrouvez la pièce (son `PRODUCT ID` dans l'onglet `PRODUCT`, ou la REF), vérifiez `Warranty` `NOT STARTED`, activez la garantie avec la date d'achat réelle et le point de vente (§1 ou §2), puis demandez-lui de scanner de nouveau.
-- Il l'a achetée ailleurs, à un particulier par exemple : n'activez rien. Une pièce qu'ORBES n'a jamais vendue, scannée hors de la console, ouvre `UNSOLD PIECE SCANNED` dans `Anomalies` (S-07) : notez la REF et le lieu d'achat, et prévenez un OPERATOR.
+1. **Le client dit l'avoir achetée chez ORBES ou chez un détaillant agréé.** Demandez la facture ou le ticket de caisse : la pièce, la date, le point de vente. Notez la REF et passez la main à un OPERATOR, qui seul décide :
+   1. il confirme auprès du point de vente nommé que la vente (sa date, l'identité `O26-…` de la pièce) figure dans ses ventes ;
+   2. sur la fiche de la pièce, section `Anomalies` → `Triage`, la ligne `UNSOLD PIECE SCANNED` → `Details` : des scans avant la date de la facture, ou dans un autre pays que celui du point de vente, contredisent la vente ;
+   3. seulement si la facture, le point de vente et ces scans concordent : il vérifie `Warranty` `NOT STARTED` et active la garantie dans la console (§1, « Sans le mode Boutique » ; jamais en mode Boutique, qui inscrit la vente aujourd'hui, au point de vente du comptoir), avec **la date de la facture** et ce point de vente ;
+   4. il classe le signal : `Triage` → `Decision` : `Dismiss` → `Note` : la facture (son numéro, sa date, le point de vente) → `Record decision` ;
+   5. il demande au client de scanner de nouveau la pièce.
 
-> Le résultat AUTHENTIC confirme que cette identité a été émise et signée par ORBES. L'enregistrement s'ouvre dès que la vente de la pièce est inscrite chez ORBES : je vérifie, puis vous scannerez de nouveau la pièce pour l'enregistrer à votre nom avec le claim code de votre carte.
+   Sans facture, si le point de vente n'a aucune trace de la vente, ou si les scans la contredisent : aucune activation. La pièce est traitée comme un achat hors réseau (2.) et l'OPERATOR passe le cas à un ADMIN.
+2. **Il l'a achetée ailleurs**, à un particulier par exemple : n'activez rien. Notez la REF et le lieu d'achat, et prévenez un OPERATOR.
+
+Pour le cas 1 seulement, facture en main :
+
+> Le résultat AUTHENTIC confirme que cette identité a été émise et signée par ORBES. L'enregistrement s'ouvre une fois la vente de la pièce inscrite chez ORBES. Pouvez-vous me montrer la facture ou le ticket de caisse de votre achat ? ORBES vérifie la vente auprès de ce point de vente ; une fois la vente inscrite, vous scannerez de nouveau la pièce pour l'enregistrer à votre nom avec le claim code de votre carte.
+
+Pour le cas 2, ou sans facture :
+
+> Le résultat AUTHENTIC confirme que cette identité a été émise et signée par ORBES. Cette pièce n'a pas encore été remise par ORBES ou un détaillant agréé : ORBES Client Services va examiner sa situation. Pouvez-vous me donner la référence REF en bas de l'écran, et me dire où vous l'avez achetée ?
 
 ### UNUSUAL ACTIVITY DETECTED
 
@@ -200,7 +217,7 @@ Le client lit : *The activity recorded for this ORBES identity requires review. 
 
 **Ce que cela veut dire.** Un examen est demandé avant de se fier à la pièce. Les causes sont internes et ne se disent pas : une perte ou un vol déclarés, un code ou un GENOME qui ne correspondent pas au registre, un historique de scans inhabituel.
 
-**Ce que vous faites.** La REF, puis la fiche de la pièce : `Lifecycle`, `Anomalies`. Un OPERATOR décide. Si la pièce n'est pas enregistrée et que le client a sa carte intacte, le résultat lui propose `DO YOU HOLD THE CERTIFICATE CARD?` : il peut l'enregistrer avec le claim code.
+**Ce que vous faites.** La REF, puis la fiche de la pièce : `Lifecycle`, `Anomalies`. Un OPERATOR décide. Seulement quand l'examen vient de l'historique des scans, sur une pièce vendue, pas encore enregistrée, dont le statut n'est ni `LOST` ni `STOLEN`, et émise avec un claim code : le résultat propose `DO YOU HOLD THE CERTIFICATE CARD?`, et le client qui a sa carte intacte peut l'enregistrer avec le claim code. Sinon, un OPERATOR traite d'abord la fiche (le retour depuis `LOST`, le `Triage` du signal).
 
 > Ce résultat demande un examen ; ce n'est pas un verdict. Avant que vous vous fiiez à cette pièce, ORBES Client Services va regarder son historique : pouvez-vous me donner la référence REF en bas de l'écran, et me dire où vous avez vu ou acheté la pièce ?
 
@@ -259,6 +276,8 @@ Une pièce enregistrée change de mains par un **code de transfert**, créé par
 **Cas particuliers.**
 
 - Une pièce revendue avant tout enregistrement n'a pas de propriétaire : aucun code de transfert ne peut exister. Si la zone de la carte est intacte, l'acheteur l'enregistre avec le claim code (kit, §2).
+- Le vendeur a donné le code d'une autre pièce : l'acheteur lit *This transfer code is not for this piece. Check the code with the owner of this piece.* Il demande au vendeur le code de cette pièce-ci, avant de payer.
+- L'acheteur s'est connecté après son scan, ou plus de 15 minutes ont passé depuis : il scanne de nouveau la pièce, connecté, puis saisit le code. Un téléphone sans caméra lit le code d'une photo (`UPLOAD A PHOTO`, sur l'accueil de theorbes.com/verify).
 - Après la récupération d'un mot de passe (§6), les transferts depuis ce compte sont suspendus 72 heures (`TRANSFERS_PAUSED`).
 
 Ce que vous dites à l'acheteur, mot pour mot comme l'écran (*Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.*) :
@@ -273,6 +292,10 @@ Au vendeur :
 
 > Connecté à votre compte ORBES, scannez la pièce, touchez I HAVE A TRANSFER CODE, puis saisissez le code dans les 15 minutes qui suivent le scan. La pièce passe alors à votre nom.
 
+Si le code est refusé parce qu'il n'est pas celui de cette pièce :
+
+> Ce code de transfert n'est pas celui de cette pièce. Avant de payer, demandez au vendeur le code de transfert de cette pièce-ci, puis saisissez-le après un nouveau scan, connecté à votre compte ORBES.
+
 ---
 
 ## 5. Perte ou vol
@@ -283,7 +306,7 @@ Sur theorbes.com/verify, connecté, le client ouvre `MY PIECES` (sur l'accueil, 
 
 - un transfert en attente est annulé ;
 - chaque scan de la pièce affiche UNUSUAL ACTIVITY DETECTED, et ses codes ne peuvent plus être imprimés ;
-- chaque scan ouvre dans `Anomalies` un signal `LOST STOLEN SCAN`, avec le pays du scan.
+- le premier scan qui suit ouvre dans `Anomalies` un signal `LOST STOLEN SCAN`, et les scans suivants s'y ajoutent ; son panneau `Details` liste ces scans, leurs jours et leurs pays (`Scans in the window`, `Countries`).
 
 Une perte que le client a déclarée lui-même, il la lève lui-même : `PIECE FOUND` dans `MY PIECES` rend à la pièce son statut d'avant. Un vol, lui, n'est levé que par ORBES Client Services.
 
@@ -295,9 +318,9 @@ Un OPERATOR, après la vérification d'identité du §6 quand la demande vient d
 
 1. `Products` → la pièce → section `Actions`, groupe `Lifecycle` → `Change status`.
 2. `New status` : `LOST` (perte) ou `STOLEN` (vol). `Reason` : qui l'a demandé, quand, et la référence d'un éventuel échange. `Continue`, puis `Apply`.
-3. Pièce retrouvée : `Change status` → le statut d'avant, marqué `(return)` → `Apply`. Seul le retour au statut d'avant est possible.
+3. Pièce retrouvée : `Change status` → le statut d'avant, marqué `(return)` → `Apply`. Seul le retour au statut d'avant est possible. Lever un `STOLEN` à la demande du client demande la vérification renforcée du §6 : en boutique, avec la pièce, jamais par téléphone.
 
-Une pièce perdue en stock ou pendant un transport se déclare de la même façon. Si quelqu'un la scanne ensuite, `UNSOLD PIECE SCANNED` ou `LOST STOLEN SCAN` dans `Anomalies` donne le pays et le jour.
+Une pièce perdue en stock ou pendant un transport se déclare de la même façon. Si quelqu'un la scanne ensuite, le signal `LOST STOLEN SCAN` s'ouvre dans `Anomalies` (avant la déclaration, c'était `UNSOLD PIECE SCANNED`, une fois par jour) : son panneau `Details` liste les scans, leurs jours et leurs pays.
 
 ### Quand quelqu'un présente une pièce déclarée
 
@@ -315,13 +338,14 @@ SECURITY-MODEL §3.6 : un code de récupération, un verrouillage à la demande 
 
 1. C'est le client qui donne les informations ; vous les comparez à la console, sans jamais les lui lire d'abord.
 2. L'adresse e-mail exacte du compte : `Owners` → `Email or REF` → l'adresse entière → `Search` (il n'y a pas de recherche partielle). La fiche du client montre ses pièces, ses transferts et ses derniers scans.
-3. Au moins une preuve liée à une pièce du compte :
-   - la facture : sa date et son point de vente, comparés à `Purchase` dans la section `Warranty` de la fiche de la pièce ;
-   - l'identité de la pièce (`O26-…`, sur sa carte) et son modèle ;
-   - un scan fait pendant l'échange : le client scanne sa pièce et vous lit la REF ; la section `Reference` doit nommer ce compte dans `Owner of the piece`.
-4. En boutique : une pièce d'identité au nom de la facture.
-5. Au moindre doute : aucun code. Proposez au client de venir en boutique avec la pièce et sa facture.
-6. Jamais : demander le mot de passe, envoyer le code par e-mail, SMS ou message, l'écrire, le donner à quelqu'un d'autre que la personne vérifiée.
+3. **Ce qui ne prouve pas l'identité.** Tout ce qu'un scan montre : l'identité de la pièce (`O26-…`) et son modèle, la date de début de sa garantie, et la REF d'un scan. N'importe qui les obtient en scannant le code de la pièce, ou une copie de ce code : la section `Reference` nomme le propriétaire dans `Owner of the piece`, quelle que soit la personne qui scanne. Ces faits prouvent au mieux l'accès à la pièce ou à une photo de son code ; ils ne suffisent jamais, seuls ou ensemble. Un scan fait pendant l'échange (le client vous lit sa REF) reste un contrôle en plus, qui montre que la pièce est à portée de main, jamais la preuve.
+4. **Ce qui la prouve : des faits qu'aucun scan ne montre**, comparés à la fiche du client. Il faut les deux :
+   - la facture d'une pièce que ce compte a enregistrée lui-même (`FIRST REGISTRATION` dans la colonne `Acquired` de `Pieces`) : son point de vente et sa date, ensemble, comparés à `Purchase` dans la section `Warranty` de la fiche de la pièce. Pour une pièce reçue par transfert (`TRANSFER`), la facture d'origine ne prouve rien : c'est celle d'un ancien propriétaire ;
+   - ce que le client dit de son compte : ses autres pièces et à peu près depuis quand il les a (ou qu'il n'en a pas d'autre), ses transferts récents, envoyés ou reçus, comparés à `Pieces` (colonnes `Acquired`, `From` et `Until`) et à `Transfers in progress`.
+5. En boutique : en plus, une pièce d'identité au nom de la facture.
+6. Une pièce du compte déclarée `LOST` ou `STOLEN` : la facture dans tous les cas, car celui qui tient la pièce, et peut-être sa boîte, est le premier à pouvoir se faire passer pour le client. Lever un `STOLEN` (§5) : en boutique, avec la pièce, la facture et une pièce d'identité à son nom ; jamais par téléphone.
+7. Sans ces faits (un compte dont les pièces ont toutes été reçues par transfert, une facture perdue), ou au moindre doute : aucun code. Proposez au client de venir en boutique avec une pièce d'identité au nom du compte (`Name` sur sa fiche) ou de la facture, la pièce et ce qu'il a de son achat ; le cas va au juriste (§11).
+8. Jamais : demander le mot de passe, envoyer le code par e-mail, SMS ou message, l'écrire, le donner à quelqu'un d'autre que la personne vérifiée.
 
 ### Dans la console (ADMIN)
 
@@ -333,17 +357,17 @@ SECURITY-MODEL §3.6 : un code de récupération, un verrouillage à la demande 
 
 ### Ce que vous dites
 
-> Nous n'envoyons jamais de lien par e-mail pour changer un mot de passe. Après avoir vérifié votre identité, je vous lis un code de récupération : il ne sert qu'une fois et reste valable 30 minutes. Sur theorbes.com/verify, scannez une de vos pièces, ouvrez l'onglet OWNERSHIP, touchez FORGOTTEN PASSWORD? sous le formulaire de connexion, puis I HAVE A RECOVERY CODE, et saisissez l'adresse e-mail de votre compte, ce code et un nouveau mot de passe de 12 caractères au moins.
+> Nous n'envoyons jamais de lien par e-mail pour changer un mot de passe. Après avoir vérifié votre identité, je vous lis un code de récupération : il ne sert qu'une fois et reste valable 30 minutes. Sur theorbes.com/verify, touchez MY PIECES (ou, après un scan, l'onglet OWNERSHIP), puis FORGOTTEN PASSWORD? sous le formulaire de connexion, puis I HAVE A RECOVERY CODE, et saisissez l'adresse e-mail de votre compte, ce code et un nouveau mot de passe de 12 caractères au moins.
 
 > Pour votre sécurité, toutes vos sessions se ferment, vos transferts en attente sont annulés et aucun nouveau transfert n'est possible depuis votre compte pendant 72 heures.
 
-Un client connecté qui veut seulement changer son mot de passe le fait lui-même : `CHANGE PASSWORD`, à côté de `SIGN OUT`.
+Un client connecté qui veut seulement changer son mot de passe le fait lui-même : `CHANGE PASSWORD`, dans `MY PIECES`, à côté de `SIGN OUT` (sur l'accueil de theorbes.com/verify, ou par `MY PIECES` dans la ligne de son compte de l'onglet `OWNERSHIP`).
 
 ---
 
 ## 7. Scans personnels du personnel
 
-Un navigateur connecté à la console scanne **en tant que staff** (S-07, API §9.7) : le scan est inscrit en `ADMIN_TEST` à votre nom, n'ouvre pas `UNSOLD PIECE SCANNED`, et l'onglet `OWNERSHIP` dit `STAFF SCAN` sans proposer d'enregistrement.
+Un navigateur connecté à la console scanne **en tant que staff** (S-07, API §9.7) : le scan est inscrit en `ADMIN_TEST` à votre nom, n'ouvre pas `UNSOLD PIECE SCANNED`, et l'onglet `OWNERSHIP` ne propose jamais d'enregistrement. Sur une pièce vendue et pas encore enregistrée, il dit `STAFF SCAN` ; sur une pièce non vendue, `NOT YET DELIVERED`, comme pour tout scan.
 
 - **Un membre de l'équipe qui achète une pièce** la scanne et l'enregistre depuis un navigateur **qui n'est pas connecté à la console** : un autre navigateur, une fenêtre de navigation privée, ou après `Sign out` dans la console. Jamais avec le téléphone du comptoir.
 - **L'inverse pour le stock** : un contrôle de stock se fait depuis un navigateur connecté à la console. Fait d'un téléphone personnel, il ouvre `UNSOLD PIECE SCANNED`, le signal d'une pièce sortie du stock sans vente.
@@ -374,7 +398,7 @@ Les mots de la console (`Products`, `STOLEN`, `COUNTERFEIT FLAGGED`, `LOST STOLE
 
 ## 9. Checklist de 30 minutes sur une pièce test
 
-Chaque personne qui vendra ou répondra aux clients la réalise une fois, seule, avant sa première vente, avec son compte OPERATOR nominatif (§10). Un vendeur RETAIL fait l'étape 3 en mode Boutique et laisse l'étape 7 à un OPERATOR.
+Chaque personne qui vendra ou répondra aux clients la réalise une fois, seule, avant sa première vente, avec son compte OPERATOR nominatif (§10). Un vendeur RETAIL fait l'étape 3 en mode Boutique et laisse l'étape 7 à un OPERATOR. Il ouvre le mode Boutique sur un autre appareil ou un autre navigateur que le téléphone de test : l'ordinateur (`Upload a photo` s'il n'a pas de caméra) ou le téléphone du comptoir. Le téléphone de test n'est jamais connecté à la console : chacun de ses scans deviendrait un scan staff, sans enregistrement (§7), et l'étape 4 échouerait.
 
 | Étape | Ce que vous faites | Durée |
 |---|---|---|
@@ -390,15 +414,15 @@ Chaque personne qui vendra ou répondra aux clients la réalise une fois, seule,
 ### Préparation (un ADMIN, avant la séance, hors chrono)
 
 1. Le compte nominatif de la personne, son application d'authentification enrôlée (§10).
-2. Une pièce test : `Generator` → `Single piece` → une catégorie et un modèle existants, `Production batch` : `TEST`, la case `Issue a one-time claim code (shown once, stored as a hash)` cochée → `Issue & sign`. Notez son identité (`O26-…`) et le claim code affiché une fois (`Claim code · shown once`). Pour cette pièce test seulement, il est remis à la personne sur papier : le claim code d'une pièce vendue ne quitte jamais sa carte.
+2. Une pièce test : `Generator` → `Single piece` → une catégorie et un modèle existants, `Production batch` : TEST, la case `Issue a one-time claim code (shown once, stored as a hash)` cochée → `Issue & sign`. Notez son identité (`O26-…`) et le claim code affiché une fois (`Claim code · shown once`). Pour cette pièce test seulement, il est remis à la personne sur papier : le claim code d'une pièce vendue ne quitte jamais sa carte.
 3. Son ORBES CODE imprimé : sur l'écran du résultat de `Generator`, section `Code & print files`, `Width (mm)` 30, `Download` `PDF`, imprimé à 100 %.
-4. La planche d'essai `docs/assets/test-sheets/orbes-code-test-sheets.pdf`, page 2, imprimée à 100 %. Ses codes sont signés par la clé d'exemple publique : ils donnent INVALID SIGNATURE et n'ouvrent aucun signal.
+4. La planche d'essai `docs/assets/test-sheets/orbes-code-test-sheets.pdf`, page 2, imprimée à 100 %. Ses codes sont signés par la clé d'exemple publique : ils donnent INVALID SIGNATURE. Ils n'ouvrent aucun signal dans `Anomalies`, mais chacun de leurs scans compte une fois dans `Analytics`, sous `Counterfeit signals by country` (INVALID SIGNATURE, le pays de la séance).
 5. Un point de vente dans `Points of sale`.
 6. Deux adresses e-mail de test, réservées à cet usage (comptes test A et B), un ordinateur pour la console, et un téléphone dont le navigateur n'est pas connecté à la console (une fenêtre de navigation privée suffit).
 
 ### Étape 1 — Se connecter à la console (3 min)
 
-Sur l'ordinateur, ouvrez `https://verify.theorbes.com/admin` : `Email`, `Password`, `Authenticator code` (les six chiffres de votre application), `Sign in`. À la première connexion avec un mot de passe provisoire, l'écran `New password` demande `Temporary password` (tapé exactement comme remis, capitales et tirets compris), `New password`, `New password again`, puis `Save password`. Vous arrivez sur `Dashboard` ; la barre latérale mène au reste.
+Sur l'ordinateur, ouvrez `https://verify.theorbes.com/admin` : `Email`, `Password`, `Sign in`, puis `Authenticator code` (les six chiffres de votre application), qui n'apparaît qu'à ce moment, et de nouveau `Sign in`. À la première connexion avec un mot de passe provisoire, l'écran `New password` demande `Temporary password` (tapé exactement comme remis, capitales et tirets compris), `New password`, `New password again`, puis `Save password`. Vous arrivez sur `Dashboard` ; la barre latérale mène au reste.
 
 ### Étape 2 — Scanner la pièce test avant sa vente (3 min)
 
@@ -410,7 +434,7 @@ Console : `Products` → `Search` : l'identité de la pièce test → `Apply` �
 
 ### Étape 4 — Enregistrer la pièce avec le compte test A (6 min)
 
-Sur le téléphone, `SCAN ANOTHER` en bas du résultat, puis scannez de nouveau la pièce. Attendu : `AUTHENTIC — FIRST REGISTRATION`. Onglet `OWNERSHIP` : `REGISTRATION OPEN UNTIL` et l'heure. `CREATE ACCOUNT` : `EMAIL` (adresse test A), `PASSWORD` (12 caractères au moins), puis `CREATE ACCOUNT`. Ensuite `CLAIM CODE` (celui de la préparation) → `REGISTER THIS PIECE`. Attendu : `REGISTERED TO YOU`. Touchez `VIEW AS OWNER` : `AUTHENTIC — OWNERSHIP VERIFIED`.
+Sur le téléphone, `SCAN ANOTHER` en bas du résultat, puis scannez de nouveau la pièce. Attendu : `AUTHENTIC — FIRST REGISTRATION`. Onglet `OWNERSHIP` : `REGISTRATION OPEN UNTIL …`, suivi de l'heure. `CREATE ACCOUNT` : `EMAIL` (adresse test A), `PASSWORD` (12 caractères au moins), puis `CREATE ACCOUNT`. Ensuite `CLAIM CODE` (celui de la préparation) → `REGISTER THIS PIECE`. Attendu : `REGISTERED TO YOU`. Touchez `VIEW AS OWNER` : `AUTHENTIC — OWNERSHIP VERIFIED`.
 
 ### Étape 5 — Transférer la pièce au compte test B (7 min)
 
@@ -420,7 +444,7 @@ Toujours connecté en A, onglet `OWNERSHIP`, `TRANSFER OF OWNERSHIP` → `CREATE
 
 Sur le téléphone, `SCAN ANOTHER`, visez une étiquette de 30 mm de la planche d'essai. Attendu : `INVALID SIGNATURE`. Lisez l'écran de haut en bas : le titre et sa phrase ; *ORBES Client Services can help with any question about this piece. Please quote the reference below.* ; `CONTACT ORBES CLIENT SERVICES` quand les coordonnées sont configurées ; `WHERE DID YOU SEE OR BUY THIS PIECE?` (n'y répondez pas : la question est pour les clients) ; en bas, `REF` et huit caractères. Notez cette REF.
 
-Un `UNKNOWN ORBES CODE` se lit exactement de la même façon : seuls le titre et la phrase changent, et les gestes sont ceux du §3. **Écart assumé** : la checklist ne fabrique pas d'UNKNOWN ORBES CODE en production. Il n'en existe que pour un code signé par une clé ORBES et absent du registre, et chacun ouvre un signal CRITICAL de clé compromise (API §9.4, étape 6) : la planche d'essai donne le même écran sans rien déclencher.
+Un `UNKNOWN ORBES CODE` se lit exactement de la même façon : seuls le titre et la phrase changent, et les gestes sont ceux du §3. **Écart assumé** : la checklist ne fabrique pas d'UNKNOWN ORBES CODE. En production, le seul qu'on puisse produire à la demande vient d'un code signé par une clé ORBES et absent du registre, qui ouvre un signal CRITICAL `VALID SIGNATURE UNREGISTERED`, celui d'une clé compromise (API §9.4, étape 6) ; l'autre cause, un serveur qui ne connaît pas encore la version du code, ne s'imprime pas pour un exercice. La planche d'essai donne le même écran sans ouvrir de signal dans `Anomalies` ; son scan compte seulement une fois dans `Analytics` (préparation, point 4).
 
 ### Étape 7 — Retrouver le scan dans la console (3 min)
 
@@ -432,6 +456,7 @@ Arrivé ici seul en moins de 30 minutes : la checklist est réussie.
 
 - La pièce test : sur sa fiche, `Change status` → `New status` `RETIRED` → `Continue` → `Apply`. Elle se lit désormais `REVOKED`, et ses codes ne peuvent plus être imprimés.
 - Le signal de l'étape 2 : `Anomalies` → `Triage` → `Decision` : `Dismiss` → `Note` : « pièce test, checklist J-09 » → `Record decision`.
+- Dans `Analytics`, `Counterfeit signals by country` compte le scan de l'étape 6 (INVALID SIGNATURE, le pays de la séance) : c'est attendu. Sa REF et son heure, notées à l'étape 6, l'identifient ; rien n'est à classer.
 - Les comptes test A et B restent : ils resservent à la séance suivante (`SIGN IN` au lieu de `CREATE ACCOUNT`).
 - Le temps réalisé va dans le §11.
 
@@ -450,15 +475,18 @@ read -rs ADMIN_PASSWORD && export ADMIN_PASSWORD   # la personne tape son mot de
 docker compose exec -e ADMIN_PASSWORD app node --import tsx scripts/admin.ts create --email <e-mail de la personne> --role OPERATOR
 unset ADMIN_PASSWORD
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <e-mail de la personne>
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <e-mail de la personne> --secret <SECRET> --code <code à 6 chiffres>
+read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # l'ADMIN colle le secret affiché par totp-setup : rien ne s'affiche
+clear   # le secret quitte l'écran
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <e-mail de la personne> --code <code à 6 chiffres>
+unset ADMIN_TOTP_SECRET
 docker compose exec app node --import tsx scripts/admin.ts list
 ```
 
 Dans le conteneur, la première commande est exactement `ADMIN_PASSWORD=… node --import tsx scripts/admin.ts create --email … --role OPERATOR` : `docker compose exec -e ADMIN_PASSWORD` lui passe le mot de passe sans l'écrire dans l'historique du shell ni sur la ligne de commande.
 
 1. `create` lit le mot de passe dans `ADMIN_PASSWORD`, jamais sur la ligne de commande.
-2. `totp-setup` affiche une fois le secret et son lien `otpauth://`. La personne l'ajoute elle-même à son application d'authentification, sur son téléphone, devant l'ADMIN. Le secret n'est ni photographié, ni envoyé, ni gardé par l'ADMIN.
-3. `totp-enable` reçoit le code que l'application affiche à cet instant : il prouve que l'application détient le secret.
+2. `totp-setup` affiche une fois le secret et son lien otpauth. La personne l'ajoute elle-même à son application d'authentification, sur son téléphone, devant l'ADMIN. L'ADMIN colle ensuite le secret dans `read -rs ADMIN_TOTP_SECRET`, copie autre chose pour vider son presse-papiers, et `clear` efface le secret de l'écran (ou fermez la fenêtre du terminal après la séance). Le secret n'est ni photographié, ni envoyé, ni gardé par l'ADMIN.
+3. `totp-enable` lit le secret dans `ADMIN_TOTP_SECRET`, comme `create` lit le mot de passe : il n'est écrit ni dans l'historique du shell, ni sur une ligne de commande que la liste des processus du serveur montrerait (ce que ferait `--secret`). Il reçoit le code que l'application affiche à cet instant : ce code prouve que l'application détient le secret.
 4. `list` montre la personne avec `2FA on` et `active`.
 5. La personne range son mot de passe dans son propre gestionnaire de mots de passe ; l'ADMIN ne garde rien. Elle peut le changer à tout moment : `Change password`, au pied de la barre latérale.
 
@@ -466,7 +494,7 @@ Dans le conteneur, la première commande est exactement `ADMIN_PASSWORD=… node
 
 1. Un ADMIN : `Team` (groupe `Security`) → `New staff account` → `Email`, `Role` : `OPERATOR` → `Create account`.
 2. Le mot de passe provisoire s'affiche une fois (`Temporary password · shown once`) : remettez-le en main propre, puis `I have handed it over — hide`.
-3. Avant sa première connexion, enrôlez son TOTP depuis le shell, en sa présence : `totp-setup` puis `totp-enable`, comme ci-dessus.
+3. Avant sa première connexion, enrôlez son TOTP depuis le shell, en sa présence : `totp-setup` puis `totp-enable`, le secret lu dans `ADMIN_TOTP_SECRET`, comme ci-dessus.
 4. À sa première connexion (§9, étape 1), elle tape le mot de passe provisoire, son code, puis choisit son propre mot de passe sur l'écran `New password`.
 5. Sur `Team`, sa ligne ne dit plus `TEMPORARY PASSWORD`, et `Two-factor` dit `ENABLED`.
 
@@ -488,4 +516,4 @@ Rien ne part en boutique tant qu'une ligne dont cela dépend reste ouverte.
 | Carte certificat sans la mention PROOF (kit, §6) | Marque | la première carte remise à un client | Ouvert |
 | Retour d'une commande expédiée (§2) : la suite d'une pièce dont la garantie a commencé | Propriétaire | la première vente en ligne | Ouvert |
 
-**Écart assumé.** Le brief demande de « lire un résultat UNKNOWN » pendant la checklist. Elle fait lire INVALID SIGNATURE, qui a le même écran, parce qu'un UNKNOWN ORBES CODE, en production, ouvre un signal CRITICAL de clé compromise (§9, étape 6).
+**Écart assumé.** Le brief demande de « lire un résultat UNKNOWN » pendant la checklist. Elle fait lire INVALID SIGNATURE, qui a le même écran : en production, le seul UNKNOWN ORBES CODE qu'on puisse produire à la demande ouvre un signal CRITICAL de clé compromise, et l'autre cause (un serveur en retard sur la version du code) ne s'imprime pas (§9, étape 6). Le scan de la planche n'ouvre aucun signal dans `Anomalies`, mais compte une fois dans `Analytics` (`Counterfeit signals by country`) : c'est attendu.
