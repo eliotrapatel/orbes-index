@@ -2,7 +2,10 @@
  * MediaService (F-04): the reference photograph of a model (phase 1) and the
  * photograph of one piece taken at issuance (phase 2), stored once each in
  * `media_objects` (migration 0012) and served publicly by
- * `GET /api/v1/media/:sha256`.
+ * `GET /api/v1/media/:sha256`; and the gallery of a model's lookbook sheet
+ * (P-R02, `model_images`, migration 0014): at most GALLERY_MAX photographs
+ * beside its cover (the reference photograph), in an order, each with its
+ * alternative text.
  *
  * Every image goes through `server/media/image.ts` first: its type checked by
  * its own bytes, EXIF and XMP removed, its dimensions read. It is then stored
@@ -12,9 +15,13 @@
  * `product.photo.remove`, each with the image's facts (hash, type, size) and
  * the one it replaced, never its bytes. A change that changes nothing (the
  * same photograph again, or a removal where there is none) writes nothing.
+ * The gallery's changes (`model.gallery.add`, `model.gallery.remove`,
+ * `model.gallery.update`: its order and alternative texts) lock the model's
+ * row first, so two of them on one model run one after the other, and keep
+ * its positions 1 to n.
  *
- * An image no model and no piece uses any more is deleted once the change
- * has committed: a removed photograph stops being served. A concurrent
+ * An image no model, no gallery and no piece uses any more is deleted once
+ * the change has committed: a removed photograph stops being served. A concurrent
  * upload of the very same bytes keeps it: the upload locks the row (FOR KEY
  * SHARE) as soon as it has inserted it or found it there, so the delete
  * waits for the upload, whose pointer the foreign key then sees (the delete
@@ -28,7 +35,7 @@ import { createHash } from 'node:crypto';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isForeignKeyViolation } from '../db/pg-errors.js';
 import type { MediaMimeType } from '../db/schema.js';
-import { notFound } from '../errors.js';
+import { conflict, notFound, validationError } from '../errors.js';
 import { sanitizeImage, type CleanImage, type ImageMime } from '../media/image.js';
 import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -44,6 +51,30 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export function mediaUrl(sha256: string | null | undefined): string | null {
   return typeof sha256 === 'string' && SHA256_RE.test(sha256) ? `${MEDIA_URL_PREFIX}${sha256}` : null;
 }
+
+/** The photographs of a model's lookbook gallery (P-R02), beside its cover: positions 1 to GALLERY_MAX (migration 0014). */
+export const GALLERY_MAX = 8;
+/** A gallery photograph's alternative text: one line, at most this many characters (the database's bound). */
+export const GALLERY_ALT_MAX = 200;
+
+/** A gallery photograph's alternative text: '' and null mean the sheet's default (the model's name and type). */
+export function normalizeAlt(v: unknown): string | null {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+  if (typeof v !== 'string') throw validationError('The alternative text must be text.');
+  const s = v.trim();
+  if (/[\u0000-\u001f\u007f]/.test(s)) throw validationError('The alternative text is one line, without control characters.');
+  if (s.length > GALLERY_ALT_MAX) throw validationError(`The alternative text has at most ${GALLERY_ALT_MAX} characters.`);
+  return s;
+}
+
+/** One photograph of a gallery, as PATCH /api/admin/models/:id/gallery sends it back: the order is the list's. */
+export interface GalleryItem {
+  sha256: string;
+  /** '' or null: the sheet's default; left out (undefined): the photograph keeps the text it has. */
+  alt?: string | null;
+}
+
+const galleryImageNotFound = () => notFound('Photograph of this gallery', 'GALLERY_IMAGE_NOT_FOUND');
 
 /** An uploaded image as the HTTP layer received it: the declared type and the raw bytes. */
 export interface ImageUpload {
@@ -181,6 +212,110 @@ export class MediaService {
     return { productId, photoUrl: null };
   }
 
+  // ── The gallery of a model's lookbook sheet (P-R02) ──────────────────────
+
+  /**
+   * Add a photograph to the gallery of a model's lookbook sheet (POST /api/admin/models/:id/gallery), last. At most
+   * GALLERY_MAX (409 GALLERY_FULL); the model's reference photograph is its cover already (409 IMAGE_IS_COVER); the same
+   * photograph again writes nothing. Audited `model.gallery.add` with the image's facts and its position.
+   */
+  async addModelGalleryImage(modelId: string, upload: ImageUpload, actor: Actor): Promise<StoredImage> {
+    const image = sanitizeImage(upload?.bytes, upload?.mime);
+    const id = modelKey(modelId);
+    const stored = describe(image);
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('models').select(['id', 'image_sha256']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (row.image_sha256 === stored.sha256) {
+        throw conflict('IMAGE_IS_COVER', 'This photograph is already the reference photograph of the model, the cover of its sheet.');
+      }
+      const images = await tx.selectFrom('model_images').select(['sha256', 'position']).where('model_id', '=', id).execute();
+      if (images.some((i) => i.sha256 === stored.sha256)) return;
+      if (images.length >= GALLERY_MAX) throw conflict('GALLERY_FULL', `The gallery of a model holds ${GALLERY_MAX} photographs at most: remove one first.`);
+      await this.store(tx, stored.sha256, image, actor);
+      const position = images.length + 1;
+      await tx
+        .insertInto('model_images')
+        .values({ model_id: id, sha256: stored.sha256, position, alt: null, created_by: adminId(actor), created_at: this.clock() })
+        .execute();
+      await this.audit.record({ actor, action: 'model.gallery.add', targetType: 'model', targetId: id, details: { ...facts(stored), position } }, tx);
+    });
+    return stored;
+  }
+
+  /**
+   * Remove a photograph from a model's gallery (DELETE /api/admin/models/:id/gallery/:sha256); the ones after it move up.
+   * 404 GALLERY_IMAGE_NOT_FOUND when it is not in this gallery. Audited `model.gallery.remove`. The image, used nowhere
+   * else, is then deleted.
+   */
+  async removeModelGalleryImage(modelId: string, sha256: string, actor: Actor): Promise<void> {
+    const id = modelKey(modelId);
+    const sha = typeof sha256 === 'string' ? sha256.toLowerCase() : '';
+    if (!SHA256_RE.test(sha)) throw galleryImageNotFound();
+    await inTransaction(this.db, async (tx) => {
+      const model = await tx.selectFrom('models').select('id').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+      const row = await tx.selectFrom('model_images').select(['position']).where('model_id', '=', id).where('sha256', '=', sha).executeTakeFirst();
+      if (!row) throw galleryImageNotFound();
+      await tx.deleteFrom('model_images').where('model_id', '=', id).where('sha256', '=', sha).execute();
+      // Positions stay 1…n: the unique (model_id, position) is checked at commit, so the shift may pass over itself.
+      await tx
+        .updateTable('model_images')
+        .set((eb) => ({ position: eb('position', '-', 1) }))
+        .where('model_id', '=', id)
+        .where('position', '>', row.position)
+        .execute();
+      await this.audit.record({ actor, action: 'model.gallery.remove', targetType: 'model', targetId: id, details: { sha256: sha, position: row.position } }, tx);
+    });
+    await this.deleteIfUnused(sha);
+  }
+
+  /**
+   * The order and the alternative texts of a model's gallery (PATCH /api/admin/models/:id/gallery): `items` names every
+   * photograph of the gallery once, in the new order, each with its text ('' or null: the sheet's default; left out:
+   * unchanged). A list that no longer matches the gallery (a photograph added or removed meanwhile) is 409
+   * GALLERY_CHANGED, and nothing is written. Audited `model.gallery.update` with the gallery before and after; nothing
+   * is written when nothing changes.
+   */
+  async arrangeModelGallery(modelId: string, items: readonly GalleryItem[], actor: Actor): Promise<void> {
+    const id = modelKey(modelId);
+    if (!Array.isArray(items) || items.length > GALLERY_MAX) throw validationError(`List the photographs of the gallery, ${GALLERY_MAX} at most.`);
+    const asked = items.map((item, i) => {
+      const sha = typeof item?.sha256 === 'string' ? item.sha256.toLowerCase() : '';
+      if (!SHA256_RE.test(sha)) throw validationError(`Photograph ${i + 1}: not a SHA-256.`);
+      return { sha256: sha, alt: item.alt === undefined ? undefined : normalizeAlt(item.alt), position: i + 1 };
+    });
+    await inTransaction(this.db, async (tx) => {
+      const model = await tx.selectFrom('models').select('id').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+      const current = await tx.selectFrom('model_images').select(['sha256', 'position', 'alt']).where('model_id', '=', id).orderBy('position').execute();
+      const named = new Set(asked.map((n) => n.sha256));
+      if (named.size !== asked.length || named.size !== current.length || current.some((c) => !named.has(c.sha256))) {
+        throw conflict('GALLERY_CHANGED', 'The gallery changed meanwhile: reload it, then try again.');
+      }
+      const before = new Map(current.map((c) => [c.sha256, c]));
+      const next = asked.map((n) => ({ ...n, alt: n.alt === undefined ? before.get(n.sha256)!.alt : n.alt }));
+      const changed = next.filter((n) => before.get(n.sha256)!.position !== n.position || before.get(n.sha256)!.alt !== n.alt);
+      if (changed.length === 0) return;
+      for (const n of changed) {
+        await tx.updateTable('model_images').set({ position: n.position, alt: n.alt }).where('model_id', '=', id).where('sha256', '=', n.sha256).execute();
+      }
+      await this.audit.record(
+        {
+          actor,
+          action: 'model.gallery.update',
+          targetType: 'model',
+          targetId: id,
+          details: {
+            before: current.map((c) => ({ sha256: c.sha256, alt: c.alt })),
+            after: next.map((n) => ({ sha256: n.sha256, alt: n.alt })),
+          },
+        },
+        tx,
+      );
+    });
+  }
+
   /**
    * Store the image once: the same bytes uploaded again (for another model or piece) are the same row. The row is
    * then locked FOR KEY SHARE until this transaction ends: ON CONFLICT DO NOTHING takes no lock on a row that already
@@ -200,7 +335,7 @@ export class MediaService {
           width: image.width,
           height: image.height,
           // The console user who uploaded it; a script (system actor) leaves it empty.
-          created_by: actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null,
+          created_by: adminId(actor),
           created_at: this.clock(),
         })
         .onConflict((oc) => oc.column('sha256').doNothing())
@@ -211,13 +346,14 @@ export class MediaService {
     throw new Error('media: the image could not be stored (deleted twice while it was being stored)');
   }
 
-  /** Delete an image no model and no piece uses any more. Best effort, after the change committed. */
+  /** Delete an image no model, no gallery and no piece uses any more. Best effort, after the change committed. */
   private async deleteIfUnused(sha256: string): Promise<void> {
     try {
       await this.db
         .deleteFrom('media_objects')
         .where('sha256', '=', sha256)
         .where((eb) => eb.not(eb.exists(eb.selectFrom('models').select('id').where('image_sha256', '=', sha256))))
+        .where((eb) => eb.not(eb.exists(eb.selectFrom('model_images').select('model_id').where('sha256', '=', sha256))))
         .where((eb) => eb.not(eb.exists(eb.selectFrom('products').select('id').where('photo_sha256', '=', sha256))))
         .execute();
     } catch (e) {
@@ -226,6 +362,11 @@ export class MediaService {
       this.log.warn({ sha256, err: { message: (e as Error)?.message } }, 'media: an unused image could not be deleted');
     }
   }
+}
+
+/** The console user behind an upload (media_objects.created_by, model_images.created_by); a script (system actor) leaves it empty. */
+function adminId(actor: Actor): string | null {
+  return actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null;
 }
 
 function modelKey(modelId: string): string {

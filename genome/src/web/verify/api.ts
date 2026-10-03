@@ -23,6 +23,8 @@ import type {
   IncidentReport,
   IncidentResolution,
   IncidentType,
+  LookbookCard,
+  LookbookSheet,
   OwnedPiece,
   OwnerCertificate,
   OwnershipConfirmation,
@@ -127,6 +129,32 @@ export class ApiClient {
     if (input.where && input.where.trim()) body.where = input.where.trim();
     if (input.note && input.note.trim()) body.note = input.note.trim();
     await this.request('POST', '/api/v1/reports', body);
+  }
+
+  // ── The lookbook (P-R02) ─────────────────────────────────────────────────
+
+  /** The PUBLIC models, by collection, without their stories; the same for everyone, so the browser may keep it 5 minutes. */
+  async lookbook(): Promise<LookbookCard[]> {
+    const r = await this.request<{ models?: unknown }>('GET', '/api/v1/lookbook', undefined, { cache: 'default' });
+    if (!Array.isArray(r?.models)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.models as LookbookCard[];
+  }
+
+  /** A PUBLIC model's sheet (404 LOOKBOOK_NOT_FOUND for any other address); the browser may keep it 5 minutes. */
+  lookbookSheet(slug: string): Promise<LookbookSheet> {
+    return this.request<LookbookSheet>('GET', `/api/v1/lookbook/${encodeURIComponent(slug)}`, undefined, { cache: 'default' });
+  }
+
+  /** The RESERVED models, for an account that holds a piece (the club; 403 OWNERS_ONLY otherwise, 401 signed out). */
+  async clubLookbook(): Promise<LookbookCard[]> {
+    const r = await this.request<{ models?: unknown }>('GET', '/api/v1/club/lookbook');
+    if (!Array.isArray(r?.models)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.models as LookbookCard[];
+  }
+
+  /** A sheet, PUBLIC or RESERVED, for an account that holds a piece (the club). */
+  clubLookbookSheet(slug: string): Promise<LookbookSheet> {
+    return this.request<LookbookSheet>('GET', `/api/v1/club/lookbook/${encodeURIComponent(slug)}`);
   }
 
   // ── Account ──────────────────────────────────────────────────────────────

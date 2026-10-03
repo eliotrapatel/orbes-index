@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0013) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0014) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -99,6 +99,13 @@ export type AnomalyStatus = (typeof ANOMALY_STATUSES)[number];
 export const REVOCATION_TARGET_TYPES = ['CODE', 'PRODUCT', 'KEY'] as const;
 export type RevocationTargetType = (typeof REVOCATION_TARGET_TYPES)[number];
 
+/**
+ * Where a model stands in the lookbook (models.lookbook, migration 0014, P-R02): HIDDEN (the default), PUBLIC (listed for
+ * everyone) or RESERVED (listed for the owners of a piece only: unlisted, not confidential).
+ */
+export const LOOKBOOK_STATES = ['HIDDEN', 'PUBLIC', 'RESERVED'] as const;
+export type LookbookState = (typeof LOOKBOOK_STATES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -166,6 +173,30 @@ export interface ModelsTable {
   active: WithDefault<boolean>;
   /** Migration 0012: the model's reference photograph (media_objects.sha256), shown on the authentic results of its pieces. */
   image_sha256: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0014 (P-R02): the address of its lookbook sheet, /verify/lookbook/<slug>; unique; fixed once published_at is set. */
+  slug: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0014: HIDDEN (default), PUBLIC or RESERVED; a model shown has its slug. */
+  lookbook: WithDefault<LookbookState>;
+  /** Migration 0014: plain paragraphs, ≤ 4 000 characters. */
+  story: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0014: one `Label: value` line per specification, ≤ 1 000 characters. */
+  specs: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0014: when the model first left HIDDEN; never cleared. */
+  published_at: TimestampNullable;
+  created_at: TimestampDefault;
+}
+
+/**
+ * The gallery of a model's lookbook sheet (migration 0014, P-R02): at most 8 photographs (positions 1–8, unique per
+ * model), each a media_objects row; `alt` NULL is the sheet's default alternative text. The reference photograph
+ * (models.image_sha256) is the cover, not a row here. model_id, sha256, created_by and created_at never change.
+ */
+export interface ModelImagesTable {
+  model_id: string;
+  sha256: string;                      // media_objects.sha256
+  position: number;                    // smallint 1..8
+  alt: string | null;                  // ≤ 200 characters
+  created_by: string | null;           // admin_users.id; null when a script stored it
   created_at: TimestampDefault;
 }
 
@@ -560,6 +591,7 @@ export interface Database {
   categories: CategoriesTable;
   collections: CollectionsTable;
   models: ModelsTable;
+  model_images: ModelImagesTable;
   products: ProductsTable;
   product_status_history: ProductStatusHistoryTable;
   genomes: GenomesTable;
@@ -595,6 +627,8 @@ export type CollectionRow = Selectable<CollectionsTable>;
 export type NewCollection = Insertable<CollectionsTable>;
 export type ModelRow = Selectable<ModelsTable>;
 export type NewModel = Insertable<ModelsTable>;
+export type ModelImageRow = Selectable<ModelImagesTable>;
+export type NewModelImage = Insertable<ModelImagesTable>;
 export type ProductRow = Selectable<ProductsTable>;
 export type NewProduct = Insertable<ProductsTable>;
 export type ProductUpdate = Updateable<ProductsTable>;

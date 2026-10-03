@@ -17,8 +17,9 @@
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
  *    trusts no proxy in direct mode, strips query strings and headers from the
  *    access log, leaves HSTS to the app, and limits every request body to
- *    64 KB except the console's two photograph uploads (F-04: 1 200 KB, over
- *    the app's 1 MiB);
+ *    64 KB except the console's three photograph uploads (F-04: a model's
+ *    reference photograph, a piece's; P-R02: a photograph of a model's
+ *    lookbook gallery; 1 200 KB, over the app's 1 MiB);
  *  - the scripts are strict bash with --help, and the destructive ones have
  *    --dry-run; the systemd units point at scripts that exist;
  *  - whatever the operator's umask, the image's sources and Caddy's
@@ -350,7 +351,7 @@ describe('deploy/vps/Caddyfile', () => {
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
   });
 
-  it('limits every body to 64 KB, except the two photograph uploads of the console (F-04): 1 200 KB, over the app\'s 1 MiB', () => {
+  it('limits every body to 64 KB, except the three photograph uploads of the console (F-04, P-R02): 1 200 KB, over the app\'s 1 MiB', () => {
     const d = directives(caddyfile);
     // Caddy reads KB as 1 000 bytes.
     const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
@@ -364,15 +365,15 @@ describe('deploy/vps/Caddyfile', () => {
     expect(kb('1200KB')).toBeGreaterThan(MEDIA_BODY_LIMIT_BYTES);
     expect(kb('64KB')).toBeGreaterThan(BODY_LIMIT_BYTES);
     expect(kb('64KB')).toBeLessThan(MEDIA_BODY_LIMIT_BYTES);
-    // The exception is a POST to one of the two upload paths; its complement is the very same pair, negated.
+    // The exception is a POST to one of the upload paths; its complement is the very same pair, negated.
     const upload = /@photo_upload \{\n\t\tmethod POST\n\t\tpath_regexp (\S+)\n\t\}/.exec(d);
     expect(upload, 'the @photo_upload matcher').not.toBeNull();
     const pattern = upload![1];
     expect(d).toContain(`@not_photo_upload {\n\t\tnot {\n\t\t\tmethod POST\n\t\t\tpath_regexp ${pattern}\n\t\t}\n\t}`);
-    // The pattern is RE2 and JavaScript alike here: it matches the app's two routes, with or without a trailing slash…
+    // The pattern is RE2 and JavaScript alike here: it matches the app's three routes, with or without a trailing slash…
     const re = new RegExp(pattern);
     const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
-    expect(MEDIA_UPLOAD_ROUTES).toHaveLength(2);
+    expect([...MEDIA_UPLOAD_ROUTES]).toEqual(['/api/admin/models/:id/image', '/api/admin/products/:productId/photo', '/api/admin/models/:id/gallery']);
     for (const route of MEDIA_UPLOAD_ROUTES) {
       expect(re.test(sample(route)), route).toBe(true);
       expect(re.test(`${sample(route)}/`), route).toBe(true);
@@ -384,6 +385,11 @@ describe('deploy/vps/Caddyfile', () => {
       '/api/admin/products/O26-J-00184',
       '/api/admin/products/batch',
       '/api/admin/products/O26-J-00184/photo/extra',
+      // The gallery: a photograph's removal and the order (a DELETE and a PATCH, never a POST here) keep 64 KB anyway.
+      `/api/admin/models/73c68b47-012d-4569-a59a-fd2effa613c1/gallery/${'ab'.repeat(32)}`,
+      '/api/admin/models/73c68b47-012d-4569-a59a-fd2effa613c1/galleries',
+      '/api/admin/models//gallery',
+      '/api/v1/lookbook/monolithe-ring',
       '/api/admin/models//image',
       '/api/admin/x/models/1/image',
       '/api/v1/verify',

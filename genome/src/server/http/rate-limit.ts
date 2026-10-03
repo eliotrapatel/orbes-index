@@ -10,6 +10,13 @@
  *   auth    logins, registration, claim & transfer codes   config.rateLimits.authPerMinute
  *   admin   every other /api/admin route                    config.rateLimits.adminPerMinute
  *   api     remaining public/account routes                 config.rateLimits.apiPerMinute
+ *   media   GET /api/v1/media/:sha256 (the photographs)     apiPerMinute × MEDIA_RATE_FACTOR
+ *
+ * The photographs have their own, higher budget (P-R02): a lookbook sheet
+ * shows up to nine of them, and the customers of a boutique share its wifi
+ * (one address): drawn from the `api` budget, a few sheets would refuse the
+ * next lookup. It follows RATE_LIMIT_API_PER_MINUTE (no variable of its own:
+ * the configuration has four files to keep in step, deploy/vps included).
  *
  * Clients are keyed by the peppered hash of their IP (IPv6 grouped by /64);
  * raw addresses are never kept, not even in the in-memory store.
@@ -23,8 +30,11 @@ import type { AppConfig } from '../config.js';
 import { tooManyRequests } from '../errors.js';
 import { rateLimitKeyOf } from './client.js';
 
-export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api'] as const;
+export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api', 'media'] as const;
 export type RateGroup = (typeof RATE_GROUPS)[number];
+
+/** The `media` group's budget, as a multiple of the `api` one (120 → 600 photographs a minute per client). */
+export const MEDIA_RATE_FACTOR = 5;
 
 const WINDOW_MS = 60_000;
 /** Clients tracked per group (LRU). Larger than the plugin default so a wide botnet cannot evict counters cheaply. */
@@ -45,6 +55,7 @@ export function groupLimits(config: Pick<AppConfig, 'rateLimits'>): Record<RateG
     auth: config.rateLimits.authPerMinute,
     admin: config.rateLimits.adminPerMinute,
     api: config.rateLimits.apiPerMinute,
+    media: config.rateLimits.apiPerMinute * MEDIA_RATE_FACTOR,
   };
 }
 

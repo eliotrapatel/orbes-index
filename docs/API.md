@@ -58,8 +58,8 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 1.2 Requests
 
-- **JSON only.** Request bodies must be sent with `Content-Type: application/json` (a `charset` parameter is accepted). Any other content type, including `text/plain` and form encodings, is refused with `415 UNSUPPORTED_MEDIA_TYPE`. **One exception**: the photograph routes of the console (`POST /api/admin/models/:id/image`, §13.4, and `POST /api/admin/products/:productId/photo`, §14.12) take the image itself, as `image/jpeg` or `image/webp`, and nothing else (`415`, "Send the image itself, as image/jpeg or image/webp (at most 1 MB)."); no other route accepts an image.
-- **Body limit: 16 KB** (16 384 bytes). Larger bodies get `413 PAYLOAD_TOO_LARGE`. On the two photograph routes only, the limit is **1 MiB** (1 048 576 bytes).
+- **JSON only.** Request bodies must be sent with `Content-Type: application/json` (a `charset` parameter is accepted). Any other content type, including `text/plain` and form encodings, is refused with `415 UNSUPPORTED_MEDIA_TYPE`. **One exception**: the photograph routes of the console (`POST /api/admin/models/:id/image` and `POST /api/admin/models/:id/gallery`, §13.4, and `POST /api/admin/products/:productId/photo`, §14.12) take the image itself, as `image/jpeg` or `image/webp`, and nothing else (`415`, "Send the image itself, as image/jpeg or image/webp (at most 1 MB)."); no other route accepts an image.
+- **Body limit: 16 KB** (16 384 bytes). Larger bodies get `413 PAYLOAD_TOO_LARGE`. On the three photograph routes only, the limit is **1 MiB** (1 048 576 bytes).
 - An empty body with `Content-Type: application/json` is treated as "no body". Routes without a body accept no body, an empty body or `{}`; any field is an unknown field.
 - Invalid JSON, and JSON with `__proto__` or `constructor` keys, gets `400 INVALID_JSON`.
 - Bodies are **strict**: unknown fields are rejected with `400 VALIDATION_FAILED` ("The request contains unknown fields: …"). Query strings tolerate unknown parameters but validate the values of known ones.
@@ -73,7 +73,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 - JSON, UTF-8. Timestamps are ISO 8601 in UTC with milliseconds (`2026-10-01T08:15:21.929Z`). Calendar dates are `YYYY-MM-DD`, from year 0001: PostgreSQL has no year 0000, so a date or a date-time before `0001-01-01` (UTC) is `400 VALIDATION_FAILED`, never sent to the database. Identifiers are lower-case UUIDs. Products are identified by their canonical id (`O26-J-00184`).
 - Wherever a path or body takes a product reference (`productId`), both the canonical id (case-insensitive) and the product's row UUID are accepted.
-- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise (the public keys, the categories, the contact of Client Services, and the photographs of §8.6, cached for a year as they never change).
+- API responses carry `Cache-Control: no-store` unless an endpoint states otherwise (the public keys, the categories, the contact of Client Services, the lookbook's lists and sheets of §8.8, cached 5 minutes, and the photographs of §8.6, cached for a year as they never change).
 - Security headers on every response include: the Content-Security-Policy `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `Permissions-Policy: camera=(self)`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (except the public key list), and in production `Strict-Transport-Security: max-age=63072000; includeSubDomains`. `X-Powered-By` is removed.
 - No CORS headers are sent, except on the public key list (§8.2). Browser code on another origin can therefore only read the public keys.
 
@@ -101,7 +101,7 @@ A production server answers only on an up-to-date database schema: it refuses to
 
 ### 2.2 CSRF protection
 
-Applies to every **unsafe** request (any method other than `GET`, `HEAD`, `OPTIONS`) under the account, ownership and admin routes:
+Applies to every **unsafe** request (any method other than `GET`, `HEAD`, `OPTIONS`) under the account, ownership, club (§10.9) and admin routes:
 
 1. **Origin rule.** The `Origin` header must equal `PUBLIC_ORIGIN` exactly (scheme, host and port). A request without `Origin` is accepted only with `Sec-Fetch-Site: same-origin`. `Origin: null`, look-alike hosts and `Sec-Fetch-Site: same-site` or `cross-site` are refused.
 2. **Token rule.** When the request is authenticated by a session cookie, the header `x-csrf-token` must equal that session's CSRF token (compared in constant time). Tokens of other sessions are refused.
@@ -118,7 +118,7 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR > RETAIL**; a role may do everythi
 |---|---|
 | RETAIL | A seller (A-08, migration 0008). The sale mode of a phone (§16.18: look a scanned piece up, start its warranty at a point of sale) and the list of points of sale it chooses from (`GET /api/admin/retailers`, §16.17). Manage its own session, password and second factor. **Nothing else**: no product, code, scan, owner, warranty list or dashboard, no download. |
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2), the list of points of sale included. Manage its own session, password and second factor. **Nothing it does changes the registry**: although ranked above RETAIL, it does not use the sale mode (`403 FORBIDDEN` on `/api/admin/sale/*`; the console shows it no Sale mode link). |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's lookbook, its place, address, story and specifications, and its gallery (§13.4; P-R02), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
 | ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data). |
 
 ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
@@ -133,7 +133,7 @@ When MFA is enforced, an admin session that has not passed TOTP may use **only**
 
 ### 2.5 Request pipeline
 
-For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON; on the two photograph routes, the image itself, ≤ 1 MiB) and validated in the handler.
+For every request, before the body is parsed: cookies are read, the client IP is pseudonymised, security headers are set, the rate limit of the route's group is applied, and then (account, ownership, club and admin routes) the session, CSRF, temporary-password, MFA and role checks run. Unauthenticated traffic is refused before any body work. The body is then parsed (≤ 16 KB, JSON; on the three photograph routes, the image itself, ≤ 1 MiB) and validated in the handler.
 
 ---
 
@@ -146,7 +146,8 @@ Each route belongs to one **group**. All routes of a group draw from one per-cli
 | `verify` | `POST /api/v1/verify`, `POST /api/v1/reports`, `POST /api/v1/certificates/lookup` and `POST /api/v1/certificates/pdf` (the ownership certificate a link opens, §8.7), `POST /api/admin/sale/lookup` (the sale mode's judgement of a code, §16.18: never a faster way to judge codes than the public route) | `RATE_LIMIT_VERIFY_PER_MINUTE`, 60 |
 | `auth` | `POST /api/v1/account/register`, `POST /api/v1/account/login`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/register`, `POST /api/v1/ownership/transfers/accept`, `POST /api/v1/ownership/incidents/resolve`, `POST /api/admin/auth/login`, `POST /api/admin/auth/password`, `POST /api/admin/auth/totp/setup`, `POST /api/admin/auth/totp/enable` | `RATE_LIMIT_AUTH_PER_MINUTE`, 10 |
 | `admin` | Every other `/api/admin/…` route | `RATE_LIMIT_ADMIN_PER_MINUTE`, 300 |
-| `api` | Every other `/api/v1/…` route, and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
+| `api` | Every other `/api/v1/…` route (the lookbook's, §8.8, and the club's, §10.9, included), and `/.well-known/orbes-keys.json` | `RATE_LIMIT_API_PER_MINUTE`, 120 |
+| `media` | `GET /api/v1/media/:sha256`, the photographs (§8.6; P-R02): a lookbook sheet shows up to nine, and the customers of a boutique share its address | 5 × the `api` budget (`MEDIA_RATE_FACTOR`, `http/rate-limit.ts`): 600 by default; no variable of its own |
 
 - Values accept integers 1–1 000 000; an unknown `RATE_LIMIT_*` variable is a configuration error. The `test` environment defaults to 10 000 per group.
 - Clients are keyed by an HMAC of their IP address; IPv6 addresses are grouped per /64. The client IP honours `TRUST_PROXY`: list the addresses or ranges of your reverse proxies (e.g. `uniquelocal`, `10.0.0.0/8`, Cloudflare's published ranges). Without it, every client behind the proxy shares the proxy's budget. Production refuses `TRUST_PROXY=true` (the left-most `X-Forwarded-For` entry is written by the client, so limits and IP pseudonyms would be forgeable) and hop counts such as `1` (SECURITY-MODEL §4).
@@ -352,13 +353,21 @@ Reports and cases:
 | `REPORT_NOT_FOUND` | 404 | (§16.9) No case with this id. |
 | `REPORT_ALREADY_CLOSED` | 409 | (§16.9) The case is already closed. |
 
-Photographs (F-04, §8.6, §13.4, §14.12):
+Photographs (F-04, §8.6, §13.4, §14.12) and the lookbook (P-R02, §8.8, §10.9, §13.4):
 
 | Code | HTTP | Meaning |
 |---|---|---|
+| `LOOKBOOK_NOT_FOUND` | 404 | (§8.8, §10.9) No sheet at this address for this reader: a HIDDEN model, a RESERVED one (publicly; the club's route for an owner), an unknown or malformed address. One answer for all (*This model is not in the ORBES collection.*). |
+| `OWNERS_ONLY` | 403 | (§10.9) The signed-in account holds no piece now (an open ownership of a piece that is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED): the club is for the owners of an ORBES piece. |
+| `SLUG_TAKEN` | 409 | (§13.4) Another model already has this address in the lookbook. |
+| `SLUG_LOCKED` | 409 | (§13.4) The model has been published in the lookbook: its address never changes (links to its sheet are out), nor goes. |
+| `GALLERY_FULL` | 409 | (§13.4) The model's gallery already holds 8 photographs: remove one first. |
+| `IMAGE_IS_COVER` | 409 | (§13.4) The photograph is the model's reference photograph, the cover of its sheet already. |
+| `GALLERY_CHANGED` | 409 | (§13.4) The order sent does not name the photographs of the gallery, each once (one was added or removed meanwhile): reload it. |
+| `GALLERY_IMAGE_NOT_FOUND` | 404 | (§13.4) The photograph is not in this model's gallery. |
 | `IMAGE_INVALID` | 400 | The bytes are not a JPEG or a WebP (an SVG, a PNG, text…), do not match the declared type (a JPEG sent as `image/webp`), are damaged or truncated, use a kind of JPEG no browser draws (hierarchical, JPEG-LS), or the image is over 4 096 pixels on a side. The message says which. |
 | `IMAGE_ANIMATED` | 400 | An animated WebP (its animation flag, or ANIM / ANMF chunks): a photograph is a still image. |
-| `MEDIA_NOT_FOUND` | 404 | (§8.6) No stored photograph with this SHA-256: never uploaded, or removed and no longer used by any model or piece. |
+| `MEDIA_NOT_FOUND` | 404 | (§8.6) No stored photograph with this SHA-256: never uploaded, or removed and no longer used by any model, gallery or piece. |
 
 ---
 
@@ -387,7 +396,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/.well-known/orbes-keys.json` | — | — | api | 8.2 |
 | GET | `/api/v1/categories` | — | — | api | 8.3 |
 | GET | `/api/v1/client-services` | — | — | api | 8.4 |
-| GET | `/api/v1/media/:sha256` | — | — | api | 8.6 |
+| GET | `/api/v1/media/:sha256` | — | — | media | 8.6 |
+| GET | `/api/v1/lookbook` | — | — | api | 8.8 |
+| GET | `/api/v1/lookbook/:slug` | — | — | api | 8.8 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
@@ -410,6 +421,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/ownership/certificates` | Account (current owner) | yes | api | 11.7 |
 | GET | `/api/v1/ownership/certificates` | Account | — | api | 11.7 |
 | DELETE | `/api/v1/ownership/certificates/:id` | Account (the link's owner) | yes | api | 11.7 |
+| GET | `/api/v1/club/lookbook` | Account (an owner of a piece) | — | api | 10.9 |
+| GET | `/api/v1/club/lookbook/:slug` | Account (an owner of a piece) | — | api | 10.9 |
 | POST | `/api/admin/auth/login` | — | origin only | auth | 12.1 |
 | POST | `/api/admin/auth/logout` | RETAIL (optional) | yes | admin | 12.2 |
 | GET | `/api/admin/auth/me` | RETAIL | — | admin | 12.3 |
@@ -425,9 +438,13 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | PATCH | `/api/admin/collections/:id` | OPERATOR | yes | admin | 13.3 |
 | GET | `/api/admin/models` | AUDITOR | — | admin | 13.4 |
 | POST | `/api/admin/models` | OPERATOR | yes | admin | 13.4 |
+| GET | `/api/admin/models/:id` | AUDITOR | — | admin | 13.4 |
 | PATCH | `/api/admin/models/:id` | OPERATOR | yes | admin | 13.4 |
 | POST | `/api/admin/models/:id/image` | OPERATOR | yes | admin | 13.4 |
 | DELETE | `/api/admin/models/:id/image` | OPERATOR | yes | admin | 13.4 |
+| POST | `/api/admin/models/:id/gallery` | OPERATOR | yes | admin | 13.4 |
+| PATCH | `/api/admin/models/:id/gallery` | OPERATOR | yes | admin | 13.4 |
+| DELETE | `/api/admin/models/:id/gallery/:sha256` | OPERATOR | yes | admin | 13.4 |
 | GET | `/api/admin/products` | AUDITOR | — | admin | 14.1 |
 | POST | `/api/admin/products` | OPERATOR | yes | admin | 14.2 |
 | POST | `/api/admin/products/batch` | OPERATOR | yes | admin | 14.11 |
@@ -489,7 +506,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | DELETE | `/api/admin/admins/:id/sessions` | **ADMIN** | yes | admin | 17.12 |
 | POST | `/api/admin/admins/:id/totp/reset` | **ADMIN** | yes | admin | 17.13 |
 
-Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, the photographs (`GET /api/v1/media/:sha256`, `/api/admin/models/:id/image`, `/api/admin/products/:productId/photo`; F-04), `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` and `incidentReportable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
+Extensions of the platform contract: `GET /api/v1/account/session`, `GET /api/v1/client-services`, the photographs (`GET /api/v1/media/:sha256`, `/api/admin/models/:id/image`, `/api/admin/products/:productId/photo`; F-04), the lookbook (`GET /api/v1/lookbook` and `/:slug`, the club's `GET /api/v1/club/lookbook` and `/:slug`, `GET /api/admin/models/:id`, the lookbook's fields of `PATCH /api/admin/models/:id`, `/api/admin/models/:id/gallery`; P-R02, and `product.lookbook` of a verification), `POST /api/v1/reports`, `POST /api/v1/account/password`, `POST /api/v1/account/recover`, `POST /api/v1/ownership/incidents/resolve` and the `incidentResolvable` and `incidentReportable` of `GET /api/v1/account/products`, the ownership certificates (`/api/v1/ownership/certificates`, `/api/v1/certificates/lookup` and `/pdf`, F-06), the owners' search (`?email=`, `?ref=`), `/api/admin/owners/:id` with its `recovery-code`, `lock`, `unlock` and `export`, `/api/admin/reports`, the catalogue's edits (`POST /api/admin/categories/:code/active`, `PATCH /api/admin/collections/:id`, `PATCH /api/admin/models/:id`), `/api/admin/auth/password`, `/api/admin/auth/totp/setup`, `/api/admin/auth/totp/enable`, `/api/admin/products/batch`, `/api/admin/codes/print-sheet`, `/api/admin/codes/print-sheet/manifest`, `/api/admin/codes/ids`, the filters of `GET /api/admin/codes` and the `productionBatch` filter of `GET /api/admin/products`, the `scanId` and the `from` / `to` window of `GET /api/admin/scans`, the `type`, `productId`, `sort` and `id` of `GET /api/admin/anomalies`, `/api/admin/anomalies/summary`, `/api/admin/anomalies/:id/context`, `/api/admin/analytics`, `/api/admin/certificates`, `/api/admin/products/:productId/warranty/extend`, every `/api/admin/admins` route, and the points of sale and sale mode routes (`/api/admin/retailers`, `/api/admin/sale/*`). There is no HTTP endpoint for creating ADMIN users or granting the ADMIN role (the first ADMIN is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`; further ADMINs with `scripts/admin.ts create` or `role`, see [DEPLOYMENT](DEPLOYMENT.md)) or cancelling service records; those operations exist only in the services and command-line tools. A customer changes their password with §10.7, or recovers it through ORBES Client Services with §10.8; a console user changes their own with §12.5.
 
 ---
 
@@ -607,7 +624,7 @@ The place and the note are the customer's own words: **personal data**. They are
 
 ### 8.6 `GET /api/v1/media/:sha256`
 
-A photograph that an authentic result names (§9.2 `product.imageUrl` and `product.photoUrl`, F-04), as does the owner's list of pieces (§10.5): a model's reference photograph or the photograph of one piece, uploaded in the console (§13.4, §14.12). Public, no session, rate group `api`; `HEAD` too.
+A photograph that an authentic result names (§9.2 `product.imageUrl` and `product.photoUrl`, F-04), as do the owner's list of pieces (§10.5) and the lookbook (§8.8, §10.9; P-R02): a model's reference photograph, a photograph of a model's gallery, or the photograph of one piece, uploaded in the console (§13.4, §14.12). Public, no session, rate group `media` (§3: five times the `api` budget, since a lookbook sheet shows up to nine); `HEAD` too. A photograph of a model RESERVED for owners is public all the same: RESERVED means unlisted, not confidential.
 
 `:sha256` is the lower-case hexadecimal SHA-256 of the image's bytes (upper case is accepted and read as lower case): the URL names its content, so the answer never changes.
 
@@ -619,7 +636,7 @@ A photograph that an authentic result names (§9.2 `product.imageUrl` and `produ
 | `ETag` | `"<sha256>"`. A request with `If-None-Match` naming it answers **304** with no body, once the image is known to exist. |
 | `X-Content-Type-Options` | `nosniff`, with the Content-Security-Policy of every response (§1.3). |
 
-What is served is what was stored: a JPEG or a WebP of at most 1 MiB and 4 096 px a side, with its EXIF and XMP removed when it was uploaded (§13.4). An image that no model and no piece uses any more (replaced or removed) is deleted and answers 404.
+What is served is what was stored: a JPEG or a WebP of at most 1 MiB and 4 096 px a side, with its EXIF and XMP removed when it was uploaded (§13.4). An image that no model, no gallery and no piece uses any more (replaced or removed) is deleted and answers 404.
 
 Errors: `400 VALIDATION_FAILED` (not 64 hexadecimal characters), `404 MEDIA_NOT_FOUND`, both `Cache-Control: no-store`.
 
@@ -673,6 +690,54 @@ Lookups are not audited (they would flood the log); creation and withdrawal are 
 Errors: `400 VALIDATION_FAILED` (no `token`, not a string, over 128 characters, unknown field), `404 CERTIFICATE_NOT_FOUND`, `409 CERTIFICATE_NO_LONGER_VALID` (`pdf`), `429 RATE_LIMITED`.
 
 **In the verify app:** `/verify/c#…` (§18) shows OWNERSHIP CERTIFICATE, its state (VALID, NO LONGER VALID, NOT FOUND) and one sentence; when valid, the piece in its écrin (the GENOME plate of MY PIECES), its lines, THE RECORD (OWNERSHIP, SINCE, WARRANTY, FROM, UNTIL, LOSS OR THEFT · NONE REPORTED), THIS CERTIFICATE (CHECKED, in the reader's time; ISSUED; VALID UNTIL), *A certificate names no owner…*, then DOWNLOAD PDF (the page's hairline button) and SCAN ORBES CODE (BRAND §5).
+
+### 8.8 `GET /api/v1/lookbook` and `GET /api/v1/lookbook/:slug` (extension of the contract)
+
+The **lookbook** of the models (P-R02): THE COLLECTION of the verification app, the models ORBES shows, each with a sheet of its photographs, its story, its specifications and its care. Public, no session; rate group `api`; `HEAD` too. Nothing in them depends on a session (an owner's reserved models are the club's, §10.9): `Cache-Control: public, max-age=300`, so a change in the console shows within 5 minutes. Implementation: `services/lookbook.ts`.
+
+A model is in the lookbook as the console set it (§13.4): **HIDDEN** (the default: every existing model, until the console shows it), **PUBLIC** (listed here) or **RESERVED** (listed for the owners of a piece only, §10.9: unlisted, not confidential, its photographs stay public, §8.6).
+
+**`GET /api/v1/lookbook`, 200**: the PUBLIC models, by collection (by name; the models without one last), then by name; never a story (the lists stay small: the verification app refuses an answer over 256 000 characters).
+
+```json
+{ "models": [ { "slug": "monolithe", "name": "MONOLITHE", "type": "RING", "category": { "code": "J", "name": "Jewelry" }, "collection": "ORBIT", "imageUrl": "/api/v1/media/9f2c4e…" } ] }
+```
+
+| Field | Notes |
+|---|---|
+| `slug` | The address of its sheet: lower-case letters and digits, words joined by single hyphens, at most 80 characters. |
+| `collection` | The model's collection, or `null`. |
+| `imageUrl` | The model's reference photograph (its cover), else the first photograph of its gallery, or `null`. |
+
+**`GET /api/v1/lookbook/:slug`, 200**: a PUBLIC model's sheet (`:slug` read in any case).
+
+```json
+{
+  "slug": "monolithe",
+  "lookbook": "PUBLIC",
+  "name": "MONOLITHE",
+  "type": "RING",
+  "category": { "code": "J", "name": "Jewelry" },
+  "collection": "ORBIT",
+  "coverUrl": "/api/v1/media/9f2c4e…",
+  "gallery": [ { "url": "/api/v1/media/4b1a…", "alt": "The ring on its side, the stone up" } ],
+  "story": "The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.",
+  "specs": [ { "label": "Metal", "value": "925 sterling silver" } ],
+  "care": "Polish with a soft dry cloth."
+}
+```
+
+| Field | Notes |
+|---|---|
+| `coverUrl` | The model's reference photograph (§13.4), shown first; `null` without one. |
+| `gallery` | Up to 8 photographs, in their order; the cover is never repeated there. `alt` `null`: the verification app says what every photograph of the model says (*The MONOLITHE RING model, photographed by ORBES*). |
+| `story` | Plain paragraphs, a blank line between two, a single line break kept inside one; no Markdown (shown as typed); `null` without one. |
+| `specs` | The `Label: value` lines of the model, in their order (a label holds no figure: it is set in the display face). |
+| `care` | The model's care instructions; `null`: the general care text of the CARE tab. |
+
+A HIDDEN or RESERVED model, an unknown or malformed address: one **`404 LOOKBOOK_NOT_FOUND`** (*This model is not in the ORBES collection.*), `no-store`, so a model shown later is seen at once. Errors: `400 BAD_REQUEST` (an address over 128 characters, §1.2), `404 LOOKBOOK_NOT_FOUND`, `429 RATE_LIMITED`.
+
+**In the verify app:** `/verify/lookbook`, THE COLLECTION (§18; BRAND §5): the models on ivory plates, grouped by collection, each with SEE THE MODEL, a text link to `/verify/lookbook/<slug>`, the sheet: the collection, the name and type, the cover and the gallery on an ivory plate, THE STORY, SPECIFICATIONS, CARE. Every photograph loads lazily. The landing and MY PIECES link to THE COLLECTION; an authentic result whose model is PUBLIC links to its sheet (`product.lookbook`, §9.2).
 
 ---
 
@@ -748,6 +813,7 @@ Every processed verification answers **HTTP 200**, whatever the state. The body 
 | `product.care` | string | The model's care instructions, when set. |
 | `product.imageUrl` | string | The model's reference photograph (F-04), when the model has one: `/api/v1/media/<sha256>`, a path of this origin (§8.6). |
 | `product.photoUrl` | string | The photograph of this piece, taken by ORBES at issuance (F-04), when it has one: `/api/v1/media/<sha256>`. The verification app shows it first, then the model's, above the GENOME. |
+| `product.lookbook` | string | (P-R02) The slug of its model's sheet in the lookbook (§8.8), when the model is PUBLIC there: the sheet is `/verify/lookbook/<slug>`. Never for a HIDDEN or RESERVED model. The verification app offers SEE THE MODEL, a text link under the product lines. |
 | `warranty` | object | `AUTHENTIC*` states only. |
 | `warranty.status` | `"NOT_STARTED"` \| `"ACTIVE"` \| `"EXPIRED"` \| `"VOID"` | Computed at the request's UTC date. |
 | `warranty.startDate`, `warranty.endDate` | date | When the warranty is activated. |
@@ -1243,6 +1309,21 @@ Errors: `400 VALIDATION_FAILED`, `400 RECOVERY_CODE_INVALID`, `403 ACCOUNT_LOCKE
 
 In the verify app, signed out: FORGOTTEN PASSWORD? under the sign-in form of the OWNERSHIP panel leads to ORBES Client Services (the contact of §8.4: an email titled *ORBES — FORGOTTEN PASSWORD* that quotes the reference of the scan on screen, the phone and the hours), then I HAVE A RECOVERY CODE to the form (email, recovery code, new password). After a recovery the sign-in form comes back with the email filled in, and says what the recovery did and until when transfers are paused.
 
+### 10.9 The club: `GET /api/v1/club/lookbook` and `GET /api/v1/club/lookbook/:slug` (extension of the contract)
+
+The owners' club (the « Potentiel » plan of 2026-10-03; `routes/club.ts`, `services/club.ts`): what a signed-in account holds now decides what it reads there. P-R02 opens the lookbook's **RESERVED** models (§8.8) to the owners of a piece. Account session required (`401 UNAUTHORIZED` without one); the club's mutations are POSTs only, under the CSRF rules (§2.2). Rate group `api`. Every answer depends on the account: `Cache-Control: no-store`, errors included.
+
+An **owner** is an account that holds at least one piece now: an ownership still open (`ownership.ended_at IS NULL`) of a piece that is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED (those never end an ownership, so they are left out of the count; the ownership table is only read here). The count is read again at each request: the access goes with the last piece. Any other account: **`403 OWNERS_ONLY`** (*This is reserved for the owners of an ORBES piece.*).
+
+- **`GET /api/v1/club/lookbook`, 200**: `{ "models": [ … ] }`, the RESERVED models, as the cards of §8.8 (never a story).
+- **`GET /api/v1/club/lookbook/:slug`, 200**: a sheet of §8.8, PUBLIC or RESERVED (`"lookbook": "RESERVED"` for a reserved one). A HIDDEN or unknown model: `404 LOOKBOOK_NOT_FOUND`.
+
+RESERVED means **unlisted, not confidential**: the sheet is not listed for the public, but its photographs stay public at `/api/v1/media/…` (§8.6), like every other.
+
+Errors: `401 UNAUTHORIZED`, `403 OWNERS_ONLY`, `404 LOOKBOOK_NOT_FOUND`, `429 RATE_LIMITED`.
+
+**In the verify app:** THE COLLECTION (§8.8) asks for the reserved models once the session is known and signed in; an owner sees them under **RESERVED FOR OWNERS**, and their sheets read `RING · RESERVED FOR OWNERS`. Any other answer shows no section and says nothing. A sheet the public route answers 404 is asked of the club, signed in.
+
 ---
 
 ## 11. Ownership endpoints
@@ -1567,13 +1648,21 @@ AUDITOR. Landing counts.
       "active": true,
       "imageUrl": "/api/v1/media/9f2c4e8a…",
       "products": 184,
+      "lookbook": "PUBLIC",
+      "slug": "monolithe",
+      "story": "The first ring of ORBES.\n\nCast in Paris.",
+      "specs": "Metal: 925 sterling silver\nWeight: 12 g",
+      "publishedAt": "2026-10-04T09:00:00.000Z",
+      "gallery": [ { "sha256": "4b1a…", "url": "/api/v1/media/4b1a…", "alt": null, "position": 1 } ],
       "createdAt": "2026-10-01T08:13:22.220Z"
     }
   ]
 }
 ```
 
-`collection` is `null` when the model has none. `active`: the model is offered for new products (§13.4, `PATCH`). `imageUrl`: the model's reference photograph (below), `null` without one. `products`: the pieces issued with the model, whose public results read its name, type, care instructions, collection and reference photograph.
+`collection` is `null` when the model has none. `active`: the model is offered for new products (§13.4, `PATCH`). `imageUrl`: the model's reference photograph (below), `null` without one; it is the cover of its lookbook sheet. `products`: the pieces issued with the model, whose public results read its name, type, care instructions, collection and reference photograph. The lookbook (P-R02, §8.8): `lookbook` (`HIDDEN`, `PUBLIC`, `RESERVED`), `slug` (the address of its sheet, `null` until named), `story`, `specs`, `publishedAt` (when it first left HIDDEN, `null` while it never has) and `gallery` (its photographs beside the cover, in their order; `alt` `null`: the sheet's default).
+
+**`GET /api/admin/models/:id`** (AUDITOR; extension of the contract, P-R02) — one model, the object of the list: the console's Lookbook page of the model. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `404 MODEL_NOT_FOUND`.
 
 **`POST /api/admin/models`** (OPERATOR):
 
@@ -1598,24 +1687,36 @@ AUDITOR. Landing counts.
 | `careInstructions` | string \| null | ≤ 2 000 characters; `""`/`null` clears them (the CARE tab of /verify then shows its general care text). Public: `product.care`. |
 | `collectionId` | uuid \| null | Must exist; `""`/`null` = none. Public: `product.collection` of the pieces without a collection of their own. |
 | `active` | boolean | `false`: no new product with this model (`POST /api/admin/products` answers `409 MODEL_INACTIVE`, the generator hides it); its pieces keep verifying as before. `true` offers it again. An issuance under way reads `active` again under a share lock in its transaction (§14.2), so it never completes with a model deactivated meanwhile. |
+| `lookbook` | string | (P-R02) `HIDDEN`, `PUBLIC` or `RESERVED` (§8.8). A model shown (PUBLIC or RESERVED) has its `slug`, sent with it or already set (400 otherwise). The first time it is shown, `publishedAt` is set; it is never cleared. |
+| `slug` | string \| null | (P-R02) The address of its sheet, `/verify/lookbook/<slug>`: 1–80 lower-case letters and digits, words joined by single hyphens (trimmed and lower-cased first). Another model's address: `409 SLUG_TAKEN`. Once the model has been published (`publishedAt`), its address never changes, nor goes: `409 SLUG_LOCKED`, links to its sheet are out. `""`/`null` clears it while the model was never published. |
+| `story` | string \| null | (P-R02) Plain paragraphs, a blank line between two, at most 4 000 characters; no Markdown: shown as typed. Line breaks are kept (as `\n`), each line trimmed, runs of blank lines kept to one. `""`/`null` clears it. |
+| `specs` | string \| null | (P-R02) One `Label: value` line per specification, at most 1 000 characters: the label before the first colon, 1–40 characters, **no figure** (labels are set in the display face); the value after it, not empty. Blank lines dropped; kept as `Label: value`. A line out of form: `400 VALIDATION_FAILED` naming the line. `""`/`null` clears them. |
 
-**Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once (the collection only on the pieces without one of their own): the console says how many (`products`) before saving, and shows the care block as the client reads it. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`.
+**Never `category`, `categoryCode` nor `skuPrefix`** (`400 VALIDATION_FAILED`, "The category and SKU prefix of a model never change: …"): the category letter is in the identity of every piece issued with the model, and the prefix starts every SKU issued with it (the database refuses them too, DATABASE §5.3). `type` cannot be changed either; any other field is unknown (400). The changes are read live by the public result (§9.2) of every piece issued with the model, at once (the collection only on the pieces without one of their own), and by its lookbook sheet (§8.8, within the 5 minutes of its cache): the console says how many (`products`) before saving, and shows the care block, the story and the specifications as the client reads them. Audited `model.update` with the changed fields only, `{ before: {…}, after: {…}, issuedPieces }`, a story as `{ length, sha256 }` (never its words, the audit log is permanent), and `publishedAt` (`null` before, the time after) when the change first shows the model; a change that changes nothing writes nothing. **200** — the model object. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`, `404 COLLECTION_NOT_FOUND`, `409 SLUG_TAKEN`, `409 SLUG_LOCKED`.
 
 **`POST /api/admin/models/:id/image`** (OPERATOR; extension of the contract, F-04) — sets the model's **reference photograph**, shown above the GENOME on the authentic result (§9.2 `product.imageUrl`) of every piece issued with the model, at once. The body is **the image itself**, not JSON:
 
-- `Content-Type: image/jpeg` or `image/webp` (anything else, a JSON body included: `415 UNSUPPORTED_MEDIA_TYPE`), at most **1 MiB** (`413 PAYLOAD_TOO_LARGE`); the CSRF rules of §2.2 apply as to any mutation. These two photograph routes are the only ones with this parser and this limit (`genome/src/server/routes/admin/media.ts`).
+- `Content-Type: image/jpeg` or `image/webp` (anything else, a JSON body included: `415 UNSUPPORTED_MEDIA_TYPE`), at most **1 MiB** (`413 PAYLOAD_TOO_LARGE`); the CSRF rules of §2.2 apply as to any mutation. These photograph routes (with the gallery's, below, and the piece's, §14.12) are the only ones with this parser and this limit (`genome/src/server/routes/admin/media.ts`).
 - The type is read from the bytes (`genome/src/server/media/image.ts`): a JPEG (`FF D8 FF`) sent as `image/jpeg` or a WebP (`RIFF…WEBP`) sent as `image/webp`, still, at most 4 096 px on each side; anything else is `400 IMAGE_INVALID` (an SVG or a PNG under either name, a damaged or truncated file), an animated WebP `400 IMAGE_ANIMATED`.
 - **Metadata removed** before anything is stored: from a JPEG, every APP1 segment (EXIF with its GPS position and thumbnail, XMP), every other application segment but the JFIF header (without its thumbnail), the ICC colour profile and the Adobe marker, every comment, and whatever follows the end of the image; from a WebP, the EXIF and XMP chunks (and their flags), every chunk that is not part of the picture, and whatever follows the container. The picture itself is not re-encoded: its pixels are the file's. **Kept**, because the colours need it: the colour profile (JPEG ICC_PROFILE, WebP ICCP), whole, with its own text (the profile's description and copyright and, in a profile a device wrote, the names of its maker and model).
 - **Upright only**: the pixels are never turned, and the EXIF orientation goes with the EXIF, so a photograph turned by it (an orientation other than 1, as a phone often writes) is refused, `400 IMAGE_INVALID` ("The photograph is turned by its EXIF orientation, which is removed here: save it upright, then send it again."), rather than shown sideways. A client of the API sends the picture upright, as the console does.
 - Stored once under the SHA-256 of what remains (`media_objects`, DATABASE §5.26): the same photograph uploaded for two models or pieces is one row.
 
-The console re-encodes every photograph through a canvas before sending it (2 000 px at most on the longer side, a JPEG whose quality steps down until it fits 1 MiB), which carries no metadata in the first place; the Catalogue's **Photo** dialog previews what will be sent, its size and the number of issued pieces it reaches. Audited `model.image.set` (target the model) with `{ sha256, mime, width, height, bytes, previous, issuedPieces }`: the facts of the image, never its bytes, the photograph it replaced (`null` for the first) and the pieces it reaches. The same photograph again writes nothing. The one it replaced, used by no other model or piece, is deleted (§8.6 then answers 404). **200** — the model object, `imageUrl` set. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `400 IMAGE_INVALID`, `400 IMAGE_ANIMATED`, `404 MODEL_NOT_FOUND` (checked after the image), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`.
+The console re-encodes every photograph through a canvas before sending it (2 000 px at most on the longer side, a JPEG whose quality steps down until it fits 1 MiB), which carries no metadata in the first place; the Catalogue's **Photo** dialog previews what will be sent, its size and the number of issued pieces it reaches. Audited `model.image.set` (target the model) with `{ sha256, mime, width, height, bytes, previous, issuedPieces }`: the facts of the image, never its bytes, the photograph it replaced (`null` for the first) and the pieces it reaches. The same photograph again writes nothing. The one it replaced, used by no other model, gallery or piece, is deleted (§8.6 then answers 404). **200** — the model object, `imageUrl` set. Errors: `400 VALIDATION_FAILED` (`:id` not a UUID), `400 IMAGE_INVALID`, `400 IMAGE_ANIMATED`, `404 MODEL_NOT_FOUND` (checked after the image), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`.
 
-**`DELETE /api/admin/models/:id/image`** (OPERATOR; extension of the contract) — removes the reference photograph: the results of the model's pieces no longer show it. No body (or `{}`). Audited `model.image.remove` with `{ previous, issuedPieces }`; removing where there is none writes nothing. The image, used by no other model or piece, is deleted. **200** — the model object, `imageUrl: null`. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`.
+**`DELETE /api/admin/models/:id/image`** (OPERATOR; extension of the contract) — removes the reference photograph: the results of the model's pieces no longer show it, nor its lookbook sheet its cover. No body (or `{}`). Audited `model.image.remove` with `{ previous, issuedPieces }`; removing where there is none writes nothing. The image, used by no other model, gallery or piece, is deleted. **200** — the model object, `imageUrl: null`. Errors: `400 VALIDATION_FAILED`, `404 MODEL_NOT_FOUND`.
 
-At the edge of the VPS stack, the two photograph uploads, and only they, may carry 1 200 KB instead of 64 KB ([DEPLOYMENT §15](DEPLOYMENT.md#15-ovh-vps-deployment), `deploy/vps/Caddyfile`).
+**The gallery of a model's lookbook sheet** (OPERATOR; extension of the contract, P-R02): up to **8** photographs beside the cover (the reference photograph above), in an order, each with its alternative text (`model_images`, DATABASE §5.28). Every change locks the model's row first, so two changes of one gallery run one after the other, and keeps its positions 1 to n. The console's Lookbook page sets them (Catalogue → Lookbook).
 
-The narrative fields of a model (workshop, materials, repairability) are a later phase (A-10 phase 2).
+- **`POST /api/admin/models/:id/gallery`**: a photograph, added last. The body is **the image itself**, exactly as for the reference photograph (the same parser and limit, the same checks of its bytes, its metadata removed, stored once by its SHA-256 through MediaService). The model's reference photograph is its cover already: `409 IMAGE_IS_COVER`; a ninth: `409 GALLERY_FULL`; the same photograph again writes nothing. Audited `model.gallery.add` with `{ sha256, mime, width, height, bytes, position }`. **200** — the model object.
+- **`PATCH /api/admin/models/:id/gallery`**: the order and the alternative texts, JSON: `{ "images": [ { "sha256": string, "alt"?: string | null } ] }`, every photograph of the gallery once, in the new order (`alt` one line of at most 200 characters; `""`/`null`: the sheet's default; left out: the photograph keeps its text). A list that does not name the gallery's photographs, each once: `409 GALLERY_CHANGED`, and nothing is written. Audited `model.gallery.update` with the gallery `{ before, after }` (each `{ sha256, alt }`); unchanged, nothing is written. **200** — the model object.
+- **`DELETE /api/admin/models/:id/gallery/:sha256`**: a photograph leaves the gallery, the next ones move up; one that is not in it: `404 GALLERY_IMAGE_NOT_FOUND`. Audited `model.gallery.remove` with `{ sha256, position }`. The image, used by no other model, gallery or piece, is deleted (§8.6 then answers 404). **200** — the model object.
+
+Errors besides: `400 VALIDATION_FAILED` (`:id` not a UUID, `:sha256` not 64 hexadecimal characters, a malformed order), `400 IMAGE_INVALID`, `400 IMAGE_ANIMATED`, `404 MODEL_NOT_FOUND`, `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE` (the POST takes the image only; the PATCH takes JSON).
+
+At the edge of the VPS stack, the three photograph uploads (`POST` …`/image`, …`/gallery`, `/api/admin/products/:productId/photo`), and only they, may carry 1 200 KB instead of 64 KB ([DEPLOYMENT §15](DEPLOYMENT.md#15-ovh-vps-deployment), `deploy/vps/Caddyfile`).
+
+A model's narrative is its lookbook sheet (P-R02, §8.8): its story and its specifications, above.
 
 ---
 
@@ -2826,7 +2927,7 @@ Served when the web build (`dist/web`) exists; not rate-limited by the applicati
 | Path | Serves | Caching |
 |---|---|---|
 | `/` | `302` redirect to `/verify` | |
-| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5) and `/verify/c#{token}` (an ownership certificate, §8.7: the token in the fragment, which the server never receives); any other path shows the landing, its address put back to `/verify` | `no-cache` |
+| `/verify`, `/verify/*` | The verification app shell (`dist/web/verify/index.html`). Its own routes: `/verify` (the landing and the screens of a scan), `/verify/pieces` (MY PIECES, §10.5), `/verify/c#{token}` (an ownership certificate, §8.7: the token in the fragment, which the server never receives), `/verify/lookbook` (THE COLLECTION, §8.8) and `/verify/lookbook/<slug>` (a model's sheet; back from it returns to THE COLLECTION, then to the landing; an address under `/verify/lookbook` that is none shows THE COLLECTION, its address put back); any other path shows the landing, its address put back to `/verify` | `no-cache` |
 | `/VERIFY/C`, and any other spelling of `/verify/c` | `301` redirect to `/verify/c` (`GET`, `HEAD`): the ownership certificate's PDF letters its address in capitals (§8.7). A browser keeps the fragment, the certificate's token, across the redirect | |
 | `/admin`, `/admin/*` | The admin console shell (`dist/web/admin/index.html`) | `no-cache` |
 | `/legal`, `/legal/*` | The legal pages' shell (`dist/web/legal/index.html`, J-06). Its own routes: `/legal/privacy` (the privacy policy), `/legal/terms` (the terms of use), `/legal/notice` (the legal notice), `/legal/faq` (the FAQ), and `/legal`, their index; any other path shows the index, its address put back to `/legal`. The language is `?lang=fr` or `?lang=en`, else the browser's (`navigator.languages`), else English; the page reads `GET /api/v1/client-services` (§8.4) to show the contact of ORBES Client Services where it names it | `no-cache` |

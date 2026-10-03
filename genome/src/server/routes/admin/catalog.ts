@@ -4,8 +4,10 @@
  * (OPERATOR to create and edit, CatalogService). A model's name, default
  * material, care instructions, collection and `active` change after
  * issuance, and a collection's name; never a model's category nor its SKU
- * prefix (A-10). The services validate, write and audit; these routes only
- * parse and shape.
+ * prefix (A-10). A model's lookbook (P-R02: its place, address, story and
+ * specifications) changes through the same edit; one model is read alone by
+ * the console's Lookbook page (its gallery is routes/admin/media.ts's). The
+ * services validate, write and audit; these routes only parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import {
@@ -77,6 +79,12 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
 
   app.get('/api/admin/models', async () => itemsOf(await catalog.listModels()));
 
+  // One model, as the list has it (P-R02: the console's Lookbook page of the model).
+  app.get('/api/admin/models/:id', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    return catalog.getModel(id);
+  });
+
   app.post('/api/admin/models', async (request, reply) => {
     const b = parse(createModelBody, request.body);
     const created = await catalog.createModel(
@@ -106,6 +114,10 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         ...(b.careInstructions !== undefined ? { careInstructions: b.careInstructions } : {}),
         ...(b.collectionId !== undefined ? { collectionId: b.collectionId } : {}),
         ...(b.active !== undefined ? { active: b.active } : {}),
+        ...(b.lookbook !== undefined ? { lookbook: b.lookbook } : {}),
+        ...(b.slug !== undefined ? { slug: b.slug } : {}),
+        ...(b.story !== undefined ? { story: b.story } : {}),
+        ...(b.specs !== undefined ? { specs: b.specs } : {}),
       },
       adminActor(request),
     );

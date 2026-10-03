@@ -40,6 +40,8 @@ const ACCOUNT: Record<string, Tone> = { ACTIVE: 'solid', LOCKED: 'alert', DELETE
 const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 /** A category or model of the catalogue: an inactive one issues no new piece, its pieces verify as before. */
 const CATALOGUE: Record<string, Tone> = { ACTIVE: 'solid', INACTIVE: 'muted' };
+/** A model's place in the lookbook (P-R02): shown to everyone, to the owners of a piece only, or nowhere. */
+const LOOKBOOK: Record<string, Tone> = { PUBLIC: 'solid', RESERVED: 'outline', HIDDEN: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
   AUTHENTIC: 'solid',
   AUTHENTIC_FIRST_REGISTRATION: 'solid',
@@ -53,7 +55,7 @@ const VERIFICATION: Record<string, Tone> = {
   PENDING: 'outline',
 };
 
-export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account' | 'catalogue';
+export type ToneDomain = 'product' | 'code' | 'key' | 'severity' | 'anomaly' | 'warranty' | 'ownership' | 'service' | 'verification' | 'case' | 'account' | 'catalogue' | 'lookbook';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -68,6 +70,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   case: CASE,
   account: ACCOUNT,
   catalogue: CATALOGUE,
+  lookbook: LOOKBOOK,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

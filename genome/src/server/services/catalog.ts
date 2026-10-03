@@ -19,14 +19,24 @@
  * database refuses them too: `models_immutable_identity`). An inactive model
  * is no longer offered for new products (IssuanceService: 409
  * MODEL_INACTIVE); its pieces verify as before.
+ *
+ * The lookbook (P-R02, services/lookbook.ts): a model's place in it
+ * (`lookbook`: HIDDEN, PUBLIC, RESERVED), the address of its sheet (`slug`,
+ * unique: 409 SLUG_TAKEN), its story and its specifications change through
+ * the same edit, audited `model.update` (the story as its length and SHA-256,
+ * never its words). A model first shown gets `published_at`; from then on its
+ * address never changes (409 SLUG_LOCKED: links to the sheet are out), and a
+ * model shown always has one. Its gallery is MediaService's.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
+import { LOOKBOOK_STATES, type LookbookState } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
+import { normalizeSlug, normalizeSpecs, normalizeStory, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 
 export interface CatalogServiceDeps {
@@ -59,12 +69,34 @@ export interface ModelRecord {
   active: boolean;
   /**
    * The model's reference photograph (F-04, MediaService): `/api/v1/media/<sha256>`, shown above the GENOME on the
-   * authentic results of its pieces; null without one.
+   * authentic results of its pieces; null without one. It is the cover of its lookbook sheet.
    */
   imageUrl: string | null;
   /** Pieces issued with this model: a change of its name, care instructions or collection reaches each of their public results. */
   products: number;
+  /** Its place in the lookbook (P-R02): HIDDEN, PUBLIC (everyone) or RESERVED (the owners of a piece). */
+  lookbook: LookbookState;
+  /** The address of its sheet, /verify/lookbook/<slug>; null until named. Fixed once `publishedAt` is set. */
+  slug: string | null;
+  /** Plain paragraphs, ≤ 4 000 characters. */
+  story: string | null;
+  /** One `Label: value` line per specification, ≤ 1 000 characters. */
+  specs: string | null;
+  /** When the model first left HIDDEN; null while it never has. */
+  publishedAt: Date | null;
+  /** The gallery of its sheet (MediaService), in its order, the cover aside. */
+  gallery: GalleryImageRecord[];
   createdAt: Date;
+}
+
+/** One photograph of a model's gallery, as the console reads it. */
+export interface GalleryImageRecord {
+  sha256: string;
+  url: string;
+  /** null: the sheet's default alternative text. */
+  alt: string | null;
+  /** 1…n, the order of the sheet. */
+  position: number;
 }
 
 /** What `updateModel` may change: never the category nor the SKU prefix. Absent = unchanged; null or '' clears an optional text or the collection. */
@@ -74,10 +106,15 @@ export interface UpdateModelInput {
   careInstructions?: string | null;
   collectionId?: string | null;
   active?: boolean;
+  /** The lookbook (P-R02). */
+  lookbook?: LookbookState;
+  slug?: string | null;
+  story?: string | null;
+  specs?: string | null;
 }
 
 /** The fields of a model a change may touch, in their API spelling. */
-export const MODEL_EDITABLE_FIELDS = Object.freeze(['name', 'defaultMaterial', 'careInstructions', 'collectionId', 'active'] as const);
+export const MODEL_EDITABLE_FIELDS = Object.freeze(['name', 'defaultMaterial', 'careInstructions', 'collectionId', 'active', 'lookbook', 'slug', 'story', 'specs'] as const);
 
 /** Refused by `updateModel` (and by the PATCH body): a model's identity, written in the pieces already issued. */
 export const MODEL_IDENTITY_FIELDS = Object.freeze(['category', 'categoryCode', 'skuPrefix'] as const);
@@ -186,14 +223,31 @@ export class CatalogService {
 
   async listModels(): Promise<ModelRecord[]> {
     const rows = await this.modelQuery().orderBy('c.code').orderBy('m.name').execute();
-    return rows.map(toModelRecord);
+    const galleries = await this.galleries();
+    return rows.map((r) => toModelRecord(r, galleries.get(r.id) ?? []));
   }
 
   async getModel(modelId: string): Promise<ModelRecord> {
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
-    const row = await this.modelQuery().where('m.id', '=', modelId.toLowerCase()).executeTakeFirst();
+    const id = modelId.toLowerCase();
+    const row = await this.modelQuery().where('m.id', '=', id).executeTakeFirst();
     if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
-    return toModelRecord(row);
+    return toModelRecord(row, (await this.galleries(id)).get(id) ?? []);
+  }
+
+  /** The galleries of every model (or of one), each in its order. */
+  private async galleries(modelId?: string): Promise<Map<string, GalleryImageRecord[]>> {
+    let q = this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt', 'position']).orderBy('model_id').orderBy('position');
+    if (modelId) q = q.where('model_id', '=', modelId);
+    const out = new Map<string, GalleryImageRecord[]>();
+    for (const r of await q.execute()) {
+      const url = mediaUrl(r.sha256);
+      if (!url) continue;
+      const list = out.get(r.model_id) ?? [];
+      list.push({ sha256: r.sha256, url, alt: r.alt, position: r.position });
+      out.set(r.model_id, list);
+    }
+    return out;
   }
 
   async createModel(input: CreateModelInput, actor: Actor): Promise<ModelRecord> {
@@ -249,9 +303,13 @@ export class CatalogService {
 
   /**
    * Change what a model shows or offers (PATCH /api/admin/models/:id): its name, default material, care instructions,
-   * collection and `active`. Never its category nor its SKU prefix (400, MODEL_IDENTITY_MESSAGE). Audited `model.update`
-   * with the changed fields before and after and the number of pieces issued with the model; nothing is written when
-   * nothing changes.
+   * collection and `active`, and its lookbook (P-R02: `lookbook`, `slug`, `story`, `specs`). Never its category nor its
+   * SKU prefix (400, MODEL_IDENTITY_MESSAGE). Audited `model.update` with the changed fields before and after (a story as
+   * its length and SHA-256) and the number of pieces issued with the model; nothing is written when nothing changes.
+   *
+   * The lookbook's rules: a model shown (PUBLIC or RESERVED) has its slug (400); a slug another model has is 409
+   * SLUG_TAKEN; the first time a model is shown, `published_at` is set (audited as `publishedAt`), and from then on
+   * its slug never changes (409 SLUG_LOCKED), whatever its place in the lookbook.
    */
   async updateModel(modelId: string, input: UpdateModelInput, actor: Actor): Promise<ModelRecord> {
     if (input === null || typeof input !== 'object' || Array.isArray(input)) throw validationError('Send the fields of the model to change.');
@@ -275,55 +333,98 @@ export class CatalogService {
       if (c !== null && (typeof c !== 'string' || !UUID_RE.test(c))) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
       after.collectionId = c === null ? null : c.toLowerCase();
     }
+    if (input.lookbook !== undefined) {
+      if (!(LOOKBOOK_STATES as readonly unknown[]).includes(input.lookbook)) throw validationError(`lookbook must be ${LOOKBOOK_STATES.join(', ')}.`);
+      after.lookbook = input.lookbook;
+    }
+    if (input.slug !== undefined) after.slug = normalizeSlug(input.slug);
+    if (input.story !== undefined) after.story = normalizeStory(input.story);
+    if (input.specs !== undefined) after.specs = normalizeSpecs(input.specs);
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
     const id = modelId.toLowerCase();
 
-    await inTransaction(this.db, async (tx) => {
-      const row = await tx
-        .selectFrom('models')
-        .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active'])
-        .where('id', '=', id)
-        .forUpdate()
-        .executeTakeFirst();
-      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
-      const current: Required<ModelChange> = {
-        name: row.name,
-        defaultMaterial: row.default_material,
-        careInstructions: row.care_instructions,
-        collectionId: row.collection_id,
-        active: row.active,
-      };
-      const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
-      if (changed.length === 0) return;
-      if (changed.includes('collectionId') && after.collectionId) {
-        const col = await tx.selectFrom('collections').select('id').where('id', '=', after.collectionId).executeTakeFirst();
-        if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
-      }
-      const set: { name?: string; default_material?: string | null; care_instructions?: string | null; collection_id?: string | null; active?: boolean } = {};
-      for (const k of changed) {
-        if (k === 'name') set.name = after.name;
-        else if (k === 'defaultMaterial') set.default_material = after.defaultMaterial;
-        else if (k === 'careInstructions') set.care_instructions = after.careInstructions;
-        else if (k === 'collectionId') set.collection_id = after.collectionId;
-        else set.active = after.active;
-      }
-      await tx.updateTable('models').set(set).where('id', '=', id).execute();
-      const issued = await tx.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', id).executeTakeFirstOrThrow();
-      await this.audit.record(
-        {
-          actor,
-          action: 'model.update',
-          targetType: 'model',
-          targetId: id,
-          details: {
-            before: Object.fromEntries(changed.map((k) => [k, current[k]])),
-            after: Object.fromEntries(changed.map((k) => [k, after[k]])),
-            issuedPieces: Number(issued.n),
+    try {
+      await inTransaction(this.db, async (tx) => {
+        const row = await tx
+          .selectFrom('models')
+          .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active', 'lookbook', 'slug', 'story', 'specs', 'published_at'])
+          .where('id', '=', id)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+        const current: Required<ModelChange> = {
+          name: row.name,
+          defaultMaterial: row.default_material,
+          careInstructions: row.care_instructions,
+          collectionId: row.collection_id,
+          active: row.active,
+          lookbook: row.lookbook,
+          slug: row.slug,
+          story: row.story,
+          specs: row.specs,
+        };
+        const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
+        if (changed.length === 0) return;
+        if (changed.includes('collectionId') && after.collectionId) {
+          const col = await tx.selectFrom('collections').select('id').where('id', '=', after.collectionId).executeTakeFirst();
+          if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+        }
+        // The lookbook: a published model keeps its address; a model shown has one.
+        if (changed.includes('slug') && row.published_at !== null) {
+          throw conflict('SLUG_LOCKED', 'The address of a model shown in the lookbook never changes once it is published: links to its sheet are out.');
+        }
+        const lookbook = after.lookbook ?? current.lookbook;
+        const slug = changed.includes('slug') ? (after.slug ?? null) : current.slug;
+        if (lookbook !== 'HIDDEN' && slug === null) throw validationError('A model shown in the lookbook needs the address of its sheet (slug).');
+        const publishedAt = row.published_at === null && lookbook !== 'HIDDEN' ? this.clock() : null;
+
+        const set: {
+          name?: string;
+          default_material?: string | null;
+          care_instructions?: string | null;
+          collection_id?: string | null;
+          active?: boolean;
+          lookbook?: LookbookState;
+          slug?: string | null;
+          story?: string | null;
+          specs?: string | null;
+          published_at?: Date;
+        } = {};
+        for (const k of changed) {
+          if (k === 'name') set.name = after.name;
+          else if (k === 'defaultMaterial') set.default_material = after.defaultMaterial;
+          else if (k === 'careInstructions') set.care_instructions = after.careInstructions;
+          else if (k === 'collectionId') set.collection_id = after.collectionId;
+          else if (k === 'active') set.active = after.active;
+          else if (k === 'lookbook') set.lookbook = after.lookbook;
+          else if (k === 'slug') set.slug = after.slug;
+          else if (k === 'story') set.story = after.story;
+          else set.specs = after.specs;
+        }
+        if (publishedAt) set.published_at = publishedAt;
+        await tx.updateTable('models').set(set).where('id', '=', id).execute();
+        const issued = await tx.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', id).executeTakeFirstOrThrow();
+        // The audit log is permanent: a story is recorded as its length and SHA-256, never in words.
+        const audited = (k: keyof ModelChange, v: ModelChange[keyof ModelChange]) => (k === 'story' ? storyFingerprint((v as string | null | undefined) ?? null) : v);
+        await this.audit.record(
+          {
+            actor,
+            action: 'model.update',
+            targetType: 'model',
+            targetId: id,
+            details: {
+              before: { ...Object.fromEntries(changed.map((k) => [k, audited(k, current[k])])), ...(publishedAt ? { publishedAt: null } : {}) },
+              after: { ...Object.fromEntries(changed.map((k) => [k, audited(k, after[k])])), ...(publishedAt ? { publishedAt: publishedAt.toISOString() } : {}) },
+              issuedPieces: Number(issued.n),
+            },
           },
-        },
-        tx,
-      );
-    });
+          tx,
+        );
+      });
+    } catch (e) {
+      if (isUniqueViolation(e, 'models_slug_key')) throw conflict('SLUG_TAKEN', 'Another model already has this address in the lookbook (slug).');
+      throw e;
+    }
     return this.getModel(id);
   }
 
@@ -345,6 +446,11 @@ export class CatalogService {
         'm.care_instructions',
         'm.active',
         'm.image_sha256',
+        'm.lookbook',
+        'm.slug',
+        'm.story',
+        'm.specs',
+        'm.published_at',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -395,6 +501,10 @@ interface ModelChange {
   careInstructions?: string | null;
   collectionId?: string | null;
   active?: boolean;
+  lookbook?: LookbookState;
+  slug?: string | null;
+  story?: string | null;
+  specs?: string | null;
 }
 
 /** Issued pieces whose public result names the collection (their own collection, else their model's). */
@@ -423,6 +533,11 @@ type ModelQueryRow = {
   care_instructions: string | null;
   active: boolean;
   image_sha256: string | null;
+  lookbook: LookbookState;
+  slug: string | null;
+  story: string | null;
+  specs: string | null;
+  published_at: Date | null;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -432,7 +547,7 @@ type ModelQueryRow = {
   products: number | string | null;
 };
 
-function toModelRecord(r: ModelQueryRow): ModelRecord {
+function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRecord {
   return {
     id: r.id,
     name: r.name,
@@ -445,6 +560,12 @@ function toModelRecord(r: ModelQueryRow): ModelRecord {
     active: r.active,
     imageUrl: mediaUrl(r.image_sha256),
     products: Number(r.products ?? 0),
+    lookbook: r.lookbook,
+    slug: r.slug,
+    story: r.story,
+    specs: r.specs,
+    publishedAt: r.published_at,
+    gallery,
     createdAt: r.created_at,
   };
 }

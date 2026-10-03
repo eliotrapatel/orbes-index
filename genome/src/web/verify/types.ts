@@ -71,6 +71,8 @@ export interface VerifyOutcome {
     imageUrl?: string;
     /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`. Authentic results only. */
     photoUrl?: string;
+    /** Its model's sheet in the lookbook (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. */
+    lookbook?: string;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
@@ -254,4 +256,35 @@ export type CertificateLookup =
 export interface DownloadedFile {
   blob: Blob;
   filename: string;
+}
+
+/** One model of the lookbook's lists (P-R02: GET /api/v1/lookbook, GET /api/v1/club/lookbook): no story. */
+export interface LookbookCard {
+  slug: string;
+  name: string;
+  type: string;
+  category: { code: string; name: string };
+  collection: string | null;
+  /** The model's reference photograph, else the first of its gallery: `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+}
+
+/** A model's sheet (P-R02: GET /api/v1/lookbook/:slug, or the club's for an owner). */
+export interface LookbookSheet {
+  slug: string;
+  /** RESERVED: shown to the owners of a piece only, through the club. */
+  lookbook: 'PUBLIC' | 'RESERVED';
+  name: string;
+  type: string;
+  category: { code: string; name: string };
+  collection: string | null;
+  /** The reference photograph, shown first, or null. */
+  coverUrl: string | null;
+  /** The gallery, in its order; `alt` null: the sheet says what it shows. */
+  gallery: { url: string; alt: string | null }[];
+  /** Plain paragraphs (shared/lookbook.ts storyParagraphs), or null. */
+  story: string | null;
+  specs: { label: string; value: string }[];
+  /** The model's care instructions; null: the general care text. */
+  care: string | null;
 }

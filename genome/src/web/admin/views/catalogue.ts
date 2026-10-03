@@ -13,7 +13,10 @@
  * and the model's shows its care block as the client reads it on /verify.
  * A model's category and SKU prefix never change. Its reference photograph
  * (Photo, on its row; F-04) is shown above the GENOME on the authentic
- * results of its pieces: the dialog says how many first.
+ * results of its pieces: the dialog says how many first. Its sheet in the
+ * lookbook (P-R02: its place, address, story, specifications and gallery) is
+ * set on its own page, Lookbook on its row (`#/catalogue/:modelId`), which
+ * every role that reads the catalogue opens.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
@@ -21,8 +24,9 @@ import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, mo
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { toneOf } from '../model/tone.js';
+import { href } from '../router.js';
 import type { Category, Collection, Model } from '../types.js';
-import { button, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
+import { button, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify } from '../ui/toast.js';
@@ -195,22 +199,23 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
     { label: 'Default material', cell: (m) => humanize(m.defaultMaterial), kind: ['wide'] },
-    { label: 'Status', cell: (m) => activeMark(m.active), kind: ['nowrap'] },
+    { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, activeMark(m.active)), kind: ['nowrap'] },
+    { label: 'Lookbook', cell: (m) => h('span', { data: { testid: 'model-lookbook-state' } }, statusMark(m.lookbook, toneOf('lookbook', m.lookbook))), kind: ['nowrap'] },
     { label: 'Issued', cell: (m) => formatCount(m.products), kind: ['num'] },
   ];
-  if (canEdit || canPhotograph) {
-    modelColumns.push({
-      label: 'Action',
-      kind: ['actions'],
-      cell: (m) =>
-        h(
-          'span',
-          { class: 'row-actions' },
-          canEdit ? button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) : null,
-          canPhotograph ? button('Photo', { kind: 'ghost', testId: 'model-photo', onClick: () => modelPhoto(m) }) : null,
-        ),
-    });
-  }
+  // Lookbook (P-R02) opens the model's page for every role that reads; Edit and Photo are the mutating roles'.
+  modelColumns.push({
+    label: 'Action',
+    kind: ['actions'],
+    cell: (m) =>
+      h(
+        'span',
+        { class: 'row-actions' },
+        canEdit ? button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) : null,
+        canPhotograph ? button('Photo', { kind: 'ghost', testId: 'model-photo', onClick: () => modelPhoto(m) }) : null,
+        withTestId(linkButton('Lookbook', href('model', { modelId: m.id }), 'ghost'), 'model-lookbook'),
+      ),
+  });
 
   const collectionColumns: Column<Collection>[] = [
     { label: 'Collection', cell: (c) => humanize(c.name), kind: ['wide'] },
@@ -228,7 +233,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Registry',
       title: 'Catalogue',
-      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them.',
+      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them. A model’s sheet in the lookbook is set on its Lookbook page.',
     }),
     section('Categories', table(categoryColumns, cats.items, { empty: 'No category.', caption: 'Categories' }), {
       id: 'categories',
@@ -243,6 +248,11 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       tools: can(role, 'createCatalog') ? [button('New collection', { kind: 'ghost', onClick: newCollection })] : [],
     }),
   );
+}
+
+function withTestId<T extends HTMLElement>(el: T, id: string): T {
+  el.dataset.testid = id;
+  return el;
 }
 
 function activeMark(active: boolean): HTMLElement {

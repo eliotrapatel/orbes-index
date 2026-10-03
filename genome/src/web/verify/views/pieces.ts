@@ -28,6 +28,7 @@
  *   ── next piece ──
  *   SIGNED IN AS …     CHANGE PASSWORD   SIGN OUT
  *            [ SCAN ORBES CODE ]
+ *            THE COLLECTION                  the lookbook (P-R02), a text link
  *   PRIVACY · TERMS · LEGAL · HELP            the legal pages (J-06), in a new tab,
  *   IP Geolocation by DB-IP                   signed out too (the sign-in collects data)
  *
@@ -54,7 +55,7 @@ import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel,
 import type { SessionStore } from '../session.js';
 import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { contactBlock, legalLinks, rows, sectionLabel, viewRoot } from './common.js';
+import { contactBlock, legalLinks, lookbookLink, rows, sectionLabel, viewRoot } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
@@ -67,6 +68,8 @@ export interface PiecesDeps {
   onScan(): void;
   /** How ORBES Client Services is reached (`{}` when not configured); never rejects, never more than a second late. */
   clientServices(): Promise<ClientServices>;
+  /** THE COLLECTION (P-R02): the lookbook, in the app. */
+  onCollection?(): void;
 }
 
 export interface PiecesView {
@@ -117,6 +120,7 @@ class PiecesPage {
         'footer',
         { class: 'pieces__foot' },
         h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: PIECES.scan }),
+        lookbookLink(deps.onCollection, { extraClass: 'pieces__collection' }),
         // The legal pages (J-06), in a new tab: the account's data is collected here too (its sign-in, CREATE
         // ACCOUNT), and a form under way stays.
         legalLinks({ newTab: true, extraClass: 'pieces__legal' }),

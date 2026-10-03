@@ -139,13 +139,15 @@
 	}
 
 	# The app accepts JSON bodies up to 16 KB; anything far larger is refused at the edge.
-	# One exception (F-04): the console's two photograph uploads, whose body is the image
-	# itself (at most 1 MiB in the app, routes/admin/media.ts), get 1200KB (1 200 000 bytes).
-	# The two matchers exclude each other, so exactly one limit applies to a request: a
-	# DELETE of a photograph, or any other path, keeps 64KB.
+	# One exception (F-04, P-R02): the console's photograph uploads (a model's reference
+	# photograph, a piece's, a photograph of a model's lookbook gallery), whose body is the
+	# image itself (at most 1 MiB in the app, routes/admin/media.ts MEDIA_UPLOAD_ROUTES), get
+	# 1200KB (1 200 000 bytes). The two matchers exclude each other, so exactly one limit
+	# applies to a request: a DELETE of a photograph, the gallery's order (a PATCH), or any
+	# other path, keeps 64KB.
 	@photo_upload {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
 	}
 	request_body @photo_upload {
 		max_size 1200KB
@@ -153,7 +155,7 @@
 	@not_photo_upload {
 		not {
 			method POST
-			path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+			path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
 		}
 	}
 	request_body @not_photo_upload {

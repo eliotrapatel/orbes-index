@@ -53,6 +53,7 @@ import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { loginView } from './views/login.js';
+import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
 import { openPasswordDialog, passwordView } from './views/password.js';
@@ -127,6 +128,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   genomes: { view: genomesView, title: 'Genomes', nav: 'genomes' },
   codes: { view: codesView, title: 'Codes', nav: 'codes' },
   catalogue: { view: catalogueView, title: 'Catalogue', nav: 'catalogue' },
+  model: { view: lookbookView, title: 'Lookbook', nav: 'catalogue' },
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
   analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
@@ -548,7 +550,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   }
   markNav(entry.nav);
   const group = NAV.find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
-  setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : `${group} · ${entry.title}`);
+  setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : r.name === 'model' ? `${group} · Catalogue · Lookbook` : `${group} · ${entry.title}`);
   setTitle(r.name === 'product' ? r.params.productId : entry.title);
   if (!opts.keepScroll) mount(sh.view, loading());
 

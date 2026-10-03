@@ -128,6 +128,8 @@ export interface VerifyOutcome {
     imageUrl?: string;
     /** The photograph of this piece, taken at issuance (F-04): `/api/v1/media/<sha256>`, when it has one. AUTHENTIC* states only. */
     photoUrl?: string;
+    /** Its model's lookbook sheet (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. AUTHENTIC* states only. */
+    lookbook?: string;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
@@ -263,6 +265,8 @@ interface Registered {
   /** media_objects.sha256 of the model's reference photograph and of the piece's own (F-04), or null. */
   modelImage: string | null;
   piecePhoto: string | null;
+  /** The slug of its model's lookbook sheet when the model is PUBLIC there (P-R02), else null. */
+  lookbook: string | null;
   code: { id: string; status: CodeStatus; createdAt: Date; payloadHash: Uint8Array } | null;
   warranty: { start_date: string | null; end_date: string | null; voided_at: Date | null; duration_months: number } | null;
   ownerAccountId: string | null;
@@ -675,6 +679,8 @@ export class VerificationService {
         'm.type as modelType',
         'm.care_instructions as care',
         'm.image_sha256 as modelImage',
+        'm.slug as modelSlug',
+        'm.lookbook as modelLookbook',
         'p.photo_sha256 as piecePhoto',
         'col.name as collection',
         'c.id as codeId',
@@ -710,6 +716,7 @@ export class VerificationService {
       collection: r.collection,
       modelImage: r.modelImage,
       piecePhoto: r.piecePhoto,
+      lookbook: r.modelLookbook === 'PUBLIC' ? r.modelSlug : null,
       code:
         r.codeId !== null && r.codeStatus !== null && r.codeCreatedAt !== null && r.payloadHash !== null
           ? { id: r.codeId, status: r.codeStatus, createdAt: r.codeCreatedAt, payloadHash: r.payloadHash }
@@ -840,6 +847,8 @@ export class VerificationService {
         ...(reg.care ? { care: reg.care } : {}),
         ...(imageUrl ? { imageUrl } : {}),
         ...(photoUrl ? { photoUrl } : {}),
+        // Its model's lookbook sheet (P-R02): a RESERVED one is the owners' and stays unnamed here.
+        ...(reg.lookbook ? { lookbook: reg.lookbook } : {}),
       };
       const today = utcDate(now);
       const wr = reg.warranty;

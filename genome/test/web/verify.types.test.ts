@@ -12,6 +12,7 @@ import type {
   CertificateOffer as ServerCertificateOffer,
   OwnerCertificate as ServerOwnerCertificate,
 } from '../../src/server/services/ownership-certificates.js';
+import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet } from '../../src/server/services/lookbook.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import {
   INCIDENT_TYPES,
@@ -19,6 +20,8 @@ import {
   VERIFICATION_STATES,
   type CertificateLookup,
   type CertificateOffer,
+  type LookbookCard,
+  type LookbookSheet,
   type OwnedPiece,
   type OwnerCertificate,
   type VerifyInput,
@@ -37,6 +40,12 @@ export const pieceFits = (p: Json<OwnedProduct>): OwnedPiece => p;
 export const lookupFits = (r: Json<ServerCertificateLookup>): CertificateLookup => r;
 export const ownerCertificateFits = (c: Json<ServerOwnerCertificate>): OwnerCertificate => c;
 export const offerFits = (o: Json<ServerCertificateOffer>): CertificateOffer => o;
+// …and the lookbook's answers (P-R02): a model of a list, a model's sheet.
+export const cardFits = (c: Json<ServerLookbookCard>): LookbookCard => c;
+export const sheetFits = (s: Json<ServerLookbookSheet>): LookbookSheet => s;
+/** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
+type ProductKeys<T> = T extends { product?: infer P } ? keyof NonNullable<P> : never;
+export const productKeysMatch: [ProductKeys<ServerVerifyOutcome>] extends [ProductKeys<VerifyOutcome>] ? ([ProductKeys<VerifyOutcome>] extends [ProductKeys<ServerVerifyOutcome>] ? true : false) : false = true;
 
 describe('verify wire types', () => {
   it('know the same verification states as the server', () => {
@@ -58,5 +67,8 @@ describe('verify wire types', () => {
     expect(typeof lookupFits).toBe('function');
     expect(typeof ownerCertificateFits).toBe('function');
     expect(typeof offerFits).toBe('function');
+    expect(typeof cardFits).toBe('function');
+    expect(typeof sheetFits).toBe('function');
+    expect(productKeysMatch).toBe(true);
   });
 });

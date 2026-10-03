@@ -24,6 +24,7 @@ import * as m0010 from './migrations/0010_models_active.js';
 import * as m0011 from './migrations/0011_scan_token_transfer_accept.js';
 import * as m0012 from './migrations/0012_media.js';
 import * as m0013 from './migrations/0013_ownership_certificates.js';
+import * as m0014 from './migrations/0014_model_lookbook.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -40,6 +41,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0011_scan_token_transfer_accept': m0011,
   '0012_media': m0012,
   '0013_ownership_certificates': m0013,
+  '0014_model_lookbook': m0014,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

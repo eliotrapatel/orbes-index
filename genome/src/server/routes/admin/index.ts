@@ -8,9 +8,10 @@
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
- * photograph routes (media.ts: an image of at most 1 MiB, F-04). RETAIL (A-08, a seller's account) reaches
- * only the routes that declare it: the sale mode, the list of points of sale
- * and its own session, password and second factor.
+ * photograph routes (media.ts: an image of at most 1 MiB, F-04; a photograph
+ * of a model's lookbook gallery, P-R02). RETAIL (A-08, a seller's account)
+ * reaches only the routes that declare it: the sale mode, the list of points
+ * of sale and its own session, password and second factor.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../../http/rate-limit.js';

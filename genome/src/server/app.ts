@@ -26,6 +26,7 @@ import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin/index.js';
+import { clubRoutes } from './routes/club.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
 
@@ -123,6 +124,7 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   await app.register(publicRoutes, { ...deps, requireAdminMfa });
   await app.register(accountRoutes, deps);
   await app.register(ownershipRoutes, deps);
+  await app.register(clubRoutes, deps);
   await app.register(adminRoutes, { ...deps, requireMfa: requireAdminMfa });
 
   if (opts.serveStatic ?? true) await registerStatic(app, opts.staticDir ?? DEFAULT_STATIC_DIR);

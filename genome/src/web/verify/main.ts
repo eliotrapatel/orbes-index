@@ -3,7 +3,9 @@
  *
  *   landing ──SCAN──▶ scanner ──code read──▶ VERIFYING… ──▶ result
  *      ├──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
- *      └──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
+ *      ├──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
+ *      └──THE COLLECTION──▶ the lookbook (/verify/lookbook, P-R02) ──SEE THE MODEL──▶ a sheet
+ *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
@@ -15,14 +17,20 @@
  *   /verify/pieces   MY PIECES, which a link, a reload or a bookmark opens directly;
  *   /verify/c#…      the ownership certificate of a link an owner shared: its token
  *                    is the fragment, which no request line or proxy log holds;
+ *   /verify/lookbook          THE COLLECTION, the lookbook of the models (P-R02);
+ *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
  *   anything else    the landing, its address put back to /verify.
  *
  * History: the landing screen is the base entry and every other screen shares
- * one entry above it, MY PIECES and the certificate included (with their own
- * URL), so the back button (or CLOSE) always returns to the landing screen and
- * releases the camera. Opened directly, MY PIECES or a certificate puts a
- * landing entry under itself, so back still leads to the landing rather than
- * out of the app; a reload keeps the entry it is on. A certificate's fragment
+ * one entry above it, MY PIECES, the certificate and the lookbook included
+ * (with their own URL), so the back button (or CLOSE) returns to the landing
+ * screen and releases the camera. A model's sheet is the one entry above
+ * that: it lies on the lookbook's, so back from a sheet returns to the
+ * lookbook, then to the landing (from a result, SEE THE MODEL turns the
+ * scan's entry into the lookbook's). Opened directly, MY PIECES, a
+ * certificate or the lookbook puts a landing entry under itself, and a sheet
+ * the landing and the lookbook, so back still leads through the app rather
+ * than out of it; a reload keeps the entry it is on. A certificate's fragment
  * edited in place reads the certificate again.
  */
 import { viewportCorners } from '../shared/corners.js';
@@ -35,30 +43,38 @@ import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError
 import { SessionStore } from './session.js';
 import type { ClientServices, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
+import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { resultViewModel } from './view-model.js';
 import { certificateView } from './views/certificate.js';
-import { CERTIFICATE_PATH, LANDING_PATH, PIECES_PATH } from './views/common.js';
+import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { landingView } from './views/landing.js';
+import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet';
 
-/** What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, or a certificate. */
-type Entry = 'landing' | 'app' | 'pieces' | 'certificate';
+/** What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a sheet. */
+type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet';
 
 /**
- * The route of a path under /verify: MY PIECES, a certificate, or the landing (also for a path the app does not know).
- * In any case: the certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
+ * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, or the landing (also for
+ * a path the app does not know). In any case: the certificate's PDF letters its address in capitals (the server
+ * redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
+  const lookbook = lookbookRouteOf(path);
+  if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
+
+/** The address of the sheet a path names, or null. */
+const sheetSlugOf = (pathname: string): string | null => lookbookRouteOf(pathname)?.sheet ?? null;
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
@@ -100,6 +116,8 @@ class App {
   private resumeScan = false;
   /** The token of the certificate on show (its fragment), to tell an edited fragment from the same one. */
   private certificateToken: string | null = null;
+  /** The address of the sheet on show (P-R02), to tell another sheet from the same one. */
+  private sheetSlug: string | null = null;
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -108,14 +126,19 @@ class App {
       if (file) void this.verifyPhoto(file);
     });
     window.addEventListener('popstate', (ev) => {
-      // Back or forward onto MY PIECES or a certificate shows it again; onto the landing, or onto a scan's entry (its
-      // screen is gone), the landing.
+      // Back or forward onto MY PIECES, a certificate, the lookbook or a sheet shows it again; onto the landing, or onto
+      // a scan's entry (its screen is gone), the landing.
       const entry = entryOf(ev.state);
       const route = routeOf(location.pathname);
       if (entry === 'pieces' || route === 'pieces') {
         if (this.screen !== 'pieces') void this.showPieces();
       } else if (entry === 'certificate' || route === 'certificate') this.onCertificateAddress();
-      else if (this.screen !== 'landing') this.showLanding();
+      else if (entry === 'sheet' || route === 'sheet') {
+        const slug = sheetSlugOf(location.pathname);
+        if (!(this.screen === 'sheet' && this.sheetSlug === slug)) void this.showSheet(slug);
+      } else if (entry === 'lookbook' || route === 'lookbook') {
+        if (this.screen !== 'lookbook') void this.showLookbook();
+      } else if (this.screen !== 'landing') this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
     window.addEventListener('hashchange', () => {
@@ -141,6 +164,17 @@ class App {
         history.pushState({ screen: 'certificate' }, '', address);
       }
       void this.showCertificate(false);
+    } else if (route === 'lookbook' || route === 'sheet') {
+      // The lookbook (P-R02) over the landing; a sheet over both, so back from it returns to the lookbook. An address
+      // under /verify/lookbook that is none shows the lookbook, its own address put back.
+      const slug = sheetSlugOf(location.pathname);
+      if (entryOf(history.state) !== (slug ? 'sheet' : 'lookbook')) {
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+        if (slug) history.pushState({ screen: 'sheet' }, '', lookbookSheetPath(slug));
+      } else if (!slug && location.pathname !== LOOKBOOK_PATH) history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+      if (slug) void this.showSheet(slug, false);
+      else void this.showLookbook(false);
     } else {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       this.showLanding(false);
@@ -160,7 +194,8 @@ class App {
    */
   private enter(): void {
     const entry = entryOf(history.state);
-    if (entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
+    // From a sheet, the scan takes its entry over the lookbook's: back then returns to the lookbook.
+    if (entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'sheet') history.replaceState({ screen: 'app' }, '', LANDING_PATH);
     else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
   }
 
@@ -170,6 +205,39 @@ class App {
     if (entry === 'app' || entry === 'pieces') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
     else history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
     void this.showPieces();
+  }
+
+  /**
+   * THE COLLECTION (P-R02), from the landing (an entry above it), from MY PIECES (in its entry), or from a sheet (the
+   * lookbook is the entry under it: back to it).
+   */
+  private openLookbook(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'sheet') {
+      history.back();
+      return;
+    }
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+    else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+    void this.showLookbook();
+  }
+
+  /**
+   * A model's sheet, over the lookbook's entry: from the lookbook (a card's SEE THE MODEL), or from a result (SEE THE
+   * MODEL: the scan's entry becomes the lookbook's). Back from it returns to the lookbook, never straight to the landing.
+   */
+  private openSheet(slug: string): void {
+    const entry = entryOf(history.state);
+    const address = lookbookSheetPath(slug);
+    if (entry === 'sheet') history.replaceState({ screen: 'sheet' }, '', address);
+    else {
+      if (entry !== 'lookbook') {
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+        else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+      }
+      history.pushState({ screen: 'sheet' }, '', address);
+    }
+    void this.showSheet(slug);
   }
 
   private async swap(next: HTMLElement, screen: Screen, focus = true): Promise<boolean> {
@@ -193,7 +261,13 @@ class App {
   private showLanding(focus = true): void {
     this.generation++;
     this.stopCamera();
-    const view = landingView({ onScan: () => void this.startScan(), onUpload: () => this.pickPhoto(), session: this.session, onPieces: () => this.openPieces() });
+    const view = landingView({
+      onScan: () => void this.startScan(),
+      onUpload: () => this.pickPhoto(),
+      session: this.session,
+      onPieces: () => this.openPieces(),
+      onCollection: () => this.openLookbook(),
+    });
     void this.swap(view, 'landing', focus);
   }
 
@@ -201,8 +275,34 @@ class App {
   private async showPieces(focus = true): Promise<void> {
     this.generation++;
     this.stopCamera();
-    const view = piecesView({ api: this.api, session: this.session, onScan: () => void this.startScan(), clientServices: () => this.contactDetails() });
+    const view = piecesView({
+      api: this.api,
+      session: this.session,
+      onScan: () => void this.startScan(),
+      clientServices: () => this.contactDetails(),
+      onCollection: () => this.openLookbook(),
+    });
     if (await this.swap(view.root, 'pieces', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** THE COLLECTION (P-R02): the lookbook of the models; an owner signed in also sees the reserved ones. */
+  private async showLookbook(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.sheetSlug = null;
+    const view = lookbookView({ api: this.api, session: this.session, onScan: () => void this.startScan(), onSheet: (slug) => this.openSheet(slug) });
+    if (await this.swap(view.root, 'lookbook', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** A model's sheet (P-R02); `slug` null: an address that is none, said as a model not in the collection. */
+  private async showSheet(slug: string | null, focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.sheetSlug = slug;
+    const view = sheetView({ api: this.api, session: this.session, slug, onCollection: () => this.openLookbook() });
+    if (await this.swap(view.root, 'sheet', focus)) this.live = view;
     else view.dispose();
   }
 
@@ -245,7 +345,7 @@ class App {
 
   private goHome(): void {
     const entry = entryOf(history.state);
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.back();
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'sheet') history.back();
     else this.showLanding();
   }
 
@@ -439,6 +539,7 @@ class App {
         onRefresh: () => void this.retryVerify(input),
         ownership: { api: this.api, session: this.session, onPieces: () => this.openPieces() },
         report: { api: this.api },
+        onModel: (slug) => this.openSheet(slug),
       });
       if (await this.swap(view.root, 'result')) this.live = view;
       else view.dispose();

@@ -4,7 +4,9 @@
  *
  *   /                → 302 /verify
  *   /verify, /verify/*  → dist/web/verify/index.html   (client-side routes: /verify/pieces is MY PIECES,
- *                                                     /verify/c#… an ownership certificate, its token in the fragment)
+ *                                                     /verify/c#… an ownership certificate, its token in the fragment,
+ *                                                     /verify/lookbook THE COLLECTION and /verify/lookbook/<slug> a
+ *                                                     model's sheet, P-R02)
  *   /VERIFY/C and any other spelling of /verify/c → 301 /verify/c   (the certificate's PDF letters it in capitals)
  *   /admin,  /admin/*   → dist/web/admin/index.html
  *   /legal,  /legal/*   → dist/web/legal/index.html    (the legal pages, J-06: /legal/privacy, /legal/terms,

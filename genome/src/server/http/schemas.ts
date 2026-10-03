@@ -14,6 +14,7 @@ import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
   CODE_STATUSES,
+  LOOKBOOK_STATES,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
@@ -25,6 +26,8 @@ import {
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
+import { GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
@@ -175,13 +178,20 @@ export const reportBody = body({
   note: optionalText(500),
 });
 
+/** A stored photograph's name: the hex SHA-256 of its bytes, any case. */
+const sha256Hex = z
+  .string()
+  .regex(/^[0-9a-fA-F]{64}$/, 'Must be a SHA-256 in hexadecimal')
+  .transform((s) => s.toLowerCase());
+
 /** GET /api/v1/media/:sha256 (§8.6): a stored photograph, named by the hex SHA-256 of its bytes. */
-export const mediaParams = z.object({
-  sha256: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/, 'Must be a SHA-256 in hexadecimal')
-    .transform((s) => s.toLowerCase()),
-});
+export const mediaParams = z.object({ sha256: sha256Hex });
+
+/**
+ * GET /api/v1/lookbook/:slug and /api/v1/club/lookbook/:slug (§8.8, §10.9, P-R02): the address of a sheet. Any string the
+ * router passes (≤ 128 characters): one that is no address answers like an unknown one, 404 LOOKBOOK_NOT_FOUND.
+ */
+export const lookbookParams = z.object({ slug: z.string().max(128) });
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
@@ -341,9 +351,11 @@ export const updateCollectionBody = body({ name: text(100) });
 const modelIdentity = z.never({ error: MODEL_IDENTITY_MESSAGE }).optional();
 
 /**
- * A model's change (A-10): its name, default material, care instructions, collection and `active`, at least one.
- * `''`/`null` clears the material, the care instructions or the collection. Never `category`, `categoryCode` nor
- * `skuPrefix` (400); any other field is unknown (400).
+ * A model's change (A-10): its name, default material, care instructions, collection and `active`, and its lookbook
+ * (P-R02: `lookbook`, `slug`, `story`, `specs`), at least one. `''`/`null` clears the material, the care instructions,
+ * the collection, the slug (while the model was never published), the story or the specifications. The service holds
+ * the rules of the lookbook (the slug's form and uniqueness, the lines of the specifications). Never `category`,
+ * `categoryCode` nor `skuPrefix` (400); any other field is unknown (400).
  */
 export const updateModelBody = body({
   name: text(100).optional(),
@@ -351,10 +363,32 @@ export const updateModelBody = body({
   careInstructions: z.preprocess((v) => (v === '' ? null : v), text(2000).nullable().optional()),
   collectionId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
   active: z.boolean().optional(),
+  lookbook: z.enum(LOOKBOOK_STATES).optional(),
+  slug: z.preprocess((v) => (v === '' ? null : v), z.string().trim().max(SLUG_MAX, `At most ${SLUG_MAX} characters`).nullable().optional()),
+  story: z.preprocess((v) => (v === '' ? null : v), text(STORY_MAX).nullable().optional()),
+  specs: z.preprocess((v) => (v === '' ? null : v), text(SPECS_MAX).nullable().optional()),
   category: modelIdentity,
   categoryCode: modelIdentity,
   skuPrefix: modelIdentity,
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change');
+
+/** DELETE /api/admin/models/:id/gallery/:sha256 (P-R02): a photograph of the model's gallery. */
+export const galleryImageParams = z.object({ id: uuid, sha256: sha256Hex });
+
+/**
+ * PATCH /api/admin/models/:id/gallery (P-R02): every photograph of the gallery once, in the new order, each with its
+ * alternative text (`''`/`null`: the sheet's default; left out: unchanged). The service checks the list against the gallery.
+ */
+export const galleryOrderBody = body({
+  images: z
+    .array(
+      z.strictObject({
+        sha256: sha256Hex,
+        alt: z.preprocess((v) => (v === '' ? null : v), text(GALLERY_ALT_MAX).nullable().optional()),
+      }),
+    )
+    .max(GALLERY_MAX, `At most ${GALLERY_MAX} photographs`),
+});
 
 // ── Admin: products ────────────────────────────────────────────────────────
 

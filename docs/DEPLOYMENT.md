@@ -139,7 +139,7 @@ verify.theorbes.com {
 | Client IP forwarded in `X-Forwarded-For`, and the proxy's address listed in `TRUST_PROXY` | Rate limits and IP pseudonyms are per client. Without trust, every client shares the proxy's IP and one rate-limit bucket. |
 | Origin cache headers honoured. Never cache `/api/*` beyond what the app allows. | API responses can carry session-bound data (`no-store`). |
 | `Set-Cookie` passed through untouched on `/api/*` | Sessions and the device cookie. |
-| Request bodies ≥ 16 KB allowed, and ≥ 1 MiB on the two photograph uploads (`POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo`); upstream timeout > 30 s | The app limits JSON bodies to 16 KB, the photographs of the console (F-04, [API §13.4](API.md#134-models)) to 1 MiB, and requests to 30 s. With nginx, `client_max_body_size 1200k;` in the `location` that proxies `/api/` (the default, 1 MiB, would refuse the largest photographs with their headers). |
+| Request bodies ≥ 16 KB allowed, and ≥ 1 MiB on the three photograph uploads (`POST /api/admin/models/:id/image`, `POST /api/admin/models/:id/gallery`, `POST /api/admin/products/:productId/photo`); upstream timeout > 30 s | The app limits JSON bodies to 16 KB, the photographs of the console (F-04, P-R02, [API §13.4](API.md#134-models)) to 1 MiB, and requests to 30 s. With nginx, `client_max_body_size 1200k;` in the `location` that proxies `/api/` (the default, 1 MiB, would refuse the largest photographs with their headers). |
 | No iframe embedding | The CSP has `frame-ancestors 'none'`. Link or redirect to `/verify`; do not embed it. |
 | With Cloudflare and `GEO_MODE=cloudflare`: the origin only accepts Cloudflare (firewall on Cloudflare's published ranges, Authenticated Origin Pulls or a Tunnel). The reverse proxy restores the client IP from Cloudflare (nginx `set_real_ip_from <Cloudflare ranges>` + `real_ip_header CF-Connecting-IP`; Caddy `trusted_proxies`). | Otherwise anyone can send forged `cf-ipcountry` headers straight to the origin, and every client shares Cloudflare's IPs. |
 
@@ -236,7 +236,7 @@ All configuration comes from environment variables. It is parsed **once at start
 | `RATE_LIMIT_VERIFY_PER_MINUTE` | `60` | Integer 1–1 000 000. Applies to `POST /api/v1/verify`. |
 | `RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Same range. Applies to logins, registration, claim and transfer codes, and TOTP enrolment, all sharing one budget. |
 | `RATE_LIMIT_ADMIN_PER_MINUTE` | `300` | Same range. Applies to every other admin route. |
-| `RATE_LIMIT_API_PER_MINUTE` | `120` | Same range. Applies to the remaining public and account routes (health, keys, categories, account reads, …): the `api` group. |
+| `RATE_LIMIT_API_PER_MINUTE` | `120` | Same range. Applies to the remaining public and account routes (health, keys, categories, the lookbook, account reads, …): the `api` group. The photographs (`GET /api/v1/media/:sha256`) have their own group, `media`, five times this budget (600 by default; P-R02: a lookbook sheet shows up to nine, and a boutique's customers share its address); it has no variable of its own. |
 
 Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a default.
 
@@ -1094,7 +1094,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
 |---|---|---|
 | Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. Caddy publishes 80/443 on **IPv4 only** (§15.2). |
 | Database roles | `deploy/vps/scripts/lib.sh` (`db_*`) | §6.2 applied: the app connects as **`POSTGRES_APP_USER`** (`orbes_app`: `SELECT`/`INSERT`/`UPDATE`/`DELETE` on the tables, sequence use, read-only on `kysely_migration*`; no superuser, no DDL, `MIGRATE_ON_START=false`). The superuser `POSTGRES_USER` owns the schema and is used only by the scripts: migrations (`deploy.sh`, `restore.sh`), backups and restores. A compromised app therefore cannot `SET session_replication_role` or `ALTER … DISABLE TRIGGER` to rewrite the append-only audit log, nor run `COPY … TO PROGRAM`. |
-| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. Request bodies: 64 KB, except the console's two photograph uploads (F-04), 1 200 KB (§15.7). |
+| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. Request bodies: 64 KB, except the console's three photograph uploads (F-04, P-R02), 1 200 KB (§15.7). |
 | Configuration | `deploy/vps/.env` (from `.env.example`) | Mode `0600`, owner `orbes`, git-ignored. Parsed by the scripts, never sourced. |
 | Scripts | `deploy/vps/scripts/` | `bootstrap-ubuntu.sh`, `setup.sh`, `deploy.sh`, `backup.sh`, `restore.sh`, `geoip-update.sh`; each has `--help`. |
 | Timers | `deploy/vps/systemd/` | Installed by `bootstrap-ubuntu.sh` (`--units-only` to refresh). |
@@ -1231,12 +1231,12 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback, or repair forward | A failure of the last three steps (health, Caddy, the signing key, the smoke tests) in a release that applied **no** migration redeploys the previous image tag and waits for health, once the previous image is known to run on the schema. A release that **did** (its migrations committed together, then something failed) is kept: the previous image cannot run on the new schema, so no rollback is attempted, `ORBES_IMAGE_TAG` stays on the new tag with the stack started on it, and the way to repair forward is printed (below). A migration that fails applies nothing (one transaction): the previous image then comes back as usual. The outcome is appended to `.state/deploys.log`. |
 
-**The photograph uploads at the edge (F-04, lot 5).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on two routes only: `POST /api/admin/models/:id/image` and `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths included, the 64 KB it had:
+**The photograph uploads at the edge (F-04, lot 5; P-R02).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on three routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the gallery's order (a `PATCH`) included, the 64 KB it had:
 
 ```caddyfile
 @photo_upload {
 	method POST
-	path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+	path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
 }
 request_body @photo_upload {
 	max_size 1200KB
@@ -1244,7 +1244,7 @@ request_body @photo_upload {
 @not_photo_upload {
 	not {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/image|products/[^/]+/photo)/?$
+		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
 	}
 }
 request_body @not_photo_upload {
@@ -1252,7 +1252,7 @@ request_body @not_photo_upload {
 }
 ```
 
-The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's two upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. This change of the shared VPS's edge goes out with lot 5, announced to the other session first; `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo) is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
+The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. Each change of the shared VPS's edge goes out with a deployment announced to the other session first (lot 5; the « Potentiel » deployment A, [its runbook](launch/DEPLOY-POTENTIEL-2026-10.md)); `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo, or a model's Lookbook page) is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
 
 ```bash
 head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @- "https://$APP_DOMAIN/api/v1/verify"
@@ -1295,7 +1295,7 @@ docker image rm orbes-genome:<tag>         # one old tag at a time
 
 Never run `docker image prune`, `docker system prune` or `docker volume prune` on the shared host. A bare `docker image prune` deletes the dangling images of the other stacks on the same Docker daemon, and does not even remove old `orbes-genome` tags. With `-a` or `--volumes`, and the stack stopped, they delete the rollback images, the database and the signing keys (COMPLIANCE §7, house rules).
 
-**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md)):
+**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md); the « Potentiel » lot of 2026-10-03, deployments A, B and C with migrations `0014`–`0020`, has its own: [DEPLOY-POTENTIEL-2026-10](launch/DEPLOY-POTENTIEL-2026-10.md)):
 
 1. Not between 03:00 and 05:30 UTC (the nightly backups of the host). Tell the host owner first.
 2. Check `.env`: `RESTORE_ALLOWED=false` (add the line if it is missing; deployment 2 adds it), and nothing exported in the shell (`env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='` prints nothing).

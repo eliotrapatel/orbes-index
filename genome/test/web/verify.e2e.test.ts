@@ -25,7 +25,11 @@
  * ownership certificate (F-06: created in MY PIECES, opened from its link by
  * a visitor, its PDF, ended by a declaration, withdrawn, its address typed
  * back in capitals as the PDF letters it; a list of links that cannot be
- * read stays said after a creation), and the problem screens. On each
+ * read stays said after a creation), THE COLLECTION (P-R02: the lookbook
+ * from the landing, a model's sheet and the way back through the lookbook,
+ * a sheet's address opened directly, SEE THE MODEL under an authentic
+ * result, the models reserved for an owner signed in), and the problem
+ * screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -1862,6 +1866,140 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.locator('.result__photos, img'), 0);
     expect(problems).toEqual([]);
   }, 120_000);
+
+  it('THE COLLECTION (P-R02): the lookbook from the landing, a sheet, back to the lookbook then the landing; SEE THE MODEL under an authentic result; the reserved models for an owner signed in', async () => {
+    // Models of their own, so that no other result of this suite names a sheet.
+    const category = (await srv.ctx.categories.getByCode('J'))!;
+    const nocturne = await srv.ctx.db.insertInto('collections').values({ name: 'NOCTURNE 2026' }).returning('id').executeTakeFirstOrThrow();
+    const model = (name: string, sku: string, collectionId: string | null) =>
+      srv.ctx.db.insertInto('models').values({ category_id: category.index, collection_id: collectionId, name, type: 'RING', sku_prefix: sku }).returning('id').executeTakeFirstOrThrow();
+    const aurore = await model('AURORE', 'AUR-RG', nocturne.id);
+    const zenith = await model('ZENITH', 'ZEN-RG', null);
+    const { catalog, media } = srv.ctx.services;
+    await media.setModelImage(aurore.id, { mime: 'image/jpeg', bytes: jpegPhoto(600, 600) }, SYSTEM_ACTOR);
+    await media.addModelGalleryImage(aurore.id, { mime: 'image/jpeg', bytes: jpegPhoto(400, 300) }, SYSTEM_ACTOR);
+    await catalog.updateModel(aurore.id, { slug: 'aurore', lookbook: 'PUBLIC', story: 'The ring of dawn.\n\nCast in Paris.\nPolished by hand.', specs: 'Metal: 925 sterling silver\nWeight: 12 g' }, SYSTEM_ACTOR);
+    await catalog.updateModel(zenith.id, { slug: 'zenith', lookbook: 'RESERVED', story: 'Shown to the owners.' }, SYSTEM_ACTOR);
+    const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: aurore.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The landing: THE COLLECTION, a text link under the actions, at once (no session needed).
+    const link = page.locator('.landing__actions').getByRole('link', { name: 'THE COLLECTION' });
+    await visible(link);
+    await attrOf(link, 'href', '/verify/lookbook');
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'THE COLLECTION']);
+    await link.click();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+    expect(new URL(page.url()).pathname).toBe('/verify/lookbook');
+
+    // The PUBLIC models by collection, the collection's figures in the reading face; nothing reserved, signed out.
+    const card = page.locator('article.lookbook-card', { hasText: 'AURORE' });
+    await visible(card);
+    await textOf(page.locator('.lookbook__group', { has: card }).locator('.lookbook__collection'), 'NOCTURNE 2026');
+    await countOf(page.locator('article.lookbook-card', { hasText: 'ZENITH' }), 0);
+    await countOf(page.locator('.lookbook__reserved'), 0);
+    await textsOf(card.locator('.lookbook-card__name, .lookbook-card__type'), ['AURORE', 'RING']);
+    const cover = card.locator('img.lookbook-card__img');
+    await attrOf(cover, 'loading', 'lazy');
+    await attrOf(cover, 'alt', 'The AURORE RING model, photographed by ORBES');
+    await expect.poll(() => cover.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth, getComputedStyle(el).objectFit]), POLL).toEqual([true, 600, 'contain']);
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['SEE THE MODEL', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
+    // One line for SEE THE MODEL, two cards to a row, on the phones in use; one to a row on the smallest.
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await linesOf(card.getByRole('link', { name: 'SEE THE MODEL' })), `${width}`).toBe(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+      await keepsFloors(page, ['SEE THE MODEL']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-lookbook.png'), fullPage: true });
+
+    // SEE THE MODEL: its sheet, the cover then the gallery, THE STORY, SPECIFICATIONS, CARE.
+    await card.getByRole('link', { name: 'SEE THE MODEL' }).click();
+    await textOf(page.locator('h1'), 'AURORE');
+    expect(new URL(page.url()).pathname).toBe('/verify/lookbook/aurore');
+    await textOf(page.locator('.sheet__collection'), 'NOCTURNE 2026');
+    await textOf(page.locator('.sheet__line'), 'RING');
+    const photos = page.getByRole('region', { name: 'Photographs of the AURORE model' });
+    await countOf(photos.locator('img.sheet-photo__img'), 2);
+    await expect.poll(() => photos.locator('img').evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).getAttribute('loading'), (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
+      ['eager', 600],
+      ['lazy', 400],
+    ]);
+    await textsOf(page.locator('.sheet__section .section-label'), ['THE STORY', 'SPECIFICATIONS', 'CARE']);
+    await textsOf(page.locator('.sheet__paragraph'), ['The ring of dawn.', 'Cast in Paris. Polished by hand.']);
+    expect(await page.locator('.sheet__paragraph').nth(1).evaluate((el) => el.querySelectorAll('br').length)).toBe(1);
+    await textsOf(page.locator('.sheet__section .rows__label'), ['METAL', 'WEIGHT']);
+    await textsOf(page.locator('.sheet__section .rows__value'), ['925 STERLING SILVER', '12 G']);
+    await textOf(page.locator('.sheet__care'), /^Store this piece on its own/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['THE COLLECTION', ...LEGAL_LINKS]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-lookbook-sheet.png'), fullPage: true });
+    // Back from a sheet: the lookbook, then the landing.
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+    expect(new URL(page.url()).pathname).toBe('/verify/lookbook');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(new URL(page.url()).pathname).toBe('/verify');
+
+    // Opened directly, a sheet puts the landing and the lookbook under it; its foot's THE COLLECTION goes back there.
+    await page.goto(`${srv.origin}/verify/lookbook/AURORE`);
+    await textOf(page.locator('h1'), 'AURORE');
+    await page.locator('.sheet__foot').getByRole('link', { name: 'THE COLLECTION' }).click();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    // A model reserved for owners, signed out, and an address that leads nowhere: the same sentence.
+    for (const address of ['zenith', 'nowhere']) {
+      await page.goto(`${srv.origin}/verify/lookbook/${address}`);
+      await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
+    }
+
+    // Under an authentic result of a piece of the model: SEE THE MODEL, under the lines; back from the sheet, the lookbook.
+    await page.goto(`${srv.origin}/verify`);
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'lookbook.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    const seeModel = page.locator('.result__lines').getByRole('link', { name: 'SEE THE MODEL' });
+    await attrOf(seeModel, 'href', '/verify/lookbook/aurore');
+    await keepsFloors(page, ['SEE THE MODEL', 'SCAN ANOTHER']);
+    await seeModel.click();
+    await textOf(page.locator('h1'), 'AURORE');
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+
+    // An owner signed in (MY PIECES) sees the models RESERVED FOR OWNERS, and their sheets.
+    const email = 'lookbook.owner@example.com';
+    const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    await ownedPiece(owner.account.id);
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const signIn = page.locator('.pieces__signin');
+    await signIn.getByLabel('EMAIL').fill(email);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await countOf(page.locator('article.piece'), 1);
+    await page.locator('.pieces__foot').getByRole('link', { name: 'THE COLLECTION' }).click();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+    const reserved = page.getByRole('region', { name: 'RESERVED FOR OWNERS' });
+    await visible(reserved);
+    const zenithCard = reserved.locator('article.lookbook-card', { hasText: 'ZENITH' });
+    await visible(zenithCard);
+    await zenithCard.getByRole('link', { name: 'SEE THE MODEL' }).click();
+    await textOf(page.locator('h1'), 'ZENITH');
+    await textOf(page.locator('.sheet__line'), 'RING · RESERVED FOR OWNERS');
+    await textsOf(page.locator('.sheet__paragraph'), ['Shown to the owners.']);
+    // No photograph: no plate.
+    await countOf(page.locator('.sheet__photos'), 0);
+    // Back: the lookbook, then the landing (MY PIECES' entry became the lookbook's).
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE COLLECTION');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(problems).toEqual([]);
+  }, 180_000);
 
   it('explains a photo without a code, and offers another photo', async () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });

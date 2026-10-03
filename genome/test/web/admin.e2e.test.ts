@@ -11,7 +11,10 @@
  * piece, added at issuance (F-04) → product page (spec §22) → warranty
  * activation and code re-issue → a model's reference photograph from the
  * catalogue, both photographs on the product page and on /verify, the
- * piece's removed → key rotation → audit chain
+ * piece's removed → a model's sheet in the lookbook from its Lookbook page
+ * (P-R02: its place and address, its story and specifications previewed as
+ * the client reads them, its gallery added, ordered, described and trimmed,
+ * then read by the public API) → key rotation → audit chain
  * verification → a batch of 120 products from a CSV (preview, requests of
  * 50, results piece by piece, the page held until the claim codes are saved,
  * certificate cards) and a quantity → sign out. Also: a customer's report
@@ -27,7 +30,8 @@
  * read-only AUDITOR console (emails masked), and the sale mode on a 390 px
  * phone (A-08: the points of sale, a RETAIL account and its first sign-in in
  * the sale shell, a sale through the phone's camera in under 20 s, nothing
- * else reachable). No CSP violation or page error is tolerated.
+ * else reachable). The AUDITOR reads a model's Lookbook page without its
+ * edits. No CSP violation or page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -388,8 +392,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
     await page.selectOption('dialog select[name=status]', 'inactive');
     await confirmDialog(page);
-    await expect.poll(() => model('ECL-PD').locator('.status__text').textContent()).toBe('INACTIVE');
-    expect(await model('MNL-RG').locator('.status__text').textContent()).toBe('ACTIVE');
+    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-active] .status__text').textContent()).toBe('INACTIVE');
+    expect(await model('MNL-RG').locator('[data-testid=model-active] .status__text').textContent()).toBe('ACTIVE');
 
     // A collection renamed, then named again as it was: each time, the pieces it is shown on are said first.
     const collection = page.locator('#collections tbody tr').first();
@@ -616,6 +620,99 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', '%.photo.%').orderBy('id').execute();
     expect(audited.map((a) => a.action)).toEqual(['product.photo.set', 'product.photo.remove']);
     expect((await ctx.db.selectFrom('audit_logs').select('action').where('action', '=', 'model.image.set').execute()).length).toBe(1);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    expect(await cspViolations(page)).toEqual([]);
+  }, STEP_TIMEOUT);
+
+  it('sets a model\'s sheet in the lookbook from the Catalogue (P-R02): its place and address, its story and specifications as the client reads them, its gallery', async () => {
+    await go(page, '#/catalogue', 'Catalogue');
+    const row = page.locator('#models tbody tr', { hasText: 'MNL-RG' });
+    expect(await row.locator('[data-testid=model-lookbook-state]').textContent()).toBe('HIDDEN');
+    await row.locator('[data-testid=model-lookbook]').click();
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 15_000 }).toBe('MONOLITHE');
+    expect(new URL(page.url()).hash).toBe(`#/catalogue/${modelId}`);
+    // Under the Catalogue, which the sidebar marks; no link of its own there.
+    await expect.poll(() => page.locator('.side__link.is-active').textContent()).toBe('Catalogue');
+    expect(await page.locator('.side__link[href*="/catalogue/"]').count()).toBe(0);
+    expect(await page.locator('[data-testid=lookbook-state]').textContent()).toBe('HIDDEN');
+
+    // The story, previewed as the client reads it while it is typed: a hidden model's sheet is not public.
+    await page.click('[data-testid=story-edit]');
+    await page.fill('dialog textarea[name=story]', 'The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.');
+    await expect.poll(() => page.locator('dialog [data-testid=story-preview] .sheet-preview__paragraph').count()).toBe(2);
+    expect(await page.locator('dialog [data-testid=story-preview] .sheet-preview__paragraph').nth(1).evaluate((el) => el.querySelectorAll('br').length)).toBe(1);
+    await shot(page, 'lookbook-story-dialog');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Story saved.")');
+    await expect.poll(() => page.locator('[data-testid=story-shown] .sheet-preview__paragraph').count()).toBe(2);
+
+    // The specifications: a label with a figure is said before anything is sent, as the server would say it.
+    await page.click('[data-testid=specs-edit]');
+    await page.fill('dialog textarea[name=specs]', 'Size 52: yes');
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toMatch(/^Specifications, line 1: a label has no figure/);
+    await page.fill('dialog textarea[name=specs]', 'Metal: 925 sterling silver\nWeight: 12 g');
+    await expect.poll(() => page.locator('dialog [data-testid=specs-preview] .sheet-preview__row').count()).toBe(2);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Specifications saved.")');
+
+    // Publication: Public, at the address proposed from the name; once published, the address is no longer a field.
+    await page.click('[data-testid=lookbook-edit]');
+    expect(await page.inputValue('dialog input[name=slug]')).toBe('monolithe');
+    expect(await page.locator('dialog [data-testid=lookbook-impact]').textContent()).toMatch(/Its address is fixed once it is first shown/);
+    await page.selectOption('dialog select[name=lookbook]', 'PUBLIC');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Publication saved.")');
+    await expect.poll(() => page.locator('[data-testid=lookbook-state]').textContent()).toBe('PUBLIC');
+    expect(await page.locator('[data-testid=lookbook-address]').textContent()).toBe('/verify/lookbook/monolithe');
+    await page.click('[data-testid=lookbook-edit]');
+    expect(await page.locator('dialog input[name=slug]').count()).toBe(0);
+    await page.click('[data-testid=dialog-cancel]');
+
+    // The gallery: two photographs through the photograph dialog, the second moved first, given its text, the other removed.
+    for (const [name, w, h] of [['gallery-1.png', 1200, 900], ['gallery-2.png', 900, 1200]] as const) {
+      await page.click('[data-testid=gallery-add]');
+      expect(await page.locator('dialog [data-testid=photo-impact]').textContent()).toMatch(/^Shown at once on the model’s sheet \(everyone\), after its cover/);
+      await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, name), w, h));
+      await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: /);
+      await confirmDialog(page);
+      await page.waitForSelector('.toast:has-text("Photograph added.")');
+    }
+    const items = page.locator('[data-testid=gallery-item]');
+    await expect.poll(() => items.count()).toBe(2);
+    const second = (await items.nth(1).getAttribute('data-sha256'))!;
+    await items.nth(1).locator('[data-testid=gallery-earlier]').click();
+    await expect.poll(() => items.first().getAttribute('data-sha256')).toBe(second);
+    expect(await items.first().locator('[data-testid=gallery-earlier]').isDisabled()).toBe(true);
+    await items.first().locator('[data-testid=gallery-alt]').click();
+    await page.fill('dialog input[name=alt]', 'The ring on its side, the stone up');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Alternative text saved.")');
+    await expect.poll(() => items.first().locator('[data-testid=gallery-alt-text]').textContent()).toBe('The ring on its side, the stone up');
+    await items.nth(1).locator('[data-testid=gallery-remove]').click();
+    expect(await page.locator('dialog.dialog--danger').count()).toBe(1);
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Photograph removed.")');
+    await expect.poll(() => items.count()).toBe(1);
+    await shot(page, 'lookbook', { full: true });
+
+    // What /verify reads now: the sheet as the console set it.
+    const sheet = (await (await fetch(`${origin}/api/v1/lookbook/monolithe`)).json()) as { lookbook: string; story: string; specs: unknown; gallery: { url: string; alt: string | null }[] };
+    expect(sheet).toMatchObject({
+      lookbook: 'PUBLIC',
+      story: 'The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.',
+      specs: [
+        { label: 'Metal', value: '925 sterling silver' },
+        { label: 'Weight', value: '12 g' },
+      ],
+      gallery: [{ url: `/api/v1/media/${second}`, alt: 'The ring on its side, the stone up' }],
+    });
+    const actions = (await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', modelId).where('action', 'like', 'model.%').orderBy('id').execute()).map((a) => a.action);
+    expect(actions.filter((a) => a.startsWith('model.gallery.'))).toEqual(['model.gallery.add', 'model.gallery.add', 'model.gallery.update', 'model.gallery.update', 'model.gallery.remove']);
+    // Back to the Catalogue: the model's row says where it stands.
+    await page.click('a.cbtn:has-text("All models")');
+    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Catalogue');
+    await expect.poll(() => row.locator('[data-testid=model-lookbook-state]').textContent()).toBe('PUBLIC');
     expect(await figuresInDisplayFace(page)).toEqual([]);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
@@ -1833,10 +1930,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('#pieces tbody tr').count()).toBe(1);
     for (const action of ['lock-account', 'unlock-account', 'export-account', 'issue-recovery-code']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     for (const email of ['sheet.client@example.com', 'lost.password@example.com']) expect(await p.content()).not.toContain(email);
-    // The catalogue reads, without its edits (A-10).
+    // The catalogue reads, without its edits (A-10); a model's Lookbook page reads too, without its edits (P-R02).
     await go(p, '#/catalogue', 'Catalogue');
     await expect.poll(() => p.locator('#models tbody tr').count()).toBe(2);
-    for (const action of ['edit-model', 'rename-collection', 'toggle-category']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    for (const action of ['edit-model', 'rename-collection', 'toggle-category', 'model-photo']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    await p.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=model-lookbook]').click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE');
+    await p.waitForSelector('[data-testid=story-shown]');
+    for (const action of ['lookbook-edit', 'story-edit', 'specs-edit', 'gallery-add', 'gallery-earlier', 'gallery-alt', 'gallery-remove']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
     await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);

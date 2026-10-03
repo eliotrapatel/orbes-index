@@ -417,8 +417,27 @@ export class AdminApi {
     return this.post('/api/admin/models', input);
   }
 
+  /** One model, as the list has it (the Lookbook page, P-R02). */
+  model(id: string): Promise<Model> {
+    return this.get(`/api/admin/models/${encodeURIComponent(id)}`);
+  }
+
   updateModel(id: string, change: ModelChange): Promise<Model> {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
+  }
+
+  /** A photograph for the gallery of the model's lookbook sheet (P-R02): the image itself, added last. */
+  addGalleryImage(id: string, photo: Blob): Promise<Model> {
+    return this.request('POST', `/api/admin/models/${encodeURIComponent(id)}/gallery`, { upload: { type: photo.type || 'image/jpeg', data: photo } });
+  }
+
+  removeGalleryImage(id: string, sha256: string): Promise<Model> {
+    return this.del(`/api/admin/models/${encodeURIComponent(id)}/gallery/${encodeURIComponent(sha256)}`);
+  }
+
+  /** The gallery's order and alternative texts: every photograph once, in the new order ('' alt: the sheet's default). */
+  arrangeGallery(id: string, images: { sha256: string; alt: string }[]): Promise<Model> {
+    return this.patch(`/api/admin/models/${encodeURIComponent(id)}/gallery`, { images });
   }
 
   /** The model's reference photograph (F-04): the image itself (JPEG or WebP, ≤ 1 MiB), not JSON. */

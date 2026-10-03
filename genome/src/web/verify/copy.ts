@@ -520,3 +520,33 @@ export const LEGAL = Object.freeze({
   terms: 'TERMS OF USE',
   privacy: 'PRIVACY POLICY',
 });
+
+/**
+ * THE COLLECTION (P-R02, /verify/lookbook): the lookbook of the models ORBES shows, grouped by collection, each on an
+ * ivory plate with SEE THE MODEL; then a model's sheet (/verify/lookbook/<slug>): its photographs, its story, its
+ * specifications and its care. An owner signed in also sees the models RESERVED FOR OWNERS. Reached from the landing,
+ * from MY PIECES and, under an authentic result, from SEE THE MODEL.
+ */
+export const LOOKBOOK = Object.freeze({
+  title: 'THE COLLECTION',
+  /** The text link of the landing, of MY PIECES and of a sheet's foot (back to the grid). */
+  link: 'THE COLLECTION',
+  lead: 'The models of ORBES, as the maison presents them.',
+  loading: 'ONE MOMENT…',
+  loadFailed: 'The collection could not be shown just now.',
+  retry: 'TRY AGAIN',
+  empty: 'No model is shown in the collection yet.',
+  /** The section an owner of an ORBES piece sees, signed in; and the line of such a model's sheet. */
+  reserved: 'RESERVED FOR OWNERS',
+  reservedLead: 'Shown to the owners of an ORBES piece.',
+  /** The text link of each card, and the one under an authentic result. */
+  seeModel: 'SEE THE MODEL',
+  scan: 'SCAN ORBES CODE',
+  /** The accessible names of a sheet's photographs and of a card's. */
+  photosLabel: (model: string) => `Photographs of the ${model} model`,
+  story: 'THE STORY',
+  specs: 'SPECIFICATIONS',
+  care: 'CARE',
+  /** The sheet of an address that leads nowhere (a model no longer shown, or reserved for owners). */
+  notFound: 'This model is not in the ORBES collection.',
+});

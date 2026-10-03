@@ -12,6 +12,9 @@
  * the session is asked for, so nothing moves when it appears; it stays
  * hidden if the account service cannot be reached.
  *
+ * Under them, THE COLLECTION (P-R02), the lookbook of the models: a third
+ * discreet link, shown at once (it needs no session).
+ *
  * At the foot (J-06), under the centre and in the page's flow, so a short
  * screen scrolls to them rather than covering the actions: the legal pages,
  * PRIVACY · TERMS · LEGAL · HELP, and DB-IP's attribution, then the
@@ -20,7 +23,7 @@
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
 import type { SessionStore } from '../session.js';
-import { legalLinks, orbitReticle, piecesLink, viewRoot } from './common.js';
+import { legalLinks, lookbookLink, orbitReticle, piecesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
@@ -28,6 +31,8 @@ export interface LandingHandlers {
   /** Asked once for the session, before MY PIECES shows. */
   session?: Pick<SessionStore, 'ensure'>;
   onPieces?(): void;
+  /** THE COLLECTION (P-R02): the lookbook, in the app. */
+  onCollection?(): void;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
@@ -71,6 +76,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
         h('button', { class: 'btn landing__scan', attrs: { type: 'button' }, data: { autofocus: '' }, on: { click: () => handlers.onScan() }, text: 'SCAN ORBES CODE' }),
         h('button', { class: 'textlink landing__upload', attrs: { type: 'button' }, on: { click: () => handlers.onUpload() }, text: 'UPLOAD A PHOTO' }),
         pieces,
+        lookbookLink(handlers.onCollection, { extraClass: 'landing__collection' }),
       ),
     ),
     h(

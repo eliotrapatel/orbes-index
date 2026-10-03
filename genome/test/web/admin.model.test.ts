@@ -154,6 +154,7 @@ describe('admin enums mirror the server', () => {
       'REVOCATION_TARGET_TYPES',
       'REPORT_CHANNELS',
       'REPORT_STATUSES',
+      'LOOKBOOK_STATES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -368,6 +369,8 @@ describe('tones', () => {
     // An open case waits for staff, as an open anomaly does; a closed one recedes.
     expect(toneOf('case', 'OPEN')).toBe(toneOf('anomaly', 'OPEN'));
     expect(toneOf('case', 'CLOSED')).toBe('muted');
+    // A model's place in the lookbook (P-R02): shown to everyone, to owners only, or nowhere.
+    expect(serverSchema.LOOKBOOK_STATES.map((s) => toneOf('lookbook', s))).toEqual(['muted', 'solid', 'outline']);
     expect([toneOf('catalogue', 'ACTIVE'), toneOf('catalogue', 'INACTIVE')]).toEqual(['solid', 'muted']);
     // A locked account needs attention; every account status has its tone.
     expect(toneOf('account', 'ACTIVE')).toBe('solid');

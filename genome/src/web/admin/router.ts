@@ -27,6 +27,8 @@ export const ROUTES = [
   { name: 'audit', path: '/audit' },
   { name: 'team', path: '/team' },
   { name: 'catalogue', path: '/catalogue' },
+  /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */
+  { name: 'model', path: '/catalogue/:modelId' },
   { name: 'retailers', path: '/retailers' },
   { name: 'sale', path: '/sale' },
   { name: 'documents', path: '/documents' },

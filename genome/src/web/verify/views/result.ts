@@ -17,6 +17,8 @@
  *     G1-E1DC-BE52 · GENOME-01
  *   └                      ┘
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
+ *            SEE THE MODEL           its model's sheet in THE COLLECTION
+ *                                    (P-R02), a text link, when it is PUBLIC
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP
  *   SCAN ANOTHER · footnote · VERIFIED · REF
  *   PRIVACY · TERMS · LEGAL · HELP   the legal pages (J-06), in a new tab,
@@ -40,7 +42,7 @@ import { h } from '../../shared/dom.js';
 import { RECEIVING } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { initialTab, type ResultViewModel, type TabId } from '../view-model.js';
-import { contactBlock, legalLinks, toneMark, viewRoot } from './common.js';
+import { contactBlock, legalLinks, lookbookLink, toneMark, viewRoot } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { photoPlate } from './photos.js';
@@ -54,6 +56,8 @@ export interface ResultHandlers {
   ownership: Omit<OwnershipDeps, 'onRescan'>;
   /** Sends the answer to WHERE DID YOU SEE OR BUY THIS PIECE? (results that were not authentic). */
   report?: ReportDeps;
+  /** SEE THE MODEL (P-R02): open its model's sheet in the app. */
+  onModel?(slug: string): void;
 }
 
 export interface ResultView {
@@ -107,11 +111,14 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   sections.push(photoPlate(vm.photos));
   if (vm.genome) sections.push(bracket(h('div', { class: 'result__genome' }, genomeBlock(vm.genome))));
   if (vm.productLines.length > 0) {
+    const slug = vm.lookbook;
     sections.push(
       h(
         'section',
         { class: 'result__lines', attrs: { 'aria-label': 'Product' } },
         h('ul', { class: 'lines' }, ...vm.productLines.map((line) => h('li', { class: 'lines__line', text: line }))),
+        // Under the lines that name the model: its sheet in THE COLLECTION, a text link (the hairline button stays the foot's).
+        slug ? lookbookLink(handlers.onModel ? () => handlers.onModel!(slug) : undefined, { slug, extraClass: 'result__model-link' }) : null,
       ),
     );
   }

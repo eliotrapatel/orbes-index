@@ -68,6 +68,10 @@ export type ReportChannel = (typeof REPORT_CHANNELS)[number];
 export const REPORT_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
+/** Where a model stands in the lookbook (P-R02, models.lookbook): HIDDEN, PUBLIC (everyone) or RESERVED (the owners of a piece). */
+export const LOOKBOOK_STATES = ['HIDDEN', 'PUBLIC', 'RESERVED'] as const;
+export type LookbookState = (typeof LOOKBOOK_STATES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -236,7 +240,29 @@ export interface Model {
   imageUrl: string | null;
   /** Pieces issued with this model: their public result reads its name, care instructions and collection. */
   products: number;
+  /** Its place in the lookbook (P-R02). */
+  lookbook: LookbookState;
+  /** The address of its sheet, /verify/lookbook/<slug>; null until named; fixed once `publishedAt` is set. */
+  slug: string | null;
+  /** Plain paragraphs, ≤ 4 000 characters. */
+  story: string | null;
+  /** One `Label: value` line per specification, ≤ 1 000 characters. */
+  specs: string | null;
+  /** When it first left HIDDEN; null while it never has. */
+  publishedAt: Iso | null;
+  /** The gallery of its sheet, in its order (the reference photograph is the cover, apart). */
+  gallery: GalleryImage[];
   createdAt: Iso;
+}
+
+/** One photograph of a model's lookbook gallery (P-R02). */
+export interface GalleryImage {
+  sha256: string;
+  /** `/api/v1/media/<sha256>`. */
+  url: string;
+  /** null: the sheet says "The MONOLITHE RING model, photographed by ORBES". */
+  alt: string | null;
+  position: number;
 }
 
 /** POST and DELETE /api/admin/products/:productId/photo (F-04): the piece and the URL of its photograph. */
@@ -252,6 +278,11 @@ export interface ModelChange {
   careInstructions?: string;
   collectionId?: string;
   active?: boolean;
+  /** The lookbook (P-R02): '' clears the slug (never published), the story or the specifications. */
+  lookbook?: LookbookState;
+  slug?: string;
+  story?: string;
+  specs?: string;
 }
 
 // ── Products, genomes, codes ───────────────────────────────────────────────

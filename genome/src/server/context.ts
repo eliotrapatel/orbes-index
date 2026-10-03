@@ -28,8 +28,10 @@ import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
 import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
+import { ClubService } from './services/club.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
+import { LookbookService } from './services/lookbook.js';
 import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
@@ -70,8 +72,12 @@ export interface AppServices {
   retailers: RetailerService;
   /** The sale mode: staff scan, then warranty activation through a sale token (A-08). */
   sale: SaleService;
-  /** Reference photographs of models and photographs of pieces, stored once and served publicly (F-04). */
+  /** Reference photographs of models and photographs of pieces, stored once and served publicly (F-04); the galleries of the lookbook (P-R02). */
   media: MediaService;
+  /** The lookbook of the models (P-R02): the PUBLIC ones and their sheets, the RESERVED ones for the club. */
+  lookbook: LookbookService;
+  /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models). */
+  club: ClubService;
 }
 
 export interface AppContext {
@@ -162,6 +168,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const retailers = new RetailerService({ db, audit, clock });
     const sale = new SaleService({ db, verification, warranty, clock });
     const media = new MediaService({ db, audit, clock, log });
+    const lookbook = new LookbookService({ db });
+    const club = new ClubService({ db, lookbook });
 
     const services: AppServices = {
       issuance,
@@ -181,6 +189,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       retailers,
       sale,
       media,
+      lookbook,
+      club,
       ...overrides.services,
     };
 

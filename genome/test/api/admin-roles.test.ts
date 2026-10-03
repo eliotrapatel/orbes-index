@@ -1,7 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
  * mutates (the catalogue's models and collections included, created or
- * edited, and the photographs of models and pieces, F-04), ADMIN for keys, revocations, reinstatement, categories (created,
+ * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08) and a customer's recovery code, lock and export;
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
@@ -49,6 +49,10 @@ const PROBES: Probe[] = [
   { group: 'models', method: 'GET', url: '/api/admin/models', min: 'AUDITOR' },
   { group: 'models', method: 'POST', url: '/api/admin/models', body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'PATCH', url: `/api/admin/models/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'models', method: 'GET', url: `/api/admin/models/${UUID}`, min: 'AUDITOR' },
+  { group: 'lookbook', method: 'POST', url: `/api/admin/models/${UUID}/gallery`, ...PHOTO, min: 'OPERATOR' },
+  { group: 'lookbook', method: 'DELETE', url: `/api/admin/models/${UUID}/gallery/${'ab'.repeat(32)}`, min: 'OPERATOR' },
+  { group: 'lookbook', method: 'PATCH', url: `/api/admin/models/${UUID}/gallery`, body: INVALID, min: 'OPERATOR' },
   { group: 'media', method: 'POST', url: `/api/admin/models/${UUID}/image`, ...PHOTO, min: 'OPERATOR' },
   { group: 'media', method: 'DELETE', url: `/api/admin/models/${UUID}/image`, min: 'OPERATOR' },
   { group: 'media', method: 'POST', url: `/api/admin/products/${PID}/photo`, ...PHOTO, min: 'OPERATOR' },
@@ -166,6 +170,7 @@ describe('admin role enforcement', () => {
       'retailers',
       'sale',
       'media',
+      'lookbook',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

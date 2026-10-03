@@ -1,21 +1,25 @@
 /**
  * Photographs (F-04): a model's reference photograph and the photograph of
- * one piece (API §13.4, §14.12). OPERATOR, like every other mutation of the
- * catalogue and of a product; CSRF as for any unsafe request.
+ * one piece (API §13.4, §14.12); and the gallery of a model's lookbook sheet
+ * (P-R02, §13.4: add, remove, order and alternative texts). OPERATOR, like
+ * every other mutation of the catalogue and of a product; CSRF as for any
+ * unsafe request.
  *
  * The only routes whose body is not JSON: the image itself, sent as
- * `image/jpeg` or `image/webp`, at most 1 MiB. The two parsers live in this
- * plugin's encapsulation context, so no other route of the API accepts an
- * image, nor a body over 16 KB; here, any other type is a 415 that says what
- * to send. The service (MediaService) checks the bytes, strips EXIF and XMP,
- * stores the image once by its SHA-256 and audits the change.
+ * `image/jpeg` or `image/webp`, at most 1 MiB, on the three upload routes
+ * (MEDIA_UPLOAD_ROUTES). The two parsers live in this plugin's encapsulation
+ * context, so no other route of the API accepts an image, nor a body over
+ * 16 KB; here, any other type is a 415 that says what to send (the gallery's
+ * order, a PATCH, is JSON). The service (MediaService) checks the bytes,
+ * strips EXIF and XMP, stores the image once by its SHA-256 and audits the
+ * change.
  *
- * The edge in front of the VPS lets these two upload paths, and only them,
- * carry 1 200 KB instead of 64 KB (deploy/vps/Caddyfile, DEPLOYMENT §15).
+ * The edge in front of the VPS lets these upload paths, and only them, carry
+ * 1 200 KB instead of 64 KB (deploy/vps/Caddyfile, DEPLOYMENT §15).
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { DomainError } from '../../errors.js';
-import { catalogParams, emptyBody, parse, productParams } from '../../http/schemas.js';
+import { catalogParams, emptyBody, galleryImageParams, galleryOrderBody, parse, productParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES, type ImageMime } from '../../media/image.js';
 import type { ImageUpload } from '../../services/media.js';
@@ -24,8 +28,8 @@ import type { AdminRouteDeps } from './index.js';
 /** The body limit of the image routes: the largest image stored (1 MiB). */
 export const MEDIA_BODY_LIMIT_BYTES = MAX_IMAGE_BYTES;
 
-/** The image routes: POST sets, DELETE removes (role OPERATOR, the default for a mutation). */
-export const MEDIA_UPLOAD_ROUTES = Object.freeze(['/api/admin/models/:id/image', '/api/admin/products/:productId/photo'] as const);
+/** The routes that take an image (POST, role OPERATOR, the default for a mutation): the edge gives exactly these 1 200 KB. */
+export const MEDIA_UPLOAD_ROUTES = Object.freeze(['/api/admin/models/:id/image', '/api/admin/products/:productId/photo', '/api/admin/models/:id/gallery'] as const);
 
 /** A parsed image body: kept apart from a parsed JSON object, which these routes refuse. */
 class ImageBody implements ImageUpload {
@@ -68,6 +72,29 @@ export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(catalogParams, request.params);
     parse(emptyBody, request.body);
     await media.removeModelImage(id, adminActor(request));
+    return catalog.getModel(id);
+  });
+
+  // ── The gallery of a model's lookbook sheet (P-R02) ──────────────────────
+
+  app.post('/api/admin/models/:id/gallery', { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    await media.addModelGalleryImage(id, imageOf(request.body), adminActor(request));
+    return catalog.getModel(id);
+  });
+
+  app.delete('/api/admin/models/:id/gallery/:sha256', async (request) => {
+    const { id, sha256 } = parse(galleryImageParams, request.params);
+    parse(emptyBody, request.body);
+    await media.removeModelGalleryImage(id, sha256, adminActor(request));
+    return catalog.getModel(id);
+  });
+
+  // The order and the alternative texts: JSON, every photograph of the gallery once, in the new order.
+  app.patch('/api/admin/models/:id/gallery', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(galleryOrderBody, request.body);
+    await media.arrangeModelGallery(id, b.images, adminActor(request));
     return catalog.getModel(id);
   });
 

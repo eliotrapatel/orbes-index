@@ -1,12 +1,14 @@
 /**
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
- * rows, the contact of ORBES Client Services, the link to MY PIECES, the
- * links to the legal pages, the app's paths and the view shell.
+ * rows, the contact of ORBES Client Services, the links to MY PIECES and to
+ * THE COLLECTION, the links to the legal pages, the app's paths, the figures
+ * of a title set in the reading face, and the view shell.
  */
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
-import { CONTACT, LEGAL, PIECES } from '../copy.js';
+import { CONTACT, LEGAL, LOOKBOOK, PIECES } from '../copy.js';
+import { LOOKBOOK_PATH, lookbookSheetPath } from '../lookbook-model.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
 
 /** A <main> view root with its modifier class. */
@@ -102,15 +104,17 @@ export const LANDING_PATH = '/verify';
 export const PIECES_PATH = '/verify/pieces';
 /** The ownership certificate (F-06): its token follows in the fragment, `/verify/c#…`, never in the path. */
 export const CERTIFICATE_PATH = '/verify/c';
+/** THE COLLECTION (P-R02): the lookbook's grid; a model's sheet is `/verify/lookbook/<slug>`. */
+export { LOOKBOOK_PATH } from '../lookbook-model.js';
 
 /**
- * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the
- * history entry is the router's); a click that opens a new tab or window is left to the browser.
+ * A link of this app (`href`, a real address: a click that opens a new tab or window is left to the browser); a plain
+ * click stays in the app (`onOpen`: no reload, the history entry is the router's).
  */
-export function piecesLink(onOpen?: () => void, extraClass?: string): HTMLAnchorElement {
+function appLink(href: string, text: string, onOpen?: () => void, extraClass?: string): HTMLAnchorElement {
   return h('a', {
     class: ['textlink', extraClass],
-    attrs: { href: PIECES_PATH },
+    attrs: { href },
     on: {
       click: (ev) => {
         if (!onOpen || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -118,8 +122,32 @@ export function piecesLink(onOpen?: () => void, extraClass?: string): HTMLAnchor
         onOpen();
       },
     },
-    text: PIECES.link,
+    text,
   });
+}
+
+/**
+ * THE COLLECTION (P-R02): a text link to /verify/lookbook, on the landing, in MY PIECES and at the foot of a sheet; or,
+ * with `slug`, SEE THE MODEL, a text link to that model's sheet (each card of the grid, and under an authentic result).
+ */
+export function lookbookLink(onOpen?: () => void, opts: { slug?: string; extraClass?: string } = {}): HTMLAnchorElement {
+  return opts.slug ? appLink(lookbookSheetPath(opts.slug), LOOKBOOK.seeModel, onOpen, opts.extraClass) : appLink(LOOKBOOK_PATH, LOOKBOOK.link, onOpen, opts.extraClass);
+}
+
+/**
+ * Words a title sets in the display face, its figures in the reading face (`.numeral`): Gravesend's one is its capital
+ * I, and its figures do not align. A model's or a collection's name may hold one (ORBIT 2026).
+ */
+export function withNumerals(text: string): (string | HTMLSpanElement)[] {
+  return text.split(/(\d+)/).flatMap((part, i): (string | HTMLSpanElement)[] => (part === '' ? [] : i % 2 === 1 ? [h('span', { class: 'numeral', text: part })] : [part]));
+}
+
+/**
+ * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the
+ * history entry is the router's); a click that opens a new tab or window is left to the browser.
+ */
+export function piecesLink(onOpen?: () => void, extraClass?: string): HTMLAnchorElement {
+  return appLink(PIECES_PATH, PIECES.link, onOpen, extraClass);
 }
 
 /** A link that opens in a new tab, so the screen it leaves (a result, a registration under way) stays as it was. */

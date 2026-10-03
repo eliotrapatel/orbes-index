@@ -7,6 +7,7 @@
  * AUTHENTIC — REGISTERED, the second-hand guidance of J-02 and its link to
  * RECEIVING THIS PIECE),
  * the photographs of an authentic piece (F-04: its own, then its model's),
+ * the sheet of its model in THE COLLECTION (P-R02: SEE THE MODEL),
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
  * registration token or a transfer window, the certificate-card or the
@@ -19,6 +20,7 @@
  * never upgrades a state.
  */
 import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
+import { isLookbookSlug } from '../shared/lookbook.js';
 import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
@@ -136,6 +138,8 @@ export interface ResultViewModel {
   noticeLink?: { label: string; tab: TabId };
   /** The photographs of an authentic piece (F-04): its own first, then its model's; empty otherwise. */
   photos: PhotoModel[];
+  /** The address of its model's sheet in THE COLLECTION (P-R02), under the product lines: authentic results of a PUBLIC model only. */
+  lookbook?: string;
   genome?: GenomeModel;
   /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
   productLines: string[];
@@ -354,6 +358,8 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     vm.tabs = ['product', 'warranty', 'care', 'ownership'];
     // The server sends them on authentic results only; the client shows them nowhere else either.
     vm.photos = photoModels(p);
+    // SEE THE MODEL (P-R02): the sheet of a model shown in THE COLLECTION, when the server names one.
+    if (isLookbookSlug(p.lookbook)) vm.lookbook = p.lookbook;
   }
 
   const v = outcome.verification;

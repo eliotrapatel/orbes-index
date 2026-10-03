@@ -2122,6 +2122,120 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* A part of a model's lookbook sheet as the client reads it on /verify (P-R02,
+   the Lookbook page and its dialogs): the sheet's section label (THE STORY,
+   SPECIFICATIONS), then the story's paragraphs in brand.css .prose, as verify's
+   .sheet__paragraph, or the specifications as verify's rows (the label in the
+   display face, the value in the reading face, both upper-case). */
+.sheet-preview__panel {
+  margin-top: 10px;
+  padding: 22px 24px 26px;
+  border: 1px solid var(--hairline);
+  background: var(--white);
+}
+
+.sheet-preview__heading {
+  font-size: var(--fs-overline);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sheet-preview__story {
+  margin-top: 12px;
+}
+
+.sheet-preview__paragraph + .sheet-preview__paragraph {
+  margin-top: 14px;
+}
+
+.sheet-preview__empty {
+  margin-top: 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.sheet-preview__rows {
+  margin-top: 8px;
+}
+
+.sheet-preview__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sheet-preview__label {
+  flex: none;
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sheet-preview__value {
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+/* The gallery of a model's sheet: the cover apart (the reference photograph),
+   then each photograph with its place, its alternative text and its actions. */
+.gallery-edit__cover {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-bottom: 22px;
+}
+
+.gallery-edit__note {
+  max-width: 46ch;
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.gallery-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 26px 22px;
+  list-style: none;
+}
+
+.gallery-edit__item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gallery-edit__position {
+  font-size: var(--fs-mono-sm);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.gallery-edit__alt {
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.gallery-edit__alt--default {
+  color: var(--ink-soft);
+}
+
+.gallery-edit__actions {
+  flex-wrap: wrap;
+}
+
 /* Photographs (F-04): a square thumbnail on ivory, the photograph contained
    (never cropped), as /verify frames it; the dialog that sets one, with the
    photograph as it will be sent and its size; the product page's pair (this
@@ -3013,6 +3127,8 @@ a.bar__label:hover {
 .gen__notes-title,
 .care-preview__label,
 .care-preview__tab,
+.sheet-preview__heading,
+.sheet-preview__label,
 .claim__label,
 .loading__text,
 .failure__title,

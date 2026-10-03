@@ -10,9 +10,9 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
-  'collections', 'cryptographic_keys', 'genomes', 'media_objects', 'models', 'ownership', 'ownership_certificates', 'ownership_transfers',
-  'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens',
-  'service_records', 'sessions', 'warranties',
+  'collections', 'cryptographic_keys', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
+  'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
+  'scan_tokens', 'service_records', 'sessions', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -102,6 +102,12 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX ownership_certificates_token_hash_key ON public\.ownership_certificates USING btree \(token_hash\)$/)).toBe(true);
     expect(has(/INDEX ownership_certificates_product_idx ON public\.ownership_certificates USING btree \(product_id, created_at\)$/)).toBe(true);
     expect(has(/INDEX ownership_certificates_ownership_idx ON public\.ownership_certificates USING btree \(ownership_id, created_at\)$/)).toBe(true);
+    // 0014: one model per address; a gallery keyed by its model, then by each foreign key at the head of its own index.
+    expect(has(/UNIQUE INDEX models_slug_key ON public\.models USING btree \(slug\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX model_images_pkey ON public\.model_images USING btree \(model_id, sha256\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX model_images_position_key ON public\.model_images USING btree \(model_id, "?position"?\)$/)).toBe(true);
+    expect(has(/INDEX model_images_sha256_idx ON public\.model_images USING btree \(sha256\)$/)).toBe(true);
+    expect(has(/INDEX model_images_created_by_idx ON public\.model_images USING btree \(created_by\)$/)).toBe(true);
   });
 
   /**
@@ -429,6 +435,94 @@ describe('migrations', () => {
     await sql`DELETE FROM scan_events WHERE id = ${scan.id}`.execute(t.db);
   });
 
+  it('0014 adds the lookbook of a model and its gallery, and nothing else; down restores 0013 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withLookbook, without: before } = await rollBackTo('0014_model_lookbook');
+    // What 0014 adds names the new table or one of the five new columns (PGlite's PostgreSQL also lists a NOT NULL as a
+    // constraint, models_lookbook_not_null; PostgreSQL 16 does not).
+    const of0014 = (o: string) => o.includes('model_images') || /\b(slug|lookbook|story|specs|published_at)\b/.test(o);
+    const added = withLookbook.filter((o) => !before.includes(o));
+    const columns = added.filter((o) => o.startsWith('table models '));
+    expect(columns).toEqual([
+      "table models lookbook text NO 'HIDDEN'::text",
+      'table models published_at timestamp with time zone YES ',
+      'table models slug text YES ',
+      'table models specs text YES ',
+      'table models story text YES ',
+    ]);
+    expect(added.filter((o) => o.startsWith('table model_images ')).map((o) => o.split(' ')[2])).toEqual(['alt', 'created_at', 'created_by', 'model_id', 'position', 'sha256']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger model_images model_images_immutable_identity']);
+    for (const c of [
+      /^constraint models models_slug_format CHECK \(\(\(slug ~ '\^\[a-z0-9\]\+\(-\[a-z0-9\]\+\)\*\$'::text\) AND \(length\(slug\) <= 80\)\)\)$/,
+      /^constraint models models_slug_key UNIQUE \(slug\)$/,
+      /^constraint models models_lookbook_slug CHECK \(\(\(lookbook = 'HIDDEN'::text\) OR \(slug IS NOT NULL\)\)\)$/,
+      /^constraint models models_published_slug CHECK \(\(\(published_at IS NULL\) OR \(slug IS NOT NULL\)\)\)$/,
+      /^constraint model_images model_images_position_key UNIQUE \(model_id, "?position"?\) DEFERRABLE INITIALLY DEFERRED$/,
+      /^constraint model_images model_images_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint model_images model_images_sha256_fkey FOREIGN KEY \(sha256\) REFERENCES media_objects\(sha256\) ON DELETE RESTRICT$/,
+      /^constraint model_images model_images_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    // Nothing of 0014 is left, and nothing else changed.
+    expect(before.filter(of0014)).toEqual([]);
+    expect(added.filter((o) => !of0014(o))).toEqual([]);
+    expect(withLookbook.filter((o) => !of0014(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0014_model_lookbook']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0014: every model stays HIDDEN without an address; a model shown has one, unique and lower-case; at most 8 photographs a gallery, in positions 1 to 8', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (27, 'U', 'Lookbook test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string; lookbook: string; slug: string | null }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (27, 'M', 'RING', 'LOOK') RETURNING id, lookbook, slug`.execute(t.db)).rows[0];
+    expect([model.lookbook, model.slug]).toEqual(['HIDDEN', null]);
+    const set = (assignments: string) => sql.raw(`UPDATE models SET ${assignments} WHERE id = '${model.id}'`).execute(t.db);
+    await expect(set(`lookbook = 'PUBLIC'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'models_lookbook_slug'));
+    await expect(set(`lookbook = 'SHOWN', slug = 'm'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    for (const slug of ['Monolithe', 'mono--lithe', '-mono', 'mono-', 'mono lithe', 'é', 'a'.repeat(81)]) {
+      await expect(set(`slug = '${slug}'`), slug).rejects.toSatisfy((e) => isCheckViolation(e, 'models_slug_format'));
+    }
+    await expect(set(`published_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e, 'models_published_slug'));
+    await set(`slug = 'monolithe-ring', lookbook = 'RESERVED', published_at = now()`);
+    await expect(set(`slug = NULL`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(set(`story = '   '`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(set(`story = '${'x'.repeat(4001)}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(set(`specs = '${'x'.repeat(1001)}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await set(`story = '${'x'.repeat(4000)}', specs = 'Metal: silver'`);
+    const other = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (27, 'N', 'RING', 'LOOK2') RETURNING id`.execute(t.db)).rows[0];
+    await expect(sql`UPDATE models SET slug = 'monolithe-ring' WHERE id = ${other.id}`.execute(t.db)).rejects.toSatisfy((e) => isUniqueViolation(e, 'models_slug_key'));
+
+    // The gallery: photographs of media_objects, positions 1 to 8, each once per model; never moved to another model.
+    const photo = async (n: number) => {
+      const bytes = new Uint8Array([0xff, 0xd8, n, 0xff, 0xd9]);
+      const sha = createHash('sha256').update(bytes).digest('hex');
+      await sql`INSERT INTO media_objects (sha256, mime, bytes, width, height) VALUES (${sha}, 'image/jpeg', ${bytes}, 10, 10)`.execute(t.db);
+      return sha;
+    };
+    const shas = await Promise.all([1, 2, 3, 4, 5, 6, 7, 8, 9].map(photo));
+    const add = (sha: string, position: number, modelId = model.id) => sql`INSERT INTO model_images (model_id, sha256, position) VALUES (${modelId}, ${sha}, ${position})`.execute(t.db);
+    for (const [i, sha] of shas.slice(0, 8).entries()) await add(sha, i + 1);
+    await expect(add(shas[8]!, 9)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(add(shas[8]!, 0)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(add(shas[8]!, 3)).rejects.toSatisfy((e) => isUniqueViolation(e, 'model_images_position_key'));
+    await expect(add(shas[0]!, 8, model.id)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(sql`INSERT INTO model_images (model_id, sha256, position) VALUES (${model.id}, ${'ab'.repeat(32)}, 1)`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`UPDATE model_images SET alt = '  ' WHERE model_id = ${model.id} AND position = 1`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+    // Two positions swapped in one transaction: the uniqueness is checked at commit.
+    await t.db.transaction().execute(async (tx) => {
+      await sql`UPDATE model_images SET position = 2 WHERE model_id = ${model.id} AND sha256 = ${shas[0]!}`.execute(tx);
+      await sql`UPDATE model_images SET position = 1 WHERE model_id = ${model.id} AND sha256 = ${shas[1]!}`.execute(tx);
+    });
+    await expect(sql`UPDATE model_images SET position = 1 WHERE model_id = ${model.id} AND sha256 = ${shas[2]!}`.execute(t.db)).rejects.toSatisfy((e) => isUniqueViolation(e, 'model_images_position_key'));
+    await expect(sql`UPDATE model_images SET model_id = ${other.id} WHERE model_id = ${model.id} AND position = 1`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    // A photograph of a gallery cannot be deleted under it, nor its model.
+    await expect(sql`DELETE FROM media_objects WHERE sha256 = ${shas[0]!}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await sql`DELETE FROM model_images WHERE model_id = ${model.id}`.execute(t.db);
+    await sql`DELETE FROM media_objects WHERE sha256 IN (${sql.join(shas)})`.execute(t.db);
+    await sql`DELETE FROM models WHERE id IN (${model.id}, ${other.id})`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -446,11 +540,12 @@ describe('migrations', () => {
     ]) {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0013_ownership_certificates']);
+    // Later migrations (0014…) were rolled back first: up again applies them after it.
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0013_ownership_certificates'));
     expect(await snapshot()).toEqual(latest);
   });
 
-  it('each migration of the 2026-10-02 plan (0004 to 0013) goes down to exactly the schema a fresh database has one migration earlier', async () => {
+  it('each migration of the 2026-10-02 plan (0004 to 0013) and of the 2026-10-03 one (0014 on) goes down to exactly the schema a fresh database has one migration earlier', async () => {
     // The tracks wrote them apart; deployed together, every down step must still land on its predecessor's schema.
     const names = Object.keys(MIGRATIONS);
     const first = names.indexOf('0004_scan_reports');
@@ -465,6 +560,8 @@ describe('migrations', () => {
       '0011_scan_token_transfer_accept',
       '0012_media',
       '0013_ownership_certificates',
+      // The « Potentiel » plan of 2026-10-03 (docs/launch/DEPLOY-POTENTIEL-2026-10.md): deployment A.
+      '0014_model_lookbook',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

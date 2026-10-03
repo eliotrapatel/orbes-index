@@ -37,14 +37,15 @@ genome/
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
                          the sale mode, photographs of models and pieces (media), ownership
-                         certificates (shared links)
+                         certificates (shared links), the lookbook of the models and the owners' club
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/ http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
-                         (/verify/pieces) and an ownership certificate's page (/verify/c#token)
+                         (/verify/pieces), an ownership certificate's page (/verify/c#token) and
+                         THE COLLECTION, the lookbook of the models (/verify/lookbook)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit; the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share

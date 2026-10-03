@@ -1,9 +1,15 @@
 /**
  * Public routes (contract §3): health, public keys, categories, Client
  * Services contact, verify, the photographs an authentic result shows
- * (F-04), the report a customer may attach to a scan that was not
+ * (F-04), the lookbook of the models (P-R02: the PUBLIC ones and their
+ * sheets), the report a customer may attach to a scan that was not
  * authentic, and the ownership certificate an owner shares (F-06: its
  * live record and its PDF, by the token of the link).
+ *
+ * The photographs draw on their own budget, `media` (rate-limit.ts): a
+ * lookbook sheet shows up to nine of them. The lookbook's answers depend on
+ * no session (the owners' reserved models are routes/club.ts's), so they are
+ * cached 5 minutes like the contact of Client Services.
  *
  * Nothing here needs a session. /verify reads the account cookie only to
  * recognise the current owner, and the console cookie only to tell a staff
@@ -30,7 +36,7 @@ import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { certificateTokenBody, mediaParams, parse, reportBody, verifyBody } from '../http/schemas.js';
+import { certificateTokenBody, lookbookParams, mediaParams, parse, reportBody, verifyBody } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
@@ -61,6 +67,9 @@ const HEALTH_DB_TIMEOUT_MS = 2_000;
 
 /** A stored photograph never changes (its name is the SHA-256 of its bytes): browsers keep it for a year. */
 export const MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+/** The lookbook's lists and sheets (P-R02): the same for everyone, so kept 5 minutes; a change shows within that time. */
+export const LOOKBOOK_CACHE_CONTROL = 'public, max-age=300';
 
 /** Whether an If-None-Match header names `etag` (a list, weak validators and `*` included). */
 function matchesEtag(header: string | string[] | undefined, etag: string): boolean {
@@ -120,9 +129,10 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
   });
 
-  // The photographs of an authentic result (§8.6): a model's reference photograph, a piece's own. Public, like the
-  // result that names them; the URL is the SHA-256 of the bytes, so the answer never changes and is cached for good.
-  app.get('/api/v1/media/:sha256', async (request, reply) => {
+  // The photographs of an authentic result (§8.6): a model's reference photograph, a piece's own; and those of the
+  // lookbook (P-R02: a model's gallery). Public, like the result or the sheet that names them; the URL is the SHA-256 of
+  // the bytes, so the answer never changes and is cached for good. Their own budget: a sheet shows up to nine.
+  app.get('/api/v1/media/:sha256', { config: { rateGroup: 'media' } }, async (request, reply) => {
     const { sha256 } = parse(mediaParams, request.params);
     const etag = `"${sha256}"`;
     const revalidating = matchesEtag(request.headers['if-none-match'], etag);
@@ -133,6 +143,22 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     if (revalidating || !found.bytes) return reply.code(304).send();
     const bytes = found.bytes;
     return reply.type(found.mime).send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  });
+
+  // The lookbook (P-R02, §8.8): the PUBLIC models, by collection, without their stories (the lists stay small).
+  app.get('/api/v1/lookbook', async (_request, reply) => {
+    const models = await ctx.services.lookbook.listPublic();
+    reply.header('cache-control', LOOKBOOK_CACHE_CONTROL);
+    return { models };
+  });
+
+  // A PUBLIC model's sheet: its photographs, story, specifications, care and collection. A HIDDEN or RESERVED model, an
+  // unknown or malformed address: one 404 LOOKBOOK_NOT_FOUND, never cached (a model shown later is seen at once).
+  app.get('/api/v1/lookbook/:slug', async (request, reply) => {
+    const { slug } = parse(lookbookParams, request.params);
+    const sheet = await ctx.services.lookbook.sheet(slug);
+    reply.header('cache-control', LOOKBOOK_CACHE_CONTROL);
+    return sheet;
   });
 
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {

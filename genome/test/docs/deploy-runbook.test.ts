@@ -5,9 +5,10 @@
  *
  *  - deployment 1 recorded as done: lot 1's commit, image and pre-deploy backup, with the three migrations
  *    that commit knows and the database still holds;
- *  - deployment 2 applies exactly the migrations of MIGRATIONS that came after it, in order: the table of
- *    §2.0, the lines `db_applied_migrations` prints before it, the line `db.ts migrate` prints, and those
- *    deploy.sh prints after it;
+ *  - deployment 2 applies exactly the migrations of MIGRATIONS that came after it, up to 0013, in order: the
+ *    table of §2.0, the lines `db_applied_migrations` prints before it, the line `db.ts migrate` prints, and
+ *    those deploy.sh prints after it (0014 on, the « Potentiel » lot of 2026-10-03, are deployments A, B and C:
+ *    docs/launch/DEPLOY-POTENTIEL-2026-10.md and its own test, deploy-potentiel.test.ts);
  *  - every message the runbook expects from deploy.sh, backup.sh, restore.sh, lib.sh and the app's
  *    configuration is still one they print (MESSAGES: a script that rewords one fails here until the runbook
  *    follows);
@@ -27,6 +28,7 @@ import { ADMIN_USAGE } from '../../scripts/admin.js';
 import { DB_USAGE } from '../../scripts/db.js';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { REPO, readDoc, section } from './lexicon.js';
+import { anchors, fenced } from './runbook.js';
 
 const RUNBOOK = 'docs/launch/DEPLOY-RECOMMANDATIONS-2026-10.md';
 const runbook = readDoc(RUNBOOK);
@@ -38,25 +40,11 @@ const LOT1_COMMIT = 'db4ffd0c0fd4752c55886d538fdb3c1e6c646d4d';
 const LOT1_TAG = LOT1_COMMIT.slice(0, 12);
 const LOT1_BACKUP = `orbes-20261003T014918Z-pre-deploy-${LOT1_TAG}.tar.age`;
 const LOT1_MIGRATIONS = ['0001_initial', '0002_platform_guards', '0003_authentication_events_default'];
-const NAMES = Object.keys(MIGRATIONS);
+/** The last migration of the plan of 2026-10-02: deployment 2 ended there; 0014 on belong to the « Potentiel » lot. */
+const LAST_OF_DEPLOY2 = '0013_ownership_certificates';
+const NAMES = Object.keys(MIGRATIONS).filter((n) => n <= LAST_OF_DEPLOY2);
 const DEPLOY2 = NAMES.slice(LOT1_MIGRATIONS.length);
 
-/** The fenced blocks of one language, their lines out of the list item's indentation. */
-function fenced(md: string, lang: string): string[] {
-  const out: string[] = [];
-  const re = /^([ \t]*)```([\w-]*)\n([\s\S]*?)\n\1```[ \t]*$/gm;
-  for (const m of md.matchAll(re)) {
-    if (m[2] !== lang) continue;
-    const indent = m[1]!.length;
-    out.push(
-      m[3]!
-        .split('\n')
-        .map((l) => l.slice(Math.min(indent, l.length - l.trimStart().length)))
-        .join('\n'),
-    );
-  }
-  return out;
-}
 const commands = fenced(runbook, 'bash');
 const outputs = fenced(runbook, 'text');
 
@@ -128,21 +116,6 @@ const MESSAGES: ReadonlyArray<readonly [message: string, sources: readonly strin
 /** The literal text of a script: shell quoting aside, a message is in it as written. */
 const sourceOf = (file: string): string => stackFile(file);
 
-/** GitHub's anchor of a markdown heading. */
-const slug = (heading: string): string =>
-  heading
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, '')
-    .replace(/\s/g, '-');
-const anchors = (md: string): Set<string> =>
-  new Set(
-    md
-      .split('\n')
-      .filter((l) => /^#{1,6} /.test(l))
-      .map((l) => slug(l.replace(/^#{1,6} /, ''))),
-  );
-
 /** The recommendations of the plan approved on 2026-10-02, in its order. */
 const RECOMMENDATIONS = [
   'D-01', 'D-02', 'D-03', 'D-04', 'D-05', 'D-06',
@@ -167,9 +140,11 @@ describe('deployment runbook (docs/launch/DEPLOY-RECOMMANDATIONS-2026-10.md)', (
     expect(runbook).toContain(`ORBES_IMAGE_TAG=${LOT1_TAG}`);
   });
 
-  it('applies in deployment 2 exactly the migrations that came after lot 1, in order, as the scripts print them', () => {
+  it('applies in deployment 2 exactly the migrations that came after lot 1, up to 0013, in order, as the scripts print them', () => {
     expect(NAMES.slice(0, LOT1_MIGRATIONS.length)).toEqual(LOT1_MIGRATIONS);
     expect(DEPLOY2[0]).toBe('0004_scan_reports');
+    expect(DEPLOY2.at(-1)).toBe(LAST_OF_DEPLOY2);
+    expect(Object.keys(MIGRATIONS)).toContain(LAST_OF_DEPLOY2);
     // The table of §2.0, in the order of deployment.
     const table = section(runbook, '### 2.0');
     const positions = DEPLOY2.map((m) => table.indexOf(`| \`${m}\` |`));

@@ -126,6 +126,11 @@ describe('admin hash router', () => {
     expect(href('cases', {}, { anomalyId: 'a1', status: '' })).toBe('#/cases?anomalyId=a1');
     expect(parseHash('#/products/%E0%A4%A')).toMatchObject({ name: 'not-found' }); // malformed escape
     expect(parseHash('products')).toMatchObject({ name: 'products' });
+    // A model's lookbook (P-R02): a page under the Catalogue, reached from its row.
+    const modelId = '73c68b47-012d-4569-a59a-fd2effa613c1';
+    expect(parseHash('#/catalogue')).toMatchObject({ name: 'catalogue' });
+    expect(parseHash(`#/catalogue/${modelId}`)).toMatchObject({ name: 'model', params: { modelId }, path: `/catalogue/${modelId}` });
+    expect(href('model', { modelId })).toBe(`#/catalogue/${modelId}`);
   });
 
   it('drops unsafe query keys and bounds values', () => {

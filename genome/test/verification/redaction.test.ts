@@ -196,6 +196,26 @@ describe('public response redaction', () => {
     expect(keyPaths(anon)).toEqual(sorted(EXPECTED_KEYS.AUTHENTIC_REGISTERED, ['ownership.transferPending']));
   });
 
+  it('a model PUBLIC in the lookbook (P-R02) adds only `product.lookbook`, its address; a RESERVED one adds nothing', async () => {
+    const r = await issue(w);
+    await w.t.db.updateTable('models').set({ slug: 'redaction-ring', lookbook: 'PUBLIC', published_at: w.clock.now() }).where('id', '=', w.modelId).execute();
+    try {
+      const out = await verify(w, r.code.data);
+      expect(out.state).toBe('AUTHENTIC');
+      expect(keyPaths(out)).toEqual(sorted(EXPECTED_KEYS.AUTHENTIC, ['product.lookbook']));
+      expect(out.product?.lookbook).toBe('redaction-ring');
+      assertNoLeak(out, [r.product.id, w.modelId]);
+      await w.t.db.updateTable('models').set({ lookbook: 'RESERVED' }).where('id', '=', w.modelId).execute();
+      expect(keyPaths(await verify(w, r.code.data))).toEqual(EXPECTED_KEYS.AUTHENTIC);
+      // Never on a result that is not authentic.
+      await w.lifecycle.transition(r.product.productId, 'REVOKED', { reason: 'test' }, admin);
+      await w.t.db.updateTable('models').set({ lookbook: 'PUBLIC' }).where('id', '=', w.modelId).execute();
+      expect(keyPaths(await verify(w, r.code.data))).toEqual(EXPECTED_KEYS.REVOKED);
+    } finally {
+      await w.t.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', w.modelId).execute();
+    }
+  });
+
   it('threshold values never appear as numbers in any body', () => {
     for (const out of seen.values()) {
       const body = JSON.stringify({ ...out, scanId: '', verifiedAt: '', registration: undefined, genome: undefined, verification: undefined });
