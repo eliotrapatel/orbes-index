@@ -40,7 +40,10 @@ scripts/setup.sh --domain verify.theorbes.com --acme-email ops@theorbes.com --ad
 
 # 4. TOTP for the first admin, then drop the bootstrap credentials:
 docker compose exec app node --import tsx scripts/admin.ts totp-setup --email <first admin>
-docker compose exec app node --import tsx scripts/admin.ts totp-enable --email <first admin> --secret <SECRET> --code <code>
+read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET   # paste the secret printed above: nothing shows, nothing enters the history
+clear                                                    # the secret leaves the screen
+docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts/admin.ts totp-enable --email <first admin> --code <code>
+unset ADMIN_TOTP_SECRET
 #   remove BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from .env, then:
 scripts/deploy.sh                        # applies .env after validating it
 ```

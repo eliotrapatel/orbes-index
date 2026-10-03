@@ -531,4 +531,17 @@ describe('deploy/vps scripts and systemd units', () => {
     const ignore = read(STACK, '.gitignore').split('\n').map((l) => l.trim());
     for (const entry of ['.env', '.env.*', '!.env.example', '.state/']) expect(ignore, entry).toContain(entry);
   });
+
+  it('enrol the first TOTP from the environment, never with the secret on a command line (scripts/admin.ts reads ADMIN_TOTP_SECRET)', () => {
+    for (const [name, text] of [
+      ['README.md', read(STACK, 'README.md')],
+      ['scripts/setup.sh', read(STACK, 'scripts', 'setup.sh')],
+    ] as const) {
+      expect(text, name).not.toMatch(/totp-enable[^\n]*--secret/);
+      // The four lines of LAUNCH.md and DEPLOYMENT.md: read without echo, off the screen, into the container, then gone.
+      expect(text, name).toMatch(/read -rs ADMIN_TOTP_SECRET && export ADMIN_TOTP_SECRET/);
+      expect(text, name).toMatch(/docker compose exec -e ADMIN_TOTP_SECRET app node --import tsx scripts\/admin\.ts totp-enable --email <[^>]+> --code <[^>]+>/);
+      expect(text, name).toMatch(/\n\s*unset ADMIN_TOTP_SECRET\n/);
+    }
+  });
 });
