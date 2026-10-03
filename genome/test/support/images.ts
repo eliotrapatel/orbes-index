@@ -48,8 +48,28 @@ export function jpegSegment(marker: number, payload: Uint8Array | string): Uint8
   return Uint8Array.of(0xff, marker, ((p.length + 2) >> 8) & 0xff, (p.length + 2) & 0xff, ...p);
 }
 
+/**
+ * A TIFF structure (the payload of an EXIF block) whose IFD0 holds one entry, Orientation (0x0112, SHORT, 1) = `value`,
+ * in big-endian (MM) or little-endian (II) byte order, followed by `tail` (e.g. a GPS marker).
+ */
+export function exifTiff(value: number, order: 'MM' | 'II' = 'MM', tail = ''): Uint8Array {
+  const u16 = (v: number) => (order === 'II' ? [v & 0xff, (v >> 8) & 0xff] : [(v >> 8) & 0xff, v & 0xff]);
+  const u32 = (v: number) => (order === 'II' ? [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff] : [(v >>> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff]);
+  const value16 = order === 'II' ? [value & 0xff, (value >> 8) & 0xff, 0, 0] : [(value >> 8) & 0xff, value & 0xff, 0, 0];
+  return Uint8Array.from([...latin1(order), ...u16(42), ...u32(8), ...u16(1), ...u16(0x0112), ...u16(3), ...u32(1), ...value16, ...u32(0), ...latin1(tail)]);
+}
+
+/**
+ * The text an ICC profile written by a device carries (its description, maker and model tags, `desc`, `dmnd`, `dmdd`),
+ * in an APP2 ICC_PROFILE segment: kept, as the colours need the profile.
+ */
+export const ICC_DEVICE_TEXT = 'dmdd iPhone 15 Pro Max';
+
 /** The segments a phone, an editor or a multi-picture file adds. */
 export const SEGMENTS = {
+  /** EXIF whose IFD0 says Orientation = `value` (6: the camera was turned a quarter clockwise), then the GPS marker. */
+  exifOriented: (value: number, order: 'MM' | 'II' = 'MM') => jpegSegment(0xe1, Uint8Array.of(...latin1('Exif\u0000\u0000'), ...exifTiff(value, order, GPS_SECRET))),
+  iccDevice: () => jpegSegment(0xe2, Uint8Array.of(...latin1('ICC_PROFILE\u0000'), 1, 1, ...latin1(`desc Display P3 dmnd APPL ${ICC_DEVICE_TEXT}`))),
   exif: () => jpegSegment(0xe1, `Exif\u0000\u0000MM\u0000*${GPS_SECRET}`),
   xmp: () => jpegSegment(0xe1, `http://ns.adobe.com/xap/1.0/\u0000<x:xmpmeta><dc:creator>${XMP_SECRET}</dc:creator></x:xmpmeta>`),
   comment: () => jpegSegment(0xfe, COMMENT_SECRET),

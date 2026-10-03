@@ -13,8 +13,8 @@
  * refused: another type (an SVG, a PNG, a GIF sent under either name), a
  * damaged or truncated file, an animated WebP.
  *
- * What is removed, so that nothing of the camera, the place or the software
- * that made the file reaches the public URL:
+ * What is removed, so that no GPS position, camera settings, serial number,
+ * thumbnail, comment or editing history reaches the public URL:
  *  - JPEG: every APP1 segment (EXIF, with its GPS position and thumbnail;
  *    XMP, extended XMP), every other application segment except the JFIF
  *    header (its embedded thumbnail dropped), the ICC colour profile (APP2
@@ -25,9 +25,22 @@
  *    every chunk that is not part of the picture (only VP8X, ICCP, ALPH and
  *    one VP8 or VP8L are kept), and anything after the RIFF container.
  *
+ * What is kept, because the colours need it: the colour profile (JPEG APP2
+ * ICC_PROFILE, WebP ICCP), copied as it is, with its own text: the
+ * profile's description and copyright and, in a profile a device wrote, the
+ * names of its maker and model (`dmnd`, `dmdd`, e.g. a phone's model). The
+ * photographs are ORBES's own, of its pieces; the console's canvas
+ * re-encoding sends none of this text.
+ *
+ * The pixels are never turned: the EXIF orientation goes with the EXIF. A
+ * photograph that relies on it (an orientation other than 1, as a phone
+ * often writes for a picture taken upright) is refused with IMAGE_INVALID,
+ * rather than stored and shown sideways: save it upright, then send it again.
+ *
  * The console re-encodes every photograph through a canvas before sending it
- * (2 000 px at most), which carries none of this; the server strips it all
- * the same, for any other client of the API.
+ * (2 000 px at most, its EXIF orientation applied to the pixels), which
+ * carries none of this; the server strips it all the same, for any other
+ * client of the API.
  */
 import { MEDIA_MIME_TYPES, type MediaMimeType } from '../db/schema.js';
 import { DomainError } from '../errors.js';
@@ -88,6 +101,7 @@ const TABLE_MARKERS = new Set([0xc4, 0xcc, 0xdb, 0xdc, 0xdd]);
 const SOS = 0xda;
 const EOI = 0xd9;
 const APP0 = 0xe0;
+const APP1 = 0xe1;
 const APP2 = 0xe2;
 const APP14 = 0xee;
 const COM = 0xfe;
@@ -142,6 +156,7 @@ export function stripJpeg(b: Uint8Array): { bytes: Uint8Array; width: number; he
       if (payload.length >= 5 && ascii(payload, 0, 5) === 'Adobe') segment(payload);
       continue;
     }
+    if (marker === APP1 && payload.length >= 6 && ascii(payload, 0, 6) === 'Exif\u0000\u0000') refuseTurned(payload.subarray(6), 'jpeg');
     if ((marker >= 0xe0 && marker <= 0xef) || marker === COM) continue; // APP1 (EXIF, XMP) and the rest; comments
     if (isSof(marker)) {
       if (frame) throw imageInvalid(DAMAGED_JPEG, 'jpeg with two frames');
@@ -228,6 +243,8 @@ export function stripWebp(b: Uint8Array): { bytes: Uint8Array; width: number; he
   if (bitstreams.length !== 1) throw imageInvalid(DAMAGED_WEBP, `webp with ${bitstreams.length} bitstreams`);
   const image = bitstreams[0];
   const size = image.fourcc === 'VP8L' ? vp8lSize(image.data) : vp8Size(image.data);
+  // The EXIF chunk holds a TIFF structure (some writers put the JPEG's "Exif\0\0" before it).
+  for (const c of chunks) if (c.fourcc === 'EXIF') refuseTurned(c.data.length >= 6 && ascii(c.data, 0, 6) === 'Exif\u0000\u0000' ? c.data.subarray(6) : c.data, 'webp');
 
   const first = chunks[0];
   let kept: Chunk[];
@@ -281,6 +298,44 @@ function vp8lSize(d: Uint8Array): { width: number; height: number } {
   if (d.length < 5 || d[0] !== 0x2f) throw imageInvalid(DAMAGED_WEBP, 'webp VP8L header');
   const bits = u32le(d, 1);
   return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+}
+
+// ── EXIF orientation ───────────────────────────────────────────────────────
+
+const ORIENTATION_TAG = 0x0112;
+const SHORT = 3;
+
+/**
+ * The Orientation (tag 0x0112) of IFD0 in a TIFF structure (the EXIF payload): 1 to 8, or null when there is none or
+ * the structure cannot be read (a browser then draws the pixels as they are, as it will once the EXIF is removed).
+ */
+export function exifOrientation(tiff: Uint8Array): number | null {
+  if (tiff.length < 8) return null;
+  const little = tiff[0] === 0x49 && tiff[1] === 0x49;
+  if (!little && !(tiff[0] === 0x4d && tiff[1] === 0x4d)) return null;
+  const u16 = (at: number) => (little ? tiff[at] | (tiff[at + 1] << 8) : (tiff[at] << 8) | tiff[at + 1]);
+  const u32 = (at: number) => (little ? u32le(tiff, at) : ((tiff[at] << 24) | (tiff[at + 1] << 16) | (tiff[at + 2] << 8) | tiff[at + 3]) >>> 0);
+  if (u16(2) !== 42) return null;
+  const ifd = u32(4);
+  if (ifd < 8 || ifd + 2 > tiff.length) return null;
+  const entries = u16(ifd);
+  for (let k = 0; k < entries; k++) {
+    const e = ifd + 2 + 12 * k;
+    if (e + 12 > tiff.length) return null;
+    if (u16(e) !== ORIENTATION_TAG) continue;
+    if (u16(e + 2) !== SHORT || u32(e + 4) !== 1) return null;
+    const value = u16(e + 8);
+    return value >= 1 && value <= 8 ? value : null;
+  }
+  return null;
+}
+
+/** Refuse a photograph whose EXIF turns it (an orientation other than 1): removed with the EXIF, it would show sideways. */
+function refuseTurned(tiff: Uint8Array, format: 'jpeg' | 'webp'): void {
+  const orientation = exifOrientation(tiff);
+  if (orientation !== null && orientation !== 1) {
+    throw imageInvalid('The photograph is turned by its EXIF orientation, which is removed here: save it upright, then send it again.', `${format} exif orientation ${orientation}`);
+  }
 }
 
 // ── Bytes ──────────────────────────────────────────────────────────────────

@@ -15,8 +15,11 @@
  *
  * An image no model and no piece uses any more is deleted once the change
  * has committed: a removed photograph stops being served. A concurrent
- * upload of the very same bytes that points to it meanwhile keeps it (the
- * foreign key refuses the delete, which is then simply skipped).
+ * upload of the very same bytes keeps it: the upload locks the row (FOR KEY
+ * SHARE) as soon as it has inserted it or found it there, so the delete
+ * waits for the upload, whose pointer the foreign key then sees (the delete
+ * is refused, and simply skipped); a row deleted before that lock is
+ * inserted again by the upload.
  *
  * The public results show these images on the AUTHENTIC states only
  * (VerificationService, `product.imageUrl` and `product.photoUrl`).
@@ -178,22 +181,34 @@ export class MediaService {
     return { productId, photoUrl: null };
   }
 
-  /** Store the image once: the same bytes uploaded again (for another model or piece) are the same row. */
+  /**
+   * Store the image once: the same bytes uploaded again (for another model or piece) are the same row. The row is
+   * then locked FOR KEY SHARE until this transaction ends: ON CONFLICT DO NOTHING takes no lock on a row that already
+   * exists, so without it the change that removed the last use of these bytes could delete the row between this
+   * insert and the pointer written next (whose foreign key would then fail). Locked, that delete waits for this
+   * transaction, and its foreign key then refuses it (deleteIfUnused skips it). A row deleted just before the lock is
+   * inserted again.
+   */
   private async store(tx: Db, sha256: string, image: CleanImage, actor: Actor): Promise<void> {
-    await tx
-      .insertInto('media_objects')
-      .values({
-        sha256,
-        mime: image.mime,
-        bytes: image.bytes,
-        width: image.width,
-        height: image.height,
-        // The console user who uploaded it; a script (system actor) leaves it empty.
-        created_by: actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null,
-        created_at: this.clock(),
-      })
-      .onConflict((oc) => oc.column('sha256').doNothing())
-      .execute();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await tx
+        .insertInto('media_objects')
+        .values({
+          sha256,
+          mime: image.mime,
+          bytes: image.bytes,
+          width: image.width,
+          height: image.height,
+          // The console user who uploaded it; a script (system actor) leaves it empty.
+          created_by: actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null,
+          created_at: this.clock(),
+        })
+        .onConflict((oc) => oc.column('sha256').doNothing())
+        .execute();
+      const kept = await tx.selectFrom('media_objects').select('sha256').where('sha256', '=', sha256).forKeyShare().executeTakeFirst();
+      if (kept) return;
+    }
+    throw new Error('media: the image could not be stored (deleted twice while it was being stored)');
   }
 
   /** Delete an image no model and no piece uses any more. Best effort, after the change committed. */

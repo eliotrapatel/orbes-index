@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { LightMyRequestResponse } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '../../src/core/payload.js';
 import { MAX_IMAGE_BYTES } from '../../src/server/media/image.js';
@@ -235,6 +235,77 @@ describe('photographs of models and pieces (F-04)', () => {
     expect((await media(`/api/v1/media/${sha}`)).statusCode).toBe(200);
     expect((await operator.request('DELETE', piecePhoto(piece.product.productId))).statusCode).toBe(200);
     expect(await stored(sha)).toBeUndefined();
+  });
+
+  it('keeps an image that the removal of its last use deletes while an upload of the same bytes is storing it', async () => {
+    // A model's photograph, about to lose its last use (removeModelImage) while the same bytes are uploaded for a piece.
+    const photo = jpegPhoto(22, 22);
+    const sha = sha256(photo);
+    const own = await seedCatalog(h.ctx);
+    const modelId = own.modelId;
+    await h.ctx.services.media.setModelImage(modelId, { mime: 'image/jpeg', bytes: photo }, SYSTEM_ACTOR);
+    const target = await issue(h.ctx, own);
+    // The upload finds the row there (INSERT … ON CONFLICT DO NOTHING); right after, the removal commits: the model no
+    // longer points to it and the row is deleted. Played inside the upload's transaction, which is where its effect
+    // shows: the row is gone between the insert and the piece's pointer.
+    const begin = h.ctx.db.transaction.bind(h.ctx.db);
+    let removed = false;
+    const removal = async (trx: typeof h.ctx.db) => {
+      removed = true;
+      await trx.updateTable('models').set({ image_sha256: null }).where('id', '=', modelId).execute();
+      await trx.deleteFrom('media_objects').where('sha256', '=', sha).execute();
+    };
+    const afterExecute = <T extends object>(builder: T, then: () => Promise<void>): T =>
+      new Proxy(builder, {
+        get(b, prop) {
+          const v = Reflect.get(b, prop, b) as unknown;
+          if (typeof v !== 'function') return v;
+          if (prop === 'execute') {
+            return async (...args: unknown[]) => {
+              const r = await (v as (...a: unknown[]) => Promise<unknown>).apply(b, args);
+              await then();
+              return r;
+            };
+          }
+          return (...args: unknown[]) => {
+            const r = (v as (...a: unknown[]) => unknown).apply(b, args);
+            return r !== null && typeof r === 'object' ? afterExecute(r, then) : r;
+          };
+        },
+      });
+    const spy = vi.spyOn(h.ctx.db, 'transaction').mockImplementationOnce(() => {
+      const builder = begin();
+      return {
+        execute: <R>(fn: (trx: typeof h.ctx.db) => Promise<R>) =>
+          builder.execute((trx) =>
+            fn(
+              new Proxy(trx, {
+                get(target, prop) {
+                  const v = Reflect.get(target, prop, target) as unknown;
+                  if (prop === 'insertInto') {
+                    return (table: 'media_objects') => {
+                      const b = target.insertInto(table);
+                      return table === 'media_objects' && !removed ? afterExecute(b, () => removal(target)) : b;
+                    };
+                  }
+                  return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+                },
+              }),
+            ),
+          ),
+      } as unknown as ReturnType<typeof begin>;
+    });
+    try {
+      const r = await h.ctx.services.media.setProductPhoto(target.product.productId, { mime: 'image/jpeg', bytes: photo }, SYSTEM_ACTOR);
+      expect(r.photoUrl).toBe(`/api/v1/media/${sha}`);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(removed).toBe(true);
+    // Stored again by the upload: the piece points to it, and it is served.
+    expect(await stored(sha)).toBeDefined();
+    expect((await h.ctx.db.selectFrom('products').select('photo_sha256').where('product_id', '=', target.product.productId).executeTakeFirstOrThrow()).photo_sha256).toBe(sha);
+    expect((await media(`/api/v1/media/${sha}`)).statusCode).toBe(200);
   });
 
   it('removes a model\'s reference photograph (audited model.image.remove)', async () => {

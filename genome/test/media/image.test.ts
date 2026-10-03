@@ -1,9 +1,9 @@
 /**
  * server/media/image.ts (F-04): an uploaded photograph is accepted only when
  * its own bytes say JPEG or WebP, as declared; EXIF, XMP and every other
- * piece of metadata are removed by hand, the picture itself left untouched;
- * an animated WebP, an SVG, a PNG, a damaged file or one over 4 096 px is
- * refused.
+ * piece of metadata are removed by hand, the picture itself left untouched,
+ * the colour profile kept whole; an animated WebP, an SVG, a PNG, a damaged
+ * file, one over 4 096 px or one turned by its EXIF orientation is refused.
  */
 import { describe, expect, it } from 'vitest';
 import { isDomainError } from '../../src/server/errors.js';
@@ -11,7 +11,9 @@ import { MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, sanitizeImage, sniffImageType, type Im
 import {
   chunk,
   COMMENT_SECRET,
+  exifTiff,
   GPS_SECRET,
+  ICC_DEVICE_TEXT,
   includesText,
   jpegMarkers,
   jpegPhoto,
@@ -92,6 +94,35 @@ describe('JPEG', () => {
     expect(includesText(clean.bytes, GPS_SECRET)).toBe(false);
   });
 
+  it('keeps the ICC profile as it is, its own text included: a device profile still names its maker and model', () => {
+    // What the module header, API §13.4 and SECURITY-MODEL say: the profile is kept whole, never edited.
+    const clean = sanitizeImage(withJpegSegments(jpegPhoto(), [SEGMENTS.iccDevice(), SEGMENTS.exif()]), 'image/jpeg');
+    expect(includesText(clean.bytes, ICC_DEVICE_TEXT)).toBe(true);
+    expect(includesText(clean.bytes, GPS_SECRET)).toBe(false);
+  });
+
+  it('refuses a photograph turned by its EXIF orientation (other than 1), which would show sideways once the EXIF is removed', () => {
+    const photo = jpegPhoto(32, 16);
+    for (const [value, order] of [[6, 'MM'], [8, 'II'], [3, 'MM'], [2, 'II']] as const) {
+      const turned = withJpegSegments(photo, [SEGMENTS.exifOriented(value, order)]);
+      let message = '';
+      try {
+        sanitizeImage(turned, 'image/jpeg');
+      } catch (e) {
+        if (!isDomainError(e)) throw e;
+        expect(`${e.httpStatus} ${e.code}`).toBe('400 IMAGE_INVALID');
+        message = e.publicMessage;
+      }
+      expect(message, `orientation ${value} ${order}`).toBe('The photograph is turned by its EXIF orientation, which is removed here: save it upright, then send it again.');
+    }
+    // Upright (1), an orientation a browser ignores (0, 9), or none at all: kept, the EXIF removed, the size as it was.
+    for (const value of [1, 0, 9]) {
+      const clean = sanitizeImage(withJpegSegments(photo, [SEGMENTS.exifOriented(value)]), 'image/jpeg');
+      expect(clean).toMatchObject({ width: 32, height: 16 });
+      expect(includesText(clean.bytes, GPS_SECRET)).toBe(false);
+    }
+  });
+
   it('refuses a damaged, truncated or oversized JPEG', () => {
     const photo = jpegPhoto();
     expect(refusal(photo.subarray(0, photo.length - 2), 'image/jpeg')).toBe('400 IMAGE_INVALID'); // no end of image
@@ -143,6 +174,21 @@ describe('WebP', () => {
     const riff = clean.bytes[4] | (clean.bytes[5] << 8) | (clean.bytes[6] << 16) | (clean.bytes[7] << 24);
     expect(riff + 8).toBe(clean.bytes.length);
     expect(Buffer.from(sanitizeImage(clean.bytes, 'image/webp').bytes).equals(Buffer.from(clean.bytes))).toBe(true);
+  });
+
+  it('refuses a WebP turned by the orientation of its EXIF chunk, with or without the JPEG\'s Exif header', () => {
+    const exif = (value: number, prefix = false) => ({ fourcc: 'EXIF', data: Uint8Array.from([...(prefix ? [0x45, 0x78, 0x69, 0x66, 0, 0] : []), ...exifTiff(value, 'II', GPS_SECRET)]) });
+    expect(refusal(webp([vp8x(0x08, 64, 48), vp8l(64, 48), exif(6)]), 'image/webp')).toBe('400 IMAGE_INVALID');
+    expect(refusal(webp([vp8x(0x08, 64, 48), vp8l(64, 48), exif(8, true)]), 'image/webp')).toBe('400 IMAGE_INVALID');
+    const upright = sanitizeImage(webp([vp8x(0x08, 64, 48), vp8l(64, 48), exif(1)]), 'image/webp');
+    expect(webpChunks(upright.bytes)).toEqual(['VP8X', 'VP8L']);
+    expect(includesText(upright.bytes, GPS_SECRET)).toBe(false);
+  });
+
+  it('keeps the ICCP chunk as it is, its own text included', () => {
+    const clean = sanitizeImage(webp([vp8x(0x20, 64, 48), chunk('ICCP', `desc Display P3 ${ICC_DEVICE_TEXT}`), vp8l(64, 48)]), 'image/webp');
+    expect(webpChunks(clean.bytes)).toEqual(['VP8X', 'ICCP', 'VP8L']);
+    expect(includesText(clean.bytes, ICC_DEVICE_TEXT)).toBe(true);
   });
 
   it('keeps the transparency of a lossy WebP (ALPH) only where the header announces it', () => {
