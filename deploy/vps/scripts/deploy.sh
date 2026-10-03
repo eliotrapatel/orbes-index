@@ -48,8 +48,13 @@
 #      rollback is attempted, ORBES_IMAGE_TAG stays on the new image with the
 #      stack started on it, and the way to repair forward is printed
 #      (scripts/deploy.sh --image <new tag> after a transient incident,
-#      otherwise a corrective commit), then exit 1. restore.sh is not used on
-#      the shared server (RESTORE_ALLOWED=false, docs/DEPLOYMENT.md §15.9).
+#      otherwise a corrective commit), then exit 1. The same when this cannot
+#      be told (the applied migrations cannot be read after the migration
+#      step), or when the previous image does not know every migration the
+#      database holds. On success, the rollback hint is given only when the
+#      schema was read and this release applied no migration. restore.sh is
+#      not used on the shared server (RESTORE_ALLOWED=false,
+#      docs/DEPLOYMENT.md §15.9).
 #
 # Exit codes: 0 deployed, 1 failed (rolled back, or kept to be repaired
 # forward, as printed), 2 usage error.
@@ -201,17 +206,22 @@ if [[ "$DRY_RUN" == true && "$PG_WAS_RUNNING" != true ]]; then
 elif [[ "$DRY_RUN" == true ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   log "[dry-run] $IMAGE is not built: schema check skipped"
 else
+  # What a stop here leaves behind: nothing, or PostgreSQL started for this check.
+  UNCHANGED="nothing was changed"
+  PG_STARTED=""
   if [[ "$PG_WAS_RUNNING" != true ]]; then
     log "starting PostgreSQL to read the schema"
     compose up -d postgres || die "PostgreSQL did not start: nothing else was changed"
     wait_healthy postgres "$TIMEOUT" || die "PostgreSQL is not healthy: nothing else was changed"
+    PG_STARTED=" (PostgreSQL was started to read the schema)"
+    UNCHANGED="nothing else was changed$PG_STARTED"
   fi
-  APPLIED_BEFORE="$(db_applied_migrations)" || die "cannot read the applied migrations (kysely_migration): nothing was changed"
-  KNOWN="$(image_migrations "$IMAGE")" || die "cannot list the migrations $IMAGE knows: nothing was changed"
+  APPLIED_BEFORE="$(db_applied_migrations)" || die "cannot read the applied migrations (kysely_migration): $UNCHANGED"
+  KNOWN="$(image_migrations "$IMAGE")" || die "cannot list the migrations $IMAGE knows: $UNCHANGED"
   UNKNOWN="$(lines_not_in "$APPLIED_BEFORE" "$KNOWN")"
   if [[ -n "$UNKNOWN" ]]; then
     err "this image cannot run on this schema: repair forward. The database holds migration(s) that $IMAGE does not know: $(words "$UNKNOWN")."
-    warn "nothing was stopped and no backup was written; the stack stays on orbes-genome:$PREV_TAG."
+    warn "nothing was stopped and no backup was written; the stack stays on orbes-genome:$PREV_TAG$PG_STARTED."
     repair_forward_help "$PREV_TAG"
     exit 1
   fi
@@ -353,15 +363,25 @@ fi
 
 # The migrations this release applied (none when it only changed code).
 NEW_MIGRATIONS=""
+SCHEMA_READ=true
 if APPLIED_AFTER="$(db_applied_migrations)"; then
   NEW_MIGRATIONS="$(lines_not_in "$APPLIED_AFTER" "$APPLIED_BEFORE")"
 else
-  warn "could not read the applied migrations after the rollout (scripts/deploy.sh --image checks the schema before any rollback)"
+  SCHEMA_READ=false
 fi
 MIGRATED_NOTE=""
-if [[ -n "$NEW_MIGRATIONS" ]]; then MIGRATED_NOTE="; migrations $(words "$NEW_MIGRATIONS")"; fi
+if [[ "$SCHEMA_READ" != true ]]; then
+  MIGRATED_NOTE="; schema not read"
+elif [[ -n "$NEW_MIGRATIONS" ]]; then
+  MIGRATED_NOTE="; migrations $(words "$NEW_MIGRATIONS")"
+fi
 printf '%s deploy %s OK (previous %s%s)\n' "$(_ts)" "$TAG" "$PREV_TAG" "$MIGRATED_NOTE" >>"$STATE_DIR/deploys.log"
-if [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
+if [[ "$SCHEMA_READ" != true ]]; then
+  # Whether this release migrated is unknown: never suggest a rollback that may be impossible.
+  rm -f -- "$STATE_DIR/previous-tag"
+  log "deployed $IMAGE (previous: $PREV_TAG)."
+  warn "the schema could not be read after the rollout (kysely_migration): whether this release applied migrations is unknown, so no rollback is suggested. scripts/deploy.sh --image <tag> checks the schema before it stops anything; if anything goes wrong, repair forward: scripts/deploy.sh --image $TAG after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7)."
+elif [[ "$PREV_TAG" != "$TAG" ]] && docker image inspect "orbes-genome:$PREV_TAG" >/dev/null 2>&1; then
   if [[ -n "$NEW_MIGRATIONS" ]]; then
     # Rolling back is no longer possible: never suggest it.
     rm -f -- "$STATE_DIR/previous-tag"

@@ -9,6 +9,8 @@
 #   running/<service>   the service is running; its content: the service's image
 #   fail/migrate        `db.ts migrate` fails: one transaction, so nothing is applied
 #   fail/grant          the GRANTs after the migrations fail (after their COMMIT)
+#   fail/read-applied   reading kysely_migration (the applied migrations) fails
+#   fail/read-applied-after-migrate   the same, once `db.ts migrate` has run
 #   fail/unhealthy-app-<tag>, fail/unhealthy-caddy, fail/keys
 #   docker.log          every call, one per line
 #
@@ -90,7 +92,12 @@ psql_owner() {
   all="$script
 $input"
   case "$all" in
-    *has_table*) applied ;;
+    *has_table*)
+      if [[ -f "$S/fail/read-applied" ]] || { [[ -f "$S/fail/read-applied-after-migrate" ]] && grep -q 'scripts/db.ts migrate' "$S/docker.log"; }; then
+        echo "psql: error: fake failure reading kysely_migration" >&2
+        return 2
+      fi
+      applied ;;
     *has_media*) if [[ -f "$S/db/media" ]]; then cat "$S/db/media"; else echo "0 0"; fi ;;
     *"json_agg(name order by name)"*) printf '[%s]\n' "$(applied | sed 's/.*/"&"/' | paste -sd, -)" ;;
     *cryptographic_keys*) echo '[{"keyId":1,"kid":"orbes-k001-fake","status":"ACTIVE"}]' ;;

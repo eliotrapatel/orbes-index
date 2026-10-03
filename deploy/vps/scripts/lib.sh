@@ -273,6 +273,8 @@ db_applied_migrations() {
 
 # image_migrations IMAGE: the migrations IMAGE knows (MIGRATIONS of src/server/db/migrate.ts),
 # one name per line, read from the image itself (throw-away container: no network, no database).
+# Keep IMAGE_MIGRATIONS_JS on one single-quoted line: CI (.github/workflows/genome-ci.yml, image
+# job) extracts it and runs it in the image it builds; genome/test/ops runs it with Node too.
 IMAGE_MIGRATIONS_JS='import("./src/server/db/migrate.ts").then((m) => { process.stdout.write(Object.keys(m.MIGRATIONS).join("\n") + "\n"); }, (e) => { console.error(String(e)); process.exit(1); })'
 image_migrations() {
   docker run --rm --network none --entrypoint node "$1" --import tsx -e "$IMAGE_MIGRATIONS_JS"

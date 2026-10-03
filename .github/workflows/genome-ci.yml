@@ -12,7 +12,9 @@
 #           package-lock.json) → web build → production dependency audit
 #           (report only, never blocks)
 #   image   docker build of genome/Dockerfile (no push), so the production
-#           image is proven to build on every change
+#           image is proven to build on every change; then deploy.sh's
+#           schema probe (deploy/vps/scripts/lib.sh IMAGE_MIGRATIONS_JS) runs
+#           in that image and must list every migration of the sources
 
 name: genome-ci
 
@@ -143,3 +145,15 @@ jobs:
 
       - name: Build genome/Dockerfile
         run: docker build --pull --tag orbes-genome:ci .
+
+      # deploy.sh reads the migrations an image knows with lib.sh's IMAGE_MIGRATIONS_JS, in a
+      # throw-away container of that image (no network): the exact probe, on the image just
+      # built, must list every migration of src/server/db/migrations, in order.
+      - name: The image lists its migrations as deploy.sh reads them
+        run: |
+          probe="$(sed -n "s/^IMAGE_MIGRATIONS_JS='\(.*\)'$/\1/p" ../deploy/vps/scripts/lib.sh)"
+          test -n "$probe"
+          docker run --rm --network none --entrypoint node orbes-genome:ci --import tsx -e "$probe" >"$RUNNER_TEMP/image-migrations"
+          find src/server/db/migrations -maxdepth 1 -name '[0-9][0-9][0-9][0-9]_*.ts' -exec basename {} .ts \; | LC_ALL=C sort >"$RUNNER_TEMP/source-migrations"
+          test -s "$RUNNER_TEMP/source-migrations"
+          diff -u "$RUNNER_TEMP/source-migrations" "$RUNNER_TEMP/image-migrations"

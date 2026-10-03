@@ -8,11 +8,14 @@
  *
  *  - deploy.sh, a release that migrates: a failure after its migrations committed (health,
  *    Caddy, signing key, smoke tests, the grants) keeps the new image, started, with the way
- *    to repair forward, and never attempts the doomed rollback; a release without migration,
- *    or whose migration failed (one transaction: nothing applied), still rolls back; the
- *    success message names the migrations and no longer offers a rollback;
+ *    to repair forward, and never attempts the doomed rollback, nor when the applied migrations
+ *    cannot be read after the migration step, nor when the previous image does not know them
+ *    all; a release without migration, or whose migration failed (one transaction: nothing
+ *    applied), still rolls back; the success message names the migrations and no longer
+ *    offers a rollback, nor when the schema cannot be read afterwards;
  *  - deploy.sh --image: an image that does not know every applied migration is refused before
- *    the pre-deploy backup and before anything is stopped;
+ *    the pre-deploy backup and before anything is stopped (and an unreadable schema stops it,
+ *    saying whether PostgreSQL was started for the check);
  *  - lib.sh: deploy.sh, backup.sh and restore.sh stop on an exported COMPOSE_PROJECT_NAME that
  *    is not the stack's, or on any exported ORBES_IMAGE_TAG;
  *  - restore.sh refuses everything, --dry-run included, when .env says RESTORE_ALLOWED=false;
@@ -264,6 +267,41 @@ describe('deploy.sh: a release that migrates is repaired forward, never rolled b
     expect(h.stateFile('deploys.log')).toMatch(/ deploy lot1b FAILED, rolled back to lot1\n$/);
   });
 
+  it('a failure after the migration step, when the applied migrations cannot be read, is kept too (it may have migrated)', () => {
+    // PostgreSQL unreadable right after the migrations committed: without this branch, the
+    // rollback would run the previous image's migration step on the new schema.
+    const h = productionBeforeDeployment2().fail('unhealthy-app-new').fail('read-applied-after-migrate');
+    const r = h.run('deploy.sh', ['--image', 'new']);
+    expect(r.status, r.stderr).toBe(1);
+    expect(h.applied()).toEqual(ALL);
+    expect(r.stderr).toMatch(/the migrations applied in the database cannot be read \(is PostgreSQL down\?\): this release may have migrated, so no rollback is attempted/);
+    expect(r.stderr).toMatch(/deployment of new failed \(the stack did not become healthy\) and is KEPT: ORBES_IMAGE_TAG=new in \.env/);
+    expect(r.stderr).not.toMatch(/rollback to orbes-genome:lot1/);
+    expect(migrateCalls(h)).toHaveLength(1);
+    expect(h.envValue('ORBES_IMAGE_TAG')).toBe('new');
+    expect(h.runningImage('app')).toBe('orbes-genome:new');
+    expect(h.stateFile('deploys.log')).toMatch(/ deploy new FAILED \(the stack did not become healthy\): kept, no rollback, repair forward\n$/);
+  });
+
+  it('a failure without new migration is kept when the previous image does not know the applied ones (the stack was down, .env on an older tag)', () => {
+    // Schema at 0013, nothing running, .env still names lot1: lot1 is the "previous" tag but
+    // cannot run on this schema, so the failing fix image is not rolled back to it.
+    const h = host({ env: { ORBES_IMAGE_TAG: 'lot1' } }).image('lot1', LOT1).image('fix', ALL).running(null).fail('unhealthy-app-fix');
+    h.applied(ALL);
+    const r = h.run('deploy.sh', ['--image', 'fix']);
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/previous image tag: lot1/);
+    expect(r.stderr).toMatch(new RegExp(`orbes-genome:lot1 does not know the migration\\(s\\) ${words(ADDED)} of this database: it cannot run on this schema, so no rollback is attempted`));
+    expect(r.stderr).toMatch(/deployment of fix failed \(the stack did not become healthy\) and is KEPT: ORBES_IMAGE_TAG=fix in \.env, the stack started on orbes-genome:fix/);
+    expect(r.stderr).not.toMatch(/rollback to orbes-genome:lot1/);
+    expect(migrateCalls(h)).toHaveLength(1);
+    expect(h.applied()).toEqual(ALL);
+    expect(h.envValue('ORBES_IMAGE_TAG')).toBe('fix');
+    expect(h.runningImage('app')).toBe('orbes-genome:fix');
+    // PostgreSQL was down: no pre-deploy backup.
+    expect(h.log('backup.log')).toBe('');
+  });
+
   it('a retry of the kept release that fails again does not roll back either', () => {
     const h = host({ env: { ORBES_IMAGE_TAG: 'new' } }).image('lot1', LOT1).image('new', ALL).running('new').fail('unhealthy-app-new');
     h.applied(ALL);
@@ -298,6 +336,20 @@ describe('deploy.sh: a release that migrates is repaired forward, never rolled b
     expect(r.stderr).toMatch(/deployed orbes-genome:lot1b \(previous: lot1\)\. Manual rollback: scripts\/deploy\.sh --image lot1\n/);
     expect(h.stateFile('previous-tag')).toBe('lot1\n');
     expect(h.stateFile('deploys.log')).toMatch(/ deploy lot1b OK \(previous lot1\)\n$/);
+  });
+
+  it('on success, when the schema cannot be read afterwards, suggests no rollback and says so', () => {
+    const h = productionBeforeDeployment2().fail('read-applied-after-migrate');
+    mkdirSync(join(h.stack, '.state'), { mode: 0o700 });
+    writeFileSync(join(h.stack, '.state', 'previous-tag'), '1bd551d91832\n');
+    const r = h.run('deploy.sh', ['--image', 'new']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(h.runningImage('app')).toBe('orbes-genome:new');
+    expect(r.stderr).toMatch(/deployed orbes-genome:new \(previous: lot1\)\.\n/);
+    expect(r.stderr).toMatch(/WARNING: the schema could not be read after the rollout \(kysely_migration\): whether this release applied migrations is unknown, so no rollback is suggested\. .*repair forward: scripts\/deploy\.sh --image new after a transient incident, otherwise a corrective commit/);
+    expect(r.stderr).not.toMatch(/Manual rollback/);
+    expect(h.stateFile('previous-tag')).toBeNull();
+    expect(h.stateFile('deploys.log')).toMatch(/ deploy new OK \(previous lot1; schema not read\)\n$/);
   });
 
   it('a first deployment migrates an empty database without a pre-deploy backup (PostgreSQL was not running)', () => {
@@ -350,6 +402,25 @@ describe('deploy.sh --image: an image that cannot run on the schema is refused b
     expect(h.envValue('ORBES_IMAGE_TAG')).toBe('new');
   });
 
+  it('stops when the applied migrations cannot be read, saying what it changed: nothing, or only PostgreSQL started', () => {
+    const up = afterDeployment2().fail('read-applied');
+    const r = up.run('deploy.sh', ['--image', 'fix']);
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/ERROR: cannot read the applied migrations \(kysely_migration\): nothing was changed\n/);
+    expect(up.log('backup.log')).toBe('');
+    expect(up.runningImage('app')).toBe('orbes-genome:new');
+    const down = afterDeployment2().running(null).fail('read-applied');
+    const d = down.run('deploy.sh', ['--image', 'fix']);
+    expect(d.status, d.stderr).toBe(1);
+    expect(d.stderr).toMatch(/ERROR: cannot read the applied migrations \(kysely_migration\): nothing else was changed \(PostgreSQL was started to read the schema\)\n/);
+    expect(down.runningImage('postgres')).toBe('postgres:17');
+    expect(down.runningImage('app')).toBeNull();
+    expect(down.envValue('ORBES_IMAGE_TAG')).toBe('new');
+    // The refusal of an older image says the same about PostgreSQL.
+    const refused = afterDeployment2().running(null).run('deploy.sh', ['--image', 'lot1']);
+    expect(refused.stderr).toMatch(/the stack stays on orbes-genome:new \(PostgreSQL was started to read the schema\)\.\n/);
+  });
+
   it('refuses it in --dry-run too, and accepts an image that knows every applied migration', () => {
     const h = afterDeployment2();
     const dry = h.run('deploy.sh', ['--image', 'lot1', '--dry-run']);
@@ -386,7 +457,7 @@ describe('lib.sh: no stray exported setting on the shared host', () => {
 
   it('stops on another compose project, or on any ORBES_IMAGE_TAG, saying what to unset', () => {
     for (const [env, dotEnv] of [
-      [{ COMPOSE_PROJECT_NAME: 'entity' }, ''],
+      [{ COMPOSE_PROJECT_NAME: 'another-stack' }, ''],
       [{ COMPOSE_PROJECT_NAME: '' }, ''],
       [{ COMPOSE_PROJECT_NAME: 'orbes' }, 'COMPOSE_PROJECT_NAME=orbes2\n'],
     ] as const) {
@@ -572,6 +643,18 @@ describe('the SQL of the scripts and of the runbook, on the migrated schema', ()
          (encode(sha256('\\x030405'::bytea), 'hex'), 'image/webp', '\\x030405'::bytea, 1, 1)`,
     );
     expect(await values(usage)).toEqual(['2 5']);
+  });
+
+  it("lists the migrations an image knows as deploy.sh reads them (lib.sh's probe, also run by CI in the built image)", () => {
+    const probe = constant('IMAGE_MIGRATIONS_JS');
+    // As `docker run --entrypoint node <image> --import tsx -e "$IMAGE_MIGRATIONS_JS"`, from the app's directory.
+    const r = spawnSync(process.execPath, ['--import', 'tsx', '-e', probe], { cwd: GENOME, encoding: 'utf8', timeout: 60_000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe(ALL.map((m) => `${m}\n`).join(''));
+    // The CI image job extracts the probe with this sed expression and runs it in orbes-genome:ci.
+    const ci = read(REPO, '.github', 'workflows', 'genome-ci.yml');
+    expect(ci).toContain(`sed -n "s/^IMAGE_MIGRATIONS_JS='\\(.*\\)'$/\\1/p" ../deploy/vps/scripts/lib.sh`);
+    expect(ci).toMatch(/docker run --rm --network none --entrypoint node orbes-genome:ci --import tsx -e "\$probe"/);
   });
 
   it('runs the photograph queries of docs/DEPLOYMENT.md §15.12 as written', async () => {
