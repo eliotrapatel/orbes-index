@@ -14,6 +14,11 @@
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
  *  - Client Services: the confirmed reservations, their reference, size, add-ons and total; CONCLUDED or CANCELLED with
  *    a note (OPERATOR); the CSV.
+ *  - The intelligence (views/live-intelligence.ts), each reading with how it is read: the live alerts and the live
+ *    sell-out forecast on the live board (its stream keeps them current); the readings of the release's stage under the
+ *    board: the release planner and the audience forecast before the announcement, the forecast and the demand radar
+ *    until T0, the bot radar from the room's opening (REMOVE in one tap, ADMIN), the release report (and its CSV) and the
+ *    collector insights once it has ended, and the release comparison.
  *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access,
  *    its times, its turns and holds, its add-ons), the silhouette (a photograph) and the boutique board's link (issued,
  *    shown once, revoked); PUBLISH (with or without a post of the circle, added or withdrawn until the announcement)
@@ -22,6 +27,7 @@
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
+import { LIVE_ALERT_LABELS } from '../model/live-intelligence.js';
 import {
   canResolve,
   defaultQuantityLine,
@@ -58,6 +64,7 @@ import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { loadLiveIntelligence, liveIntelligenceSections, liveSignals, sizeSellOut } from './live-intelligence.js';
 
 /** The board read again this often while the stream is refused or lost. */
 export const LIVE_POLL_MS = 5000;
@@ -144,10 +151,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const reservationsPage = Math.max(1, Number(ctx.route.query.rpage) || 1);
   const [r, models, collections] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections()]);
   const published = hasBoard(r.phase);
-  const [boardRead, entries, reservations] = await Promise.all([
+  const [boardRead, entries, reservations, intelligence] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
     published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
     published ? ctx.api.liveReservations(id, reservationsPage, 50) : Promise.resolve(null),
+    loadLiveIntelligence(ctx.api, r),
   ]);
   // The console moved on while the release was read: this page is stale, and starts nothing. Every read is above this
   // line, so the follower below starts only for the page on screen.
@@ -177,6 +185,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const figures = h('div', { class: ['kpis', 'live__figures'] });
   const messageLine = h('p', { class: 'live__message', data: { testid: 'live-message' } });
   const sizesBox = h('div', { class: 'live__sizes' });
+  // The live alerts and the sell-out forecast (live-intelligence.ts), drawn with each board; the alerts' names are
+  // announced once, when they change, not their running figures.
+  const alertsBox = h('div', { class: 'live__alerts-box' });
+  const alertsSaid = h('span', { class: 'visually-hidden', attrs: { 'aria-live': 'polite' } });
+  let alertsKey = '';
+  const sellOutBox = h('div', { class: 'live__sellout-box' });
   const lineBox = h('div', { class: 'live__line' });
 
   const addPieces = (size: { id: string; label: string; stock: number }) =>
@@ -288,6 +302,14 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       el.setAttribute('data-testid', f.testId);
       return el;
     }));
+    const signals = liveSignals(b);
+    mount(alertsBox, signals.alerts);
+    mount(sellOutBox, signals.sellOut);
+    const said = b.alerts.map((a) => `${LIVE_ALERT_LABELS[a.kind]}${a.size ? ` · ${a.size.label}` : ''}`).join(', ');
+    if (said !== alertsKey) {
+      alertsKey = said;
+      alertsSaid.textContent = said ? `${said}.` : '';
+    }
     mount(messageLine, ...(b.message ? [h('span', { class: 'live__message-label' }, 'Host message'), h('span', { class: 'live__message-text' }, `« ${b.message.text} »`), h('span', { class: 'cell-sub' }, formatDateTime(b.message.at, { seconds: true }))] : []));
     messageLine.hidden = !b.message;
     mount(
@@ -307,6 +329,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Missed', cell: (s) => formatCount(s.missed), kind: ['num'] },
           { label: 'Ended holds', cell: (s) => formatCount(s.expired), kind: ['num'] },
           { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
+          ...(b.sellOut ? [{ label: 'Forecast', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-sellout' } }, sizeSellOut(b, s.id)), kind: ['nowrap' as const] }] : []),
           {
             label: '',
             cell: (s) => (acts.addPieces && !b.endedAt ? button('Add pieces', { kind: 'ghost', testId: 'live-add-pieces', onClick: () => addPieces(s) }) : null),
@@ -409,7 +432,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   ].filter((b): b is HTMLButtonElement => b !== null);
 
   const boardSection = board
-    ? section('Live board', [stateLine, figures, messageLine, sizesBox], { id: 'live-board', tools: boardTools, note: `T0 ${formatDateTime(r.opensAt)} · end ${formatDateTime(r.closesAt)}` })
+    ? section('Live board', [stateLine, alertsSaid, alertsBox, figures, messageLine, sizesBox, sellOutBox], { id: 'live-board', tools: boardTools, note: `T0 ${formatDateTime(r.opensAt)} · end ${formatDateTime(r.closesAt)}` })
     : null;
 
   // ── The entries ──────────────────────────────────────────────────────────
@@ -822,6 +845,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     ].filter((b): b is HTMLButtonElement => b !== null),
   });
 
+  const readings = liveIntelligenceSections(ctx, r, intelligence, board);
   const root = h(
     'div',
     { class: 'view view--live' },
@@ -832,8 +856,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       lead: liveLead(r),
       actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
-    // Once published, the board leads; a draft opens on its publication.
-    ...(published ? [boardSection, entriesSection, servicesSection, releaseSection] : [releaseSection]),
+    // Once published, the board leads, the intelligence of the release's stage after its people; a draft opens on its
+    // publication, then its planner and forecast.
+    ...(published ? [boardSection, entriesSection, servicesSection, ...readings, releaseSection] : [releaseSection, ...readings]),
     h('div', { class: 'grid grid--2 live__parts' }, ...parts),
   );
 

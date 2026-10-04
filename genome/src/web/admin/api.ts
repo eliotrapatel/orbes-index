@@ -53,11 +53,18 @@ import type {
   DropEntry,
   DropEntryStatus,
   DropInput,
+  LiveAudienceForecast,
   LiveBoard,
+  LiveBotRadar,
   LiveCard,
+  LiveCollectorInsights,
+  LiveDemandRadar,
   LiveEntry,
   LiveEntryStatus,
   LiveRelease,
+  LiveReleaseComparison,
+  LiveReleasePlan,
+  LiveReleaseReport,
   LiveReservation,
   LiveResolution,
   LiveSettings,
@@ -791,6 +798,49 @@ export class AdminApi {
   /** CONCLUDED or CANCELLED, with an optional note (Client Services). */
   resolveLiveReservation(id: string, entryId: string, resolution: LiveResolution, note: string): Promise<LiveReservation> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/resolve`, note ? { resolution, note } : { resolution });
+  }
+
+  // ── The Club: the LIVE RELEASES' intelligence ────────────────────────────
+
+  /** The release planner: the quantity and size mix suggested. */
+  liveReleasePlan(id: string): Promise<LiveReleasePlan> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/plan`);
+  }
+
+  /** The audience forecast: the room expected at T0. */
+  liveAudienceForecast(id: string): Promise<LiveAudienceForecast> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/forecast`);
+  }
+
+  /** The demand radar, before T0. */
+  liveDemandRadar(id: string): Promise<LiveDemandRadar> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/radar`);
+  }
+
+  /** The bot radar (the emails masked for an AUDITOR). */
+  liveBotRadar(id: string): Promise<LiveBotRadar> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/bots`);
+  }
+
+  /** The release report. */
+  liveReport(id: string): Promise<LiveReleaseReport> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/report`);
+  }
+
+  /** The release report as a CSV. */
+  async liveReportCsv(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/live/${encodeURIComponent(id)}/report.csv`, { raw: true });
+    return toDownload(res, 'orbes-live-report.csv');
+  }
+
+  /** The collector insights (the emails masked for an AUDITOR). */
+  liveCollectors(id: string): Promise<LiveCollectorInsights> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/collectors`);
+  }
+
+  /** The release beside the others whose T0 has passed. */
+  liveComparison(id: string): Promise<LiveReleaseComparison> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/comparison`);
   }
 
   // ── The Club: drops (P-R03) ──────────────────────────────────────────────

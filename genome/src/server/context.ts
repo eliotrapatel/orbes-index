@@ -35,6 +35,7 @@ import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
 import { LiveEngine } from './services/live-engine.js';
+import { LiveInsightsService } from './services/live-insights.js';
 import { LiveRoomService } from './services/live-room.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
@@ -98,6 +99,8 @@ export interface AppServices {
   liveRoom: LiveRoomService;
   /** The LIVE RELEASES in the console: created, edited until their announcement, published, cancelled; the live board; Client Services' reservations. */
   liveConsole: LiveConsoleService;
+  /** The console's intelligence on the LIVE RELEASES: the planner, the forecasts, the radars, the alerts, the report, the collectors, the comparison. */
+  liveInsights: LiveInsightsService;
 }
 
 export interface AppContext {
@@ -196,7 +199,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const turnKey = deriveLiveTurnKey(config);
     const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, clock });
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
-    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, clock });
+    const liveInsights = new LiveInsightsService({ db, clock });
+    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
 
     const services: AppServices = {
       issuance,
@@ -224,6 +228,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       live,
       liveRoom,
       liveConsole,
+      liveInsights,
       ...overrides.services,
     };
 

@@ -70,11 +70,11 @@ export async function liveFixtureOn(
   };
 }
 
-export async function createModel(db: Db, name: string, collectionId: string | null = null): Promise<string> {
+export async function createModel(db: Db, name: string, collectionId: string | null = null, type = 'RING'): Promise<string> {
   return (
     await db
       .insertInto('models')
-      .values({ category_id: CATEGORY, collection_id: collectionId, name, type: 'RING', sku_prefix: `${name.slice(0, 3)}-${randomUUID().slice(0, 8)}` })
+      .values({ category_id: CATEGORY, collection_id: collectionId, name, type, sku_prefix: `${name.slice(0, 3)}-${randomUUID().slice(0, 8)}` })
       .returning('id')
       .executeTakeFirstOrThrow()
   ).id;
@@ -91,8 +91,17 @@ export async function createAccount(db: Db): Promise<{ id: string; email: string
   return { id, email, actor: { type: 'account', id } };
 }
 
-/** `n` pieces held now by the account (open ownerships), of `modelId`; a piece's own collection when given. */
-export async function holdPieces(db: Db, accountId: string, n: number, modelId: string, opts: { collectionId?: string | null } = {}): Promise<string[]> {
+/**
+ * `n` pieces held now by the account (open ownerships), of `modelId`; a piece's own collection when given, its size
+ * (`products.variant`) and the start of its ownership (1 January 2025 by default).
+ */
+export async function holdPieces(
+  db: Db,
+  accountId: string,
+  n: number,
+  modelId: string,
+  opts: { collectionId?: string | null; variant?: string | null; startedAt?: Date } = {},
+): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < n; i++) {
     const top = await db.selectFrom('products').select((eb) => eb.fn.max('serial').as('s')).where('category_id', '=', CATEGORY).where('year', '=', 2026).executeTakeFirstOrThrow();
@@ -108,13 +117,14 @@ export async function holdPieces(db: Db, accountId: string, n: number, modelId: 
         sku: `LIVE-${serial}`,
         model_id: modelId,
         collection_id: opts.collectionId ?? null,
+        variant: opts.variant ?? null,
         material: '925 STERLING SILVER',
         status: 'OWNED',
         ownership_state: 'OWNED',
       })
       .returning('id')
       .executeTakeFirstOrThrow();
-    await db.insertInto('ownership').values({ product_id: product.id, account_id: accountId, acquired_via: 'ADMIN', started_at: new Date('2025-01-01T00:00:00Z') }).execute();
+    await db.insertInto('ownership').values({ product_id: product.id, account_id: accountId, acquired_via: 'ADMIN', started_at: opts.startedAt ?? new Date('2025-01-01T00:00:00Z') }).execute();
     ids.push(product.id);
   }
   return ids;

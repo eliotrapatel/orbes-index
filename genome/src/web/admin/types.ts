@@ -1132,6 +1132,10 @@ export interface LiveBoard {
   /** The open entries by place, then arrival (the first 200). */
   line: LiveEntry[];
   lineTotal: number;
+  /** The live alerts, from T0 while the release runs (services/live-insights.ts). */
+  alerts: LiveAlert[];
+  /** The live sell-out forecast, from T0 until the end. */
+  sellOut: LiveSellOut | null;
 }
 
 /** The release's state after a live control (pause, resume, extend, add pieces, end). */
@@ -1167,6 +1171,223 @@ export interface LiveReservation {
   note: string | null;
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
+}
+
+// ── The Club: the LIVE RELEASES' intelligence (services/live-insights.ts) ──
+
+/** The three live alerts (LIVE_ALERT_KINDS), in the order the board shows them. */
+export const LIVE_ALERT_KINDS = ['SIZE_SOLD_OUT', 'MISSED_WAVE', 'LINE_STALLED'] as const;
+export type LiveAlertKind = (typeof LIVE_ALERT_KINDS)[number];
+
+export interface LiveAlert {
+  kind: LiveAlertKind;
+  size: { id: string; label: string } | null;
+  since: Iso;
+  text: string;
+  reasoning: string[];
+}
+
+export type LiveSellOutOutlook = 'SOLD_OUT' | 'SELLS_OUT' | 'LINE_SHORT' | 'CLOSE_FIRST' | 'NO_PACE';
+
+export interface LiveSizeSellOut {
+  size: { id: string; label: string };
+  stock: number;
+  remaining: number;
+  outlook: LiveSellOutOutlook;
+  at: Iso | null;
+  expectedLeft: number | null;
+  /** Pieces secured a minute. */
+  pace: number;
+  reasoning: string[];
+}
+
+export interface LiveSellOut {
+  outlook: LiveSellOutOutlook | 'PARTIAL';
+  at: Iso | null;
+  expectedLeft: number;
+  windowMs: number;
+  secureRate: number;
+  payRate: number;
+  sizes: LiveSizeSellOut[];
+  reasoning: string[];
+}
+
+/** GET /api/admin/live/:id/forecast: the room expected at T0. */
+export interface LiveAudienceForecast {
+  low: number;
+  high: number;
+  expected: number;
+  basis: 'INTEREST' | 'ELIGIBLE' | 'NONE';
+  interest: number;
+  eligible: number;
+  /** By tier, 0 (none) to 3 (PALLADIUM). */
+  eligibleByTier: number[];
+  inRoom: number | null;
+  capacity: number;
+  capacityProvisional: boolean;
+  aboveCapacity: boolean;
+  pastReleases: number;
+  reasoning: string[];
+}
+
+/** GET /api/admin/live/:id/plan: the release planner. */
+export interface LiveReleasePlan {
+  forecast: LiveAudienceForecast;
+  demandPerPerson: number;
+  pastReleases: number;
+  quantity: number | null;
+  sizes: { id: string; label: string; stock: number; interest: number; collectors: number; suggested: number | null }[];
+  otherSizes: { label: string; collectors: number }[];
+  eligibleByTier: number[];
+  modelType: string;
+  reasoning: string[];
+}
+
+/** GET /api/admin/live/:id/radar: the demand radar, before T0. */
+export interface LiveDemandRadar {
+  roomOpen: boolean;
+  formed: boolean;
+  inRoom: number;
+  stock: number;
+  interest: number;
+  pressure: number | null;
+  sizes: {
+    id: string;
+    label: string;
+    stock: number;
+    interest: number;
+    inRoom: number;
+    roomPieces: number;
+    demand: number;
+    pressure: number | null;
+    sellsOut: boolean;
+    sellOutAt: Iso | null;
+    expectedSold: number;
+    addPieces: number | null;
+  }[];
+  byTier: { tier: number; interest: number; inRoom: number }[];
+  conversion: number;
+  sellOutAt: Iso | null;
+  quantityLine: string;
+  reasoning: string[];
+}
+
+export const LIVE_BOT_SIGNS = ['NEW_ACCOUNT', 'NETWORK', 'GESTURE_FLOOR', 'GESTURE_REPEAT'] as const;
+export type LiveBotSign = (typeof LIVE_BOT_SIGNS)[number];
+
+/** GET /api/admin/live/:id/bots: the bot radar; the emails masked for an AUDITOR. */
+export interface LiveBotRadar {
+  entries: number;
+  flagged: number;
+  bySign: Record<LiveBotSign, number>;
+  networks: { group: number; entries: number }[];
+  items: {
+    entryId: string;
+    accountId: string;
+    email: string;
+    status: LiveEntryStatus;
+    size: { id: string; label: string };
+    tier: number;
+    position: number | null;
+    open: boolean;
+    signs: LiveBotSign[];
+    network: number | null;
+    reasons: string[];
+  }[];
+  reasoning: string[];
+}
+
+export type LiveFunnelStep = 'INTEREST' | 'ROOM' | 'TURN' | 'SECURED' | 'CONFIRMED' | 'CONCLUDED';
+
+/** GET /api/admin/live/:id/report: the release report. */
+export interface LiveReleaseReport {
+  id: string;
+  title: string;
+  final: boolean;
+  endedReason: LiveEndReason | null;
+  opensAt: Iso;
+  endedAt: Iso | null;
+  sellOutMs: number | null;
+  pausedMs: number;
+  currency: LiveCurrency;
+  quantityLine: string;
+  funnel: { step: LiveFunnelStep; people: number; share: number | null }[];
+  sizes: {
+    id: string;
+    label: string;
+    stock: number;
+    added: number;
+    confirmedPieces: number;
+    sellOutMs: number | null;
+    unservedPeople: number;
+    unservedPieces: number;
+    missed: number;
+    expired: number;
+    released: number;
+    nextDemand: number;
+  }[];
+  byTier: { tier: number; entries: number; turns: number; secured: number; confirmed: number; missed: number; expired: number }[];
+  missed: number;
+  expired: number;
+  released: number;
+  addons: { id: string; label: string; reservations: number; pieces: number; revenueMinor: number }[];
+  piecesRevenueMinor: number;
+  addonsRevenueMinor: number;
+  additions: { at: Iso; sizeId: string; size: string; pieces: number; before: number; after: number }[];
+  conversion: number;
+  next: { quantity: number; sizes: { label: string; pieces: number }[] };
+  reasoning: string[];
+}
+
+export interface LiveConversionRow {
+  entered: number;
+  secured: number;
+  confirmed: number;
+  conversion: number | null;
+}
+
+/** GET /api/admin/live/:id/collectors: the collector insights; the emails masked for an AUDITOR. */
+export interface LiveCollectorInsights {
+  byTier: (LiveConversionRow & { tier: number })[];
+  byCountry: (LiveConversionRow & { country: string | null })[];
+  repeat: LiveConversionRow;
+  firstTime: LiveConversionRow;
+  unsecured: {
+    total: number;
+    items: { entryId: string; accountId: string; email: string; tier: number; size: string; status: LiveEntryStatus; position: number | null; country: string | null }[];
+  };
+  reasoning: string[];
+}
+
+/** A release in the comparison (GET /api/admin/live/:id/comparison). */
+export interface LiveComparedRelease {
+  id: string;
+  title: string;
+  current: boolean;
+  opensAt: Iso;
+  endedReason: LiveEndReason | null;
+  currency: LiveCurrency;
+  priceMinor: number;
+  stock: number;
+  added: number;
+  interest: number;
+  room: number;
+  presentAtT0: number;
+  turns: number;
+  secured: number;
+  confirmedPieces: number;
+  sellThrough: number | null;
+  sellOutMs: number | null;
+  missedShare: number | null;
+  expired: number;
+  conversion: number;
+  piecesRevenueMinor: number;
+  addonsRevenueMinor: number;
+}
+
+export interface LiveReleaseComparison {
+  releases: LiveComparedRelease[];
+  reasoning: string[];
 }
 
 // ── The Club: the circle (P-X01) ───────────────────────────────────────────

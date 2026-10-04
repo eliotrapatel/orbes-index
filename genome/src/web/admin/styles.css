@@ -3197,6 +3197,101 @@ a.bar__label:hover {
   word-break: break-all;
 }
 
+/* ── A LIVE RELEASE's intelligence ─────────────────────────────────────── */
+
+/* HOW IT IS READ: the rule and its figures under each reading, a quiet hairline above. */
+.live__why {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.live__why-title {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.live__why-lines {
+  margin-top: 10px;
+  padding-left: 18px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.live__why-lines li + li {
+  margin-top: 4px;
+}
+
+/* The live alerts, above the board's figures: each its mark, its words, since when, and its reasoning. */
+.live__alerts {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 22px;
+}
+
+.live__alert {
+  padding: 14px 18px;
+  border: 1px solid var(--hairline-strong);
+}
+
+.live__alert-head,
+.live__sellout-head,
+.live__capacity,
+.live__next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+
+.live__alert .live__why {
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.live__alert-text,
+.live__sellout-text {
+  font-size: var(--fs-body);
+}
+
+.live__sellout {
+  margin-top: 22px;
+}
+
+.live__capacity,
+.live__next {
+  margin-top: 18px;
+}
+
+/* What the quantity line promised, under a suggestion to add pieces (the plan's choice 36). */
+.live__promise {
+  margin-top: 14px;
+  padding: 14px 18px;
+  background: var(--ivory);
+  font-size: var(--fs-line);
+  line-height: 1.6;
+}
+
+/* A flagged entry's signs, one under the other with their reasons. */
+.live__signs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.live__intel-figures {
+  margin-bottom: 22px;
+}
+
+.live__intel-pair {
+  align-items: start;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
@@ -3220,6 +3315,7 @@ a.bar__label:hover {
 .panel__subtitle,
 .kpi__label,
 .live__message-label,
+.live__why-title,
 .deflist__label,
 .table th,
 .empty__text,
@@ -3307,7 +3403,8 @@ a.bar__label:hover {
     border-top: 1px solid var(--hairline);
     padding-top: 18px;
   }
-  .live__parts {
+  .live__parts,
+  .live__intel-pair {
     grid-template-columns: minmax(0, 1fr);
   }
 }

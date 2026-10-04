@@ -17,8 +17,10 @@
  *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW).
  *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
  *                   the holds that ended, per size and overall, the interest), the latest host message and the line
- *                   itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX): GET and the console's stream
- *                   (http/live-stream.ts) read the same `board`. The routes mask the emails for an AUDITOR.
+ *                   itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX), and from T0 until the release is
+ *                   over its live alerts and live sell-out forecast (live-insights.ts, injected as `insights`): GET and
+ *                   the console's stream (http/live-stream.ts) read the same `board`. The routes mask the emails for an
+ *                   AUDITOR.
  *   entries         every entry of the release, by status, by place then arrival.
  *   Client Services the confirmed reservations with their sizes, add-ons and totals; CONCLUDED or CANCELLED with a note
  *                   (a cancellation never returns the piece to the line: the plan's choice 26); a CSV.
@@ -38,6 +40,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import type { LiveAlert, LiveSellOut, LiveSignals } from './live-insights.js';
 import { cleanDescription, cleanTime, cleanTitle, DROP_QUANTITY_MAX, dropNotFound, newSealedSeed, PURCHASE_WINDOW_HOURS } from './drops.js';
 import {
   announcedAt,
@@ -106,7 +109,7 @@ export function majorUnits(minor: number): string {
 const SIGNS: Readonly<Record<string, string>> = Object.freeze({ EUR: '€', GBP: '£', USD: '$', CHF: 'CHF' });
 
 /** A price as the house writes it (verify/live-model.ts formatMoney): `€ 4 800`, `€ 4 800.50`. */
-function money(minor: number, currency: string): string {
+export function liveMoney(minor: number, currency: string): string {
   const units = String(Math.floor(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   const cents = minor % 100;
   return `${SIGNS[currency] ?? currency} ${units}${cents ? `.${String(cents).padStart(2, '0')}` : ''}`;
@@ -502,6 +505,10 @@ export interface AdminLiveBoard {
   line: AdminLiveEntry[];
   /** Every open entry. */
   lineTotal: number;
+  /** The live alerts (services/live-insights.ts liveAlerts), from T0 on. */
+  alerts: LiveAlert[];
+  /** The live sell-out forecast, from T0 until the end; null otherwise. */
+  sellOut: LiveSellOut | null;
 }
 
 /** A confirmed reservation for ORBES Client Services; the routes mask the email for an AUDITOR. */
@@ -539,6 +546,8 @@ export interface LiveConsoleServiceDeps {
   seedKey: Uint8Array;
   /** PUBLIC_ORIGIN: the boutique board's link. */
   publicOrigin: string;
+  /** The live board's alerts and sell-out forecast (LiveInsightsService.signals); without it, none. */
+  insights?: { signals(d: DropRow, now: Date): Promise<LiveSignals> };
   clock?: Clock;
 }
 
@@ -547,6 +556,7 @@ export class LiveConsoleService {
   private readonly audit: AuditService;
   private readonly seedKey: Uint8Array;
   private readonly origin: string;
+  private readonly insights: LiveConsoleServiceDeps['insights'];
   private readonly clock: Clock;
 
   constructor(deps: LiveConsoleServiceDeps) {
@@ -555,6 +565,7 @@ export class LiveConsoleService {
     this.audit = deps.audit;
     this.seedKey = deps.seedKey;
     this.origin = deps.publicOrigin;
+    this.insights = deps.insights;
     this.clock = deps.clock ?? systemClock;
   }
 
@@ -631,9 +642,11 @@ export class LiveConsoleService {
     const holding = people(null, ['TURN', 'SECURED']);
     const phase = livePhase(d, now);
     const over = phase === 'ENDED' && holding === 0;
-    const [line, lineTotal] = await Promise.all([
+    const [line, lineTotal, signals] = await Promise.all([
       this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now),
       this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', 'in', [...LIVE_OPEN_STATUSES]).executeTakeFirstOrThrow(),
+      // The alerts and the forecast from T0 while the release runs; once it is over, the report says the rest.
+      this.insights && !over ? this.insights.signals(d, now) : Promise.resolve<LiveSignals>({ alerts: [], sellOut: null }),
     ]);
     return {
       id,
@@ -671,6 +684,8 @@ export class LiveConsoleService {
       message: message ? { text: message.text, at: message.created_at } : null,
       line,
       lineTotal: Number(lineTotal.n),
+      alerts: signals.alerts,
+      sellOut: signals.sellOut,
     };
   }
 
@@ -1149,7 +1164,7 @@ export class LiveConsoleService {
     const minutes = d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default;
     const body = [
       `The room opens on ${parts.weekday} ${parts.day} ${parts.month} at ${parts.hour}:${parts.minute}, Paris time, ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} before the release.`,
-      `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${money(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText({ ...rule, models: rule.models.map((m) => (m.id === d.model_id ? { ...m, name: 'this model' } : m)) })}.`,
+      `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${liveMoney(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText({ ...rule, models: rule.models.map((m) => (m.id === d.model_id ? { ...m, name: 'this model' } : m)) })}.`,
     ].join('\n\n');
     const announced = announcedAt(d) ?? now;
     return { body, minTier: Math.max(1, d.live_min_tier ?? 0), at: announced.getTime() > now.getTime() ? announced : now };

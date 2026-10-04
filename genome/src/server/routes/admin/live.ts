@@ -28,9 +28,21 @@
  *   GET    /api/admin/live/:id/reservations.csv              AUDITOR   the same, every one, as a CSV
  *   POST   /api/admin/live/:id/entries/:entryId/resolve      OPERATOR  CONCLUDED or CANCELLED, with a note
  *
+ * The intelligence (services/live-insights.ts; each answer carries its reasoning; the live alerts and the live sell-out
+ * forecast ride on the live board and its stream, `alerts` and `sellOut`):
+ *
+ *   GET    /api/admin/live/:id/plan                          AUDITOR   the release planner: quantity and size mix
+ *   GET    /api/admin/live/:id/forecast                      AUDITOR   the audience forecast: the room at T0
+ *   GET    /api/admin/live/:id/radar                         AUDITOR   the demand radar, before T0
+ *   GET    /api/admin/live/:id/bots                          AUDITOR   the bot radar (REMOVE: the control above, ADMIN)
+ *   GET    /api/admin/live/:id/report                        AUDITOR   the release report
+ *   GET    /api/admin/live/:id/report.csv                    AUDITOR   the same, as a CSV
+ *   GET    /api/admin/live/:id/collectors                    AUDITOR   the collector insights
+ *   GET    /api/admin/live/:id/comparison                    AUDITOR   the release beside the others
+ *
  * An AUDITOR reads the customers' emails masked (`j***@example.com`), in the board, its stream, the entries, the
- * reservations and their CSV; OPERATOR and ADMIN in clear (serialize.ts). The board link's secret is in the answer that
- * issues it and nowhere else. Every mutation is audited by its service.
+ * reservations and their CSV, the bot radar and the collector insights; OPERATOR and ADMIN in clear (serialize.ts). The
+ * board link's secret is in the answer that issues it and nowhere else. Every mutation is audited by its service.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import {
@@ -52,6 +64,7 @@ import { adminActor, requireAdmin } from '../../http/sessions.js';
 import { dropNotFound } from '../../services/drops.js';
 import type { AdminLiveEntry } from '../../services/live.js';
 import type { AdminLiveBoard, AdminLiveReservation } from '../../services/live-console.js';
+import type { BotRadar, CollectorInsights } from '../../services/live-insights.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, readsClientEmails } from './serialize.js';
 
@@ -69,10 +82,20 @@ function reservationJson(r: AdminLiveReservation, inClear: boolean): AdminLiveRe
   return { ...r, email: clientEmail(r.email, inClear) };
 }
 
+/** The bot radar as the caller may read it. */
+export function botRadarJson(radar: BotRadar, inClear: boolean): BotRadar {
+  return { ...radar, items: radar.items.map((x) => ({ ...x, email: clientEmail(x.email, inClear) })) };
+}
+
+/** The collector insights as the caller may read them. */
+export function collectorInsightsJson(c: CollectorInsights, inClear: boolean): CollectorInsights {
+  return { ...c, unsecured: { ...c.unsecured, items: c.unsecured.items.map((x) => ({ ...x, email: clientEmail(x.email, inClear) })) } };
+}
+
 const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
 export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { live, liveConsole } = ctx.services;
+  const { live, liveConsole, liveInsights } = ctx.services;
 
   // ── The release ──────────────────────────────────────────────────────────
 
@@ -241,5 +264,50 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id, entryId } = parse(liveAdminEntryParams, request.params);
     const b = parse(liveResolveBody, request.body);
     return reservationJson(await liveConsole.resolve(id, entryId, { resolution: b.resolution, note: b.note ?? null }, adminActor(request)), readsClientEmails(request));
+  });
+
+  // ── The intelligence (reads only) ────────────────────────────────────────
+
+  app.get('/api/admin/live/:id/plan', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveInsights.plan(id);
+  });
+
+  app.get('/api/admin/live/:id/forecast', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveInsights.forecast(id);
+  });
+
+  app.get('/api/admin/live/:id/radar', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveInsights.radar(id);
+  });
+
+  app.get('/api/admin/live/:id/bots', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return botRadarJson(await liveInsights.bots(id), readsClientEmails(request));
+  });
+
+  app.get('/api/admin/live/:id/report', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveInsights.report(id);
+  });
+
+  app.get('/api/admin/live/:id/report.csv', async (request, reply) => {
+    const { id } = parse(liveAdminParams, request.params);
+    const file = await liveInsights.reportCsv(id);
+    reply.header('cache-control', 'no-store');
+    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
+    return reply.type(file.contentType).send(file.body);
+  });
+
+  app.get('/api/admin/live/:id/collectors', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return collectorInsightsJson(await liveInsights.collectors(id), readsClientEmails(request));
+  });
+
+  app.get('/api/admin/live/:id/comparison', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveInsights.comparison(id);
   });
 };
