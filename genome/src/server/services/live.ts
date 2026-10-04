@@ -120,6 +120,42 @@ export function announcedAt(d: Pick<DropRow, 'announce_at' | 'published_at'>): D
   return d.announce_at ?? d.published_at ?? null;
 }
 
+/** When each stage of a release is revealed, and whether it is at `now`. */
+export interface LiveStages {
+  silhouetteAt: Date;
+  nameAt: Date;
+  photoAt: Date;
+  silhouette: boolean;
+  name: boolean;
+  photo: boolean;
+}
+
+export type LiveStageRow = Pick<DropRow, 'announce_at' | 'published_at' | 'silhouette_at' | 'name_at' | 'photo_at' | 'opens_at' | 'room_opens_minutes'>;
+
+/**
+ * The stages of an announced release (null before its publication): each at its time, a NULL one at the announcement,
+ * none before the one it follows, every one at the room's opening at the latest.
+ */
+export function liveStages(d: LiveStageRow, now: Date): LiveStages | null {
+  const announced = announcedAt(d);
+  if (!announced) return null;
+  const a = announced.getTime();
+  const room = Math.max(a, roomOpensAt(d).getTime());
+  const at = (stage: Date | null, after: number) => Math.min(room, Math.max(after, stage ? new Date(stage).getTime() : a));
+  const silhouetteAt = at(d.silhouette_at, a);
+  const nameAt = at(d.name_at, silhouetteAt);
+  const photoAt = at(d.photo_at, nameAt);
+  const t = now.getTime();
+  return {
+    silhouetteAt: new Date(silhouetteAt),
+    nameAt: new Date(nameAt),
+    photoAt: new Date(photoAt),
+    silhouette: t >= silhouetteAt,
+    name: t >= nameAt,
+    photo: t >= photoAt,
+  };
+}
+
 /** How long a pause in progress has lasted at `now` (0 without one). */
 export function pausedFor(d: Pick<DropRow, 'paused_at'>, now: Date): number {
   return d.paused_at ? Math.max(0, now.getTime() - new Date(d.paused_at).getTime()) : 0;
@@ -303,7 +339,14 @@ export function liveRuleText(rule: LiveAccessRule): string {
   return 'every ORBES account';
 }
 
-export async function liveAccessRule(db: Db, d: Pick<DropRow, 'id' | 'live_min_tier' | 'access_collection_id'>): Promise<LiveAccessRule> {
+/** The model named in place of the release's own before its name's stage. */
+export const LIVE_UNNAMED_MODEL = 'this model';
+
+/**
+ * The rule of a release as anyone may read it at `now` (an announcement, a 403 LIVE_NOT_ELIGIBLE): a model it names
+ * that is the release's own is « this model » until the name's stage (liveStages), so no answer says the name before.
+ */
+export async function liveAccessRule(db: Db, d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id'> & LiveStageRow, now: Date): Promise<LiveAccessRule> {
   const models = await db
     .selectFrom('live_access_models as a')
     .innerJoin('models as m', 'm.id', 'a.model_id')
@@ -315,7 +358,12 @@ export async function liveAccessRule(db: Db, d: Pick<DropRow, 'id' | 'live_min_t
   const collection = d.access_collection_id
     ? ((await db.selectFrom('collections').select(['id', 'name']).where('id', '=', d.access_collection_id).executeTakeFirst()) ?? null)
     : null;
-  return { minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier, models, collection };
+  const named = liveStages(d, now)?.name ?? false;
+  return {
+    minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier,
+    models: named ? models : models.map((m) => (m.id === d.model_id ? { id: m.id, name: LIVE_UNNAMED_MODEL } : m)),
+    collection,
+  };
 }
 
 /**
@@ -843,7 +891,7 @@ export class LiveService {
     const now = this.clock();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
     if (!d || !isAnnounced(d, now)) throw dropNotFound();
-    return { rule: await liveAccessRule(this.db, d), access: await accessOf(this.db, d, account, now) };
+    return { rule: await liveAccessRule(this.db, d, now), access: await accessOf(this.db, d, account, now) };
   }
 
   /** The account's entry in a published LIVE RELEASE, or null. */
@@ -892,7 +940,7 @@ export class LiveService {
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
       const existing = await tx.selectFrom('live_entries').select(['id', 'status', 'position']).where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (existing && !(existing.status === 'LEFT' && existing.position === null)) throw alreadyEntered();
       const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity);
@@ -992,7 +1040,7 @@ export class LiveService {
       if (!isAnnounced(d, now)) throw dropNotFound();
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
       const { size } = await this.choice(tx, d, sizeId, 1);
       const before = await tx.selectFrom('live_interest').select('size_id').where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (before?.size_id === size.id) return;
@@ -1056,7 +1104,7 @@ export class LiveService {
       const gesture = e.press_started_at ? now.getTime() - e.press_started_at.getTime() : -1;
       if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
       const { payMinutes } = windowsFor(d, await this.tierWindows(tx, d.id), e.tier);
       await tx
         .updateTable('live_entries')

@@ -5,7 +5,8 @@
  *
  *   GET  /api/v1/live                       THE RELEASES' LIVE half: announced, not ended, the next opening first
  *   GET  /api/v1/live/next                  the banner of /verify and MY PIECES ({ release: null } when none)
- *   GET  /api/v1/live/clock                 the server's time, for the page's 3-sample clock sync
+ *   GET  /api/v1/live/clock                 the server's time, for the page's 3-sample clock sync (the banner's too: a
+ *                                           cached public answer never carries a time)
  *   GET  /api/v1/live/:id                   a release's page (once ended, only that it is)
  *   GET  /api/v1/live/:id/calendar.ics      ADD TO CALENDAR
  *   POST /api/v1/live/:id/board             the boutique board, by its secret link (in the body, from the page's fragment)
@@ -30,7 +31,8 @@
  * The state and the stream are only for an account allowed to enter the release, or holding an entry in it (403
  * LIVE_NOT_ELIGIBLE otherwise, with the rule in words; 401 without a session): no live view for anyone else, the
  * spectator mode was declined. The board's link is its only key: a missing, malformed, wrong or revoked secret, a
- * release not announced or over, all answer 404, and its answers are never indexed.
+ * release not announced or over, all answer 404, and its answers are never indexed; a board stream open on a link since
+ * replaced or revoked ends at the next pulse, as does a viewer's stream once its session has ended.
  *
  * Rate group `live` (rate-limit.ts): every route draws on its network's budget first, and a signed-in account's routes
  * on the account's own too. The account's answers are never stored (`no-store`); the public ones are kept
@@ -68,10 +70,11 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     return { releases };
   });
 
+  // No `now` here: an answer kept LIVE_PUBLIC_CACHE_CONTROL would carry a time 15 s old; the banner syncs with /clock.
   app.get('/api/v1/live/next', { config: PUBLIC }, async (_request, reply) => {
     const release = await liveRoom.next();
     reply.header('cache-control', LIVE_PUBLIC_CACHE_CONTROL);
-    return { now: ctx.clock(), release };
+    return { release };
   });
 
   // The clock sync: the page times three round trips and keeps the offset of the shortest.
@@ -110,8 +113,8 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     reply.header('x-robots-tag', 'noindex, nofollow');
     const { id } = parse(liveParams, request.params);
     const { token } = parse(liveBoardBody, request.body);
-    const { dropId } = await liveRoom.board(id, token);
-    await hub.openBoard(request, reply, dropId);
+    const { dropId, tokenHash } = await liveRoom.board(id, token);
+    await hub.openBoard(request, reply, dropId, tokenHash);
     return reply;
   });
 
@@ -132,10 +135,10 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
   });
 
   app.get('/api/v1/live/:id/stream', async (request, reply) => {
-    const { account } = requireAccount(request);
+    const { account, session } = requireAccount(request);
     const { id } = parse(liveParams, request.params);
     const viewer = await liveRoom.viewer(account.id, id, 'stream');
-    await hub.openViewer(request, reply, viewer.dropId, account.id);
+    await hub.openViewer(request, reply, viewer.dropId, { accountId: account.id, sessionId: session.id });
     return reply;
   });
 

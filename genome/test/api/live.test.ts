@@ -9,16 +9,17 @@
  *  - the account's routes: I'LL BE THERE and its withdrawal, ENTER, CHANGE SIZE (before T0 only), LEAVE, PRESS,
  *    SECURE (the gesture's rule), the add-ons, PAY, RELEASE MY PLACE and the second chance, the state with the room and
  *    the account's own entry (its place, those ahead, its turn's secret), MY PIECES; the network's keyed hash kept;
- *  - who reads the room: 401 without a session, 403 LIVE_NOT_ELIGIBLE (the rule in words) for an account the rule
- *    leaves out, the state of an entrant whatever its tier now, a REMOVED entry's state but not its stream;
+ *  - who reads the room: 401 without a session, 403 LIVE_NOT_ELIGIBLE (the rule in words, the release's own model
+ *    unnamed before its stage) for an account the rule leaves out, the state of an entrant whatever its tier now, a REMOVED entry's state but not its stream;
  *  - CSRF and the same-origin rule on every mutation, the board's included;
  *  - the rate group `live`: an account's budget, its network's;
  *  - the streams over HTTP: the first events, then only what changed, the server's time in each, a heartbeat after 20 s
  *    of quiet, the turn's secret to its own account only, at most two per account, a disconnection that frees its
  *    place, one frame and one read of the entries per pulse whatever the audience, the last frame then the end once
- *    over (204 afterwards), the end of a REMOVED entry's stream, the server's shutdown with streams open;
- *  - the board by its secret link only: valid, missing, malformed, wrong, another release's, replaced, revoked; never a
- *    person in its answers, never indexed;
+ *    over (204 afterwards), the end of a REMOVED entry's stream, the end of a stream whose session has ended (signed
+ *    out, account locked), the server's shutdown with streams open;
+ *  - the board by its secret link only: valid, missing, malformed, wrong, another release's, replaced, revoked, a stream
+ *    open on a link replaced or revoked ended at the next pulse; never a person in its answers, never indexed;
  *  - the clock for the page's sync, the .ics (its alarm, its lines).
  */
 import { createHash } from 'node:crypto';
@@ -240,11 +241,26 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         return { sheet: sheet.body, card: JSON.stringify(card), banner: banner.body, ics: ics.body, board: board.body, json: safeJson(sheet) as Record<string, unknown> };
       };
       const leaks = (s: Awaited<ReturnType<typeof surfaces>>, word: string) => Object.entries(s).filter(([k, v]) => k !== 'json' && String(v).includes(word)).map(([k]) => k);
+      // An account the rule leaves out reads the rule in its 403s (the state, the stream, I'LL BE THERE): the same stage.
+      const outsider = await member(h, f, 0);
+      const refusals = async () =>
+        Promise.all(
+          [
+            outsider.client.get(`/api/v1/live/${r.id}/state`),
+            outsider.client.get(`/api/v1/live/${r.id}/stream`),
+            outsider.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[0]!.id } }),
+          ].map(async (p) => {
+            const res = await p;
+            expect(res.statusCode).toBe(403);
+            return errorOf(res);
+          }),
+        );
 
       // Announced: the price, the quantity line, the rule (the release's own model unnamed), no stage.
       let s = await surfaces();
       expect(s.json).toMatchObject({ phase: 'ANNOUNCED', revealed: { silhouette: false, name: false, photo: false }, title: null, name: null, silhouetteUrl: null, imageUrl: null, description: null, priceMinor: 505_000, quantityLine: '2 PIECES' });
       expect(s.json.access).toEqual({ minTier: 0, text: 'owners of this model' });
+      expect(await refusals()).toEqual(Array(3).fill({ code: 'LIVE_NOT_ELIGIBLE', message: 'This release is for owners of this model.' }));
       expect(s.json.stages).toEqual({ silhouetteAt: new Date(t + HOUR).toISOString(), nameAt: new Date(t + 2 * HOUR).toISOString(), photoAt: new Date(t + 3 * HOUR).toISOString() });
       for (const word of ['NOCTURNE', 'CUFF', 'night', sha, photoSha]) expect(leaks(s, word)).toEqual([]);
 
@@ -258,7 +274,9 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       // The name: the title, the model, its type, the description; the rule names it; the banner and the .ics too.
       h.clock.set(t + 2 * HOUR - 1);
       expect(leaks(await surfaces(), 'NOCTURNE')).toEqual([]);
+      expect(JSON.stringify(await refusals())).not.toContain('NOCTURNE');
       h.clock.set(t + 2 * HOUR);
+      expect(await refusals()).toEqual(Array(3).fill({ code: 'LIVE_NOT_ELIGIBLE', message: 'This release is for owners of NOCTURNE.' }));
       s = await surfaces();
       expect(s.json).toMatchObject({ revealed: { name: true, photo: false }, title: 'THE NOCTURNE CUFF', name: 'NOCTURNE', type: 'CUFF', description: 'A cuff of the night.', imageUrl: null });
       expect(s.json.access).toEqual({ minTier: 0, text: 'owners of NOCTURNE' });
@@ -309,7 +327,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
     it('shows the release live now first, then the room open, then the next announced; the page with its sizes, add-ons and interest', async () => {
       await clearReleases(h);
       const c = h.client();
-      expect(safeJson(await c.get('/api/v1/live/next'))).toEqual({ now: h.clock.now().toISOString(), release: null });
+      // No server time in a public answer kept 15 s: the banner syncs with /clock.
+      expect(safeJson(await c.get('/api/v1/live/next'))).toEqual({ release: null });
       const later = await release(h, f, { inMinutes: 120, minTier: 2 });
       const soon = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }], perAccount: 2 });
       const banner = safeJson(await c.get('/api/v1/live/next')) as { release: Record<string, unknown> };
@@ -700,6 +719,32 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(h.app.liveHub.open.streams).toBe(0);
     });
 
+    it('ends a stream once its session has ended: signed out, its account locked; another account’s stays open', async () => {
+      const r = await release(h, f, { inMinutes: 30 });
+      const [a, b, c] = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      const [sa, sb, sc] = [
+        await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: a.client.cookies }),
+        await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: b.client.cookies }),
+        await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: c.client.cookies }),
+      ];
+      for (const s of [sa, sb, sc]) await s.next((e) => e.event === 'you');
+      await h.app.liveHub.pulse();
+      expect([sa.ended, sb.ended, sc.ended]).toEqual([false, false, false]);
+
+      const signedOut = new Map(a.client.cookies);
+      expect((await a.client.post('/api/v1/account/logout', {})).statusCode).toBeLessThan(300);
+      await h.ctx.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', b.id).execute();
+      await h.app.liveHub.pulse();
+      await until(() => sa.ended && sb.ended);
+      expect(sc.ended).toBe(false);
+      expect(h.app.liveHub.open.accounts.has(a.id) || h.app.liveHub.open.accounts.has(b.id)).toBe(false);
+      // Its EventSource reconnecting goes through the session's guard again.
+      expect((await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: signedOut })).status).toBe(401);
+      expect((await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: b.client.cookies })).status).toBe(401);
+      sc.close();
+      await until(() => h.app.liveHub.open.streams === 0);
+    });
+
     it('ends the streams of a cancelled release', async () => {
       const r = await release(h, f, { inMinutes: 30 });
       const a = await member(h, f, 1);
@@ -749,9 +794,20 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       await refused(other.id, { token });
       const { token: replaced } = await f.live.issueBoardLink(r.id, f.admin);
       await refused(r.id, { token });
+      // A stream open on the old link ends at the next pulse, without another event; the new link's stays open.
+      const sent = s.events.length;
+      await h.app.liveHub.pulse();
+      await until(() => s.ended);
+      expect(s.events.length).toBe(sent);
       expect((await c.post(`/api/v1/live/${r.id}/board`, { token: replaced })).statusCode).toBe(200);
+      const s2 = await openSse(base, `/api/v1/live/${r.id}/board/stream`, { method: 'POST', body: { token: replaced }, origin: ORIGIN });
+      await s2.next((e) => e.event === 'board');
+      await h.app.liveHub.pulse();
+      expect(s2.ended).toBe(false);
       await f.live.revokeBoardLink(r.id, f.admin);
       await refused(r.id, { token: replaced });
+      await h.app.liveHub.pulse();
+      await until(() => s2.ended);
       await expect(f.live.revokeBoardLink(r.id, f.admin)).rejects.toMatchObject({ code: 'LIVE_NO_BOARD_LINK' });
       expect(
         (await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', r.id).where('action', 'like', 'drop.live.board.%').orderBy('id').execute()).map((x) => [x.action, x.details]),
@@ -761,8 +817,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         ['drop.live.board.revoke', {}],
       ]);
       expect(JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', r.id).execute())).not.toContain(replaced);
-      s.close();
-      await until(() => h.app.liveHub.open.streams === 0);
+      expect(h.app.liveHub.open.streams).toBe(0);
     });
 
     it('closes once the release is over', async () => {

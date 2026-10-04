@@ -15,8 +15,9 @@
  * model's name, type and collection, the description), the photograph and the lookbook's link at `photo_at`, each NULL
  * one at the announcement, each never before the one it follows, all of them at the room's opening at the latest. No
  * surface returns a stage before its time: the cards and sheets, the banner, the .ics, the board, and the rule of access
- * (a model the rule names that is the release's own is « this model » until its name is revealed). The room's
- * snapshots and an account's entry name no stage at all.
+ * wherever it is said, a 403 LIVE_NOT_ELIGIBLE included (live.ts liveAccessRule: a model the rule names that is the
+ * release's own is « this model » until its name is revealed). The room's snapshots and an account's entry name no
+ * stage at all.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
  * the pieces left and held per size, the people in the room and in the line, the latest host message; and the board's
@@ -40,6 +41,7 @@ import {
   liveNotEligible,
   livePhase,
   liveRuleText,
+  liveStages,
   roomOpensAt,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
@@ -61,41 +63,8 @@ export const LIVE_CALENDAR_ALARM_MINUTES = 10;
 
 // ── The stages ─────────────────────────────────────────────────────────────
 
-/** When each stage is revealed, and whether it is at `now`. */
-export interface LiveStages {
-  silhouetteAt: Date;
-  nameAt: Date;
-  photoAt: Date;
-  silhouette: boolean;
-  name: boolean;
-  photo: boolean;
-}
-
-type StageRow = Pick<DropRow, 'announce_at' | 'published_at' | 'silhouette_at' | 'name_at' | 'photo_at' | 'opens_at' | 'room_opens_minutes'>;
-
-/**
- * The stages of an announced release (null before its publication): each at its time, a NULL one at the announcement,
- * none before the one it follows, every one at the room's opening at the latest.
- */
-export function liveStages(d: StageRow, now: Date): LiveStages | null {
-  const announced = announcedAt(d);
-  if (!announced) return null;
-  const a = announced.getTime();
-  const room = Math.max(a, roomOpensAt(d).getTime());
-  const at = (stage: Date | null, after: number) => Math.min(room, Math.max(after, stage ? new Date(stage).getTime() : a));
-  const silhouetteAt = at(d.silhouette_at, a);
-  const nameAt = at(d.name_at, silhouetteAt);
-  const photoAt = at(d.photo_at, nameAt);
-  const t = now.getTime();
-  return {
-    silhouetteAt: new Date(silhouetteAt),
-    nameAt: new Date(nameAt),
-    photoAt: new Date(photoAt),
-    silhouette: t >= silhouetteAt,
-    name: t >= nameAt,
-    photo: t >= photoAt,
-  };
-}
+/** The stages (services/live.ts, where the rule of access reads them too). */
+export { liveStages, type LiveStages } from './live.js';
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +193,11 @@ export interface LiveBoard {
 export interface LiveFrame {
   room: LiveRoom;
   board: LiveBoard;
+  /**
+   * The SHA-256 of the board link's secret as it stands now (null: revoked or never issued), for the hub to end a board
+   * stream opened with a link since replaced or revoked. Internal: never in `room` or `board`, never sent.
+   */
+  boardTokenHash: Uint8Array | null;
 }
 
 /** An account's standing in a release, as its state and stream are opened with it. */
@@ -435,7 +409,7 @@ export class LiveRoomService {
       this.db.selectFrom('live_entries').select('status').where('drop_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       accessOf(this.db, d, accountId, now),
     ]);
-    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d));
+    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now));
     if (purpose === 'stream' && entry?.status === 'REMOVED') throw streamRefused();
     return { dropId: id, access, entry: entry?.status ?? null };
   }
@@ -531,14 +505,15 @@ export class LiveRoomService {
         imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
       },
     };
-    return { room, board };
+    return { room, board, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null };
   }
 
   /**
    * The boutique board's release by its secret link: the release named, its link's secret matching the one issued and
-   * not revoked, announced and not over. Anything else, a missing or malformed secret included: one 404.
+   * not revoked, announced and not over. Anything else, a missing or malformed secret included: one 404. Its secret's
+   * hash (`tokenHash`) goes with its stream, which ends once the link is replaced or revoked (LiveFrame.boardTokenHash).
    */
-  async board(dropId: string, token: unknown): Promise<{ dropId: string }> {
+  async board(dropId: string, token: unknown): Promise<{ dropId: string; tokenHash: Uint8Array }> {
     const id = releaseId(dropId);
     const hash = liveBoardTokenHash(token);
     if (!hash) throw dropNotFound();
@@ -556,7 +531,27 @@ export class LiveRoomService {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
       if (!open) throw dropNotFound();
     }
-    return { dropId: id };
+    return { dropId: id, tokenHash: hash };
+  }
+
+  /**
+   * Which of these sessions (SessionInfo.id, the hex SHA-256 of the cookie's token) are still live sessions of an ACTIVE
+   * account at `now`, as sessionGuard would let them in: one read for every viewer stream of the process, so a stream
+   * opened before a sign-out, a revocation, a lock or a disabling ends at the next pulse.
+   */
+  async liveSessions(sessionIds: readonly string[]): Promise<Set<string>> {
+    const ids = [...new Set(sessionIds.filter((x) => /^[0-9a-f]{64}$/.test(x)))];
+    if (ids.length === 0) return new Set();
+    const rows = await this.db
+      .selectFrom('sessions as s')
+      .innerJoin('accounts as a', 'a.id', 's.subject_id')
+      .select('s.id_hash')
+      .where('s.id_hash', 'in', ids.map((x) => new Uint8Array(Buffer.from(x, 'hex'))))
+      .where('s.subject_type', '=', 'account')
+      .where('s.expires_at', '>', this.clock())
+      .where('a.status', '=', 'ACTIVE')
+      .execute();
+    return new Set(rows.map((r) => Buffer.from(r.id_hash).toString('hex')));
   }
 
   // ── The account ──────────────────────────────────────────────────────────
@@ -625,9 +620,7 @@ export class LiveRoomService {
 
   private async card(r: ReadRow, now: Date): Promise<LiveCard> {
     const stages = liveStages(r, now)!;
-    const rule = await liveAccessRule(this.db, r);
-    // A model the rule names that is the release's own would say its name before its stage.
-    if (!stages.name) rule.models = rule.models.map((m) => (m.id === r.model_id ? { id: m.id, name: 'this model' } : m));
+    const rule = await liveAccessRule(this.db, r, now);
     return {
       id: r.id,
       kind: 'LIVE',

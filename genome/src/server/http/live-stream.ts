@@ -15,7 +15,10 @@
  * polls when its stream is lost (`room`) shares the same frame, at most a pulse old. A frame that no longer exists (the
  * release cancelled) closes its streams; a release that is over sends its last frame, then closes them, and a stream
  * asked for again answers 204, which an EventSource takes as the end. An entry REMOVED sends its last `you` event and
- * closes that stream.
+ * closes that stream. A stream is checked again at every pulse, not only when it opens: a viewer's session that has
+ * ended (signed out, revoked, its account locked or disabled: one read for every viewer of the process) and a board
+ * whose link has been replaced or revoked since it opened (the frame carries the link's hash) close their streams,
+ * which then reconnect through the same checks as a new one.
  *
  * At most LIVE_STREAMS_PER_ACCOUNT (2) streams per account on a process (429 LIVE_STREAMS_LIMIT for a third: the page
  * then polls its state). A disconnection removes the stream at once; a client that does not read (more than
@@ -69,13 +72,22 @@ interface Stream {
 interface ViewerStream extends Stream {
   kind: 'viewer';
   accountId: string;
+  /** Its session (SessionInfo.id), checked at every pulse. */
+  sessionId: string;
 }
 
 interface BoardStream extends Stream {
   kind: 'board';
+  /** The SHA-256 of the link's secret it opened with, compared at every pulse with the release's current one. */
+  tokenHash: Uint8Array;
 }
 
 type AnyStream = ViewerStream | BoardStream;
+
+/** The same link's hash (not a secret: both sides are the server's own hashes). */
+function sameHash(a: Uint8Array, b: Uint8Array | null): boolean {
+  return b !== null && a.length === b.length && a.every((x, i) => x === b[i]);
+}
 
 export class LiveHub {
   private readonly room: LiveRoomService;
@@ -120,10 +132,11 @@ export class LiveHub {
   }
 
   /**
-   * Open a viewer's stream (the route has checked who may read the room): 429 LIVE_STREAMS_LIMIT past the account's
-   * streams; 204 when the release is over.
+   * Open a viewer's stream (the route has checked who may read the room), for as long as its session lives: 429
+   * LIVE_STREAMS_LIMIT past the account's streams; 204 when the release is over.
    */
-  async openViewer(request: FastifyRequest, reply: FastifyReply, dropId: string, accountId: string): Promise<void> {
+  async openViewer(request: FastifyRequest, reply: FastifyReply, dropId: string, viewer: { accountId: string; sessionId: string }): Promise<void> {
+    const { accountId, sessionId } = viewer;
     const held = this.accounts.get(accountId) ?? 0;
     if (held >= this.perAccount) throw liveStreamsLimit();
     this.accounts.set(accountId, held + 1);
@@ -135,7 +148,7 @@ export class LiveHub {
         return;
       }
       const views = await this.room.viewerEntries(dropId, [accountId]);
-      const stream: ViewerStream = { kind: 'viewer', dropId, accountId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
+      const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
       registered = true;
       this.deliver(stream, frame, views);
@@ -144,21 +157,22 @@ export class LiveHub {
     }
   }
 
-  /** Open a board's stream (the route has checked its link): 204 when the release is over. */
-  async openBoard(request: FastifyRequest, reply: FastifyReply, dropId: string): Promise<void> {
+  /** Open a board's stream (the route has checked its link, whose hash it keeps): 204 when the release is over. */
+  async openBoard(request: FastifyRequest, reply: FastifyReply, dropId: string, tokenHash: Uint8Array): Promise<void> {
     const frame = await this.frame(dropId, false);
     if (!frame || frame.room.over) {
       reply.code(204).send();
       return;
     }
-    const stream: BoardStream = { kind: 'board', dropId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
+    const stream: BoardStream = { kind: 'board', dropId, tokenHash, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
     this.register(stream);
     this.deliver(stream, frame, new Map());
   }
 
   /**
-   * One pulse: for each release followed, its frame built once and its viewers' entries read at once, each stream sent
-   * what changed for it; a heartbeat to the quiet ones. One pulse at a time.
+   * One pulse: the viewers whose session has ended closed; for each release followed, its frame built once and its
+   * viewers' entries read at once, its boards whose link has changed closed, each other stream sent what changed for
+   * it; a heartbeat to the quiet ones. One pulse at a time.
    */
   pulse(): Promise<void> {
     this.pulsing ??= this.runPulse().finally(() => {
@@ -178,14 +192,18 @@ export class LiveHub {
   // ── internals ────────────────────────────────────────────────────────────
 
   private async runPulse(): Promise<void> {
+    await this.endSignedOut();
     for (const [dropId, set] of [...this.streams]) {
       if (set.size === 0) continue;
+      // The streams opened while the frame is built were checked against the database by their route, after it.
+      const checked = new Set(set);
       try {
         const frame = await this.frame(dropId, true);
         if (!frame) {
           for (const s of [...set]) this.close(s);
           continue;
         }
+        for (const s of [...set]) if (s.kind === 'board' && checked.has(s) && !sameHash(s.tokenHash, frame.boardTokenHash)) this.close(s);
         const viewers = [...set].filter((s): s is ViewerStream => s.kind === 'viewer').map((s) => s.accountId);
         const views = await this.room.viewerEntries(dropId, [...new Set(viewers)]);
         for (const s of [...set]) this.deliver(s, frame, views);
@@ -197,6 +215,18 @@ export class LiveHub {
     const now = this.clock().getTime();
     for (const set of this.streams.values()) {
       for (const s of set) if (now - s.lastWrite >= this.heartbeatMs) this.write(s, ': still here\n\n');
+    }
+  }
+
+  /** Close the viewer streams whose session has ended (one read for all of them). */
+  private async endSignedOut(): Promise<void> {
+    const viewers = [...this.streams.values()].flatMap((set) => [...set]).filter((s): s is ViewerStream => s.kind === 'viewer');
+    if (viewers.length === 0) return;
+    try {
+      const live = await this.room.liveSessions(viewers.map((s) => s.sessionId));
+      for (const s of viewers) if (!live.has(s.sessionId)) this.close(s);
+    } catch (e) {
+      this.log.error({ err: { message: (e as Error)?.message } }, 'live stream: the viewers\' sessions could not be read');
     }
   }
 
