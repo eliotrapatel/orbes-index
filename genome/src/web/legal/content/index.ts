@@ -18,11 +18,15 @@ import type { Lang, LegalDocument } from './types.js';
 export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } from './types.js';
 
 /**
- * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment
- * (deployment A of the plan of 2026-10-03: the releases of P-R03 and their early access, P-X02, in the terms, article
- * 12; the owners' circle, P-X01, article 13; the tiers' benefits, P-X04; and the privacy policy).
+ * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment, and a
+ * date already published never changes. 2026-10-04 was deployment A of the plan of 2026-10-03 (the releases, their
+ * early access, the circle, the tiers' benefits). 2026-10-05 is the one version of deployment B+C (stages B and C
+ * combined): the terms' article 4 (a model discontinued, P-R06), article 11 (ORBES Care, P-M02), article 12 (the
+ * private salon, P-X08) and articles 1, 2, 3, 14 and 15; the privacy policy's requests of the private salon, ORBES
+ * Care's page and the sound preference kept on the device (P-D07); the FAQ's sound. The next date, since 2026-10-04 is
+ * A's: B+C is deployed on that day (docs/launch/DEPLOY-POTENTIEL-2026-10.md §0, rule 7).
  */
-export const LEGAL_VERSION = '2026-10-04';
+export const LEGAL_VERSION = '2026-10-05';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

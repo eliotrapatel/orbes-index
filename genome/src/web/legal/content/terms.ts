@@ -20,14 +20,14 @@ import type { LegalDocument } from './types.js';
 
 const EN: LegalDocument = {
   title: 'Terms of use',
-  summary: "The rules of the verification service and of the ORBES account: what a result says, registration, transfer, loss and theft, the warranty, the releases, the owners' circle.",
+  summary: "The rules of the verification service and of the ORBES account: what a result says, registration, transfer, loss and theft, the warranty and ORBES Care, the releases and the private salon, the owners' circle.",
   intro: [],
   sections: [
     {
       id: 'article-1',
       title: 'Article 1 — Purpose',
       blocks: [
-        "These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, and the owners' circle.",
+        "These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the requests of the private salon, and the owners' circle. MY PIECES also presents ORBES Care (article 11).",
         'The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.',
       ],
     },
@@ -35,14 +35,14 @@ const EN: LegalDocument = {
       id: 'article-2',
       title: 'Article 2 — Definitions',
       blocks: [
-        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).\n- **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).\n- **Owners\' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 13).\n- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).',
+        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).\n- **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).\n- **Private salon**: the models ORBES reserves for the owners of a piece, each from a tier, shown with an indicative price, which an account may request (article 12).\n- **Owners\' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 13).\n- **ORBES Care**: the care subscription ORBES presents in MY PIECES (article 11).\n- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).',
       ],
     },
     {
       id: 'article-3',
       title: 'Article 3 — Access to the service',
       blocks: [
-        "Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and, for the owners of a piece, to read the owners' circle.",
+        "Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and, for the owners of a piece, to read the owners' circle and to request the models of the private salon.",
         'ORBES endeavours to keep the service available, without committing to it: it may be interrupted, in particular for maintenance. ORBES has its pieces verified only at theorbes.com/verify, which leads to verify.theorbes.com. Another address, or a code printed beside the piece, does not come from ORBES.',
       ],
     },
@@ -55,6 +55,7 @@ const EN: LegalDocument = {
         '**UNUSUAL ACTIVITY DETECTED is a request for review, never a verdict.** This result asks you to contact ORBES Client Services before relying on the piece. It accuses neither the piece nor its holder.',
         '**Hardware checks.** No hardware check (secure NFC chip, secure element, seal) is available yet. A piece designed to carry one is verified on its code alone, and the result says so.',
         '**Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. A verification then reads REVOKED (UNUSUAL ACTIVITY DETECTED when the code read, or its ORBES GENOME, does not match what ORBES issued).',
+        '**Discontinued model.** ORBES may discontinue a model, and reinstate it. The pieces of a discontinued model verify as before: an AUTHENTIC result, the page of the model and the ownership certificate of its pieces then say DISCONTINUED and the year. No new piece is issued with a discontinued model.',
         '**Registration is not a title of ownership.** The ORBES registry states the account to which a piece is registered. It is not a title of ownership and replaces neither an invoice nor a deed of sale. The ownership of a piece is proven under the rules of the applicable law.',
       ],
     },
@@ -129,11 +130,12 @@ const EN: LegalDocument = {
         "**Start.** The ORBES warranty starts when ORBES, or an authorised retailer listed in the ORBES register of points of sale, activates it, on the date of purchase, for the length set for the category of the piece. In a boutique, the seller activates the warranty within 10 minutes of their scan of the piece, on the day's date and in the country of the point of sale.",
         '**Follow-up.** The service shows the status of the warranty of each piece. The warranty stays with the piece when it changes hands.',
         'The statutory guarantees remain due in every case.',
+        "**ORBES Care.** MY PIECES presents ORBES Care, a care subscription for your pieces: an annual care service by the ORBES atelier, priority repair and an extended warranty. ORBES Care is not on sale until SUBSCRIBE appears in MY PIECES. Once open, the subscription is taken out on a third-party page (Whop), under that page's own terms: the service takes no payment, and sends that page nothing about your account or your pieces.",
       ],
     },
     {
       id: 'article-12',
-      title: 'Article 12 — Releases',
+      title: 'Article 12 — Releases and the private salon',
       blocks: [
         'ORBES may offer a model in a limited number of pieces in a release, announced on the service (THE RELEASES) with its number of pieces, the dates of its entries and the rule of its draw. ORBES may cancel a release until its draw.',
         '**Entering.** Any ORBES account may enter a release while its entries are open, whether or not pieces are registered to it. Entering is free and obliges you to nothing. An account enters a release once: it may withdraw its entry until the draw, and enter again, under the same entry, while entries are open. One entry per person: ORBES Client Services may decline to conclude the sale of a second account of the same person.',
@@ -143,6 +145,7 @@ const EN: LegalDocument = {
         '**The draw.** After its entries close, ORBES runs the draw of a release once. It ranks the entries by the tier of their account, then by its seniority, both read at the time of the draw, then by the SHA-256 of a seed of 32 bytes followed by the identifier of the entry, in increasing order. The seed is drawn when the release is created, and its fingerprint is published with the release. The seed itself is published after the draw, with the identifier, the tier, the seniority and the rank of each entry, never its account: anyone can check the order. MY PIECES shows each account the identifier of its entry.',
         '**Place held.** The first ranks, as many as there are pieces left after the direct reservations of the early access, are selected; the next are on the waiting list, in their order. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. The service sends no email: MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.',
         '**No obligation.** A place held obliges you to nothing: ORBES Client Services concludes each sale with you, outside the service. Once its time has passed, a place that has not been concluded lapses, and ORBES may offer it to the next entry on the waiting list.',
+        "**The private salon.** ORBES may reserve models for the owners of a piece (THE PRIVATE SALON). Each model is shown, with an indicative price, to the signed-in accounts whose tier reaches the one ORBES sets for it (TITANE, PLATINE or PALLADIUM); below that tier, it is not shown. From the page of a model, an account may request it, with an optional note of at most 500 characters. A request obliges neither the account nor ORBES and creates no contract: ORBES Client Services contacts the account and concludes any sale with it, outside the service. Nothing is paid on the service, and it sends no email. An account holds one open request per model; once ORBES Client Services has closed it, with a note of what was done, the account may request the model again. Neither your note nor that of ORBES Client Services is written to the service's audit log.",
       ],
     },
     {
@@ -162,14 +165,14 @@ const EN: LegalDocument = {
       title: 'Article 14 — Locking an account',
       blocks: [
         'ORBES Client Services may lock an ORBES account.',
-        "The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.",
+        "The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), closes its open requests in the private salon (article 12), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.",
       ],
     },
     {
       id: 'article-15',
       title: 'Article 15 — Personal data',
       blocks: [
-        'ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, answers and votes in the circle) as its [privacy policy](/legal/privacy) describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account.',
+        'ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, answers and votes in the circle, requests in the private salon) as its [privacy policy](/legal/privacy) describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy.',
       ],
     },
     {
@@ -198,14 +201,14 @@ const EN: LegalDocument = {
 
 const FR: LegalDocument = {
   title: "Conditions générales d'utilisation",
-  summary: "Les règles du service de vérification et du compte ORBES : ce que dit un résultat, l'enregistrement, le transfert, la perte et le vol, la garantie, les sorties, le cercle des propriétaires.",
+  summary: "Les règles du service de vérification et du compte ORBES : ce que dit un résultat, l'enregistrement, le transfert, la perte et le vol, la garantie et ORBES Care, les sorties et le salon privé, le cercle des propriétaires.",
   intro: [],
   sections: [
     {
       id: 'article-1',
       title: 'Article 1 — Objet',
       blocks: [
-        "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, et le cercle des propriétaires.",
+        "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les demandes du salon privé, et le cercle des propriétaires. MY PIECES présente aussi ORBES Care (article 11).",
         "Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.",
       ],
     },
@@ -213,14 +216,14 @@ const FR: LegalDocument = {
       id: 'article-2',
       title: 'Article 2 — Définitions',
       blocks: [
-        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).\n- **Palier** : TITANE, PLATINE ou PALLADIUM, le rang d'un compte selon le nombre de pièces qui y sont enregistrées (article 12).\n- **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 13).\n- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).",
+        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).\n- **Palier** : TITANE, PLATINE ou PALLADIUM, le rang d'un compte selon le nombre de pièces qui y sont enregistrées (article 12).\n- **Salon privé** : les modèles qu'ORBES réserve aux propriétaires d'une pièce, chacun à partir d'un palier, présentés avec un prix indicatif, qu'un compte peut demander (article 12).\n- **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 13).\n- **ORBES Care** : l'abonnement d'entretien qu'ORBES présente dans MY PIECES (article 11).\n- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).",
       ],
     },
     {
       id: 'article-3',
       title: 'Article 3 — Accès au service',
       blocks: [
-        "La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires.",
+        "La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires et à demander les modèles du salon privé.",
         "ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut être interrompu, notamment pour maintenance. ORBES ne fait vérifier ses pièces qu'à l'adresse theorbes.com/verify, qui mène à verify.theorbes.com. Une autre adresse, ou un code imprimé à côté de la pièce, ne vient pas d'ORBES.",
       ],
     },
@@ -233,6 +236,7 @@ const FR: LegalDocument = {
         "**UNUSUAL ACTIVITY DETECTED est une demande d'examen, jamais un verdict.** Ce résultat invite à contacter ORBES Client Services avant de se fier à la pièce. Il n'accuse ni la pièce ni son détenteur.",
         "**Contrôles matériels.** Aucun contrôle matériel (puce NFC sécurisée, élément sécurisé, scellé) n'est encore disponible. Une pièce conçue pour en recevoir un est vérifiée sur son seul code, et le résultat le précise.",
         "**Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Une vérification affiche alors REVOKED (UNUSUAL ACTIVITY DETECTED quand le code lu, ou son ORBES GENOME, ne correspond pas à ce qu'ORBES a émis).",
+        "**Modèle arrêté.** ORBES peut arrêter un modèle, puis le rétablir. Les pièces d'un modèle arrêté se vérifient comme avant : un résultat AUTHENTIC, la fiche du modèle et le certificat de propriété de ses pièces indiquent alors DISCONTINUED et l'année. Aucune nouvelle pièce n'est émise avec un modèle arrêté.",
         "**L'enregistrement n'est pas un titre de propriété.** Le registre ORBES indique le compte auquel une pièce est enregistrée. Il ne vaut pas titre de propriété et ne remplace ni une facture ni un acte de vente. La propriété d'une pièce se prouve selon les règles du droit applicable.",
       ],
     },
@@ -307,11 +311,12 @@ const FR: LegalDocument = {
         "**Début.** La garantie ORBES commence à son activation par ORBES ou par un détaillant agréé inscrit au registre des points de vente d'ORBES, à la date d'achat, pour la durée prévue pour la catégorie de la pièce. En boutique, le vendeur active la garantie dans les 10 minutes qui suivent son scan de la pièce, à la date du jour et au pays du point de vente.",
         "**Suivi.** Le service affiche l'état de la garantie de chaque pièce. La garantie reste attachée à la pièce quand celle-ci change de propriétaire.",
         'Les garanties légales restent dues dans tous les cas.',
+        "**ORBES Care.** MY PIECES présente ORBES Care, un abonnement d'entretien de vos pièces : un entretien annuel par l'atelier ORBES, une réparation prioritaire et une garantie prolongée. ORBES Care n'est pas en vente tant que SUBSCRIBE n'apparaît pas dans MY PIECES. Une fois ouvert, l'abonnement se souscrit sur une page tierce (Whop), selon les conditions propres à cette page : le service n'encaisse aucun paiement, et ne transmet à cette page rien de votre compte ni de vos pièces.",
       ],
     },
     {
       id: 'article-12',
-      title: 'Article 12 — Sorties',
+      title: 'Article 12 — Sorties et salon privé',
       blocks: [
         "ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie, annoncée sur le service (THE RELEASES) avec son nombre de pièces, les dates de ses inscriptions et la règle de son tirage. ORBES peut annuler une sortie tant que son tirage n'a pas eu lieu.",
         "**Inscription.** Tout compte ORBES peut s'inscrire à une sortie pendant que ses inscriptions sont ouvertes, que des pièces y soient enregistrées ou non. L'inscription est gratuite et ne vous oblige à rien. Un compte s'inscrit une fois à une sortie : il peut retirer son inscription jusqu'au tirage, et s'inscrire de nouveau, sous la même inscription, tant que les inscriptions sont ouvertes. Une inscription par personne : ORBES Client Services peut refuser de conclure la vente d'un second compte de la même personne.",
@@ -321,6 +326,7 @@ const FR: LegalDocument = {
         "**Tirage.** Après la clôture de ses inscriptions, ORBES procède au tirage d'une sortie, une seule fois. Il classe les inscriptions selon le palier de leur compte, puis selon son ancienneté, tous deux lus au moment du tirage, puis selon le SHA-256 d'une graine de 32 octets suivie de l'identifiant de l'inscription, par ordre croissant. La graine est tirée à la création de la sortie, et son empreinte est publiée avec la sortie. La graine elle-même est publiée après le tirage, avec l'identifiant, le palier, l'ancienneté et le rang de chaque inscription, jamais son compte : chacun peut vérifier l'ordre. MY PIECES montre à chaque compte l'identifiant de son inscription.",
         "**Place réservée.** Les premiers rangs, autant qu'il reste de pièces après les réservations directes de l'accès anticipé, sont sélectionnés ; les suivants sont sur la liste d'attente, dans leur ordre. Quand moins de comptes s'inscrivent qu'il n'y a de pièces, toutes les inscriptions sont sélectionnées. La place d'une inscription sélectionnée est réservée pendant la durée que fixe sa sortie, 48 heures sauf mention contraire. Le service n'envoie aucun e-mail : MY PIECES montre le statut de chaque inscription, et ORBES Client Services contacte les comptes sélectionnés.",
         "**Aucune obligation.** Une place réservée ne vous oblige à rien : ORBES Client Services conclut chaque vente avec vous, hors du service. Passé son délai, une place qui n'a pas été conclue expire, et ORBES peut la proposer à l'inscription suivante de la liste d'attente.",
+        "**Le salon privé.** ORBES peut réserver des modèles aux propriétaires d'une pièce (THE PRIVATE SALON). Chaque modèle est présenté, avec un prix indicatif, aux comptes connectés dont le palier atteint celui qu'ORBES fixe pour lui (TITANE, PLATINE ou PALLADIUM) ; au-dessous de ce palier, il n'est pas présenté. Depuis la fiche d'un modèle, un compte peut le demander, avec une note facultative de 500 caractères au plus. Une demande n'engage ni le compte ni ORBES et ne forme aucun contrat : ORBES Client Services contacte le compte et conclut avec lui toute vente, hors du service. Rien n'est payé sur le service, et il n'envoie aucun e-mail. Un compte a une seule demande ouverte par modèle ; une fois qu'ORBES Client Services l'a close, avec une note de ce qui a été fait, le compte peut demander le modèle de nouveau. Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service.",
       ],
     },
     {
@@ -340,14 +346,14 @@ const FR: LegalDocument = {
       title: 'Article 14 — Verrouillage du compte',
       blocks: [
         'ORBES Client Services peut verrouiller un compte ORBES.',
-        "Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.",
+        "Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), clôt ses demandes ouvertes du salon privé (article 12), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.",
       ],
     },
     {
       id: 'article-15',
       title: 'Article 15 — Données personnelles',
       blocks: [
-        'ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, réponses et votes du cercle) comme le décrit sa [politique de confidentialité](/legal/privacy). Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte.',
+        'ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, réponses et votes du cercle, demandes du salon privé) comme le décrit sa [politique de confidentialité](/legal/privacy). Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie.',
       ],
     },
     {

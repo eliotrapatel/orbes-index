@@ -8,10 +8,11 @@
  *    gives the line where it is now), every constant the rules lean on
  *    holding what the rule says (the statuses that end a certificate, those
  *    that allow a transfer, the tiers of the club and the statuses they leave
- *    out, the early access of the releases and the hosts of the circle's
- *    links), and every absence of §10 (no email, no reset link, no undoing
- *    an accepted transfer, no account deletion, no age check, no vote of the
- *    circle in the audit log) holding in the code;
+ *    out, the early access of the releases, the hosts of the circle's links,
+ *    and the private salon's note, price and tiers, P-X08), and every absence
+ *    of §10 (no email, no reset link, no undoing an accepted transfer, no
+ *    account deletion, no age check, no vote of the circle and no note of the
+ *    private salon in the audit log) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -44,6 +45,7 @@ import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces, tierName } from '../../src/server/services/club.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import { normalizeMinTier, PRICE_LABEL_MAX } from '../../src/server/services/lookbook.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
   CERTIFICATE_ENDING_STATUSES,
@@ -59,6 +61,7 @@ import {
   TRANSFERABLE_STATUSES,
 } from '../../src/server/services/ownership.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
+import { normalizeShopNote, SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { ASSURANCE_NOTE, LEGAL as LEGAL_COPY, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
@@ -315,6 +318,29 @@ const CONSTANTS: Record<string, ConstantSpec> = {
       for (const host of CIRCLE_LINK_HOSTS) expect(rule).toContain(host);
     },
   },
+  PRICE_LABEL_MAX: {
+    // R86: the price of a model of the private salon, the console's words (P-X08); the terms say "indicative", not its length.
+    value: `${PRICE_LABEL_MAX} caractères`,
+    holds: () => {
+      expect(PRICE_LABEL_MAX).toBe(60);
+      // R85: the tier a model of the salon is shown from is TITANE, PLATINE or PALLADIUM (1 to 3), nothing else.
+      expect([1, 2, 3].map((t) => normalizeMinTier(t))).toEqual([1, 2, 3]);
+      for (const t of [0, 4, 1.5, '2']) expect(() => normalizeMinTier(t), String(t)).toThrow();
+      expect(CLUB_TIER_NAMES).toHaveLength(3);
+    },
+  },
+  SHOP_NOTE_MAX: {
+    // R87: the account's note on a request of the private salon, optional (P-X08).
+    value: `${SHOP_NOTE_MAX} caractères`,
+    fr: [`${SHOP_NOTE_MAX} caractères`],
+    en: [`${SHOP_NOTE_MAX} characters`],
+    holds: () => {
+      expect(SHOP_NOTE_MAX).toBe(500);
+      expect(normalizeShopNote('   ')).toBeNull();
+      expect(normalizeShopNote('x'.repeat(SHOP_NOTE_MAX))).toHaveLength(SHOP_NOTE_MAX);
+      expect(() => normalizeShopNote('x'.repeat(SHOP_NOTE_MAX + 1))).toThrow();
+    },
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -348,6 +374,15 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'external links on the allowed hosts only (P-X01)': 'if (!CIRCLE_LINK_HOSTS.some((h) => host === h',
   'the export lists the answers and votes (P-X01)': 'circleVotes: circle.votes,',
   'the tiers\' words set from the console, the thresholds never (P-X04)': "app.patch('/api/admin/club/tiers/:tier'",
+  'the reserved models shown from their tier, 404 below (P-X08)': "if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();",
+  'the price of the salon, a text of the console (P-X08)': 'if (s.length > PRICE_LABEL_MAX) throw validationError(',
+  'a request on demand, concluded by ORBES Client Services, no payment and no email (P-X08)': ".insertInto('shop_requests')",
+  'one open request per account and model (P-X08)': "if (isUniqueViolation(e, 'shop_requests_one_open')) throw shopRequestOpen();",
+  'the console closes a request with a note (P-X08)': "if (words === null) throw validationError('Say in the note what was done for the client.');",
+  'the export lists the requests (P-X08)': 'shopRequests,',
+  'the lock closes the open requests, before the transfers are cancelled (P-X08)': 'closeAccountShopRequests(tx, account.id, actor, now)',
+  'a discontinued model\'s pieces verify as before, said DISCONTINUED with the year (P-R06)': 'discontinuedYear: reg.modelDiscontinuedAt.getUTCFullYear()',
+  'SUBSCRIBE of ORBES Care only once its address is published (P-M02)': "field('CARE_SUBSCRIBE_URL', zHttpsLink, e.CARE_SUBSCRIBE_URL) ?? null",
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -416,6 +451,19 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(vote).toContain("insertInto('circle_poll_votes')");
     expect(vote).not.toMatch(/audit/);
     expect(matches(/action:\s*'([a-z.]*vote[a-z._]*)'/g).map((m) => m.match[1])).toEqual([]);
+  },
+  N7: () => {
+    // The private salon (P-X08) audits a request and its closing with the model alone (and a lock's reason): never a note.
+    const salon = readDoc('genome/src/server/services/salon.ts');
+    const records = [...salon.matchAll(/audit\.record\(\{[^\n]*\}, tx\)/g)].map((m) => m[0]);
+    expect(records).toHaveLength(3);
+    for (const r of records) {
+      expect(r).toMatch(/action: 'shop\.request(?:\.close)?'/);
+      expect(r).toMatch(/details: \{ modelId(?:: [\w.]+)?(?:, reason)? \}/);
+      expect(r).not.toMatch(/note|words|resolution/i);
+    }
+    // No other audit entry of the salon: every write of shop_requests is in services/salon.ts.
+    expect(matches(/'shop\.request[a-z.]*'/g).every((m) => m.file === join('src', 'server', 'services', 'salon.ts'))).toBe(true);
   },
 };
 

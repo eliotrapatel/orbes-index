@@ -41,6 +41,21 @@
  *    computed from ownership at each request (services/club.ts tierOf), not
  *    stored but with an entry; the tiers' words (club_tiers, P-X04) are
  *    staff text, nothing personal;
+ *  - the private salon (P-X08, services/salon.ts): a request (the account,
+ *    the model, the account's optional note of at most SHOP_NOTE_MAX = 500
+ *    characters, OPEN or CLOSED, its times, and ORBES Client Services'
+ *    closing note); read by staff with the email, masked for an AUDITOR;
+ *    audited `shop.request` and `shop.request.close` with the model only,
+ *    never a note; kept with the account (no purge), exported with it
+ *    (AccountExport.shopRequests), and closed when the account is locked;
+ *  - ORBES Care (P-M02): SUBSCRIBE, once CARE_SUBSCRIBE_URL is set, opens a
+ *    third-party page (Whop) in a new tab, rel="noopener noreferrer": the
+ *    service sends it neither the account nor the piece;
+ *  - the sound signature (P-D07, shared/prefs.ts): the one preference the
+ *    verify app keeps on the device, in local storage, under SOUND_PREF_KEY
+ *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
+ *    ON; no expiry, never sent to ORBES. The ceremony's share image (P-D01)
+ *    is drawn on the device and sent nowhere by ORBES: nothing to declare;
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com.
  *
@@ -101,6 +116,7 @@ const EN: LegalDocument = {
         'ORBES records what is done with your account: the pieces registered to it and since when, the transfers, the reports of loss or theft, the links to ownership certificates (of each link, only a fingerprint), and the recovery codes ORBES Client Services gives you (only as a hash).',
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
+        'In MY PIECES, SUBSCRIBE of ORBES Care, once ORBES publishes it, opens a third-party page (Whop) in a new tab. That page collects its own data under its own policy; the service sends it neither your account nor your piece.',
       ],
     },
     {
@@ -125,6 +141,15 @@ const EN: LegalDocument = {
       ],
     },
     {
+      id: 'salon',
+      title: 'Your requests in the private salon',
+      blocks: [
+        'In the private salon, the owner of a piece may request a model ORBES reserves for the owners. ORBES then records the request: the account, the model requested, the note you may write (at most 500 characters), whether it is open or closed, when it was made and when it was closed, and the note ORBES Client Services writes when it closes it. ORBES processes these data to answer the request you make, under the [terms of use](/legal/terms).',
+        "ORBES Client Services reads the requests with the email address of their account, to contact you and conclude the sale, outside the service; a staff member with read-only access sees it masked. The service sends no email and takes no payment. Neither your note nor that of ORBES Client Services is written to the service's audit log, which records a request with the model and your account's identifier only.",
+        'A request is kept with your account, open or closed, and is in the copy of your data. When ORBES Client Services locks an account, its open requests are closed.',
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -134,6 +159,7 @@ const EN: LegalDocument = {
           '- **__Host-orbes_session**: your session once you sign in to your ORBES account, 30 days at most; it ends when you sign out.',
           '- **__Host-orbes_admin**: the session of ORBES staff in the ORBES console.',
         ].join('\n'),
+        "The verification app also keeps one preference on your device, in your browser's local storage, under the key **orbes.sound**: the value off, written only when you press SOUND OFF at the foot of the app's first page; pressing SOUND ON again removes it. It has no expiry, is never sent to ORBES, and is cleared with the site's data in your browser.",
       ],
     },
     {
@@ -163,6 +189,7 @@ const EN: LegalDocument = {
           '- **Your account and what it records**: as long as the account exists. The service does not yet let you delete your account: ask ORBES Client Services.',
           '- **Entries and reservations in releases**: as long as the account exists. What the draw publishes (the identifier, tier, seniority and rank of each entry) stays on the page of the release.',
           "- **Answers to the circle's invitations and votes in its polls**: as long as the account exists. The daily count of the circle's visits names no one, and is kept.",
+          '- **Requests in the private salon**, with their notes: as long as the account exists, open or closed.',
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
           '- **The audit log**: permanent; it names accounts by their identifier only.',
           '- **The device cookie**: 2 years on your device.',
@@ -243,6 +270,7 @@ const FR: LegalDocument = {
         "ORBES enregistre ce qui est fait avec votre compte : les pièces qui y sont enregistrées et depuis quand, les transferts, les déclarations de perte ou de vol, les liens vers des certificats de propriété (de chaque lien, une empreinte seulement), et les codes de récupération que vous remet ORBES Client Services (sous forme d'empreinte seulement).",
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
+        "Dans MY PIECES, SUBSCRIBE d'ORBES Care, une fois qu'ORBES le publie, ouvre une page tierce (Whop) dans un nouvel onglet. Cette page collecte ses propres données selon sa propre politique ; le service ne lui transmet ni votre compte ni votre pièce.",
       ],
     },
     {
@@ -267,6 +295,15 @@ const FR: LegalDocument = {
       ],
     },
     {
+      id: 'salon',
+      title: 'Vos demandes au salon privé',
+      blocks: [
+        "Dans le salon privé, le propriétaire d'une pièce peut demander un modèle qu'ORBES réserve aux propriétaires. ORBES enregistre alors la demande : le compte, le modèle demandé, la note que vous pouvez écrire (500 caractères au plus), si elle est ouverte ou close, quand elle a été faite et quand elle a été close, et la note qu'ORBES Client Services écrit en la clôturant. ORBES traite ces données pour répondre à la demande que vous faites, selon les [conditions générales d'utilisation](/legal/terms).",
+        "ORBES Client Services lit les demandes avec l'adresse e-mail de leur compte, pour vous contacter et conclure la vente, hors du service ; un membre du personnel en lecture seule la voit masquée. Le service n'envoie aucun e-mail et n'encaisse aucun paiement. Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service, qui n'enregistre d'une demande que le modèle et l'identifiant de votre compte.",
+        "Une demande est conservée avec votre compte, ouverte ou close, et figure dans la copie de vos données. Quand ORBES Client Services verrouille un compte, ses demandes ouvertes sont closes.",
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -276,6 +313,7 @@ const FR: LegalDocument = {
           '- **__Host-orbes_session** : votre session une fois connecté à votre compte ORBES, 30 jours au plus ; elle prend fin quand vous vous déconnectez.',
           "- **__Host-orbes_admin** : la session du personnel d'ORBES dans la console ORBES.",
         ].join('\n'),
+        "L'application de vérification garde aussi une préférence sur votre appareil, dans le stockage local de votre navigateur, sous la clé **orbes.sound** : la valeur off, écrite seulement quand vous appuyez sur SOUND OFF au pied de la première page de l'application ; appuyer de nouveau sur SOUND ON l'efface. Elle n'expire pas, n'est jamais envoyée à ORBES, et s'efface avec les données du site dans votre navigateur.",
       ],
     },
     {
@@ -305,6 +343,7 @@ const FR: LegalDocument = {
           "- **Votre compte et ce qu'il enregistre** : tant que le compte existe. Le service ne permet pas encore de supprimer votre compte : adressez-vous à ORBES Client Services.",
           "- **Inscriptions et réservations aux sorties** : tant que le compte existe. Ce que publie le tirage (l'identifiant, le palier, l'ancienneté et le rang de chaque inscription) reste sur la page de la sortie.",
           '- **Réponses aux invitations du cercle et votes de ses sondages** : tant que le compte existe. Le compte quotidien des visites du cercle ne désigne personne, et il est conservé.',
+          '- **Demandes au salon privé**, avec leurs notes : tant que le compte existe, ouvertes ou closes.',
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",
           "- **Journal d'audit** : permanent ; il ne désigne les comptes que par leur identifiant.",
           "- **Cookie d'appareil** : 2 ans sur votre appareil.",

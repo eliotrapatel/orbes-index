@@ -1,8 +1,9 @@
 /**
  * The FAQ (J-06), in English and French: what a result proves, UNUSUAL
  * ACTIVITY DETECTED, buying a piece second-hand, a lost claim code, the
- * transfer, a loss or a theft, a forgotten password, and the data a
- * verification records. Written from the code and from the copy the
+ * transfer, a loss or a theft, a forgotten password, the data a
+ * verification records, and the sound an authentic result plays (P-D07,
+ * SOUND ON / OFF, verify/sound.ts). Written from the code and from the copy the
  * customer already reads (verify/copy.ts, the packaging kit), held to both
  * by test/web/legal.content.test.ts: every duration and limit equals its
  * constant, and the second-hand answer opens with the very sentence /verify
@@ -89,6 +90,13 @@ const EN: LegalDocument = {
         'The [privacy policy](/legal/privacy) says what is recorded, why, for how long, and your rights.',
       ],
     },
+    {
+      id: 'sound',
+      title: 'Why does my phone play a sound?',
+      blocks: [
+        "An AUTHENTIC result plays one soft chord, about a second long; no other result does. SOUND ON / OFF, at the foot of the app's first page, turns it off on this device, which keeps the choice. On an iPhone, the silent switch silences it too.",
+      ],
+    },
   ],
 };
 
@@ -163,6 +171,13 @@ const FR: LegalDocument = {
       blocks: [
         "Le code lu, le résultat et l'heure ; une localisation approximative (le pays, à 10 km environ) ; la famille de votre navigateur ; des pseudonymes de votre adresse IP et d'un cookie d'appareil, jamais l'adresse elle-même ; et, quand vous êtes connecté, votre compte. L'image de la caméra ou de votre photo est lue sur votre appareil et n'est jamais envoyée.",
         'La [politique de confidentialité](/legal/privacy) dit ce qui est enregistré, pourquoi, combien de temps, et vos droits.',
+      ],
+    },
+    {
+      id: 'sound',
+      title: 'Pourquoi mon téléphone joue-t-il un son ?',
+      blocks: [
+        "Un résultat AUTHENTIC joue un accord doux, d'une seconde environ ; aucun autre résultat n'en joue. SOUND ON / OFF, au pied de la première page de l'application, le coupe sur cet appareil, qui garde ce choix. Sur un iPhone, le mode silencieux le coupe aussi.",
       ],
     },
   ],

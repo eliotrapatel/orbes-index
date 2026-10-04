@@ -263,6 +263,14 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 Each is optional. While neither an email nor a phone is set, the verification app shows no contact at all (the help sentence asking the customer to quote the reference stays). The contact appears on every caution and void result and in the WARRANTY tab of a warranty that no longer applies. Values are public once served; `redactConfig` still logs only `[set]`. Browsers may keep the details for 5 minutes (`Cache-Control: public, max-age=300`). On the VPS (`deploy/vps/.env`), quote a value that contains ` #`.
 
+**ORBES Care** (P-M02; served by `GET /api/v1/client-services`, API §8.4)
+
+| Variable | Default | Rules |
+|---|---|---|
+| `CARE_SUBSCRIBE_URL` | unset | Optional: where SUBSCRIBE of ORBES Care leads, from the CARE tab of MY PIECES, opened in a new tab. An `https://` address with a host, no credentials (`user:pass@`) and no spaces, at most 2 048 characters (`config.careSubscribeUrl`; anything else stops the server at startup). Served publicly as `careSubscribeUrl` (5-minute cache). Unset, the tab reads *Subscriptions open soon.*, with nothing to press. |
+
+It stays empty until the ORBES Care subscription opens (on Whop): no deployment needs it. `deploy/vps/compose.yaml` passes it to the app as `${CARE_SUBSCRIBE_URL:-}`, so a line missing from `deploy/vps/.env` is the same as empty. The startup log shows it as `[set]` only (`redactConfig`), and production prints no warning about it, set or not. Setting it later is a change of `deploy/vps/.env` and a recreation of the app, with no migration: check the value with `docker compose run --rm --no-deps -T app node --import tsx scripts/db.ts status` (a malformed one reads `Invalid configuration:` and the variable), then `scripts/deploy.sh`, which reuses the running image and recreates the app with the new environment.
+
 **Ownership transfers** (F-03, API §11.3)
 
 | Variable | Default | Rules |
@@ -1297,7 +1305,7 @@ docker image rm orbes-genome:<tag>         # one old tag at a time
 
 Never run `docker image prune`, `docker system prune` or `docker volume prune` on the shared host. A bare `docker image prune` deletes the dangling images of the other stacks on the same Docker daemon, and does not even remove old `orbes-genome` tags. With `-a` or `--volumes`, and the stack stopped, they delete the rollback images, the database and the signing keys (COMPLIANCE §7, house rules).
 
-**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md); the « Potentiel » lot of 2026-10-03, deployments A, B and C with migrations `0014`–`0020`, has its own: [DEPLOY-POTENTIEL-2026-10](launch/DEPLOY-POTENTIEL-2026-10.md)):
+**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md); the « Potentiel » lot of 2026-10-03, deployment A with migrations `0014`–`0018` (done on 2026-10-04) and deployment B+C (stages B and C combined) with `0019` and `0020`, has its own: [DEPLOY-POTENTIEL-2026-10](launch/DEPLOY-POTENTIEL-2026-10.md)):
 
 1. Not between 03:00 and 05:30 UTC (the nightly backups of the host). Tell the host owner first.
 2. Check `.env`: `RESTORE_ALLOWED=false` (add the line if it is missing; deployment 2 adds it), and nothing exported in the shell (`env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='` prints nothing).

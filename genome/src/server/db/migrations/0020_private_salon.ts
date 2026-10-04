@@ -1,5 +1,5 @@
 /**
- * 0020 — the private salon (P-X08; API §10.9, §16.20; DATABASE §5.3 and §5.32): the lookbook's RESERVED models, each
+ * 0020 — the private salon (P-X08; API §10.9, §16.22; DATABASE §5.3 and §5.37): the lookbook's RESERVED models, each
  * with a price shown and the lowest tier it is offered to, requested from /verify and concluded by ORBES Client
  * Services.
  *

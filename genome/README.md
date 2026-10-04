@@ -40,27 +40,37 @@ genome/
                          certificates (shared links), the lookbook of the models and the owners' club
                          (club.ts: tierOf, clubMembersByTier, the tiers' benefits), the releases
                          (drops.ts: DropService, the draw by tier, the early access and its direct
-                         reservation, DropService.reserve), the owners' circle (circle.ts: CircleService)
+                         reservation, DropService.reserve), the owners' circle (circle.ts: CircleService),
+                         THE PRIVATE SALON (salon.ts: SalonService, the reserved models by tier with their
+                         prices and the owners' requests, migration 0020; it reads LookbookService and
+                         ClubService.tierOf), a model discontinued and reinstated by an ADMIN (catalog.ts,
+                         P-R06, migration 0019: POST /api/admin/models/:id/discontinue and …/reinstate)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
-    routes/              public, account, ownership, club (the lookbook's reserved models, the club's status,
-                         ENTER, WITHDRAW and RESERVE a release, the circle's feed, posts, answers and votes),
-                         admin/ (drops.ts, circle.ts and club.ts for the Club page; media.ts for every
+    routes/              public, account, ownership, club (THE PRIVATE SALON: its cards, sheets and REQUEST THIS
+                         PIECE; the club's status, ENTER, WITHDRAW and RESERVE a release, the circle's feed, posts,
+                         answers and votes), admin/ (drops.ts, circle.ts and club.ts for the Club page, its
+                         Requests tab included; catalog.ts, Discontinue and Reinstate a model; media.ts for every
                          photograph, a circle post's included; analytics.ts, its circle panel too)
     http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
-                         (/verify/pieces), an ownership certificate's page (/verify/c#token),
-                         THE COLLECTION, the lookbook of the models (/verify/lookbook),
+                         (/verify/pieces, its tabs OWNERSHIP · WARRANTY · SERVICE · CARE), an ownership
+                         certificate's page (/verify/c#token), THE COLLECTION, the lookbook of the models
+                         (/verify/lookbook) and THE PRIVATE SALON for an owner,
                          THE RELEASES, the drops, their early access and their draw (/verify/releases),
                          THE CIRCLE, the owners' posts (/verify/circle, circle-model.ts, views/circle.ts),
-                         and YOUR TIER at the head of MY PIECES (tier-model.ts)
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics (and its panel The Circle),
-                         audit, the Club (Drops, Circle with a post's page #/club/circle/:postId, Tiers);
+                         YOUR TIER at the head of MY PIECES (tier-model.ts); the ceremony of a first
+                         registration and SHARE THE GENOME (share-image.ts), the sound signature (sound.ts),
+                         the scan as a ritual (the seal signal: capture.ts, scanner.ts)
+    admin/               admin console: catalogue (Discontinue, Reinstate), generator, keys, anomalies, analytics
+                         (and its panel The Circle), audit, the Club (Drops, Circle with a post's page
+                         #/club/circle/:postId, Tiers, Requests); a model's Lookbook page (its Private salon);
                          the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
-    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share
+    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share;
+                         prefs.ts, the preferences kept on the device (the sound, orbes.sound)
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
     support/             camera simulator, PRNG, raster/PNG/JPEG/Y4M helpers, test database
@@ -167,7 +177,7 @@ This runs the core end to end without a server or database: key pair → identit
   npx playwright-core install chromium
   export ORBES_CHROMIUM=$(node -p "require('playwright-core').chromium.executablePath()")
   ```
-- Results and screenshots go to `out/e2e/`.
+- Results and screenshots go to `out/e2e/`; `test/web/verify.e2e.test.ts` writes its design-review captures to `out/` (among them, P-D01, `out/verify-ceremony.png`, the ceremony of a first registration, and `out/verify-share-genome.png`, the image SHARE THE GENOME shares).
 - `ORBES_SCREENSHOTS=1` writes admin console screenshots.
 - `ORBES_E2E_STRICT=1` asserts the < 1 s recognition target on the median instead of the best run.
 
@@ -175,6 +185,7 @@ This runs the core end to end without a server or database: key pair → identit
 
 - `UPDATE_BASELINES=1 npx vitest run test/visual/renderer.test.ts` regenerates the visual baselines after an intended rendering change. Review the diff.
 - `test/render/artifact.test.ts` rasterises the PDF artifacts with `pdftoppm` when it is installed.
+- Stage BC of the « Potentiel » plan added `test/web/verify.share-image.test.ts` (the share image of the ceremony, drawn on a recording context, and the tap that shares or saves it), `test/web/verify.sound.test.ts` (the sound signature and its preference), `test/api/salon.test.ts` (THE PRIVATE SALON) and `test/web/verify.capture.test.ts` cases for the seal signal (P-D10).
 
 CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `postgres:16` service and Chromium, the web build, a production `npm audit` report, and a Docker image build on every change under `genome/` or `docs/`.
 

@@ -1,5 +1,5 @@
 /**
- * THE PRIVATE SALON (P-X08; API §10.9, §16.20; DATABASE §5.32): the
+ * THE PRIVATE SALON (P-X08; API §10.9, §16.22; DATABASE §5.37): the
  * lookbook's RESERVED models, offered to the owners of a piece by tier, each
  * with its price, on request. No route of its own: it is the reserved section
  * of the lookbook (the plan's choice 14), read through the club.
