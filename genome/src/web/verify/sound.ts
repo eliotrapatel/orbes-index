@@ -11,7 +11,11 @@
  *
  * When: only as a result of an AUTHENTIC_* state appears (AUTHENTIC, FIRST
  * REGISTRATION, REGISTERED, OWNERSHIP VERIFIED), never for another result,
- * and not while the page is in the background.
+ * and not while the page is in the background. A LIVE RELEASE (plan of
+ * 2026-10-04) plays it too, at the reveal of a piece secured, and before it a
+ * soft tick each second of the last ten before the door opens (TICK: one sine
+ * voice of 80 ms, struck and faded); its room creates the context in its taps
+ * (a size, ENTER, the seal pressed), as SCAN does.
  *
  * The AudioContext is created in the gesture SCAN ORBES CODE or UPLOAD A
  * PHOTO (`prime()`): a browser lets a page sound only from a tap. A later
@@ -93,6 +97,36 @@ export function scheduleSignature(ctx: SoundContext): void {
     osc.start(start);
     osc.stop(end + SIGNATURE.tail);
   });
+}
+
+/** The tick of the last ten seconds before a LIVE RELEASE opens: one soft voice, struck and faded. Times in seconds. */
+export const TICK = Object.freeze({
+  /** E6 (Hz): above the chord, short enough to read as a tick rather than a note. */
+  note: 1318.51,
+  attack: 0.004,
+  duration: 0.08,
+  /** Softer than one voice of the chord. */
+  peak: 0.035,
+  floor: SIGNATURE.floor,
+  lead: SIGNATURE.lead,
+  tail: SIGNATURE.tail,
+});
+
+/** Schedule one tick on `ctx`, from its clock (plus TICK.lead). */
+export function scheduleTick(ctx: SoundContext): void {
+  const start = ctx.currentTime + TICK.lead;
+  const end = start + TICK.duration;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(TICK.note, start);
+  const voice = ctx.createGain();
+  voice.gain.setValueAtTime(TICK.floor, start);
+  voice.gain.exponentialRampToValueAtTime(TICK.peak, start + TICK.attack);
+  voice.gain.exponentialRampToValueAtTime(TICK.floor, end);
+  osc.connect(voice);
+  voice.connect(ctx.destination);
+  osc.start(start);
+  osc.stop(end + TICK.tail);
 }
 
 /** What the signature needs from the browser (the page's; fakes in the tests). */
@@ -185,11 +219,21 @@ export class SoundSignature implements SoundSwitch {
 
   /** The chord, when the sound is on, a gesture created the context and the page is in view. True when scheduled. */
   play(): boolean {
+    return this.sound(scheduleSignature);
+  }
+
+  /** A tick of the last ten seconds before a LIVE RELEASE opens, on the same conditions as the chord. True when scheduled. */
+  tick(): boolean {
+    return this.sound(scheduleTick);
+  }
+
+  /** Schedule a sound, then suspend the context once it has faded (a tick a second keeps it running through the ten). */
+  private sound(schedule: (ctx: SoundContext) => void): boolean {
     const ctx = this.ctx;
     if (!this.enabled || !ctx || this.env.hidden()) return false;
     try {
       this.resume(ctx);
-      scheduleSignature(ctx);
+      schedule(ctx);
     } catch {
       return false;
     }

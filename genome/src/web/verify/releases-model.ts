@@ -253,6 +253,8 @@ export interface EntryModel {
   sentence: string;
   /** The entry's id (the one the draw publishes); null without one. */
   entryId: string | null;
+  /** A LIVE RELEASE entry's reference for ORBES Client Services (`REFERENCE LR-…`), in place of an id. */
+  reference?: string | null;
   canEnter: boolean;
   canWithdraw: boolean;
   /** P-X02: RESERVE A PLACE, for a PLATINE or PALLADIUM account while the early access lasts and a piece is left. */

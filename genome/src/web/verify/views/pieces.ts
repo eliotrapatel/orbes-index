@@ -44,7 +44,7 @@
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
  *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
  *                                            TITANE up, YOUR TIER says it: its benefits or NEXT)
- *   YOUR RELEASES                            the account's entries in the drops (P-R03):
+ *   YOUR RELEASES                            the account's entries in the drops (P-R03), its LIVE RELEASES first:
  *     MONOLITHE — RELEASE I · DRAWN          each release (a link to its page), its state,
  *     PLACE HELD · Your place is held until … — ORBES Client Services will contact you.
  *     YOUR ENTRY 3f9a…                        what the entry means now, its id (the one the
@@ -78,10 +78,11 @@ import { ownerCertificateLine } from '../certificate-model.js';
 import { ACCOUNT_PASSWORD, ORBES_CARE, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
+import { myLiveEntries } from '../live-model.js';
 import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
-import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
 import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
@@ -139,6 +140,8 @@ class PiecesPage {
   private cards: PieceCard[] = [];
   /** The account's entries in the drops; null when they could not be read. */
   private entries: ClubEntry[] | null = [];
+  /** Its entries in the LIVE RELEASES (plan of 2026-10-04: they stay here after the release); null when unread. */
+  private liveEntries: LiveAccountEntry[] | null = [];
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
   /** The club's status as read with the pieces (P-X04, the tier block); null until read, or when it could not be. */
@@ -244,13 +247,17 @@ class PiecesPage {
     try {
       // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so. The
       // account's entries in the drops (P-R03) likewise: without them, the page says they could not be shown.
-      const [list, certificates, club] = await Promise.all([
+      const [list, certificates, club, live] = await Promise.all([
         this.deps.api.products(),
         this.deps.api.certificates().catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
         }),
         this.deps.api.clubStatus().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+        this.deps.api.liveMine().catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
         }),
@@ -266,6 +273,7 @@ class PiecesPage {
           }),
       );
       this.entries = club ? club.entries : null;
+      this.liveEntries = live;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
       this.club = club;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
@@ -401,18 +409,18 @@ class PiecesPage {
    */
   private renderReleases(): void {
     const signedIn = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready';
-    if (!signedIn || (this.entries !== null && this.entries.length === 0)) {
+    if (!signedIn || (this.entries !== null && this.entries.length === 0 && this.liveEntries !== null && this.liveEntries.length === 0)) {
       this.releases.hidden = true;
       this.releases.replaceChildren();
       return;
     }
     this.releases.hidden = false;
     const heading = sectionLabel(RELEASES.yourEntries, 'pieces-releases');
-    if (this.entries === null) {
+    if (this.entries === null || this.liveEntries === null) {
       this.releases.replaceChildren(heading, h('p', { class: 'form__error', attrs: { role: 'alert' }, text: RELEASES.entryFailed }));
       return;
     }
-    const items = myEntries(this.entries, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices: this.contacts });
+    const items = [...myLiveEntries(this.liveEntries, { clientServices: this.contacts }), ...myEntries(this.entries, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices: this.contacts })];
     this.releases.replaceChildren(heading, h('ul', { class: 'pieces__entries' }, ...items.map((m) => h('li', { class: 'pieces__entry' }, this.entryBlock(m)))));
   }
 
@@ -439,6 +447,7 @@ class PiecesPage {
       h('p', { class: 'ownership__status pieces__entry-state', text: [m.stateLabel, m.entry.label].filter(Boolean).join(' · ') }),
       h('p', { class: 'prose pieces__entry-sentence', text: m.entry.sentence }),
       m.entry.entryId ? h('p', { class: 'ownership__meta micro soft pieces__entry-id', text: RELEASES.entryId(m.entry.entryId) }) : null,
+      m.entry.reference ? h('p', { class: 'ownership__meta micro soft pieces__entry-id', text: m.entry.reference }) : null,
       m.entry.contact ? contactBlock(m.entry.contact) : null,
     );
   }

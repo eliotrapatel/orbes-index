@@ -9,6 +9,8 @@ import {
   CIRCLE_POST_KINDS as SERVER_CIRCLE_KINDS,
   CIRCLE_RSVP_ANSWERS as SERVER_CIRCLE_ANSWERS,
   DROP_ENTRY_STATUSES as SERVER_ENTRY_STATUSES,
+  LIVE_END_REASONS as SERVER_LIVE_END_REASONS,
+  LIVE_ENTRY_STATUSES as SERVER_LIVE_ENTRY_STATUSES,
   REPORT_CHANNELS as SERVER_CHANNELS,
   VERIFICATION_STATES as SERVER_STATES,
 } from '../../src/server/db/schema.js';
@@ -21,6 +23,14 @@ import {
   type DropCard as ServerDropCard,
   type DropSheet as ServerDropSheet,
 } from '../../src/server/services/drops.js';
+import type { LiveAccess as ServerLiveAccess, LiveEntryView as ServerLiveEntry, LiveInterestView as ServerLiveInterest } from '../../src/server/services/live.js';
+import type {
+  LiveAccountEntry as ServerLiveAccountEntry,
+  LiveCard as ServerLiveCard,
+  LiveEndedSheet as ServerLiveEndedSheet,
+  LiveRoom as ServerLiveRoom,
+  LiveSheet as ServerLiveSheet,
+} from '../../src/server/services/live-room.js';
 import type { Page } from '../../src/server/types.js';
 import { INCIDENT_TYPES as SERVER_INCIDENTS, type OwnedProduct } from '../../src/server/services/ownership.js';
 import type {
@@ -37,6 +47,8 @@ import {
   DROP_ENTRY_STATUSES,
   DROP_STATES,
   INCIDENT_TYPES,
+  LIVE_END_REASONS,
+  LIVE_ENTRY_STATUSES,
   REPORT_CHANNELS,
   VERIFICATION_STATES,
   type ClubEntry,
@@ -50,6 +62,14 @@ import {
   type CircleCard,
   type CircleFeed,
   type CirclePost,
+  type LiveAccess,
+  type LiveAccountEntry,
+  type LiveCard,
+  type LiveEndedSheet,
+  type LiveEntry,
+  type LiveInterest,
+  type LiveRoom,
+  type LiveSheet,
   type LookbookCard,
   type LookbookSheet,
   type OwnedPiece,
@@ -89,6 +109,16 @@ export const clubStatusFits = (s: Json<ServerClubStatus>): ClubStatus => s;
 export const circleCardFits = (c: Json<ServerCircleCard>): CircleCard => c;
 export const circleFeedFits = (p: Json<Page<ServerCircleCard>>): CircleFeed => p;
 export const circlePostFits = (p: Json<ServerCirclePost>): CirclePost => p;
+// …and the LIVE RELEASES' (plan of 2026-10-04): a card, a page (and an ended one), the room, the account's entry, its
+// standing, its interest and its entries in MY PIECES.
+export const liveCardFits = (c: Json<ServerLiveCard>): LiveCard => c;
+export const liveSheetFits = (s: Json<ServerLiveSheet>): LiveSheet => s;
+export const liveEndedFits = (s: Json<ServerLiveEndedSheet>): LiveEndedSheet => s;
+export const liveRoomFits = (r: Json<ServerLiveRoom>): LiveRoom => r;
+export const liveEntryFits = (e: Json<ServerLiveEntry>): LiveEntry => e;
+export const liveAccessFits = (a: Json<ServerLiveAccess>): LiveAccess => a;
+export const liveInterestFits = (i: Json<ServerLiveInterest>): LiveInterest => i;
+export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry => e;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
 type ProductKeys<T> = T extends { product?: infer P } ? keyof NonNullable<P> : never;
 export const productKeysMatch: [ProductKeys<ServerVerifyOutcome>] extends [ProductKeys<VerifyOutcome>] ? ([ProductKeys<VerifyOutcome>] extends [ProductKeys<ServerVerifyOutcome>] ? true : false) : false = true;
@@ -116,6 +146,11 @@ describe('verify wire types', () => {
     expect([...CIRCLE_ANSWERS]).toEqual([...SERVER_CIRCLE_ANSWERS]);
   });
 
+  it('know the same statuses of a LIVE RELEASE entry and the same ways it ends as the server', () => {
+    expect([...LIVE_ENTRY_STATUSES]).toEqual([...SERVER_LIVE_ENTRY_STATUSES]);
+    expect([...LIVE_END_REASONS]).toEqual([...SERVER_LIVE_END_REASONS]);
+  });
+
   it('are structurally compatible (checked by tsc)', () => {
     expect(typeof outcomeFits).toBe('function');
     expect(typeof inputFits).toBe('function');
@@ -126,6 +161,7 @@ describe('verify wire types', () => {
     expect(typeof cardFits).toBe('function');
     expect(typeof sheetFits).toBe('function');
     for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
+    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
   });
 });

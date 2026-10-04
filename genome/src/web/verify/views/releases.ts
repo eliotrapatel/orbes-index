@@ -35,6 +35,11 @@
  * SCAN ORBES CODE is then a text link), as DOWNLOAD PDF is on a
  * certificate. After a reservation, the page is read again: its places.
  *
+ * THE RELEASES lists the LIVE RELEASES first (plan of 2026-10-04: LIVE RELEASE cards), each on a vault plate among
+ * the ivory ones of the draws: its picture of the stage reached (the seal before any), LIVE RELEASE and where it
+ * stands, its name once revealed, its opening in Paris (then on this phone), its price and quantity line, its rule and
+ * SEE THE RELEASE; its page is the LIVE RELEASE's (views/live.ts).
+ *
  * Every action is a same-origin JSON call through ApiClient (the session
  * cookie, the CSRF token); server messages are shown as they come. A 401
  * ends the session on the page, which then offers the sign-in again.
@@ -44,6 +49,8 @@ import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { RELEASES } from '../copy.js';
+import { liveCards, type LiveCardModel } from '../live-model.js';
+import { sealSvg } from '../live-seal.js';
 import {
   drawLines,
   entryModel,
@@ -74,6 +81,8 @@ export interface ReleasesDeps {
   onRelease(id: string): void;
   /** THE COLLECTION, in the app. */
   onCollection(): void;
+  /** This phone's time zone: a LIVE RELEASE's opening is said in Paris, then here when it differs. */
+  localZone: string;
 }
 
 export interface ReleaseDeps {
@@ -133,7 +142,7 @@ function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
 
 // ── The list ───────────────────────────────────────────────────────────────
 
-type ListLoad = { kind: 'loading' } | { kind: 'ready'; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
+type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
 
 class ListPage {
   readonly root: HTMLElement;
@@ -172,9 +181,9 @@ class ListPage {
     this.load = { kind: 'loading' };
     this.render();
     try {
-      const cards = releaseCards(await this.deps.api.drops());
+      const [drops, live] = await Promise.all([this.deps.api.drops(), this.deps.api.liveReleases()]);
       if (this.disposed) return;
-      this.load = { kind: 'ready', cards };
+      this.load = { kind: 'ready', live: liveCards(live, this.deps.localZone), cards: releaseCards(drops) };
     } catch (e) {
       if (this.disposed) return;
       this.load = { kind: 'failed', message: messageOf(e) };
@@ -197,11 +206,45 @@ class ListPage {
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
-    if (l.cards.length === 0) {
+    if (l.cards.length === 0 && l.live.length === 0) {
       this.body.replaceChildren(h('p', { class: 'prose releases__empty', text: RELEASES.empty }));
       return;
     }
-    this.body.replaceChildren(h('ul', { class: 'releases__list' }, ...l.cards.map((c) => h('li', { class: 'releases__item' }, this.card(c)))));
+    this.body.replaceChildren(
+      h(
+        'ul',
+        { class: 'releases__list' },
+        ...l.live.map((c) => h('li', { class: 'releases__item' }, this.liveCard(c))),
+        ...l.cards.map((c) => h('li', { class: 'releases__item' }, this.card(c))),
+      ),
+    );
+  }
+
+  /** A LIVE RELEASE: its vault plate, its picture of the stage reached (the seal before any), its opening, its rule. */
+  private liveCard(c: LiveCardModel): HTMLElement {
+    const id = `release-${c.id}`;
+    const link = releasesLink(() => this.deps.onRelease(c.id), { id: c.id, extraClass: 'live-card__link' });
+    link.setAttribute('aria-describedby', `${id}-title`);
+    const frame = h('div', { class: 'live-card__frame' });
+    if (c.picture) {
+      const img = h('img', { class: ['live-card__img', `live-card__img--${c.picture.kind}`], attrs: { src: c.picture.src, alt: c.picture.alt, decoding: 'async', loading: 'lazy' } });
+      img.addEventListener('error', () => img.replaceWith(sealSvg('live-card__seal')), { once: true });
+      frame.append(img);
+    } else frame.append(sealSvg('live-card__seal'));
+    return bracket(
+      h(
+        'article',
+        { class: 'live-card vault', attrs: { 'aria-labelledby': `${id}-title` } },
+        frame,
+        h('p', { class: 'live-card__kind', text: c.kind }),
+        h('h2', { class: 'live-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
+        h('p', { class: 'live-card__when' }, ...withNumerals(c.when.paris)),
+        c.when.local ? h('p', { class: 'live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
+        h('p', { class: 'live-card__line' }, ...withNumerals(c.line)),
+        h('p', { class: 'live-card__access' }, ...withNumerals(c.access)),
+        link,
+      ),
+    );
   }
 
   private card(c: ReleaseCardModel): HTMLElement {

@@ -4,14 +4,16 @@
  * recording AudioContext, when it plays (an AUTHENTIC_* result, after the
  * gesture that created the context, the page in view, the sound on), the
  * ambient audio session set before the context exists, the context suspended
- * between chords, and a storage that refuses every access. The landing's
+ * between chords, and a storage that refuses every access. The LIVE RELEASE's
+ * tick (the last ten seconds before its door opens): one soft voice, on the
+ * same conditions as the chord, the context kept running through the ten. The landing's
  * SOUND ON / OFF and the chord in a real page are checked in Chromium by
  * verify.e2e.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deviceStorage, readPref, setSoundPref, SOUND_OFF, SOUND_PREF_KEY, soundPref, writePref, type PrefStorage } from '../../src/web/shared/prefs.js';
 import { SOUND } from '../../src/web/verify/copy.js';
-import { scheduleSignature, SIGNATURE, SoundSignature, SUSPEND_AFTER_MS, type SoundContext, type SoundEnvironment, type SoundNode, type SoundParam } from '../../src/web/verify/sound.js';
+import { scheduleSignature, scheduleTick, SIGNATURE, SoundSignature, SUSPEND_AFTER_MS, TICK, type SoundContext, type SoundEnvironment, type SoundNode, type SoundParam } from '../../src/web/verify/sound.js';
 import { VERIFICATION_STATES } from '../../src/web/verify/types.js';
 
 /** A Map behind the Storage interface. */
@@ -382,5 +384,45 @@ describe('SoundSignature: when the chord plays (P-D07)', () => {
 
   it('labels the switch SOUND, its state ON or OFF', () => {
     expect(SOUND).toEqual({ label: 'SOUND', on: 'ON', off: 'OFF' });
+  });
+});
+
+describe('the tick of the last ten seconds before a LIVE RELEASE opens (plan of 2026-10-04)', () => {
+  it('schedules one soft sine voice, E6, struck in 4 ms and faded in 80 ms, softer than a voice of the chord', () => {
+    const ctx = new RecordingContext();
+    scheduleTick(ctx);
+    const [voice] = ctx.voices;
+    expect(ctx.voices).toHaveLength(1);
+    const start = 3 + TICK.lead;
+    expect(voice).toMatchObject({ type: 'sine', frequency: [['set', TICK.note, start]], start, stop: start + TICK.duration + TICK.tail, chain: ['gain', 'destination'] });
+    expect(voice!.gain).toEqual([
+      ['set', TICK.floor, start],
+      ['exp', TICK.peak, start + TICK.attack],
+      ['exp', TICK.floor, start + TICK.duration],
+    ]);
+    expect(TICK.note).toBeCloseTo(1318.51, 2);
+    expect(TICK.peak).toBeLessThan(SIGNATURE.peak);
+    expect(TICK.duration).toBeLessThan(0.1);
+  });
+
+  it('ticks on the chord’s conditions: a gesture made the context, the sound on, the page in view; ten ticks a second apart keep it running', () => {
+    const { env, contexts, timers, setHidden } = environment();
+    const sound = new SoundSignature(env);
+    expect(sound.tick()).toBe(false);
+    sound.prime();
+    const ctx = contexts[0]!;
+    for (let i = 0; i < 10; i++) expect(sound.tick()).toBe(true);
+    expect(ctx.voices).toHaveLength(10);
+    // Each tick pushes the suspension back (a second apart, under SUSPEND_AFTER_MS): one timer left, then suspended.
+    expect(timers.filter((t) => !t.cleared)).toHaveLength(1);
+    expect(SUSPEND_AFTER_MS).toBeGreaterThan(1000);
+    timers.at(-1)!.fn();
+    expect(ctx.state).toBe('suspended');
+    setHidden(true);
+    expect(sound.tick()).toBe(false);
+    setHidden(false);
+    sound.set(false);
+    expect(sound.tick()).toBe(false);
+    expect(ctx.voices).toHaveLength(10);
   });
 });

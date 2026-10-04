@@ -350,6 +350,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         roomOpensMinutes: 5,
         turnSeconds: 30,
         payMinutes: 5,
+        tierPriority: true,
       });
       h.clock.advance(4 * MINUTE);
       expect((safeJson(await c.get('/api/v1/live/next')) as { release: { id: string; phase: string } }).release).toMatchObject({ id: soon.id, phase: 'LIVE' });

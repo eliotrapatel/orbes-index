@@ -117,6 +117,8 @@ export interface LiveSheet extends LiveCard {
   roomOpensMinutes: number;
   turnSeconds: number;
   payMinutes: number;
+  /** The line at T0 by tier first (PALLADIUM, PLATINE, TITANE, then the others), random within a tier; else random for all. */
+  tierPriority: boolean;
 }
 
 /** A LIVE RELEASE's page once it has ended: nothing more (the plan's choice 32). */
@@ -364,6 +366,7 @@ export class LiveRoomService {
       roomOpensMinutes: r.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
       turnSeconds: r.turn_seconds ?? LIVE_TURN_SECONDS.default,
       payMinutes: r.pay_minutes ?? LIVE_PAY_MINUTES.default,
+      tierPriority: r.tier_priority ?? true,
     };
   }
 

@@ -1,0 +1,480 @@
+/**
+ * The LIVE RELEASE as /verify shows it (plan of 2026-10-04; src/web/verify/live-model.ts, live-seal.ts): which screen
+ * the page shows from the release, the account's standing, the room and its entry; the server's clock from three round
+ * trips; the times in Paris then on this phone; the prices as the house writes them; the countdowns; the lock's orbits
+ * in the last minute and its ten ticks; the size picker (the size of I'LL BE THERE preselected); the line's facts; the
+ * add-ons; the card in THE RELEASES (each stage only once the server sends it, the seal before any); MY PIECES; the
+ * specimen of the seal (never a piece's code); the vault palette's contrast, computed from brand.css. Pure: no DOM. The
+ * pages are driven in Chromium by verify.live.e2e.test.ts.
+ */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { CODE01, CODE01_RINGS } from '../../src/core/code/profile.js';
+import { unframeCodeData } from '../../src/core/payload.js';
+import { LIVE } from '../../src/web/verify/copy.js';
+import {
+  addonChoices,
+  clockOffset,
+  clockText,
+  countdown,
+  formatMoney,
+  heldEntry,
+  initialSize,
+  isEndedSheet,
+  lineFacts,
+  liveCards,
+  liveReference,
+  liveScreen,
+  liveSheetModel,
+  lockAngle,
+  LOCK_MS,
+  mediaSrc,
+  myLiveEntries,
+  phaseAt,
+  pictureOf,
+  placeAnnouncement,
+  readyChecks,
+  releaseTime,
+  sizeChoices,
+  tickSecond,
+  windowLeft,
+  zonedTime,
+  type LiveScreenInput,
+} from '../../src/web/verify/live-model.js';
+import { SEAL_RINGS, SPECIMEN_GLYPHS, specimenData } from '../../src/web/verify/live-seal.js';
+import type { LiveAccountEntry, LiveCard, LiveEntry, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
+
+const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+const ENTRY = '01edcb93-7b6d-4e5f-8a9b-0c1d2e3f4a5b';
+const S48 = '11111111-1111-4111-8111-111111111111';
+const S52 = '22222222-2222-4222-8222-222222222222';
+const S56 = '33333333-3333-4333-8333-333333333333';
+const media = (n: number) => `/api/v1/media/${n.toString(16).padStart(2, '0').repeat(32)}`;
+/** T0: Sunday 11 October 2026, 19:00 in Paris (17:00 UTC). */
+const T0 = Date.parse('2026-10-11T17:00:00.000Z');
+const iso = (t: number) => new Date(t).toISOString();
+
+function card(extra: Partial<LiveCard> = {}): LiveCard {
+  return {
+    id: ID,
+    kind: 'LIVE',
+    phase: 'ANNOUNCED',
+    revealed: { silhouette: true, name: true, photo: true },
+    stages: { silhouetteAt: iso(T0 - 86_400_000), nameAt: iso(T0 - 43_200_000), photoAt: iso(T0 - 3_600_000) },
+    title: 'Monolithe — live',
+    name: 'Monolithe',
+    type: 'Ring',
+    collection: 'Orbit',
+    silhouetteUrl: media(2),
+    imageUrl: media(1),
+    lookbook: null,
+    announcedAt: iso(T0 - 7 * 86_400_000),
+    roomOpensAt: iso(T0 - 300_000),
+    opensAt: iso(T0),
+    closesAt: iso(T0 + 3_600_000),
+    priceMinor: 480_000,
+    currency: 'EUR',
+    quantityLine: '25 pieces',
+    perAccount: 1,
+    access: { minTier: 2, text: 'owners from PLATINE' },
+    ...extra,
+  };
+}
+
+function sheet(extra: Partial<LiveSheet> = {}): LiveSheet {
+  return {
+    ...card(),
+    description: 'A ring cut from one block of silver.',
+    sizes: [
+      { id: S48, label: '48', stock: 3 },
+      { id: S52, label: '52', stock: 2 },
+      { id: S56, label: '56', stock: 0 },
+    ],
+    addons: [
+      { id: 'a1', label: 'Engraving', line: ' Your initials ', priceMinor: 15_000 },
+      { id: 'a2', label: 'Gift box', line: null, priceMinor: 9_000 },
+    ],
+    interest: 0,
+    roomOpensMinutes: 5,
+    turnSeconds: 30,
+    payMinutes: 5,
+    tierPriority: true,
+    ...extra,
+  };
+}
+
+function room(extra: Partial<LiveRoom> = {}): LiveRoom {
+  return {
+    id: ID,
+    phase: 'ROOM',
+    paused: false,
+    over: false,
+    endedReason: null,
+    roomOpensAt: iso(T0 - 300_000),
+    opensAt: iso(T0),
+    closesAt: iso(T0 + 3_600_000),
+    inRoom: 214,
+    line: 0,
+    quantity: 5,
+    quantityLine: '25 PIECES',
+    left: 5,
+    held: 0,
+    sizes: [
+      { id: S48, label: '48', stock: 3, left: 3, held: 0 },
+      { id: S52, label: '52', stock: 2, left: 2, held: 0 },
+      { id: S56, label: '56', stock: 0, left: 0, held: 0 },
+    ],
+    message: null,
+    ...extra,
+  };
+}
+
+function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
+  return {
+    id: ENTRY,
+    dropId: ID,
+    status: 'WAITING',
+    size: { id: S52, label: '52' },
+    quantity: 1,
+    tier: 2,
+    position: null,
+    ahead: null,
+    joinedAt: iso(T0 - 120_000),
+    turn: null,
+    hold: null,
+    confirmedAt: null,
+    endedAt: null,
+    letIn: false,
+    addons: [],
+    currency: 'EUR',
+    priceMinor: 480_000,
+    totalMinor: 480_000,
+    ...extra,
+  };
+}
+
+const screen = (i: Partial<LiveScreenInput>) => liveScreen({ sheet: sheet(), viewer: 'ready', room: room(), entry: null, now: T0 - 60_000, ...i });
+
+describe('the LIVE RELEASE\'s words and figures', () => {
+  it('writes a price as the house does, its groups kept together', () => {
+    expect(formatMoney(480_000, 'EUR')).toBe('€ 4 800');
+    expect(formatMoney(505_000, 'EUR')).toBe('€ 5 050');
+    expect(formatMoney(1_234_567_850, 'EUR')).toBe('€ 12 345 678.50');
+    expect(formatMoney(9_000, 'GBP')).toBe('£ 90');
+    expect(formatMoney(9_000, 'SEK')).toBe('SEK 90');
+    expect(formatMoney(-5, 'nonsense')).toBe('€ 0');
+  });
+
+  it('says a time in Paris, then on this phone when its zone says it otherwise', () => {
+    expect(zonedTime(T0, 'Europe/Paris')).toEqual({ day: 'SUNDAY 11 OCTOBER', date: '11 OCTOBER', time: '19:00', clock: '19:00:00' });
+    expect(releaseTime(iso(T0), 'Europe/Paris')).toEqual({ paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: null });
+    // Berlin keeps Paris's hour: said once.
+    expect(releaseTime(iso(T0), 'Europe/Berlin').local).toBeNull();
+    expect(releaseTime(iso(T0), 'America/New_York')).toEqual({ paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: 'SUNDAY 11 OCTOBER · 13:00 ON THIS PHONE' });
+    expect(releaseTime(iso(T0), 'Asia/Tokyo').local).toBe('MONDAY 12 OCTOBER · 02:00 ON THIS PHONE');
+    expect(releaseTime('nonsense', 'Europe/Paris')).toEqual({ paris: '', local: null });
+    // A zone this browser does not know: UTC.
+    expect(zonedTime(T0, 'Not/AZone')?.time).toBe('17:00');
+  });
+
+  it('counts down in two-digit groups: days, hours and minutes a day ahead; hours, minutes and seconds within it', () => {
+    expect(countdown(2 * 3_600_000 + 14 * 60_000 + 9_000)).toEqual([
+      { value: '02', unit: 'HOURS' },
+      { value: '14', unit: 'MINUTES' },
+      { value: '09', unit: 'SECONDS' },
+    ]);
+    // A partial second counts as a whole one: the countdown reads 00:00:00 at T0, not a second before.
+    expect(countdown(8_001).map((p) => p.value)).toEqual(['00', '00', '09']);
+    expect(countdown(3 * 86_400_000 + 5 * 3_600_000 + 61_000).map((p) => `${p.value} ${p.unit}`)).toEqual(['03 DAYS', '05 HOURS', '01 MINUTES']);
+    expect(countdown(-5).map((p) => p.value)).toEqual(['00', '00', '00']);
+    expect(clockText(299_001)).toBe('05:00');
+    expect(clockText(24_000)).toBe('00:24');
+    expect(clockText(3_904_000)).toBe('1:05:04');
+    expect(clockText(-1)).toBe('00:00');
+  });
+
+  it('gives a confirmed entry its reference for ORBES Client Services', () => {
+    expect(liveReference(ENTRY)).toBe('LR-01EDCB93');
+  });
+
+  it('takes a picture from this origin\'s media route only', () => {
+    expect(mediaSrc(media(1))).toBe(media(1));
+    expect(mediaSrc('https://elsewhere.example/x.jpg')).toBeNull();
+    expect(mediaSrc(null)).toBeNull();
+  });
+});
+
+describe('the server\'s clock (three round trips)', () => {
+  it('keeps the offset of the shortest round trip, the server having read its clock half-way through it', () => {
+    const samples = [
+      { sentAt: 1_000, receivedAt: 1_300, server: 5_400 },
+      { sentAt: 2_000, receivedAt: 2_040, server: 6_120 },
+      { sentAt: 3_000, receivedAt: 3_100, server: 7_000 },
+    ];
+    expect(clockOffset(samples)).toEqual({ offset: 4_100, rtt: 40 });
+    expect(clockOffset([])).toBeNull();
+    expect(clockOffset([{ sentAt: 10, receivedAt: 5, server: 1 }, { sentAt: 0, receivedAt: 10, server: Number.NaN }])).toBeNull();
+  });
+});
+
+describe('which screen the page shows', () => {
+  it('announced, whoever reads it; then, from the room\'s opening, the sign-in, the rule, or the room', () => {
+    const early = T0 - 3_600_000;
+    for (const viewer of ['unknown', 'signed-out', 'not-eligible', 'ready'] as const) expect(screen({ viewer, room: null, now: early })).toBe('announced');
+    expect(screen({ viewer: 'unknown' })).toBe('loading');
+    expect(screen({ viewer: 'signed-out' })).toBe('signin');
+    expect(screen({ viewer: 'not-eligible' })).toBe('notEligible');
+    expect(screen({})).toBe('room');
+    // After T0 an account not in the line chooses its size and joins behind.
+    expect(screen({ now: T0 + 1_000 })).toBe('join');
+    // Ended (sold out, closed, ended by ORBES), or past its close: over.
+    expect(screen({ room: room({ phase: 'ENDED' }), now: T0 + 1_000 })).toBe('over');
+    expect(screen({ room: null, now: T0 + 3_600_000 })).toBe('over');
+    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, viewer: 'signed-out' })).toBe('over');
+    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, viewer: 'unknown' })).toBe('loading');
+  });
+
+  it('follows the account\'s entry: the room, the line, the turn, the piece held, confirmed, and every edge page', () => {
+    expect(screen({ entry: entry() })).toBe('room');
+    expect(screen({ entry: entry({ status: 'QUEUED', position: 4, ahead: 1 }), now: T0 + 5_000 })).toBe('line');
+    expect(screen({ entry: entry({ status: 'TURN' }) })).toBe('turn');
+    expect(screen({ entry: entry({ status: 'SECURED' }) })).toBe('secured');
+    expect(screen({ entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
+    for (const [status, kind] of [['MISSED', 'missed'], ['EXPIRED', 'expired'], ['RELEASED', 'released'], ['REMOVED', 'removed'], ['ENDED', 'ended']] as const) {
+      expect(screen({ entry: entry({ status, position: 3 }) }), status).toBe(kind);
+    }
+    // LEFT before T0 (no place): it may enter again, the room shows; after T0 (a place), it has left the line.
+    expect(screen({ entry: entry({ status: 'LEFT' }) })).toBe('room');
+    expect(heldEntry(entry({ status: 'LEFT' }))).toBeNull();
+    expect(screen({ entry: entry({ status: 'LEFT', position: 9 }), now: T0 + 5_000 })).toBe('left');
+    // A participant keeps its outcome after the end, and only a ready account's entry counts.
+    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
+    expect(screen({ viewer: 'signed-out', entry: entry({ status: 'CONFIRMED' }) })).toBe('signin');
+  });
+
+  it('says sold out in your size only when no piece is free nor held that may return', () => {
+    const queued = entry({ status: 'QUEUED', position: 4, ahead: 1 });
+    const now = T0 + 5_000;
+    const sizes = (left: number, held: number) => room({ phase: 'LIVE', sizes: [{ id: S52, label: '52', stock: 2, left, held }] });
+    expect(screen({ entry: queued, room: sizes(0, 2), now })).toBe('line');
+    expect(screen({ entry: queued, room: sizes(0, 0), now })).toBe('soldOut');
+    expect(screen({ entry: entry({ ...queued, quantity: 2 }), room: sizes(1, 0), now })).toBe('soldOut');
+    expect(phaseAt(sheet(), null, T0 - 400_000)).toBe('ANNOUNCED');
+    expect(phaseAt(sheet(), room({ opensAt: iso(T0 + 60_000) }), T0 + 1_000)).toBe('ROOM');
+    expect(isEndedSheet(sheet())).toBe(false);
+  });
+});
+
+describe('the room', () => {
+  it('checks the account, its access, its size, the connection and the clock before T0', () => {
+    const access = { allowed: true, tier: 2, missing: null };
+    expect(readyChecks({ access, size: '52', connection: 'live', synced: true })).toEqual([
+      { label: 'SIGNED IN', value: '', ok: true },
+      { label: 'ACCESS', value: 'PLATINE', ok: true },
+      { label: 'SIZE', value: '52', ok: true },
+      { label: 'CONNECTION', value: 'LIVE', ok: true },
+      { label: 'CLOCK', value: 'SYNCED TO ORBES', ok: true },
+    ]);
+    const pending = readyChecks({ access: { allowed: true, tier: 0, missing: null }, size: null, connection: 'reconnecting', synced: false });
+    expect(pending.map((c) => [c.value, c.ok])).toEqual([['', true], ['GRANTED', true], ['TO CHOOSE', false], ['RECONNECTING', false], ['SYNCING', false]]);
+  });
+
+  it('offers the sizes with stock, the one of I\'LL BE THERE preselected, the only one of a one-size release', () => {
+    const s = sheet();
+    expect(sizeChoices(s, room(), S52)).toEqual([
+      { id: S48, label: '48', available: true, selected: false },
+      { id: S52, label: '52', available: true, selected: true },
+    ]);
+    // After T0, a size whose pieces are all taken cannot be chosen.
+    expect(sizeChoices(s, room({ sizes: [{ id: S48, label: '48', stock: 3, left: 0, held: 1 }] }), null)[0]!.available).toBe(false);
+    const interest = { dropId: ID, size: { id: S48, label: '48' }, since: iso(T0 - 86_400_000) };
+    expect(initialSize(s, null, interest)).toBe(S48);
+    expect(initialSize(s, entry(), interest)).toBe(S52);
+    expect(initialSize(s, null, { ...interest, size: { id: S56, label: '56' } })).toBeNull();
+    expect(initialSize(s, null, null)).toBeNull();
+    expect(initialSize(sheet({ sizes: [{ id: S52, label: 'ONE SIZE', stock: 25 }] }), null, null)).toBe(S52);
+  });
+
+  it('turns the lock\'s orbits back into alignment during the last minute, a step a second, aligned at T0', () => {
+    for (let k = 0; k < SEAL_RINGS; k++) {
+      const scrambled = lockAngle(k, LOCK_MS + 30_000);
+      expect(Math.abs(scrambled), `${k}`).toBeGreaterThanOrEqual(24);
+      expect(Math.sign(scrambled)).toBe(k % 2 === 0 ? 1 : -1);
+      expect(lockAngle(k, LOCK_MS)).toBe(scrambled);
+      expect(lockAngle(k, 30_000)).toBeCloseTo(scrambled / 2, 9);
+      // One step a second: the same angle within a second.
+      expect(lockAngle(k, 29_001)).toBe(lockAngle(k, 30_000));
+      expect(lockAngle(k, 0)).toBe(0);
+      expect(lockAngle(k, -500)).toBe(0);
+    }
+    expect(SEAL_RINGS).toBe(CODE01_RINGS.length);
+  });
+
+  it('ticks each of the last ten seconds once, never before nor at T0', () => {
+    expect(tickSecond(10_000)).toBe(10);
+    expect(tickSecond(9_400)).toBe(10);
+    expect(tickSecond(9_000)).toBe(9);
+    expect(tickSecond(1)).toBe(1);
+    expect(tickSecond(10_001)).toBeNull();
+    expect(tickSecond(0)).toBeNull();
+    const seconds = new Set<number>();
+    for (let ms = 12_000; ms > -1_000; ms -= 250) {
+      const s = tickSecond(ms);
+      if (s !== null) seconds.add(s);
+    }
+    expect([...seconds]).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+  });
+});
+
+describe('the line, the turn and the piece held', () => {
+  it('says the pieces left overall and in your size, the held pieces that may return, and draws them', () => {
+    const r = room({ phase: 'LIVE', quantity: 25, left: 16, held: 2, sizes: [{ id: S52, label: '52', stock: 6, left: 4, held: 1 }] });
+    const f = lineFacts(r, S52, '52');
+    expect(f.left).toBe('16 OF 25 LEFT · 4 IN SIZE 52');
+    expect(f.held).toBe('2 HELD PIECES MAY RETURN');
+    expect(f.cells).toHaveLength(25);
+    expect(f.cells!.filter((c) => c === 'gone')).toHaveLength(7);
+    expect(f.cells!.filter((c) => c === 'held')).toHaveLength(2);
+    expect(f.cells!.slice(0, 9)).toEqual([...Array(7).fill('gone'), 'held', 'held']);
+    expect(lineFacts(room({ held: 1 }), S48, '48').held).toBe('1 HELD PIECE MAY RETURN');
+    expect(lineFacts(room(), S48, '48').held).toBeNull();
+    // Past fifty pieces, a bar.
+    const big = lineFacts(room({ quantity: 1_000, left: 250, held: 0 }), S52, '52');
+    expect(big.cells).toBeNull();
+    expect(big.taken).toBe(0.75);
+  });
+
+  it('announces the place and who is ahead in your size, in words', () => {
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 14, ahead: 3 }))).toBe('Your place: 14. 3 ahead of you in size 52.');
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0 }))).toBe('Your place: 2. You are next in size 52.');
+    expect(placeAnnouncement(entry())).toBeNull();
+    expect(LIVE.ahead(3, '52')).toBe('3 AHEAD OF YOU IN SIZE 52');
+  });
+
+  it('measures a window at the server\'s time: what is left, and its share', () => {
+    expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 6_000)).toEqual({ remainingMs: 24_000, fraction: 0.8 });
+    expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 40_000)).toEqual({ remainingMs: 0, fraction: 0 });
+    expect(windowLeft('x', iso(T0), T0)).toEqual({ remainingMs: 0, fraction: 0 });
+  });
+
+  it('offers the add-ons with their price per piece, the one kept when chosen', () => {
+    const held = entry({ status: 'SECURED', addons: [{ id: 'a1', label: 'Engraving', priceMinor: 12_000 }] });
+    expect(addonChoices(sheet(), held)).toEqual([
+      { id: 'a1', label: 'ENGRAVING', line: 'Your initials', price: '+ € 120', selected: true },
+      { id: 'a2', label: 'GIFT BOX', line: null, price: '+ € 90', selected: false },
+    ]);
+  });
+});
+
+describe('the release announced, and its card in THE RELEASES', () => {
+  it('states its piece, price, opening in Paris, rule, quantity, room and the draw of the places', () => {
+    const m = liveSheetModel(sheet(), 'America/New_York');
+    expect(m).toMatchObject({
+      name: 'MONOLITHE',
+      named: true,
+      line: 'RING · ORBIT',
+      price: '€ 4 800',
+      when: { paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: 'SUNDAY 11 OCTOBER · 13:00 ON THIS PHONE' },
+      access: 'FOR OWNERS FROM PLATINE',
+      quantity: '25 PIECES · ONE PER COLLECTOR',
+      roomOpens: 'THE ROOM OPENS 5 MINUTES BEFORE',
+      rule: LIVE.rule(true),
+      picture: { src: media(1), kind: 'photo' },
+      calendarHref: `/api/v1/live/${ID}/calendar.ics`,
+    });
+    expect(liveSheetModel(sheet({ perAccount: 2, roomOpensMinutes: 1, tierPriority: false }), 'Europe/Paris')).toMatchObject({ quantity: '25 PIECES · UP TO 2 PER COLLECTOR', roomOpens: 'THE ROOM OPENS 1 MINUTE BEFORE', rule: LIVE.rule(false) });
+    expect(LIVE.rule(false)).not.toContain('tier');
+  });
+
+  it('shows each stage only once the server sends it: the silhouette, else the seal; no name before its time', () => {
+    const before = sheet({ name: null, type: null, collection: null, title: null, imageUrl: null, silhouetteUrl: null, revealed: { silhouette: false, name: false, photo: false } });
+    expect(liveSheetModel(before, 'Europe/Paris')).toMatchObject({ name: 'TO BE REVEALED', named: false, line: null, picture: null });
+    expect(pictureOf({ ...before, silhouetteUrl: media(2) })).toEqual({ src: media(2), alt: 'The silhouette of LIVE RELEASE', kind: 'silhouette' });
+    expect(pictureOf({ ...before, silhouetteUrl: 'https://elsewhere.example/s.png' })).toBeNull();
+  });
+
+  it('lists its LIVE RELEASES on vault plates: where each stands, its name or TO BE REVEALED, its opening, price, quantity and rule', () => {
+    const [announced, room0, live, unnamed] = liveCards(
+      [
+        card(),
+        card({ id: ID.replace('8a1d', '8a1e'), phase: 'ROOM' }),
+        card({ id: ID.replace('8a1d', '8a1f'), phase: 'LIVE' }),
+        card({ id: ID.replace('8a1d', '8a2a'), name: null, imageUrl: null, silhouetteUrl: null }),
+        { ...card(), id: 'not-an-id' },
+        { ...card(), kind: 'DRAW' as never },
+      ],
+      'Europe/Paris',
+    );
+    expect(announced).toEqual({
+      id: ID,
+      href: `/verify/releases/${ID}`,
+      kind: 'LIVE RELEASE',
+      title: 'MONOLITHE',
+      when: { paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: null },
+      line: '€ 4 800 · 25 PIECES',
+      access: 'FOR OWNERS FROM PLATINE',
+      picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
+    });
+    expect(room0!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
+    expect(live!.kind).toBe('LIVE RELEASE · LIVE NOW');
+    expect(unnamed).toMatchObject({ title: 'TO BE REVEALED', picture: null });
+    expect(liveCards([card()], 'Asia/Tokyo')[0]!.when.local).toBe('MONDAY 12 OCTOBER · 02:00 ON THIS PHONE');
+  });
+});
+
+describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
+  it('lists each with its release, its status in words, its reference once held, ORBES Client Services once confirmed', () => {
+    const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000) };
+    const list: LiveAccountEntry[] = [
+      { release, entry: entry({ status: 'CONFIRMED' }) },
+      { release: { ...release, id: ID.replace('8a1d', '8a1e'), title: null, name: null }, entry: entry({ id: ID, status: 'MISSED' }) },
+    ];
+    const contacts = { email: 'clientservices@theorbes.com' };
+    const [confirmed, missed] = myLiveEntries(list, { clientServices: contacts });
+    expect(confirmed).toMatchObject({ dropId: ID, href: `/verify/releases/${ID}`, title: 'MONOLITHE — LIVE', stateLabel: 'LIVE RELEASE' });
+    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: LIVE.sentence.CONFIRMED('52'), reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
+    expect(confirmed!.entry.contact?.mailto).toContain('LR-01EDCB93');
+    expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
+    expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);
+  });
+});
+
+describe('the seal: the specimen, never a piece\'s code', () => {
+  it('draws the ORBES CODE from fixed bytes and eight glyphs of GENOME-01, which no signature verifies', () => {
+    const data = specimenData();
+    expect(data).toHaveLength(CODE01.ecc.dataBytes);
+    expect(specimenData()).toEqual(data);
+    expect(new Set(data).size).toBeGreaterThan(40);
+    expect(SPECIMEN_GLYPHS).toHaveLength(CODE01.genome.count);
+    for (const g of SPECIMEN_GLYPHS) expect(g >= 0 && g < 16).toBe(true);
+    // Not a code ORBES issued: its frame does not even hold (no valid CRC), so no scan of the screen reads a piece.
+    expect(() => unframeCodeData(data)).toThrow();
+  });
+});
+
+describe('the vault palette (brand.css), computed', () => {
+  const brand = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/shared/brand.css'), 'utf8');
+  const token = (name: string) => new RegExp(`${name}:\\s*(#[0-9a-f]{6});`, 'i').exec(brand)?.[1] ?? '';
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+
+  it('holds the plan\'s tokens, and every text colour at 4.5 : 1 or more on the ground and on the plate; faint for decoration only', () => {
+    expect([token('--vault-ground'), token('--vault-ink'), token('--vault-soft'), token('--vault-faint'), token('--vault-plate')]).toEqual(['#0a0a0a', '#f6f2ea', '#a7a29a', '#6f6a63', '#141312']);
+    for (const ground of ['--vault-ground', '--vault-plate']) {
+      for (const text of ['--vault-ink', '--vault-soft']) expect(contrast(token(text), token(ground)), `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(token('--vault-faint'), token(ground))).toBeLessThan(4.5);
+    }
+    // The primary action: the ground's ink on ivory.
+    expect(contrast(token('--vault-ground'), token('--vault-ink'))).toBeGreaterThanOrEqual(4.5);
+    expect(brand).toMatch(/--vault-hairline: rgba\(246, 242, 234, 0\.14\);/);
+    expect(brand).toMatch(/--vault-hairline-strong: rgba\(246, 242, 234, 0\.34\);/);
+  });
+});

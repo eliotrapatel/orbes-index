@@ -835,3 +835,176 @@ export const SOUND = Object.freeze({
   on: 'ON',
   off: 'OFF',
 });
+
+/**
+ * The LIVE RELEASE (plan of 2026-10-04, The experience): its card in THE RELEASES, its page at /verify/releases/<id>
+ * as it becomes the room, the line, the turn, the piece secured and the reservation confirmed, and its edge pages, each
+ * with one action. A time is said in Paris, then on this phone when it differs; every figure is set in the reading face.
+ */
+export const LIVE = Object.freeze({
+  kind: 'LIVE RELEASE',
+  /** Before the name's stage: the release has no name yet on screen. */
+  unnamed: 'TO BE REVEALED',
+  /** Where it stands, over its title. */
+  phase: Object.freeze({ ANNOUNCED: 'LIVE RELEASE', ROOM: 'THE ROOM IS OPEN', LIVE: 'LIVE NOW' }),
+  /** The card's line in THE RELEASES before the room opens. */
+  opens: (when: string) => `OPENS ${when}`,
+  opensIn: 'OPENS IN',
+  units: Object.freeze({ days: 'DAYS', hours: 'HOURS', minutes: 'MINUTES', seconds: 'SECONDS' }),
+  /** A time of the release in Paris (`SUNDAY 11 OCTOBER · 19:00 PARIS`), then on this phone when its zone differs. */
+  paris: (day: string, time: string) => `${day} · ${time} PARIS`,
+  onThisPhone: (day: string, time: string) => `${day} · ${time} ON THIS PHONE`,
+  /** The rule of access as the page states it (after « FOR »: « owners from PLATINE »). */
+  forWhom: (rule: string) => `FOR ${rule.toUpperCase()}`,
+  perAccount: (n: number) => (n === 1 ? 'ONE PER COLLECTOR' : `UP TO ${n} PER COLLECTOR`),
+  roomOpens: (minutes: number) => `THE ROOM OPENS ${minutes} ${minutes === 1 ? 'MINUTE' : 'MINUTES'} BEFORE`,
+  calendar: 'ADD TO CALENDAR',
+  /** How the places are drawn at the opening (the release's tier priority). */
+  rule: (tierPriority: boolean) =>
+    tierPriority
+      ? 'Places are drawn by tier, then at random, among the collectors present at the opening. Those who arrive later join behind, in order of arrival.'
+      : 'Places are drawn at random among the collectors present at the opening. Those who arrive later join behind, in order of arrival.',
+  // The room
+  untilOpening: 'UNTIL THE OPENING',
+  inRoom: (n: number) => `${n} IN THE ROOM`,
+  /** The latest host message, under the header. */
+  message: 'FROM ORBES',
+  paused: 'PAUSED',
+  pausedLine: 'The release is paused. It resumes shortly, and no time passes on your turn meanwhile.',
+  ready: Object.freeze({
+    title: 'READY CHECK',
+    signedIn: 'SIGNED IN',
+    access: 'ACCESS',
+    size: 'SIZE',
+    connection: 'CONNECTION',
+    clock: 'CLOCK',
+    granted: 'GRANTED',
+    choose: 'TO CHOOSE',
+    live: 'LIVE',
+    reconnecting: 'RECONNECTING',
+    synced: 'SYNCED TO ORBES',
+    syncing: 'SYNCING',
+    /** The accessible state of a check. */
+    ok: 'ready',
+    pending: 'not ready yet',
+  }),
+  yourSize: 'YOUR SIZE',
+  size: (label: string) => `SIZE ${label}`,
+  /** A size that has no piece left to give. */
+  soldOutSize: (size: string) => `Size ${size}, no piece left`,
+  quantity: 'PIECES',
+  fewer: 'One piece fewer',
+  more: 'One piece more',
+  enter: 'ENTER THE ROOM',
+  enterLine: 'ENTER THE LINE',
+  chooseLine: 'Choose your size, then enter the room. It can change until the opening, never after.',
+  youreReady: 'YOU’RE READY',
+  readyLine: (time: string) => `Your place is drawn at ${time}. Keep this page open.`,
+  leaveRoom: 'LEAVE THE ROOM',
+  // T0
+  drawing: 'DRAWING THE PLACES',
+  drawingLine: (tierPriority: boolean) =>
+    tierPriority ? 'PALLADIUM first, then PLATINE, then TITANE; at random within each tier.' : 'At random among the collectors present at the opening.',
+  /** After T0, for an account not in the line yet. */
+  joinLine: 'The release is open. Choose your size to join the line: you take your place behind those already in it.',
+  // The line
+  yourPlace: 'YOUR PLACE',
+  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT IN SIZE ${size}` : `${n} AHEAD OF YOU IN SIZE ${size}`),
+  left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
+  inSize: (n: number, size: string) => `${n} IN SIZE ${size}`,
+  held: (n: number) => (n === 1 ? '1 HELD PIECE MAY RETURN' : `${n} HELD PIECES MAY RETURN`),
+  lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open.',
+  // The turn
+  yourTurn: 'YOUR TURN',
+  returned: 'A PIECE HAS RETURNED',
+  holding: 'HOLD',
+  pressHold: 'PRESS AND HOLD THE SEAL',
+  /** The accessible name of the seal: the keyboard holds it with the space bar or Enter. */
+  sealLabel: 'Press and hold the seal, or hold the space bar, to secure your piece',
+  toSecure: 'TO SECURE YOUR PIECE',
+  letGo: 'Let go too early and the seal resets.',
+  // Secured
+  secured: 'SECURED',
+  yourPiece: 'YOUR PIECE',
+  securedAt: (time: string) => `SECURED AT ${time}`,
+  addons: 'ADD-ONS',
+  /** An add-on's price, per piece. */
+  addonPrice: (price: string) => `+ ${price}`,
+  pay: (total: string) => `PAY · ${total}`,
+  toConfirm: 'TO CONFIRM',
+  payNote: 'ORBES Client Services will contact you for payment and delivery.',
+  release: 'RELEASE MY PLACE',
+  /** RELEASE MY PLACE gives the piece back at once: a second tap within a few seconds confirms it. */
+  releaseConfirm: 'TAP AGAIN TO RELEASE',
+  // Confirmed
+  confirmed: 'CONFIRMED',
+  confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
+  reservedIn: (size: string, quantity: number) =>
+    `${quantity > 1 ? `Your ${quantity} pieces are reserved` : 'Your piece is reserved'} in size ${size}. ORBES Client Services will contact you to settle payment and delivery.`,
+  rows: Object.freeze({ reserved: 'RESERVED', size: 'SIZE', pieces: 'PIECES', total: 'TOTAL', reference: 'REFERENCE' }),
+  clientServices: 'CLIENT SERVICES',
+  // The edge pages: a title, a sentence, one action
+  edge: Object.freeze({
+    signIn: Object.freeze({ title: 'SIGN IN TO ENTER', text: (rule: string) => `The room is open to the ORBES accounts of its rule: ${rule}. Sign in, or create an account.` }),
+    notEligible: Object.freeze({ text: 'Your ORBES account does not meet the rule of this release.' }),
+    missed: Object.freeze({ title: 'YOUR TURN HAS PASSED', text: 'The piece went to the next collector in line.' }),
+    expired: Object.freeze({ title: 'YOUR HOLD HAS ENDED', text: 'The piece has returned to the line for the next collector.' }),
+    released: Object.freeze({ title: 'YOUR PLACE IS RELEASED', text: 'The piece has returned to the line for the next collector.' }),
+    left: Object.freeze({ title: 'YOU LEFT THE LINE', text: 'Your place has gone to the collectors behind you.' }),
+    removed: Object.freeze({ title: 'YOUR ENTRY IS REMOVED', text: 'ORBES has removed your entry from this release. ORBES Client Services can assist you.' }),
+    soldOut: Object.freeze({
+      title: (size: string) => `SOLD OUT IN SIZE ${size}`,
+      stay: 'Every piece in your size is taken. You keep your place in case one returns, or you may leave.',
+      none: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.',
+      leave: 'LEAVE THE LINE',
+      leaveConfirm: 'TAP AGAIN TO LEAVE',
+    }),
+    ended: Object.freeze({
+      SOLD_OUT: Object.freeze({ title: 'SOLD OUT', text: 'Every piece of this release is reserved.' }),
+      CLOSED: Object.freeze({ title: 'THE RELEASE HAS CLOSED', text: 'Its time has run out before your turn came.' }),
+      ENDED: Object.freeze({ title: 'THE RELEASE HAS ENDED', text: 'ORBES has ended this release before your turn came.' }),
+    }),
+    over: Object.freeze({ title: 'THIS RELEASE IS OVER', text: 'It no longer appears in THE RELEASES. Your entry, if you had one, stays in MY PIECES.' }),
+  }),
+  back: 'THE RELEASES',
+  loading: 'ONE MOMENT…',
+  loadFailed: 'The release could not be shown just now.',
+  retry: 'TRY AGAIN',
+  /** What the page says aloud as it changes (aria-live). */
+  announce: Object.freeze({
+    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next in size ${size}` : `${ahead} ahead of you in size ${size}`}.`,
+    turn: 'Your turn. Press and hold the seal until the ring is full.',
+    returned: 'A piece has returned: your turn. Press and hold the seal until the ring is full.',
+    secured: (name: string) => `Secured: ${name} is held for you.`,
+    open: 'The release is open. The places are drawn.',
+    reset: 'The seal has reset. Press and hold it until the ring is full.',
+  }),
+  /** MY PIECES: an entry's status, and what it means now. */
+  statusLabel: Object.freeze({
+    WAITING: 'IN THE ROOM',
+    QUEUED: 'IN LINE',
+    TURN: 'YOUR TURN',
+    SECURED: 'PIECE HELD',
+    CONFIRMED: 'CONFIRMED',
+    MISSED: 'TURN PASSED',
+    EXPIRED: 'HOLD ENDED',
+    RELEASED: 'PLACE RELEASED',
+    LEFT: 'LEFT',
+    REMOVED: 'REMOVED',
+    ENDED: 'ENDED',
+  }),
+  sentence: Object.freeze({
+    WAITING: 'You are in the room. Your place is drawn at the opening.',
+    QUEUED: 'You are in the line. Open the release to follow your place.',
+    TURN: 'It is your turn. Open the release to secure your piece.',
+    SECURED: 'A piece is held for you. Open the release to confirm it.',
+    CONFIRMED: (size: string) => `Your piece is reserved in size ${size}. ORBES Client Services will contact you to settle payment and delivery.`,
+    MISSED: 'Your turn passed before the seal was held.',
+    EXPIRED: 'Your hold ended before it was confirmed.',
+    RELEASED: 'You released your place: the piece returned to the line.',
+    LEFT: 'You left this release.',
+    REMOVED: 'ORBES removed your entry from this release.',
+    ENDED: 'The release ended before your turn came.',
+  }),
+  reference: (ref: string) => `REFERENCE ${ref}`,
+});

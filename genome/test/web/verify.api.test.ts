@@ -266,6 +266,51 @@ describe('ApiClient', () => {
     expect(api.hasSession).toBe(true);
   });
 
+  it('LIVE RELEASE: reads the list, a page, the clock and the state with no CSRF header; acts with it, the add-ons by PUT', async () => {
+    const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const entry = { id: 'e', status: 'WAITING' };
+    const f = fakeFetch([
+      () => json(200, { releases: [] }),
+      () => json(200, { id: ID, kind: 'LIVE', phase: 'ENDED' }),
+      () => json(200, { now: '2026-10-11T17:00:00.000Z' }),
+      () => json(200, SESSION('tok')),
+      () => json(200, { now: '2026-10-11T17:00:00.000Z', room: {}, access: { allowed: true, tier: 1, missing: null }, entry: null, interest: null }),
+      ...['enter', 'size', 'leave', 'press', 'secure', 'addons', 'confirm', 'release'].map(() => () => json(200, { entry })),
+      () => json(200, { entries: [] }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.liveReleases()).toEqual([]);
+    expect(await api.liveRelease(ID)).toEqual({ id: ID, kind: 'LIVE', phase: 'ENDED' });
+    expect(await api.liveClock()).toBe('2026-10-11T17:00:00.000Z');
+    await api.me();
+    expect((await api.liveState(ID)).entry).toBeNull();
+    await api.liveEnter(ID, 's52');
+    await api.liveSize(ID, 's50', 2);
+    await api.liveLeave(ID);
+    await api.livePress(ID, 'turn');
+    await api.liveSecure(ID, 'turn');
+    expect(await api.liveAddons(ID, ['a1'])).toEqual(entry);
+    await api.liveConfirm(ID);
+    await api.liveGiveBack(ID);
+    expect(await api.liveMine()).toEqual([]);
+    expect(api.liveStreamUrl(ID)).toBe(`/api/v1/live/${ID}/stream`);
+    const reads = f.calls.filter((c) => c.method === 'GET');
+    expect(reads.map((c) => c.url)).toEqual(['/api/v1/live', `/api/v1/live/${ID}`, '/api/v1/live/clock', '/api/v1/account/session', `/api/v1/live/${ID}/state`, '/api/v1/live/mine']);
+    for (const c of reads) expect(c.headers['x-csrf-token']).toBeUndefined();
+    const acts = f.calls.filter((c) => c.method !== 'GET');
+    expect(acts.map((c) => [c.method, c.url, c.body])).toEqual([
+      ['POST', `/api/v1/live/${ID}/enter`, { sizeId: 's52' }],
+      ['POST', `/api/v1/live/${ID}/size`, { sizeId: 's50', quantity: 2 }],
+      ['POST', `/api/v1/live/${ID}/leave`, {}],
+      ['POST', `/api/v1/live/${ID}/press`, { token: 'turn' }],
+      ['POST', `/api/v1/live/${ID}/secure`, { token: 'turn' }],
+      ['PUT', `/api/v1/live/${ID}/addons`, { addonIds: ['a1'] }],
+      ['POST', `/api/v1/live/${ID}/confirm`, {}],
+      ['POST', `/api/v1/live/${ID}/release`, {}],
+    ]);
+    for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
+  });
+
   it('filenameOf: the attachment\'s name when it is a plain one, else the fallback', () => {
     expect(filenameOf('attachment; filename="ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf"', 'x.pdf')).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
     expect(filenameOf('attachment; filename="../../etc/passwd"', 'x.pdf')).toBe('x.pdf');

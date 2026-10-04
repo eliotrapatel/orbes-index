@@ -25,10 +25,9 @@
  */
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
-import { SOUND } from '../copy.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
-import { legalLinks, lookbookLink, orbitReticle, piecesLink, releasesLink, viewRoot } from './common.js';
+import { legalLinks, lookbookLink, orbitReticle, piecesLink, releasesLink, soundToggle, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
@@ -42,26 +41,6 @@ export interface LandingHandlers {
   onReleases?(): void;
   /** The sound signature (P-D07): SOUND ON / OFF at the foot. */
   sound?: SoundSwitch;
-}
-
-/**
- * SOUND ON / OFF (P-D07): a text link that switches the sound signature, its state in aria-pressed. Its accessible
- * name is SOUND; ON or OFF beside the word says the state to the eye (hidden from assistive technologies, which hear
- * the pressed state instead).
- */
-function soundToggle(sound: SoundSwitch): HTMLButtonElement {
-  const state = h('span', { class: 'landing__sound-state', attrs: { 'aria-hidden': 'true' } });
-  const button = h('button', { class: 'textlink landing__sound', attrs: { type: 'button' } }, `${SOUND.label} `, state);
-  const render = (): void => {
-    button.setAttribute('aria-pressed', String(sound.on));
-    state.textContent = sound.on ? SOUND.on : SOUND.off;
-  };
-  button.addEventListener('click', () => {
-    sound.set(!sound.on);
-    render();
-  });
-  render();
-  return button;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
@@ -112,7 +91,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
     h(
       'footer',
       { class: 'landing__foot' },
-      handlers.sound ? soundToggle(handlers.sound) : null,
+      handlers.sound ? soundToggle(handlers.sound, 'landing__sound') : null,
       legalLinks({ extraClass: 'landing__legal' }),
       h('div', { class: 'landing__meta nano' }, h('span', { text: '© ORBES' }), h('span', { text: 'GENOME CODE' }), h('span', { text: 'PARIS' })),
     ),

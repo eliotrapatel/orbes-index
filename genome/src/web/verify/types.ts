@@ -484,3 +484,159 @@ export interface CirclePost extends CircleCard {
     external: { url: string; host: string } | null;
   };
 }
+
+// ── The LIVE RELEASES (plan of 2026-10-04; GET /api/v1/live…, services/live-room.ts) ─────────────────────────────────
+
+/** Where an announced LIVE RELEASE stands for the public: announced, its room open, live; or over (its page only). */
+export type LivePhase = 'ANNOUNCED' | 'ROOM' | 'LIVE';
+
+/** The ways a LIVE RELEASE ends. */
+export type LiveEndReason = 'SOLD_OUT' | 'CLOSED' | 'ENDED';
+
+export const LIVE_END_REASONS: readonly LiveEndReason[] = ['SOLD_OUT', 'CLOSED', 'ENDED'];
+
+/** An entry's status in a LIVE RELEASE (live_entries.status). */
+export type LiveEntryStatus = 'WAITING' | 'QUEUED' | 'TURN' | 'SECURED' | 'CONFIRMED' | 'MISSED' | 'EXPIRED' | 'RELEASED' | 'LEFT' | 'REMOVED' | 'ENDED';
+
+export const LIVE_ENTRY_STATUSES: readonly LiveEntryStatus[] = ['WAITING', 'QUEUED', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED'];
+
+/** A LIVE RELEASE in THE RELEASES (GET /api/v1/live): each stage only from its time (null before). */
+export interface LiveCard {
+  id: string;
+  kind: 'LIVE';
+  phase: LivePhase;
+  revealed: { silhouette: boolean; name: boolean; photo: boolean };
+  stages: { silhouetteAt: string; nameAt: string; photoAt: string };
+  title: string | null;
+  name: string | null;
+  type: string | null;
+  collection: string | null;
+  silhouetteUrl: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
+  announcedAt: string;
+  roomOpensAt: string;
+  /** T0. */
+  opensAt: string;
+  closesAt: string;
+  priceMinor: number;
+  currency: string;
+  /** The quantity as the console wrote it (« 25 PIECES »). */
+  quantityLine: string;
+  perAccount: number;
+  /** The lowest tier allowed (0 any account), and the rule in words after « for ». */
+  access: { minTier: number; text: string };
+}
+
+/** A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live. */
+export interface LiveSheet extends LiveCard {
+  description: string | null;
+  sizes: { id: string; label: string; stock: number }[];
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** I'LL BE THERE: how many accounts said so. */
+  interest: number;
+  roomOpensMinutes: number;
+  turnSeconds: number;
+  payMinutes: number;
+  tierPriority: boolean;
+}
+
+/** A LIVE RELEASE's page once it has ended: only that it has. */
+export interface LiveEndedSheet {
+  id: string;
+  kind: 'LIVE';
+  phase: 'ENDED';
+}
+
+/** A size in the room: its stock, the pieces free now, and those in a turn or held that may return. */
+export interface LiveRoomSize {
+  id: string;
+  label: string;
+  stock: number;
+  left: number;
+  held: number;
+}
+
+/** The room as its viewers read it (the stream's `room` event, without its `now`; the state's `room`). */
+export interface LiveRoom {
+  id: string;
+  phase: LivePhase | 'ENDED';
+  paused: boolean;
+  /** Ended, and no turn or hold left. */
+  over: boolean;
+  endedReason: LiveEndReason | null;
+  roomOpensAt: string;
+  opensAt: string;
+  closesAt: string;
+  inRoom: number;
+  line: number;
+  quantity: number;
+  quantityLine: string;
+  left: number;
+  held: number;
+  sizes: LiveRoomSize[];
+  message: { text: string; at: string } | null;
+}
+
+/** The signed-in account's entry in a release (the stream's `you` event, the state's `entry`, every action's answer). */
+export interface LiveEntry {
+  id: string;
+  dropId: string;
+  status: LiveEntryStatus;
+  size: { id: string; label: string };
+  quantity: number;
+  tier: number;
+  /** The place in the line; null before T0. */
+  position: number | null;
+  /** While QUEUED: the entries of its size before it. */
+  ahead: number | null;
+  joinedAt: string;
+  /** Its deadline as it stands now; the secret only while it is TURN. */
+  turn: { at: string; expiresAt: string; token: string | null } | null;
+  hold: { securedAt: string; expiresAt: string } | null;
+  confirmedAt: string | null;
+  endedAt: string | null;
+  letIn: boolean;
+  addons: { id: string; label: string; priceMinor: number }[];
+  currency: string;
+  priceMinor: number;
+  totalMinor: number;
+}
+
+/** The account against the release's rule now. */
+export interface LiveAccess {
+  allowed: boolean;
+  tier: number;
+  missing: 'TIER' | 'PIECE' | null;
+}
+
+/** I'LL BE THERE, with a size. */
+export interface LiveInterest {
+  dropId: string;
+  size: { id: string; label: string };
+  since: string;
+}
+
+/** GET /api/v1/live/:id/state: the server's time, the room, the account's standing, entry and interest. */
+export interface LiveState {
+  now: string;
+  room: LiveRoom;
+  access: LiveAccess;
+  entry: LiveEntry | null;
+  interest: LiveInterest | null;
+}
+
+/** An entry of the account in MY PIECES (GET /api/v1/live/mine), with its release, each part from its stage. */
+export interface LiveAccountEntry {
+  release: {
+    id: string;
+    phase: 'DRAFT' | 'CANCELLED' | 'HIDDEN' | LivePhase | 'ENDED';
+    endedReason: LiveEndReason | null;
+    title: string | null;
+    name: string | null;
+    imageUrl: string | null;
+    opensAt: string;
+    closesAt: string;
+  };
+  entry: LiveEntry;
+}

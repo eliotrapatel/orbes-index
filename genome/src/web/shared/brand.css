@@ -46,6 +46,18 @@
   --hairline-strong: rgba(10, 10, 10, 0.32);
   --paper: var(--white);
 
+  /* The VAULT (the LIVE RELEASE’s look): ivory on the ink ground, under an overhead light. --vault-soft reads at
+     7.8 : 1 on the ground and 7.3 : 1 on the plate (AA), --vault-ink 17.7 : 1; --vault-faint (3.7 : 1) is decoration only. */
+  --vault-ground: #0a0a0a;
+  --vault-ink: #f6f2ea;
+  --vault-soft: #a7a29a;
+  --vault-faint: #6f6a63;
+  --vault-plate: #141312;
+  --vault-hairline: rgba(246, 242, 234, 0.14);
+  --vault-hairline-strong: rgba(246, 242, 234, 0.34);
+  --vault-light: radial-gradient(120% 55% at 50% 0%, rgba(246, 242, 234, 0.1), rgba(10, 10, 10, 0) 62%);
+  --vault-glow: drop-shadow(0 0 22px rgba(246, 242, 234, 0.28));
+
   /* Type. --font reads: sentences, values, identifiers, codes, inputs (the
      stack of index.html). --font-display is the brand's voice: the wordmark,
      titles and tracked-capital labels, falling back to --font. Gravesend has
@@ -76,6 +88,9 @@
   --fs-display-sm: 22px;
   --fs-display: 26px;
   --fs-figure: 46px;
+  /* The LIVE RELEASE's figures: the room's countdown, the place in the line (thin weight, tabular, --font). */
+  --fs-count: 58px;
+  --fs-place: 104px;
   --track-micro: 0.22em;
   --track-label: 0.28em;
   --track-display: 0.32em;

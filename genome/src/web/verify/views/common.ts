@@ -9,9 +9,10 @@
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
 import { CIRCLE_PATH, circlePostPath } from '../circle-model.js';
-import { CIRCLE, CONTACT, LEGAL, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { CIRCLE, CONTACT, LEGAL, LOOKBOOK, PIECES, RELEASES, SOUND } from '../copy.js';
 import { LOOKBOOK_PATH, lookbookSheetPath } from '../lookbook-model.js';
 import { releasePath, RELEASES_PATH } from '../releases-model.js';
+import type { SoundSwitch } from '../sound.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
 
 /** A <main> view root with its modifier class. */
@@ -215,4 +216,24 @@ export function termsNote(): HTMLElement {
       h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('privacy'), ...NEW_TAB }, text: LEGAL.privacy }),
     ),
   );
+}
+
+/**
+ * SOUND ON / OFF (P-D07): a text link that switches the sound signature, its state in aria-pressed. Its accessible
+ * name is SOUND; ON or OFF beside the word says the state to the eye (hidden from assistive technologies, which hear
+ * the pressed state instead). At the foot of the landing (`landing__sound`) and of a LIVE RELEASE's room (`live__sound`).
+ */
+export function soundToggle(sound: SoundSwitch, extraClass: string): HTMLButtonElement {
+  const state = h('span', { class: `${extraClass}-state`, attrs: { 'aria-hidden': 'true' } });
+  const button = h('button', { class: `textlink ${extraClass}`, attrs: { type: 'button' } }, `${SOUND.label} `, state);
+  const render = (): void => {
+    button.setAttribute('aria-pressed', String(sound.on));
+    state.textContent = sound.on ? SOUND.on : SOUND.off;
+  };
+  button.addEventListener('click', () => {
+    sound.set(!sound.on);
+    render();
+  });
+  render();
+  return button;
 }

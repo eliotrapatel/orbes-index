@@ -14,6 +14,8 @@
  *   Server messages are written for customers and safe to display.
  * - The ownership certificate's PDF (F-06) is the one answer that is not
  *   JSON: it comes back as a blob with its file name, for the page to save.
+ * - A LIVE RELEASE's stream is no fetch: the page opens an EventSource on
+ *   `liveStreamUrl` (same origin, the session cookie with it).
  */
 import type {
   CertificateLookup,
@@ -31,6 +33,12 @@ import type {
   IncidentReport,
   IncidentResolution,
   IncidentType,
+  LiveAccountEntry,
+  LiveCard,
+  LiveEndedSheet,
+  LiveEntry,
+  LiveSheet,
+  LiveState,
   LookbookCard,
   LookbookSheet,
   OwnedPiece,
@@ -88,12 +96,15 @@ interface RequestOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** The contact of ORBES Client Services is optional: its read gives up early, and is tried again with the next result. */
 export const CONTACT_TIMEOUT_MS = 4_000;
+/** A LIVE RELEASE's clock sync gives up on a slow round trip (it is no use for the sync), and its state polled every 2 s on one that hangs. */
+export const LIVE_CLOCK_TIMEOUT_MS = 4_000;
+export const LIVE_STATE_TIMEOUT_MS = 6_000;
 /** Largest response body we are willing to parse (verify outcomes are ~2 KB). */
 const MAX_RESPONSE_CHARS = 256 * 1024;
 /** Largest file we are willing to take (a certificate's PDF is about 40 KB). */
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
-type Method = 'GET' | 'POST' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 export class ApiClient {
   private csrfToken: string | undefined;
@@ -225,6 +236,92 @@ export class ApiClient {
   async reserveDrop(id: string): Promise<ClubEntry> {
     const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, undefined, { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entry;
+  }
+
+  // ── The LIVE RELEASES (plan of 2026-10-04) ───────────────────────────────
+
+  /** THE RELEASES' LIVE half: every LIVE RELEASE announced and not ended, the next opening first; read afresh. */
+  async liveReleases(): Promise<LiveCard[]> {
+    const r = await this.request<{ releases?: unknown }>('GET', '/api/v1/live');
+    if (!Array.isArray(r?.releases)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.releases as LiveCard[];
+  }
+
+  /** A LIVE RELEASE's page, each stage from its time (404 DROP_NOT_FOUND for any other id, a draw's included). */
+  liveRelease(id: string): Promise<LiveSheet | LiveEndedSheet> {
+    return this.request<LiveSheet | LiveEndedSheet>('GET', `/api/v1/live/${encodeURIComponent(id)}`);
+  }
+
+  /** The server's time, for the page's clock sync (one of its three round trips). */
+  async liveClock(): Promise<string> {
+    const r = await this.request<{ now?: unknown }>('GET', '/api/v1/live/clock', undefined, { timeoutMs: LIVE_CLOCK_TIMEOUT_MS });
+    if (typeof r?.now !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.now;
+  }
+
+  /** The room and the account's own standing (401 signed out, 403 LIVE_NOT_ELIGIBLE with the rule in words). */
+  async liveState(id: string): Promise<LiveState> {
+    const r = await this.request<LiveState>('GET', `/api/v1/live/${encodeURIComponent(id)}/state`, undefined, { timeoutMs: LIVE_STATE_TIMEOUT_MS });
+    if (!r?.room || typeof r.now !== 'string' || !r.access) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The address of a release's stream (SSE: `room` and `you` events), for an EventSource. */
+  liveStreamUrl(id: string): string {
+    return `${this.base}/api/v1/live/${encodeURIComponent(id)}/stream`;
+  }
+
+  /** The account's entries in the LIVE RELEASES, with their releases (MY PIECES). */
+  async liveMine(): Promise<LiveAccountEntry[]> {
+    const r = await this.request<{ entries?: unknown }>('GET', '/api/v1/live/mine');
+    if (!Array.isArray(r?.entries)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entries as LiveAccountEntry[];
+  }
+
+  /** ENTER the room (before T0) or the line (after it), with a size and, where the release allows more, a quantity. */
+  liveEnter(id: string, sizeId: string, quantity?: number): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'enter', quantity === undefined ? { sizeId } : { sizeId, quantity });
+  }
+
+  /** CHANGE SIZE (and quantity), before T0 only (409 LIVE_SIZE_LOCKED from T0 on). */
+  liveSize(id: string, sizeId: string, quantity?: number): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'size', quantity === undefined ? { sizeId } : { sizeId, quantity });
+  }
+
+  /** LEAVE the room or the line. */
+  liveLeave(id: string): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'leave', {});
+  }
+
+  /** The seal pressed: the server notes the time with the turn's secret. */
+  livePress(id: string, token: string): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'press', { token });
+  }
+
+  /** The seal held: the piece secured, when the press is at least 1.4 s old on the server's clock. */
+  liveSecure(id: string, token: string): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'secure', { token });
+  }
+
+  /** The add-ons of the piece held, all of them at once (none: an empty list). */
+  liveAddons(id: string, addonIds: readonly string[]): Promise<LiveEntry> {
+    return this.liveAction('PUT', id, 'addons', { addonIds: [...addonIds] });
+  }
+
+  /** PAY (a placeholder): the piece held becomes a reservation ORBES Client Services concludes. */
+  liveConfirm(id: string): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'confirm', {});
+  }
+
+  /** RELEASE MY PLACE: the piece held goes back to the line. */
+  liveGiveBack(id: string): Promise<LiveEntry> {
+    return this.liveAction('POST', id, 'release', {});
+  }
+
+  private async liveAction(method: Method, id: string, action: string, body: Record<string, unknown>): Promise<LiveEntry> {
+    const r = await this.request<{ entry?: LiveEntry }>(method, `/api/v1/live/${encodeURIComponent(id)}/${action}`, body, { csrf: true });
+    if (!r?.entry || typeof r.entry.status !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }
 

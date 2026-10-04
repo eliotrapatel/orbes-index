@@ -6,6 +6,8 @@
  *      ├──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
  *      ├──THE COLLECTION──▶ the lookbook (/verify/lookbook, P-R02) ──SEE THE MODEL──▶ a sheet
  *      └──THE RELEASES──▶ the releases (/verify/releases, P-R03) ──SEE THE RELEASE──▶ a release's page
+ *                         a LIVE RELEASE's page (plan of 2026-10-04): its room, its line, the turn, the piece secured
+ *                         (the vault), the reservation confirmed (ivory); read first as one, else a draw's
  *   MY PIECES ──THE CIRCLE──▶ the owners' circle (/verify/circle, P-X01) ──SEE THE …──▶ a post
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   result ──REGISTER, then VIEW AS OWNER──▶ VERIFYING… ──▶ the result with the ceremony (P-D01)
@@ -26,7 +28,7 @@
  *   /verify/lookbook          THE COLLECTION, the lookbook of the models (P-R02);
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
  *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
- *   /verify/releases/<id>     a release's page, its entry and its draw (an address that is none: the list);
+ *   /verify/releases/<id>     a release's page, its entry and its draw, or a LIVE RELEASE's (an address that is none: the list);
  *   /verify/circle            THE CIRCLE, the owners' feed (P-X01);
  *   /verify/circle/<id>       a post, its answer or its vote (an address that is none: the feed);
  *   anything else    the landing, its address put back to /verify.
@@ -49,14 +51,14 @@
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
-import { ApiClient, settledWithin } from './api.js';
+import { ApiClient, ApiError, settledWithin } from './api.js';
 import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
 import { HINTS, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
 import { SoundSignature } from './sound.js';
-import type { ClientServices, VerifyInput } from './types.js';
+import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
@@ -65,7 +67,9 @@ import { resultViewModel } from './view-model.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
+import { messageOf } from './views/forms.js';
 import { landingView } from './views/landing.js';
+import { liveView } from './views/live.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
@@ -74,7 +78,7 @@ import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'circle' | 'circlePost';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
@@ -127,6 +131,15 @@ const LEAVE_MS = 280;
 const LOCK_PAUSE_MS = 420;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** This phone's time zone: a LIVE RELEASE says its times in Paris, then here when it differs. */
+function localZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
 
 class App {
   private readonly host = byId('app');
@@ -183,7 +196,7 @@ class App {
         if (this.screen !== 'lookbook') void this.showLookbook();
       } else if (entry === 'release' || route === 'release') {
         const id = releaseIdOf(location.pathname);
-        if (!(this.screen === 'release' && this.releaseId === id)) void this.showRelease(id);
+        if (!((this.screen === 'release' || this.screen === 'live') && this.releaseId === id)) void this.showRelease(id);
       } else if (entry === 'releases' || route === 'releases') {
         if (this.screen !== 'releases') void this.showReleases();
       } else if (entry === 'circlePost' || route === 'circlePost') {
@@ -491,16 +504,48 @@ class App {
     this.generation++;
     this.stopCamera();
     this.releaseId = null;
-    const view = releasesView({ api: this.api, onScan: () => void this.startScan(), onRelease: (id) => this.openRelease(id), onCollection: () => this.openLookbook() });
+    const view = releasesView({ api: this.api, onScan: () => void this.startScan(), onRelease: (id) => this.openRelease(id), onCollection: () => this.openLookbook(), localZone: localZone() });
     if (await this.swap(view.root, 'releases', focus)) this.live = view;
     else view.dispose();
   }
 
-  /** A release's page (P-R03): its entry for a signed-in account, its draw; `id` null: an address that is none. */
+  /**
+   * A release's page: a LIVE RELEASE's (its room, the vault) when the id is one, read first; else a draw's (P-R03), its
+   * entry for a signed-in account, its draw. `id` null: an address that is none.
+   */
   private async showRelease(id: string | null, focus = true): Promise<void> {
-    this.generation++;
+    const gen = ++this.generation;
     this.stopCamera();
     this.releaseId = id;
+    if (id !== null) {
+      // The LIVE page answers 404 for any other id, a draw's included; a release that cannot be read now is said there.
+      let sheet: LiveSheet | LiveEndedSheet | null = null;
+      let failure: string | null = null;
+      try {
+        sheet = await this.api.liveRelease(id);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 404)) failure = messageOf(e);
+      }
+      if (gen !== this.generation) return;
+      if (sheet || failure !== null) {
+        const view = liveView({
+          api: this.api,
+          session: this.session,
+          sound: this.sound,
+          sheet,
+          failure: failure ?? undefined,
+          onRetry: () => void this.showRelease(id),
+          onReleases: () => this.openReleases(),
+          onPieces: () => this.openPieces(),
+          onScan: () => void this.startScan(),
+          clientServices: () => this.contactDetails(),
+          localZone: localZone(),
+        });
+        if (await this.swap(view.root, 'live', focus)) this.live = view;
+        else view.dispose();
+        return;
+      }
+    }
     const view = releaseView({
       api: this.api,
       session: this.session,
