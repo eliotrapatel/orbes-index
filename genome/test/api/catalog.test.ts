@@ -5,6 +5,8 @@
  * instructions and collection are read live by every public result of its
  * pieces; its category and SKU prefix never change; an inactive model or
  * category issues no new piece (409) while its pieces verify as before.
+ * An ADMIN discontinues a model and reinstates it (P-R06: POST
+ * /api/admin/models/:id/discontinue and /reinstate).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { IssueResult } from '../../src/server/services/issuance.js';
@@ -21,6 +23,7 @@ interface ModelJson {
   careInstructions: string | null;
   active: boolean;
   products: number;
+  discontinuedAt: string | null;
 }
 
 describe('the editable catalogue (A-10)', () => {
@@ -32,7 +35,7 @@ describe('the editable catalogue (A-10)', () => {
   let piece: IssueResult;
 
   const verify = async (code: string) =>
-    safeJson(await h.client().post('/api/v1/verify', { code })) as { state: string; product?: { model: string; type: string; collection?: string; care?: string } };
+    safeJson(await h.client().post('/api/v1/verify', { code })) as { state: string; product?: { model: string; type: string; collection?: string; care?: string; discontinuedYear?: number } };
   const modelOf = async (id: string) => ((safeJson(await auditor.get('/api/admin/models')) as { items: ModelJson[] }).items.find((m) => m.id === id))!;
   const issueViaApi = (c: Client) => c.post('/api/admin/products', { categoryCode: 'J', modelId: catalog.modelId, material: '925 STERLING SILVER' });
 
@@ -169,5 +172,61 @@ describe('the editable catalogue (A-10)', () => {
     for (const [url, body] of [['/api/admin/categories/JJ/active', { active: true }], ['/api/admin/categories/J/active', { active: 'yes' }], ['/api/admin/categories/J/active', {}]] as const) {
       expect(errorOf(await admin.post(url, body)).code, `${url} ${JSON.stringify(body)}`).toBe('VALIDATION_FAILED');
     }
+  });
+
+  it('POST /api/admin/models/:id/discontinue and /reinstate (ADMIN; P-R06): inactive and said DISCONTINUED, then offered again', async () => {
+    const url = (action: string, id = catalog.modelId) => `/api/admin/models/${id}/${action}`;
+    // ADMIN only, before anything is read; no body but an empty one; an unknown model is a 404.
+    for (const c of [operator, auditor]) expect(errorOf(await c.post(url('discontinue'))).code).toBe('FORBIDDEN');
+    expect(errorOf(await admin.post(url('discontinue'), { reason: 'x' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await admin.post(url('discontinue', 'nope'))).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await admin.post(url('discontinue', '00000000-0000-4000-8000-000000000000'))).code).toBe('MODEL_NOT_FOUND');
+    expect((await admin.post(url('discontinue'), {}, { noCsrf: true })).statusCode).toBe(403);
+    expect((await verify(piece.code.data)).product).not.toHaveProperty('discontinuedYear');
+    // Shown in the lookbook, to read the year on its sheet too.
+    expect((await operator.patch(`/api/admin/models/${catalog.modelId}`, { lookbook: 'PUBLIC', slug: 'monolithe-discontinued' })).statusCode).toBe(200);
+    const sheet = async () => safeJson(await h.client().get('/api/v1/lookbook/monolithe-discontinued')) as { discontinuedYear: number | null };
+    expect((await sheet()).discontinuedYear).toBeNull();
+
+    const res = await admin.post(url('discontinue'));
+    expect(res.statusCode, res.body).toBe(200);
+    const m = safeJson(res) as ModelJson;
+    expect(m).toMatchObject({ id: catalog.modelId, active: false, discontinuedAt: expect.any(String) });
+    const year = new Date(m.discontinuedAt!).getUTCFullYear();
+    expect(await modelOf(catalog.modelId)).toMatchObject({ active: false, discontinuedAt: m.discontinuedAt });
+    // Who discontinued it: the ADMIN's console account.
+    const row = await h.ctx.db.selectFrom('models as m').innerJoin('admin_users as a', 'a.id', 'm.discontinued_by').select(['a.role']).where('m.id', '=', catalog.modelId).executeTakeFirstOrThrow();
+    expect(row.role).toBe('ADMIN');
+    // Its pieces verify as before, said DISCONTINUED with the year; its sheet says it; no new piece (MODEL_INACTIVE).
+    const after = await verify(piece.code.data);
+    expect(after.state).toMatch(/^AUTHENTIC/);
+    expect(after.product?.discontinuedYear).toBe(year);
+    expect((await sheet()).discontinuedYear).toBe(year);
+    expect(errorOf(await issueViaApi(operator)).code).toBe('MODEL_INACTIVE');
+    // Only Reinstate offers it again: an edit to active is refused; any other edit goes through.
+    const reactivated = await operator.patch(`/api/admin/models/${catalog.modelId}`, { active: true });
+    expect([reactivated.statusCode, errorOf(reactivated).code]).toEqual([409, 'MODEL_DISCONTINUED']);
+    expect((await operator.patch(`/api/admin/models/${catalog.modelId}`, { active: false, careInstructions: 'Polish it.' })).statusCode).toBe(200);
+    expect(errorOf(await admin.post(url('discontinue'))).code).toBe('MODEL_ALREADY_DISCONTINUED');
+    expect(errorOf(await operator.post(url('reinstate'))).code).toBe('FORBIDDEN');
+
+    const back = await admin.post(url('reinstate'), {});
+    expect(back.statusCode, back.body).toBe(200);
+    expect(safeJson(back)).toMatchObject({ active: true, discontinuedAt: null });
+    expect((await h.ctx.db.selectFrom('models').select('discontinued_by').where('id', '=', catalog.modelId).executeTakeFirstOrThrow()).discontinued_by).toBeNull();
+    expect((await verify(piece.code.data)).product).not.toHaveProperty('discontinuedYear');
+    expect((await sheet()).discontinuedYear).toBeNull();
+    expect((await issueViaApi(operator)).statusCode).toBe(201);
+    expect(errorOf(await admin.post(url('reinstate'))).code).toBe('MODEL_NOT_DISCONTINUED');
+
+    // Audited, each with the admin and what it touched.
+    const entries = await h.ctx.db.selectFrom('audit_logs').selectAll().where('action', 'in', ['model.discontinue', 'model.reinstate']).orderBy('id').execute();
+    expect(entries.map((e) => [e.action, e.actor_type, e.target_type, e.target_id])).toEqual([
+      ['model.discontinue', 'admin', 'model', catalog.modelId],
+      ['model.reinstate', 'admin', 'model', catalog.modelId],
+    ]);
+    expect(entries[0].details).toEqual({ name: 'MONOLITHE II', skuPrefix: expect.stringMatching(/^MNL-/), discontinuedAt: m.discontinuedAt, wasActive: true, issuedPieces: expect.any(Number) });
+    expect(entries[1].details).toMatchObject({ discontinuedAt: m.discontinuedAt });
+    expect((await operator.patch(`/api/admin/models/${catalog.modelId}`, { lookbook: 'HIDDEN', careInstructions: 'Polish with a soft dry cloth.' })).statusCode).toBe(200);
   });
 });

@@ -2046,6 +2046,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await media.addModelGalleryImage(aurore.id, { mime: 'image/jpeg', bytes: jpegPhoto(400, 300) }, SYSTEM_ACTOR);
     await catalog.updateModel(aurore.id, { slug: 'aurore', lookbook: 'PUBLIC', story: 'The ring of dawn.\n\nCast in Paris.\nPolished by hand.', specs: 'Metal: 925 sterling silver\nWeight: 12 g' }, SYSTEM_ACTOR);
     await catalog.updateModel(zenith.id, { slug: 'zenith', lookbook: 'RESERVED', story: 'Shown to the owners.' }, SYSTEM_ACTOR);
+    // P-R06: ZENITH is discontinued; its sheet's line says so, with the year.
+    const zenithYear = (await catalog.discontinueModel(zenith.id, SYSTEM_ACTOR)).discontinuedAt!.getUTCFullYear();
     const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: aurore.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
 
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
@@ -2143,6 +2145,17 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.goBack();
     await textOf(page.locator('h1'), 'THE COLLECTION');
 
+    // P-R06: once its model is discontinued, the piece verifies as before, and its lines end with DISCONTINUED · <year>,
+    // the year in the reading face.
+    const auroreYear = (await catalog.discontinueModel(aurore.id, SYSTEM_ACTOR)).discontinuedAt!.getUTCFullYear();
+    await page.goto(`${srv.origin}/verify`);
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'lookbook-discontinued.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    await textsOf(page.locator('.result__lines .lines__line'), ['AURORE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026', `DISCONTINUED · ${auroreYear}`]);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await catalog.reinstateModel(aurore.id, SYSTEM_ACTOR);
+
     // An owner signed in (MY PIECES) sees the models RESERVED FOR OWNERS, and their sheets.
     const email = 'lookbook.owner@example.com';
     const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
@@ -2161,7 +2174,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await visible(zenithCard);
     await zenithCard.getByRole('link', { name: 'SEE THE MODEL' }).click();
     await textOf(page.locator('h1'), 'ZENITH');
-    await textOf(page.locator('.sheet__line'), 'RING · RESERVED FOR OWNERS');
+    await textOf(page.locator('.sheet__line'), `RING · RESERVED FOR OWNERS · DISCONTINUED · ${zenithYear}`);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     await textsOf(page.locator('.sheet__paragraph'), ['Shown to the owners.']);
     // No photograph: no plate.
     await countOf(page.locator('.sheet__photos'), 0);

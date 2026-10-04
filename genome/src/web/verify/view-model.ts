@@ -10,7 +10,8 @@
  * the sheet of its model in THE COLLECTION (P-R02: SEE THE MODEL),
  * the ceremony of a first registration (P-D01: the GENOME, then the name of
  * its model and its collection),
- * how product facts read as brand lines, which tabs exist and what the
+ * how product facts read as brand lines (DISCONTINUED · <year> last when
+ * its model was discontinued, P-R06), which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
  * registration token or a transfer window, the certificate-card or the
  * transfer-code section), when the scan's windows end on this device's
@@ -23,7 +24,7 @@
  */
 import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, FALLBACK_TITLES, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -146,7 +147,7 @@ export interface ResultViewModel {
   /** The address of its model's sheet in THE COLLECTION (P-R02), under the product lines: authentic results of a PUBLIC model only. */
   lookbook?: string;
   genome?: GenomeModel;
-  /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
+  /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY, then DISCONTINUED · YYYY when its model was (P-R06). */
   productLines: string[];
   tabs: TabId[];
   productRows: Row[];
@@ -294,8 +295,29 @@ export function upper(s: string | undefined | null): string {
 }
 
 /** Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED (the variant belongs to the rows), as a result and MY PIECES show them. */
-export function productLines(p: { model: string; type: string; category?: { name: string } | null; material: string; createdYear?: number | null }): string[] {
-  return [upper(p.model), upper(p.type), upper(p.category?.name), upper(p.material), p.createdYear ? `CREATED ${p.createdYear}` : ''].filter((x) => x.length > 0);
+export function productLines(p: {
+  model: string;
+  type: string;
+  category?: { name: string } | null;
+  material: string;
+  createdYear?: number | null;
+  discontinuedYear?: number | null;
+}): string[] {
+  const discontinued = discontinuedYearOf(p.discontinuedYear);
+  return [
+    upper(p.model),
+    upper(p.type),
+    upper(p.category?.name),
+    upper(p.material),
+    p.createdYear ? `CREATED ${p.createdYear}` : '',
+    // P-R06: last, under CREATED, when its model was discontinued.
+    discontinued !== null ? DISCONTINUED.line(discontinued) : '',
+  ].filter((x) => x.length > 0);
+}
+
+/** The year a model was discontinued (P-R06), when the server sent one that is a year; else null (nothing is said). */
+export function discontinuedYearOf(year: unknown): number | null {
+  return typeof year === 'number' && Number.isInteger(year) && year >= 1000 && year <= 9999 ? year : null;
 }
 
 /** The WARRANTY rows and their sentence, on a result and in MY PIECES; undefined for a status the app does not know. */
@@ -375,6 +397,8 @@ export function resultViewModel(
     if (p.variant) rows.push(['VARIANT', upper(p.variant)]);
     rows.push(['CATEGORY', upper(p.category?.name)], ['MATERIAL', upper(p.material)], ['CREATED', String(p.createdYear)]);
     if (p.productionDate) rows.push(['PRODUCTION DATE', formatDate(p.productionDate)]);
+    const discontinued = discontinuedYearOf(p.discontinuedYear);
+    if (discontinued !== null) rows.push([DISCONTINUED.row, String(discontinued)]);
     vm.productRows = rows;
     if (p.care && p.care.trim()) vm.care = p.care.trim();
     vm.tabs = ['product', 'warranty', 'care', 'ownership'];

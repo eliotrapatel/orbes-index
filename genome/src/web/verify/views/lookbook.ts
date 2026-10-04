@@ -19,7 +19,8 @@
  *
  * A card is no control of its own: its text link is (BRAND §3.8, the
  * pointer is the controls'). The sheet: the collection, the model's name and
- * type (RESERVED FOR OWNERS when the club opened it), its photographs on an
+ * type (RESERVED FOR OWNERS when the club opened it, DISCONTINUED · <year>
+ * once an ADMIN discontinued it, P-R06), its photographs on an
  * ivory plate (the cover, then the gallery, each contained, never cropped),
  * THE STORY (shared/lookbook.ts, the paragraphs the console previews),
  * SPECIFICATIONS, CARE, then THE COLLECTION, back to the grid.
@@ -35,7 +36,7 @@ import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { LOOKBOOK } from '../copy.js';
-import { lookbookGroups, sheetModel, type CardModel, type CollectionGroup, type LookbookPhoto, type SheetModel } from '../lookbook-model.js';
+import { lookbookGroups, sheetLine, sheetModel, type CardModel, type CollectionGroup, type LookbookPhoto, type SheetModel } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { LookbookCard } from '../types.js';
 import { legalLinks, lookbookLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
@@ -310,7 +311,7 @@ class SheetPage {
     this.eyebrow.replaceChildren(...withNumerals(s.collection ?? s.category));
     this.eyebrow.hidden = false;
     this.title.replaceChildren(...withNumerals(s.name));
-    this.line.replaceChildren(...withNumerals(s.reserved ? `${s.type} · ${LOOKBOOK.reserved}` : s.type));
+    this.line.replaceChildren(...withNumerals(sheetLine(s)));
     this.line.hidden = false;
 
     const sections: (HTMLElement | null)[] = [];

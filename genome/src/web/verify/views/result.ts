@@ -20,6 +20,7 @@
  *      SHARE THE GENOME         and its collection, and the image to share
  *   └                      ┘
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
+ *   DISCONTINUED · 2027              once an ADMIN discontinued its model (P-R06)
  *            SEE THE MODEL           its model's sheet in THE COLLECTION
  *                                    (P-R02), a text link, when it is PUBLIC
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP

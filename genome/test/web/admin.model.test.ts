@@ -109,7 +109,20 @@ import {
   type IssueForm,
 } from '../../src/web/admin/model/generator.js';
 import { formatCount } from '../../src/web/admin/format.js';
-import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
+import {
+  carePreview,
+  categoryImpact,
+  collectionImpact,
+  discontinuedYear,
+  discontinueImpact,
+  discontinuePhrase,
+  MODEL_STATUS_OPTIONS,
+  modelChange,
+  modelForm,
+  modelImpact,
+  modelStatus,
+  reinstateImpact,
+} from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
 import {
   DROP_STATES as SERVER_DROP_STATES,
@@ -157,6 +170,7 @@ import {
   normalizeBenefits,
   type ClubTierSheet as ServerClubTierSheet,
 } from '../../src/server/services/club.js';
+import type { ModelRecord as ServerModelRecord } from '../../src/server/services/catalog.js';
 import type { OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
 import {
   answersLine,
@@ -360,6 +374,9 @@ describe('permissions', () => {
     expect(can('OPERATOR', 'manageDrops')).toBe(true);
     expect(can('OPERATOR', 'drawDrop')).toBe(false);
     expect(can('ADMIN', 'drawDrop')).toBe(true);
+    // A model discontinued and reinstated (P-R06): an ADMIN's, as the server's guard.
+    expect(can('OPERATOR', 'discontinueModel')).toBe(false);
+    expect(can('ADMIN', 'discontinueModel')).toBe(true);
     // The Club's circle (P-X01): an OPERATOR writes, publishes, withdraws and photographs; an AUDITOR reads.
     expect(can('AUDITOR', 'manageCircle')).toBe(false);
     expect(can('OPERATOR', 'manageCircle')).toBe(true);
@@ -392,6 +409,8 @@ export const adminDropEntryFits = (e: Json<ServerAdminDropEntry>): web.DropEntry
 /** P-X04: a tier of GET /api/admin/club/tiers, and the tier of an owner's sheet, as the console reads them. */
 export const clubTierFits = (t: Json<ServerClubTierSheet>): web.ClubTierSheet => t;
 export const ownerTierFits = (t: Json<ServerOwnerSheet['tier']>): web.OwnerSheet['tier'] => t;
+/** A model of GET /api/admin/models (its discontinuation of P-R06 included), as the console reads it. */
+export const adminModelFits = (m: Json<ServerModelRecord>): web.Model => m;
 
 describe('the Club\'s drops (P-R03)', () => {
   const base: web.Drop = {
@@ -785,7 +804,7 @@ describe('tones', () => {
     expect(toneOf('case', 'CLOSED')).toBe('muted');
     // A model's place in the lookbook (P-R02): shown to everyone, to owners only, or nowhere.
     expect(serverSchema.LOOKBOOK_STATES.map((s) => toneOf('lookbook', s))).toEqual(['muted', 'solid', 'outline']);
-    expect([toneOf('catalogue', 'ACTIVE'), toneOf('catalogue', 'INACTIVE')]).toEqual(['solid', 'muted']);
+    expect([toneOf('catalogue', 'ACTIVE'), toneOf('catalogue', 'INACTIVE'), toneOf('catalogue', 'DISCONTINUED')]).toEqual(['solid', 'muted', 'muted']);
     // A locked account needs attention; every account status has its tone.
     expect(toneOf('account', 'ACTIVE')).toBe('solid');
     expect(toneOf('account', 'LOCKED')).toBe('alert');
@@ -1706,6 +1725,28 @@ describe('catalogue edits (A-10)', () => {
       `The category receives new pieces again: the generator offers it with its active models. Its ${formatCount(12480)} issued pieces keep verifying as before: no public result changes.`,
     );
     expect(categoryImpact(0, false)).toBe('The category receives new pieces again: the generator offers it with its active models.');
+  });
+
+  it('discontinues and reinstates a model (P-R06): its status, its phrase, what each dialog says first; no status edit while discontinued', () => {
+    const discontinued = { ...model, active: false, discontinuedAt: '2027-02-01T10:00:00.000Z' } as Model;
+    expect([modelStatus(model), modelStatus({ ...model, active: false }), modelStatus(discontinued)]).toEqual(['ACTIVE', 'INACTIVE', 'DISCONTINUED']);
+    expect([discontinuedYear(model), discontinuedYear(discontinued)]).toEqual([null, 2027]);
+    expect(discontinuePhrase('discontinue', model)).toBe('DISCONTINUE MNL-RG');
+    expect(discontinuePhrase('reinstate', model)).toBe('REINSTATE MNL-RG');
+    expect(discontinueImpact(model, 2026)).toBe(
+      'Its 184 issued pieces keep verifying as before. The result of each on /verify, its sheet in the lookbook and their ownership certificates say DISCONTINUED · 2026. No new piece can be issued with it, and the generator stops offering it. An ADMIN can reinstate it.',
+    );
+    expect(discontinueImpact({ ...model, products: 1, active: false }, 2026)).toMatch(/^Its 1 issued piece keeps verifying as before\. .* It stays inactive: no new piece can be issued with it\. An ADMIN can reinstate it\.$/);
+    expect(discontinueImpact({ ...model, products: 0, active: false }, 2026)).toBe(
+      'No piece has been issued with this model yet. The result of each on /verify, its sheet in the lookbook and their ownership certificates say DISCONTINUED · 2026. It stays inactive: no new piece can be issued with it. An ADMIN can reinstate it.',
+    );
+    expect(reinstateImpact(discontinued)).toBe(
+      'Discontinued in 2027. Reinstated, it is active again: the generator offers it for new pieces, and the results of its pieces, its sheet in the lookbook and their ownership certificates no longer say DISCONTINUED.',
+    );
+    // A discontinued model's edit has no status field: what it sends never makes it active (only Reinstate does).
+    const f = modelForm(discontinued);
+    expect(modelChange(discontinued, { ...f, status: undefined as unknown as string })).toEqual({});
+    expect(modelChange(discontinued, { ...f, status: 'active', name: 'MONOLITHE II' })).toEqual({ name: 'MONOLITHE II' });
   });
 
   it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {

@@ -4,7 +4,8 @@
  * A model the console publishes (CatalogService.updateModel: `lookbook`,
  * `slug`, `story`, `specs`) has a sheet at `/verify/lookbook/<slug>`: its
  * reference photograph (the cover) and its gallery (`model_images`,
- * MediaService), its story, its specifications, its care and its collection.
+ * MediaService), its story, its specifications, its care and its collection,
+ * and, once an ADMIN discontinued it (P-R06), the year it was.
  *
  *   HIDDEN    nowhere (every model, until the console shows it);
  *   PUBLIC    listed for everyone (GET /api/v1/lookbook, /:slug), and named
@@ -163,6 +164,8 @@ export interface LookbookSheet {
   specs: SpecLine[];
   /** The model's care instructions; null: the general care text of /verify. */
   care: string | null;
+  /** The year (UTC) the model was discontinued (P-R06), said « DISCONTINUED · <year> » on the sheet; null while it is not. */
+  discontinuedYear: number | null;
 }
 
 export interface LookbookServiceDeps {
@@ -198,7 +201,21 @@ export class LookbookService {
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
       .leftJoin('collections as col', 'col.id', 'm.collection_id')
-      .select(['m.id', 'm.slug', 'm.lookbook', 'm.name', 'm.type', 'm.story', 'm.specs', 'm.care_instructions', 'm.image_sha256', 'c.code as category_code', 'c.name as category_name', 'col.name as collection'])
+      .select([
+        'm.id',
+        'm.slug',
+        'm.lookbook',
+        'm.name',
+        'm.type',
+        'm.story',
+        'm.specs',
+        'm.care_instructions',
+        'm.image_sha256',
+        'm.discontinued_at',
+        'c.code as category_code',
+        'c.name as category_name',
+        'col.name as collection',
+      ])
       .where('m.slug', '=', key)
       .where('m.lookbook', 'in', shown)
       .executeTakeFirst();
@@ -220,6 +237,7 @@ export class LookbookService {
       story: m.story,
       specs: parseSpecs(m.specs),
       care: m.care_instructions,
+      discontinuedYear: m.discontinued_at ? m.discontinued_at.getUTCFullYear() : null,
     };
   }
 

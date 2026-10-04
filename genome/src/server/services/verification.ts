@@ -130,6 +130,8 @@ export interface VerifyOutcome {
     photoUrl?: string;
     /** Its model's lookbook sheet (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. AUTHENTIC* states only. */
     lookbook?: string;
+    /** The year (UTC) its model was discontinued (P-R06), said « DISCONTINUED · <year> »; absent while it is not. AUTHENTIC* states only. */
+    discontinuedYear?: number;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
@@ -267,6 +269,8 @@ interface Registered {
   piecePhoto: string | null;
   /** The slug of its model's lookbook sheet when the model is PUBLIC there (P-R02), else null. */
   lookbook: string | null;
+  /** When its model was discontinued (P-R06), else null. */
+  modelDiscontinuedAt: Date | null;
   code: { id: string; status: CodeStatus; createdAt: Date; payloadHash: Uint8Array } | null;
   warranty: { start_date: string | null; end_date: string | null; voided_at: Date | null; duration_months: number } | null;
   ownerAccountId: string | null;
@@ -681,6 +685,7 @@ export class VerificationService {
         'm.image_sha256 as modelImage',
         'm.slug as modelSlug',
         'm.lookbook as modelLookbook',
+        'm.discontinued_at as modelDiscontinuedAt',
         'p.photo_sha256 as piecePhoto',
         'col.name as collection',
         'c.id as codeId',
@@ -717,6 +722,7 @@ export class VerificationService {
       modelImage: r.modelImage,
       piecePhoto: r.piecePhoto,
       lookbook: r.modelLookbook === 'PUBLIC' ? r.modelSlug : null,
+      modelDiscontinuedAt: r.modelDiscontinuedAt,
       code:
         r.codeId !== null && r.codeStatus !== null && r.codeCreatedAt !== null && r.payloadHash !== null
           ? { id: r.codeId, status: r.codeStatus, createdAt: r.codeCreatedAt, payloadHash: r.payloadHash }
@@ -849,6 +855,8 @@ export class VerificationService {
         ...(photoUrl ? { photoUrl } : {}),
         // Its model's lookbook sheet (P-R02): a RESERVED one is the owners' and stays unnamed here.
         ...(reg.lookbook ? { lookbook: reg.lookbook } : {}),
+        // DISCONTINUED · <year> (P-R06): the piece verifies as before; its model is no longer made.
+        ...(reg.modelDiscontinuedAt ? { discontinuedYear: reg.modelDiscontinuedAt.getUTCFullYear() } : {}),
       };
       const today = utcDate(now);
       const wr = reg.warranty;

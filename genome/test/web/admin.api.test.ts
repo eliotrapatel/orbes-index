@@ -186,6 +186,20 @@ describe('AdminApi', () => {
     for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
   });
 
+  it('discontinues and reinstates a model (P-R06): POST, an empty body, the CSRF token', async () => {
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { id: 'm' }), json(200, { id: 'm' }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.discontinueModel('m/1');
+    await api.reinstateModel('m/1');
+    expect([calls[1].init.method, calls[1].url]).toEqual(['POST', '/api/admin/models/m%2F1/discontinue']);
+    expect([calls[2].init.method, calls[2].url]).toEqual(['POST', '/api/admin/models/m%2F1/reinstate']);
+    for (const c of calls.slice(1)) {
+      expect(JSON.parse(String(c.init.body))).toEqual({});
+      expect(header(c, 'x-csrf-token')).toBe('tok-1');
+    }
+  });
+
   it('reads the daily scan statistics of a window with a GET (no CSRF token)', async () => {
     const { fetch, calls } = fakeFetch(json(200, { days: 90 }), json(200, { days: 2 }));
     const api = new AdminApi({ fetch });

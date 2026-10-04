@@ -12,6 +12,7 @@
  *     G1-E1DC-BE52 · GENOME-01
  *   └                      ┘
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
+ *   DISCONTINUED · 2027                      once its model was (P-R06)
  *   THE RECORD        OWNERSHIP · SINCE · WARRANTY (FROM, UNTIL) · LOSS OR THEFT
  *   THIS CERTIFICATE  CHECKED · ISSUED · VALID UNTIL
  *   A certificate names no owner. …

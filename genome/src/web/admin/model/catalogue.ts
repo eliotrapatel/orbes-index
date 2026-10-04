@@ -8,6 +8,12 @@
  * are read live by the public result of every piece issued with them: the
  * console says how many before anything is saved. Its category and SKU
  * prefix never change (the server refuses them).
+ *
+ * DISCONTINUED (P-R06): an ADMIN discontinues a model (inactive for good,
+ * said DISCONTINUED with the year on the results of its pieces, its lookbook
+ * sheet and their ownership certificates) and may reinstate it, each after a
+ * typed phrase. A discontinued model's edit has no status: it is offered
+ * again only by reinstating it.
  */
 import { DEFAULT_CARE } from '../../shared/care.js';
 import { formatCount } from '../format.js';
@@ -27,6 +33,43 @@ export const MODEL_STATUS_OPTIONS: readonly { value: 'active' | 'inactive'; labe
   { value: 'active', label: 'Active — offered for new pieces' },
   { value: 'inactive', label: 'Inactive — no new piece' },
 ]);
+
+/** The status of a model in the catalogue's list: DISCONTINUED (P-R06) before ACTIVE or INACTIVE. */
+export function modelStatus(m: Pick<Model, 'active' | 'discontinuedAt'>): 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED' {
+  if (m.discontinuedAt) return 'DISCONTINUED';
+  return m.active ? 'ACTIVE' : 'INACTIVE';
+}
+
+/** The year (UTC) a model was discontinued, as /verify says it (DISCONTINUED · 2027); null while it is not. */
+export function discontinuedYear(m: Pick<Model, 'discontinuedAt'>): number | null {
+  const y = m.discontinuedAt ? Number(/^(\d{4})-/.exec(m.discontinuedAt)?.[1]) : NaN;
+  return Number.isInteger(y) ? y : null;
+}
+
+/** The phrase an ADMIN types to discontinue or reinstate a model: the action and its SKU prefix (unique, never changes). */
+export function discontinuePhrase(action: 'discontinue' | 'reinstate', m: Pick<Model, 'skuPrefix'>): string {
+  return `${action === 'discontinue' ? 'DISCONTINUE' : 'REINSTATE'} ${m.skuPrefix}`;
+}
+
+/** Said before a model is discontinued: what its pieces keep, what /verify says of them, what stops, and that it can be undone. */
+export function discontinueImpact(m: Pick<Model, 'products' | 'active'>, year: number): string {
+  const n = Number.isFinite(m.products) && m.products > 0 ? m.products : 0;
+  return [
+    n === 0 ? 'No piece has been issued with this model yet.' : `Its ${formatCount(n)} issued ${n === 1 ? 'piece keeps' : 'pieces keep'} verifying as before.`,
+    `The result of each on /verify, its sheet in the lookbook and their ownership certificates say DISCONTINUED · ${year}.`,
+    m.active ? 'No new piece can be issued with it, and the generator stops offering it.' : 'It stays inactive: no new piece can be issued with it.',
+    'An ADMIN can reinstate it.',
+  ].join(' ');
+}
+
+/** Said before a discontinued model is reinstated: it is offered again, and its pieces are no longer said DISCONTINUED. */
+export function reinstateImpact(m: Pick<Model, 'discontinuedAt'>): string {
+  const year = discontinuedYear(m);
+  return [
+    year === null ? 'Discontinued.' : `Discontinued in ${year}.`,
+    'Reinstated, it is active again: the generator offers it for new pieces, and the results of its pieces, its sheet in the lookbook and their ownership certificates no longer say DISCONTINUED.',
+  ].join(' ');
+}
 
 /** The form a model opens with. */
 export function modelForm(m: Model): ModelForm {
@@ -52,8 +95,9 @@ export function modelChange(m: Model, f: ModelForm): ModelChange {
   const care = f.careInstructions.trim();
   if (care !== (m.careInstructions ?? '')) out.careInstructions = care;
   if (f.collectionId !== (m.collection?.id ?? '')) out.collectionId = f.collectionId;
+  // A discontinued model has no status to edit (P-R06): only Reinstate offers it again.
   const active = f.status !== 'inactive';
-  if (active !== m.active) out.active = active;
+  if (!m.discontinuedAt && active !== m.active) out.active = active;
   return out;
 }
 

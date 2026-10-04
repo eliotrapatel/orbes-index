@@ -250,6 +250,7 @@ describe('OwnershipCertificateService', () => {
         material: '925 STERLING SILVER',
         createdYear: 2026,
         genome: { id: p.productId, version: 1, fingerprint: p.genome.fingerprint, glyphs: [...p.genome.glyphs], pattern: p.genome.ids.join('·') },
+        discontinuedYear: null,
       },
       ownership: { verified: false, since },
       warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
@@ -265,6 +266,23 @@ describe('OwnershipCertificateService', () => {
     // Read live: the ownership confirmed by ORBES Client Services shows at once.
     await ownership.confirmOwnership(p.productId, admin);
     expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', ownership: { verified: true } });
+  });
+
+  it('says DISCONTINUED and its year once the model was (P-R06), read live on the page and the PDF; reinstated, no more', async () => {
+    const { p, owner } = await owned();
+    const offer = await certificates.create(owner.id, p.productId, {}, owner.actor);
+    const before = await certificates.renderPdf(offer.token);
+    await t.db.updateTable('models').set({ discontinued_at: new Date('2027-02-01T10:00:00.000Z'), active: false }).where('id', '=', modelId).execute();
+    try {
+      expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { productId: p.productId, discontinuedYear: 2027 } });
+      // The PDF draws one row more (DISCONTINUED, 2027) under CREATED.
+      const after = await certificates.renderPdf(offer.token);
+      expect(Buffer.from(after.body as Uint8Array).equals(Buffer.from(before.body as Uint8Array))).toBe(false);
+    } finally {
+      await t.db.updateTable('models').set({ discontinued_at: null, active: true }).where('id', '=', modelId).execute();
+    }
+    expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { discontinuedYear: null } });
+    expect(Buffer.from((await certificates.renderPdf(offer.token)).body as Uint8Array).equals(Buffer.from(before.body as Uint8Array))).toBe(true);
   });
 
   it('NO_LONGER_VALID after a transfer, for good; the new owner makes their own', async () => {

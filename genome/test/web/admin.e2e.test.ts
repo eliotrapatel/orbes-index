@@ -440,6 +440,42 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => leather.locator('.status__text').textContent()).toBe('ACTIVE');
     const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['model.update', 'collection.update', 'category.activate', 'category.deactivate']).orderBy('id').execute();
     expect(audited.map((a) => a.action)).toEqual(['model.update', 'model.update', 'collection.update', 'collection.update', 'category.deactivate', 'category.activate']);
+
+    // P-R06: an ADMIN discontinues the model that left the range, after its typed phrase; reinstated the same way, it is
+    // offered again; discontinued once more, it stays out of the generator. Its edit then has no status.
+    const eclipse = model('ECL-PD');
+    await eclipse.locator('[data-testid=discontinue-model]').click();
+    await impact.waitFor();
+    expect(await impact.textContent()).toMatch(/^No piece has been issued with this model yet\. The result of each on \/verify, its sheet in the lookbook and their ownership certificates say DISCONTINUED · \d{4}\. It stays inactive/);
+    expect(await page.locator('dialog.dialog .cfield__phrase').textContent()).toBe('DISCONTINUE ECL-PD');
+    expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await page.fill('[data-testid=dialog-phrase]', 'DISCONTINUE ECL');
+    expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await confirmDialog(page, 'DISCONTINUE ECL-PD');
+    await page.waitForSelector('.toast:has-text("Model discontinued.")');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('DISCONTINUED');
+    const eclipseId = (await ctx.db.selectFrom('models').select('id').where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow()).id;
+    expect(await ctx.services.catalog.getModel(eclipseId)).toMatchObject({ active: false, discontinuedAt: expect.any(Date) });
+    await eclipse.locator('[data-testid=edit-model]').click();
+    await page.locator('dialog [data-testid=model-discontinued-note]').waitFor();
+    expect(await page.locator('dialog select[name=status]').count()).toBe(0);
+    await page.click('[data-testid=dialog-cancel]');
+    await page.waitForSelector('dialog.dialog', { state: 'detached' });
+    await eclipse.locator('[data-testid=reinstate-model]').click();
+    await impact.waitFor();
+    expect(await impact.textContent()).toMatch(/^Discontinued in \d{4}\. Reinstated, it is active again/);
+    await confirmDialog(page, 'REINSTATE ECL-PD');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('ACTIVE');
+    expect(await ctx.services.catalog.getModel(eclipseId)).toMatchObject({ active: true, discontinuedAt: null });
+    await eclipse.locator('[data-testid=discontinue-model]').click();
+    await confirmDialog(page, 'discontinue  ecl-pd');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('DISCONTINUED');
+    const lifecycle = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['model.discontinue', 'model.reinstate']).orderBy('id').execute();
+    expect(lifecycle.map((a) => a.action)).toEqual(['model.discontinue', 'model.reinstate', 'model.discontinue']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await go(page, '#/generator', 'Issue a product');
+    await page.selectOption('select[name=categoryCode]', 'J');
+    expect(await page.locator('select[name=modelId] option').allTextContents()).toEqual(['MONOLITHE · RING · MNL-RG']);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -2311,7 +2347,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The catalogue reads, without its edits (A-10); a model's Lookbook page reads too, without its edits (P-R02).
     await go(p, '#/catalogue', 'Catalogue');
     await expect.poll(() => p.locator('#models tbody tr').count()).toBe(2);
-    for (const action of ['edit-model', 'rename-collection', 'toggle-category', 'model-photo']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    for (const action of ['edit-model', 'rename-collection', 'toggle-category', 'model-photo', 'discontinue-model', 'reinstate-model']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     await p.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=model-lookbook]').click();
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE');
     await p.waitForSelector('[data-testid=story-shown]');

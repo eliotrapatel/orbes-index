@@ -575,6 +575,16 @@ export const LEGAL = Object.freeze({
  * specifications and its care. An owner signed in also sees the models RESERVED FOR OWNERS. Reached from the landing,
  * from MY PIECES and, under an authentic result, from SEE THE MODEL.
  */
+/**
+ * DISCONTINUED (P-R06): a model an ADMIN discontinued is no longer made; its pieces verify as before. Said with the
+ * year, under the product lines of an authentic result and of an ownership certificate, and on the line of its sheet
+ * in THE COLLECTION; the result's PRODUCT tab has its row.
+ */
+export const DISCONTINUED = Object.freeze({
+  line: (year: number) => `DISCONTINUED · ${year}`,
+  row: 'DISCONTINUED',
+});
+
 export const LOOKBOOK = Object.freeze({
   title: 'THE COLLECTION',
   /** The text link of the landing, of MY PIECES and of a sheet's foot (back to the grid). */

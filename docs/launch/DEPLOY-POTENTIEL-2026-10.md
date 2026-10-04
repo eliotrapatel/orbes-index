@@ -461,6 +461,10 @@ docker images orbes-genome
 
 À compléter par ses éléments (P-D01, P-M02, P-R06, P-X08), sur le modèle du §1 : les migrations `0019` (P-R06) et `0020` (P-X08) en une transaction ; `CARE_SUBSCRIBE_URL` (P-M02), une variable facultative qui reste vide jusqu'au lien Whop ; la version des pages légales du jour de B (une seule si A et B tombent le même jour). Après B, on répare en avant, comme après A.
 
+  | Migration | Élément | Contenu |
+  |---|---|---|
+  | `0019_model_discontinued` | P-R06 | un modèle arrêté (`models.discontinued_at`, `discontinued_by`, nullables) : arrêté par un ADMIN, il devient inactif ; ses pièces disent DISCONTINUED et l'année ; réversible |
+
 ## 3. Déploiement C : après B
 
 À compléter par ses éléments (P-D07, P-D10), sur le modèle du §1 : aucune migration ; la version des pages légales du jour de C (la préférence du son). Après C, l'image précédente reste possible (`scripts/deploy.sh --image <le tag de B>`), puisque C ne touche pas au schéma.

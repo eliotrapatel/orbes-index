@@ -509,6 +509,7 @@ export const OWNERSHIP_CERTIFICATE_COPY = Object.freeze({
     variant: 'VARIANT',
     material: 'MATERIAL',
     created: 'CREATED',
+    discontinued: 'DISCONTINUED',
     ownership: 'OWNERSHIP',
     since: 'SINCE',
     warranty: 'WARRANTY',
@@ -577,6 +578,8 @@ export interface OwnershipCertificateDocument {
   material: string;
   createdYear: number;
   genome: Pick<Genome, 'glyphs' | 'version' | 'fingerprint'> | null;
+  /** The year its model was discontinued (P-R06): a row DISCONTINUED under CREATED; null or absent while it is not. */
+  discontinuedYear?: number | null;
   verified: boolean;
   /** The day the ownership began, 'YYYY-MM-DD' (UTC). */
   since: string;
@@ -681,6 +684,7 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
     ...(d.variant ? [[C.rows.variant, d.variant] as [string, string]] : []),
     [C.rows.material, d.material],
     [C.rows.created, String(d.createdYear)],
+    ...(d.discontinuedYear ? [[C.rows.discontinued, String(d.discontinuedYear)] as [string, string]] : []),
   ];
   const record: [string, string][] = [
     [C.rows.ownership, d.verified ? C.verified : C.unverified],

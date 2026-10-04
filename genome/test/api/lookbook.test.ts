@@ -60,6 +60,7 @@ interface Sheet {
   story: string | null;
   specs: { label: string; value: string }[];
   care: string | null;
+  discontinuedYear: number | null;
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -313,6 +314,7 @@ describe('the lookbook of the models (P-R02)', () => {
         { label: 'Sizes', value: '48 to 60' },
       ],
       care: 'Polish with a soft dry cloth.',
+      discontinuedYear: null,
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {

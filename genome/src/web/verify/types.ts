@@ -73,6 +73,8 @@ export interface VerifyOutcome {
     photoUrl?: string;
     /** Its model's sheet in the lookbook (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. */
     lookbook?: string;
+    /** The year its model was discontinued (P-R06): « DISCONTINUED · <year> » under the product lines. Authentic results only. */
+    discontinuedYear?: number;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
   warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
@@ -243,6 +245,8 @@ export interface CertificatePiece {
   material: string;
   createdYear: number;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
+  /** The year its model was discontinued (P-R06), or null. */
+  discontinuedYear: number | null;
 }
 
 /** POST /api/v1/certificates/lookup (F-06): the record read now, or NO_LONGER_VALID; an unknown or withdrawn link is a 404. */
@@ -294,6 +298,8 @@ export interface LookbookSheet {
   specs: { label: string; value: string }[];
   /** The model's care instructions; null: the general care text. */
   care: string | null;
+  /** The year the model was discontinued (P-R06), or null. */
+  discontinuedYear: number | null;
 }
 
 /** A release's state as the public reads it (P-R03): a DRAFT is never sent. */

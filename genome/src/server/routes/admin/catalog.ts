@@ -6,7 +6,9 @@
  * issuance, and a collection's name; never a model's category nor its SKU
  * prefix (A-10). A model's lookbook (P-R02: its place, address, story and
  * specifications) changes through the same edit; one model is read alone by
- * the console's Lookbook page (its gallery is routes/admin/media.ts's). The
+ * the console's Lookbook page (its gallery is routes/admin/media.ts's). An
+ * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
+ * …/reinstate, no body; the console asks for a typed phrase first). The
  * services validate, write and audit; these routes only parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -17,6 +19,7 @@ import {
   createCategoryBody,
   createCollectionBody,
   createModelBody,
+  emptyBody,
   parse,
   updateCollectionBody,
   updateModelBody,
@@ -121,5 +124,18 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       },
       adminActor(request),
     );
+  });
+
+  // P-R06: ADMIN only, reversible (the console asks for a typed phrase first). Discontinuing also makes the model inactive.
+  app.post('/api/admin/models/:id/discontinue', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    parse(emptyBody, request.body);
+    return catalog.discontinueModel(id, adminActor(request));
+  });
+
+  app.post('/api/admin/models/:id/reinstate', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    parse(emptyBody, request.body);
+    return catalog.reinstateModel(id, adminActor(request));
   });
 };

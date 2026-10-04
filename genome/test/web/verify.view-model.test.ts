@@ -8,6 +8,7 @@ import {
   classifyCameraError,
   CONTACT,
   DEFAULT_CARE,
+  DISCONTINUED,
   FALLBACK_TITLES,
   HINTS,
   NOT_DELIVERED_NOTE,
@@ -24,6 +25,7 @@ import {
 } from '../../src/web/verify/copy.js';
 import { VERIFICATION_STATES, type VerificationState, type VerifyOutcome } from '../../src/web/verify/types.js';
 import {
+  discontinuedYearOf,
   formatDate,
   formatDateLong,
   formatDateTime,
@@ -183,6 +185,36 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     expect(v.productRows).toContainEqual(['VARIANT', 'SIZE 52']);
     expect(v.care).toBe(DEFAULT_CARE);
+  });
+});
+
+describe('verify view-model: DISCONTINUED (P-R06)', () => {
+  it('says DISCONTINUED · <year> last of the brand lines, and its row in PRODUCT, when the server sends the year', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_REGISTERED', { product: { ...PRODUCT, discontinuedYear: 2027 } }));
+    expect(vm.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026', 'DISCONTINUED · 2027']);
+    expect(vm.productLines.at(-1)).toBe(DISCONTINUED.line(2027));
+    expect(vm.productRows.slice(-2)).toEqual([
+      ['PRODUCTION DATE', '12 SEP 2026'],
+      ['DISCONTINUED', '2027'],
+    ]);
+    // The piece still verifies as it did: the state, the tabs and the rest of the result are unchanged.
+    expect(vm.tone).toBe('authentic');
+    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+  });
+
+  it('says nothing without a year, nor for one that is not a year', () => {
+    for (const discontinuedYear of [undefined, 0, 2027.5, 99999, '2027' as unknown as number, null as unknown as number]) {
+      const vm = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, ...(discontinuedYear === undefined ? {} : { discontinuedYear }) } }));
+      expect(vm.productLines, String(discontinuedYear)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+      expect(vm.productRows.some(([label]) => label === 'DISCONTINUED'), String(discontinuedYear)).toBe(false);
+    }
+    expect(discontinuedYearOf(2027)).toBe(2027);
+    expect(discontinuedYearOf(-2027)).toBeNull();
+  });
+
+  it('writes its line in the house voice: capitals, no word of BRAND §4.5', () => {
+    expect(DISCONTINUED.line(2027)).toBe('DISCONTINUED · 2027');
+    expect(DISCONTINUED.row).toBe('DISCONTINUED');
   });
 });
 

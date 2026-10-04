@@ -20,7 +20,8 @@
  * Everything a certificate shows is read live, at each lookup:
  *   VALID            the record: the piece and its GENOME, the ownership
  *                    (verified or not) and its date, the warranty, and that
- *                    no loss or theft is reported;
+ *                    no loss or theft is reported; DISCONTINUED and its year
+ *                    once an ADMIN discontinued its model (P-R06);
  *   NO_LONGER_VALID  expired, or the piece changed hands (its ownership period
  *                    ended), or it has been LOST, STOLEN, REVOKED,
  *                    COUNTERFEIT_FLAGGED or RETIRED since the certificate was
@@ -175,6 +176,8 @@ export interface CertificatePiece {
   material: string;
   createdYear: number;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
+  /** The year (UTC) its model was discontinued (P-R06), said « DISCONTINUED · <year> » on the page and the PDF; null while it is not. */
+  discontinuedYear: number | null;
 }
 
 /** POST /api/v1/certificates/lookup (API §8.7). */
@@ -488,7 +491,8 @@ export class OwnershipCertificateService {
       .selectFrom('ownership_certificates as c')
       .innerJoin('ownership as o', 'o.id', 'c.ownership_id')
       .innerJoin('products as p', 'p.id', 'c.product_id')
-      .select(['c.created_at', 'c.expires_at', 'c.revoked_at', 'o.account_id', 'o.ended_at', 'p.id as uuid', 'p.status'])
+      .innerJoin('models as m', 'm.id', 'p.model_id')
+      .select(['c.created_at', 'c.expires_at', 'c.revoked_at', 'o.account_id', 'o.ended_at', 'p.id as uuid', 'p.status', 'm.discontinued_at'])
       .where('c.token_hash', '=', hash)
       .executeTakeFirst();
     if (!row || row.revoked_at !== null) throw certificateNotFound();
@@ -513,6 +517,8 @@ export class OwnershipCertificateService {
         material: owned.material,
         createdYear: owned.createdYear,
         genome: owned.genome,
+        // P-R06: read live, as the rest of the record; a reinstated model says it no more.
+        discontinuedYear: row.discontinued_at ? row.discontinued_at.getUTCFullYear() : null,
       },
       ownership: { verified: owned.verified, since: utcDate(owned.since) },
       warranty: owned.warranty,
@@ -539,6 +545,7 @@ export class OwnershipCertificateService {
       material: piece.material,
       createdYear: piece.createdYear,
       genome: piece.genome,
+      discontinuedYear: piece.discontinuedYear,
       verified: r.ownership.verified,
       since: r.ownership.since,
       warranty: r.warranty,

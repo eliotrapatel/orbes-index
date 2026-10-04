@@ -5,7 +5,7 @@
  * required everywhere except login; reads need AUDITOR, mutations OPERATOR
  * unless a route asks for ADMIN (keys, revocations, reinstatement,
  * categories, console users, a customer's recovery code, lock and export,
- * the draw of a drop); every mutation needs the CSRF token and a same-origin
+ * the draw of a drop, a model discontinued or reinstated); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the

@@ -445,6 +445,16 @@ export class AdminApi {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
   }
 
+  /** P-R06, ADMIN: the model discontinued (inactive, said DISCONTINUED on its pieces' results). */
+  discontinueModel(id: string): Promise<Model> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/discontinue`, {});
+  }
+
+  /** P-R06, ADMIN: the discontinued model reinstated (active again). */
+  reinstateModel(id: string): Promise<Model> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/reinstate`, {});
+  }
+
   /** A photograph for the gallery of the model's lookbook sheet (P-R02): the image itself, added last. */
   addGalleryImage(id: string, photo: Blob): Promise<Model> {
     return this.request('POST', `/api/admin/models/${encodeURIComponent(id)}/gallery`, { upload: { type: photo.type || 'image/jpeg', data: photo } });

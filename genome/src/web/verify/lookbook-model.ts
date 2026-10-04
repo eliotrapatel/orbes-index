@@ -11,15 +11,16 @@
  *    (the operator's, else "The MONOLITHE RING model, photographed by
  *    ORBES"), the story (its paragraphs drawn by shared/lookbook.ts, as the
  *    console's preview draws them), the specifications as rows and the care
- *    (the model's, else the general care text of the CARE tab).
+ *    (the model's, else the general care text of the CARE tab); its line
+ *    says DISCONTINUED · <year> once an ADMIN discontinued it (P-R06).
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, and an address only if it is one.
  */
 import { isLookbookSlug, storyParagraphs } from '../shared/lookbook.js';
-import { DEFAULT_CARE, PHOTOS } from './copy.js';
+import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
 import type { LookbookCard, LookbookSheet } from './types.js';
-import { upper, type Row } from './view-model.js';
+import { discontinuedYearOf, upper, type Row } from './view-model.js';
 
 /** The grid of the lookbook, and the sheet of one model under it. */
 export const LOOKBOOK_PATH = '/verify/lookbook';
@@ -92,6 +93,8 @@ export interface SheetModel {
   story: string | null;
   specs: Row[];
   care: string;
+  /** DISCONTINUED · <year> when the model was discontinued (P-R06), else null: said on the sheet's line. */
+  discontinued: string | null;
 }
 
 export function sheetModel(s: LookbookSheet): SheetModel {
@@ -113,7 +116,18 @@ export function sheetModel(s: LookbookSheet): SheetModel {
     story: storyParagraphs(s.story).length > 0 ? s.story : null,
     specs: (Array.isArray(s.specs) ? s.specs : []).filter((r) => r?.label && r?.value).map((r): Row => [upper(r.label), upper(r.value)]),
     care: s.care && s.care.trim() ? s.care.trim() : DEFAULT_CARE,
+    discontinued: discontinuedLine(s.discontinuedYear),
   };
+}
+
+function discontinuedLine(year: unknown): string | null {
+  const y = discontinuedYearOf(year);
+  return y === null ? null : DISCONTINUED.line(y);
+}
+
+/** The line under a sheet's title: its type, RESERVED FOR OWNERS for a sheet the club opened, DISCONTINUED · <year> (P-R06). */
+export function sheetLine(s: Pick<SheetModel, 'type' | 'reserved' | 'discontinued'>): string {
+  return [s.type, s.reserved ? LOOKBOOK.reserved : null, s.discontinued].filter((x): x is string => !!x).join(' · ');
 }
 
 /** The route of a path under /verify/lookbook: the grid, or a sheet by its address (anything else is the grid). */

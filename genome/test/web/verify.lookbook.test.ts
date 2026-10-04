@@ -24,7 +24,7 @@ import {
 } from '../../src/web/shared/lookbook.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
-import { LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, sheetModel } from '../../src/web/verify/lookbook-model.js';
+import { LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, sheetLine, sheetModel } from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
 import { resultViewModel } from '../../src/web/verify/view-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
@@ -51,6 +51,7 @@ function sheet(extra: Partial<LookbookSheet> = {}): LookbookSheet {
     story: 'The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.',
     specs: [{ label: 'Metal', value: '925 sterling silver' }],
     care: null,
+    discontinuedYear: null,
     ...extra,
   };
 }
@@ -106,10 +107,23 @@ describe('a model\'s sheet (P-R02)', () => {
       story: 'The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.',
       specs: [['METAL', '925 STERLING SILVER']],
       care: DEFAULT_CARE,
+      discontinued: null,
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));
     expect(reserved).toMatchObject({ reserved: true, care: 'Polish with a soft cloth.', story: null, photos: [{ src: media(2), alt: PHOTOS.modelAlt('MONOLITHE', 'RING') }] });
+  });
+
+  it('says DISCONTINUED · <year> on the line of a sheet whose model was (P-R06), after RESERVED FOR OWNERS', () => {
+    expect(sheetModel(sheet()).discontinued).toBeNull();
+    expect(sheetLine(sheetModel(sheet()))).toBe('RING');
+    expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED' })))).toBe(`RING · ${LOOKBOOK.reserved}`);
+    const discontinued = sheetModel(sheet({ discontinuedYear: 2027 }));
+    expect(discontinued.discontinued).toBe('DISCONTINUED · 2027');
+    expect(sheetLine(discontinued)).toBe('RING · DISCONTINUED · 2027');
+    expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED', discontinuedYear: 2027 })))).toBe('RING · RESERVED FOR OWNERS · DISCONTINUED · 2027');
+    // Only a year: anything else says nothing.
+    for (const bad of [0, 2027.5, '2027' as unknown as number]) expect(sheetModel(sheet({ discontinuedYear: bad })).discontinued, String(bad)).toBeNull();
   });
 
   it('routes /verify/lookbook and its sheets, any case, and an address that is none to the lookbook itself', () => {
@@ -186,6 +200,7 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     story: null,
     specs: null,
     publishedAt: null,
+    discontinuedAt: null,
     gallery: [],
     createdAt: '2026-10-01T08:00:00.000Z',
     ...extra,

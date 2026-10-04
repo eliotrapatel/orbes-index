@@ -27,6 +27,18 @@
  * never its words). A model first shown gets `published_at`; from then on its
  * address never changes (409 SLUG_LOCKED: links to the sheet are out), and a
  * model shown always has one. Its gallery is MediaService's.
+ *
+ * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
+ * (`discontinueModel`, audited `model.discontinue`) and may open it again
+ * (`reinstateModel`, `model.reinstate`). Discontinuing sets
+ * `discontinued_at`, its author, and `active = false` in one transaction, so
+ * the issuance's refusal (409 MODEL_INACTIVE) and the generator's filter
+ * apply as to any inactive model; reinstating clears both and sets
+ * `active = true` again. A discontinued model is never active: an edit that
+ * would make it so is refused (409 MODEL_DISCONTINUED; the database's
+ * `models_discontinued_inactive` refuses it too). Its year is said
+ * « DISCONTINUED · <year> » on the authentic results of its pieces, its
+ * lookbook sheet and their ownership certificates.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -84,6 +96,8 @@ export interface ModelRecord {
   specs: string | null;
   /** When the model first left HIDDEN; null while it never has. */
   publishedAt: Date | null;
+  /** When an ADMIN discontinued it (P-R06): then it is inactive, and said DISCONTINUED with this year; null while it is not. */
+  discontinuedAt: Date | null;
   /** The gallery of its sheet (MediaService), in its order, the cover aside. */
   gallery: GalleryImageRecord[];
   createdAt: Date;
@@ -347,7 +361,7 @@ export class CatalogService {
       await inTransaction(this.db, async (tx) => {
         const row = await tx
           .selectFrom('models')
-          .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active', 'lookbook', 'slug', 'story', 'specs', 'published_at'])
+          .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active', 'lookbook', 'slug', 'story', 'specs', 'published_at', 'discontinued_at'])
           .where('id', '=', id)
           .forUpdate()
           .executeTakeFirst();
@@ -365,6 +379,8 @@ export class CatalogService {
         };
         const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
         if (changed.length === 0) return;
+        // P-R06: a discontinued model is offered again only by reinstating it (an ADMIN's, audited as such).
+        if (changed.includes('active') && after.active === true && row.discontinued_at !== null) throw modelDiscontinued();
         if (changed.includes('collectionId') && after.collectionId) {
           const col = await tx.selectFrom('collections').select('id').where('id', '=', after.collectionId).executeTakeFirst();
           if (!col) throw notFound('Collection', 'COLLECTION_NOT_FOUND');
@@ -428,6 +444,60 @@ export class CatalogService {
     return this.getModel(id);
   }
 
+  /**
+   * Discontinue a model (POST /api/admin/models/:id/discontinue, ADMIN; P-R06): `discontinued_at` now, its author
+   * (null for a script), and `active = false`, in one transaction. Its pieces verify as before, said DISCONTINUED with
+   * the year; no new piece is issued with it (409 MODEL_INACTIVE). Audited `model.discontinue` with whether it was
+   * active and the number of its issued pieces. 409 MODEL_ALREADY_DISCONTINUED when it already is.
+   */
+  async discontinueModel(modelId: string, actor: Actor): Promise<ModelRecord> {
+    const id = modelKey(modelId);
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('models').select(['name', 'sku_prefix', 'active', 'discontinued_at']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (row.discontinued_at !== null) throw conflict('MODEL_ALREADY_DISCONTINUED', 'This model is already discontinued.');
+      const now = this.clock();
+      await tx.updateTable('models').set({ discontinued_at: now, discontinued_by: adminIdOf(actor), active: false }).where('id', '=', id).execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'model.discontinue',
+          targetType: 'model',
+          targetId: id,
+          details: { name: row.name, skuPrefix: row.sku_prefix, discontinuedAt: now.toISOString(), wasActive: row.active, issuedPieces: await issuedWithModel(tx, id) },
+        },
+        tx,
+      );
+    });
+    return this.getModel(id);
+  }
+
+  /**
+   * Reinstate a discontinued model (POST /api/admin/models/:id/reinstate, ADMIN; P-R06): `discontinued_at` and its
+   * author cleared, `active = true` again (offered for new pieces), in one transaction. Audited `model.reinstate` with
+   * the date it had been discontinued. 409 MODEL_NOT_DISCONTINUED when it is not.
+   */
+  async reinstateModel(modelId: string, actor: Actor): Promise<ModelRecord> {
+    const id = modelKey(modelId);
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('models').select(['name', 'sku_prefix', 'discontinued_at']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (row.discontinued_at === null) throw conflict('MODEL_NOT_DISCONTINUED', 'This model is not discontinued.');
+      await tx.updateTable('models').set({ discontinued_at: null, discontinued_by: null, active: true }).where('id', '=', id).execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'model.reinstate',
+          targetType: 'model',
+          targetId: id,
+          details: { name: row.name, skuPrefix: row.sku_prefix, discontinuedAt: row.discontinued_at.toISOString(), issuedPieces: await issuedWithModel(tx, id) },
+        },
+        tx,
+      );
+    });
+    return this.getModel(id);
+  }
+
   private modelQuery() {
     return this.db
       .selectFrom('models as m')
@@ -451,6 +521,7 @@ export class CatalogService {
         'm.story',
         'm.specs',
         'm.published_at',
+        'm.discontinued_at',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -507,6 +578,26 @@ interface ModelChange {
   specs?: string | null;
 }
 
+/** 409 MODEL_DISCONTINUED: an edit that would offer a discontinued model again (P-R06). */
+export const modelDiscontinued = () =>
+  conflict('MODEL_DISCONTINUED', 'This model is discontinued: it is offered for new pieces again only once an ADMIN reinstates it.');
+
+function modelKey(modelId: string): string {
+  if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+  return modelId.toLowerCase();
+}
+
+/** The console user behind an action, for a column naming one; null for a script (an actor that is no admin's uuid). */
+function adminIdOf(actor: Actor): string | null {
+  return actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null;
+}
+
+/** Pieces issued with the model: what a change of it reaches. */
+async function issuedWithModel(db: Db, modelId: string): Promise<number> {
+  const r = await db.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', modelId).executeTakeFirstOrThrow();
+  return Number(r.n);
+}
+
 /** Issued pieces whose public result names the collection (their own collection, else their model's). */
 async function issuedInCollection(db: Db, collectionId: string): Promise<number> {
   const r = await db
@@ -538,6 +629,7 @@ type ModelQueryRow = {
   story: string | null;
   specs: string | null;
   published_at: Date | null;
+  discontinued_at: Date | null;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -565,6 +657,7 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRe
     story: r.story,
     specs: r.specs,
     publishedAt: r.published_at,
+    discontinuedAt: r.discontinued_at,
     gallery,
     createdAt: r.created_at,
   };

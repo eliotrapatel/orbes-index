@@ -270,6 +270,8 @@ export interface Model {
   specs: string | null;
   /** When it first left HIDDEN; null while it never has. */
   publishedAt: Iso | null;
+  /** When an ADMIN discontinued it (P-R06): inactive, and said DISCONTINUED with this year on /verify; null while it is not. */
+  discontinuedAt: Iso | null;
   /** The gallery of its sheet, in its order (the reference photograph is the cover, apart). */
   gallery: GalleryImage[];
   createdAt: Iso;

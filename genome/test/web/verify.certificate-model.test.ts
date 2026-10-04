@@ -32,6 +32,7 @@ function valid(extra: Partial<Valid> = {}): Valid {
       material: '925 Sterling Silver',
       createdYear: 2026,
       genome: { id: 'O26-J-00184', version: 1, fingerprint: G.fingerprint, glyphs: [...G.glyphs], pattern: G.ids.join('·') },
+      discontinuedYear: null,
     },
     ownership: { verified: true, since: '2026-10-01' },
     warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
@@ -94,6 +95,15 @@ describe('certificate page', () => {
     if (odd.kind !== 'valid') throw new Error(odd.kind);
     expect(odd.genome).toBeUndefined();
     expect(odd.key).toBe('');
+  });
+
+  it('says DISCONTINUED · <year> last of the piece\'s lines once its model was (P-R06), as the result does', () => {
+    const s = certificateScreen(valid({ piece: { ...valid().piece, discontinuedYear: 2027 } }));
+    if (s.kind !== 'valid') throw new Error(s.kind);
+    expect(s.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026', 'DISCONTINUED · 2027']);
+    const plain = certificateScreen(valid());
+    if (plain.kind !== 'valid') throw new Error(plain.kind);
+    expect(plain.productLines.some((l) => l.startsWith('DISCONTINUED'))).toBe(false);
   });
 
   it('NO LONGER VALID, and NOT FOUND for a 404 or a link without a token: one sentence each, nothing about the piece', () => {

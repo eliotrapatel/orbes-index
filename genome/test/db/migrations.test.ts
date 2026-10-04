@@ -121,6 +121,8 @@ describe('migrations', () => {
     // 0018: one row per tier at most, the console user who wrote it at the head of its own index.
     expect(has(/UNIQUE INDEX club_tiers_pkey ON public\.club_tiers USING btree \(tier\)$/)).toBe(true);
     expect(has(/INDEX club_tiers_updated_by_idx ON public\.club_tiers USING btree \(updated_by\)$/)).toBe(true);
+    // 0019: the console user who discontinued a model, at the head of its own index.
+    expect(has(/INDEX models_discontinued_by_idx ON public\.models USING btree \(discontinued_by\)$/)).toBe(true);
   });
 
   /**
@@ -851,6 +853,50 @@ describe('migrations', () => {
     await sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db);
   });
 
+  it('0019 adds models.discontinued_at and discontinued_by, and nothing else; down restores 0018 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withDiscontinued, without: before } = await rollBackTo('0019_model_discontinued');
+    const of0019 = (o: string) => o.includes('discontinued');
+    const added = withDiscontinued.filter((o) => !before.includes(o));
+    expect(added.filter((o) => o.startsWith('table '))).toEqual(['table models discontinued_at timestamp with time zone YES ', 'table models discontinued_by uuid YES ']);
+    for (const c of [
+      /^constraint models models_discontinued_by_fkey FOREIGN KEY \(discontinued_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint models models_discontinued_inactive CHECK \(\(\(discontinued_at IS NULL\) OR \(NOT active\)\)\)$/,
+      /^constraint models models_discontinued_by_when CHECK \(\(\(discontinued_by IS NULL\) OR \(discontinued_at IS NOT NULL\)\)\)$/,
+      /^index CREATE INDEX models_discontinued_by_idx ON public\.models USING btree \(discontinued_by\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => !of0019(o))).toEqual([]);
+    expect(before.filter(of0019)).toEqual([]);
+    expect(withDiscontinued.filter((o) => !of0019(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0019_model_discontinued'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0019: a model discontinued is never active; its author only with its date, and stays while named; reinstated, both cleared', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (25, 'Y', 'Discontinued test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string; discontinued_at: Date | null; discontinued_by: string | null }>`
+      INSERT INTO models (category_id, name, type, sku_prefix) VALUES (25, 'D', 'RING', 'DISC') RETURNING id, discontinued_at, discontinued_by`.execute(t.db)).rows[0];
+    // Every model starts as it was: not discontinued.
+    expect([model.discontinued_at, model.discontinued_by]).toEqual([null, null]);
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('disc@orbes.test', 'disc@orbes.test', 'scrypt$x', 'ADMIN') RETURNING id`.execute(t.db)).rows[0].id;
+    const set = (sets: string) => sql.raw(`UPDATE models SET ${sets} WHERE id = '${model.id}'`).execute(t.db);
+    // Discontinued while active, an author without a date, an active discontinued model: refused.
+    await expect(set(`discontinued_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e, 'models_discontinued_inactive'));
+    await expect(set(`discontinued_by = '${admin}', active = false`)).rejects.toSatisfy((e) => isCheckViolation(e, 'models_discontinued_by_when'));
+    await set(`discontinued_at = now(), discontinued_by = '${admin}', active = false`);
+    await expect(set(`active = true`)).rejects.toSatisfy((e) => isCheckViolation(e, 'models_discontinued_inactive'));
+    // A script discontinues without an author.
+    await set(`discontinued_by = NULL`);
+    await set(`discontinued_by = '${admin}'`);
+    await expect(sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    // Reinstated: both cleared, active again.
+    await set(`discontinued_at = NULL, discontinued_by = NULL, active = true`);
+    await sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -894,6 +940,8 @@ describe('migrations', () => {
       '0016_circle',
       '0017_drop_early_access',
       '0018_club_tiers',
+      // Deployment B+C.
+      '0019_model_discontinued',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

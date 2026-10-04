@@ -38,8 +38,11 @@ const SERVICE: Record<string, Tone> = { OPEN: 'outline', COMPLETED: 'muted', CAN
 const ACCOUNT: Record<string, Tone> = { ACTIVE: 'solid', LOCKED: 'alert', DELETED: 'muted' };
 /** A case of the Cases queue: an open one waits for staff, as an open anomaly does. */
 const CASE: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
-/** A category or model of the catalogue: an inactive one issues no new piece, its pieces verify as before. */
-const CATALOGUE: Record<string, Tone> = { ACTIVE: 'solid', INACTIVE: 'muted' };
+/**
+ * A category or model of the catalogue: an inactive one issues no new piece, its pieces verify as before; a
+ * discontinued model (P-R06) is inactive for good, until an ADMIN reinstates it.
+ */
+const CATALOGUE: Record<string, Tone> = { ACTIVE: 'solid', INACTIVE: 'muted', DISCONTINUED: 'muted' };
 /** A model's place in the lookbook (P-R02): shown to everyone, to the owners of a piece only, or nowhere. */
 const LOOKBOOK: Record<string, Tone> = { PUBLIC: 'solid', RESERVED: 'outline', HIDDEN: 'muted' };
 /**

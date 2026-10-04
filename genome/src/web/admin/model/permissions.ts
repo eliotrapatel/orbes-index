@@ -2,8 +2,8 @@
  * What each admin role may do, mirroring the server guard (contract §3:
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
  * reinstatement, categories (created, activated, deactivated), console users,
- * points of sale, a customer's recovery code, lock and export, and the draw
- * of a drop). Every role
+ * points of sale, a customer's recovery code, lock and export, the draw
+ * of a drop, and a model discontinued or reinstated). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -47,6 +47,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageCircle: 'OPERATOR',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */
   manageClubTiers: 'OPERATOR',
+  /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
+  discontinueModel: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',

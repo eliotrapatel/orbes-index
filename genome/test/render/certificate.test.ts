@@ -579,6 +579,29 @@ describe('ownership certificate (F-06)', () => {
     expect(bare.placements).toEqual([]);
   });
 
+  it('draws DISCONTINUED and its year under CREATED once the model was (P-R06): one row more, its label clear of its value, above the middle rule', () => {
+    const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+    const R = L.rows;
+    const full = layoutOwnershipCertificate(ownershipDoc());
+    const discontinued = layoutOwnershipCertificate(ownershipDoc({ discontinuedYear: 2027 }));
+    // The label, then the value: two runs of strokes more; nothing without a year (null or absent).
+    expect(discontinued.marks!.length - full.marks!.length).toBe(2);
+    expect(layoutOwnershipCertificate(ownershipDoc({ discontinuedYear: null })).marks).toEqual(full.marks);
+    const added = discontinued.marks!.filter((m) => !full.marks!.some((f) => f.d === m.d)).map((m) => bounds(m.d));
+    expect(added).toHaveLength(2);
+    // The eighth row of THE PIECE (model, type, category, collection, variant, material, created, discontinued).
+    const baseline = R.first + 7 * R.pitch;
+    for (const b of added) {
+      expect(b.y1).toBeLessThanOrEqual(baseline + 0.01);
+      expect(b.y1).toBeLessThan(L.ruleMiddle);
+    }
+    const [label, value] = [...added].sort((a, b) => a.x0 - b.x0);
+    expect(label.x0).toBeCloseTo(L.columns[0], 0);
+    expect(label.x1).toBeLessThan(L.columns[0] + L.valueOffset);
+    expect(value.x0).toBeGreaterThanOrEqual(L.columns[0] + L.valueOffset - 0.01);
+    expect(OWNERSHIP_CERTIFICATE_COPY.rows.discontinued).toBe('DISCONTINUED');
+  });
+
   it('writes its copy in the lettering\'s capitals, names no owner and never says AUTHENTIC', () => {
     const all = JSON.stringify(OWNERSHIP_CERTIFICATE_COPY) + OWNERSHIP_CERTIFICATE_COPY.valid('3 OCTOBER 2026 · 12:34 UTC');
     expect(all).not.toMatch(/AUTHENTIC|GENUINE|REAL\b|STOLEN|COUNTERFEIT|OWNER'S|NAME:/);

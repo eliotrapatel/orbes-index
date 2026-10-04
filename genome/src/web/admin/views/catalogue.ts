@@ -16,11 +16,28 @@
  * results of its pieces: the dialog says how many first. Its sheet in the
  * lookbook (P-R02: its place, address, story, specifications and gallery) is
  * set on its own page, Lookbook on its row (`#/catalogue/:modelId`), which
- * every role that reads the catalogue opens.
+ * every role that reads the catalogue opens. An ADMIN discontinues a model
+ * (P-R06: Discontinue, on its row, after a typed phrase; inactive, said
+ * DISCONTINUED with the year on /verify) and reinstates it (Reinstate, the
+ * same way); a discontinued model's edit has no status.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
-import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact, type ModelForm } from '../model/catalogue.js';
+import {
+  carePreview,
+  categoryImpact,
+  collectionImpact,
+  discontinuedYear,
+  discontinueImpact,
+  discontinuePhrase,
+  MODEL_STATUS_OPTIONS,
+  modelChange,
+  modelForm,
+  modelImpact,
+  modelStatus,
+  reinstateImpact,
+  type ModelForm,
+} from '../model/catalogue.js';
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { toneOf } from '../model/tone.js';
@@ -38,6 +55,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   const canEdit = can(role, 'editCatalog');
   const canToggle = can(role, 'activateCategory');
   const canPhotograph = can(role, 'photograph');
+  const canDiscontinue = can(role, 'discontinueModel');
   const done = (msg: string) => (r: unknown) => {
     if (!r) return;
     notify(msg);
@@ -141,13 +159,17 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       body: [
         h('p', { class: 'dialog__text', data: { testid: 'catalogue-impact' } }, modelImpact(m.products)),
         h('p', { class: 'dialog__text' }, `Its category (${humanize(m.category.name)} · ${m.category.code}) and its SKU prefix (${m.skuPrefix}) never change: they are written in the pieces already issued.`),
+        // P-R06: no status for a discontinued model; only Reinstate (an ADMIN's) offers it again.
+        m.discontinuedAt
+          ? h('p', { class: 'dialog__text', data: { testid: 'model-discontinued-note' } }, 'Discontinued: it stays inactive until an ADMIN reinstates it.')
+          : null,
       ],
       fields: [
         { name: 'name', label: 'Name', required: true, maxlength: 100, value: form.name },
         { name: 'collectionId', label: 'Collection', kind: 'select', options: collectionOptions, value: form.collectionId },
         { name: 'defaultMaterial', label: 'Default material', maxlength: 200, value: form.defaultMaterial, hint: 'Proposed by the generator; each piece keeps its own material.' },
         { name: 'careInstructions', label: 'Care instructions', kind: 'textarea', rows: 5, maxlength: 2000, value: form.careInstructions, hint: 'Empty: the client reads the general care text.' },
-        { name: 'status', label: 'Status', kind: 'select', options: [...MODEL_STATUS_OPTIONS], value: form.status },
+        ...(m.discontinuedAt ? [] : [{ name: 'status', label: 'Status', kind: 'select' as const, options: [...MODEL_STATUS_OPTIONS], value: form.status }]),
       ],
       live: (v) => careBlock(v.careInstructions),
       validate: (v) => (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 ? 'Nothing has changed.' : null),
@@ -157,6 +179,32 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done('Model saved.'));
   };
+
+  // P-R06, ADMIN: reversible, but it changes what /verify says of every piece issued with the model, so a typed phrase.
+  const discontinueModel = (m: Model) =>
+    void openDialog({
+      title: 'Discontinue model',
+      eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
+      danger: true,
+      body: h('p', { class: 'dialog__text', data: { testid: 'catalogue-impact' } }, discontinueImpact(m, ctx.now().getUTCFullYear())),
+      phrase: discontinuePhrase('discontinue', m),
+      confirmLabel: 'Discontinue',
+      submit: async () => {
+        await ctx.api.discontinueModel(m.id);
+      },
+    }).then(done('Model discontinued.'));
+
+  const reinstateModel = (m: Model) =>
+    void openDialog({
+      title: 'Reinstate model',
+      eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
+      body: h('p', { class: 'dialog__text', data: { testid: 'catalogue-impact' } }, reinstateImpact(m)),
+      phrase: discontinuePhrase('reinstate', m),
+      confirmLabel: 'Reinstate',
+      submit: async () => {
+        await ctx.api.reinstateModel(m.id);
+      },
+    }).then(done('Model reinstated.'));
 
   // The reference photograph: chosen, previewed as it will be sent, saved; or removed.
   const modelPhoto = (m: Model) =>
@@ -199,11 +247,12 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
     { label: 'Default material', cell: (m) => humanize(m.defaultMaterial), kind: ['wide'] },
-    { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, activeMark(m.active)), kind: ['nowrap'] },
+    { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, modelStatusMark(m)), kind: ['nowrap'] },
     { label: 'Lookbook', cell: (m) => h('span', { data: { testid: 'model-lookbook-state' } }, statusMark(m.lookbook, toneOf('lookbook', m.lookbook))), kind: ['nowrap'] },
     { label: 'Issued', cell: (m) => formatCount(m.products), kind: ['num'] },
   ];
-  // Lookbook (P-R02) opens the model's page for every role that reads; Edit and Photo are the mutating roles'.
+  // Lookbook (P-R02) opens the model's page for every role that reads; Edit and Photo are the mutating roles';
+  // Discontinue and Reinstate (P-R06) an ADMIN's.
   modelColumns.push({
     label: 'Action',
     kind: ['actions'],
@@ -213,6 +262,11 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'row-actions' },
         canEdit ? button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) : null,
         canPhotograph ? button('Photo', { kind: 'ghost', testId: 'model-photo', onClick: () => modelPhoto(m) }) : null,
+        canDiscontinue
+          ? m.discontinuedAt
+            ? button('Reinstate', { kind: 'ghost', testId: 'reinstate-model', onClick: () => reinstateModel(m) })
+            : button('Discontinue', { kind: 'ghost', testId: 'discontinue-model', onClick: () => discontinueModel(m) })
+          : null,
         withTestId(linkButton('Lookbook', href('model', { modelId: m.id }), 'ghost'), 'model-lookbook'),
       ),
   });
@@ -253,6 +307,15 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
 function withTestId<T extends HTMLElement>(el: T, id: string): T {
   el.dataset.testid = id;
   return el;
+}
+
+/** ACTIVE, INACTIVE, or DISCONTINUED with its year as the mark's title (P-R06). */
+function modelStatusMark(m: Model): HTMLElement {
+  const status = modelStatus(m);
+  const mark = statusMark(status, toneOf('catalogue', status));
+  const year = discontinuedYear(m);
+  if (year !== null) mark.title = `Discontinued in ${year}`;
+  return mark;
 }
 
 function activeMark(active: boolean): HTMLElement {

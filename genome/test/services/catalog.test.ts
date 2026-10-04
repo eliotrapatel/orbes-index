@@ -175,6 +175,47 @@ describe('CatalogService (collections and models)', () => {
       await expect(t.db.updateTable('models').set({ sku_prefix: 'NEW-RG' }).where('id', '=', model.id).execute()).rejects.toSatisfy(isGuardViolation);
     });
 
+    it('discontinues a model (P-R06): inactive in the same transaction, dated, audited; reinstated, active again; never active while discontinued', async () => {
+      clock.advance(60_000);
+      const before = await catalog.getModel(model.id);
+      expect(before).toMatchObject({ active: true, discontinuedAt: null });
+      const off = await catalog.discontinueModel(model.id.toUpperCase(), admin);
+      expect(off).toMatchObject({ id: model.id, active: false, discontinuedAt: clock.now() });
+      // A script (an actor that is no console user's uuid) leaves no author.
+      expect((await t.db.selectFrom('models').select(['discontinued_by', 'active']).where('id', '=', model.id).executeTakeFirstOrThrow())).toEqual({ discontinued_by: null, active: false });
+      const [entry] = (await audit.list({ action: 'model.discontinue' })).items;
+      expect(entry).toMatchObject({ actorId: 'admin-1', targetType: 'model', targetId: model.id });
+      expect(entry.details).toEqual({ name: before.name, skuPrefix: 'HAL-RG', discontinuedAt: clock.now().toISOString(), wasActive: true, issuedPieces: 2 });
+      // Once: again is a 409, and nothing more is written.
+      expect((await domainError(catalog.discontinueModel(model.id, admin))).code).toBe('MODEL_ALREADY_DISCONTINUED');
+      expect((await audit.list({ action: 'model.discontinue' })).items).toHaveLength(1);
+      // An edit never makes it active (409, nothing written); its other fields still change; inactive again is no change.
+      const audited = (await audit.list({ action: 'model.update' })).items.length;
+      const refused = await domainError(catalog.updateModel(model.id, { active: true, name: 'HALO III' }, admin));
+      expect([refused.httpStatus, refused.code]).toEqual([409, 'MODEL_DISCONTINUED']);
+      expect((await catalog.getModel(model.id)).name).toBe(before.name);
+      expect((await catalog.updateModel(model.id, { active: false, defaultMaterial: '18K GOLD' }, admin))).toMatchObject({ active: false, defaultMaterial: '18K GOLD', discontinuedAt: clock.now() });
+      expect((await audit.list({ action: 'model.update' })).items).toHaveLength(audited + 1);
+
+      clock.advance(60_000);
+      const on = await catalog.reinstateModel(model.id, admin);
+      expect(on).toMatchObject({ active: true, discontinuedAt: null });
+      const [back] = (await audit.list({ action: 'model.reinstate' })).items;
+      expect(back.details).toEqual({ name: before.name, skuPrefix: 'HAL-RG', discontinuedAt: new Date(clock.now().getTime() - 60_000).toISOString(), issuedPieces: 2 });
+      expect((await domainError(catalog.reinstateModel(model.id, admin))).code).toBe('MODEL_NOT_DISCONTINUED');
+      // An inactive model discontinued stays inactive; reinstated, it is active (offered again).
+      await catalog.updateModel(model.id, { active: false }, admin);
+      expect((await audit.list({ action: 'model.discontinue' })).items.length).toBe(1);
+      await catalog.discontinueModel(model.id, admin);
+      expect((await audit.list({ action: 'model.discontinue' })).items[0].details).toMatchObject({ wasActive: false });
+      expect(await catalog.reinstateModel(model.id, admin)).toMatchObject({ active: true, discontinuedAt: null });
+      for (const id of ['00000000-0000-4000-8000-000000000000', 'not-a-uuid']) {
+        expect((await domainError(catalog.discontinueModel(id, admin))).code).toBe('MODEL_NOT_FOUND');
+        expect((await domainError(catalog.reinstateModel(id, admin))).code).toBe('MODEL_NOT_FOUND');
+      }
+      await catalog.updateModel(model.id, { defaultMaterial: before.defaultMaterial }, admin);
+    });
+
     it('renames a collection, audited with the name before and after and the pieces it is shown on', async () => {
       clock.advance(60_000);
       const renamed = await catalog.updateCollection(eclipse, { name: ' ECLIPSE NOIRE ' }, admin);

@@ -209,6 +209,10 @@ export interface ModelsTable {
   specs: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0014: when the model first left HIDDEN; never cleared. */
   published_at: TimestampNullable;
+  /** Migration 0019 (P-R06): when an ADMIN discontinued the model (then never active); NULL while it is not, cleared when reinstated. */
+  discontinued_at: TimestampNullable;
+  /** Migration 0019: admin_users.id of who discontinued it; NULL for a script, and with discontinued_at. */
+  discontinued_by: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
 }
 

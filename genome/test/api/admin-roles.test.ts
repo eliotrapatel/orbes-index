@@ -6,7 +6,8 @@
  * concluded and the next one offered; the posts of its circle, P-X01: created, edited, published,
  * withdrawn, their photographs; the words of its tiers' benefits, P-X04), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
- * points of sale (A-08), a customer's recovery code, lock and export, and the draw of a drop;
+ * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, and a model
+ * discontinued or reinstated (P-R06);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -53,6 +54,9 @@ const PROBES: Probe[] = [
   { group: 'models', method: 'POST', url: '/api/admin/models', body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'PATCH', url: `/api/admin/models/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'GET', url: `/api/admin/models/${UUID}`, min: 'AUDITOR' },
+  // P-R06: an ADMIN discontinues a model and reinstates it.
+  { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/discontinue`, body: INVALID, min: 'ADMIN' },
+  { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/reinstate`, body: INVALID, min: 'ADMIN' },
   { group: 'lookbook', method: 'POST', url: `/api/admin/models/${UUID}/gallery`, ...PHOTO, min: 'OPERATOR' },
   { group: 'lookbook', method: 'DELETE', url: `/api/admin/models/${UUID}/gallery/${'ab'.repeat(32)}`, min: 'OPERATOR' },
   { group: 'lookbook', method: 'PATCH', url: `/api/admin/models/${UUID}/gallery`, body: INVALID, min: 'OPERATOR' },
