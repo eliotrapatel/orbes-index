@@ -34,6 +34,7 @@ import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPT
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { LIVE_ADDONS_MAX, LIVE_PER_ACCOUNT } from '../services/live.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
@@ -234,6 +235,38 @@ export const circleVoteBody = body({
     .min(0, 'Must be the index of an option')
     .max(CIRCLE_POLL_OPTIONS.max - 1, 'Must be the index of an option'),
 });
+
+// ── The LIVE RELEASES (routes/live.ts) ─────────────────────────────────────
+
+/**
+ * /api/v1/live/:id/… : a LIVE RELEASE's id. Any string the router passes (≤ 64 characters): one that is no id answers like
+ * an unknown release, 404 DROP_NOT_FOUND.
+ */
+export const liveParams = z.object({ id: z.string().max(64) });
+
+/** An id the service checks against the release's own (a size, an add-on): one that is not answers 400 LIVE_SIZE_UNKNOWN or LIVE_ADDON_UNKNOWN. */
+const liveRef = z.string().max(64);
+
+/** PUT /api/v1/live/:id/interest: I'LL BE THERE, in this size. */
+export const liveInterestBody = body({ sizeId: liveRef });
+
+/** POST /api/v1/live/:id/enter and /size: the size, and the pieces (1 by default; up to the release's own limit, at most 5). */
+export const liveEntryBody = body({
+  sizeId: liveRef,
+  quantity: z.number().int('Must be a whole number of pieces').min(1, 'At least 1 piece').max(LIVE_PER_ACCOUNT.max, `At most ${LIVE_PER_ACCOUNT.max} pieces`).optional(),
+});
+
+/** POST /api/v1/live/:id/press and /secure: the turn's secret, as the account's state gave it. */
+export const liveTurnBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid turn').regex(BASE64URL_RE, 'Invalid turn') });
+
+/** PUT /api/v1/live/:id/addons: the add-ons chosen for the piece held, each once, at most six (none: an empty list). */
+export const liveAddonsBody = body({ addonIds: z.array(liveRef).max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`) });
+
+/**
+ * POST /api/v1/live/:id/board and /board/stream: the board link's secret, from the fragment of its address (never in a
+ * request line or a log). Missing or malformed, it answers like a wrong one: 404 DROP_NOT_FOUND.
+ */
+export const liveBoardBody = optionalBody({ token: z.string().max(256).optional() });
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 

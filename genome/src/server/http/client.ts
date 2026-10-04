@@ -11,7 +11,7 @@ import { createHmac } from 'node:crypto';
 import { normalizeIP } from '@fastify/rate-limit';
 import type { FastifyRequest } from 'fastify';
 
-export type PseudonymDomain = 'ip' | 'device' | 'session';
+export type PseudonymDomain = 'ip' | 'device' | 'session' | 'account';
 
 /** HMAC-SHA256(pepper, domain ‖ value), base64url (43 chars). */
 export function pseudonymize(pepper: string, domain: PseudonymDomain, value: string): string {

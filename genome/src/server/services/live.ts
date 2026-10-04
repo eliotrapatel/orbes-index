@@ -49,11 +49,12 @@
  * (`drop.live.enter`, `.size`, `.leave`, `.interest`, `.interest.withdraw`, `.secure`, `.addons`, `.confirm`,
  * `.release`; a PRESS changes no state and is not audited), the engine's (`drop.live.queue` at T0, `drop.live.end` for
  * SOLD_OUT and CLOSED, the system as actor) and the console's (`drop.live.pause`, `.resume`, `.extend`, `.stock`,
- * `.free`, `.let_in`, `.message`, `.end`, `.remove`). A lock of an account (OwnerService) removes its open entries and
+ * `.free`, `.let_in`, `.message`, `.end`, `.remove`, and the boutique board's link, `.board.issue` and `.board.revoke`,
+ * never with its secret). A lock of an account (OwnerService) removes its open entries and
  * withdraws its interest in the releases not opened yet (`removeAccountLiveEntries`); the right of access exports every
  * entry with its add-ons, and its interest (`accountLiveData`).
  */
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIPv4 } from 'node:net';
 import { normalizeIP } from '@fastify/rate-limit';
 import { sql } from 'kysely';
@@ -89,6 +90,8 @@ export const LIVE_MESSAGE_MAX = 140;
 export const LIVE_EXTEND_MINUTES = Object.freeze({ min: 1, max: 240 });
 /** ADD PIECES raises a size's stock by 1 to 1 000 at a time. */
 export const LIVE_ADD_PIECES = Object.freeze({ min: 1, max: 1000 });
+/** The boutique board's link: a secret of 32 random bytes (256 bits), base64url, kept only as its SHA-256. */
+export const LIVE_BOARD_TOKEN_BYTES = 32;
 /** The network's hash of an entry is erased this many days after the release's end (or its cancellation). */
 export const LIVE_NETWORK_RETENTION_DAYS = 30;
 
@@ -193,6 +196,12 @@ export function turnTokenHash(token: string): Uint8Array {
   return new Uint8Array(createHash('sha256').update(token, 'utf8').digest());
 }
 
+/** The SHA-256 of a board link's secret (drops.board_token_hash); null for anything that cannot be one (not 43 base64url characters). */
+export function liveBoardTokenHash(token: unknown): Uint8Array | null {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  return new Uint8Array(createHash('sha256').update(token, 'utf8').digest());
+}
+
 function sameHash(a: Uint8Array | null, b: Uint8Array): boolean {
   return a !== null && a.length === b.length && timingSafeEqual(a, b);
 }
@@ -246,9 +255,11 @@ const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
 const entryNotQueued = () => conflict('LIVE_ENTRY_NOT_QUEUED', 'Only an entry waiting in the line can take its turn now.');
 const entryNotSecured = () => conflict('LIVE_ENTRY_NOT_SECURED', 'Only a held piece can be freed.');
 const entryClosed = () => conflict('LIVE_ENTRY_CLOSED', 'This entry is no longer in the release.');
+const noBoardLink = () => conflict('LIVE_NO_BOARD_LINK', 'This release has no board link.');
 
 /** 403 LIVE_NOT_ELIGIBLE: the rule of the release, in words. */
-const notEligible = (rule: LiveAccessRule) => new DomainError('LIVE_NOT_ELIGIBLE', 403, `This release is for ${liveRuleText(rule)}.`);
+export const liveNotEligible = (rule: LiveAccessRule) => new DomainError('LIVE_NOT_ELIGIBLE', 403, `This release is for ${liveRuleText(rule)}.`);
+const notEligible = liveNotEligible;
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -362,6 +373,8 @@ export interface LiveEntryView {
   tier: number;
   /** The place in the line; null before T0. */
   position: number | null;
+  /** While QUEUED: the entries of its size before it in the line (0: it is next); null otherwise. */
+  ahead: number | null;
   joinedAt: Date;
   /** The turn: its deadline as it stands now (a pause in progress moves it); `token` only while it is TURN. */
   turn: { at: Date; expiresAt: Date; token: string | null } | null;
@@ -655,6 +668,103 @@ export async function eraseLiveNetworkHashes(db: Db, now: Date): Promise<number>
     .where(sql<Date>`coalesce(d.ended_at, d.cancelled_at)`, '<=', cutoff)
     .executeTakeFirst();
   return Number(r.numUpdatedRows ?? 0);
+}
+
+/** The accounts' ids per statement of `liveEntryViews` (a release's room is read in chunks of this many). */
+const VIEW_CHUNK = 1000;
+
+const chunks = <T>(xs: readonly T[], n = VIEW_CHUNK): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+
+/**
+ * The entries of published LIVE RELEASES as their accounts' own screens read them: those of `accountIds` in one release,
+ * by account id (the room's viewers, read once a second for all of them by the live streams, routes/live.ts), or every
+ * entry of one account, by release id (MY PIECES). A few statements whatever the number of accounts: the entries, their add-ons, and
+ * for those QUEUED how many of their size are before them (`ahead`). Deadlines as they stand at `now` (a pause in
+ * progress moves them); the turn's secret only while it is TURN, to its own account.
+ */
+export async function liveEntryViews(
+  db: Db,
+  turnKey: Uint8Array,
+  of: { dropId: string; accountIds: readonly string[] } | { accountId: string },
+  now: Date,
+): Promise<Map<string, LiveEntryView>> {
+  const base = db
+    .selectFrom('live_entries as e')
+    .innerJoin('drops as d', 'd.id', 'e.drop_id')
+    .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
+    .select([
+      'e.id', 'e.drop_id', 'e.account_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
+      'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
+    ])
+    .where('d.mode', '=', 'LIVE')
+    .where('d.published_at', 'is not', null);
+  const rows =
+    'accountId' in of
+      ? await base.where('e.account_id', '=', of.accountId).execute()
+      : (await Promise.all(chunks([...new Set(of.accountIds)]).map((ids) => base.where('e.drop_id', '=', of.dropId).where('e.account_id', 'in', ids).execute()))).flat();
+  const out = new Map<string, LiveEntryView>();
+  if (rows.length === 0) return out;
+  const addons = (
+    await Promise.all(
+      chunks(rows.map((r) => r.id)).map((ids) =>
+        db
+          .selectFrom('live_entry_addons as x')
+          .innerJoin('live_addons as a', 'a.id', 'x.addon_id')
+          .select(['x.entry_id', 'a.id', 'a.label', 'x.price_minor', 'a.position'])
+          .where('x.entry_id', 'in', ids)
+          .orderBy('a.position')
+          .execute(),
+      ),
+    )
+  ).flat();
+  const queued = rows.filter((r) => r.status === 'QUEUED');
+  const ahead = new Map<string, number>();
+  for (const ids of chunks(queued.map((r) => r.id))) {
+    const drops = [...new Set(queued.map((r) => r.drop_id))];
+    const r = await sql<{ id: string; ahead: number }>`
+      SELECT q.id, q.ahead
+        FROM (SELECT id, (row_number() OVER (PARTITION BY drop_id, size_id ORDER BY position) - 1)::int AS ahead
+                FROM live_entries
+               WHERE drop_id IN (${sql.join(drops)}) AND status = 'QUEUED') AS q
+       WHERE q.id IN (${sql.join(ids)})`.execute(db);
+    for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
+  }
+  for (const r of rows) {
+    const own = addons.filter((a) => a.entry_id === r.id);
+    const price = r.price_minor ?? 0;
+    const unit = price + own.reduce((n, a) => n + a.price_minor, 0);
+    out.set('accountId' in of ? r.drop_id : r.account_id, {
+      id: r.id,
+      dropId: r.drop_id,
+      status: r.status,
+      size: { id: r.size_id, label: r.label },
+      quantity: r.quantity,
+      tier: r.tier,
+      position: r.position,
+      ahead: r.status === 'QUEUED' ? (ahead.get(r.id) ?? 0) : null,
+      joinedAt: r.joined_at,
+      turn:
+        r.turn_at && r.turn_expires_at
+          ? {
+              at: r.turn_at,
+              expiresAt: r.status === 'TURN' ? effectiveDeadline(r.turn_expires_at, r, now) : r.turn_expires_at,
+              token: r.status === 'TURN' ? liveTurnToken(turnKey, r.id, r.turn_at) : null,
+            }
+          : null,
+      hold:
+        r.secured_at && r.hold_expires_at
+          ? { securedAt: r.secured_at, expiresAt: r.status === 'SECURED' ? effectiveDeadline(r.hold_expires_at, r, now) : r.hold_expires_at }
+          : null,
+      confirmedAt: r.confirmed_at,
+      endedAt: r.ended_at,
+      letIn: r.let_in_by !== null,
+      addons: own.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
+      currency: r.currency ?? 'EUR',
+      priceMinor: price,
+      totalMinor: r.quantity * unit,
+    });
+  }
+  return out;
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -1176,6 +1286,40 @@ export class LiveService {
     });
   }
 
+  /**
+   * The boutique board's secret link (the plan's choice 31): a new secret of LIVE_BOARD_TOKEN_BYTES random bytes,
+   * base64url, returned once; only its SHA-256 is kept (`board_token_hash`), with the time it was issued. Issuing again
+   * replaces it: the previous link stops working at once. Any LIVE RELEASE not cancelled (the console prepares the
+   * screen before the announcement; the board itself shows nothing before it). Audited `drop.live.board.issue`, never
+   * with the secret.
+   */
+  async issueBoardLink(dropId: string, actor: Actor): Promise<{ token: string; issuedAt: Date }> {
+    assertStaff(actor, 'issue a board link');
+    const id = knownId(dropId, dropNotFound);
+    const token = randomBytes(LIVE_BOARD_TOKEN_BYTES).toString('base64url');
+    const issuedAt = await inTransaction(this.db, async (tx) => {
+      const d = await this.lockAnyLive(tx, id);
+      const now = this.clock();
+      if (d.cancelled_at) throw liveCancelled();
+      await tx.updateTable('drops').set({ board_token_hash: liveBoardTokenHash(token), board_token_issued_at: now }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'drop.live.board.issue', targetType: 'drop', targetId: id, details: d.board_token_hash ? { replaced: true } : {} }, tx);
+      return now;
+    });
+    return { token, issuedAt };
+  }
+
+  /** Revoke the board's link: the board answers 404 from then on (409 LIVE_NO_BOARD_LINK without one). Audited `drop.live.board.revoke`. */
+  async revokeBoardLink(dropId: string, actor: Actor): Promise<void> {
+    assertStaff(actor, 'revoke a board link');
+    const id = knownId(dropId, dropNotFound);
+    await inTransaction(this.db, async (tx) => {
+      const d = await this.lockAnyLive(tx, id);
+      if (!d.board_token_hash) throw noBoardLink();
+      await tx.updateTable('drops').set({ board_token_hash: null, board_token_issued_at: null }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'drop.live.board.revoke', targetType: 'drop', targetId: id, details: {} }, tx);
+    });
+  }
+
   // ── The engine (live-engine.ts) ──────────────────────────────────────────
 
   /** The releases in their live window at `now`: published, not cancelled, from T0 until no entry is left open. */
@@ -1260,6 +1404,13 @@ export class LiveService {
   private async lockLive(tx: Db, id: string, lock: Lock): Promise<LiveDrop> {
     const q = tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null);
     const d = await (lock === 'update' ? q.forUpdate() : q.forShare()).executeTakeFirst();
+    if (!d) throw dropNotFound();
+    return d;
+  }
+
+  /** A LIVE RELEASE's row FOR UPDATE, published or not; anything else is the same 404 as an unknown release. */
+  private async lockAnyLive(tx: Db, id: string): Promise<LiveDrop> {
+    const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').forUpdate().executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
   }
@@ -1572,59 +1723,7 @@ export class LiveService {
   }
 
   private async viewerEntry(db: Db, accountId: string, dropId: string): Promise<LiveEntryView | null> {
-    const now = this.clock();
-    const r = await db
-      .selectFrom('live_entries as e')
-      .innerJoin('drops as d', 'd.id', 'e.drop_id')
-      .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
-      .select([
-        'e.id', 'e.drop_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at', 'e.turn_expires_at',
-        'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
-      ])
-      .where('e.drop_id', '=', dropId)
-      .where('e.account_id', '=', accountId)
-      .where('d.mode', '=', 'LIVE')
-      .where('d.published_at', 'is not', null)
-      .executeTakeFirst();
-    if (!r) return null;
-    const addons = await db
-      .selectFrom('live_entry_addons as x')
-      .innerJoin('live_addons as a', 'a.id', 'x.addon_id')
-      .select(['a.id', 'a.label', 'x.price_minor'])
-      .where('x.entry_id', '=', r.id)
-      .orderBy('a.position')
-      .execute();
-    const price = r.price_minor ?? 0;
-    const unit = price + addons.reduce((n, a) => n + a.price_minor, 0);
-    return {
-      id: r.id,
-      dropId: r.drop_id,
-      status: r.status,
-      size: { id: r.size_id, label: r.label },
-      quantity: r.quantity,
-      tier: r.tier,
-      position: r.position,
-      joinedAt: r.joined_at,
-      turn:
-        r.turn_at && r.turn_expires_at
-          ? {
-              at: r.turn_at,
-              expiresAt: r.status === 'TURN' ? effectiveDeadline(r.turn_expires_at, r, now) : r.turn_expires_at,
-              token: r.status === 'TURN' ? liveTurnToken(this.turnKey, r.id, r.turn_at) : null,
-            }
-          : null,
-      hold:
-        r.secured_at && r.hold_expires_at
-          ? { securedAt: r.secured_at, expiresAt: r.status === 'SECURED' ? effectiveDeadline(r.hold_expires_at, r, now) : r.hold_expires_at }
-          : null,
-      confirmedAt: r.confirmed_at,
-      endedAt: r.ended_at,
-      letIn: r.let_in_by !== null,
-      addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
-      currency: r.currency ?? 'EUR',
-      priceMinor: price,
-      totalMinor: r.quantity * unit,
-    };
+    return (await liveEntryViews(db, this.turnKey, { dropId, accountIds: [accountId] }, this.clock())).get(accountId) ?? null;
   }
 
   private async interestView(db: Db, accountId: string, dropId: string): Promise<LiveInterestView | null> {
@@ -1640,7 +1739,7 @@ export class LiveService {
 }
 
 /** Whether a release is announced at `now` (its announcement, or its publication). */
-function isAnnounced(d: Pick<DropRow, 'announce_at' | 'published_at'>, now: Date): boolean {
+export function isAnnounced(d: Pick<DropRow, 'announce_at' | 'published_at'>, now: Date): boolean {
   const at = announcedAt(d);
   return at !== null && now.getTime() >= at.getTime();
 }

@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { packIdentity } from '../../src/core/identity.js';
-import { testConfig } from '../../src/server/config.js';
+import { testConfig, type AppConfig } from '../../src/server/config.js';
 import type { Db } from '../../src/server/db/connection.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
@@ -42,6 +42,32 @@ export async function liveFixture(db: Db, start: string): Promise<LiveFixture> {
   const adminId = (await db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
   const modelId = await createModel(db, 'MONOLITHE');
   return { db, clock, audit, drops, live, seedKey, turnKey, admin: { type: 'admin', id: adminId }, modelId };
+}
+
+/**
+ * The same fixture on an application's context (test/api: the routes and the services share its database, clock and
+ * keys), its console user and model created as `liveFixture` creates them.
+ */
+export async function liveFixtureOn(
+  ctx: { db: Db; config: AppConfig; audit: AuditService; services: { drops: DropService; live: LiveService } },
+  clock: ManualClock,
+): Promise<LiveFixture> {
+  const db = ctx.db;
+  await db.insertInto('categories').values({ id: CATEGORY, code: 'J', name: 'Jewelry' }).onConflict((oc) => oc.doNothing()).execute();
+  const email = `live-admin-${randomUUID()}@orbes.test`;
+  const adminId = (await db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
+  const modelId = await createModel(db, 'MONOLITHE');
+  return {
+    db,
+    clock,
+    audit: ctx.audit,
+    drops: ctx.services.drops,
+    live: ctx.services.live,
+    seedKey: deriveDropSeedKey(ctx.config),
+    turnKey: deriveLiveTurnKey(ctx.config),
+    admin: { type: 'admin', id: adminId },
+    modelId,
+  };
 }
 
 export async function createModel(db: Db, name: string, collectionId: string | null = null): Promise<string> {

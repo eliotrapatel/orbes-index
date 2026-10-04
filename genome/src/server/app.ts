@@ -10,6 +10,9 @@
  *   (per group) → session / CSRF / MFA / role guard (account & admin scopes).
  * Then: JSON body (≤ 16 KB, JSON only) → zod validation in the handler →
  * service call → `{ error: { code, message } }` on any failure.
+ *
+ * The LIVE RELEASES' streams (http/live-stream.ts) live in this app's hub
+ * (`app.liveHub`), which the shutdown ends before the server closes.
  */
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -21,12 +24,14 @@ import type { AppContext } from './context.js';
 import { DomainError } from './errors.js';
 import { ipHashOf } from './http/client.js';
 import { errorBody, installErrorHandlers } from './http/errors.js';
+import { LiveHub, type LiveHubOptions } from './http/live-stream.js';
 import { registerRateLimits } from './http/rate-limit.js';
 import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin/index.js';
 import { clubRoutes } from './routes/club.js';
+import { liveRoutes } from './routes/live.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
 
@@ -44,6 +49,15 @@ export interface BuildAppOptions {
   logger?: FastifyServerOptions['logger'];
   /** Refuse admin sessions that did not pass TOTP outside the auth routes. Default: config.adminRequireMfa (ADMIN_REQUIRE_MFA). */
   requireAdminMfa?: boolean;
+  /** The LIVE RELEASES' streams: their pulse, heartbeat, cache and per-account cap (tests). */
+  liveHub?: LiveHubOptions;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** The LIVE RELEASES' streams of this app (http/live-stream.ts). */
+    liveHub: LiveHub;
+  }
 }
 
 /**
@@ -109,8 +123,12 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   // Shutdown gate: once close() starts, requests still arriving on open keep-alive connections get
   // a 503 SERVICE_UNAVAILABLE (and Connection: close) instead of running against a closing database.
   let closing = false;
+  const liveHub = new LiveHub({ room: ctx.services.liveRoom, clock: ctx.clock, log: ctx.log, ...opts.liveHub });
+  app.decorate('liveHub', liveHub);
   app.addHook('preClose', async () => {
     closing = true;
+    // Open streams are requests in progress: ended here, or the server would wait for them.
+    liveHub.stop();
   });
   app.addHook('onRequest', async (_request, reply) => {
     if (!closing) return;
@@ -125,6 +143,7 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   await app.register(accountRoutes, deps);
   await app.register(ownershipRoutes, deps);
   await app.register(clubRoutes, deps);
+  await app.register(liveRoutes, { ...deps, hub: liveHub });
   await app.register(adminRoutes, { ...deps, requireMfa: requireAdminMfa });
 
   if (opts.serveStatic ?? true) await registerStatic(app, opts.staticDir ?? DEFAULT_STATIC_DIR);
