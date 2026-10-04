@@ -10,6 +10,7 @@ import {
   DEFAULT_ZOOM,
   defaultZoomLevel,
   FRAME_INTERVAL_MS,
+  FORMAT_SEAL_CONFIDENCE,
   FrameThrottle,
   HEAVY_CORRECTION_LOAD,
   HINT_AFTER_MS,
@@ -19,6 +20,12 @@ import {
   RETICLE_MARGIN,
   scanHint,
   SEAL_CONFIDENT,
+  SEAL_HOLD_MS,
+  SEAL_SCALE,
+  SEAL_SIGNAL_INTERVAL_MS,
+  sealConfidence,
+  sealScale,
+  SealSignal,
   SMALL_MODULE_PX,
   UPLOAD_MAX_SIDE,
   uploadConfirmCrops,
@@ -197,6 +204,95 @@ describe('HintTracker', () => {
     t.push({ reason: 'ECC', moduleSizePx: 6 });
     t.push({ reason: 'NO_SEAL' });
     expect(t.hint(HINT_AFTER_MS)).toBe('align');
+  });
+});
+
+describe('the seal signal (P-D10)', () => {
+  const f = (reason: DecodeFailureReason, more: Partial<ScanFailure> = {}): ScanFailure => ({ reason, ...more });
+
+  it('reads a seal from the replies that carry one: its evidence on NO_MOONS, less for a code located than for one whose format was read', () => {
+    expect(sealConfidence(f('NO_MOONS', { seal: { confidence: 0.62, unitPx: 4 } }))).toBe(0.62);
+    expect(sealConfidence(f('NO_MOONS', { seal: { confidence: 1.4, unitPx: 4 } }))).toBe(1);
+    expect(sealConfidence(f('NO_MOONS', { seal: { confidence: -0.2, unitPx: 4 } }))).toBe(0);
+    expect(sealConfidence(f('NO_MOONS', { seal: { confidence: Number.NaN, unitPx: 4 } }))).toBeNull();
+    expect(sealConfidence(f('NO_MOONS'))).toBeNull();
+    for (const r of ['ECC', 'CRC', 'PAYLOAD'] as const) {
+      expect(sealConfidence(f(r, { moduleSizePx: 5 }))).toBe(1);
+      expect(sealConfidence(f(r))).toBeNull();
+    }
+    // FORMAT: seal and moons found, the format unread (clutter framed as a code fails there too): confident, not certain.
+    expect(sealConfidence(f('FORMAT', { moduleSizePx: 5 }))).toBe(FORMAT_SEAL_CONFIDENCE);
+    expect(FORMAT_SEAL_CONFIDENCE).toBeGreaterThanOrEqual(SEAL_CONFIDENT);
+    expect(FORMAT_SEAL_CONFIDENCE).toBeLessThan(1);
+    expect(sealConfidence(f('FORMAT'))).toBeNull();
+    // Nothing code-like carries no seal at all.
+    for (const r of ['NO_SEAL', 'INPUT', 'INTERNAL'] as const) expect(sealConfidence(f(r, { moduleSizePx: 5 }))).toBeNull();
+  });
+
+  it('reaches the page at most 4 times a second, and only from a reply that carries a seal', () => {
+    expect(SEAL_SIGNAL_INTERVAL_MS).toBe(250);
+    const signal = new SealSignal();
+    expect(signal.intervalMs).toBe(SEAL_SIGNAL_INTERVAL_MS);
+    // Replies as fast as the frame pump could ever send them (one per FRAME_INTERVAL_MS), then faster still.
+    const emitted: number[] = [];
+    for (let t = 0; t < 3_000; t += 40) {
+      const c = signal.offer(t, f('NO_MOONS', { seal: { confidence: 0.8, unitPx: 4 } }));
+      if (c !== null) {
+        expect(c).toBe(0.8);
+        emitted.push(t);
+      }
+    }
+    for (let i = 1; i < emitted.length; i++) expect(emitted[i] - emitted[i - 1]).toBeGreaterThanOrEqual(SEAL_SIGNAL_INTERVAL_MS);
+    for (const start of emitted) expect(emitted.filter((t) => t >= start && t < start + 1_000).length).toBeLessThanOrEqual(4);
+    expect(emitted.length).toBeGreaterThanOrEqual(10);
+    // A reply without a seal neither emits nor uses the slot: the next seal goes through at once.
+    const s2 = new SealSignal();
+    expect(s2.offer(0, f('NO_SEAL'))).toBeNull();
+    expect(s2.offer(10, f('FORMAT'))).toBeNull();
+    expect(s2.offer(20, f('ECC', { moduleSizePx: 4 }))).toBe(1);
+    expect(s2.offer(20 + SEAL_SIGNAL_INTERVAL_MS - 1, f('ECC', { moduleSizePx: 4 }))).toBeNull();
+    expect(s2.offer(20 + SEAL_SIGNAL_INTERVAL_MS, f('ECC', { moduleSizePx: 4 }))).toBe(1);
+    // A new scan starts afresh.
+    s2.reset();
+    expect(s2.offer(30 + SEAL_SIGNAL_INTERVAL_MS, f('NO_MOONS', { seal: { confidence: 0.5, unitPx: 4 } }))).toBe(0.5);
+  });
+
+  it('tightens the ring around the centre from SEAL_CONFIDENT up, never for a look-alike in the clutter', () => {
+    expect(SEAL_SCALE).toEqual({ loose: 0.95, tight: 0.88 });
+    expect(SEAL_HOLD_MS).toBeGreaterThan(SEAL_SIGNAL_INTERVAL_MS * 3);
+    expect(sealScale(SEAL_CONFIDENT - 0.01)).toBeNull();
+    expect(sealScale(0)).toBeNull();
+    expect(sealScale(Number.NaN)).toBeNull();
+    expect(sealScale(SEAL_CONFIDENT)).toBe(SEAL_SCALE.loose);
+    expect(sealScale(1)).toBe(SEAL_SCALE.tight);
+    expect(sealScale(1.5)).toBe(SEAL_SCALE.tight);
+    expect(sealScale(0.75)).toBe(0.915);
+    // The surer the seal, the tighter the ring.
+    const scales = [0.5, 0.6, 0.7, 0.8, 0.9, 1].map((c) => sealScale(c)!);
+    for (let i = 1; i < scales.length; i++) expect(scales[i]).toBeLessThan(scales[i - 1]);
+  });
+
+  it('comes from what the worker replies for a real code whose moons are out of the frame', () => {
+    // The centre half of a rendered CODE-01, its four moons cropped away: the seal is there, the moons are not (this
+    // code and crop give NO_MOONS; other crops let the finder frame look-alike moons, a FORMAT failure).
+    const code = makeCode(11);
+    const gray = svgToGray(renderOrbesCodeSvg(code.model), { widthPx: 600 });
+    const side = Math.round(gray.width * 0.5);
+    const x0 = Math.floor((gray.width - side) / 2);
+    const y0 = Math.floor((gray.height - side) / 2);
+    const crop = { width: side, height: side, data: new Uint8Array(side * side) };
+    for (let y = 0; y < side; y++) crop.data.set(gray.data.subarray((y0 + y) * gray.width + x0, (y0 + y) * gray.width + x0 + side), y * side);
+    const rgba = grayToRgba(crop);
+    const buffer = new ArrayBuffer(rgba.byteLength);
+    new Uint8Array(buffer).set(rgba);
+    const reply = handleDecode({ type: 'decode', id: 9, width: side, height: side, buffer, options: { tryInverted: true, tryMirrored: false, readGenome: true } });
+    expect(reply.ok).toBe(false);
+    if (reply.ok) return;
+    expect(reply.reason).toBe('NO_MOONS');
+    const confidence = sealConfidence({ reason: reply.reason, seal: reply.seal, moduleSizePx: reply.moduleSizePx });
+    expect(confidence).toBeGreaterThanOrEqual(SEAL_CONFIDENT);
+    expect(new SealSignal().offer(0, { reason: reply.reason, seal: reply.seal })).toBe(confidence);
+    expect(sealScale(confidence!)).not.toBeNull();
   });
 });
 

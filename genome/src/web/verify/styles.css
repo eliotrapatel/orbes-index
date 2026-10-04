@@ -301,7 +301,9 @@ h1[tabindex="-1"]:focus,
 
 .reticle--live .reticle__ring {
   opacity: 0.85;
-  transition: opacity var(--t-med) var(--ease);
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transition: opacity var(--t-med) var(--ease), transform 0.45s var(--ease);
 }
 
 .reticle--live .reticle__sweep {
@@ -317,6 +319,26 @@ h1[tabindex="-1"]:focus,
   transform-box: fill-box;
   transform-origin: center;
   transition: transform var(--t-slow) var(--ease);
+}
+
+/* The scan as a ritual (P-D10). Searching: the sweep above. Seal seen: a decoder
+   reply carried a confident seal, but no position for it, so the ring tightens
+   around the centre (--seal-scale, set by the view through the CSSOM) and its
+   focus breathes; the sweep gives way. Locked: .is-locked below, which the view
+   sets in place of .is-sealed. */
+.view--scan.is-sealed .reticle--live .reticle__ring {
+  opacity: 1;
+  transform: scale(var(--seal-scale, 0.92));
+  animation: reticle-focus 0.8s var(--ease) infinite alternate;
+}
+
+.view--scan.is-sealed .reticle--live .reticle__sweep {
+  opacity: 0;
+}
+
+@keyframes reticle-focus {
+  from { stroke-width: 1; opacity: 0.7; }
+  to { stroke-width: 1.8; opacity: 1; }
 }
 
 .view--scan.is-locked .scan__aperture {
@@ -491,47 +513,51 @@ h1[tabindex="-1"]:focus,
 
 /* ── Verifying ─────────────────────────────────────────────────────────── */
 
+/* VERIFYING… takes the scanner's ring up (P-D10): the same reticle, at the
+   scanner's size and in its centre, its ring and moons at the weight the lock
+   leaves them, the ring faint under the arc travelling while the server
+   answers. No transition between screens. */
 .view--verifying {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  padding: 32px;
+  --reticle: min(66vw, 40vh, 340px);
+  overflow: hidden;
 }
 
 .verifying__orbit {
-  width: 112px;
-  height: 112px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: calc(var(--reticle) * 1.3);
+  height: calc(var(--reticle) * 1.3);
+  transform: translate(-50%, -50%);
   color: var(--ink);
 }
 
-.loader {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
+.reticle--verifying .reticle__ring {
+  stroke-width: 2;
+  opacity: 0.3;
 }
 
-.loader__ring {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-  opacity: 0.22;
+.reticle--verifying .reticle__arc {
+  stroke-width: 2.4;
 }
 
-.loader__core,
-.loader__moon circle {
-  fill: currentColor;
+.reticle--verifying .reticle__moon {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(1.35);
 }
 
-.loader__moon {
-  transform-box: view-box;
-  transform-origin: 0 0;
-  animation: orbit 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+.reticle--verifying .reticle__sweep {
+  animation-duration: 2.4s;
 }
 
 .verifying__status {
+  position: absolute;
+  top: calc(50% + var(--reticle) * 0.65 + 20px);
+  left: 0;
+  right: 0;
+  padding: 0 32px;
+  text-align: center;
   letter-spacing: 0.34em;
   text-indent: 0.34em;
 }
@@ -823,6 +849,19 @@ h1[tabindex="-1"]:focus,
   height: auto;
   aspect-ratio: 1;
   margin: 0 auto;
+}
+
+/* The plate opens from the centre (P-D10), where the ring closed on the code:
+   a circle widening over it, in step with the other sections' delays. Not on
+   the way out (.is-leaving), and not with reduced motion. */
+.view--result:not(.is-leaving) > .result__genome {
+  animation-name: genome-open;
+  animation-duration: 1.4s;
+}
+
+@keyframes genome-open {
+  from { opacity: 0; clip-path: circle(0% at 50% 50%); }
+  to { opacity: 1; clip-path: circle(75% at 50% 50%); }
 }
 
 /* The fingerprint the customer may compare or quote: 10 px, never the 8 px of decoration. */
@@ -3020,12 +3059,19 @@ h1[tabindex="-1"]:focus,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reticle__sweep,
-  .loader__moon {
+  .reticle__sweep {
     animation: none;
   }
   .view--result > * {
     opacity: 1;
+  }
+  /* P-D10: the seal seen only steadies the ring (no tightening, no breathing); the plate is simply there. */
+  .view--scan.is-sealed .reticle--live .reticle__ring {
+    transform: none;
+    animation: none;
+  }
+  .view--result:not(.is-leaving) > .result__genome {
+    animation: none;
   }
   .is-ceremony .genome-svg g[data-layer="genome"],
   .is-ceremony .ceremony__name,

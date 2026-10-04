@@ -619,6 +619,84 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
   });
 });
 
+describe('verify app: the scan as a ritual (P-D10)', () => {
+  const scanningSrc = readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8');
+  const verifyingSrc = readFileSync(join(WEB, 'verify/views/verifying.ts'), 'utf8');
+  const scannerSrc = readFileSync(join(WEB, 'verify/scanner.ts'), 'utf8');
+  const mainSrc = readFileSync(join(WEB, 'verify/main.ts'), 'utf8');
+  const decls = (selector: string): Record<string, string> => {
+    const found = rules(styles).find((r) => r.selectors.includes(selector));
+    if (!found) throw new Error(`no rule ${selector}`);
+    return found.decls;
+  };
+  const reduced = styles.slice(styles.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
+
+  it('raises onSeal from the decoder replies that carry a seal, through SealSignal, outside the decoding', () => {
+    expect(scannerSrc).toContain('onSeal?(confidence: number): void;');
+    expect(scannerSrc).toContain('private readonly seals = new SealSignal();');
+    expect(scannerSrc).toContain('this.seals.reset();');
+    // In the reply branch of a failed decode, after the hint: nothing added to the frame pump or the worker.
+    const reply = scannerSrc.slice(scannerSrc.indexOf('this.hints.push(failure);'), scannerSrc.indexOf('.catch((e: unknown)'));
+    expect(reply).toContain('this.seals.offer(performance.now(), failure)');
+    expect(reply).toContain('this.callbacks.onSeal?.(seal)');
+    for (const file of ['verify/frame-decoder.ts', 'verify/worker.ts']) expect(readFileSync(join(WEB, file), 'utf8'), file).not.toMatch(/SealSignal|onSeal/);
+    // The page passes it to the scanner's view, for the scan on show only.
+    expect(mainSrc).toContain('onSeal: (confidence) => gen === this.generation && view.setSeal(confidence),');
+  });
+
+  it('draws three states of the reticle: the sweep, the ring tightened around the centre, the lock', () => {
+    // Searching: the sweep, as before.
+    expect(decls('.view--scan.is-ready .reticle--live .reticle__sweep').opacity).toBe('1');
+    // Seal seen: the ring scaled about the orbit's centre (the view-box origin), its focus breathing; the sweep gone.
+    expect(decls('.reticle--live .reticle__ring')).toMatchObject({ 'transform-box': 'view-box', 'transform-origin': '0 0' });
+    expect(decls('.reticle--live .reticle__ring').transition).toContain('transform');
+    expect(decls('.view--scan.is-sealed .reticle--live .reticle__ring')).toMatchObject({
+      opacity: '1',
+      transform: 'scale(var(--seal-scale, 0.92))',
+      animation: 'reticle-focus 0.8s var(--ease) infinite alternate',
+    });
+    expect(decls('.view--scan.is-sealed .reticle--live .reticle__sweep').opacity).toBe('0');
+    expect(styles).toMatch(/@keyframes reticle-focus \{\s*from \{ stroke-width: 1; opacity: 0\.7; \}\s*to \{ stroke-width: 1\.8; opacity: 1; \}/);
+    // Its scale set through the CSSOM (no inline style attribute is written), held SEAL_HOLD_MS, then the search.
+    expect(scanningSrc).toContain("root.style.setProperty('--seal-scale', String(scale));");
+    expect(scanningSrc).toContain("root.classList.add('is-sealed');");
+    expect(scanningSrc).toContain('sealTimer = setTimeout(loosen, SEAL_HOLD_MS);');
+    expect(scanningSrc).toContain("import { SEAL_HOLD_MS, sealScale } from '../capture.js';");
+    // Locked: the existing .is-locked, untouched, set in place of the seal seen.
+    expect(decls('.view--scan.is-locked .reticle__ring')).toEqual({ opacity: '1', 'stroke-width': '2' });
+    expect(decls('.view--scan.is-locked .reticle__moon')).toEqual({ transform: 'scale(1.35)' });
+    expect(decls('.view--scan.is-locked .reticle__sweep')).toEqual({ opacity: '0' });
+    expect(scanningSrc).toMatch(/if \(locked\) loosen\(\);\n\s*root\.classList\.toggle\('is-locked', locked\);/);
+    // The scan's controls and screen stay as they were (test/e2e/fallbacks.test.ts measures them).
+    expect(scanningSrc).toContain("text: 'UPLOAD A PHOTO'");
+    expect(scanningSrc).toContain("text: 'LIGHT'");
+    expect(scanningSrc).toContain("text: 'CLOSE'");
+    expect(mainSrc).toContain("if (!(await this.swap(view.root, 'scan'))) return;");
+  });
+
+  it('takes the ring up on VERIFYING…, then opens the GENOME plate from the centre, with no transition between screens', () => {
+    expect(verifyingSrc).toContain("orbitReticle('reticle--verifying')");
+    expect(verifyingSrc).not.toMatch(/loader|getBoundingClientRect|animate\(/);
+    // The scanner's geometry: the same --reticle, the same 1.3 box, centred; closed as the lock leaves it.
+    expect(decls('.view--verifying')['--reticle']).toBe(decls('.view--scan')['--reticle']);
+    expect(decls('.verifying__orbit')).toMatchObject({ width: decls('.scan__reticle').width, height: decls('.scan__reticle').height, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' });
+    expect(decls('.reticle--verifying .reticle__ring')['stroke-width']).toBe(decls('.view--scan.is-locked .reticle__ring')['stroke-width']);
+    expect(decls('.reticle--verifying .reticle__moon').transform).toBe(decls('.view--scan.is-locked .reticle__moon').transform);
+    expect(styles).not.toMatch(/\.loader/);
+    // The plate: a circle widening from its centre, in step with the sections' delays (only the name and duration set).
+    expect(decls('.view--result:not(.is-leaving) > .result__genome')).toEqual({ 'animation-name': 'genome-open', 'animation-duration': '1.4s' });
+    expect(styles).toMatch(/@keyframes genome-open \{\s*from \{ opacity: 0; clip-path: circle\(0% at 50% 50%\); \}\s*to \{ opacity: 1; clip-path: circle\(75% at 50% 50%\); \}/);
+    // No FLIP: nothing measures one screen to animate the next.
+    expect(mainSrc).not.toMatch(/\bFLIP\b|\.animate\(/);
+  });
+
+  it('respects reduced motion: the seal seen only steadies the ring, the plate is simply there', () => {
+    expect(reduced).toMatch(/\.view--scan\.is-sealed \.reticle--live \.reticle__ring \{\s*transform: none;\s*animation: none;\s*\}/);
+    expect(reduced).toMatch(/\.view--result:not\(\.is-leaving\) > \.result__genome \{\s*animation: none;\s*\}/);
+    expect(reduced).toMatch(/\.reticle__sweep \{\s*animation: none;/);
+  });
+});
+
 describe('verify app: OWNERSHIP heading follows the registration window', () => {
   const now = Date.parse('2026-10-01T08:30:00.000Z');
   it('says REGISTRATION OPEN only while the scan token is valid', () => {

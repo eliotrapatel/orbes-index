@@ -48,8 +48,11 @@
  * when it is reduced, kept by TRY AGAIN, never for a piece received), the
  * sound signature (P-D07: the chord on an authentic result only, its
  * AudioContext created in the tap UPLOAD A PHOTO or SCAN ORBES CODE, SOUND ON /
- * OFF at the foot of the landing, kept on the device across a reload), and the
- * problem screens. On each
+ * OFF at the foot of the landing, kept on the device across a reload), the scan
+ * as a ritual (P-D10: the ring tightened around the centre while a decoder
+ * stand-in sees a seal, 4 times a second at most, then loosened; only steadied
+ * when motion is reduced; VERIFYING… on the scanner's ring; the GENOME plate
+ * opening from its centre), and the problem screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -2894,6 +2897,148 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera scan (Chromium fake captu
     expect(scan.result_state).toBe('AUTHENTIC');
     expect(JSON.stringify(scan.client_metrics)).toMatch(/"source":"camera"/);
     expect(problems).toEqual([]);
+  }, 120_000);
+});
+
+/**
+ * A decoder worker that stands in for the real one (P-D10): it answers the warm-up and every frame as a failed read,
+ * the first SEALED camera frames with a confident seal (NO_MOONS, confidence 0.9), then with nothing code-like.
+ */
+const SEALED_FRAMES = 24;
+const SEALING_WORKER = `
+let frames = 0;
+self.addEventListener('message', (ev) => {
+  const m = ev.data;
+  const camera = m.options && m.options.tryInverted === true;
+  const sealed = camera && frames++ < ${SEALED_FRAMES};
+  const reply = sealed
+    ? { type: 'result', id: m.id, ok: false, reason: 'NO_MOONS', seal: { confidence: 0.9, unitPx: 5 }, timing: { grayMs: 0, decodeMs: 1, totalMs: 1 } }
+    : { type: 'result', id: m.id, ok: false, reason: 'NO_SEAL', timing: { grayMs: 0, decodeMs: 1, totalMs: 1 } };
+  self.postMessage(reply);
+});
+self.postMessage({ type: 'ready' });
+`;
+
+describe.skipIf(!HAS_CHROMIUM)('verify web app: the scan as a ritual (P-D10)', () => {
+  let srv: VerifyServer;
+  let browser: Browser;
+  let issued: IssueResult;
+
+  beforeAll(async () => {
+    srv = await startVerifyServer();
+    issued = await srv.issue({ serial: 210 });
+    browser = await launchChromium({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  }, 120_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    await srv?.close();
+  });
+
+  /** The scanner on a decoder that sees a seal for SEALED_FRAMES frames: each --seal-scale written, with its time. */
+  async function scanWithSeal(reducedMotion: 'reduce' | 'no-preference'): Promise<{ page: Page; problems: string[]; writes: () => Promise<{ t: number; value: string }[]> }> {
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion });
+    await page.route(/\/assets\/verify-worker-[A-Z0-9]{8}\.js$/, (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: SEALING_WORKER }));
+    // The worker started on the landing is the real one: a reload starts the stand-in.
+    await page.reload();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    await page.evaluate(() => {
+      const w = window as unknown as { __seal: { t: number; value: string }[] };
+      w.__seal = [];
+      const set = CSSStyleDeclaration.prototype.setProperty;
+      CSSStyleDeclaration.prototype.setProperty = function (this: CSSStyleDeclaration, name: string, value: string | null, priority?: string) {
+        if (name === '--seal-scale') w.__seal.push({ t: performance.now(), value: String(value) });
+        return set.call(this, name, value, priority);
+      };
+    });
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
+    await page.locator('.view--scan.is-ready').waitFor();
+    return { page, problems, writes: () => page.evaluate(() => (window as unknown as { __seal: { t: number; value: string }[] }).__seal) };
+  }
+
+  it('tightens the ring around the centre while a seal is seen, at most 4 times a second, then loosens back to the search', async () => {
+    const { page, problems, writes } = await scanWithSeal('no-preference');
+    // Searching: the sweep turns, the ring at rest.
+    const ring = page.locator('.view--scan .reticle--live .reticle__ring');
+    // Seal seen: .is-sealed, the sweep gone, the ring scaled about the orbit's centre (0.95 − 0.07 × 0.8 = 0.894).
+    await page.locator('.view--scan.is-sealed').waitFor({ timeout: 10_000 });
+    await expect.poll(() => ring.evaluate((el) => getComputedStyle(el).transform), POLL).toBe('matrix(0.894, 0, 0, 0.894, 0, 0)');
+    expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe('reticle-focus');
+    expect(await page.locator('.view--scan .reticle__sweep').evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+    // The ring keeps its centre: the centre of the screen, where the reticle stands.
+    const box = (await ring.boundingBox())!;
+    expect(Math.abs(box.x + box.width / 2 - MOBILE_VIEWPORT.width / 2)).toBeLessThan(1.5);
+    expect(Math.abs(box.y + box.height / 2 - MOBILE_VIEWPORT.height / 2)).toBeLessThan(1.5);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-scan-sealed.png') });
+    // The decoder stops seeing it: the ring loosens back to the search within SEAL_HOLD_MS, the sweep turning again.
+    await expect.poll(() => page.locator('.view--scan.is-sealed').count(), { timeout: 10_000, interval: 50 }).toBe(0);
+    await expect.poll(() => ring.evaluate((el) => getComputedStyle(el).transform), POLL).toBe('none');
+    await expect.poll(() => page.locator('.view--scan .reticle__sweep').evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
+    // The signal reached the view at most 4 times a second (each one writes the scale), and the scan's screen and
+    // controls are as they were: no lock, the status, CLOSE and UPLOAD A PHOTO.
+    const seen = await writes();
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(seen.map((w) => w.value))).toEqual(new Set(['0.894']));
+    for (let i = 1; i < seen.length; i++) expect(seen[i].t - seen[i - 1].t).toBeGreaterThanOrEqual(240);
+    expect(await page.locator('.view--scan.is-locked').count()).toBe(0);
+    expect(await page.evaluate(() => document.body.dataset.screen)).toBe('scan');
+    await textOf(page.getByRole('status'), 'SCANNING…');
+    await page.getByRole('button', { name: 'CLOSE' }).click();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('only steadies the ring when motion is reduced: no tightening, no breathing', async () => {
+    const { page, problems } = await scanWithSeal('reduce');
+    await page.locator('.view--scan.is-sealed').waitFor({ timeout: 10_000 });
+    const ring = page.locator('.view--scan .reticle--live .reticle__ring');
+    expect(await ring.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+    expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+    expect(await ring.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    await page.getByRole('button', { name: 'CLOSE' }).click();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('takes the ring up on VERIFYING…, then opens the GENOME plate from its centre', async () => {
+    for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+      const { page, problems } = await openVerify(browser, srv, { reducedMotion });
+      // The server answers after 2.5 s, so VERIFYING… stays on screen long enough to be looked at.
+      await page.route('**/api/v1/verify', async (route) => {
+        await new Promise((r) => setTimeout(r, 2_500));
+        await route.fallback();
+      });
+      await uploadPhoto(page, writeCodePng(srv.workDir, `ritual-${reducedMotion}.png`, issued));
+      await page.locator('.view--verifying').waitFor();
+      await textOf(page.getByRole('status'), 'VERIFYING…');
+      // Once the screen has come in (its own fade and rise, not a transition from the screen before).
+      await expect.poll(() => page.locator('.view--verifying').evaluate((el) => el.getAnimations().every((a) => a.playState === 'finished')), POLL).toBe(true);
+      // The scanner's ring, at the scanner's size (min(66vw, 40vh, 340px) = 257.4 px here) and in its centre, closed
+      // on its four moons, the arc travelling (with motion).
+      const orbit = page.locator('.view--verifying .verifying__orbit .reticle--verifying');
+      await countOf(orbit.locator('.reticle__moon'), 4);
+      const ring = (await orbit.locator('.reticle__ring').boundingBox())!;
+      expect(Math.abs(ring.width - Math.min(0.66 * MOBILE_VIEWPORT.width, 0.4 * MOBILE_VIEWPORT.height, 340))).toBeLessThan(2.5);
+      expect(Math.abs(ring.x + ring.width / 2 - MOBILE_VIEWPORT.width / 2)).toBeLessThan(1.5);
+      expect(Math.abs(ring.y + ring.height / 2 - MOBILE_VIEWPORT.height / 2)).toBeLessThan(1.5);
+      expect(await orbit.locator('.reticle__ring').evaluate((el) => getComputedStyle(el).strokeWidth)).toBe('2px');
+      expect(await orbit.locator('.reticle__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe(reducedMotion === 'reduce' ? 'none' : 'orbit');
+      if (reducedMotion === 'no-preference') await page.screenshot({ path: join(OUT_DIR, 'verify-verifying-ring.png') });
+      expect(await resultTitle(page)).toBe('AUTHENTIC');
+      // The plate opens from its centre (a widening circle) with motion; without, it is simply there.
+      const plate = page.locator('.view--result > .result__genome');
+      expect(await plate.evaluate((el) => getComputedStyle(el).animationName)).toBe(reducedMotion === 'reduce' ? 'none' : 'genome-open');
+      if (reducedMotion === 'no-preference') {
+        await expect.poll(() => plate.evaluate((el) => el.getAnimations().every((a) => a.playState === 'finished')), POLL).toBe(true);
+        expect(await plate.evaluate((el) => getComputedStyle(el).clipPath)).toBe('circle(75% at 50% 50%)');
+      }
+      // Nothing of the plate is left hidden: its four brackets and the GENOME's id are seen whole.
+      await expect.poll(() => plate.evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
+      for (const corner of ['tl', 'tr', 'bl', 'br']) await visible(plate.locator(`.bracket--${corner}`));
+      await textOf(page.locator('.genome__id'), issued.product.productId);
+      expect(problems).toEqual([]);
+      await page.context().close();
+    }
   }, 120_000);
 });
 

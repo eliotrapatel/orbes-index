@@ -10,6 +10,8 @@
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   result ──REGISTER, then VIEW AS OWNER──▶ VERIFYING… ──▶ the result with the ceremony (P-D01)
  *   an AUTHENTIC_* result ──▶ the sound signature (P-D07), its AudioContext created in the tap SCAN or UPLOAD
+ *   the scan as a ritual (P-D10): the ring searches, tightens around the centre on a seal seen (onSeal), locks on the
+ *                    code; VERIFYING… takes the ring up, and the result's GENOME plate opens from the centre
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
@@ -616,6 +618,7 @@ class App {
       session = new ScanSession({ video: view.video, reticleSize: () => view.reticleSize(), zoomState: () => this.zoomState() }, decoder, {
         onDecoded: (reply, ms) => void this.onDecoded(gen, view, reply, ms),
         onHint: (hint) => view.setHint(hint ? HINTS[hint] : null),
+        onSeal: (confidence) => gen === this.generation && view.setSeal(confidence),
         onTimeout: () => gen === this.generation && this.showProblem('scan-timeout'),
         onFatal: () => gen === this.generation && this.showProblem('decoder-failed'),
       });

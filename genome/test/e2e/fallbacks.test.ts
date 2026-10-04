@@ -9,10 +9,10 @@
  *   - photo upload from the landing screen: a simulated ≈3 MP phone JPEG of a
  *     real issued code → AUTHENTIC with its product id, timed;
  *   - an INVALID code (one flipped signature bit) uploaded → INVALID SIGNATURE;
- *   - a camera showing a blank tag (no code): no false recognition, the scan
- *     guidance appears, the scanner controls keep the floors of
- *     BRAND-DESIGN-SYSTEM §3.8 (10 px, 44 × 44 px tap zones), CLOSE releases
- *     the camera.
+ *   - a camera showing a blank tag (no code): no false recognition (the ring
+ *     never tightens on a look-alike seal, P-D10), the scan guidance appears,
+ *     the scanner controls keep the floors of BRAND-DESIGN-SYSTEM §3.8 (10 px,
+ *     44 × 44 px tap zones), CLOSE releases the camera.
  *
  * Chromium runs without --use-fake-ui-for-media-stream here so permissions
  * can be refused: --deny-permission-prompts declines every prompt, a context
@@ -229,6 +229,14 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
     const { page, problems, close } = await openVerify(browser, srv, { reducedMotion: 'no-preference', permissions: ['camera'] });
     try {
       const before = await srv.ctx.db.selectFrom('scan_events').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+      // P-D10: a look-alike seal in the clutter never tightens the ring (watched for the whole scan).
+      await page.evaluate(() => {
+        const w = window as unknown as { __sealed: boolean };
+        w.__sealed = false;
+        new MutationObserver(() => {
+          if (document.querySelector('.view--scan.is-sealed')) w.__sealed = true;
+        }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+      });
       await page.getByRole('button', { name: 'SCAN ORBES CODE' }).tap();
       await page.locator('.view--scan.is-ready').waitFor();
       await textOf(page.getByRole('status'), 'SCANNING…');
@@ -272,6 +280,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       await page.waitForTimeout(1_500);
       expect(norm(await page.locator('.scan__hint').innerText())).toBe('Place the whole code inside the orbit');
       expect(timeline.locked).toBeNull();
+      expect(await page.evaluate(() => (window as unknown as { __sealed: boolean }).__sealed)).toBe(false);
       const reasons: Record<string, number> = {};
       for (const r of timeline.replies) reasons[r.reason ?? '?'] = (reasons[r.reason ?? '?'] ?? 0) + 1;
       const elapsed = timeline.replies.at(-1)!.t - timeline.frames[0].t;

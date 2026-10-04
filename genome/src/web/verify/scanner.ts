@@ -11,7 +11,9 @@
  *                 worker is idle, the square under the reticle is drawn to a
  *                 canvas (scaled to ≤ 960 px) and sent for decoding. A read
  *                 that needed heavy Reed-Solomon correction is only reported
- *                 once a second video frame decodes to identical data.
+ *                 once a second video frame decodes to identical data. A
+ *                 reply that carries a seal raises onSeal (P-D10), 4 times a
+ *                 second at most (SealSignal), for the ring to tighten.
  *   readPhoto     the upload fallback: whole photo, then centred crops (a
  *                 heavily corrected read is confirmed by a second resampling).
  *
@@ -25,6 +27,7 @@ import {
   HintTracker,
   ReadConfirmer,
   SCAN_TIMEOUT_MS,
+  SealSignal,
   uploadConfirmCrops,
   uploadCrops,
   type CropPlan,
@@ -384,6 +387,12 @@ export interface ScanCallbacks {
   onDecoded(reply: Extract<DecodeReply, { ok: true }>, decodeMs: number): void;
   /** Guidance changed (null clears it). */
   onHint(hint: ScanHint): void;
+  /**
+   * A decoder reply carried a seal (P-D10): its confidence in [0, 1] (capture.ts sealConfidence), 4 times a second at
+   * most. The replies hold no position for it: the ring tightens around the centre. The console's sale scanner
+   * leaves it out.
+   */
+  onSeal?(confidence: number): void;
   /** Nothing read for SCAN_TIMEOUT_MS. Scanning has stopped. */
   onTimeout(): void;
   /** The decoder cannot run in this browser. Scanning has stopped. */
@@ -413,6 +422,7 @@ export class ScanSession {
   private startedAt = 0;
   private readonly hints = new HintTracker();
   private readonly confirmer = new ReadConfirmer();
+  private readonly seals = new SealSignal();
   private cropSide = 0;
   private lastHint: ScanHint = null;
   private hintTimer: ReturnType<typeof setInterval> | undefined;
@@ -434,6 +444,7 @@ export class ScanSession {
     this.startedAt = performance.now();
     this.hints.reset();
     this.confirmer.reset();
+    this.seals.reset();
     this.lastHint = null;
     this.throttle.reset();
     this.hintTimer = setInterval(() => this.tickHints(), 500);
@@ -506,7 +517,10 @@ export class ScanSession {
           this.stop();
           this.callbacks.onDecoded({ ...reply, decoded: accepted }, reply.timing.totalMs);
         } else {
-          this.hints.push({ reason: reply.reason, seal: reply.seal, moduleSizePx: reply.moduleSizePx });
+          const failure = { reason: reply.reason, seal: reply.seal, moduleSizePx: reply.moduleSizePx };
+          this.hints.push(failure);
+          const seal = this.callbacks.onSeal ? this.seals.offer(performance.now(), failure) : null;
+          if (seal !== null) this.callbacks.onSeal?.(seal);
         }
       })
       .catch((e: unknown) => {

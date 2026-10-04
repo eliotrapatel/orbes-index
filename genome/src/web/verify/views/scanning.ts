@@ -2,8 +2,18 @@
  * Scanner: full-bleed camera, the orbit reticle with its four moons, and the
  * status line (SCANNING… → ORBES CODE FOUND → VERIFYING…) announced through
  * an aria-live region. Torch and zoom appear only when the camera offers them.
+ *
+ * The scan as a ritual (P-D10), three states of the reticle:
+ *   searching   the travelling arc (the sweep);
+ *   seal seen   .is-sealed: a decoder reply carried a confident seal (onSeal), so
+ *               the ring tightens around the centre (--seal-scale, set through the
+ *               CSSOM) and its focus breathes; without one for SEAL_HOLD_MS it
+ *               loosens back to the search;
+ *   locked      .is-locked: the code was read, the orbit closes.
+ * With reduced motion the ring neither tightens nor breathes: it only steadies.
  */
 import { h } from '../../shared/dom.js';
+import { SEAL_HOLD_MS, sealScale } from '../capture.js';
 import { SCAN_GUIDE, STATUS } from '../copy.js';
 import { orbitReticle, viewRoot } from './common.js';
 
@@ -21,6 +31,8 @@ export interface ScanView {
   reticleSize(): number;
   setStatus(text: string): void;
   setHint(text: string | null): void;
+  /** A seal was seen (P-D10), with this confidence: the ring tightens around the centre while it lasts. */
+  setSeal(confidence: number): void;
   /** Code found: the orbit closes and the frame freezes. */
   setLocked(locked: boolean): void;
   setReady(ready: boolean): void;
@@ -67,6 +79,14 @@ export function scanView(handlers: ScanHandlers): ScanView {
     ),
   );
 
+  // The seal seen (P-D10): held for SEAL_HOLD_MS after the last confident signal, then the search again.
+  let sealTimer: ReturnType<typeof setTimeout> | undefined;
+  const loosen = (): void => {
+    clearTimeout(sealTimer);
+    sealTimer = undefined;
+    root.classList.remove('is-sealed');
+  };
+
   return {
     root,
     video,
@@ -83,7 +103,17 @@ export function scanView(handlers: ScanHandlers): ScanView {
       hint.textContent = next;
       hint.classList.add('is-changing');
     },
+    setSeal: (confidence) => {
+      const scale = sealScale(confidence);
+      if (scale === null || root.classList.contains('is-locked')) return;
+      root.style.setProperty('--seal-scale', String(scale));
+      root.classList.add('is-sealed');
+      clearTimeout(sealTimer);
+      sealTimer = setTimeout(loosen, SEAL_HOLD_MS);
+    },
     setLocked: (locked) => {
+      // Locked takes over from the seal seen: the orbit closes on the code.
+      if (locked) loosen();
       root.classList.toggle('is-locked', locked);
       if (locked) {
         video.pause();

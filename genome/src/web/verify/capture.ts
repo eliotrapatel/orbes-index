@@ -251,6 +251,78 @@ export class HintTracker {
   }
 }
 
+// ── The seal signal (P-D10) ────────────────────────────────────────────────
+
+/** The seal signal reaches the page at most 4 times a second. */
+export const SEAL_SIGNAL_INTERVAL_MS = 250;
+/** Without a confident seal for this long, the tightened ring loosens back to the search. */
+export const SEAL_HOLD_MS = 900;
+/** The ring's scale once a seal is seen: SEAL_CONFIDENT draws it to the first, a certain seal to the second. */
+export const SEAL_SCALE = { loose: 0.95, tight: 0.88 } as const;
+
+/**
+ * The seal confidence given to a code located (seal and moons found) whose format was not read: clutter framed as a
+ * code fails there too, so less than a format read, yet above SEAL_CONFIDENT, as a code held a little blurred or
+ * askew mostly fails there.
+ */
+export const FORMAT_SEAL_CONFIDENCE = 0.75;
+
+/**
+ * The seal a failed decode carries, as a confidence in [0, 1], or null when it carries none: NO_MOONS gives the
+ * evidence of the most code-like seal; FORMAT with a located code FORMAT_SEAL_CONFIDENCE; ECC, CRC and PAYLOAD mean
+ * a code was located and its format read, so 1. Nothing code-like (NO_SEAL, INPUT, INTERNAL) carries none. The
+ * decoder replies hold no position for the seal, so the ring only ever tightens around the centre.
+ */
+export function sealConfidence(failure: ScanFailure): number | null {
+  const located = typeof failure.moduleSizePx === 'number';
+  switch (failure.reason) {
+    case 'NO_MOONS': {
+      const c = failure.seal?.confidence;
+      return typeof c === 'number' && Number.isFinite(c) ? Math.min(1, Math.max(0, c)) : null;
+    }
+    case 'FORMAT':
+      return located ? FORMAT_SEAL_CONFIDENCE : null;
+    case 'ECC':
+    case 'CRC':
+    case 'PAYLOAD':
+      return located ? 1 : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The scale of the tightened ring for a seal confidence, or null below SEAL_CONFIDENT (a look-alike in the clutter
+ * does not tighten it): linear from SEAL_SCALE.loose at SEAL_CONFIDENT to SEAL_SCALE.tight at 1.
+ */
+export function sealScale(confidence: number): number | null {
+  if (!Number.isFinite(confidence) || confidence < SEAL_CONFIDENT) return null;
+  const k = (Math.min(1, confidence) - SEAL_CONFIDENT) / (1 - SEAL_CONFIDENT);
+  return Math.round((SEAL_SCALE.loose + (SEAL_SCALE.tight - SEAL_SCALE.loose) * k) * 1000) / 1000;
+}
+
+/**
+ * The scanner's seal signal (`onSeal`): from the decoder replies that carry a seal, at most one per
+ * SEAL_SIGNAL_INTERVAL_MS. `offer` returns the confidence to emit, or null (no seal, or too soon after the last).
+ * Constant work on a reply already received: nothing is added to the decoding itself.
+ */
+export class SealSignal {
+  private last = Number.NEGATIVE_INFINITY;
+
+  constructor(readonly intervalMs = SEAL_SIGNAL_INTERVAL_MS) {}
+
+  offer(now: number, failure: ScanFailure): number | null {
+    const confidence = sealConfidence(failure);
+    if (confidence === null || now - this.last < this.intervalMs) return null;
+    this.last = now;
+    return confidence;
+  }
+
+  reset(): void {
+    this.last = Number.NEGATIVE_INFINITY;
+  }
+}
+
 // ── Read confirmation ──────────────────────────────────────────────────────
 
 /**
