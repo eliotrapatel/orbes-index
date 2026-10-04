@@ -19,6 +19,7 @@ import {
   botRadar,
   collectorInsights,
   compareReleases,
+  count,
   demandRadar,
   duration,
   LIVE_ALERT_KINDS,
@@ -138,13 +139,13 @@ describe('the audience forecast', () => {
     expect(f.reasoning[0]).toContain('100 collectors said I\'LL BE THERE. In 2 past releases, the line at T0 held 75 % to 90 % of the interest: 75 to 90.');
     // 45 / 450 = 10 % and 60 / 550 = 11 % of 760.
     expect(f.reasoning.join(' ')).toContain('(10 % to 11 %) give 76 to 83');
-    expect(f.reasoning.join(' ')).toContain('provisional until the load test measures it');
+    expect(f.reasoning.join(' ')).toContain(`Within the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the load test measured the server to hold.`);
   });
 
   it('assumes half to all of the interest without a past release, and says when it passes the room the server holds', () => {
     const f = audienceForecast({ interest: 1500, eligibleByTier: [3000, 0, 0, 0], past: [], inRoom: 12 });
     expect(f).toMatchObject({ basis: 'INTEREST', low: 750, high: 1500, expected: 1125, aboveCapacity: true, inRoom: 12 });
-    expect(f.reasoning.join(' ')).toContain('The upper end, 1\u2009500, is above the 1\u2009000 in the room');
+    expect(f.reasoning.join(' ')).toContain('The upper end, 1\u2009500, is above the 1\u2009000 in the room the load test measured the server to hold.');
     expect(f.reasoning.at(-1)).toBe('In the room now: 12 people.');
   });
 

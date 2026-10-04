@@ -18,10 +18,13 @@
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
  *    trusts no proxy in direct mode, strips query strings and headers from the
  *    access log, leaves HSTS to the app, and limits every request body to
- *    64 KB except the console's four photograph uploads (F-04: a model's
+ *    64 KB except the console's five image uploads (F-04: a model's
  *    reference photograph, a piece's; P-R02: a photograph of a model's
  *    lookbook gallery; P-X01: a photograph of a post of the owners' circle;
- *    1 200 KB, over the app's 1 MiB);
+ *    the LIVE RELEASES: a release's silhouette; 1 200 KB, over the app's
+ *    1 MiB); it compresses every response but the LIVE RELEASES' streams,
+ *    which it passes on at once (LIVE_STREAM_ROUTES, the app's own list,
+ *    itself checked against the routes the app registers);
  *  - the scripts are strict bash with --help, and the destructive ones have
  *    --dry-run; the systemd units point at scripts that exist;
  *  - whatever the operator's umask, the image's sources and Caddy's
@@ -40,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/server/config.js';
 import { MEDIA_BODY_LIMIT_BYTES, MEDIA_UPLOAD_ROUTES } from '../../src/server/routes/admin/media.js';
+import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
 import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 
 const GENOME = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -327,7 +331,13 @@ describe('deploy/vps/Caddyfile', () => {
 
   it("proxies to the app's real port with exactly one forwarded client IP", () => {
     const port = /\bPORT: "(\d+)"/.exec(read(STACK, 'compose.yaml'))![1];
-    expect(directives(caddyfile)).toMatch(new RegExp(`reverse_proxy app:${port} \\{`));
+    // Two proxies to the app (the LIVE RELEASES' streams, everything else), both through the same upstream snippet.
+    const proxies = [...directives(caddyfile).matchAll(/\n\treverse_proxy (@\w+) app:(\d+) \{\n\t\timport app_upstream\n/g)];
+    expect(proxies.map((m) => [m[1], m[2]])).toEqual([
+      ['@live_stream', port],
+      ['@not_live_stream', port],
+    ]);
+    expect([...directives(caddyfile).matchAll(/reverse_proxy/g)]).toHaveLength(2);
     expect(directives(caddyfile)).toMatch(/header_up X-Forwarded-For \{client_ip\}/);
     expect(directives(caddyfile)).toMatch(/header_up -X-Real-Ip/);
     expect(directives(caddyfile)).toMatch(/header_up -Forwarded/);
@@ -365,14 +375,14 @@ describe('deploy/vps/Caddyfile', () => {
   it('leaves security headers to the app, limits bodies, compresses, and supports tls internal and an admin allowlist', () => {
     const d = directives(caddyfile);
     expect(d).not.toMatch(/Strict-Transport-Security|Content-Security-Policy/i);
-    expect(d).toMatch(/encode zstd gzip/);
+    expect(d).toMatch(/\n\tencode @not_live_stream zstd gzip\n/);
     expect(d).toMatch(/import tls_\{\$TLS_MODE:acme\}/);
     expect(d).toMatch(/\(tls_internal\) \{\s*tls internal\s*\}/);
     expect(d).toMatch(/not client_ip \{\$ADMIN_ALLOWED_IPS:0\.0\.0\.0\/0 ::\/0\}/);
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
   });
 
-  it('limits every body to 64 KB, except the four photograph uploads of the console (F-04, P-R02, P-X01): 1 200 KB, over the app\'s 1 MiB', () => {
+  it('limits every body to 64 KB, except the five image uploads of the console (F-04, P-R02, P-X01, the LIVE RELEASES): 1 200 KB, over the app\'s 1 MiB', () => {
     const d = directives(caddyfile);
     // Caddy reads KB as 1 000 bytes.
     const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
@@ -440,6 +450,63 @@ describe('deploy/vps/Caddyfile', () => {
     ]) {
       expect(re.test(path), path).toBe(false);
     }
+  });
+
+  it("passes the LIVE RELEASES' streams on uncompressed and at once, and only them", () => {
+    const d = directives(caddyfile);
+    // The streams' matcher; its complement is the very same pattern, negated.
+    const stream = /\n\t@live_stream \{\n\t\tpath_regexp (\S+)\n\t\}/.exec(d);
+    expect(stream, 'the @live_stream matcher').not.toBeNull();
+    const pattern = stream![1];
+    expect(d).toContain(`\n\t@not_live_stream {\n\t\tnot path_regexp ${pattern}\n\t}`);
+    // Compression for everything else only (a single encode, with the complement's matcher)…
+    expect([...d.matchAll(/\n\tencode /g)]).toHaveLength(1);
+    expect(d).toMatch(/\n\tencode @not_live_stream zstd gzip\n/);
+    // …and the streams flushed at once, by their own proxy.
+    const proxy = /\n\treverse_proxy @live_stream app:\d+ \{\n([\s\S]*?)\n\t\}/.exec(d)?.[1] ?? '';
+    expect(proxy).toMatch(/\n\t\tflush_interval -1$/);
+    expect(d.match(/flush_interval/g)).toHaveLength(1);
+    // No handle or route block: Caddy's own directive order runs the admin allowlist (respond) before either proxy,
+    // so the console's stream keeps it.
+    expect(d).not.toMatch(/\n\t(handle|handle_path|route)\b/);
+
+    // The pattern (RE2 and JavaScript alike here) matches the app's three streams, with or without a trailing slash…
+    const re = new RegExp(pattern);
+    const id = '73c68b47-012d-4569-a59a-fd2effa613c1';
+    expect([...LIVE_STREAM_ROUTES]).toEqual(['/api/v1/live/:id/stream', '/api/v1/live/:id/board/stream', '/api/admin/live/:id/stream']);
+    for (const route of LIVE_STREAM_ROUTES) {
+      expect(re.test(route.replace(':id', id)), route).toBe(true);
+      expect(re.test(`${route.replace(':id', id)}/`), route).toBe(true);
+    }
+    // …and nothing else: the release's other reads and actions, the board's page and its first read, the console's.
+    for (const path of [
+      `/api/v1/live/${id}`,
+      `/api/v1/live/${id}/state`,
+      `/api/v1/live/${id}/board`,
+      `/api/v1/live/${id}/enter`,
+      `/api/v1/live/${id}/streams`,
+      `/api/v1/live/${id}/stream/x`,
+      `/api/v1/live/${id}/board/stream/x`,
+      '/api/v1/live/stream',
+      '/api/v1/live//stream',
+      '/api/v1/live/mine',
+      `/api/admin/live/${id}`,
+      `/api/admin/live/${id}/board`,
+      `/api/admin/live/${id}/entries`,
+      `/api/admin/live/${id}/stream/x`,
+      '/api/admin/live//stream',
+      `/verify/releases/${id}/board`,
+      `/x/api/v1/live/${id}/stream`,
+    ]) {
+      expect(re.test(path), path).toBe(false);
+    }
+
+    // LIVE_STREAM_ROUTES is the app's own list: every route the app registers whose path ends in /stream, and only those.
+    const routesDir = join(GENOME, 'src', 'server', 'routes');
+    const sources = [...readdirSync(routesDir), ...readdirSync(join(routesDir, 'admin')).map((f) => join('admin', f))].filter((f) => f.endsWith('.ts'));
+    const registered = sources.flatMap((f) => [...read(routesDir, f).matchAll(/\bapp\.(?:get|post|put|patch|delete)\('([^']+)'/g)].map((m) => m[1]!));
+    expect(registered.length).toBeGreaterThan(100);
+    expect(registered.filter((r) => /\/stream$/.test(r)).sort()).toEqual([...LIVE_STREAM_ROUTES].sort());
   });
 });
 

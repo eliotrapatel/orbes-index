@@ -111,6 +111,25 @@
 	header_up -True-Client-Ip
 }
 
+# ── The app upstream (inside each reverse_proxy below) ─────────────────────
+
+(app_upstream) {
+	# Exactly one entry: the client IP as Caddy determined it (see the contract above).
+	header_up X-Forwarded-For {client_ip}
+	header_up -X-Real-Ip
+	header_up -Forwarded
+	import upstream_{$EDGE_MODE:direct}
+
+	# Ride out an app restart (deploy, rollback) instead of answering 502 at once.
+	lb_try_duration 15s
+	lb_try_interval 250ms
+	transport http {
+		dial_timeout 5s
+		# The app answers within 30 s (requestTimeout); give it a little more.
+		response_header_timeout 35s
+	}
+}
+
 {$APP_DOMAIN} {
 	import tls_{$TLS_MODE:acme}
 	import site_{$EDGE_MODE:direct}
@@ -163,7 +182,19 @@
 		max_size 64KB
 	}
 
-	encode zstd gzip
+	# The LIVE RELEASES' streams (Server-Sent Events, genome/src/server/http/live-stream.ts LIVE_STREAM_ROUTES: a
+	# viewer's room, the boutique board, the console's live board) are never compressed and are flushed at once: each
+	# event reaches the phone the moment the app writes it, where compression would hold the first bytes back until a
+	# block fills. Every other response is compressed. The two matchers exclude each other, so exactly one
+	# reverse_proxy below serves a request.
+	@live_stream {
+		path_regexp ^/api/(v1/live/[^/]+/(stream|board/stream)|admin/live/[^/]+/stream)/?$
+	}
+	@not_live_stream {
+		not path_regexp ^/api/(v1/live/[^/]+/(stream|board/stream)|admin/live/[^/]+/stream)/?$
+	}
+
+	encode @not_live_stream zstd gzip
 
 	# Optional allowlist for the admin console and the admin API (off by default).
 	@admin_blocked {
@@ -180,20 +211,14 @@
 		-Via
 	}
 
-	reverse_proxy app:8080 {
-		# Exactly one entry: the client IP as Caddy determined it (see the contract above).
-		header_up X-Forwarded-For {client_ip}
-		header_up -X-Real-Ip
-		header_up -Forwarded
-		import upstream_{$EDGE_MODE:direct}
+	reverse_proxy @live_stream app:8080 {
+		import app_upstream
+		# Each event passed on as soon as the app writes it (Caddy does so by itself for text/event-stream; said
+		# here, it does not depend on the response's type). The stream's own heartbeat (20 s) keeps it open.
+		flush_interval -1
+	}
 
-		# Ride out an app restart (deploy, rollback) instead of answering 502 at once.
-		lb_try_duration 15s
-		lb_try_interval 250ms
-		transport http {
-			dial_timeout 5s
-			# The app answers within 30 s (requestTimeout); give it a little more.
-			response_header_timeout 35s
-		}
+	reverse_proxy @not_live_stream app:8080 {
+		import app_upstream
 	}
 }

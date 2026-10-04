@@ -186,7 +186,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
             'p',
             { class: 'live__capacity', data: { testid: 'live-forecast-capacity' } },
             f.aboveCapacity ? statusMark('ABOVE THE ROOM’S LIMIT', 'alert') : statusMark('WITHIN THE ROOM’S LIMIT', 'solid'),
-            h('span', { class: 'cell-sub' }, `The server holds ${formatCount(f.capacity)} in the room${f.capacityProvisional ? ' (provisional, until the load test measures it)' : ''}.`),
+            h('span', { class: 'cell-sub' }, `The server holds ${formatCount(f.capacity)} in the room, as the load test measured.`),
           ),
           reasoning(f.reasoning, 'live-forecast-why'),
         ],

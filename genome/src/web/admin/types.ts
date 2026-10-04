@@ -1224,7 +1224,6 @@ export interface LiveAudienceForecast {
   eligibleByTier: number[];
   inRoom: number | null;
   capacity: number;
-  capacityProvisional: boolean;
   aboveCapacity: boolean;
   pastReleases: number;
   reasoning: string[];

@@ -63,8 +63,9 @@ describe('LIVE RELEASES: the console’s intelligence over HTTP', () => {
     expect(plan).toMatchObject({ modelType: 'RING', sizes: [{ label: '52' }, { label: '54' }] });
     expect(plan.reasoning.length).toBeGreaterThan(1);
     const forecast = await read(auditor, `/api/admin/live/${r.id}/forecast`);
-    expect(forecast).toMatchObject({ capacity: 1000, capacityProvisional: true, aboveCapacity: false });
-    expect(forecast.reasoning.join(' ')).toContain('provisional until the load test measures it');
+    expect(forecast).toMatchObject({ capacity: 1000, aboveCapacity: false });
+    expect(forecast).not.toHaveProperty('capacityProvisional');
+    expect(forecast.reasoning.join(' ')).toContain('in the room the load test measured the server to hold');
 
     expect((await op.post(`/api/admin/live/${r.id}/publish`, {})).statusCode).toBe(200);
     h.clock.advance(6 * MINUTE);

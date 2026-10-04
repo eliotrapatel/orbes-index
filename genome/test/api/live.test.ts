@@ -23,6 +23,7 @@
  *  - the clock for the page's sync, the .ics (its alarm, its lines).
  */
 import { createHash } from 'node:crypto';
+import { ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { LIVE_HEARTBEAT_MS, LIVE_STREAMS_PER_ACCOUNT } from '../../src/server/http/live-stream.js';
 import { LIVE_NETWORK_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
@@ -599,7 +600,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       await until(() => h.app.liveHub.open.streams === 0 && h.app.liveHub.open.accounts.size === 0);
     });
 
-    it('builds a release’s room once per pulse and reads all its viewers’ entries at once, whatever their number', async () => {
+    it('builds a release’s room once per pulse, reads all its viewers’ entries at once and writes its event once, each stream one chunk, whatever their number', async () => {
       const r = await release(h, f, { inMinutes: 4 });
       const viewers = [];
       for (let i = 0; i < 6; i++) viewers.push(await member(h, f, 1));
@@ -608,17 +609,28 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       for (const s of streams) await s.next((e) => e.event === 'you');
       const frame = vi.spyOn(h.ctx.services.liveRoom, 'frame');
       const entries = vi.spyOn(h.ctx.services.liveRoom, 'viewerEntries');
+      expect((await viewers[0]!.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      const stringify = vi.spyOn(JSON, 'stringify');
+      const write = vi.spyOn(ServerResponse.prototype, 'write');
       try {
-        expect((await viewers[0]!.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
         await h.app.liveHub.pulse();
         expect(frame).toHaveBeenCalledTimes(1);
         expect(entries).toHaveBeenCalledTimes(1);
         expect(entries.mock.calls[0]![1]).toHaveLength(6);
-        for (const s of streams) await s.next((e) => e.event === 'room' && e.data.inRoom === 1);
+        // The room serialised once for the six; each viewer written once: the room, and its own entry when it changed.
+        expect(stringify.mock.calls.filter(([v]) => typeof v === 'object' && v !== null && 'inRoom' in v)).toHaveLength(1);
+        const chunks = write.mock.calls.map(([c]) => String(c)).filter((c) => c.startsWith('event: '));
+        expect(chunks).toHaveLength(6);
+        expect(new Set(chunks.map((c) => c.slice(0, c.indexOf('\n\n') + 2))).size).toBe(1);
+        expect(chunks.filter((c) => c.includes('\n\nevent: you\n'))).toHaveLength(1);
       } finally {
+        stringify.mockRestore();
+        write.mockRestore();
         frame.mockRestore();
         entries.mockRestore();
       }
+      for (const s of streams) await s.next((e) => e.event === 'room' && e.data.inRoom === 1);
+      expect((await streams[0]!.next((e) => e.event === 'you' && e.data.entry !== null)).data).toMatchObject({ now: h.clock.now().toISOString(), entry: { status: 'WAITING' } });
       for (const s of streams) s.close();
       await until(() => h.app.liveHub.open.streams === 0);
     });

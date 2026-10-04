@@ -15,8 +15,8 @@
  *                        interest present at T0 in past releases (their lowest and highest; LIVE_INSIGHT_RULES.
  *                        defaultShowUp without one); before any interest, from the eligible accounts of each tier at
  *                        the share of each tier present at T0 in past releases (counted under each release's rule today);
- *                        never above the eligible accounts. Above LIVE_ROOM_CAPACITY (provisional until the load test
- *                        measures it: step L7), it says so.
+ *                        never above the eligible accounts. Above LIVE_ROOM_CAPACITY (the room the load test measured
+ *                        the server to hold), it says so.
  *   demand radar         (`radar`) before T0: per size, the pieces wanted (the room's once it is open, the interest's
  *                        before) against the stock, its pressure; interest and presence by tier; the expected sell-out
  *                        time (the pieces go at T0; a share of the turns returns, at the conversion of past releases, and
@@ -59,10 +59,11 @@ import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
 // ── Rules ──────────────────────────────────────────────────────────────────
 
 /**
- * The room the server holds, the limit the audience forecast warns against: the plan's design target (1 000 in the
- * room) until the load test of the VPS profile (step L7, scripts/live-load.ts) measures it and sets it here.
+ * The room the server holds, the limit the audience forecast warns against: measured by the load test of the VPS
+ * profile (scripts/live-load.ts, 2026-10-04; docs/reports/live-load.md), the largest level that met every target in
+ * every run (500 and 1 000 did in all three; 1 500 in two of three; 2 000 in none).
  */
-export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 1000, provisional: true });
+export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 1000 });
 
 /** Every number the intelligence's rules use (each one is in the reasoning it gives). */
 export const LIVE_INSIGHT_RULES = Object.freeze({
@@ -390,7 +391,6 @@ export interface AudienceForecast {
   /** In the room now (from its opening), null before. */
   inRoom: number | null;
   capacity: number;
-  capacityProvisional: boolean;
   aboveCapacity: boolean;
   pastReleases: number;
   reasoning: string[];
@@ -450,10 +450,10 @@ export function audienceForecast(input: { interest: number; eligibleByTier: read
   const above = high > LIVE_ROOM_CAPACITY.inRoom;
   if (above) {
     why.push(
-      `The upper end, ${count(high)}, is above the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the server is ${LIVE_ROOM_CAPACITY.provisional ? 'designed to hold (provisional until the load test measures it)' : 'measured to hold'}.`,
+      `The upper end, ${count(high)}, is above the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the load test measured the server to hold.`,
     );
   } else {
-    why.push(`Within the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the server ${LIVE_ROOM_CAPACITY.provisional ? 'is designed to hold (provisional until the load test measures it)' : 'is measured to hold'}.`);
+    why.push(`Within the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the load test measured the server to hold.`);
   }
   if (input.inRoom !== null) why.push(`In the room now: ${people(input.inRoom)}.`);
   return {
@@ -466,7 +466,6 @@ export function audienceForecast(input: { interest: number; eligibleByTier: read
     eligibleByTier,
     inRoom: input.inRoom,
     capacity: LIVE_ROOM_CAPACITY.inRoom,
-    capacityProvisional: LIVE_ROOM_CAPACITY.provisional,
     aboveCapacity: above,
     pastReleases: input.past.length,
     reasoning: why,

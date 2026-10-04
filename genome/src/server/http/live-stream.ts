@@ -9,12 +9,13 @@
  *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
  *             (`{ now, board }`), the live board as LiveConsoleService.board builds it (the counters, the line), the customers' emails in clear
  *             for an OPERATOR or an ADMIN and masked for an AUDITOR (`consoleView`), sent when it changed.
- * Every event carries the server's time (`now`); a comment line keeps a quiet stream open every LIVE_HEARTBEAT_MS
- * (20 s), under the server's idle timeout and the proxies'.
+ * Every event carries the server's time (`now`: the same for every event of a pulse, the moment its room was read); a
+ * comment line keeps a quiet stream open every LIVE_HEARTBEAT_MS (20 s), under the server's idle timeout and the proxies'.
  *
  * One pulse a second (LIVE_PULSE_MS) for each release that has a stream open on this process: its frame built once
- * (four reads) and the entries of all its viewers read at once (a few more), then fanned out from memory; its console
- * board, when a console follows it, built once too. The database
+ * (four reads) and the entries of all its viewers read at once (a few more), then fanned out from memory, the room's
+ * event (and the board's) written once for all and each stream sent one chunk; its console board, when a console
+ * follows it, built once too. The database
  * work per second grows with the releases followed, never with the people following them; the state that a client
  * polls when its stream is lost (`room`) shares the same frame, at most a pulse old. A frame that no longer exists (the
  * release cancelled) closes its streams; a release that is over sends its last frame, then closes them, and a stream
@@ -38,6 +39,12 @@ import type { LiveEntryView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
 import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
+
+/**
+ * The routes that stream (a viewer's, the board's, the console's): the edge passes exactly these on uncompressed and at
+ * once (deploy/vps/Caddyfile, `@live_stream`).
+ */
+export const LIVE_STREAM_ROUTES = Object.freeze(['/api/v1/live/:id/stream', '/api/v1/live/:id/board/stream', '/api/admin/live/:id/stream'] as const);
 
 export const LIVE_PULSE_MS = 1000;
 export const LIVE_HEARTBEAT_MS = 20_000;
@@ -97,6 +104,25 @@ interface BoardStream extends Stream {
   kind: 'board';
   /** The SHA-256 of the link's secret it opened with, compared at every pulse with the release's current one. */
   tokenHash: Uint8Array;
+}
+
+/**
+ * What a pulse sends the streams of a release: the server's time once, and the room's and the board's JSON and event
+ * made once, when a stream first needs them, whatever the audience.
+ */
+interface Outgoing {
+  frame: LiveFrame;
+  /** The server's time of these events, as JSON. */
+  now: string;
+  room?: Shared;
+  board?: Shared;
+}
+
+interface Shared {
+  /** The data, to compare with what a stream was last sent. */
+  json: string;
+  /** Its whole event. */
+  event: string;
 }
 
 interface ConsoleStream extends Stream {
@@ -182,7 +208,7 @@ export class LiveHub {
       const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
       registered = true;
-      this.deliver(stream, frame, views);
+      this.deliver(stream, this.outgoing(frame), views);
     } finally {
       if (!registered) this.release(accountId);
     }
@@ -197,7 +223,7 @@ export class LiveHub {
     }
     const stream: BoardStream = { kind: 'board', dropId, tokenHash, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
     this.register(stream);
-    this.deliver(stream, frame, new Map());
+    this.deliver(stream, this.outgoing(frame), new Map());
   }
 
   /**
@@ -280,7 +306,8 @@ export class LiveHub {
         for (const s of [...set]) if (s.kind === 'board' && checked.has(s) && !sameHash(s.tokenHash, frame.boardTokenHash)) this.close(s);
         const viewers = [...set].filter((s): s is ViewerStream => s.kind === 'viewer').map((s) => s.accountId);
         const views = await this.room.viewerEntries(dropId, [...new Set(viewers)]);
-        for (const s of [...set]) if (s.kind !== 'console') this.deliver(s, frame, views);
+        const out = this.outgoing(frame);
+        for (const s of [...set]) if (s.kind !== 'console') this.deliver(s, out, views);
         if (frame.room.over) for (const s of [...set]) if (s.kind !== 'console') this.close(s);
       } catch (e) {
         this.log.error({ dropId, err: { message: (e as Error)?.message } }, 'live stream: a release could not be read');
@@ -397,28 +424,42 @@ export class LiveHub {
     if (s.res.destroyed) this.close(s);
   }
 
-  /** Send what changed for this stream since its last event. */
-  private deliver(s: ViewerStream | BoardStream, frame: LiveFrame, views: ReadonlyMap<string, LiveEntryView>): void {
-    if (s.closed) return;
-    const now = this.clock();
-    const data = s.kind === 'viewer' ? frame.room : frame.board;
-    const json = JSON.stringify(data);
-    if (json !== s.sent) {
-      s.sent = json;
-      this.event(s, s.kind === 'viewer' ? 'room' : 'board', { now, ...data });
-    }
-    if (s.kind !== 'viewer') return;
-    const entry = views.get(s.accountId) ?? null;
-    const you = JSON.stringify(entry);
-    if (you !== s.you) {
-      s.you = you;
-      this.event(s, 'you', { now, entry });
-    }
-    if (entry?.status === 'REMOVED') this.close(s);
+  /** A frame about to be sent, stamped with the server's time. */
+  private outgoing(frame: LiveFrame): Outgoing {
+    return { frame, now: JSON.stringify(this.clock()) };
   }
 
-  private event(s: AnyStream, name: string, data: unknown): void {
-    this.write(s, `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  /** The room's or the board's JSON and event (`{ now, ...data }`), made once per pulse. */
+  private shared(out: Outgoing, kind: 'room' | 'board'): Shared {
+    let shared = out[kind];
+    if (!shared) {
+      const json = JSON.stringify(out.frame[kind]);
+      // `{ now, ...data }`, the data's fields after the time (the room and the board are never empty objects).
+      shared = { json, event: `event: ${kind}\ndata: {"now":${out.now},${json.slice(1)}\n\n` };
+      out[kind] = shared;
+    }
+    return shared;
+  }
+
+  /** Send what changed for this stream since its last events, in one write. */
+  private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>): void {
+    if (s.closed) return;
+    const shared = this.shared(out, s.kind === 'viewer' ? 'room' : 'board');
+    let chunk = '';
+    if (shared.json !== s.sent) {
+      s.sent = shared.json;
+      chunk = shared.event;
+    }
+    const entry = s.kind === 'viewer' ? (views.get(s.accountId) ?? null) : null;
+    if (s.kind === 'viewer') {
+      const you = JSON.stringify(entry);
+      if (you !== s.you) {
+        s.you = you;
+        chunk += `event: you\ndata: {"now":${out.now},"entry":${you}}\n\n`;
+      }
+    }
+    if (chunk) this.write(s, chunk);
+    if (entry?.status === 'REMOVED') this.close(s);
   }
 
   private write(s: AnyStream, chunk: string): void {
