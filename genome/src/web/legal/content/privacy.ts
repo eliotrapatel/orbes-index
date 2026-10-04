@@ -27,6 +27,20 @@
  *    then publishes by entry id, never by account; the console's entries
  *    show the account's email, masked for an AUDITOR; kept with the account
  *    (no purge), and exported with it (AccountExport.dropEntries);
+ *  - a direct reservation of a release's early access (P-X02): an entry
+ *    like the others, with the tier and seniority of the moment of the
+ *    request and the end of the place held; the same retention and export;
+ *  - the circle (P-X01, services/circle.ts): an answer to an invitation (the
+ *    account, the post, YES or NO, its first and latest times; read by
+ *    ORBES staff with the email, masked for an AUDITOR; audited
+ *    `circle.rsvp`) and a vote in a poll (the account, the post, the
+ *    option, the time; shown to members only as totals after their own
+ *    vote; never in the audit log); both kept with the account and
+ *    exported (AccountExport.circleAnswers, circleVotes); the visits counted
+ *    per UTC day (circle_daily_visits), without any account; the tier
+ *    computed from ownership at each request (services/club.ts tierOf), not
+ *    stored but with an entry; the tiers' words (club_tiers, P-X04) are
+ *    staff text, nothing personal;
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com.
  *
@@ -96,6 +110,18 @@ const EN: LegalDocument = {
         'When you enter a release with your ORBES account, ORBES records your entry: the account, the release, the time, and what becomes of the entry (entered, withdrawn, place held, waiting list, sale concluded, place lapsed), with the note ORBES Client Services may add when it records the sale concluded or the place lapsed. ORBES processes these data to run the release you enter, under the [terms of use](/legal/terms).',
         'At the draw, ORBES records with each entry the tier and the seniority of its account, read from the pieces registered to it, and its rank. The page of the release then publishes, for each entry, its identifier, its tier, its seniority and its rank, so that anyone can check the order of the draw: never the account, its email address or its name. MY PIECES shows you the identifier of your entry.',
         'ORBES Client Services reads the entries of a release with the email address of their account, to conclude each sale with the accounts selected; a staff member with read-only access sees it masked. The service sends no email.',
+        'During the early access of a release, a PLATINE or PALLADIUM account may reserve a place directly. ORBES then records an entry, as for the draw: the account, the release, the time, the tier and seniority of the account at the moment of the request, and until when the place is held. It is kept like the other entries, and is in the copy of your data.',
+      ],
+    },
+    {
+      id: 'circle',
+      title: 'Your answers and votes in the circle',
+      blocks: [
+        "The owners' circle is read signed in to your ORBES account, by the owners of a piece. ORBES processes the data below to run the circle you take part in, under the [terms of use](/legal/terms).",
+        "When you answer an invitation, ORBES records your answer: the account, the post, YES or NO, and the times of your first answer and of its latest change. ORBES staff read the answers to an invitation with the email address of their account, to welcome the guests; a staff member with read-only access sees it masked. Your answer is also written to the service's audit log, which names your account by its identifier only.",
+        'When you vote in a poll, ORBES records your vote: the account, the post, the option chosen and the time. Members see the results only as totals by option, after their own vote. A vote is never written to the audit log.',
+        'The visits of the circle are counted per day, as a number only: without any account, address or device.',
+        'Your tier (TITANE, PLATINE or PALLADIUM) is computed at each request from the pieces registered to your account. It is not stored, except with an entry in a release (above).',
       ],
     },
     {
@@ -135,7 +161,8 @@ const EN: LegalDocument = {
           '- **Verifications**: kept 90 days. Older verifications are deleted with everything attached to them, your answer included, and only the daily counts remain.',
           '- **Sessions**: deleted when they end, at sign-out or 30 days after sign-in at most.',
           '- **Your account and what it records**: as long as the account exists. The service does not yet let you delete your account: ask ORBES Client Services.',
-          '- **Entries in releases**: as long as the account exists. What the draw publishes (the identifier, tier, seniority and rank of each entry) stays on the page of the release.',
+          '- **Entries and reservations in releases**: as long as the account exists. What the draw publishes (the identifier, tier, seniority and rank of each entry) stays on the page of the release.',
+          "- **Answers to the circle's invitations and votes in its polls**: as long as the account exists. The daily count of the circle's visits names no one, and is kept.",
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
           '- **The audit log**: permanent; it names accounts by their identifier only.',
           '- **The device cookie**: 2 years on your device.',
@@ -225,6 +252,18 @@ const FR: LegalDocument = {
         "Quand vous vous inscrivez à une sortie avec votre compte ORBES, ORBES enregistre votre inscription : le compte, la sortie, l'heure, et ce que devient l'inscription (inscrite, retirée, place réservée, liste d'attente, vente conclue, place expirée), avec la note qu'ORBES Client Services peut y ajouter quand il enregistre la vente conclue ou la place expirée. ORBES traite ces données pour organiser la sortie à laquelle vous vous inscrivez, selon les [conditions générales d'utilisation](/legal/terms).",
         "Au tirage, ORBES enregistre avec chaque inscription le palier et l'ancienneté de son compte, lus sur les pièces qui y sont enregistrées, et son rang. La page de la sortie publie alors, pour chaque inscription, son identifiant, son palier, son ancienneté et son rang, pour que chacun puisse vérifier l'ordre du tirage : jamais le compte, son adresse e-mail ni son nom. MY PIECES vous montre l'identifiant de votre inscription.",
         "ORBES Client Services lit les inscriptions d'une sortie avec l'adresse e-mail de leur compte, pour conclure chaque vente avec les comptes sélectionnés ; un membre du personnel en lecture seule la voit masquée. Le service n'envoie aucun e-mail.",
+        "Pendant l'accès anticipé d'une sortie, un compte PLATINE ou PALLADIUM peut réserver directement une place. ORBES enregistre alors une inscription, comme pour le tirage : le compte, la sortie, l'heure, le palier et l'ancienneté du compte au moment de la demande, et l'heure jusqu'à laquelle la place est tenue. Elle est conservée comme les autres inscriptions, et figure dans la copie de vos données.",
+      ],
+    },
+    {
+      id: 'circle',
+      title: 'Vos réponses et vos votes dans le cercle',
+      blocks: [
+        "Le cercle des propriétaires se lit connecté à votre compte ORBES, par les propriétaires d'une pièce. ORBES traite les données ci-dessous pour faire vivre le cercle auquel vous participez, selon les [conditions générales d'utilisation](/legal/terms).",
+        "Quand vous répondez à une invitation, ORBES enregistre votre réponse : le compte, la publication, YES ou NO, et les heures de votre première réponse et de sa dernière modification. Le personnel d'ORBES lit les réponses à une invitation avec l'adresse e-mail de leur compte, pour accueillir les invités ; un membre du personnel en lecture seule la voit masquée. Votre réponse est aussi inscrite au journal d'audit du service, qui ne désigne votre compte que par son identifiant.",
+        "Quand vous votez à un sondage, ORBES enregistre votre vote : le compte, la publication, l'option choisie et l'heure. Les membres ne voient les résultats qu'en totaux par option, après leur propre vote. Un vote n'est jamais inscrit au journal d'audit.",
+        'Les visites du cercle sont comptées par jour, comme un simple nombre : sans aucun compte, adresse ni appareil.',
+        "Votre palier (TITANE, PLATINE ou PALLADIUM) est calculé à chaque requête à partir des pièces enregistrées à votre compte. Il n'est pas conservé, sauf avec une inscription à une sortie (ci-dessus).",
       ],
     },
     {
@@ -264,7 +303,8 @@ const FR: LegalDocument = {
           "- **Vérifications** : conservées 90 jours. Les vérifications plus anciennes sont supprimées avec tout ce qui s'y rattache, votre réponse comprise, et seuls les comptes quotidiens restent.",
           '- **Sessions** : supprimées à leur fin, à la déconnexion ou 30 jours au plus après la connexion.',
           "- **Votre compte et ce qu'il enregistre** : tant que le compte existe. Le service ne permet pas encore de supprimer votre compte : adressez-vous à ORBES Client Services.",
-          "- **Inscriptions aux sorties** : tant que le compte existe. Ce que publie le tirage (l'identifiant, le palier, l'ancienneté et le rang de chaque inscription) reste sur la page de la sortie.",
+          "- **Inscriptions et réservations aux sorties** : tant que le compte existe. Ce que publie le tirage (l'identifiant, le palier, l'ancienneté et le rang de chaque inscription) reste sur la page de la sortie.",
+          '- **Réponses aux invitations du cercle et votes de ses sondages** : tant que le compte existe. Le compte quotidien des visites du cercle ne désigne personne, et il est conservé.',
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",
           "- **Journal d'audit** : permanent ; il ne désigne les comptes que par leur identifiant.",
           "- **Cookie d'appareil** : 2 ans sur votre appareil.",

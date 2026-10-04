@@ -6,7 +6,7 @@ Each article ends with a *Code: …* line that points to the rules of the code i
 
 ## Article 1 — Purpose
 
-These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, and the releases.
+These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, and the owners' circle.
 
 The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
 
@@ -23,13 +23,15 @@ The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is gi
 - **Transfer code**: the code the registered owner creates to pass on the registration of a piece.
 - **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.
 - **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).
+- **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).
+- **Owners' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 13).
 - **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).
 
 *Code: — (legal clause).*
 
 ## Article 3 — Access to the service
 
-Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, and to enter the releases.
+Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and, for the owners of a piece, to read the owners' circle.
 
 ORBES endeavours to keep the service available, without committing to it: it may be interrupted, in particular for maintenance. ORBES has its pieces verified only at theorbes.com/verify, which leads to verify.theorbes.com. Another address, or a code printed beside the piece, does not come from ORBES.
 
@@ -149,41 +151,61 @@ ORBES may offer a model in a limited number of pieces in a release, announced on
 
 **Tiers and seniority.** The tier of an account is read from the pieces registered to it: TITANE from 1 piece, PLATINE from 3, PALLADIUM from 5. A piece revoked, set aside by ORBES after review, or withdrawn does not count. The seniority of an account is the number of full years since a piece was first registered to it.
 
+**Benefits of the tiers.** MY PIECES describes, for information, the benefits of each tier. ORBES may change their terms, never the thresholds of the tiers. A benefit creates no obligation beyond what this article and article 13 say.
+
+**Early access.** Before its entries open to everyone, a release may offer an early access, 48 hours by default: its length is set for each release, and its page gives the times. During it, PLATINE and PALLADIUM owners (from 3 pieces) may reserve a place directly, without a draw, each by their tier at the time of the request: first come, first served, within the pieces of the release. Once all its pieces are reserved, the release is full. An account holds a single entry or reservation per release. A place reserved is held until the time stated, like a place drawn. It obliges you to nothing: ORBES Client Services concludes the sale with you, or lets it lapse once its time has passed. The pieces left then go to the draw.
+
 **The draw.** After its entries close, ORBES runs the draw of a release once. It ranks the entries by the tier of their account, then by its seniority, both read at the time of the draw, then by the SHA-256 of a seed of 32 bytes followed by the identifier of the entry, in increasing order. The seed is drawn when the release is created, and its fingerprint is published with the release. The seed itself is published after the draw, with the identifier, the tier, the seniority and the rank of each entry, never its account: anyone can check the order. MY PIECES shows each account the identifier of its entry.
 
-**Place held.** The first ranks, as many as there are pieces, are selected; the next are on the waiting list, in their order. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. The service sends no email: MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.
+**Place held.** The first ranks, as many as there are pieces left after the direct reservations of the early access, are selected; the next are on the waiting list, in their order. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. The service sends no email: MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.
 
 **No obligation.** A place held obliges you to nothing: ORBES Client Services concludes each sale with you, outside the service. Once its time has passed, a place that has not been concluded lapses, and ORBES may offer it to the next entry on the waiting list.
 
-*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70.*
+*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84.*
 
-## Article 13 — Locking an account
+## Article 13 — The owners' circle
+
+In the owners' circle (THE CIRCLE), ORBES publishes content of the maison for the owners of a piece: notes, invitations and polls. The circle is free and obliges you to nothing. ORBES chooses what it publishes there, and may change or withdraw a post.
+
+**Access.** The circle is reserved for signed-in ORBES accounts to which at least one piece is registered (article 12). Each post is reserved for a tier and the tiers above it. Access is checked at each visit: it ends with the last piece registered to the account.
+
+**Invitations.** You answer an invitation YES or NO, within its places. You may change your answer until the event begins. Answering obliges you to nothing.
+
+**Polls.** Each account votes once in a poll, and that vote is final. The results, as totals by option, show once you have voted.
+
+**Links.** A post links only to sites authorised by ORBES. The service shows the name of the site beside the link.
+
+**What is recorded.** Your answer to an invitation is written to the service's audit log; your vote never is. Visits to the circle are counted per day, without any account. Your answers and votes are in the copy of your data you may ask ORBES Client Services for (article 15).
+
+*Code: R76, R77, R78, R79, R80, R81, R82, R83, N6.*
+
+## Article 14 — Locking an account
 
 ORBES Client Services may lock an ORBES account, [À COMPLÉTER: grounds for a lock, for example at its holder's request, on suspicion of a takeover or of a breach of these terms, on counsel's advice].
 
-The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), and cancels its pending transfers. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.
+The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.
 
 *Code: R19, R20.*
 
-## Article 14 — Personal data
+## Article 15 — Personal data
 
-ORBES processes the data of the service (account, registrations, scans, entries in releases) as its privacy policy describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account.
+ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, answers and votes in the circle) as its privacy policy describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account.
 
 *Code: R21.*
 
-## Article 15 — Liability
+## Article 16 — Liability
 
 ORBES describes faithfully what the service checks and what it does not (article 4). A result does not guarantee that an object is the one ORBES made: before buying, ask the seller for a transfer code, and when in doubt, ORBES Client Services can inspect the piece. [À COMPLÉTER: limits of liability, on counsel's advice.]
 
 *Code: R03.*
 
-## Article 16 — Changes to these terms
+## Article 17 — Changes to these terms
 
 ORBES may change these terms. The version in force and its date are published on the service. [À COMPLÉTER: how account holders are informed and when changes take effect, on counsel's advice; the service sends no email.]
 
 *Code: R57.*
 
-## Article 17 — Applicable law and disputes
+## Article 18 — Applicable law and disputes
 
 These terms are governed by the laws of the State of Wyoming, United States, without regard to its conflict-of-laws rules. Nothing in them deprives a consumer of the protection of the mandatory rules of the law of the country where they live. In a dispute, you may first turn to ORBES Client Services. Any dispute relating to these terms will be handled in the courts located in Wyoming, United States, subject to those mandatory rules.
 

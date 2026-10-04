@@ -139,7 +139,7 @@ verify.theorbes.com {
 | Client IP forwarded in `X-Forwarded-For`, and the proxy's address listed in `TRUST_PROXY` | Rate limits and IP pseudonyms are per client. Without trust, every client shares the proxy's IP and one rate-limit bucket. |
 | Origin cache headers honoured. Never cache `/api/*` beyond what the app allows. | API responses can carry session-bound data (`no-store`). |
 | `Set-Cookie` passed through untouched on `/api/*` | Sessions and the device cookie. |
-| Request bodies ≥ 16 KB allowed, and ≥ 1 MiB on the three photograph uploads (`POST /api/admin/models/:id/image`, `POST /api/admin/models/:id/gallery`, `POST /api/admin/products/:productId/photo`); upstream timeout > 30 s | The app limits JSON bodies to 16 KB, the photographs of the console (F-04, P-R02, [API §13.4](API.md#134-models)) to 1 MiB, and requests to 30 s. With nginx, `client_max_body_size 1200k;` in the `location` that proxies `/api/` (the default, 1 MiB, would refuse the largest photographs with their headers). |
+| Request bodies ≥ 16 KB allowed, and ≥ 1 MiB on the four photograph uploads (`POST /api/admin/models/:id/image`, `POST /api/admin/models/:id/gallery`, `POST /api/admin/products/:productId/photo`, `POST /api/admin/circle/posts/:id/photos`); upstream timeout > 30 s | The app limits JSON bodies to 16 KB, the photographs of the console (F-04, P-R02, [API §13.4](API.md#134-models)) to 1 MiB, and requests to 30 s. With nginx, `client_max_body_size 1200k;` in the `location` that proxies `/api/` (the default, 1 MiB, would refuse the largest photographs with their headers). |
 | No iframe embedding | The CSP has `frame-ancestors 'none'`. Link or redirect to `/verify`; do not embed it. |
 | With Cloudflare and `GEO_MODE=cloudflare`: the origin only accepts Cloudflare (firewall on Cloudflare's published ranges, Authenticated Origin Pulls or a Tunnel). The reverse proxy restores the client IP from Cloudflare (nginx `set_real_ip_from <Cloudflare ranges>` + `real_ip_header CF-Connecting-IP`; Caddy `trusted_proxies`). | Otherwise anyone can send forged `cf-ipcountry` headers straight to the origin, and every client shares Cloudflare's IPs. |
 
@@ -211,7 +211,7 @@ All configuration comes from environment variables. It is parsed **once at start
 |---|---|---|
 | `KEY_PROVIDER` | `local` in production, `memory` otherwise | `local` or `memory`. **Production refuses `memory`** (keys would vanish on restart). |
 | `KEY_DIR` | none (image/compose: `/var/lib/orbes/keys`) | Required when `KEY_PROVIDER=local`. Absolute path. Created with mode `0700`; group/world bits on an existing directory are removed (with a warning). |
-| `KEY_ENCRYPTION_KEY` | none | Required when `KEY_PROVIDER=local`. base64url **without padding** of **exactly 32 bytes** (43 characters). Production refuses a key whose bytes are all identical. The AES-256-GCM key-encryption key for every key file. The admin TOTP sealing key is also derived from it (HKDF), see §7.7. |
+| `KEY_ENCRYPTION_KEY` | none | Required when `KEY_PROVIDER=local`. base64url **without padding** of **exactly 32 bytes** (43 characters). Production refuses a key whose bytes are all identical. The AES-256-GCM key-encryption key for every key file. The admin TOTP sealing key and the key that seals the seeds of the releases' draws (P-R03, [DATABASE §5.29](DATABASE.md#529-drops)) are also derived from it (HKDF), see §7.7. |
 
 **First admin**
 
@@ -423,9 +423,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 | Secret | Effect of changing it | Procedure |
 |---|---|---|
-| `COOKIE_SECRET` | Device cookies are re-issued, so devices look new to the anomaly rules for a while (session cookies are not signed and survive). Pending ownership transfer codes stop working (their lookup key is derived from it): owners start a new transfer. When `KEY_ENCRYPTION_KEY` is unset, enrolled admin TOTP secrets can no longer be opened either. | Change and restart. Schedule a quiet period. |
+| `COOKIE_SECRET` | Device cookies are re-issued, so devices look new to the anomaly rules for a while (session cookies are not signed and survive). Pending ownership transfer codes stop working (their lookup key is derived from it): owners start a new transfer. When `KEY_ENCRYPTION_KEY` is unset, enrolled admin TOTP secrets and the sealed seeds of releases not drawn yet (P-R03) can no longer be opened either. | Change and restart. Schedule a quiet period. |
 | `IP_HASH_PEPPER` | New IP, device and session pseudonyms cannot be linked to older scans. Anomaly scoring (device, IP and geo diversity) starts again from scratch. | Change and restart. Rotate only when it may have leaked or on a planned schedule. |
-| `KEY_ENCRYPTION_KEY` | Existing key files can no longer be decrypted, and enrolled admin TOTP secrets can no longer be opened. | Follow §7.7. Never just swap it. |
+| `KEY_ENCRYPTION_KEY` | Existing key files can no longer be decrypted, enrolled admin TOTP secrets can no longer be opened, and neither can the sealed seeds of the releases not drawn yet (their draw fails closed, `503 DROP_SEED_UNAVAILABLE`). | Follow §7.7. Never just swap it. |
 | `POSTGRES_PASSWORD` | The app cannot connect until `DATABASE_URL` matches. | `ALTER ROLE … PASSWORD …`, update the env file, restart. With compose, the `POSTGRES_PASSWORD` variable only applies when the data volume is first created. |
 | `BOOTSTRAP_ADMIN_PASSWORD` | None after the first admin exists. | Remove it from the environment after the first start. |
 
@@ -760,10 +760,11 @@ The rest of the system only sees public keys and the opaque `providerRef`, which
 
 ### 7.7 Rotating `KEY_ENCRYPTION_KEY`
 
-There is no re-encryption tool. Changing the key-encryption key has two effects:
+There is no re-encryption tool. Changing the key-encryption key has three effects:
 
 1. **Existing key files become undecryptable.** The ACTIVE key fails the start-up self-test and issuance stops. Verification is unaffected.
 2. **Admin TOTP secrets become undecryptable.** The TOTP sealing key is derived from `KEY_ENCRYPTION_KEY` with HKDF, and admins with TOTP get `TOTP_UNAVAILABLE` (503) at sign-in. The code fails closed and never falls back to password-only.
+3. **The sealed seeds of the releases not drawn yet become unreadable** (P-R03): they are sealed under a key derived from `KEY_ENCRYPTION_KEY` (from `COOKIE_SECRET` without one) with HKDF, and their draw fails closed (`503 DROP_SEED_UNAVAILABLE`).
 
 Procedure:
 
@@ -776,6 +777,7 @@ Procedure:
    ```
 5. Each admin signs in and enrols again (§8.1).
 6. Back up the `keys` volume, escrow the new key-encryption key, and destroy the old one once no backup needs it.
+7. **Releases not drawn yet** (P-R03): their seeds were sealed under the old key and committed by their published SHA-256, so they cannot be re-sealed without breaking that commitment. Their draw now fails closed (`503 DROP_SEED_UNAVAILABLE`, nothing written): cancel each such release from the console's Club page and create it again (a new seed, a new commitment). Rotate between releases where possible. Drawn releases are unaffected: their seed is published.
 
 ---
 
@@ -1094,7 +1096,7 @@ The production decision: the backend and its database run on **one OVH VPS** (Ub
 |---|---|---|
 | Stack definition | `deploy/vps/compose.yaml` | Services `caddy`, `app`, `postgres`; one-off tool `geoip-update` (profile `tools`). Compose project `orbes`, volumes `orbes_pgdata`, `orbes_keys`, `orbes_geoip`, `orbes_caddy_data`, `orbes_caddy_config`. Caddy publishes 80/443 on **IPv4 only** (§15.2). |
 | Database roles | `deploy/vps/scripts/lib.sh` (`db_*`) | §6.2 applied: the app connects as **`POSTGRES_APP_USER`** (`orbes_app`: `SELECT`/`INSERT`/`UPDATE`/`DELETE` on the tables, sequence use, read-only on `kysely_migration*`; no superuser, no DDL, `MIGRATE_ON_START=false`). The superuser `POSTGRES_USER` owns the schema and is used only by the scripts: migrations (`deploy.sh`, `restore.sh`), backups and restores. A compromised app therefore cannot `SET session_replication_role` or `ALTER … DISABLE TRIGGER` to rewrite the append-only audit log, nor run `COPY … TO PROGRAM`. |
-| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. Request bodies: 64 KB, except the console's three photograph uploads (F-04, P-R02), 1 200 KB (§15.7). |
+| TLS edge | `deploy/vps/Caddyfile`, `deploy/vps/caddy.d/` | Official `caddy:2` image. Switches in `.env`: `TLS_MODE`, `EDGE_MODE`, `ADMIN_ALLOWED_IPS`. Request bodies: 64 KB, except the console's four photograph uploads (F-04, P-R02, P-X01), 1 200 KB (§15.7). |
 | Configuration | `deploy/vps/.env` (from `.env.example`) | Mode `0600`, owner `orbes`, git-ignored. Parsed by the scripts, never sourced. |
 | Scripts | `deploy/vps/scripts/` | `bootstrap-ubuntu.sh`, `setup.sh`, `deploy.sh`, `backup.sh`, `restore.sh`, `geoip-update.sh`; each has `--help`. |
 | Timers | `deploy/vps/systemd/` | Installed by `bootstrap-ubuntu.sh` (`--units-only` to refresh). |
@@ -1231,12 +1233,12 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback, or repair forward | A failure of the last three steps (health, Caddy, the signing key, the smoke tests) in a release that applied **no** migration redeploys the previous image tag and waits for health, once the previous image is known to run on the schema. A release that **did** (its migrations committed together, then something failed) is kept: the previous image cannot run on the new schema, so no rollback is attempted, `ORBES_IMAGE_TAG` stays on the new tag with the stack started on it, and the way to repair forward is printed (below). A migration that fails applies nothing (one transaction): the previous image then comes back as usual. The outcome is appended to `.state/deploys.log`. |
 
-**The photograph uploads at the edge (F-04, lot 5; P-R02).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on three routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the gallery's order (a `PATCH`) included, the 64 KB it had:
+**The photograph uploads at the edge (F-04, lot 5; P-R02; P-X01).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on four routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery) and `POST /api/admin/circle/posts/:id/photos` (a photograph of a post of the owners' circle, [API §16.20](API.md#1620-the-circle-the-club-pages-posts-extension-of-the-contract)). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the order of a gallery or of a post's photographs (a `PATCH`) included, the 64 KB it had:
 
 ```caddyfile
 @photo_upload {
 	method POST
-	path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
+	path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos)/?$
 }
 request_body @photo_upload {
 	max_size 1200KB
@@ -1244,7 +1246,7 @@ request_body @photo_upload {
 @not_photo_upload {
 	not {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo)/?$
+		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos)/?$
 	}
 }
 request_body @not_photo_upload {
@@ -1252,7 +1254,7 @@ request_body @not_photo_upload {
 }
 ```
 
-The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. Each change of the shared VPS's edge goes out with a deployment announced to the other session first (lot 5; the « Potentiel » deployment A, [its runbook](launch/DEPLOY-POTENTIEL-2026-10.md)); `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo, or a model's Lookbook page) is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
+The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. Each change of the shared VPS's edge goes out with a deployment announced to the other session first (lot 5; the « Potentiel » deployment A, [its runbook](launch/DEPLOY-POTENTIEL-2026-10.md)); `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo, or a model's Lookbook page) and from a post of the Club's Circle is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
 
 ```bash
 head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @- "https://$APP_DOMAIN/api/v1/verify"
@@ -1315,7 +1317,7 @@ Operating system updates arrive through unattended-upgrades (`live-restore` keep
 
 **What and how** (`scripts/backup.sh`, nightly via `orbes-backup.timer`, and before every deploy):
 
-Every run starts by logging a line `photos: <count>, <size> MB`, before the dump, printed even with `--quiet` and also with `--dry-run`: the photographs of the catalogue and of the pieces (F-04), stored in the database and so in every archive. It reads `photos: 0, 0.0 MB` before migration `0012` creates their table; when they cannot be read, a warning says `photos: unknown` and the backup goes on. The thresholds that watch it: §15.12. Then:
+Every run starts by logging a line `photos: <count>, <size> MB`, before the dump, printed even with `--quiet` and also with `--dry-run`: the photographs of the catalogue and of the pieces (F-04), of the lookbook's galleries (P-R02) and of the circle's posts (P-X01), stored in the database and so in every archive. It reads `photos: 0, 0.0 MB` before migration `0012` creates their table; when they cannot be read, a warning says `photos: unknown` and the backup goes on. The thresholds that watch it: §15.12. Then:
 
 1. `pg_dump --format=custom` from the `postgres` container (first), checked with `pg_restore --list`;
 2. a tar of the `keys` volume (the key files stay AES-GCM-encrypted under `KEY_ENCRYPTION_KEY`, which is **not** in the backup);
@@ -1418,9 +1420,9 @@ The app's `TRUST_PROXY` stays Caddy's address in both modes: Caddy always hands 
 
 **Key rotation and compromise:** the runbooks of §7.4 and §7.5 apply unchanged; run their commands from `deploy/vps` as `orbes` (`docker compose exec app npm run keys:rotate`, `docker compose exec app node --import tsx scripts/keys.ts revoke …`). Back up right after any rotation: `scripts/backup.sh --reason post-rotation`. On suspicion of a host compromise also rotate `POSTGRES_PASSWORD`, `COOKIE_SECRET` (§4.3) and the backup age key (new key pair; re-encrypting old archives is not needed, but they stay readable with the old identity).
 
-#### Disk used by the photographs (F-04)
+#### Disk used by the photographs (F-04, P-R02, P-X01)
 
-**The decision (2026-10-03): the photographs stay as they are**, 2 000 px at most on the longer side and 1 MB at most (the console's re-encoding, [API §13.4](API.md#134-models)), **and the disk is watched**, as follows.
+**The decision (2026-10-03): the photographs stay as they are**, 2 000 px at most on the longer side and 1 MB at most (the console's re-encoding, [API §13.4](API.md#134-models)), **and the disk is watched**, as follows. From the « Potentiel » deployment A there are more of them: up to 8 in each model's lookbook gallery (P-R02) and up to 4 in each post of the owners' circle (P-X01), each at most 1 MB and copied into every archive.
 
 **Where they are.** In the database: the `bytea` column of `media_objects` ([DATABASE §5.26](DATABASE.md#526-media_objects)), inside the `orbes_pgdata` volume. They are therefore in every `pg_dump`, so in **every** backup archive, and a JPEG or WebP does not compress any further. With `P` the size of the photographs in use and `A` the number of archives kept in `/var/backups/orbes` (14 nightly + up to 14 event archives + the weekly copies that are no longer hard links to a daily one: about 20 to 35), the photographs take about **P × (1 + A)** of the disk: 300 MB of photographs with 30 archives is about 9.3 GB. On the shared server, the database and the archives are both on `/`.
 
@@ -1431,7 +1433,7 @@ journalctl -u orbes-backup --since yesterday | grep 'photos:'      # last night
 journalctl -u orbes-backup | grep 'photos:' | tail -n 30           # the trend
 ```
 
-**The queries** (from `deploy/vps`, as `orbes`): the photographs in use, the table on disk, the orphans (a photograph no model and no piece uses: normally none, the service deletes it at once; a few left by an interrupted request are harmless, a growing number is a bug to report), and the largest ones:
+**The queries** (from `deploy/vps`, as `orbes`): the photographs in use, the table on disk, the orphans (a photograph no model, gallery, circle post or piece uses: normally none, the service deletes it at once; a few left by an interrupted request are harmless, a growing number is a bug to report), and the largest ones:
 
 ```bash
 docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
@@ -1439,10 +1441,12 @@ docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POS
 SELECT count(*) AS photos, round(coalesce(sum(octet_length(bytes)), 0) / 1048576.0, 1) AS mb FROM media_objects;
 -- the table on disk, TOAST and indexes included
 SELECT pg_size_pretty(pg_total_relation_size('media_objects')) AS on_disk;
--- orphans: used by no model and no piece
+-- orphans: used by no model, no gallery, no circle post and no piece (before migrations 0014 and 0016, drop their lines)
 SELECT count(*) AS orphans, round(coalesce(sum(octet_length(m.bytes)), 0) / 1048576.0, 1) AS mb
   FROM media_objects m
  WHERE NOT EXISTS (SELECT 1 FROM models WHERE image_sha256 = m.sha256)
+   AND NOT EXISTS (SELECT 1 FROM model_images WHERE sha256 = m.sha256)
+   AND NOT EXISTS (SELECT 1 FROM circle_post_images WHERE sha256 = m.sha256)
    AND NOT EXISTS (SELECT 1 FROM products WHERE photo_sha256 = m.sha256);
 -- the ten largest
 SELECT sha256, mime, width, height, octet_length(bytes) AS bytes, created_at

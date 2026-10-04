@@ -37,18 +37,28 @@ genome/
                          scan tokens, scan reports (Cases), scan-history retention, daily scan statistics,
                          account recovery and the owner's sheet (Client Services), points of sale and
                          the sale mode, photographs of models and pieces (media), ownership
-                         certificates (shared links), the lookbook of the models and the owners' club,
-                         the releases (drops) and their draw by tier
+                         certificates (shared links), the lookbook of the models and the owners' club
+                         (club.ts: tierOf, clubMembersByTier, the tiers' benefits), the releases
+                         (drops.ts: DropService, the draw by tier, the early access and its direct
+                         reservation, DropService.reserve), the owners' circle (circle.ts: CircleService)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
-    routes/ http/ geo/ render/
+    routes/              public, account, ownership, club (the lookbook's reserved models, the club's status,
+                         ENTER, WITHDRAW and RESERVE a release, the circle's feed, posts, answers and votes),
+                         admin/ (drops.ts, circle.ts and club.ts for the Club page; media.ts for every
+                         photograph, a circle post's included; analytics.ts, its circle panel too)
+    http/ geo/ render/
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
                          (/verify/pieces), an ownership certificate's page (/verify/c#token),
-                         THE COLLECTION, the lookbook of the models (/verify/lookbook), and
-                         THE RELEASES, the drops and their draw (/verify/releases)
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (its releases); the sale mode (decoder worker of verify/)
+                         THE COLLECTION, the lookbook of the models (/verify/lookbook),
+                         THE RELEASES, the drops, their early access and their draw (/verify/releases),
+                         THE CIRCLE, the owners' posts (/verify/circle, circle-model.ts, views/circle.ts),
+                         and YOUR TIER at the head of MY PIECES (tier-model.ts)
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics (and its panel The Circle),
+                         audit, the Club (Drops, Circle with a post's page #/club/circle/:postId, Tiers);
+                         the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)

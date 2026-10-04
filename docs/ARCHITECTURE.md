@@ -110,7 +110,8 @@ genome/
                          daily scan statistics, account recovery and the owner's sheet (Client Services),
                          points of sale and the sale mode, photographs of models and pieces (media),
                          ownership certificates (shared links), the lookbook of the models and the owners' club,
-                         the releases (drops) and their draw by tier
+                         the releases (drops), their early access and their draw by tier, the owners' circle,
+                         the tiers' benefits
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files
@@ -119,9 +120,11 @@ genome/
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
                          the ownership certificate's PDF
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
-    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces); THE COLLECTION (/verify/lookbook);
-                         THE RELEASES (/verify/releases); an ownership certificate (/verify/c#token)
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (its releases); the sale mode (decoder worker of verify/)
+    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces, YOUR TIER at its head);
+                         THE COLLECTION (/verify/lookbook); THE RELEASES (/verify/releases); THE CIRCLE (/verify/circle);
+                         an ownership certificate (/verify/c#token)
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (Drops, Circle, Tiers);
+                         the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share (the legal pages' paths,
@@ -143,6 +146,17 @@ Each state describes what was actually proven: an authentic signature, a registe
 - **Versions.** `code_version` (CODE-01…08) is carried in both the format word and the signed payload, and `genome_version` (GENOME-01…15) is in the signed payload. Code versions are looked up in the `CODE_PROFILES` registry (`src/core/code-profiles.ts`): the decoder picks the profile the format word names, payload decoding dispatches on the high nibble of byte 0, and the server answers a well-formed code of a version it has no profile for with UNKNOWN (`UNSUPPORTED_CODE_VERSION`) and a warning. Genome generators are looked up by version (`SUPPORTED_GENOME_VERSIONS`, `computeGenome`). CODE-01 is today the only code profile; the decoder's sampling tables are those of the CODE-01 geometry, so a CODE-02 with a different layout also needs them generalised. Historical products stay verifiable.
 - **Keys.** A 1-byte `key_id` is carried in every code. Keys can be ACTIVE, RETIRED or REVOKED. Historical verification always uses the key named by the code.
 - **Hardware.** A `PhysicalAuthenticator` interface with `PrintedCodeAuthenticator` today. A per-product authentication policy can later require secure NFC or secure-element evidence.
+
+### B.6 The owners' club (the « Potentiel » plan of 2026-10-03)
+
+What a signed-in account holds now decides what it reads in the club. One function counts it: `tierOf` (`services/club.ts`), from the open ownerships of pieces neither REVOKED, COUNTERFEIT_FLAGGED nor RETIRED (`ownership` is only read), the tiers TITANE, PLATINE and PALLADIUM at 1, 3 and 5 pieces (`CLUB_TIER_THRESHOLDS`, a constant of the code), and the seniority in full years since the first ownership. Every customer route of the club is in `routes/club.ts`: an account session, CSRF and same origin for its POSTs, `no-store`, rate group `api` ([API §10.9–§10.11](API.md#109-the-club-get-apiv1clublookbook-and-get-apiv1clublookbookslug-extension-of-the-contract)).
+
+- **The lookbook** (P-R02, `services/lookbook.ts`): the public sheets of the models, and the RESERVED ones for the owners.
+- **The releases** (P-R03 and P-X02, `services/drops.ts`, `DropService`; `routes/public.ts`, `routes/club.ts`, `routes/admin/drops.ts`). A release goes DRAFT → published; then, when it has one, its **early access** from `max(opens_at − early_access_hours, published_at)` to `opens_at`, when an account PLATINE or PALLADIUM at the moment of its request reserves a place directly (`DropService.reserve`: the release's row `FOR UPDATE`, first come, first served, within `quantity`; the entry SELECTED at once, with its `respond_by`, its tier and seniority of that moment and no rank); then the **entries**, from `opens_at` to `closes_at` (`enter`, `withdraw`, any account); then the **draw** (ADMIN, `draw`), which opens the sealed seed, checks it against its commitment, reads every ENTERED entry's tier and seniority at that moment, ranks them and selects as many as there are places left (`quantity` less the places held or sold, the direct reservations among them); then ORBES Client Services concludes each place (`confirm`, `lapse`, `offerNext`).
+- **The circle** (P-X01, `services/circle.ts`, `CircleService`; `routes/club.ts` for the members, `routes/admin/circle.ts` for the console, its photographs in `routes/admin/media.ts` through `MediaService`, its Analytics panel in `routes/admin/analytics.ts`): posts (NOTE, INVITATION, POLL) published from a tier up, read with `tierOf` at each request; answers to invitations under the post's `FOR UPDATE` within its capacity (audited), final votes in polls (not audited), a count of visits per day. `clubMembersByTier` (`services/club.ts`) counts the ACTIVE accounts at each tier for the Analytics panel, counts only.
+- **The tiers' benefits** (P-X04, `services/club.ts`, `ClubService.tiers`, `updateTier`, `normalizeBenefits`; `routes/admin/club.ts`): the words of each tier's benefits, by default code constants (`CLUB_TIER_DEFAULT_BENEFITS`), changed from the console (`club_tiers`, at most `CLUB_TIER_BENEFITS_MAX` = 600 characters in `CLUB_TIER_BENEFIT_LINES` = 8 lines), audited through `AuditService` (`club.tier.update`). `ClubService.status` (`GET /api/v1/club/status`) gives the account its tier, the benefits of its tier and those below it, the next tier, and its entries.
+
+The web side: in `web/verify/`, `releases-model.ts` and `views/releases.ts` (THE RELEASES, the early access line and RESERVE A PLACE), `circle-model.ts` and `views/circle.ts` (THE CIRCLE: the routes `/verify/circle` and `/verify/circle/<id>` in `main.ts`'s `routeOf`, like `/verify/pieces`), `tier-model.ts` and `views/pieces.ts` (YOUR TIER at the head of MY PIECES, read from the club's status; THE CIRCLE at its foot for an owner). In `web/admin/`, the Club page (`views/club.ts`, `#/club`, its tabs `drops`, `circle`, `tiers`), a release's page (`views/drop.ts`, `#/club/drops/:dropId`), a post's page (`views/circle.ts`, route `circlePost`, `#/club/circle/:postId`, its view-model `model/circle.ts`), the Tiers tab (`views/tiers.ts`, its rules in `model/club.ts`), the Analytics panel *The Circle* (`views/analytics.ts`), and the capabilities `manageDrops`, `drawDrop` (ADMIN), `manageCircle` and `manageClubTiers` (OPERATOR) in `model/permissions.ts`.
 
 ---
 

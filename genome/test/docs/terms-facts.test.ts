@@ -8,9 +8,10 @@
  *    gives the line where it is now), every constant the rules lean on
  *    holding what the rule says (the statuses that end a certificate, those
  *    that allow a transfer, the tiers of the club and the statuses they leave
- *    out), and every absence of §10 (no email, no reset
- *    link, no undoing an accepted transfer, no account deletion, no age
- *    check) holding in the code;
+ *    out, the early access of the releases and the hosts of the circle's
+ *    links), and every absence of §10 (no email, no reset link, no undoing
+ *    an accepted transfer, no account deletion, no age check, no vote of the
+ *    circle in the audit log) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -39,9 +40,10 @@ import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces } from '../../src/server/services/club.js';
+import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
+import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces, tierName } from '../../src/server/services/club.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
-import { DROP_SEED_BYTES, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
   CERTIFICATE_ENDING_STATUSES,
@@ -288,6 +290,31 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     fr: [`${PURCHASE_WINDOW_HOURS.default} heures`],
     en: [`${PURCHASE_WINDOW_HOURS.default} hours`],
   },
+  EARLY_ACCESS_HOURS: {
+    value: `${EARLY_ACCESS_HOURS.default} heures par défaut, de ${EARLY_ACCESS_HOURS.min} à ${EARLY_ACCESS_HOURS.max}`,
+    fr: [`${EARLY_ACCESS_HOURS.default} heures par défaut`],
+    en: [`${EARLY_ACCESS_HOURS.default} hours by default`],
+  },
+  EARLY_ACCESS_MIN_TIER: {
+    value: '—',
+    holds: () => {
+      // R72: PLATINE and PALLADIUM, from 3 pieces held (R61), reserve directly; TITANE does not.
+      expect(EARLY_ACCESS_MIN_TIER).toBe(2);
+      expect(tierName(EARLY_ACCESS_MIN_TIER)).toBe('PLATINE');
+      expect(CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]).toBe(3);
+    },
+    fr: ['PLATINE et PALLADIUM', 'au moment de sa demande'],
+    en: ['PLATINE and PALLADIUM', 'at the time of the request'],
+  },
+  CIRCLE_LINK_HOSTS: {
+    value: '—',
+    holds: () => {
+      // R82: the hosts the rule names, and no other (the terms say "sites authorised by ORBES" without naming them).
+      expect([...CIRCLE_LINK_HOSTS].sort()).toEqual(['theorbes.com', 'vimeo.com', 'youtube.com']);
+      const rule = facts.find((f) => f.id === 'R82')!.rule;
+      for (const host of CIRCLE_LINK_HOSTS) expect(rule).toContain(host);
+    },
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -307,6 +334,20 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the seed published only after the draw (P-R03)': 'seed: r.drawn_at && r.seed ? toHex(r.seed) : null,',
   'a selection obliges no one, a lapse only after its time (P-R03)': 'throw placeHeld(e.respond_by)',
   'the lock withdraws the open entries (P-R03)': 'withdrawAccountEntries(tx, account.id)',
+  'the early access window, 48 hours by default and set per release (P-X02)': 'throw earlyAccessNotOpen(from);',
+  'only PLATINE and PALLADIUM, at the moment of the request (P-X02)': 'if (standing.tier < EARLY_ACCESS_MIN_TIER) throw tierRequired();',
+  'first come, first served within the pieces, then full (P-X02)': 'if (Number(held.n) >= d.quantity) throw dropFull();',
+  'one entry or reservation per account, the place held until respond_by (P-X02)': 'throw alreadyReserved();',
+  'the draw only on the places left (P-X02)': 'const places = Math.max(0, d.quantity - Number(held.n));',
+  'the circle for the owners, each post from its tier, read again at each request (P-X01)': "if (tier < 1) throw ownersOnly();",
+  'an answer YES or NO until the event, within its places (P-X01)': 'if (Number(yes.n) >= p.capacity) throw circleFull();',
+  'one final vote per poll (P-X01)': 'if (voted) throw alreadyVoted();',
+  'the results after one\'s own vote (P-X01)': 'results: voted === null ? null :',
+  'visits counted per day without any account (P-X01)': '.values({ day: now.toISOString().slice(0, 10), visits: 1 })',
+  'answers audited (P-X01)': "action: 'circle.rsvp'",
+  'external links on the allowed hosts only (P-X01)': 'if (!CIRCLE_LINK_HOSTS.some((h) => host === h',
+  'the export lists the answers and votes (P-X01)': 'circleVotes: circle.votes,',
+  'the tiers\' words set from the console, the thresholds never (P-X04)': "app.patch('/api/admin/club/tiers/:tier'",
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -367,6 +408,14 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   },
   N5: () => {
     expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'password']);
+  },
+  N6: () => {
+    // The vote of the circle (P-X01) writes its row and nothing in the audit log; no audit action names a vote.
+    const circle = readDoc('genome/src/server/services/circle.ts');
+    const vote = /\n {2}async vote\(accountId[\s\S]*?\n {2}\}\n/.exec(circle)?.[0] ?? '';
+    expect(vote).toContain("insertInto('circle_poll_votes')");
+    expect(vote).not.toMatch(/audit/);
+    expect(matches(/action:\s*'([a-z.]*vote[a-z._]*)'/g).map((m) => m.match[1])).toEqual([]);
   },
 };
 

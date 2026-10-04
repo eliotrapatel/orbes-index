@@ -2,7 +2,7 @@
  * The content of the legal pages (J-06): the four documents in English and
  * French, the words of the pages around them, and LEGAL_VERSION, the date of
  * this version of the texts, shown under each title. Change LEGAL_VERSION
- * with any change of a text: the terms (article 16, docs/legal/TERMS-FACTS.md
+ * with any change of a text: the terms (article 17, docs/legal/TERMS-FACTS.md
  * R57) and the privacy policy tell their readers that the version in force
  * and its date are shown here. test/web/legal.content.test.ts pins the
  * fingerprint of DOCUMENTS to this version: a text changed without a new
@@ -19,7 +19,8 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
 
 /**
  * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment
- * (deployment A of the plan of 2026-10-03: the releases of P-R03 in the terms, article 12, and the privacy policy).
+ * (deployment A of the plan of 2026-10-03: the releases of P-R03 and their early access, P-X02, in the terms, article
+ * 12; the owners' circle, P-X01, article 13; the tiers' benefits, P-X04; and the privacy policy).
  */
 export const LEGAL_VERSION = '2026-10-04';
 

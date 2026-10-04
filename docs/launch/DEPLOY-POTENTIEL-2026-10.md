@@ -2,11 +2,11 @@
 
 Ce document est pour toi, le propriétaire. Tu lances toi-même chaque commande sur le serveur : en SSH, puis `sudo -iu orbes`, une commande à la fois. Après chaque commande, compare ce qui s'affiche avec la « sortie attendue ». Si ce n'est pas pareil, arrête-toi, ne lance rien d'autre et colle la sortie à Claude (jamais un secret, jamais le contenu de `.env`).
 
-Les douze éléments du lot « Potentiel » (choisis le 2026-10-03) partent en production en **trois déploiements**, dans l'ordre du plan :
+Les éléments du lot « Potentiel » (choisis le 2026-10-03 ; P-R04, la provenance, retirée le 2026-10-04, il en reste onze) partent en production en **trois déploiements**, dans l'ordre du plan :
 
 | Déploiement | Éléments | Migrations | État |
 |---|---|---|---|
-| A | P-R02, P-R03, P-R04, P-X01, P-X02, P-X04 | `0014` à `0018`, et l'exception Caddy des nouveaux envois de photos | **À faire** (§1) |
+| A | P-R02, P-R03, P-X01, P-X02, P-X04 | `0014` à `0018`, et l'exception Caddy des nouveaux envois de photos | **À faire** (§1) |
 | B | P-D01, P-M02, P-R06, P-X08 | `0019` et `0020` | À faire, après A (§2) |
 | C | P-D07, P-D10 | aucune | À faire, après B (§3) |
 
@@ -38,11 +38,12 @@ Le point de départ : la production tourne le commit `3660154006b5016509856930a0
   | `0017_drop_early_access` | P-X02 | l'accès anticipé d'une sortie (`drops.early_access_hours`, 48 h par défaut, de 0 à 336) : PLATINE et PALLADIUM y réservent directement une place avant l'ouverture à tous, le reste part au tirage |
   | `0018_club_tiers` | P-X04 | les paliers du club (`club_tiers`) : les avantages de TITANE, PLATINE et PALLADIUM tels que la console les a modifiés ; aucune ligne insérée, les textes par défaut restent dans le code |
 
-  Chaque migration de l'étape s'ajoute à ce tableau avec son élément (`0015` à `0018` : P-R03, P-X01, P-X02, P-X04).
+  Ces cinq migrations sont toutes celles de l'étape A. Aucune ne casse l'ancienne image pendant le déploiement (tables nouvelles, ou une colonne avec une valeur par défaut constante pour `0017`), mais une fois appliquées on ne revient plus en arrière (ci-dessous).
 
-- **Caddy** : l'exception de 1 200 Ko des envois de photos de la console s'étend à la galerie d'un modèle (P-R02) ; tout le reste garde la limite de 64 Ko. `deploy.sh` valide la configuration, puis recrée Caddy tout seul (son empreinte change) : aucune étape à la main, quelques secondes sans HTTPS.
+- **Caddy** : l'exception de 1 200 Ko des envois de photos de la console couvre désormais **quatre** routes : la photo de référence d'un modèle et la photo d'une pièce, comme avant, plus la galerie d'un modèle (P-R02, `POST /api/admin/models/:id/gallery`) et les photos d'une publication du cercle (P-X01, `POST /api/admin/circle/posts/:id/photos`) ; tout le reste garde la limite de 64 Ko. `deploy.sh` valide la configuration, puis recrée Caddy tout seul (son empreinte change) : aucune étape à la main, quelques secondes sans HTTPS.
 - **Les photos** ont désormais leur propre budget de requêtes, cinq fois celui de l'API (600 par minute et par adresse avec le réglage par défaut), car une fiche du lookbook en montre jusqu'à neuf : aucune variable à poser.
-- **Les variables** : aucune à poser. `CLIENT_SERVICES_*` et `SCAN_RETENTION_DAYS` ne changent pas.
+- **Les variables** : aucune à poser. `CLIENT_SERVICES_*` et `SCAN_RETENTION_DAYS` ne changent pas. P-X04 (les paliers) n'ajoute ni variable ni changement de Caddy : les seuils 1, 3 et 5 pièces sont une constante du code, et seuls les textes des avantages se règlent, depuis la console.
+- **Les pages légales** : une seule nouvelle version pour l'étape A, datée du jour du déploiement (`LEGAL_VERSION`, aujourd'hui `2026-10-04`) : les conditions d'utilisation (les sorties, l'accès anticipé, le cercle, les paliers) et la politique de confidentialité (les inscriptions, les réservations, les réponses aux invitations, les votes, les visites comptées sans compte). Si le déploiement glisse à un autre jour, la règle 7 du §0 s'applique.
 - **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
 - **Pas de retour en arrière** : une fois les migrations faites, l'image `3660154006b5` ne peut plus tourner sur ce schéma. `deploy.sh --image 3660154006b5` la refuse.
 
@@ -409,11 +410,26 @@ Sur un téléphone dont le navigateur **n'est pas connecté à la console** (une
 | P-R02 | Téléphone | Scanner une pièce de ce modèle | Sous le résultat AUTHENTIC, `SEE THE MODEL` mène à sa fiche |
 | P-R02 | Téléphone, compte d'un propriétaire | Un second modèle en `Reserved` dans la console, puis `THE COLLECTION` connecté | La section `RESERVED FOR OWNERS` ; déconnecté, elle n'apparaît pas et sa fiche dit `This model is not in the ORBES collection.` |
 
-Les vérifications de P-R03, P-R04, P-X01, P-X02 et P-X04 s'ajoutent à ce tableau avec leurs éléments.
+| P-R03 | Console | `Club` (groupe Clients) → onglet `Drops` → `New release` : un modèle, un titre, `Pieces` 2, `Entries open (UTC)` dans quelques minutes, `Entries close (UTC)` une heure après, `Early access (hours)` **0** ; puis, sur la page de la sortie, `Publish` | La sortie passe de `DRAFT` à `UPCOMING`, avec l'empreinte de sa graine (`Seed fingerprint`) et son adresse `/verify/releases/<id>` |
+| P-R03 | Téléphone, un compte ORBES (pièce ou non) | `THE RELEASES` sur l'accueil → `SEE THE RELEASE` ; à l'ouverture des inscriptions, `ENTER THE DRAW` ; puis `MY PIECES` | La page de la sortie : le modèle, les pièces, les dates en UTC et à l'heure du téléphone, la règle du tirage, l'empreinte de la graine ; après l'inscription, son identifiant ; dans MY PIECES, `YOUR RELEASES` avec l'inscription et son statut |
+| P-R03 | Console, un ADMIN | Après la clôture des inscriptions, `Run the draw` (taper la phrase demandée) | Les inscriptions classées, `SELECTED` puis `WAITLISTED` ; sur le téléphone, la graine publiée, *Checked on this phone: …* et la liste par rang ; dans MY PIECES, *Your place is held until … — ORBES Client Services will contact you.* |
+| P-X01 | Console | `Club` → onglet `Circle` → `New invitation` : un titre, `Event (UTC)` dans quelques jours, `Places` 2 ; sur la page de la publication, `Publish`, puis `Add a photograph` | La publication passe en `Published`, avec son adresse `/verify/circle/<id>` et sa photo |
+| P-X01 | Téléphone, compte d'un propriétaire | `MY PIECES` → `THE CIRCLE` en bas de page → `SEE THE INVITATION` ; `YES`, puis `NO` | Le fil, la carte de l'invitation sur sa plaque ivoire ; la page : photo, `THE INVITATION` (WHEN, WHERE, PLACES), `YOUR ANSWER` ; après YES, `1 LEFT OF 2` ; après NO, `2 LEFT OF 2` et la phrase *You will not come…* |
+| P-X01 | Console, puis téléphone | Une publication `New poll` (deux options) publiée, puis `SEE THE POLL` sur le téléphone : choisir une option, `VOTE` ; une `New note` avec un lien (`Release`, `Model` ou `Link` sur youtube.com, vimeo.com ou theorbes.com), publiée | Sur le téléphone, après le vote, *Your vote is counted. The results so far:* et `YOUR VOTE` ; la note montre `TO SEE` et ses liens (le site du lien affiché à côté, ouvert dans un nouvel onglet) ; dans la console, la page de l'invitation montre les réponses (YES, NO), celle du sondage ses résultats |
+| P-X01 | Console | `Analytics` | En bas, le panneau `The Circle` : les membres par palier et les visites du jour (au moins une, la tienne) |
+| P-X01 | Téléphone, sans pièce | `/verify/circle` connecté avec un compte qui n'a aucune pièce, puis déconnecté | *The circle is reserved for the owners of an ORBES piece. It opens once a piece is registered to your ORBES account.* ; déconnecté, la connexion |
+| P-X02 | Console | `Club` → `Drops` → `New release` : `Early access (hours)` **48**, `Entries open (UTC)` dans **plus de 48 h** ; puis `Publish` | La page de la sortie dit `Early access 48 hours · from …` (l'heure d'ouverture des réservations, en UTC) et `Reserved directly 0 of …` |
+| P-X02 | Téléphone | La page de cette sortie | Sous l'état, la ligne `PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …` ; les lignes `EARLY ACCESS` et `RESERVED DIRECTLY` |
+| P-X02 | Téléphone, compte PLATINE (3 pièces ou plus), pendant la fenêtre | `RESERVE A PLACE` | L'entrée lit `PLACE RESERVED` et *You reserved a place directly. It is held until … — ORBES Client Services will contact you.* ; dans la console, l'entrée marquée `Reserved directly` et `Reserved directly 1 of …` |
+| P-X02 | Téléphone, compte TITANE (1 ou 2 pièces), pendant la fenêtre | La page de la sortie | Aucun bouton ; *PLATINE and PALLADIUM owners are reserving their places now. Entries open to everyone on …* |
+| P-X04 | Téléphone, compte d'un propriétaire | `MY PIECES` | En tête, `YOUR TIER` : le nom du palier sur sa plaque ivoire, le nombre de pièces (`3 pieces held`), ses avantages, puis `NEXT: …` ; sans pièce, `THE CLUB` |
+| P-X04 | Console | `Club` → onglet `Tiers` → `Edit benefits` sur PLATINE : modifier une ligne, enregistrer ; puis `Restore default` | Le palier passe à `Edited` avec l'heure, et MY PIECES montre aussitôt les nouveaux mots ; après `Restore default`, `Default` et les mots d'origine. Sur la fiche d'un client (`Owners`), la ligne `Tier` |
+
+Une publication, une sortie ou un texte de palier créés pour ces vérifications restent dans la base (rien ne s'efface) : retire du cercle (`Withdraw`) ou annule (`Cancel`) ce qui ne doit pas rester visible.
 
 ### 1.8 Ensuite : surveiller le disque
 
-Les photos de la galerie (8 au plus par modèle) sont dans la base, donc dans chaque sauvegarde (environ 22 copies).
+Les photos de la galerie (8 au plus par modèle) et celles du cercle (4 au plus par publication) sont dans la base, donc dans chaque sauvegarde (environ 22 copies).
 
 - **Chaque semaine** (ou après un ajout de photos) :
 
