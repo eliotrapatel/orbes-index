@@ -44,6 +44,8 @@ import type {
   CirclePostInput,
   CircleRsvpAnswer,
   CircleStats,
+  ClubTierName,
+  ClubTierSheet,
   DashboardData,
   DrawOutcome,
   Drop,
@@ -738,6 +740,17 @@ export class AdminApi {
   /** The order and alternative texts of a post's photographs: every one once, in the new order ('' alt: the post's default). */
   arrangeCirclePhotos(id: string, images: { sha256: string; alt: string }[]): Promise<CirclePost> {
     return this.patch(`/api/admin/circle/posts/${encodeURIComponent(id)}/photos`, { images });
+  }
+
+  // ── The Club: the tiers (P-X04) ──────────────────────────────────────────
+
+  clubTiers(): Promise<Items<ClubTierSheet>> {
+    return this.get('/api/admin/club/tiers');
+  }
+
+  /** A tier's benefits, one per line; null restores the words by default. */
+  updateClubTier(tier: ClubTierName, benefits: string | null): Promise<ClubTierSheet> {
+    return this.patch(`/api/admin/club/tiers/${encodeURIComponent(tier)}`, { benefits });
   }
 
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {

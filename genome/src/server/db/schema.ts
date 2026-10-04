@@ -125,6 +125,13 @@ export type CirclePostKind = (typeof CIRCLE_POST_KINDS)[number];
 export const CIRCLE_RSVP_ANSWERS = ['YES', 'NO'] as const;
 export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 
+/**
+ * The tiers of the collectors' club (club_tiers.tier, migration 0018, P-X04), in order: 1 TITANE, 2 PLATINE,
+ * 3 PALLADIUM, reached at 1, 3 and 5 pieces held now (services/club.ts CLUB_TIER_THRESHOLDS).
+ */
+export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
+export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -667,6 +674,18 @@ export interface CircleDailyVisitsTable {
   visits: WithDefault<number>;         // integer >= 0
 }
 
+/**
+ * The words of a tier's benefits as the console changed them (migration 0018, P-X04): at most one row per tier, none
+ * inserted; without a row the tier reads its default words (services/club.ts CLUB_TIER_DEFAULT_BENEFITS). `tier` never
+ * changes.
+ */
+export interface ClubTiersTable {
+  tier: ClubTierName;
+  benefits: string;                    // what the tier adds to the ones below it, one per line, 1..600 characters
+  updated_by: string | null;           // admin_users.id; null when a script wrote it
+  updated_at: TimestampDefault;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -758,6 +777,7 @@ export interface Database {
   circle_rsvps: CircleRsvpsTable;
   circle_poll_votes: CirclePollVotesTable;
   circle_daily_visits: CircleDailyVisitsTable;
+  club_tiers: ClubTiersTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -835,6 +855,7 @@ export type CirclePostUpdate = Updateable<CirclePostsTable>;
 export type CirclePostImageRow = Selectable<CirclePostImagesTable>;
 export type CircleRsvpRow = Selectable<CircleRsvpsTable>;
 export type CirclePollVoteRow = Selectable<CirclePollVotesTable>;
+export type ClubTierRow = Selectable<ClubTiersTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

@@ -80,7 +80,7 @@ export interface AppServices {
   lookbook: LookbookService;
   /** The drops (P-R03): releases on a waiting list, entered from /verify and drawn by tier from a committed seed. */
   drops: DropService;
-  /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models; P-R03: its tier and its entries). */
+  /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models; P-R03: its tier and its entries; P-X04: its tier's benefits and the next tier, their words set from the console). */
   club: ClubService;
   /** The owners' circle (P-X01): posts by tier (notes, invitations, polls), their answers and votes, the visits by day. */
   circle: CircleService;
@@ -176,7 +176,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const media = new MediaService({ db, audit, clock, log });
     const lookbook = new LookbookService({ db });
     const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock });
-    const club = new ClubService({ db, lookbook, drops, clock });
+    const club = new ClubService({ db, lookbook, drops, audit, clock });
     const circle = new CircleService({ db, audit, clock, log });
 
     const services: AppServices = {

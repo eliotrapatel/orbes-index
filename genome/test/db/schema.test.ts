@@ -97,6 +97,7 @@ describe('schema', () => {
       ['drop_entries', 'status', S.DROP_ENTRY_STATUSES],
       ['circle_posts', 'kind', S.CIRCLE_POST_KINDS],
       ['circle_rsvps', 'answer', S.CIRCLE_RSVP_ANSWERS],
+      ['club_tiers', 'tier', S.CLUB_TIER_NAMES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

@@ -3089,6 +3089,16 @@ a.bar__label:hover {
   gap: 4px 10px;
 }
 
+/* ── Club: the tiers (P-X04) ───────────────────────────────────────────── */
+
+/* A tier's benefits, one per line, as /verify lists them. */
+.tier__lines {
+  margin: 0;
+  padding: 0 0 0 16px;
+  display: grid;
+  gap: 6px;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css

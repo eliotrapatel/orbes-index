@@ -8,7 +8,8 @@
  *            app prints under every result (the first 8 hexadecimal characters
  *            of the scan's id) finds the scan, its piece, the piece's current
  *            owner and the account that scanned it, if one was signed in.
- *   sheet    GET  /api/admin/owners/:id (AUDITOR): the account, the pieces it
+ *   sheet    GET  /api/admin/owners/:id (AUDITOR): the account, its tier in
+ *            the club now (P-X04: services/club.ts `tierOf`), the pieces it
  *            owns and owned (`ownership`), its transfers in progress and its 20
  *            latest scans (`scan_events.account_id`).
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
@@ -48,6 +49,7 @@ import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
+import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import type { OwnershipService } from './ownership.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
@@ -168,6 +170,8 @@ export interface AccountScan {
 
 export interface OwnerSheet {
   owner: OwnerSummary;
+  /** P-X04: the account's tier in the club now (0 and null: none), the pieces it counts and the full years since its first ownership. */
+  tier: { level: ClubTier; name: ClubTierName | null; pieces: number; seniority: number };
   /** Owned now first, then owned before; newest first within each. */
   pieces: OwnedPiece[];
   /** Transfers offered by the account and still open. */
@@ -338,7 +342,8 @@ export class OwnerService {
     const owner = found.items[0];
     if (!owner) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
     const now = this.clock();
-    const [pieces, transfers, scans] = await Promise.all([
+    const [standing, pieces, transfers, scans] = await Promise.all([
+      tierOf(this.db, owner.id, now),
       this.pieces(this.db, owner.id),
       this.db
         .selectFrom('ownership_transfers as t')
@@ -361,6 +366,7 @@ export class OwnerService {
     ]);
     return {
       owner,
+      tier: { level: standing.tier, name: tierName(standing.tier), pieces: standing.pieces, seniority: standing.seniority },
       pieces,
       transfers: transfers.map((t) => ({ id: t.id, productId: t.product_id, createdAt: t.created_at, expiresAt: t.expires_at })),
       scans: scans.map((s) => ({

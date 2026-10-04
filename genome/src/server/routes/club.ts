@@ -10,7 +10,8 @@
  * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
  * the tiers):
  *
- *   GET  /api/v1/club/status                the account's tier, pieces and seniority, and its entries
+ *   GET  /api/v1/club/status                the account's tier, pieces and seniority, its entries, and
+ *                                           (P-X04) its tier's benefits and the next tier
  *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal)
  *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
  *   POST /api/v1/club/drops/:id/reserve     P-X02: a place held at once, during the early access, PLATINE and PALLADIUM
@@ -58,7 +59,8 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     return club.lookbookSheet(account.id, slug);
   });
 
-  // P-R03: the account's tier and its entries in the drops, for MY PIECES and a release's page.
+  // P-R03: the account's tier and its entries in the drops, for MY PIECES and a release's page; P-X04: the benefits of
+  // its tier and the next tier, for the badge at the head of MY PIECES. /api/v1/account/me does not change.
   app.get('/api/v1/club/status', async (request) => {
     const { account } = requireAccount(request);
     return club.status(account.id);

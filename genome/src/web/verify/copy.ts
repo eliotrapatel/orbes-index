@@ -341,6 +341,32 @@ export const PIECES = Object.freeze({
 });
 
 /**
+ * THE CLUB'S TIERS (P-X04, at the head of MY PIECES): the account's tier, TITANE, PLATINE or PALLADIUM (1, 3 and 5
+ * pieces held now, never a revoked one), its name in the display face and its pieces in the reading face, the benefits
+ * of the tier and of those below it (the server's words, set by ORBES), and the way to the next tier. An account that
+ * holds no piece reads what its first one opens.
+ */
+export const TIER = Object.freeze({
+  /** The section's label, and its accessible name. */
+  label: 'YOUR TIER',
+  /** Before the first tier: the section names the club. */
+  noneLabel: 'THE CLUB',
+  /** Under the tier's name, in the reading face. */
+  pieces: (n: number) => `${n} ${Number(n) === 1 ? 'piece' : 'pieces'} held`,
+  /** The heading of the way to the next tier. */
+  next: (tier: string) => `NEXT: ${tier}`,
+  /** How many more pieces reach it, and from how many it starts. */
+  nextWay: (tier: string, missing: number, from: number) =>
+    `${missing} more ${Number(missing) === 1 ? 'piece registered to your account opens' : 'pieces registered to your account open'} ${tier}, from ${from} pieces held. It adds:`,
+  /** An account without a tier: what its first piece opens. */
+  first: (tier: string) => `A piece registered to your ORBES account opens ${tier}, the first tier of the club:`,
+  /** PALLADIUM: no tier above. */
+  top: 'PALLADIUM is the highest tier of the club.',
+  /** Shown when MY PIECES lists more pieces than the tier counts: a piece revoked or retired by ORBES counts for none. */
+  counted: 'A piece revoked or retired by ORBES counts for no tier.',
+});
+
+/**
  * The ownership certificate's own page (F-06, /verify/c#…): what a buyer or an insurer reads when an owner shares
  * the link. It attests a record, not the object it is shown with: never AUTHENTIC, never a name or an email.
  */

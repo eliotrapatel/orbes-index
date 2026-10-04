@@ -10,7 +10,7 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories',
-  'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'codes',
+  'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
   'collections', 'cryptographic_keys', 'drop_entries', 'drops', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
   'scan_tokens', 'service_records', 'sessions', 'warranties',
@@ -118,6 +118,9 @@ describe('migrations', () => {
     expect(has(/INDEX drop_entries_account_idx ON public\.drop_entries USING btree \(account_id, created_at\)$/)).toBe(true);
     expect(has(/INDEX drop_entries_handled_by_idx ON public\.drop_entries USING btree \(handled_by\)$/)).toBe(true);
     expect(has(/INDEX drop_entries_drop_status_idx ON public\.drop_entries USING btree \(drop_id, status, rank\)$/)).toBe(true);
+    // 0018: one row per tier at most, the console user who wrote it at the head of its own index.
+    expect(has(/UNIQUE INDEX club_tiers_pkey ON public\.club_tiers USING btree \(tier\)$/)).toBe(true);
+    expect(has(/INDEX club_tiers_updated_by_idx ON public\.club_tiers USING btree \(updated_by\)$/)).toBe(true);
   });
 
   /**
@@ -812,6 +815,42 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
   });
 
+  it('0018 adds club_tiers, and nothing else; down restores 0017 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withTiers, without: before } = await rollBackTo('0018_club_tiers');
+    const of0018 = (o: string) => o.includes('club_tiers');
+    const added = withTiers.filter((o) => !before.includes(o));
+    expect(added.filter((o) => o.startsWith('table '))).toEqual([
+      'table club_tiers benefits text NO ',
+      'table club_tiers tier text NO ',
+      'table club_tiers updated_at timestamp with time zone NO now()',
+      'table club_tiers updated_by uuid YES ',
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger club_tiers club_tiers_immutable_tier']);
+    expect(added.some((o) => /^constraint club_tiers club_tiers_updated_by_fkey FOREIGN KEY \(updated_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/.test(o))).toBe(true);
+    expect(added.filter((o) => !of0018(o))).toEqual([]);
+    expect(before.filter(of0018)).toEqual([]);
+    expect(withTiers.filter((o) => !of0018(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0018_club_tiers'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0018: a tier\'s benefits, one row per tier at most, 1 to 600 characters; its tier never changes; its author stays while named', async () => {
+    const insert = (tier: string, benefits: string, by: string | null = null) =>
+      sql`INSERT INTO club_tiers (tier, benefits, updated_by) VALUES (${tier}, ${benefits}, ${by})`.execute(t.db);
+    await expect(insert('GOLD', 'A benefit.')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert('TITANE', '   ')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert('TITANE', 'x'.repeat(601))).rejects.toSatisfy((e) => isCheckViolation(e));
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('tiers@orbes.test', 'tiers@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    await insert('TITANE', 'x'.repeat(600), admin);
+    await expect(insert('TITANE', 'Again.')).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(sql`UPDATE club_tiers SET tier = 'PLATINE' WHERE tier = 'TITANE'`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await sql`UPDATE club_tiers SET benefits = 'The circle.' WHERE tier = 'TITANE'`.execute(t.db);
+    await expect(sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await sql`DELETE FROM club_tiers`.execute(t.db);
+    await sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -854,6 +893,7 @@ describe('migrations', () => {
       '0015_drops',
       '0016_circle',
       '0017_drop_early_access',
+      '0018_club_tiers',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

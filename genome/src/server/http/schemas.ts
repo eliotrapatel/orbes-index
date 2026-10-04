@@ -15,6 +15,7 @@ import {
   ANOMALY_STATUSES,
   CIRCLE_POST_KINDS,
   CIRCLE_RSVP_ANSWERS,
+  CLUB_TIER_NAMES,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
   LOOKBOOK_STATES,
@@ -29,6 +30,7 @@ import {
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
+import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
@@ -534,6 +536,19 @@ export const circlePhotoOrderBody = body({
       }),
     )
     .max(CIRCLE_PHOTOS_MAX, `At most ${CIRCLE_PHOTOS_MAX} photographs`),
+});
+
+// ── Admin: the club's tiers (P-X04) ───────────────────────────────────────
+
+/** PATCH /api/admin/club/tiers/:tier: TITANE, PLATINE or PALLADIUM, as written. */
+export const clubTierParams = z.object({ tier: z.enum(CLUB_TIER_NAMES) });
+
+/**
+ * PATCH /api/admin/club/tiers/:tier: the tier's benefits, one per line (the service drops blank lines and the spaces
+ * around each, then holds them to 600 characters and 8 lines); `null` or `''` restores the words by default.
+ */
+export const updateClubTierBody = body({
+  benefits: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(CLUB_TIER_BENEFITS_MAX * 2).nullable()),
 });
 
 // ── Admin: products ────────────────────────────────────────────────────────

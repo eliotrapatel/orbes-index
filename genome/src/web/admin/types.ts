@@ -88,6 +88,10 @@ export type CirclePostKind = (typeof CIRCLE_POST_KINDS)[number];
 export const CIRCLE_RSVP_ANSWERS = ['YES', 'NO'] as const;
 export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 
+/** The tiers of the club (P-X04, club_tiers.tier), in order: 1 TITANE, 2 PLATINE, 3 PALLADIUM (1, 3 and 5 pieces held now). */
+export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
+export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -740,6 +744,8 @@ export interface OwnedPiece {
 /** GET /api/admin/owners/:id: the owner's sheet. */
 export interface OwnerSheet {
   owner: OwnerRecord;
+  /** P-X04: the account's tier in the club now (level 0 and name null: none), the pieces it counts, the full years since its first ownership. */
+  tier: { level: 0 | 1 | 2 | 3; name: ClubTierName | null; pieces: number; seniority: number };
   pieces: OwnedPiece[];
   transfers: { id: string; productId: string; createdAt: Iso; expiresAt: Iso }[];
   scans: { id: string; reference: string; occurredAt: Iso; eventType: string; state: string; productId: string | null; country: string | null }[];
@@ -1008,4 +1014,20 @@ export interface CircleStats {
   days: number;
   members: { TITANE: number; PLATINE: number; PALLADIUM: number; total: number };
   visits: { total: number; daily: { day: string; visits: number }[] };
+}
+
+// ── The Club: the tiers (P-X04) ────────────────────────────────────────────
+
+/** One tier of GET /api/admin/club/tiers (and PATCH /api/admin/club/tiers/:tier). */
+export interface ClubTierSheet {
+  tier: ClubTierName;
+  level: 1 | 2 | 3;
+  /** The pieces held now it starts from: a constant of the code. */
+  pieces: number;
+  /** Its words now, one benefit per line: the console's, or the default ones. */
+  benefits: string;
+  defaultBenefits: string;
+  /** The console changed its words. */
+  edited: boolean;
+  updatedAt: Iso | null;
 }

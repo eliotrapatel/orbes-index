@@ -376,11 +376,28 @@ export interface ClubEntry {
   drawnAt: string | null;
 }
 
-/** GET /api/v1/club/status (P-R03): the account's tier now (0: no piece; TITANE, PLATINE, PALLADIUM), and its entries. */
+/** A tier of the club by name: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+export type ClubTierName = 'TITANE' | 'PLATINE' | 'PALLADIUM';
+
+/** P-X04: the tier after the account's: the pieces it starts from, how many more the account needs, what it adds. */
+export interface ClubNextTier {
+  level: 1 | 2 | 3;
+  name: ClubTierName;
+  pieces: number;
+  missing: number;
+  benefits: string[];
+}
+
+/**
+ * GET /api/v1/club/status (P-R03): the account's tier now (0: no piece; TITANE, PLATINE, PALLADIUM), and its entries;
+ * P-X04: the benefits of its tier and of those below it (lowest first), and the next tier (null at PALLADIUM).
+ */
 export interface ClubStatus {
-  tier: { level: 0 | 1 | 2 | 3; name: 'TITANE' | 'PLATINE' | 'PALLADIUM' | null };
+  tier: { level: 0 | 1 | 2 | 3; name: ClubTierName | null };
   pieces: number;
   seniority: number;
+  benefits: string[];
+  next: ClubNextTier | null;
   entries: ClubEntry[];
 }
 

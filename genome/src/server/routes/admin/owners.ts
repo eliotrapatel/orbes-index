@@ -5,8 +5,8 @@
  *                                                      a transfer pause after a recovery and an open code;
  *                                                      ?email= one exact email, ?ref= the accounts behind
  *                                                      the REF printed under a result, with its scans
- *   GET  /api/admin/owners/:id                AUDITOR  the owner's sheet: pieces, transfers in progress,
- *                                                      20 latest scans
+ *   GET  /api/admin/owners/:id                AUDITOR  the owner's sheet: its tier in the club (P-X04),
+ *                                                      pieces, transfers in progress, 20 latest scans
  *   POST /api/admin/owners/:id/recovery-code  ADMIN    a one-time recovery code, after an identity check
  *   POST /api/admin/owners/:id/lock           ADMIN    LOCKED: sessions end, pending transfers cancelled,
  *                                                      certificate links and open entries in the drops

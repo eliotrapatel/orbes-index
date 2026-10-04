@@ -35,7 +35,9 @@
  * the entries by rank; P-X02: the early access, both openings under the
  * state, RESERVE A PLACE for a PLATINE owner and the place held at once, a
  * TITANE owner who waits, the privilege recalled in MY PIECES and THE
- * CIRCLE), THE CIRCLE (P-X01: signed out its sign-in, then the
+ * CIRCLE), the tier at the head of MY PIECES (P-X04: the badge, the
+ * benefits and the way to the next tier as ORBES words it; THE CLUB for an
+ * account without a piece), THE CIRCLE (P-X01: signed out its sign-in, then the
  * feed of an owner, each post from its tier up; an invitation answered YES
  * then NO within its places; a poll, one option chosen then VOTE, then its
  * results; a note's photographs, text and links, the release's page and a
@@ -57,6 +59,7 @@ import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
+import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { CIRCLE, CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { groupHex } from '../../src/web/verify/releases-model.js';
@@ -2240,6 +2243,76 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await other.page.goto(`${srv.origin}/verify/circle`);
     await textOf(other.page.locator('.circle__early .section-label'), 'EARLY ACCESS');
     await textOf(other.page.locator('.circle__early-text'), RELEASES.earlyAccess.recall);
+    expect(await figuresInDisplayFace(other.page)).toEqual([]);
+    expect(other.problems).toEqual([]);
+  }, 180_000);
+
+  it('MY PIECES, the tier (P-X04): at the head of the page, the badge (the name in the display face, the pieces in the reading face), the benefits, the way to the next tier as ORBES words it; THE CLUB for an account without a piece', async () => {
+    const { ctx } = srv;
+    const email = 'tier.platine@example.com';
+    const owner = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    for (let i = 0; i < 3; i++) await ownedPiece(owner.account.id);
+    // ORBES changed the words of PALLADIUM from the console: the next tier says them.
+    const staff = await ctx.services.auth.createAdmin({ email: 'tier.staff@orbes.test', password: 'orbes tier passphrase 2026', role: 'OPERATOR' }, SYSTEM_ACTOR);
+    await ctx.services.club.updateTier('PALLADIUM', 'A commission of your own.\nA yearly visit to the atelier.', { type: 'admin', id: staff.id });
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const signIn = page.locator('.pieces__signin');
+    await countOf(page.locator('.pieces__tier:not([hidden])'), 0);
+    await signIn.getByLabel('EMAIL').fill(email);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await countOf(page.locator('article.piece'), 3);
+    const tier = page.locator('.pieces__tier');
+    await textOf(tier.locator('> .section-label'), 'YOUR TIER');
+    await attrOf(tier, 'aria-labelledby', 'pieces-tier');
+    // The badge: PLATINE in the display face, its pieces in the reading face, on the ivory plate of a GENOME.
+    await textOf(tier.locator('.pieces__badge-name'), 'PLATINE');
+    await textOf(tier.locator('.pieces__badge-pieces'), '3 pieces held');
+    expect(await tier.locator('.pieces__badge-name').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    expect(await tier.locator('.pieces__badge-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
+    expect(await tier.locator('.pieces__badge').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    await countOf(tier.locator('.pieces__badge .bracket'), 4);
+    // The benefits of TITANE and PLATINE, then PALLADIUM: two more pieces, and what ORBES says it adds.
+    await textsOf(tier.locator('.pieces__benefits:not(.pieces__benefits--next) .pieces__benefit'), [
+      ...CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'),
+      ...CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'),
+    ]);
+    await textOf(tier.locator('.pieces__next .section-label'), 'NEXT: PALLADIUM');
+    await textOf(tier.locator('.pieces__next-way'), '2 more pieces registered to your account open PALLADIUM, from 5 pieces held. It adds:');
+    await textsOf(tier.locator('.pieces__benefits--next .pieces__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
+    // At the head of the page: under the title, above the pieces.
+    const tierBox = (await tier.boundingBox())!;
+    expect(tierBox.y).toBeGreaterThan((await page.locator('#pieces-title').boundingBox())!.y);
+    expect((await page.locator('article.piece').first().boundingBox())!.y).toBeGreaterThan(tierBox.y + tierBox.height);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-pieces-tier.png'), fullPage: true });
+    // Signed out: the tier leaves with the session.
+    await page.getByRole('button', { name: 'SIGN OUT' }).click();
+    await visible(page.locator('.pieces__signin'));
+    await countOf(page.locator('.pieces__tier:not([hidden])'), 0);
+    expect(problems).toEqual([]);
+
+    // An account without a piece: THE CLUB, no badge, what a first piece opens.
+    const newcomer = 'tier.newcomer@example.com';
+    await ctx.services.auth.registerAccount({ email: newcomer, password: PASSWORD }, {});
+    const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await other.page.goto(`${srv.origin}/verify/pieces`);
+    const otherSignIn = other.page.locator('.pieces__signin');
+    await otherSignIn.getByLabel('EMAIL').fill(newcomer);
+    await otherSignIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await otherSignIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    const club = other.page.locator('.pieces__tier');
+    await textOf(club.locator('> .section-label'), 'THE CLUB');
+    await countOf(club.locator('.pieces__badge'), 0);
+    await textOf(club.locator('.pieces__next-way'), 'A piece registered to your ORBES account opens TITANE, the first tier of the club:');
+    await textsOf(club.locator('.pieces__benefits--next .pieces__benefit'), CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'));
     expect(await figuresInDisplayFace(other.page)).toEqual([]);
     expect(other.problems).toEqual([]);
   }, 180_000);

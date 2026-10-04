@@ -1,6 +1,8 @@
 /**
  * An owner's sheet (A-06): what ORBES Client Services needs while a client
- * is on the line. The account and its status, the pieces it owns and owned,
+ * is on the line. The account and its status, its tier in the club (P-X04:
+ * TITANE, PLATINE or PALLADIUM, the pieces it counts and the full years since
+ * its first ownership), the pieces it owns and owned,
  * its transfers in progress and its 20 latest scans, each linked to its
  * piece and its verification event.
  *
@@ -17,6 +19,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
+import { tierStanding } from '../model/club.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
@@ -121,6 +124,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Email', value: o.email },
         { label: 'Name', value: o.displayName ?? '—' },
         { label: 'Country', value: o.country ?? '—' },
+        { label: 'Tier', value: h('span', { data: { testid: 'owner-tier' } }, tierStanding(sheet.tier)), note: 'In the club now: from the pieces held, never a revoked, flagged or retired one' },
         { label: 'Since', value: formatDate(o.createdAt) },
         { label: 'Account id', value: mono(o.id) },
       ]),

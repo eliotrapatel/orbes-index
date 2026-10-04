@@ -29,7 +29,9 @@
  * action; P-X01: its Circle tab, an invitation and a poll written in their
  * dialogs, a photograph added, published, the answers and the results read,
  * an option refused once voted; the panel The Circle of Analytics; read by an
- * AUDITOR, emails masked, without an action);
+ * AUDITOR, emails masked, without an action; P-X04: its Tiers tab, a tier's
+ * words edited in their dialog and restored to the default, the tier on an
+ * owner's sheet, read by an AUDITOR without an action);
  * the Analytics view (90 and 30 days, its cursor, the countries of the
  * counterfeit signals), anomaly triage (the badge and the tab title, the
  * filters, a finding's scans, one dialog that marks the piece, revokes its
@@ -65,6 +67,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
+import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
@@ -2189,6 +2192,77 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     for (const action of ['circle-edit', 'circle-publish', 'circle-unpublish', 'circle-photo-add', 'circle-photo-remove', 'circle-photo-alt']) {
       expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
+  }, STEP_TIMEOUT);
+
+  it('sets the words of the tiers from the Club page (P-X04): edited in their dialog, restored to the default; the tier on an owner\'s sheet; an AUDITOR reads', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await go(p, '#/club', 'Club');
+    await p.click('[data-testid=club-tab-tiers]');
+    await expect.poll(() => p.locator('[data-testid=club-tab-tiers]').getAttribute('aria-current')).toBe('page');
+    expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=tiers');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
+    // The three tiers, each from its threshold, with the words by default.
+    await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+    expect(await p.locator('.tiers .deflist__row', { hasText: 'Reached' }).locator('.deflist__value').evaluateAll((els) => els.map((e) => e.firstChild?.textContent))).toEqual([
+      'From 1 piece held',
+      'From 3 pieces held',
+      'From 5 pieces held',
+    ]);
+    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'));
+    for (const t of ['TITANE', 'PLATINE', 'PALLADIUM']) expect(await p.locator(`[data-testid=tier-words-${t}]`).textContent(), t).toBe('Default');
+    expect(await p.locator('[data-testid^=tier-restore-]').count()).toBe(0);
+
+    // Edited: refused unchanged, then saved, one benefit per line; read by the club at once.
+    await p.click('[data-testid=tier-edit-PLATINE]');
+    expect(await p.locator('dialog textarea[name=benefits]').inputValue()).toBe(CLUB_TIER_DEFAULT_BENEFITS.PLATINE);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await p.fill('dialog textarea[name=benefits]', 'Priority care for your pieces.\n\nA private viewing of each release.');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(['Priority care for your pieces.', 'A private viewing of each release.']);
+    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE] .status__text').textContent()).toBe('Edited');
+    expect(await p.locator('[data-testid=tier-words-PLATINE] .cell-sub').textContent()).toMatch(/UTC$/);
+    expect((await ctx.db.selectFrom('club_tiers').select(['tier', 'benefits']).execute())).toEqual([{ tier: 'PLATINE', benefits: 'Priority care for your pieces.\nA private viewing of each release.' }]);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-tiers', { full: true });
+    // Restored: the row goes, the words by default are back.
+    await p.click('[data-testid=tier-restore-PLATINE]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE]').textContent()).toBe('Default');
+    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'));
+    expect(await ctx.db.selectFrom('club_tiers').selectAll().execute()).toEqual([]);
+    expect(await cspViolations(p)).toEqual([]);
+
+    // An owner's sheet: the tier in the club now, from the pieces held.
+    const a = await ctx.services.auth.registerAccount({ email: 'tier.owner@example.com', password: 'tier owner passphrase 2026' }, {});
+    for (let i = 0; i < 3; i++) {
+      const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
+      await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+      const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
+      await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
+    }
+    await go(p, `#/owners/${a.account.id}`, 'tier.owner@example.com');
+    await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 3 pieces held');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads the tiers, without an action.
+    const auditor = { email: 'tiers.audit@orbes.test', password: 'tiers auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, '#/club?tab=tiers', 'Club');
+    await expect.poll(() => ap.locator('.tiers .panel__title').count()).toBe(3);
+    expect(await ap.locator('[data-testid^=tier-edit-], [data-testid^=tier-restore-]').count()).toBe(0);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
   }, STEP_TIMEOUT);

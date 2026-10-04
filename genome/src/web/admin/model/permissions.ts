@@ -45,6 +45,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   drawDrop: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
+  /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */
+  manageClubTiers: 'OPERATOR',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',

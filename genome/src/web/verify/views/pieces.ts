@@ -5,6 +5,16 @@
  *              ORBES                         small wordmark
  *          M Y   P I E C E S                 the page's title
  *   The pieces registered to your ORBES account.
+ *   YOUR TIER                                the club's tier (P-X04), once its status is read:
+ *   ┌                      ┐
+ *          PLATINE                           the badge: the name in the display face,
+ *       3 pieces held                        the pieces it counts in the reading face
+ *   └                      ┘
+ *     · The owners' circle: …                the benefits of the tier and of those below it
+ *   NEXT: PALLADIUM                          the way to the next tier: how many more pieces,
+ *     2 more pieces … open PALLADIUM …       from how many, what it adds (PALLADIUM: the
+ *     · Special commissions …                highest); without a tier, THE CLUB and what a
+ *                                            first piece opens
  *   ┌                      ┐
  *     GENOME  O26-J-00184                    the piece's title (h2)
  *     ◔ · ◯ · ◕ · …                          the glyphs in their orbit, around the SEAL
@@ -65,7 +75,8 @@ import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
 import { EARLY_ACCESS_MIN_TIER, myEntries, tierLabel, type MyEntryModel } from '../releases-model.js';
-import type { CertificateOffer, ClientServices, ClubEntry, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import { tierModel } from '../tier-model.js';
+import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
 import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
@@ -105,6 +116,8 @@ class PiecesPage {
   readonly root: HTMLElement;
   private readonly lead = h('p', { class: 'prose pieces__lead', attrs: { hidden: true }, text: PIECES.lead });
   private readonly body = h('div', { class: 'pieces__body' });
+  /** YOUR TIER (P-X04): the badge, the benefits and the way to the next tier, at the head of the page. */
+  private readonly tierBlock = h('section', { class: 'pieces__tier', attrs: { 'aria-labelledby': 'pieces-tier', hidden: true } });
   /** EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM, recalled once the club's status is read. */
   private readonly early = h('section', { class: 'pieces__early', attrs: { 'aria-labelledby': 'pieces-early', hidden: true } });
   /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
@@ -123,6 +136,8 @@ class PiecesPage {
   private entries: ClubEntry[] | null = [];
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
+  /** The club's status as read with the pieces (P-X04, the tier block); null until read, or when it could not be. */
+  private club: ClubStatus | null = null;
   private load: Load = { kind: 'idle' };
   /** Bumped on every load; an answer to an older one is dropped. */
   private loadGen = 0;
@@ -143,6 +158,7 @@ class PiecesPage {
         h('h1', { class: 'pieces__title', id: 'pieces-title', text: PIECES.title }),
         this.lead,
       ),
+      this.tierBlock,
       this.body,
       this.early,
       this.releases,
@@ -204,6 +220,7 @@ class PiecesPage {
       this.cards = [];
       this.entries = [];
       this.tier = null;
+      this.club = null;
       this.circle.hidden = true;
       this.changing = false;
       this.signIn ??= new OwnershipPanel(
@@ -245,6 +262,7 @@ class PiecesPage {
       );
       this.entries = club ? club.entries : null;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
+      this.club = club;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
       this.circle.hidden = !(club && club.tier.level >= 1);
       this.load = { kind: 'ready' };
@@ -270,6 +288,7 @@ class PiecesPage {
   private renderBody(): void {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
+    this.renderTier();
     this.renderEarly();
     this.renderReleases();
     if (!this.ready) {
@@ -305,6 +324,52 @@ class PiecesPage {
 
   private waiting(): HTMLElement {
     return h('p', { class: 'ownership__meta micro soft pieces__waiting', attrs: { 'aria-busy': 'true' }, text: PIECES.loading });
+  }
+
+  /**
+   * YOUR TIER (P-X04), at the head of the page once the pieces and the club's status are read, signed in: the badge
+   * (the tier's name in the display face, the pieces it counts in the reading face) on an ivory plate framed like a
+   * GENOME's, the benefits of the tier and of those below it, then the way to the next tier and what it adds
+   * (PALLADIUM: the highest). Without a tier, THE CLUB and what a first piece opens. Nothing when the status could not
+   * be read: the pieces still show.
+   */
+  private renderTier(): void {
+    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.club !== null;
+    if (!shown || !this.club) {
+      this.tierBlock.hidden = true;
+      this.tierBlock.replaceChildren();
+      return;
+    }
+    const m = tierModel(this.club, this.cards.length);
+    const list = (items: string[], extra?: string) =>
+      items.length ? h('ul', { class: ['pieces__benefits', extra] }, ...items.map((l) => h('li', { class: 'prose pieces__benefit', text: l }))) : null;
+    this.tierBlock.hidden = false;
+    const parts: (HTMLElement | null)[] = [
+      sectionLabel(m.label, 'pieces-tier'),
+      m.badge
+        ? bracket(
+            h(
+              'div',
+              { class: 'pieces__badge', data: { tier: m.badge.name } },
+              h('p', { class: 'pieces__badge-name', text: m.badge.name }),
+              h('p', { class: 'pieces__badge-pieces', text: m.badge.pieces }),
+            ),
+          )
+        : null,
+      list(m.benefits),
+      m.next
+        ? h(
+            'div',
+            { class: 'pieces__next' },
+            m.badge ? sectionLabel(m.next.label) : null,
+            h('p', { class: 'prose pieces__next-way', text: m.next.sentence }),
+            list(m.next.benefits, 'pieces__benefits--next'),
+          )
+        : null,
+      m.top ? h('p', { class: 'prose pieces__top', text: m.top }) : null,
+      m.note ? h('p', { class: 'ownership__meta micro soft pieces__tier-note', text: m.note }) : null,
+    ];
+    this.tierBlock.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
   }
 
   /**

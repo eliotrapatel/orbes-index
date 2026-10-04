@@ -123,6 +123,7 @@ import {
   type AdminDropEntry as ServerAdminDropEntry,
 } from '../../src/server/services/drops.js';
 import {
+  benefitLines,
   CLUB_TABS,
   clubTab,
   DROP_LIMITS,
@@ -140,9 +141,23 @@ import {
   placesTaken,
   placesToDraw,
   releaseAddress,
+  TIER_LIMITS,
+  tierBenefitsChange,
+  tierBenefitsProblem,
   tierName,
+  tierStanding,
+  tierThreshold,
   utcInstant,
 } from '../../src/web/admin/model/club.js';
+import {
+  CLUB_TIER_BENEFIT_LINES as SERVER_TIER_LINES,
+  CLUB_TIER_BENEFITS_MAX as SERVER_TIER_MAX,
+  CLUB_TIER_DEFAULT_BENEFITS,
+  CLUB_TIER_THRESHOLDS,
+  normalizeBenefits,
+  type ClubTierSheet as ServerClubTierSheet,
+} from '../../src/server/services/club.js';
+import type { OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
 import {
   answersLine,
   circleActions,
@@ -222,6 +237,7 @@ describe('admin enums mirror the server', () => {
       'DROP_ENTRY_STATUSES',
       'CIRCLE_POST_KINDS',
       'CIRCLE_RSVP_ANSWERS',
+      'CLUB_TIER_NAMES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -373,6 +389,9 @@ type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U
 // Compile-time: the console's drop and entry are what the server sends (P-R03, with the early access of P-X02).
 export const adminDropFits = (d: Json<ServerAdminDrop>): web.Drop => d;
 export const adminDropEntryFits = (e: Json<ServerAdminDropEntry>): web.DropEntry => e;
+/** P-X04: a tier of GET /api/admin/club/tiers, and the tier of an owner's sheet, as the console reads them. */
+export const clubTierFits = (t: Json<ServerClubTierSheet>): web.ClubTierSheet => t;
+export const ownerTierFits = (t: Json<ServerOwnerSheet['tier']>): web.OwnerSheet['tier'] => t;
 
 describe('the Club\'s drops (P-R03)', () => {
   const base: web.Drop = {
@@ -482,17 +501,73 @@ describe('the Club\'s drops (P-R03)', () => {
     expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
   });
 
-  it('opens on the Drops tab, then the Circle tab (P-X01)', () => {
-    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle']);
+  it('opens on the Drops tab, then the Circle tab (P-X01), then the Tiers tab (P-X04)', () => {
+    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle', 'tiers']);
+    expect(CLUB_TABS.map((t) => t.label)).toEqual(['Drops', 'Circle', 'Tiers']);
     expect(clubTab({})).toBe('drops');
     expect(clubTab({ tab: 'nope' })).toBe('drops');
     expect(clubTab({ tab: 'circle' })).toBe('circle');
+    expect(clubTab({ tab: 'tiers' })).toBe('tiers');
   });
 
   it('gives each state and status a tone: a place held waits for ORBES Client Services, as an open case does', () => {
     expect(SERVER_DROP_STATES.map((s) => toneOf('drop', s))).toEqual(['outline', 'outline', 'solid', 'outline', 'solid', 'muted']);
     expect(serverSchema.DROP_ENTRY_STATUSES.map((s) => toneOf('dropEntry', s))).toEqual(['outline', 'alert', 'outline', 'solid', 'muted', 'muted']);
     expect(toneOf('dropEntry', 'SELECTED')).toBe(toneOf('case', 'OPEN'));
+  });
+});
+
+describe('the Club\'s tiers (P-X04)', () => {
+  const sheet = (over: Partial<Json<ServerClubTierSheet>> = {}): web.ClubTierSheet =>
+    clubTierFits({
+      tier: 'PLATINE',
+      level: 2,
+      pieces: 3,
+      benefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE,
+      defaultBenefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE,
+      edited: false,
+      updatedAt: null,
+      ...over,
+    });
+
+  it('holds the benefits to the server\'s bounds, one per line', () => {
+    expect(TIER_LIMITS).toEqual({ benefits: SERVER_TIER_MAX, lines: SERVER_TIER_LINES });
+    expect(benefitLines('  A.\r\n\r\n B. \n')).toEqual(['A.', 'B.']);
+    expect(benefitLines(null)).toEqual([]);
+    expect(tierBenefitsProblem({ benefits: 'A.\nB.' })).toBeNull();
+    expect(tierBenefitsProblem({ benefits: '' })).toBeNull();
+    expect(tierBenefitsProblem({ benefits: 'x'.repeat(SERVER_TIER_MAX + 1) })).toMatch(/at most 600 characters/);
+    expect(tierBenefitsProblem({ benefits: Array.from({ length: 9 }, (_, i) => `B${i}`).join('\n') })).toMatch(/at most 8 benefits/);
+    // What the console accepts, the server keeps as it was sent (blank lines dropped), and the other way round.
+    for (const text of ['A.\n\nB.', '  The circle. ', Array.from({ length: 8 }, (_, i) => `B${i}`).join('\n')]) {
+      expect(tierBenefitsProblem({ benefits: text })).toBeNull();
+      expect(normalizeBenefits(text)).toBe(benefitLines(text).join('\n'));
+    }
+  });
+
+  it('sends the words typed, null for the default ones, nothing when unchanged', () => {
+    expect(tierBenefitsChange(sheet(), { benefits: 'A.\n\nB.' })).toBe('A.\nB.');
+    expect(tierBenefitsChange(sheet(), { benefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE })).toBeUndefined();
+    expect(tierBenefitsChange(sheet(), { benefits: '  ' })).toBeUndefined();
+    const edited = sheet({ benefits: 'A.\nB.', edited: true, updatedAt: '2026-10-04T10:00:00.000Z' });
+    expect(tierBenefitsChange(edited, { benefits: ' A.\nB. ' })).toBeUndefined();
+    expect(tierBenefitsChange(edited, { benefits: '' })).toBeNull();
+    expect(tierBenefitsChange(edited, { benefits: `${CLUB_TIER_DEFAULT_BENEFITS.PLATINE}\n` })).toBeNull();
+    expect(tierBenefitsChange(edited, { benefits: 'C.' })).toBe('C.');
+  });
+
+  it('says each threshold, and an account\'s tier on its sheet (A-06)', () => {
+    expect(CLUB_TIER_THRESHOLDS.map((pieces) => tierThreshold({ pieces }))).toEqual(['From 1 piece held', 'From 3 pieces held', 'From 5 pieces held']);
+    expect(tierStanding({ level: 2, name: 'PLATINE', pieces: 3, seniority: 2 })).toBe('PLATINE · 3 pieces held · 2 years');
+    expect(tierStanding({ level: 1, name: 'TITANE', pieces: 1, seniority: 1 })).toBe('TITANE · 1 piece held · 1 year');
+    expect(tierStanding({ level: 0, name: null, pieces: 0, seniority: 0 })).toBe('None · 0 pieces held');
+    expect(tierStanding(undefined)).toBe('—');
+  });
+
+  it('lets OPERATOR change the words, an AUDITOR read them', () => {
+    expect(can('AUDITOR', 'manageClubTiers')).toBe(false);
+    expect(can('OPERATOR', 'manageClubTiers')).toBe(true);
+    expect(can('ADMIN', 'manageClubTiers')).toBe(true);
   });
 });
 

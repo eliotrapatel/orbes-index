@@ -15,15 +15,19 @@
  *  - Its early access (P-X02): the hours before the opening when PLATINE
  *    and PALLADIUM reserve a place directly (0 for none, 48 by default),
  *    said with its time, and the places the draw will give.
+ *  - The tiers (P-X04): the words of each tier's benefits, one per line, as
+ *    the server holds them (600 characters, 8 lines), what is sent (null to
+ *    restore the default words), and an account's tier on its sheet.
  */
 import { formatDateTime } from '../format.js';
 import { can } from './permissions.js';
-import type { AdminRole, Drop, DropChange, DropEntry, DropInput } from '../types.js';
+import type { AdminRole, ClubTierSheet, Drop, DropChange, DropEntry, DropInput, OwnerSheet } from '../types.js';
 
 /** The tabs of the Club page, in their order. */
 export const CLUB_TABS = [
   { id: 'drops', label: 'Drops' },
   { id: 'circle', label: 'Circle' },
+  { id: 'tiers', label: 'Tiers' },
 ] as const;
 export type ClubTab = (typeof CLUB_TABS)[number]['id'];
 
@@ -233,4 +237,50 @@ export function dropLead(d: Drop): string {
     default:
       return 'Cancelled before its draw: entries closed for good, no draw.';
   }
+}
+
+// ── The tiers (P-X04) ─────────────────────────────────────────────────────
+
+/** The bounds the server holds a tier's benefits to (services/club.ts CLUB_TIER_BENEFITS_MAX, CLUB_TIER_BENEFIT_LINES). */
+export const TIER_LIMITS = Object.freeze({ benefits: 600, lines: 8 });
+
+/** The lines of a tier's benefits, as /verify lists them: one benefit per line, the blank ones dropped. */
+export function benefitLines(text: string | null | undefined): string[] {
+  return (text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+}
+
+/** What the server would refuse in a tier's benefits, said before anything is sent; null when they hold (blank: the default words). */
+export function tierBenefitsProblem(v: Record<string, string>): string | null {
+  const lines = benefitLines(v.benefits);
+  if (lines.join('\n').length > TIER_LIMITS.benefits) return `The benefits have at most ${TIER_LIMITS.benefits} characters.`;
+  if (lines.length > TIER_LIMITS.lines) return `A tier has at most ${TIER_LIMITS.lines} benefits, one per line.`;
+  return null;
+}
+
+/**
+ * The words to send for a tier (PATCH /api/admin/club/tiers/:tier): the lines as typed, or null (the default words)
+ * when they are blank or the default ones exactly; undefined when nothing changed.
+ */
+export function tierBenefitsChange(t: Pick<ClubTierSheet, 'benefits' | 'defaultBenefits' | 'edited'>, v: Record<string, string>): string | null | undefined {
+  const typed = benefitLines(v.benefits).join('\n');
+  const next = typed === '' || typed === benefitLines(t.defaultBenefits).join('\n') ? null : typed;
+  const now = t.edited ? benefitLines(t.benefits).join('\n') : null;
+  return next === now ? undefined : next;
+}
+
+/** A tier's threshold: `From 1 piece`, `From 3 pieces`. */
+export function tierThreshold(t: Pick<ClubTierSheet, 'pieces'>): string {
+  return `From ${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
+}
+
+/** An account's tier on its sheet (A-06): `PLATINE · 3 pieces held · 2 years`, or `None · 0 pieces held`. */
+export function tierStanding(t: OwnerSheet['tier'] | null | undefined): string {
+  if (!t) return '—';
+  const pieces = `${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
+  const years = t.seniority > 0 ? ` · ${t.seniority} ${t.seniority === 1 ? 'year' : 'years'}` : '';
+  return `${tierName(t.level)} · ${pieces}${years}`;
 }
