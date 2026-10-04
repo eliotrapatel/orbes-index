@@ -67,9 +67,9 @@
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
  * each sale; no email is sent (the account's page says it).
  *
- * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages,
- * its entries (ENTER, WITHDRAW, RESERVE), the draw and OFFER NEXT know only the drops whose `mode` is DRAW, and answer
- * for a LIVE one as for an unknown drop (404) or refuse it (409 DROP_LIVE).
+ * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages, its
+ * entries (ENTER, WITHDRAW, RESERVE), the console's list, change, publication and cancellation, the draw and OFFER NEXT
+ * know only the drops whose `mode` is DRAW: a LIVE one is left out of a list, a 404 or a refusal (409 DROP_LIVE).
  *
  * The audit log names the drop and the entry's id, never an email: ENTER,
  * WITHDRAW and a direct reservation (`drop.enter`, `drop.withdraw`,
@@ -898,10 +898,10 @@ export class DropService {
 
   // ── The console (routes/admin/drops.ts) ──────────────────────────────────
 
-  /** Every drop, the latest created first. */
+  /** Every drop of the draw (a LIVE RELEASE is not one), the latest created first. */
   async list(page: PageRequest): Promise<Page<AdminDrop>> {
-    const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    const rows = await this.reads(this.db).orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
+    const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).where('mode', '=', 'DRAW').executeTakeFirstOrThrow();
+    const rows = await this.reads(this.db).where('d.mode', '=', 'DRAW').orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const tallies = await this.tallies(this.db, rows.map((r) => r.id));
     const creators = await this.staffEmails(this.db, rows.map((r) => r.created_by));
     const now = this.clock();
@@ -989,7 +989,7 @@ export class DropService {
     assertStaff(actor, 'change a release');
     const id = knownId(dropId, dropNotFound);
     return inTransaction(this.db, async (tx) => {
-      const d = await this.lock(tx, id);
+      const d = await this.lockDraw(tx, id);
       const set: DropUpdate = {};
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
@@ -1042,7 +1042,7 @@ export class DropService {
     const id = knownId(dropId, dropNotFound);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const d = await this.lock(tx, id);
+      const d = await this.lockDraw(tx, id);
       if (d.cancelled_at) throw dropCancelled();
       if (d.published_at) throw dropAlreadyPublished();
       if (now.getTime() >= d.closes_at.getTime()) throw dropWindowPast();
@@ -1077,7 +1077,7 @@ export class DropService {
     const id = knownId(dropId, dropNotFound);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const d = await this.lock(tx, id);
+      const d = await this.lockDraw(tx, id);
       if (d.drawn_at) throw dropDrawn();
       if (d.cancelled_at) throw dropCancelled();
       await tx.updateTable('drops').set({ cancelled_at: now }).where('id', '=', id).execute();
@@ -1256,6 +1256,13 @@ export class DropService {
   private async lock(tx: Db, id: string): Promise<DropRow> {
     const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
     if (!d) throw dropNotFound();
+    return d;
+  }
+
+  /** The same row for a change, a publication or a cancellation of a draw's drop; 409 DROP_LIVE for a LIVE RELEASE. */
+  private async lockDraw(tx: Db, id: string): Promise<DropRow> {
+    const d = await this.lock(tx, id);
+    if (d.mode === 'LIVE') throw dropLive();
     return d;
   }
 

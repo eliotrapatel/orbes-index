@@ -316,6 +316,16 @@ describe('LiveService', () => {
       f.clock.set(at(70 * MINUTE));
       await rejects(f.drops.draw(r.id, f.admin), 'DROP_LIVE', 409);
       await rejects(f.drops.offerNext(r.id, f.admin), 'DROP_LIVE', 409);
+      // Nor do the draw's console paths: its list, a change, a publication or a cancellation.
+      const draft = await release({ published: false });
+      expect((await f.drops.list({ page: 1, pageSize: 200 })).items.map((d) => d.id)).not.toContain(r.id);
+      for (const id of [r.id, draft.id]) {
+        await rejects(f.drops.update(id, { description: 'A note.' }, f.admin), 'DROP_LIVE', 409);
+        await rejects(f.drops.update(id, { quantity: 99 }, f.admin), 'DROP_LIVE', 409);
+        await rejects(f.drops.publish(id, f.admin), 'DROP_LIVE', 409);
+        await rejects(f.drops.cancel(id, f.admin), 'DROP_LIVE', 409);
+      }
+      expect(await t.db.selectFrom('drops').select(['published_at', 'cancelled_at', 'quantity']).where('id', '=', draft.id).executeTakeFirstOrThrow()).toEqual({ published_at: null, cancelled_at: null, quantity: 2 });
     });
   });
 
@@ -482,6 +492,8 @@ describe('LiveService', () => {
       await f.live.press(a.id, r.id, token);
       f.clock.set(at(30 * SECOND + 500));
       await rejects(f.live.secure(a.id, r.id, token, a.actor), 'LIVE_TURN_PASSED', 409);
+      // Nor is it given back: a turn that has run out is MISSED, not LEFT.
+      await rejects(f.live.leave(a.id, r.id, a.actor), 'LIVE_TURN_PASSED', 409);
       expect((await entry(r.id, a.id)).status).toBe('TURN');
       expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
       expect(await entry(r.id, a.id)).toMatchObject({ status: 'MISSED', ended_at: at(30 * SECOND) });
@@ -602,6 +614,20 @@ describe('LiveService', () => {
         ['drop.live.free', { entryId: (await entry(r.id, who(2).id)).id }],
         ['drop.live.remove', { entryId: (await entry(r.id, who(3).id)).id, from: 'TURN' }],
       ]);
+    });
+
+    it('ends a hold freed after its deadline (not yet marked by the engine) at that deadline', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+      const [a, b] = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
+      f.clock.set(at(-MINUTE));
+      for (const p of [a, b]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+      await advance(r, T0);
+      f.clock.set(at(SECOND));
+      await holdAndSecure(r.id, a.id, a.actor);
+      const holdEnd = (await entry(r.id, a.id)).hold_expires_at!;
+      f.clock.set(new Date(holdEnd.getTime() + 10 * SECOND));
+      expect(await f.live.freeHold(r.id, (await entry(r.id, a.id)).id, f.admin)).toMatchObject({ status: 'EXPIRED', endedAt: holdEnd });
+      expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: f.clock.now() });
     });
   });
 
@@ -752,6 +778,72 @@ describe('LiveService', () => {
       expect((await t.db.selectFrom('drops').select('ended_reason').where('id', '=', r.id).executeTakeFirstOrThrow()).ended_reason).toBe('CLOSED');
       expect(await f.live.liveReleaseIds()).not.toContain(r.id);
       await rejects(f.live.end(r.id, f.admin), 'LIVE_ENDED', 409);
+    });
+
+    it('CLOSED during a pause: the pause ends with it, the turns and holds moved by it; SECURE until the moved deadline, MISSED at it; then over', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 3 }], closesAt: at(MINUTE) });
+      const people = [await accountOfTier(f, 3), await accountOfTier(f, 2), await accountOfTier(f, 1), await accountOfTier(f, 0)];
+      f.clock.set(at(-MINUTE));
+      for (const p of people) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+      await advance(r, T0);
+      const [a, b, c, d] = (await entriesOf(t.db, r.id)).map((x) => people.find((p) => p.id === x.account_id)!);
+      // Three turns of 30 s from T0; a secures; paused at 10 s; the close at 60 s passes during the pause.
+      f.clock.set(at(5 * SECOND));
+      await holdAndSecure(r.id, a!.id, a!.actor);
+      const holdEnd = (await entry(r.id, a!.id)).hold_expires_at!;
+      f.clock.set(at(10 * SECOND));
+      await f.live.pause(r.id, f.admin);
+      const pausedMs = 61 * SECOND - 10 * SECOND;
+      expect(await advance(r, at(61 * SECOND))).toMatchObject({ ended: 'CLOSED', missed: 0, turns: 0 });
+      expect(await t.db.selectFrom('drops').select(['ended_at', 'ended_reason', 'paused_at', 'paused_ms_total']).where('id', '=', r.id).executeTakeFirstOrThrow()).toEqual({
+        ended_at: at(MINUTE),
+        ended_reason: 'CLOSED',
+        paused_at: null,
+        paused_ms_total: pausedMs,
+      });
+      expect((await entriesOf(t.db, r.id)).map((x) => [x.status, x.turn_expires_at, x.hold_expires_at, x.ended_at])).toEqual([
+        ['SECURED', at(30 * SECOND), new Date(holdEnd.getTime() + pausedMs), null],
+        ['TURN', at(30 * SECOND + pausedMs), null, null],
+        ['TURN', at(30 * SECOND + pausedMs), null, null],
+        ['ENDED', null, null, at(MINUTE)],
+      ]);
+      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.end')).toEqual([
+        { action: 'drop.live.end', actor: 'system', details: { reason: 'CLOSED', at: at(MINUTE).toISOString(), ended: 1, pausedMs } },
+      ]);
+      await rejects(f.live.pause(r.id, f.admin), 'LIVE_ENDED', 409);
+      await rejects(f.live.resume(r.id, f.admin), 'LIVE_NOT_PAUSED', 409);
+      // b secures just before its moved deadline; c's turn runs out at it and is MISSED there.
+      f.clock.set(at(30 * SECOND + pausedMs - 2 * SECOND));
+      expect(await holdAndSecure(r.id, b!.id, b!.actor)).toMatchObject({ status: 'SECURED' });
+      expect(await advance(r, at(30 * SECOND + pausedMs + SECOND))).toMatchObject({ missed: 1, turns: 0, ended: null });
+      expect(await entry(r.id, c!.id)).toMatchObject({ status: 'MISSED', ended_at: at(30 * SECOND + pausedMs) });
+      for (const p of [a!, b!]) await f.live.confirm(p.id, r.id, p.actor);
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'CONFIRMED', 'MISSED', 'ENDED']);
+      expect(await entry(r.id, d!.id)).toMatchObject({ status: 'ENDED' });
+      expect(await f.live.liveReleaseIds()).not.toContain(r.id);
+    });
+
+    it('SOLD_OUT during a pause: the last piece confirmed ends the pause with the release', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+      const [a, b] = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
+      f.clock.set(at(-MINUTE));
+      for (const p of [a, b]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+      await advance(r, T0);
+      f.clock.set(at(5 * SECOND));
+      await holdAndSecure(r.id, a.id, a.actor);
+      f.clock.set(at(10 * SECOND));
+      await f.live.pause(r.id, f.admin);
+      f.clock.set(at(40 * SECOND));
+      await f.live.confirm(a.id, r.id, a.actor);
+      expect(await t.db.selectFrom('drops').select(['ended_at', 'ended_reason', 'paused_at', 'paused_ms_total']).where('id', '=', r.id).executeTakeFirstOrThrow()).toEqual({
+        ended_at: at(40 * SECOND),
+        ended_reason: 'SOLD_OUT',
+        paused_at: null,
+        paused_ms_total: 30 * SECOND,
+      });
+      expect(await entry(r.id, b.id)).toMatchObject({ status: 'ENDED', ended_at: at(40 * SECOND) });
+      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.end').map((x) => x.details)).toEqual([{ reason: 'SOLD_OUT', at: at(40 * SECOND).toISOString(), ended: 1, pausedMs: 30 * SECOND }]);
+      expect(await f.live.liveReleaseIds()).not.toContain(r.id);
     });
 
     it('ENDED by an ADMIN: the room, the line and the turns ENDED at once; a hold may still be confirmed; a pause ends with it', async () => {

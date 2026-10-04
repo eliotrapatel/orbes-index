@@ -844,8 +844,9 @@ export class LiveService {
   }
 
   /**
-   * LEAVE: WAITING (the room), QUEUED (the line) or TURN (a turn given back: the piece goes to the next) → LEFT. Never
-   * back in the line after T0. Audited `drop.live.leave` with the status it left.
+   * LEAVE: WAITING (the room), QUEUED (the line) or TURN (a turn given back: the piece goes to the next) → LEFT; a turn
+   * whose deadline has passed is not given back (409 LIVE_TURN_PASSED: the engine marks it MISSED at its deadline).
+   * Never back in the line after T0. Audited `drop.live.leave` with the status it left.
    */
   async leave(accountId: string, dropId: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
@@ -857,6 +858,8 @@ export class LiveService {
       const e = await this.lockEntry(tx, id, account);
       if (!e) throw notEntered();
       if (e.status !== 'WAITING' && e.status !== 'QUEUED' && e.status !== 'TURN') throw notInLine();
+      // A turn that has run out, the engine not having marked it yet: MISSED at its deadline, not LEFT.
+      if (e.status === 'TURN' && effectiveDeadline(e.turn_expires_at!, d, now).getTime() <= now.getTime()) throw turnPassed();
       await tx.updateTable('live_entries').set({ status: 'LEFT', ended_at: maxDate(now, e.joined_at) }).where('id', '=', e.id).execute();
       if (e.status === 'TURN') await this.giveTurnsNow(tx, d, now);
       await this.audit.record({ actor, action: 'drop.live.leave', targetType: 'drop', targetId: id, details: { entryId: e.id, from: e.status } }, tx);
@@ -1092,13 +1095,17 @@ export class LiveService {
     });
   }
 
-  /** FREE A HOLD: a SECURED entry EXPIRED now, its add-ons dropped; the next in line gets the piece. Audited `drop.live.free`. */
+  /**
+   * FREE A HOLD: a SECURED entry EXPIRED now (at its deadline when that has already passed, the engine not having marked
+   * it yet), its add-ons dropped; the next in line gets the piece. Audited `drop.live.free`.
+   */
   async freeHold(dropId: string, entryId: string, actor: Actor): Promise<AdminLiveEntry> {
     assertStaff(actor, 'free a hold');
     return this.entryControl(dropId, entryId, async (tx, d, e, now) => {
       if (e.status !== 'SECURED') throw entryNotSecured();
+      const ranOut = effectiveDeadline(e.hold_expires_at!, d, now).getTime() <= now.getTime();
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
-      await tx.updateTable('live_entries').set({ status: 'EXPIRED', ended_at: now }).where('id', '=', e.id).execute();
+      await tx.updateTable('live_entries').set({ status: 'EXPIRED', ended_at: ranOut ? e.hold_expires_at : now }).where('id', '=', e.id).execute();
       await this.giveTurnsNow(tx, d, now);
       await this.audit.record({ actor, action: 'drop.live.free', targetType: 'drop', targetId: d.id, details: { entryId: e.id } }, tx);
     });
@@ -1366,7 +1373,8 @@ export class LiveService {
 
   /**
    * The end that is due, begun now: SOLD_OUT when every piece is confirmed (at the last confirmation, before the close),
-   * CLOSED once `closes_at` has passed (at `closes_at`). Returns its reason, or null.
+   * CLOSED once `closes_at` has passed (at `closes_at`). A pause in progress ends with it, the deadlines moved as by
+   * RESUME (a turn in progress may still be secured, a hold confirmed, until its deadline). Returns its reason, or null.
    */
   private async settleEnd(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<LiveEndReason | null> {
     if (d.ended_at) return null;
@@ -1378,15 +1386,11 @@ export class LiveService {
       const last = await tx.selectFrom('live_entries').select((eb) => eb.fn.max('confirmed_at').as('at')).where('drop_id', '=', d.id).executeTakeFirstOrThrow();
       soldOutAt = last.at ? new Date(last.at as Date) : now;
     }
-    if (soldOutAt && soldOutAt.getTime() < d.closes_at.getTime()) {
-      await this.endRelease(tx, d, 'SOLD_OUT', soldOutAt, SYSTEM_ACTOR, {}, notes);
-      return 'SOLD_OUT';
-    }
-    if (now.getTime() >= d.closes_at.getTime()) {
-      await this.endRelease(tx, d, 'CLOSED', d.closes_at, SYSTEM_ACTOR, {}, notes);
-      return 'CLOSED';
-    }
-    return null;
+    const reason: LiveEndReason | null = soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT' : now.getTime() >= d.closes_at.getTime() ? 'CLOSED' : null;
+    if (!reason) return null;
+    const pausedMs = d.paused_at ? await this.unpause(tx, d, now) : null;
+    await this.endRelease(tx, d, reason, reason === 'SOLD_OUT' ? soldOutAt! : d.closes_at, SYSTEM_ACTOR, pausedMs === null ? {} : { pausedMs }, notes);
+    return reason;
   }
 
   /**

@@ -17,11 +17,12 @@
  *    paused, before T0, after the close or the end, with its tier's window;
  *  - legal transitions only; add-ons only on a held or confirmed piece;
  *  - paused time never consumes a turn or a hold: a MISSED turn and an EXPIRED hold (not freed) ran exactly their
- *    windows outside the pauses; a refusal for a passed turn or an ended hold comes exactly then; a press held 1.4 s
- *    secures, a shorter one never;
+ *    windows outside the pauses, a freed hold until it was freed or its end; a refusal for a passed turn (SECURE,
+ *    PRESS, LEAVE) or an ended hold comes exactly then; a press held 1.4 s secures, a shorter one never;
  *  - the end: SOLD_OUT exactly when every piece is confirmed before the close (at the last confirmation), CLOSED at
- *    `closes_at`, ENDED only by the console; set once, on time, never changed; after it no WAITING or QUEUED entry
- *    (nor TURN after ENDED) and no new turn; in the end every release is over;
+ *    `closes_at`, ENDED only by the console; set once, on time, never changed; a pause ends by RESUME, END or with the
+ *    release, never outlives it; after it no WAITING or QUEUED entry (nor TURN after ENDED) and no new turn; in the
+ *    end every release is over, with no RESUME forced;
  *  - the engine's pass is idempotent: a second pass at the same time changes nothing.
  *
  * Entry ids and sealed seeds are random (the database draws them): a failure prints the scenario's seed and its trace.
@@ -128,7 +129,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
       expect(totals[`${k}:ok`] ?? 0, k).toBeGreaterThan(0);
     }
     for (const k of [
-      'end:SOLD_OUT', 'end:CLOSED', 'end:ENDED',
+      'end:SOLD_OUT', 'end:CLOSED', 'end:ENDED', 'pause ended:CLOSED',
       'status:QUEUED', 'status:TURN', 'status:SECURED', 'status:CONFIRMED', 'status:MISSED', 'status:EXPIRED', 'status:RELEASED', 'status:LEFT', 'status:REMOVED', 'status:ENDED',
       'refused:LIVE_HOLD_TOO_SHORT', 'refused:LIVE_TURN_PASSED', 'refused:LIVE_HOLD_ENDED', 'refused:LIVE_PAUSED', 'refused:LIVE_NO_FREE_PIECE', 'refused:LIVE_SIZE_LOCKED',
     ]) {
@@ -248,7 +249,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
       if (w.prev!.drop.paused_at && rng.chance(0.5)) await step(w, 'resume', () => w.live.resume(w.dropId, w.f.admin));
       await tick(w);
     }
-    if (w.prev!.drop.paused_at) await step(w, 'resume', () => w.live.resume(w.dropId, w.f.admin));
+    // No RESUME forced here: a pause still in progress at the close ends with the release, by the engine's pass.
     w.f.clock.advance(20 * MINUTE);
     await tick(w);
     expect(await over(w), 'over').toBe(true);
@@ -297,7 +298,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
         else await tick(w);
         return;
       case 'TURN': {
-        if (rng.chance(0.05)) return void (await step(w, 'leave', () => w.live.leave(p.id, w.dropId, actor)));
+        if (rng.chance(0.05)) return void (await step(w, 'leave', () => w.live.leave(p.id, w.dropId, actor), { person: p }));
         if (rng.chance(0.25)) return tick(w); // slow: the turn may run out
         const token = (await w.live.entry(p.id, w.dropId))?.turn?.token ?? 'none';
         const kind = rng.float();
@@ -378,7 +379,12 @@ describe('the LIVE RELEASE engine, simulated', () => {
     for (const e of after.entries.values()) if (before.entries.get(e.id)?.status !== e.status) count(w, `status:${e.status}`);
     // The console's controls change the pauses' record only when they succeed.
     if (outcome === 'ok' && name === 'pause') w.pauses.push({ from: after.now, to: null });
-    if (outcome === 'ok' && (name === 'resume' || (name === 'end' && before.drop.paused_at))) w.pauses.at(-1)!.to = after.now;
+    if (before.drop.paused_at && !after.drop.paused_at) {
+      // A pause ends by RESUME, by END, or with the release (its close or its sell-out).
+      expect(name === 'resume' || name === 'end' || (after.drop.ended_at !== null && !before.drop.ended_at), `a pause ended by ${name}`).toBe(true);
+      w.pauses.at(-1)!.to = after.now;
+      if (name !== 'resume' && name !== 'end') count(w, `pause ended:${after.drop.ended_reason}`);
+    }
     if (outcome === 'ok' && name === 'free' && ctx.entry) w.freed.add(ctx.entry);
     if (outcome === 'ok' && name === 'press' && ctx.person) w.lastPress.set(ctx.person.id, after.now);
     check(w, name, outcome, before, after, ctx);
@@ -436,6 +442,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
     if ((name === 'tick' && now >= closes) || ((name === 'tick' || name === 'confirm') && confirmedQty >= stock)) expect(d.ended_at, 'the end on time').not.toBeNull();
     if (!d.ended_at) expect(confirmedQty < stock || name !== 'tick').toBe(true);
     if (d.ended_at) {
+      expect(d.paused_at, 'no pause after the end').toBeNull();
       for (const e of entries) expect(['WAITING', 'QUEUED'], 'nothing waits after the end').not.toContain(e.status);
       if (d.ended_reason === 'ENDED') for (const e of entries) expect(e.status, 'no turn after an END').not.toBe('TURN');
     }
@@ -476,6 +483,9 @@ describe('the LIVE RELEASE engine, simulated', () => {
       // Paused time never consumes a turn or a hold.
       if (e.status === 'MISSED' && was?.status !== 'MISSED') expect(running(w, e.turn_at!, e.ended_at!), 'a missed turn ran its window').toBe(turnMs);
       if (e.status === 'EXPIRED' && was?.status !== 'EXPIRED' && !w.freed.has(e.id)) expect(running(w, e.secured_at!, e.ended_at!), 'an ended hold ran its window').toBe(payMs);
+      if (e.status === 'EXPIRED' && was?.status !== 'EXPIRED' && w.freed.has(e.id)) {
+        expect(running(w, e.secured_at!, e.ended_at!), 'a hold freed now, or at its end when that has passed').toBe(Math.min(running(w, e.secured_at!, new Date(now)), payMs));
+      }
       if (e.status === 'SECURED' && was?.status === 'TURN') {
         expect(running(w, e.turn_at!, new Date(now)), 'secured within its turn').toBeLessThan(turnMs);
         expect(e.hold_expires_at!.getTime() - now, 'the pay window of its tier').toBe(payMs);
@@ -487,10 +497,11 @@ describe('the LIVE RELEASE engine, simulated', () => {
 
     // What the customer was told agrees with the clock and the gesture.
     const mine = ctx.person ? before.entries.get(entryKey(w, ctx.person.id)) : undefined;
-    if (mine && (name === 'secure' || name === 'press') && mine.status === 'TURN') {
+    if (mine && (name === 'secure' || name === 'press' || name === 'leave') && mine.status === 'TURN') {
       const tier = mine.tier;
       const turnMs = (w.overrides.get(tier)?.turn ?? w.turnSeconds) * SECOND;
       if (outcome === 'LIVE_TURN_PASSED') expect(running(w, mine.turn_at!, new Date(now))).toBeGreaterThanOrEqual(turnMs);
+      if (name === 'leave' && outcome === 'ok') expect(running(w, mine.turn_at!, new Date(now)), 'a turn given back while it runs').toBeLessThan(turnMs);
       if (name === 'secure' && outcome === 'LIVE_HOLD_TOO_SHORT') expect(ctx.hold!).toBeLessThan(LIVE_GESTURE_MIN_MS);
       if (name === 'secure' && outcome === 'ok') {
         expect(ctx.hold!, 'the gesture from the last press').toBeGreaterThanOrEqual(LIVE_GESTURE_MIN_MS);
