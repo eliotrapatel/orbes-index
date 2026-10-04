@@ -270,6 +270,17 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
     for (const c of ['tail -n 1 .state/deploys.log', 'docker compose ps', 'docker compose exec app node --import tsx scripts/db.ts status', 'scripts/backup.sh --dry-run', 'scripts/restore.sh --identity /dev/null --latest --dry-run', 'curl -s https://verify.theorbes.com/api/v1/health', 'curl -s https://verify.theorbes.com/api/v1/client-services']) {
       expect(cmds, c).toContain(c);
     }
+    // Then, in §2.6, the plan's external checks after every deployment (Vérification): the public routes, the 401
+    // without a session, the 413 outside the photographs' uploads (the app is recreated with a new environment).
+    const post = section(runbook, '### 2.6');
+    for (const c of [
+      "curl -s -o /dev/null -w '%{http_code}\\n' https://verify.theorbes.com/api/v1/club/lookbook",
+      "head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\\n' -X POST -H 'content-type: application/json' --data-binary @- https://verify.theorbes.com/api/v1/verify",
+      'curl -s https://verify.theorbes.com/api/v1/lookbook',
+    ]) {
+      expect(fenced(post, 'bash'), c).toContain(c);
+    }
+    for (const s of ['Sortie attendue : `401`', 'Sortie attendue : `413`', 'sans aucun modèle réservé au salon privé (P-X08)']) expect(post, s).toContain(s);
   });
 
   it('gives each item of B and C one real check, and says C is merged into B+C', () => {

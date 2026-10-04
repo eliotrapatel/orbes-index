@@ -1031,9 +1031,8 @@ export interface CircleStats {
   visits: { total: number; daily: { day: string; visits: number }[] };
 }
 
-// ── The Club: the tiers (P-X04) ────────────────────────────────────────────
+// ── The Club: the private salon's requests (P-X08) ─────────────────────────
 
-/** One tier of GET /api/admin/club/tiers (and PATCH /api/admin/club/tiers/:tier). */
 /** A request of the private salon (P-X08; GET /api/admin/club/requests): the client's email masked for an AUDITOR. */
 export interface ShopRequest {
   id: string;
@@ -1049,6 +1048,9 @@ export interface ShopRequest {
   resolutionNote: string | null;
 }
 
+// ── The Club: the tiers (P-X04) ────────────────────────────────────────────
+
+/** One tier of GET /api/admin/club/tiers (and PATCH /api/admin/club/tiers/:tier). */
 export interface ClubTierSheet {
   tier: ClubTierName;
   level: 1 | 2 | 3;

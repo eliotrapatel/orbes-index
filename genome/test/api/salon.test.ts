@@ -168,6 +168,8 @@ describe('the private salon (P-X08)', () => {
     expect(errorOf(await requestOf(titane.client, 'nope')).code).toBe('LOOKBOOK_NOT_FOUND');
     expect((await requestOf(titane.client, 'solstice', { note: 'x'.repeat(501) })).statusCode).toBe(400);
     expect((await requestOf(titane.client, 'solstice', { price: 1 })).statusCode).toBe(400);
+    // A mutation without the CSRF header is refused before anything is written.
+    expect(errorOf(await titane.client.post('/api/v1/club/lookbook/solstice/request', {}, { noCsrf: true })).code).toBe('CSRF_FAILED');
 
     const res = await requestOf(titane.client, 'solstice', { note: '  A size 52, and a call after six.  ' });
     expect(res.statusCode, res.body).toBe(201);
@@ -209,6 +211,8 @@ describe('the private salon (P-X08)', () => {
 
     const close = (c: Client, body: unknown, id = mine.id) => c.post(`/api/admin/club/requests/${id}/close`, body);
     expect((await close(auditor, { note: 'Called.' })).statusCode).toBe(403);
+    // Without the CSRF header, refused even for an OPERATOR.
+    expect((await operator.post(`/api/admin/club/requests/${mine.id}/close`, { note: 'Called.' }, { noCsrf: true })).statusCode).toBe(403);
     expect((await close(operator, {})).statusCode).toBe(400);
     expect((await close(operator, { note: '   ' })).statusCode).toBe(400);
     expect(errorOf(await close(operator, { note: 'Called.' }, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6')).code).toBe('SHOP_REQUEST_NOT_FOUND');

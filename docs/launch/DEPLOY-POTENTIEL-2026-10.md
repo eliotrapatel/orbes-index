@@ -810,6 +810,18 @@ curl -s -o /dev/null -w '%{http_code}\n' https://verify.theorbes.com/api/v1/club
 
 Sortie attendue : `401` (le salon privé demande un compte connecté, P-X08).
 
+```bash
+head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @- https://verify.theorbes.com/api/v1/verify
+```
+
+Sortie attendue : `413` (un corps de 100 Ko reste refusé hors des envois de photos de la console, après la recréation de l'application).
+
+```bash
+curl -s https://verify.theorbes.com/api/v1/lookbook
+```
+
+Sortie attendue : `{"models":[…]}`, la collection publique (une liste vide tant qu'aucun modèle n'est publié), sans aucun modèle réservé au salon privé (P-X08).
+
 **Préviens le responsable de l'hôte** : « Déploiement B+C d'ORBES fait à <heure> UTC, tout est healthy. Avant / après : <les chiffres>. »
 
 ### 2.7 Une vérification réelle par élément

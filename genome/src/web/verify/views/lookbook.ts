@@ -425,7 +425,13 @@ class SheetPage {
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
-      this.requestError = messageOf(e);
+      if (e instanceof ApiError && e.code === 'SHOP_REQUEST_OPEN') {
+        // Already requested (from another tab or device, or the sheet was stale): the sheet read again says REQUESTED,
+        // with the contact of ORBES Client Services, rather than a failure.
+        this.load = await this.fromClub(sheet.slug);
+      } else {
+        this.requestError = messageOf(e);
+      }
     } finally {
       this.busy = false;
     }
