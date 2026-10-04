@@ -691,11 +691,10 @@ export const RELEASES = Object.freeze({
   /** The facts of the email to ORBES Client Services about a place held. */
   contactRelease: 'RELEASE',
   contactEntry: 'ENTRY',
-  /** P-X02: the privilege of PLATINE and PALLADIUM, recalled in THE CIRCLE and in MY PIECES (its own words for a PLATINE or PALLADIUM account). */
+  /** P-X02: the privilege of PLATINE and PALLADIUM, recalled in THE CIRCLE and in MY PIECES (for an account without a tier: from TITANE up, YOUR TIER says it). */
   earlyAccess: Object.freeze({
     label: 'EARLY ACCESS',
     recall: 'PLATINE and PALLADIUM owners reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.',
-    yours: (tier: string) => `As a ${tier} owner, you reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.`,
   }),
 });
 

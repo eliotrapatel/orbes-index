@@ -195,11 +195,14 @@ export function dropActions(d: Drop, role: AdminRole | null | undefined): DropAc
   };
 }
 
-/** What `role` may do to an entry now: CONFIRMED while its place is held, LAPSED once that time has passed. */
-export function entryActions(e: DropEntry, role: AdminRole | null | undefined, now: Date): { confirm: boolean; lapse: boolean } {
+/**
+ * What `role` may do to an entry now: CONFIRMED while its place is held, never on a cancelled release (the server
+ * answers DROP_CANCELLED); LAPSED once that time has passed.
+ */
+export function entryActions(e: DropEntry, role: AdminRole | null | undefined, now: Date, cancelled = false): { confirm: boolean; lapse: boolean } {
   const manage = can(role, 'manageDrops') && e.status === 'SELECTED';
   const due = e.respondBy !== null && Date.parse(e.respondBy) <= now.getTime();
-  return { confirm: manage, lapse: manage && due };
+  return { confirm: manage && !cancelled, lapse: manage && due };
 }
 
 /** A tier as the console names it: 0 is none. */

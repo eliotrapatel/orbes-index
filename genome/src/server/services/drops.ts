@@ -590,7 +590,10 @@ export async function auditWithdrawnEntries(audit: AuditService, tx: Db, actor: 
   }
 }
 
-/** An account's entries, for its right-of-access export (OwnerService.exportData): every one, oldest first; never the console's note. */
+/**
+ * An account's entries, for its right-of-access export (OwnerService.exportData): every one, oldest first, with the note
+ * ORBES Client Services added when it concluded it (the privacy policy says ORBES records it); never who concluded it.
+ */
 export interface ExportedDropEntry {
   entryId: string;
   dropId: string;
@@ -602,6 +605,8 @@ export interface ExportedDropEntry {
   rank: number | null;
   respondBy: Date | null;
   handledAt: Date | null;
+  /** The console's note on the conclusion (CONFIRMED, LAPSED); null when none was given. */
+  note: string | null;
 }
 
 export async function accountDropEntries(db: Db, accountId: string): Promise<ExportedDropEntry[]> {
@@ -609,7 +614,7 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
   const rows = await db
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
-    .select(['e.id', 'e.drop_id', 'd.title', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_at'])
+    .select(['e.id', 'e.drop_id', 'd.title', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_at', 'e.note'])
     .where('e.account_id', '=', accountId)
     .orderBy('e.created_at')
     .orderBy('e.id')
@@ -625,6 +630,7 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
     rank: r.rank,
     respondBy: r.respond_by,
     handledAt: r.handled_at,
+    note: r.note,
   }));
 }
 
@@ -1145,7 +1151,7 @@ export class DropService {
     );
   }
 
-  /** CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held. OPERATOR; audited `drop.entry.confirm`. */
+  /** CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held; never on a cancelled release (409 DROP_CANCELLED). OPERATOR; audited `drop.entry.confirm`. */
   confirm(dropId: string, entryId: string, note: string | null, actor: Actor): Promise<AdminDropEntry> {
     return this.conclude(dropId, entryId, 'CONFIRMED', note, actor);
   }
@@ -1197,7 +1203,9 @@ export class DropService {
     if (text !== null && (text.length > DROP_NOTE_MAX || CONTROL_CHARS.test(text))) throw validationError(`A note has at most ${DROP_NOTE_MAX} characters.`);
     await inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      await this.lock(tx, id);
+      const d = await this.lock(tx, id);
+      // No sale on a cancelled release (its direct reservations stay SELECTED); its places may still lapse.
+      if (to === 'CONFIRMED' && d.cancelled_at) throw dropCancelled();
       const e = await tx.selectFrom('drop_entries').select(['id', 'status', 'rank', 'respond_by']).where('id', '=', entry).where('drop_id', '=', id).forUpdate().executeTakeFirst();
       if (!e) throw dropEntryNotFound();
       if (e.status !== 'SELECTED') throw entryNotSelected();

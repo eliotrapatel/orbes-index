@@ -256,7 +256,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
           {
             label: '',
             cell: (e) => {
-              const a = entryActions(e, role, now);
+              const a = entryActions(e, role, now, d.state === 'CANCELLED');
               return h(
                 'span',
                 { class: 'row-actions' },

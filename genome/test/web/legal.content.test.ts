@@ -537,7 +537,7 @@ describe('legal pages: both languages, links, lexicon', () => {
     // and their early access, P-X02: terms article 12; the circle, P-X01: terms article 13; the tiers' benefits, P-X04;
     // the privacy policy's entries, reservations, answers, votes and visits); its items until that deployment move this
     // line, never another.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': 'ecf77d7e54f3ddf4' };
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

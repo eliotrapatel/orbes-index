@@ -37,8 +37,8 @@
  *                           after a creation, TRY AGAIN while unreadable)
  *   ── next piece ──
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
- *     As a PLATINE owner, you reserve …       recalled: the account's own words from its tier,
- *                                            the general rule below it
+ *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
+ *                                            TITANE up, YOUR TIER says it: its benefits or NEXT)
  *   YOUR RELEASES                            the account's entries in the drops (P-R03):
  *     MONOLITHE — RELEASE I · DRAWN          each release (a link to its page), its state,
  *     PLACE HELD · Your place is held until … — ORBES Client Services will contact you.
@@ -74,7 +74,7 @@ import { ACCOUNT_PASSWORD, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
-import { EARLY_ACCESS_MIN_TIER, myEntries, tierLabel, type MyEntryModel } from '../releases-model.js';
+import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
 import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
@@ -374,17 +374,17 @@ class PiecesPage {
 
   /**
    * EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM recalled, once the pieces and the club's status are
-   * read, signed in: in the account's own words when its tier reserves directly, the general rule otherwise.
+   * read, signed in, for an account that holds no piece only. From TITANE up, YOUR TIER already says it: among the
+   * account's own benefits (PLATINE, PALLADIUM) or under NEXT: PLATINE (TITANE), so it is not said twice.
    */
   private renderEarly(): void {
-    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.tier !== null;
+    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.club !== null && this.tier === 0;
     if (!shown) {
       this.early.hidden = true;
       this.early.replaceChildren();
       return;
     }
-    const tier = this.tier ?? 0;
-    const text = tier >= EARLY_ACCESS_MIN_TIER ? RELEASES.earlyAccess.yours(tierLabel(tier)) : RELEASES.earlyAccess.recall;
+    const text = RELEASES.earlyAccess.recall;
     this.early.hidden = false;
     this.early.replaceChildren(sectionLabel(RELEASES.earlyAccess.label, 'pieces-early'), h('p', { class: 'prose pieces__early-text', text }));
   }

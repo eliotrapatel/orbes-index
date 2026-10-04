@@ -538,12 +538,16 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect((await back.post('/api/v1/account/login', { email, password: PASSWORD })).statusCode).toBe(200);
     expect((safeJson(await enter(back, next.id)) as { entry: EntryJson }).entry).toMatchObject({ id: entry.id, status: 'ENTERED' });
 
+    // ORBES Client Services concludes the sale of the place held, with a note: the export carries it (the privacy
+    // policy says ORBES records it), never who concluded it.
+    const held = await h.ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drawnDrop.id).where('account_id', '=', accountId).executeTakeFirstOrThrow();
+    expect((await operator.post(`${adminUrl(drawnDrop.id)}/entries/${held.id}/confirm`, { note: 'Sold in the Paris boutique.' })).statusCode).toBe(200);
     const exported = safeJson(await admin.get(`/api/admin/owners/${accountId}/export`)) as { dropEntries: Record<string, unknown>[] };
     expect(exported.dropEntries).toEqual([
-      expect.objectContaining({ dropId: drawnDrop.id, status: 'SELECTED', rank: 1, tier: 0, seniority: 0, title: drawnDrop.title }),
-      expect.objectContaining({ entryId: entry.id, dropId: next.id, status: 'ENTERED', rank: null }),
+      expect.objectContaining({ entryId: held.id, dropId: drawnDrop.id, status: 'CONFIRMED', rank: 1, tier: 0, seniority: 0, title: drawnDrop.title, note: 'Sold in the Paris boutique.' }),
+      expect.objectContaining({ entryId: entry.id, dropId: next.id, status: 'ENTERED', rank: null, note: null }),
     ]);
-    for (const e of exported.dropEntries) expect(e).not.toHaveProperty('note');
+    for (const e of exported.dropEntries) expect(Object.keys(e).filter((k) => /handledBy|handled_by/.test(k))).toEqual([]);
     expect((await audits('account.export', accountId))[0]!.details).toMatchObject({ dropEntries: 2 });
   });
 
@@ -711,6 +715,20 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // The account whose place lapsed has had its chance: its entry is the lapsed one.
       const lapsedAccount = accounts.find((a) => a.id === lapsing!.account_id)!;
       expect(errorOf(await reserve(lapsedAccount.client, d.id)).code).toBe('DROP_ALREADY_RESERVED');
+    });
+
+    it('confirms no sale on a cancelled release: its direct reservations stay held, then lapse after their time', async () => {
+      const d = await draft({ quantity: 2, purchaseWindowHours: 1 }, 10 * HOUR, 2);
+      await publish(d.id);
+      const entry = await entryOf(await reserve((await owner(3)).client, d.id));
+      expect(safeJson(await operator.post(`${adminUrl(d.id)}/cancel`))).toMatchObject({ state: 'CANCELLED' });
+      const refused = await operator.post(`${adminUrl(d.id)}/entries/${entry.id}/confirm`, { note: 'Sold in the Paris boutique.' });
+      expect([refused.statusCode, errorOf(refused).code]).toEqual([409, 'DROP_CANCELLED']);
+      expect(await audits('drop.entry.confirm', d.id)).toEqual([]);
+      expect(errorOf(await operator.post(`${adminUrl(d.id)}/entries/${entry.id}/lapse`)).code).toBe('DROP_PLACE_HELD');
+      h.clock.advance(HOUR);
+      await staff();
+      expect(safeJson(await operator.post(`${adminUrl(d.id)}/entries/${entry.id}/lapse`))).toMatchObject({ status: 'LAPSED', reserved: true });
     });
 
     it('draws only the places the direct reservations leave, and lists only the entries it ranked', async () => {

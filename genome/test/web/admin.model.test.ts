@@ -498,6 +498,9 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'))).toEqual({ confirm: true, lapse: true });
     expect(entryActions(entry, 'AUDITOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });
     expect(entryActions({ ...entry, status: 'WAITLISTED' }, 'OPERATOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });
+    // A cancelled release: no sale concluded on it, its places held may still lapse.
+    expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T10:59:59Z'), true)).toEqual({ confirm: false, lapse: false });
+    expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'), true)).toEqual({ confirm: false, lapse: true });
     expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
   });
 

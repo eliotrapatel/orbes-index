@@ -1932,12 +1932,13 @@ h1[tabindex="-1"]:focus,
   grid-template-columns: 1fr 1fr;
 }
 
-.sheet__plate--gallery .sheet-photo:first-child {
+/* By type: the plate's last children are its four brackets (absolutely placed, never grid items). */
+.sheet__plate--gallery .sheet-photo:first-of-type {
   grid-column: 1 / -1;
 }
 
 /* The last photograph alone on its row: centred, at the width of a column. */
-.sheet__plate--gallery .sheet-photo:last-child:nth-child(even) {
+.sheet__plate--gallery .sheet-photo:last-of-type:nth-of-type(even) {
   grid-column: 1 / -1;
   justify-self: center;
   width: calc(50% - 9px);

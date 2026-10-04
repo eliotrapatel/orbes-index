@@ -248,7 +248,8 @@ export interface AccountExport {
   certificates: AccountCertificate[];
   /**
    * The account's entries in the drops (P-R03), oldest first: the release, the status, the entry's id (the one a
-   * drawn release publishes with its tier, seniority and rank) and the end of a place held; never the console's note.
+   * drawn release publishes with its tier, seniority and rank), the end of a place held and the note ORBES Client
+   * Services added on its conclusion; never who concluded it.
    */
   dropEntries: ExportedDropEntry[];
   /** The account's answers to the invitations of the circle (P-X01), oldest first: the post, YES or NO, when. */

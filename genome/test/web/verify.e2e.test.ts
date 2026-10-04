@@ -1944,6 +1944,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       ['eager', 600],
       ['lazy', 400],
     ]);
+    // The gallery: the cover across the plate, the last photograph alone on its row centred (the plate's brackets,
+    // its last children, do not count).
+    expect(await photos.locator('figure.sheet-photo').evaluateAll((els) => els.map((el) => [getComputedStyle(el).gridColumnEnd, getComputedStyle(el).justifySelf]))).toEqual([
+      ['-1', 'auto'],
+      ['-1', 'center'],
+    ]);
     await textsOf(page.locator('.sheet__section .section-label'), ['THE STORY', 'SPECIFICATIONS', 'CARE']);
     await textsOf(page.locator('.sheet__paragraph'), ['The ring of dawn.', 'Cast in Paris. Polished by hand.']);
     expect(await page.locator('.sheet__paragraph').nth(1).evaluate((el) => el.querySelectorAll('br').length)).toBe(1);
@@ -2148,7 +2154,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 180_000);
 
-  it('THE RELEASES, early access (P-X02): both openings under the state; RESERVE A PLACE for a PLATINE owner, the place held at once; a TITANE owner waits; the privilege recalled in MY PIECES and THE CIRCLE', async () => {
+  it('THE RELEASES, early access (P-X02): both openings under the state; RESERVE A PLACE for a PLATINE owner, the place held at once; a TITANE owner waits; the privilege said once in MY PIECES (YOUR TIER) and recalled in THE CIRCLE', async () => {
     const { ctx } = srv;
     const category = (await ctx.categories.getByCode('J'))!;
     const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-EA' }).returning('id').executeTakeFirstOrThrow();
@@ -2219,15 +2225,19 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
     await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    // MY PIECES: the privilege in the account's own words, and the place reserved among its releases.
+    // MY PIECES: the privilege among the benefits of YOUR TIER, said once (no EARLY ACCESS block), and the place
+    // reserved among its releases.
     await page.goto(`${srv.origin}/verify/pieces`);
-    await textOf(page.locator('.pieces__early .section-label'), 'EARLY ACCESS');
-    await textOf(page.locator('.pieces__early-text'), RELEASES.earlyAccess.yours('PLATINE'));
     await textOf(page.locator('.pieces__releases .pieces__entry-state'), 'ENTRIES OPEN SOON · PLACE RESERVED');
+    await textOf(page.locator('.pieces__badge-name'), 'PLATINE');
+    await countOf(page.locator('.pieces__benefits:not(.pieces__benefits--next) .pieces__benefit', { hasText: 'Early access to each release' }), 1);
+    await countOf(page.locator('.pieces__early:not([hidden])'), 0);
+    await countOf(page.locator('.pieces__early-text'), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     expect(problems).toEqual([]);
 
-    // The TITANE owner: told PLATINE and PALLADIUM owners reserve now, nothing to press; the privilege recalled.
+    // The TITANE owner: told PLATINE and PALLADIUM owners reserve now, nothing to press; the privilege said under
+    // NEXT: PLATINE in MY PIECES, recalled in THE CIRCLE.
     const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await other.page.goto(`${srv.origin}/verify/releases/${drop.id}`);
     const signIn = other.page.locator('.release__signin');
@@ -2239,7 +2249,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(other.page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     await attrOf(other.page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     await other.page.goto(`${srv.origin}/verify/pieces`);
-    await textOf(other.page.locator('.pieces__early-text'), RELEASES.earlyAccess.recall);
+    await textOf(other.page.locator('.pieces__next .section-label'), 'NEXT: PLATINE');
+    await countOf(other.page.locator('.pieces__benefits--next .pieces__benefit', { hasText: 'Early access to each release' }), 1);
+    await countOf(other.page.locator('.pieces__early:not([hidden])'), 0);
     await other.page.goto(`${srv.origin}/verify/circle`);
     await textOf(other.page.locator('.circle__early .section-label'), 'EARLY ACCESS');
     await textOf(other.page.locator('.circle__early-text'), RELEASES.earlyAccess.recall);
@@ -2313,6 +2325,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(club.locator('.pieces__badge'), 0);
     await textOf(club.locator('.pieces__next-way'), 'A piece registered to your ORBES account opens TITANE, the first tier of the club:');
     await textsOf(club.locator('.pieces__benefits--next .pieces__benefit'), CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'));
+    // Without a tier, YOUR TIER does not say the early access of PLATINE and PALLADIUM: EARLY ACCESS recalls it.
+    await textOf(other.page.locator('.pieces__early .section-label'), 'EARLY ACCESS');
+    await textOf(other.page.locator('.pieces__early-text'), RELEASES.earlyAccess.recall);
     expect(await figuresInDisplayFace(other.page)).toEqual([]);
     expect(other.problems).toEqual([]);
   }, 180_000);
