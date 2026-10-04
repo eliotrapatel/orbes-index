@@ -12,6 +12,8 @@
  *    it: its commit check, its window and its date (the B+C LEGAL_VERSION), the pre-check with `pgrep -a pg_dump`,
  *    the host's OK, the fast-forward, the guarded launch `pgrep -a pg_dump || scripts/deploy.sh`, its failures and
  *    post-checks, one real check per item of B and C, and C itself merged into it;
+ *  - deployment B+C is recorded as done on 2026-10-04 (the owner's launch, commit 78959e8), its version 2026-10-05
+ *    published a few hours before its date, so the next legal version comes after it;
  *  - every message it expects from deploy.sh, backup.sh, restore.sh and lib.sh is still one they print;
  *  - the rules of the shared host: never 03:00–05:30 UTC, the pre-check of DEPLOYMENT §15.7 before and after,
  *    restore.sh only ever run to watch it refuse (--dry-run), no prune, the fast-forward to the final commit after
@@ -210,8 +212,19 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
     expect(section(runbook, '### 1.7')).toContain('`THE PRIVATE SALON` depuis le déploiement B+C');
   });
 
+  it('records deployment B+C as done on 2026-10-04, from its final commit, its version published before its date', () => {
+    expect(runbook).toContain('## 2. Déploiement B+C : fait le 2026-10-04');
+    const bc = section(runbook, '## 2.');
+    for (const s of ['**Ce qui s\'est passé.**', '**2026-10-04**', '`78959e8516cc146a297cab46ddec68e157fe2847`', '`orbes-genome:78959e8516cc`', 'soit vingt en tout', `\`${LEGAL_VERSION}\``, '**publiée le 2026-10-04, quelques heures avant sa date**', '**On répare en avant**', `l'image de A, \`${A_TAG}\`, ne peut plus tourner sur ce schéma`, '`deploys.log`']) {
+      expect(bc, s).toContain(s);
+    }
+    expect(NAMES.filter((n) => numberOf(n) <= 20)).toHaveLength(20);
+    // Rule 7: the next legal version comes after B+C's.
+    expect(runbook).toContain('B+C a publié `2026-10-05`, mis en ligne le 2026-10-04 (§2) ; le prochain déploiement qui change les pages légales porte donc une date postérieure, le 2026-10-06 au plus tôt.');
+  });
+
   it('combines B and C into one deployment B+C, from deployment A, with its two migrations, as the scripts print them', () => {
-    expect(runbook).toContain(`| B+C | ${BC_ITEMS.join(', ')} | \`0019\` et \`0020\` | À faire, après A (§2) |`);
+    expect(runbook).toContain(`| B+C | ${BC_ITEMS.join(', ')} | \`0019\` et \`0020\` | **Fait** le 2026-10-04 (§2) |`);
     expect(runbook).not.toMatch(/^\| [BC] \|/m);
     const bc = section(runbook, '## 2.');
     // The start: A's commit, its image, its eighteen migrations.
@@ -246,7 +259,8 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
     expect(LEGAL_VERSION).not.toBe('2026-10-04');
     expect(LEGAL_VERSION).toBe('2026-10-05');
     expect(section(runbook, '### 2.0')).toContain(`\`LEGAL_VERSION\` \`${LEGAL_VERSION}\``);
-    expect(section(runbook, '### 2.0')).toContain(`B+C se déploie donc **le ${LEGAL_VERSION}**`);
+    expect(section(runbook, '### 2.0')).toContain(`B+C devait donc se déployer **le ${LEGAL_VERSION}**`);
+    expect(section(runbook, '### 2.0')).toContain('Il est parti le 2026-10-04 : ses pages légales affichent la date du lendemain');
     expect(section(runbook, '### 2.1')).toContain(`Sortie attendue : le **${LEGAL_VERSION}** (\`Mon Oct  5 …\`), à une heure **hors** de 03:00–05:30 UTC.`);
     expect(cmds).toContain('date -u');
     // The pre-check, a backup running, the host's OK, then the fast-forward to the checked commit.

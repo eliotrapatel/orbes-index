@@ -7,7 +7,7 @@ Les éléments du lot « Potentiel » (choisis le 2026-10-03 ; P-R04, la provena
 | Déploiement | Éléments | Migrations | État |
 |---|---|---|---|
 | A | P-R02, P-R03, P-X01, P-X02, P-X04 | `0014` à `0018`, et l'exception Caddy des nouveaux envois de photos | **Fait** le 2026-10-04 à 03:27 UTC (§1) |
-| B+C | P-D01, P-M02, P-R06, P-X08, P-D07, P-D10 | `0019` et `0020` | À faire, après A (§2) |
+| B+C | P-D01, P-M02, P-R06, P-X08, P-D07, P-D10 | `0019` et `0020` | **Fait** le 2026-10-04 (§2) |
 
 Le point de départ : la production tourne le commit `3660154006b5016509856930a0255377584a6084` (image `orbes-genome:3660154006b5`) depuis le 2026-10-03 à 19:44 UTC, avec les treize migrations `0001` à `0013` ([le runbook précédent](DEPLOY-RECOMMANDATIONS-2026-10.md), §3.5). Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
 
@@ -19,7 +19,7 @@ Le point de départ : la production tourne le commit `3660154006b5016509856930a0
 4. **Jamais de `docker image prune`, `docker system prune` ni `docker volume prune`** sur ce serveur : ces commandes touchent aussi les autres projets de l'hôte. Une ancienne image se retire par son tag exact (§1.8).
 5. **Aucun autre commit que celui indiqué.** Chaque déploiement part du commit final de son étape, que te donne le rapport de Claude, sa CI verte : un commit intermédiaire n'a pas toutes les migrations de l'étape.
 6. **Les secrets ne se collent jamais dans une conversation.** Aucun de ces déploiements n'en crée ni n'en affiche.
-7. **Les pages légales** portent une seule version par déploiement, datée du jour du déploiement (`LEGAL_VERSION`, posée dans le commit final de l'étape), et une version publiée ne change plus : A a publié `2026-10-04`, B+C porte `2026-10-05` (§2.0). Si la date prévue glisse, demande à Claude un commit qui la recale avant de déployer.
+7. **Les pages légales** portent une seule version par déploiement, datée du jour du déploiement (`LEGAL_VERSION`, posée dans le commit final de l'étape), et une version publiée ne change plus : A a publié `2026-10-04` ; B+C a publié `2026-10-05`, mis en ligne le 2026-10-04 (§2) ; le prochain déploiement qui change les pages légales porte donc une date postérieure, le 2026-10-06 au plus tôt. Si la date prévue glisse, demande à Claude un commit qui la recale avant de déployer.
 8. **Le lancement est gardé** : `pgrep -a pg_dump || scripts/deploy.sh` ne démarre `deploy.sh` que si aucune sauvegarde (`pg_dump`, de n'importe quel projet de l'hôte) ne tourne.
 
 ---
@@ -459,7 +459,9 @@ docker images orbes-genome
 
 ---
 
-## 2. Déploiement B+C : à faire
+## 2. Déploiement B+C : fait le 2026-10-04
+
+**Ce qui s'est passé.** Le déploiement B+C est en production depuis le **2026-10-04**, hors de la fenêtre des sauvegardes : tu l'as lancé toi-même, depuis le commit final de l'étape BC, `78959e8516cc146a297cab46ddec68e157fe2847` (sa CI verte ; l'image attendue est `orbes-genome:78959e8516cc`). Les migrations `0019` et `0020` sont appliquées, soit vingt en tout. Vérifié de l'extérieur à 18:57 UTC : santé 200, `/verify`, le lookbook, THE RELEASES, MY PIECES et la console répondent, les six éléments sont dans l'application servie, et les pages légales portent la version `2026-10-05`. Cette version a donc été **publiée le 2026-10-04, quelques heures avant sa date** : une version publiée ne change plus, elle reste telle quelle, et le prochain déploiement qui change les pages légales portera une date postérieure (règle 7). **On répare en avant** : l'image de A, `ce5bf886d444`, ne peut plus tourner sur ce schéma. L'heure exacte, l'image et la sauvegarde pré-déploiement sont dans `deploys.log` sur le serveur (§2.6). Restent avec toi les vérifications réelles du §2.7. La suite du §2 garde la procédure telle qu'elle était prévue.
 
 Le 2026-10-04, tu as fusionné les étapes B et C du plan en **une seule étape « BC » et un seul déploiement, B+C** : ses six éléments, dans l'ordre du plan, chacun construit sur le précédent (le son et le rituel du scan s'ajoutent à la cérémonie, sur le même écran de résultat). Le modèle est le §1 ; seules changent les valeurs : le point de départ est le déploiement A.
 
@@ -477,7 +479,7 @@ Le 2026-10-04, tu as fusionné les étapes B et C du plan en **une seule étape 
 
 - **Caddy** : rien ne change (le Caddyfile est celui du déploiement A). `deploy.sh` le valide et ne recrée pas Caddy.
 - **Les variables** : aucune à poser. `CARE_SUBSCRIBE_URL` (P-M02, l'adresse de la page d'abonnement d'ORBES Care) est **facultative et reste vide** dans le `.env` du serveur : le déploiement n'en a pas besoin, et l'onglet CARE dit alors *Subscriptions open soon.* Elle se posera plus tard, quand l'abonnement ouvrira sur Whop (§2.8). P-D07 et P-D10 n'ajoutent aucune variable.
-- **Les pages légales** : une seule nouvelle version pour l'étape BC, `LEGAL_VERSION` `2026-10-05` : les conditions d'utilisation (articles 1, 2, 3, 4, 11, 12, 14 et 15 : un modèle arrêté, ORBES Care, le salon privé) et la politique de confidentialité (les demandes du salon privé, la page d'ORBES Care, la préférence du son gardée sur l'appareil), avec la FAQ (le son). Le 2026-10-04 est la version que le déploiement A a publiée, et une version publiée ne change plus : B+C se déploie donc **le 2026-10-05** (la date de `date -u`), hors 03:00–05:30 UTC. Un déploiement le 2026-10-04 afficherait la date du lendemain : demande d'abord à Claude. Après le 2026-10-05, la règle 7 du §0 s'applique.
+- **Les pages légales** : une seule nouvelle version pour l'étape BC, `LEGAL_VERSION` `2026-10-05` : les conditions d'utilisation (articles 1, 2, 3, 4, 11, 12, 14 et 15 : un modèle arrêté, ORBES Care, le salon privé) et la politique de confidentialité (les demandes du salon privé, la page d'ORBES Care, la préférence du son gardée sur l'appareil), avec la FAQ (le son). Le 2026-10-04 est la version que le déploiement A a publiée, et une version publiée ne change plus : B+C devait donc se déployer **le 2026-10-05** (la date de `date -u`), hors 03:00–05:30 UTC. Il est parti le 2026-10-04 : ses pages légales affichent la date du lendemain (ci-dessus, « Ce qui s'est passé »). Après le 2026-10-05, la règle 7 du §0 s'applique.
 - **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
 - **Pas de retour en arrière** : une fois les migrations faites, l'image `ce5bf886d444` ne peut plus tourner sur ce schéma. `deploy.sh --image ce5bf886d444` la refuse.
 
