@@ -4257,12 +4257,12 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   display: none;
 }
 
-/* One line, as every control's label: a long name gives way (an ellipsis), never the state nor the countdown. */
+/* One line, as every control's label: a long name gives way (an ellipsis), never the state nor the countdown. The strip
+   centres its line; the line sets the labels and the countdown's larger figures on one baseline. */
 .live-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   min-height: 56px;
   padding: var(--safe-top) calc(16px + var(--safe-right)) 0 calc(16px + var(--safe-left));
   background: var(--ink);
@@ -4272,6 +4272,13 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   letter-spacing: var(--track-micro);
   white-space: nowrap;
   text-decoration: none;
+}
+
+.live-banner__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .live-banner__lead {

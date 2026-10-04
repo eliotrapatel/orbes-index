@@ -569,16 +569,38 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
     }));
 }
 
+/** A moment the answer still holds ahead though this device's estimate of the server's clock has passed it: read again this soon. */
+export const CHANGE_RETRY_MS = 4000;
+
 /**
- * When THE RELEASES should read its LIVE half again, at the server's time `now` (ms): the next of the moments that change
- * a card (a stage, the room's opening, T0, the end); null when none is ahead.
+ * When THE RELEASES should read its LIVE half again, at the server's time `now` (ms) as this device estimates it: the
+ * next of the moments that change a card (a stage, the room's opening, T0, the end); and, while a release's room is open
+ * or it is live, within `watchMs`, since it may end before its time (sold out, or ended by ORBES) and then leaves the
+ * list. A moment the answer still holds ahead (a reveal it lists, a phase it has not reached, its end) that `now` has
+ * passed (an answer read just before it, or this device ahead of the server) is read again CHANGE_RETRY_MS later, never
+ * dropped. Null when nothing is ahead.
  */
-export function nextChange(cards: readonly Pick<LiveCard, 'reveals' | 'roomOpensAt' | 'opensAt' | 'closesAt'>[], now: number): number | null {
+export function nextChange(
+  cards: readonly Pick<LiveCard, 'phase' | 'reveals' | 'roomOpensAt' | 'opensAt' | 'closesAt'>[],
+  now: number,
+  watchMs: number,
+): number | null {
   let next: number | null = null;
+  const consider = (t: number) => {
+    if (next === null || t < next) next = t;
+  };
   for (const c of cards) {
-    for (const at of [...(Array.isArray(c.reveals) ? c.reveals.map((r) => r.at) : []), c.roomOpensAt, c.opensAt, c.closesAt]) {
-      const t = Date.parse(at);
-      if (Number.isFinite(t) && t > now && (next === null || t < next)) next = t;
+    const room = Date.parse(c.roomOpensAt);
+    if (c.phase === 'ROOM' || c.phase === 'LIVE' || (Number.isFinite(room) && now >= room)) consider(now + watchMs);
+    const ahead = [
+      ...(Array.isArray(c.reveals) ? c.reveals.map((r) => r.at) : []),
+      c.phase === 'ANNOUNCED' ? c.roomOpensAt : null,
+      c.phase === 'ANNOUNCED' || c.phase === 'ROOM' ? c.opensAt : null,
+      c.closesAt,
+    ];
+    for (const at of ahead) {
+      const t = typeof at === 'string' ? Date.parse(at) : NaN;
+      if (Number.isFinite(t)) consider(t > now ? t : now + CHANGE_RETRY_MS);
     }
   }
   return next;
@@ -610,7 +632,9 @@ export function bannerModel(b: LiveBanner | null, now: number): BannerModel | nu
   const base = { id: b.id, href: releasePath(b.id), lead };
   if (now >= opens) return { ...base, phase: 'LIVE', state: LIVE.phase.LIVE, clock: null };
   if (now >= room) return { ...base, phase: 'ROOM', state: LIVE.phase.ROOM, clock: null };
-  // OPENS IN counts to T0, as the release's page does; the room opens a few minutes before it.
+  // OPENS IN counts to T0, as the release's page does; the room opens a few minutes before it. A day or more ahead it
+  // says the days (OPENS IN 3 DAYS), as the page's countdown does, the plan's hh:mm:ss from the last day: hours past 24
+  // would read as a number to work out, not a time.
   const left = opens - now;
   if (left >= DAY) return { ...base, phase: 'ANNOUNCED', state: LIVE.banner.days(Math.floor(left / DAY)), clock: null };
   const total = Math.ceil(left / SECOND);

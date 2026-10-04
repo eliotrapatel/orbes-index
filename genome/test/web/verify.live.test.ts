@@ -16,6 +16,7 @@ import { unframeCodeData } from '../../src/core/payload.js';
 import { LIVE } from '../../src/web/verify/copy.js';
 import {
   addonChoices,
+  CHANGE_RETRY_MS,
   clockOffset,
   clockText,
   countdown,
@@ -468,16 +469,41 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
     expect(interestLine(Number.NaN)).toBeNull();
   });
 
-  it('reads THE RELEASES again at the next moment that changes a card: a stage, the room, T0, the end', () => {
-    const c = card({ reveals: stages([T0 - 7_200_000, T0 - 3_600_000]) });
-    expect(nextChange([c], T0 - 10 * 3_600_000)).toBe(T0 - 7_200_000);
-    expect(nextChange([c], T0 - 7_200_000)).toBe(T0 - 3_600_000);
-    expect(nextChange([c], T0 - 3_600_000)).toBe(T0 - 300_000);
-    expect(nextChange([c], T0 - 300_000)).toBe(T0);
-    expect(nextChange([c], T0)).toBe(T0 + 3_600_000);
-    expect(nextChange([c], T0 + 3_600_000)).toBeNull();
-    expect(nextChange([c, card({ opensAt: iso(T0 - 600_000), roomOpensAt: iso(T0 - 900_000) })], T0 - 1_000_000)).toBe(T0 - 900_000);
-    expect(nextChange([], T0)).toBeNull();
+  /** The card as the server answers at `at`: the reveals still to come (T0 - 2 h, T0 - 1 h), the phase reached. */
+  const answer = (at: number, extra: Partial<LiveCard> = {}): LiveCard =>
+    card({
+      phase: at < T0 - 300_000 ? 'ANNOUNCED' : at < T0 ? 'ROOM' : 'LIVE',
+      reveals: stages([T0 - 7_200_000, T0 - 3_600_000].filter((t) => t > at)),
+      ...extra,
+    });
+  const WATCH = 60_000;
+
+  it('reads THE RELEASES again at the next moment that changes a card: a stage, the room, T0, the end; within the watch while a room is open or a release live', () => {
+    expect(nextChange([answer(T0 - 10 * 3_600_000)], T0 - 10 * 3_600_000, WATCH)).toBe(T0 - 7_200_000);
+    expect(nextChange([answer(T0 - 7_200_000)], T0 - 7_200_000, WATCH)).toBe(T0 - 3_600_000);
+    expect(nextChange([answer(T0 - 3_600_000)], T0 - 3_600_000, WATCH)).toBe(T0 - 300_000);
+    // The room open, then live: sold out or ended by ORBES before its time, it leaves the list within the watch.
+    expect(nextChange([answer(T0 - 300_000)], T0 - 300_000, WATCH)).toBe(T0 - 240_000);
+    expect(nextChange([answer(T0 - 30_000)], T0 - 30_000, WATCH)).toBe(T0);
+    expect(nextChange([answer(T0)], T0, WATCH)).toBe(T0 + WATCH);
+    expect(nextChange([answer(T0 + 3_590_000)], T0 + 3_590_000, WATCH)).toBe(T0 + 3_600_000);
+    // One release in its room watches the list for all.
+    const later = card({ roomOpensAt: iso(T0 + 86_400_000 - 300_000), opensAt: iso(T0 + 86_400_000), closesAt: iso(T0 + 90_000_000) });
+    expect(nextChange([later, answer(T0 - 200_000)], T0 - 200_000, WATCH)).toBe(T0 - 140_000);
+    expect(nextChange([later], T0, WATCH)).toBe(T0 + 86_400_000 - 300_000);
+    expect(nextChange([], T0, WATCH)).toBeNull();
+  });
+
+  it('reads THE RELEASES again shortly when the answer still holds ahead a moment this device has passed: never a stage dropped from the schedule', () => {
+    // A reveal still listed, read a moment before it (or this device ahead of the server).
+    expect(nextChange([answer(T0 - 7_200_001)], T0 - 7_199_500, WATCH)).toBe(T0 - 7_199_500 + CHANGE_RETRY_MS);
+    // Once the server no longer lists it, the next stage.
+    expect(nextChange([answer(T0 - 7_200_000)], T0 - 7_199_500, WATCH)).toBe(T0 - 3_600_000);
+    // A phase not reached in the answer: the room, T0, the end.
+    expect(nextChange([answer(T0 - 300_001)], T0 - 299_000, WATCH)).toBe(T0 - 299_000 + CHANGE_RETRY_MS);
+    expect(nextChange([answer(T0 - 1)], T0 + 100, WATCH)).toBe(T0 + 100 + CHANGE_RETRY_MS);
+    expect(nextChange([answer(T0 + 3_599_999)], T0 + 3_600_100, WATCH)).toBe(T0 + 3_600_100 + CHANGE_RETRY_MS);
+    expect(CHANGE_RETRY_MS).toBeLessThan(WATCH);
   });
 
   it('says the banner OPENS IN to T0 on the server\'s clock, then THE ROOM IS OPEN, then LIVE NOW; hidden at the end; the name once revealed', () => {

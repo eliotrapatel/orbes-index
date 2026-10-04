@@ -40,8 +40,9 @@
  * RELEASE and where it stands, its name once revealed, its opening in Paris (then on this phone), its price and quantity
  * line, its rule, the reveals still to come with their times, N COLLECTORS WILL BE THERE, and
  * SEE THE RELEASE; its page is the LIVE RELEASE's (views/live.ts). The list is read again at each moment that changes a
- * LIVE RELEASE's card, on the server's clock (a stage, its room, T0, its end): each stage shows at its time, and the
- * release leaves THE RELEASES at its end.
+ * LIVE RELEASE's card, on the server's clock (a stage, its room, T0, its end), and every BANNER_REFRESH_MS while a room
+ * is open or a release live: each stage shows at its time, and the release leaves THE RELEASES at its end, within a
+ * minute when it comes early (sold out, or ended by ORBES).
  *
  * Every action is a same-origin JSON call through ApiClient (the session
  * cookie, the CSRF token); server messages are shown as they come. A 401
@@ -52,7 +53,7 @@ import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { LIVE, RELEASES } from '../copy.js';
-import { liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
+import { CHANGE_RETRY_MS, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import { sealSvg } from '../live-seal.js';
 import {
   drawLines,
@@ -69,6 +70,7 @@ import type { SessionStore } from '../session.js';
 import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
 import { contactBlock, legalLinks, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
+import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
 
 export interface ReleasesView {
@@ -191,8 +193,8 @@ class ListPage {
   }
 
   /**
-   * The releases. `quiet`: read again at a moment of a LIVE RELEASE (a stage, its room, T0, its end), the list kept on
-   * show meanwhile and kept as it was should the read fail; the release that has ended leaves it then.
+   * The releases. `quiet`: read again at a moment of a LIVE RELEASE (a stage, its room, T0, its end, or the watch of a
+   * room open or a release live), the list kept on show meanwhile and kept as it was should the read fail; the release that has ended leaves it then.
    */
   private async fetch(quiet = false): Promise<void> {
     if (this.changeTimer) clearTimeout(this.changeTimer);
@@ -221,11 +223,17 @@ class ListPage {
     this.render(quiet);
   }
 
-  /** The next read: at the next moment that changes a LIVE RELEASE's card, on the server's clock. */
+  /**
+   * The next read: at the next moment that changes a LIVE RELEASE's card, on the server's clock; within
+   * BANNER_REFRESH_MS while a room is open or a release live (sold out or ended by ORBES, it leaves the list then, as it
+   * leaves the banner). A moment passed that the answer still holds ahead says this phone's estimate of the server's
+   * clock may be off: it is measured again with that read.
+   */
   private schedule(live: Parameters<typeof nextChange>[0]): void {
     const now = Date.now() + (this.offset ?? 0);
-    const next = nextChange(live, now);
+    const next = nextChange(live, now, BANNER_REFRESH_MS);
     if (next === null) return;
+    if (next - now <= CHANGE_RETRY_MS) this.offset = null;
     this.changeTimer = setTimeout(() => void this.fetch(true), Math.min(CHANGE_MAX_MS, next - now + CHANGE_MARGIN_MS));
   }
 

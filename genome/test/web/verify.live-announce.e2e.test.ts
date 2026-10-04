@@ -4,7 +4,7 @@
  *
  *  - THE RELEASES as the release calendar: a release's card says the reveals still to come and their times, then each
  *    stage at its own (the silhouette, the name, the photograph), never before it, the page reading the releases again
- *    then; N COLLECTORS WILL BE THERE; a release leaves the list at its end.
+ *    then; N COLLECTORS WILL BE THERE; a release leaves the list at its end, and within a minute when sold out before it.
  *  - The release's page announced: THE REVEALS; I'LL BE THERE with a size, its public count following, another size
  *    changing it, WITHDRAW; read again, the size said; signed out, the sign-in under it; outside the rule, the rule and
  *    why.
@@ -27,6 +27,7 @@ import { startLiveEngine } from '../../src/server/context.js';
 import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
+import { BANNER_REFRESH_MS } from '../../src/web/verify/views/live-banner.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -198,6 +199,27 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(problems).toEqual([]);
   }, 90_000);
 
+  it('THE RELEASES open while a release is live: sold out long before its end, it leaves the list within the minute the banner takes', async () => {
+    await clear();
+    const t = Date.now();
+    const live = await release({ opensAt: new Date(t + 2 * SECOND), closesAt: new Date(t + 2 * 3_600_000), roomOpensMinutes: 1 });
+    const { page, problems } = await phone(null);
+    // This page's timers on a clock the test moves on (its time still flowing meanwhile).
+    await page.clock.install();
+    await page.goto(`${srv.origin}/verify/releases`);
+    const card = page.locator('article.live-card').filter({ has: page.locator(`#release-${live.id}-title`) });
+    await textOf(card.locator('.live-card__kind'), 'LIVE RELEASE · LIVE NOW');
+    // Sold out at once: ended long before its time, its end two hours away.
+    await srv.ctx.db.updateTable('drops').set({ ended_at: new Date(), ended_reason: 'SOLD_OUT' }).where('id', '=', live.id).execute();
+    await page.clock.fastForward(BANNER_REFRESH_MS - 5 * SECOND);
+    await sleep(500);
+    expect(await card.count()).toBe(1);
+    await page.clock.fastForward(10 * SECOND);
+    await expect.poll(() => card.count(), POLL).toBe(0);
+    expect(await page.locator('article.live-card').count()).toBe(0);
+    expect(problems).toEqual([]);
+  }, 60_000);
+
   it('the page announced: THE REVEALS; I’LL BE THERE with a size and its public count, changed, withdrawn; signed out the sign-in; outside the rule, the rule and why', async () => {
     await clear();
     const r = await release({ opensAt: new Date(Date.now() + 2 * 86_400_000), minTier: 1, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 2 }, { label: '54', stock: 1 }] });
@@ -311,6 +333,29 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     const [strip, corners] = await page.evaluate(() => [getComputedStyle(document.querySelector('.live-banner-host')!).zIndex, getComputedStyle(document.querySelector('.corners')!).zIndex].map(Number));
     expect(strip).toBeGreaterThan(corners!);
     expect(await banner.locator('.live-banner__clock').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
+    // One line on one baseline: the countdown's figures on the labels' own, the line centred in the strip.
+    const line = await banner.evaluate((el) => {
+      const baseline = (node: Element) => {
+        const probe = document.createElement('span');
+        probe.style.display = 'inline-block';
+        probe.style.height = '0';
+        node.append(probe);
+        const y = probe.getBoundingClientRect().bottom;
+        probe.remove();
+        return y;
+      };
+      const strip = el.getBoundingClientRect();
+      const row = el.querySelector('.live-banner__line')!.getBoundingClientRect();
+      return {
+        lead: baseline(el.querySelector('.live-banner__lead')!),
+        state: baseline(el.querySelector('.live-banner__state')!),
+        clock: baseline(el.querySelector('.live-banner__clock')!),
+        offCentre: Math.abs(row.top + row.height / 2 - (strip.top + strip.height / 2)),
+      };
+    });
+    expect(Math.abs(line.clock - line.state)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(line.lead - line.state)).toBeLessThanOrEqual(0.5);
+    expect(line.offCentre).toBeLessThanOrEqual(1);
     expect((await tapZoneFloors(page)).problems).toEqual([]);
     // Its name at its stage, never before.
     await holdsUntil(t + 6 * SECOND, async () => expect(await page.content()).not.toContain('MONOLITHE'));
