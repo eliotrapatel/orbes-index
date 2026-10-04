@@ -18,7 +18,9 @@
  *    said under the header, the seal not offered and its time still; the seal held from the keyboard (the space bar); a
  *    pause on the piece held, its time to confirm still; RELEASE MY PLACE confirmed by a second tap.
  *  - Every edge page: not signed in, not eligible, turn passed, hold ended, place released, left the line, removed, sold
- *    out in your size, the release ended before your turn, the release over.
+ *    out in your size, the release ended before your turn, the release over; the release's end said once the room says its
+ *    reason, when the entry's end is read first.
+ *  - A collector entered on another phone, back in the room: a tap there makes the ten ticks heard; untouched, silence.
  *  - The LIVE RELEASES refused (429, their own rate group): THE RELEASES still shows the draws and says the LIVE half is
  *    missing; a draw's address shows its draw; a LIVE one says its failure, TRY AGAIN reading it again.
  *
@@ -244,7 +246,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await visible(card);
     await textOf(card.locator('.live-card__kind'), 'LIVE RELEASE');
     await textOf(card.locator('.live-card__title'), 'MONOLITHE');
-    await textOf(card.locator('.live-card__line'), '€ 5 050 · 25 PIECES');
+    await textOf(card.locator('.live-card__line'), '€ 5 050 · 25 PIECES · ONE PER COLLECTOR');
     await textOf(card.locator('.live-card__access'), 'FOR OWNERS FROM PLATINE');
     await textOf(card.locator('.live-card__when').first(), /^[A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
     expect(await card.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(GROUND);
@@ -574,7 +576,49 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       expect(problems, c.name).toEqual([]);
       await context.close();
     }
+
+    // The entry's end read before the room's reason (the room and the entries are read apart): the page follows the room
+    // until it says why, and its words follow it.
+    const { page, context, problems } = await phone(waiting.token);
+    let behind = 0;
+    await page.route(
+      (u) => u.pathname === `/api/v1/live/${ended.id}/state`,
+      async (route) => {
+        if (behind++ > 0) return route.continue();
+        const response = await route.fetch();
+        const state = (await response.json()) as { room: Record<string, unknown> };
+        await route.fulfill({ response, json: { ...state, room: { ...state.room, phase: 'LIVE', over: false, endedReason: null } } });
+      },
+    );
+    await page.goto(`${srv.origin}/verify/releases/${ended.id}`);
+    await textOf(page.locator('h1'), LIVE.edge.ended.SOLD_OUT.title);
+    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.SOLD_OUT.text);
+    expect(behind).toBeGreaterThan(0);
+    expect(problems).toEqual([]);
+    await context.close();
   }, 180_000);
+
+  it('a collector entered on another phone, back in the room: a tap or a key there makes the ten ticks heard; untouched, the room keeps silent', async () => {
+    const t0 = new Date(Date.now() + 25_000);
+    const r = await release({ opensAt: t0, minTier: 1, sizes: [{ label: '50', stock: 2 }] });
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    const quiet = await phone(me.token);
+    const back = await phone(me.token);
+    for (const p of [quiet, back]) {
+      await p.page.goto(`${srv.origin}/verify/releases/${r.id}`);
+      await visible(p.page.getByText(LIVE.youreReady));
+    }
+    // A tap on the room's title, nothing that acts: the gesture alone.
+    await back.page.locator('.live__room > h1').click();
+    for (const p of [quiet, back]) await expect.poll(() => p.page.locator('.live-door').getAttribute('class'), { timeout: 45_000, interval: 100 }).toMatch(/is-open/);
+    expect((await live(back.page)).tones.filter((t) => t === 1318.51)).toHaveLength(10);
+    expect((await live(quiet.page)).tones).toEqual([]);
+    for (const p of [quiet, back]) {
+      expect(p.problems).toEqual([]);
+      await p.context.close();
+    }
+  }, 120_000);
 
   it('the LIVE RELEASES refused (429): THE RELEASES keeps the draws and says the LIVE half missing; a draw\'s address shows its draw; a LIVE one its failure, then TRY AGAIN', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 2 * 86_400_000) });

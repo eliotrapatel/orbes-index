@@ -402,7 +402,7 @@ describe('the release announced, and its card in THE RELEASES', () => {
     expect(pictureOf({ ...before, silhouetteUrl: 'https://elsewhere.example/s.png' })).toBeNull();
   });
 
-  it('lists its LIVE RELEASES on vault plates: where each stands, its name or TO BE REVEALED, its opening, price, quantity and rule', () => {
+  it('lists its LIVE RELEASES on vault plates: where each stands, its name or TO BE REVEALED, its opening, price, quantity, limit per collector and rule', () => {
     const [announced, room0, live, unnamed] = liveCards(
       [
         card(),
@@ -420,13 +420,14 @@ describe('the release announced, and its card in THE RELEASES', () => {
       kind: 'LIVE RELEASE',
       title: 'MONOLITHE',
       when: { paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: null },
-      line: '€ 4 800 · 25 PIECES',
+      line: '€ 4 800 · 25 PIECES · ONE PER COLLECTOR',
       access: 'FOR OWNERS FROM PLATINE',
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
     });
     expect(room0!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
     expect(live!.kind).toBe('LIVE RELEASE · LIVE NOW');
     expect(unnamed).toMatchObject({ title: 'TO BE REVEALED', picture: null });
+    expect(liveCards([card({ perAccount: 2 })], 'Europe/Paris')[0]!.line).toBe('€ 4 800 · 25 PIECES · UP TO 2 PER COLLECTOR');
     expect(liveCards([card()], 'Asia/Tokyo')[0]!.when.local).toBe('MONDAY 12 OCTOBER · 02:00 ON THIS PHONE');
   });
 });

@@ -489,7 +489,7 @@ export interface LiveCardModel {
   title: string;
   /** `SUNDAY 11 OCTOBER · 19:00 PARIS`, then on this phone when it differs. */
   when: { paris: string; local: string | null };
-  /** `€ 4 800 · 25 PIECES` */
+  /** `€ 4 800 · 25 PIECES · ONE PER COLLECTOR`: the price, the quantity line and the limit per collector. */
   line: string;
   access: string;
   picture: LivePicture | null;
@@ -504,7 +504,7 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
       kind: c.phase === 'ANNOUNCED' ? LIVE.kind : `${LIVE.kind} · ${LIVE.phase[c.phase]}`,
       title: c.name ? upper(c.name) : LIVE.unnamed,
       when: releaseTime(c.opensAt, localZone),
-      line: offerLine(c),
+      line: [offerLine(c), LIVE.perAccount(c.perAccount)].join(' · '),
       access: LIVE.forWhom(c.access.text),
       picture: pictureOf(c),
     }));

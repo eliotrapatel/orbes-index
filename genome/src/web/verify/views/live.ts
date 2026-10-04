@@ -356,7 +356,7 @@ class LivePage {
     const before = e?.status === 'QUEUED' ? roomSize(this.room, e.size.id) : null;
     if (e && before && before.left < e.quantity) this.sizeWasFull = true;
     this.room = room;
-    if (room.over) {
+    if (this.done()) {
       this.closeStream();
       this.stopPolling();
     }
@@ -373,7 +373,7 @@ class LivePage {
     const held = heldEntry(entry);
     if (held) this.picked = { sizeId: held.size.id, quantity: held.quantity };
     else if (this.picked.sizeId === null && this.sheet && !isEndedSheet(this.sheet)) this.picked = { sizeId: initialSize(this.sheet, entry, this.interest), quantity: this.picked.quantity };
-    if (entry && FINAL.has(entry.status)) {
+    if (this.done()) {
       this.closeStream();
       this.stopPolling();
     }
@@ -426,9 +426,14 @@ class LivePage {
     });
   }
 
-  /** Nothing will change for this page any more: the release over, or the account's entry final. */
+  /**
+   * Nothing will change for this page any more: the release over, or the account's entry final. An entry ENDED is final
+   * once the room says why (the room and the entries are read apart: the reason may come a frame after the entry).
+   */
   private done(): boolean {
-    return this.gone || this.room?.over === true || (this.entry !== null && FINAL.has(this.entry.status)) || this.viewer === 'not-eligible';
+    const e = this.entry;
+    const final = e !== null && FINAL.has(e.status) && (e.status !== 'ENDED' || !!this.room?.endedReason);
+    return this.gone || this.room?.over === true || final || this.viewer === 'not-eligible';
   }
 
   private closeStream(): void {
@@ -834,9 +839,12 @@ class LivePage {
     const choose = this.note(LIVE.chooseLine, 'live__choose');
     const leave = h('button', { class: 'textlink live__leave', attrs: { type: 'button' }, on: { click: () => void this.act(() => this.deps.api.liveLeave(s.id)) }, text: LIVE.leaveRoom });
     const prep = h('div', { class: 'live__prep' }, plate, picker.el, errorLine, choose, enter, ready, readyLine, leave);
+    // The ticks sound only from a context a gesture made: any tap or key in the room before T0 makes it (a collector
+    // who entered earlier, on this page or another, then came back). A tap's pointerup is the gesture a browser grants.
+    const prime = (): void => this.deps.sound.prime();
     const el = h(
       'section',
-      { class: 'live__room' },
+      { class: 'live__room', on: { pointerup: prime, keydown: prime } },
       overline,
       this.title(m.name),
       this.fact(m.offer, 'live__offer'),
@@ -1390,15 +1398,23 @@ class LivePage {
   private edgeScreen(kind: LiveScreenKind): Screen {
     const copy = this.edgeCopy(kind);
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
+    const title = this.title(copy.title);
+    const note = this.note(copy.text);
     const el = h(
       'section',
       { class: 'live__edge' },
       this.overline(this.name()),
-      this.title(copy.title),
-      this.note(copy.text),
+      title,
+      note,
       contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
     );
-    return { kind, el, back: contact === null, update: () => undefined };
+    // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
+    const update = (): void => {
+      const now = this.edgeCopy(kind);
+      if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
+      if (note.textContent !== now.text) note.textContent = now.text;
+    };
+    return { kind, el, back: contact === null, update };
   }
 
   private edgeCopy(kind: LiveScreenKind): { title: string; text: string } {

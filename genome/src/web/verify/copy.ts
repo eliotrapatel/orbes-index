@@ -964,7 +964,7 @@ export const LIVE = Object.freeze({
     ended: Object.freeze({
       SOLD_OUT: Object.freeze({ title: 'SOLD OUT', text: 'Every piece of this release is reserved.' }),
       CLOSED: Object.freeze({ title: 'THE RELEASE HAS CLOSED', text: 'Its time has run out before your turn came.' }),
-      ENDED: Object.freeze({ title: 'THE RELEASE HAS ENDED', text: 'ORBES has ended this release before your turn came.' }),
+      ENDED: Object.freeze({ title: 'THE RELEASE HAS ENDED', text: 'ORBES has ended this release before your piece was secured.' }),
     }),
     over: Object.freeze({ title: 'THIS RELEASE IS OVER', text: 'It no longer appears in THE RELEASES. Your entry, if you had one, stays in MY PIECES.' }),
   }),
@@ -1006,7 +1006,7 @@ export const LIVE = Object.freeze({
     RELEASED: 'You released your place: the piece returned to the line.',
     LEFT: 'You left this release.',
     REMOVED: 'ORBES removed your entry from this release.',
-    ENDED: 'The release ended before your turn came.',
+    ENDED: 'The release ended before your piece was secured.',
   }),
   reference: (ref: string) => `REFERENCE ${ref}`,
 });
