@@ -16,7 +16,8 @@
  *            transaction with every session of the account revoked, its
  *            pending transfers cancelled, its open links to ownership
  *            certificates withdrawn, its open entries in the drops withdrawn
- *            (P-R03) and its open recovery code revoked.
+ *            (P-R03), its open requests of the private salon closed (P-X08)
+ *            and its open recovery code revoked.
  *            Sign-in is then refused (403 ACCOUNT_LOCKED) until it is
  *            unlocked, and a recovery code cannot be issued. Audited
  *            `account.lock`.
@@ -26,8 +27,8 @@
  *            holds about the account, for a request under the right of access,
  *            including the links to ownership certificates it created (never
  *            their tokens), its entries in the drops (P-R03), its answers to
- *            the circle's invitations and its votes in its polls (P-X01) and
- *            every audit entry that names it, as target or as actor. Audited
+ *            the circle's invitations and its votes in its polls (P-X01), its
+ *            requests of the private salon (P-X08) and every audit entry that names it, as target or as actor. Audited
  *            `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -35,7 +36,8 @@
  * (routes/admin/serialize.ts `clientEmail`): the service returns them as stored.
  *
  * Lock order: the account row, its open certificate links, the drops of its
- * open entries (FOR SHARE, as ENTER and WITHDRAW), then the products of its
+ * open entries (FOR SHARE, as ENTER and WITHDRAW), its open requests of the
+ * private salon, then the products of its
  * pending transfers (OwnershipService.cancelPendingTransfersFrom), as in an
  * assisted recovery.
  * The audit log is permanent: entries name the account id, never its email.
@@ -52,6 +54,7 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import type { OwnershipService } from './ownership.js';
+import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
 
@@ -190,6 +193,8 @@ export interface LockOutcome {
   certificatesRevoked: number;
   /** The account's entries in drops not drawn yet the lock withdrew (P-R03). */
   dropEntriesWithdrawn: number;
+  /** The account's open requests of the private salon the lock closed (P-X08). */
+  shopRequestsClosed: number;
 }
 
 /**
@@ -256,6 +261,11 @@ export interface AccountExport {
   circleAnswers: ExportedCircleAnswer[];
   /** The account's votes in the polls of the circle (P-X01), oldest first: the post, the option and its words, when. */
   circleVotes: ExportedCircleVote[];
+  /**
+   * The account's requests of the private salon (P-X08), oldest first: the model, the account's note, the status, when,
+   * and the note ORBES Client Services added on closing it; never who closed it.
+   */
+  shopRequests: ExportedShopRequest[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -386,8 +396,8 @@ export class OwnerService {
 
   /**
    * Lock an ACTIVE account (an ADMIN of ORBES Client Services): every session ends, the pending transfers
-   * it offered are cancelled, its open certificate links are withdrawn and its open recovery code is revoked,
-   * in one transaction.
+   * it offered are cancelled, its open certificate links are withdrawn, its open entries in the drops withdrawn, its
+   * open requests of the private salon closed and its open recovery code is revoked, in one transaction.
    * 409 ACCOUNT_ALREADY_LOCKED, ACCOUNT_NOT_ACTIVE (deleted).
    */
   async lock(accountId: string, actor: Actor): Promise<LockOutcome> {
@@ -417,23 +427,27 @@ export class OwnerService {
       const certificates = await withdrawAccountCertificates(tx, account.id, now);
       // Its entries in drops not drawn yet leave their draw (P-R03): the drops FOR SHARE, as ENTER and WITHDRAW take them.
       const entries = await withdrawAccountEntries(tx, account.id);
+      // Its open requests of the private salon are closed (P-X08): ORBES Client Services does not follow them up.
+      const shopRequests = await closeAccountShopRequests(tx, account.id, actor, now);
       // Last of the writes: it audits each cancellation, and no row is locked after the audit chain's lock.
       const transfersCancelled = await this.ownership.cancelPendingTransfersFrom(tx, account.id, actor, 'account_locked');
       await auditWithdrawnCertificates(this.audit, tx, actor, certificates, 'account_locked');
       await auditWithdrawnEntries(this.audit, tx, actor, entries, 'account_locked');
+      await auditClosedShopRequests(this.audit, tx, actor, shopRequests, 'account_locked');
       const certificatesRevoked = certificates.length;
       const dropEntriesWithdrawn = entries.length;
+      const shopRequestsClosed = shopRequests.length;
       await this.audit.record(
         {
           actor,
           action: 'account.lock',
           targetType: 'account',
           targetId: account.id,
-          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn },
+          details: { sessionsRevoked, transfersCancelled: transfersCancelled.length, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn, shopRequestsClosed },
         },
         tx,
       );
-      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn };
+      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn, shopRequestsClosed };
     });
   }
 
@@ -513,6 +527,7 @@ export class OwnerService {
       const certificates = await accountCertificates(tx, a.id, now);
       const dropEntries = await accountDropEntries(tx, a.id);
       const circle = await accountCircleData(tx, a.id);
+      const shopRequests = await accountShopRequests(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -588,6 +603,7 @@ export class OwnerService {
         dropEntries,
         circleAnswers: circle.answers,
         circleVotes: circle.votes,
+        shopRequests,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -616,6 +632,7 @@ export class OwnerService {
             dropEntries: out.dropEntries.length,
             circleAnswers: out.circleAnswers.length,
             circleVotes: out.circleVotes.length,
+            shopRequests: out.shopRequests.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

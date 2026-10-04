@@ -1956,7 +1956,7 @@ h1[tabindex="-1"]:focus,
   margin-top: 60px;
 }
 
-/* A sheet: its collection over its name, its type (and RESERVED FOR OWNERS) under it. */
+/* A sheet: its collection over its name, its type (and THE PRIVATE SALON) under it. */
 .sheet__collection {
   margin-bottom: 18px;
   font-size: var(--fs-caption);
@@ -2024,6 +2024,39 @@ h1[tabindex="-1"]:focus,
 
 .sheet__paragraph + .sheet__paragraph {
   margin-top: 14px;
+}
+
+/* P-X08, THE PRIVATE SALON: a reserved card's price, in the reading face (its figures), under the type. */
+.lookbook-card__price {
+  margin-top: 6px;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+/* A reserved sheet's salon: its price and tier, then REQUEST THIS PIECE with its note, or the request recorded. */
+.sheet__salon-lead,
+.sheet__requested {
+  margin-top: 14px;
+}
+
+.sheet__requested-text {
+  margin-top: 8px;
+}
+
+.sheet__note-field {
+  margin-top: 22px;
+  text-align: left;
+}
+
+.sheet__note {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.sheet__salon .btn {
+  margin-top: 22px;
 }
 
 /* ── The releases (P-R03) ──────────────────────────────────────────────── */

@@ -6,10 +6,43 @@
  * console's by admin.e2e.test.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { lookbookNotFound, normalizeSpecs, normalizeStory, parseSpecs, SLUG_MAX, SLUG_RE, SPEC_LABEL_MAX, SPECS_MAX, STORY_MAX } from '../../src/server/services/lookbook.js';
+import {
+  lookbookNotFound,
+  normalizePriceLabel,
+  normalizeSpecs,
+  normalizeStory,
+  parseSpecs,
+  PRICE_LABEL_MAX as SERVER_PRICE_LABEL_MAX,
+  SLUG_MAX,
+  SLUG_RE,
+  SPEC_LABEL_MAX,
+  SPECS_MAX,
+  STORY_MAX,
+} from '../../src/server/services/lookbook.js';
+import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../../src/server/services/salon.js';
+import { CLUB_TIER_NAMES as SERVER_TIER_NAMES } from '../../src/server/db/schema.js';
+import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, shopRequestStatusOf } from '../../src/web/admin/model/club.js';
 import { GALLERY_ALT_MAX as SERVER_GALLERY_ALT_MAX, GALLERY_MAX as SERVER_GALLERY_MAX } from '../../src/server/services/media.js';
 import { DomainError } from '../../src/server/errors.js';
-import { defaultAlt, GALLERY_ALT_MAX, GALLERY_MAX, galleryMoved, galleryOrder, galleryWithAlt, proposeSlug, publicationChange, publicationForm, publicationProblem } from '../../src/web/admin/model/lookbook.js';
+import {
+  defaultAlt,
+  GALLERY_ALT_MAX,
+  GALLERY_MAX,
+  galleryMoved,
+  galleryOrder,
+  galleryWithAlt,
+  PRICE_LABEL_MAX,
+  proposeSlug,
+  publicationChange,
+  publicationForm,
+  publicationProblem,
+  SALON_TIER_OPTIONS,
+  salonChange,
+  salonForm,
+  salonImpact,
+  salonProblem,
+  salonTierName,
+} from '../../src/web/admin/model/lookbook.js';
 import type { Model } from '../../src/web/admin/types.js';
 import {
   isLookbookSlug,
@@ -24,9 +57,9 @@ import {
 } from '../../src/web/shared/lookbook.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
-import { LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, sheetLine, sheetModel } from '../../src/web/verify/lookbook-model.js';
+import { LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, SALON_NOTE_MAX, sheetLine, sheetModel } from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
-import { resultViewModel } from '../../src/web/verify/view-model.js';
+import { resultViewModel, salonContactModel } from '../../src/web/verify/view-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
 const media = (n: number) => `/api/v1/media/${n.toString(16).padStart(2, '0').repeat(32)}`;
@@ -75,6 +108,7 @@ describe('the lookbook\'s grid (P-R02)', () => {
       name: 'MONOLITHE',
       type: 'RING',
       image: { src: media(1), alt: PHOTOS.modelAlt('MONOLITHE', 'RING') },
+      price: null,
     });
     expect(groups[1]!.cards[1]!.image).toBeNull();
     expect(groups[2]!.cards[0]!.name).toBe('AURORE 2026');
@@ -108,20 +142,21 @@ describe('a model\'s sheet (P-R02)', () => {
       specs: [['METAL', '925 STERLING SILVER']],
       care: DEFAULT_CARE,
       discontinued: null,
+      salon: null,
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));
     expect(reserved).toMatchObject({ reserved: true, care: 'Polish with a soft cloth.', story: null, photos: [{ src: media(2), alt: PHOTOS.modelAlt('MONOLITHE', 'RING') }] });
   });
 
-  it('says DISCONTINUED · <year> on the line of a sheet whose model was (P-R06), after RESERVED FOR OWNERS', () => {
+  it('says DISCONTINUED · <year> on the line of a sheet whose model was (P-R06), after THE PRIVATE SALON', () => {
     expect(sheetModel(sheet()).discontinued).toBeNull();
     expect(sheetLine(sheetModel(sheet()))).toBe('RING');
     expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED' })))).toBe(`RING · ${LOOKBOOK.reserved}`);
     const discontinued = sheetModel(sheet({ discontinuedYear: 2027 }));
     expect(discontinued.discontinued).toBe('DISCONTINUED · 2027');
     expect(sheetLine(discontinued)).toBe('RING · DISCONTINUED · 2027');
-    expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED', discontinuedYear: 2027 })))).toBe('RING · RESERVED FOR OWNERS · DISCONTINUED · 2027');
+    expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED', discontinuedYear: 2027 })))).toBe('RING · THE PRIVATE SALON · DISCONTINUED · 2027');
     // Only a year: anything else says nothing.
     for (const bad of [0, 2027.5, '2027' as unknown as number]) expect(sheetModel(sheet({ discontinuedYear: bad })).discontinued, String(bad)).toBeNull();
   });
@@ -136,6 +171,81 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(lookbookRouteOf('/verify/lookbook/a/b')).toEqual({ sheet: null });
     expect(lookbookRouteOf('/verify/pieces')).toBeNull();
     expect(lookbookRouteOf('/verify/lookbooks')).toBeNull();
+  });
+});
+
+describe('THE PRIVATE SALON on /verify (P-X08)', () => {
+  it('names a reserved card\'s price, and nothing the server did not send as a price', () => {
+    const [group] = lookbookGroups([card({ slug: 'eclipse', priceLabel: ' € 4 800 ', minTier: 2 }), card({ slug: 'orbe', priceLabel: null }), card({ slug: 'aurore', priceLabel: 'x'.repeat(61) })]);
+    expect(group!.cards.map((c) => [c.slug, c.price])).toEqual([
+      ['eclipse', '€ 4 800'],
+      ['orbe', null],
+      ['aurore', null],
+    ]);
+  });
+
+  it('gives a reserved sheet read through the club its price, its tier and the account\'s open request; nothing on a public sheet', () => {
+    const salon = (extra: Partial<NonNullable<LookbookSheet['salon']>> = {}) => sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: '€ 4 800', minTier: 2, request: null, ...extra } })).salon;
+    expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null });
+    expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null });
+    expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z' } })).toEqual({ price: '€ 4 800', tier: 'PALLADIUM', request: { id: 'r-1' } });
+    // A closed request offers REQUEST THIS PIECE again; a tier the club does not have, nothing to request from.
+    expect(salon({ request: { id: 'r-1', status: 'CLOSED', createdAt: '2026-10-04T10:00:00.000Z' } })!.request).toBeNull();
+    expect(salon({ minTier: 4 })).toBeNull();
+    expect(sheetModel(sheet({ lookbook: 'RESERVED' })).salon).toBeNull();
+    expect(sheetModel(sheet({ salon: { priceLabel: '€ 1', minTier: 1, request: null } })).salon).toBeNull();
+    // The tiers it names are the club's.
+    expect([1, 2, 3].map((t) => salon({ minTier: t })!.tier)).toEqual([...SERVER_TIER_NAMES]);
+  });
+
+  it('writes to ORBES Client Services about a request: the model in the subject, the model and the request in the body', () => {
+    const c = salonContactModel({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Friday' }, 'ECLIPSE', 'r-1');
+    expect(c).toMatchObject({ placement: 'salon', phone: { label: '+33 1 23 45 67 89', href: 'tel:+33123456789' }, hours: 'Monday to Friday' });
+    const url = new URL(c!.mailto!);
+    expect(url.searchParams.get('subject')).toBe('ORBES — ECLIPSE — REQUEST');
+    expect(url.searchParams.get('body')).toBe('\r\n\r\nMODEL: ECLIPSE\r\nREQUEST: r-1');
+    expect(salonContactModel({}, 'ECLIPSE', 'r-1')).toBeNull();
+    expect(salonContactModel(undefined, 'ECLIPSE', 'r-1')).toBeNull();
+  });
+
+  it('mirrors the server\'s bounds, and says the salon in the lexicon', () => {
+    expect([SALON_NOTE_MAX, SHOP_REQUEST_LIMITS.note, SHOP_REQUEST_LIMITS.resolution, PRICE_LABEL_MAX]).toEqual([SHOP_NOTE_MAX, SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX, SERVER_PRICE_LABEL_MAX]);
+    expect(LOOKBOOK.reserved).toBe('THE PRIVATE SALON');
+    expect(LOOKBOOK.salon.request).toBe('REQUEST THIS PIECE');
+    expect(LOOKBOOK.salon.requested).toBe('ORBES Client Services will contact you.');
+    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, ...Object.values(LOOKBOOK.salon)].join('\n');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toContain('!');
+  });
+});
+
+describe('the private salon in the console (P-X08)', () => {
+  it('sends only what changed of a model\'s price and tier, the price as the server keeps it, and says before what it would refuse', () => {
+    const m = { priceLabel: null, privateMinTier: 1, lookbook: 'RESERVED' as const };
+    expect(salonForm(m)).toEqual({ priceLabel: '', minTier: '1' });
+    expect(salonChange(m, { priceLabel: '  €   4 800 ', minTier: '2' })).toEqual({ priceLabel: '€ 4 800', privateMinTier: 2 });
+    expect(normalizePriceLabel('  €   4 800 ')).toBe('€ 4 800');
+    expect(salonChange({ ...m, priceLabel: '€ 4 800' }, { priceLabel: '€ 4 800', minTier: '1' })).toEqual({});
+    expect(salonChange({ ...m, priceLabel: '€ 4 800' }, { priceLabel: '  ', minTier: '1' })).toEqual({ priceLabel: '' });
+    expect(salonProblem({ priceLabel: 'x'.repeat(61), minTier: '1' })).toBe(`The price must be at most ${SERVER_PRICE_LABEL_MAX} characters.`);
+    expect(salonProblem({ priceLabel: '', minTier: '4' })).toBe('Choose the tier the model is shown from.');
+    expect(salonProblem({ priceLabel: 'Price on request', minTier: '3' })).toBeNull();
+    expect(SALON_TIER_OPTIONS.map((o) => o.value)).toEqual(['1', '2', '3']);
+    expect([1, 2, 3].map(salonTierName)).toEqual([...SERVER_TIER_NAMES]);
+    expect(salonImpact({ lookbook: 'RESERVED' })).toMatch(/in the private salon now\.$/);
+    expect(salonImpact({ lookbook: 'PUBLIC' })).toMatch(/a Public model shows no price\.$/);
+  });
+
+  it('the Requests tab: its status filter, who closes a request, the note it needs, a request\'s model line', () => {
+    expect([shopRequestStatusOf({ status: 'OPEN' }), shopRequestStatusOf({ status: 'CLOSED' }), shopRequestStatusOf({ status: 'x' }), shopRequestStatusOf({})]).toEqual(['OPEN', 'CLOSED', undefined, undefined]);
+    expect(['AUDITOR', 'OPERATOR', 'ADMIN'].map((role) => canCloseRequest(role as 'AUDITOR', { status: 'OPEN' }))).toEqual([false, true, true]);
+    expect(canCloseRequest('ADMIN', { status: 'CLOSED' })).toBe(false);
+    expect(closeRequestProblem('  ')).toBe('Say in the note what was done for the client.');
+    expect(closeRequestProblem('x'.repeat(2001))).toBe('The note must be at most 2000 characters.');
+    expect(closeRequestProblem('Called the client.')).toBeNull();
+    const model = { id: 'm', name: 'ECLIPSE', type: 'PENDANT', slug: 'eclipse', priceLabel: '€ 4 800' };
+    expect(requestModelLine({ model })).toBe('PENDANT · € 4 800');
+    expect(requestModelLine({ model: { ...model, priceLabel: null } })).toBe('PENDANT');
   });
 });
 
@@ -201,6 +311,8 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     specs: null,
     publishedAt: null,
     discontinuedAt: null,
+    priceLabel: null,
+    privateMinTier: 1,
     gallery: [],
     createdAt: '2026-10-01T08:00:00.000Z',
     ...extra,

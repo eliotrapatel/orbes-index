@@ -28,7 +28,8 @@ import type {
   CertificateOffer as ServerCertificateOffer,
   OwnerCertificate as ServerOwnerCertificate,
 } from '../../src/server/services/ownership-certificates.js';
-import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet } from '../../src/server/services/lookbook.js';
+import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
+import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import {
   CIRCLE_ANSWERS,
@@ -53,6 +54,7 @@ import {
   type LookbookSheet,
   type OwnedPiece,
   type OwnerCertificate,
+  type ShopRequest,
   type VerifyInput,
   type VerifyOutcome,
 } from '../../src/web/verify/types.js';
@@ -72,6 +74,10 @@ export const offerFits = (o: Json<ServerCertificateOffer>): CertificateOffer => 
 // …and the lookbook's answers (P-R02): a model of a list, a model's sheet.
 export const cardFits = (c: Json<ServerLookbookCard>): LookbookCard => c;
 export const sheetFits = (s: Json<ServerLookbookSheet>): LookbookSheet => s;
+// …and THE PRIVATE SALON's (P-X08): a card with its price and tier, a sheet with the account's request, a request made.
+export const salonCardFits = (c: Json<ServerSalonCard>): LookbookCard => c;
+export const salonSheetFits = (s: Json<ServerSalonSheet>): LookbookSheet => s;
+export const shopRequestFits = (r: Json<ServerShopRequest>): ShopRequest => r;
 // …and the releases' (P-R03): a release of the list, its page, its draw's entries, the account's entries and status.
 export const dropCardFits = (c: Json<ServerDropCard>): DropCard => c;
 export const dropSheetFits = (s: Json<ServerDropSheet>): DropSheet => s;

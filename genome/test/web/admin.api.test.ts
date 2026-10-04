@@ -200,6 +200,22 @@ describe('AdminApi', () => {
     }
   });
 
+  it('reads the requests of the private salon with a GET, closes one with a POST, its note and the CSRF token (P-X08)', async () => {
+    const page = { items: [], total: 0, page: 2, pageSize: 50 };
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, page), json(200, { id: 'r' }), json(200, { id: 'r' }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.shopRequests({ status: 'OPEN', page: 2, pageSize: 50 });
+    await api.updateModel('m/1', { priceLabel: '€ 4 800', privateMinTier: 2 });
+    await api.closeShopRequest('r/1', 'Called the client.');
+    expect([calls[1].init.method ?? 'GET', calls[1].url]).toEqual(['GET', '/api/admin/club/requests?status=OPEN&page=2&pageSize=50']);
+    expect(header(calls[1], 'x-csrf-token')).toBeUndefined();
+    expect(JSON.parse(String(calls[2].init.body))).toEqual({ priceLabel: '€ 4 800', privateMinTier: 2 });
+    expect([calls[3].init.method, calls[3].url]).toEqual(['POST', '/api/admin/club/requests/r%2F1/close']);
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ note: 'Called the client.' });
+    expect(header(calls[3], 'x-csrf-token')).toBe('tok-1');
+  });
+
   it('reads the daily scan statistics of a window with a GET (no CSRF token)', async () => {
     const { fetch, calls } = fakeFetch(json(200, { days: 90 }), json(200, { days: 2 }));
     const api = new AdminApi({ fetch });

@@ -278,6 +278,17 @@ export interface LookbookCard {
   collection: string | null;
   /** The model's reference photograph, else the first of its gallery: `/api/v1/media/<sha256>`, or null. */
   imageUrl: string | null;
+  /** P-X08, THE PRIVATE SALON's cards only (GET /api/v1/club/lookbook): the price shown, or null. */
+  priceLabel?: string | null;
+  /** P-X08: the lowest tier the model is shown to, 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  minTier?: number;
+}
+
+/** An account's request for a model of the private salon (P-X08), as its sheet and REQUEST THIS PIECE give it. */
+export interface ShopRequest {
+  id: string;
+  status: 'OPEN' | 'CLOSED';
+  createdAt: string;
 }
 
 /** A model's sheet (P-R02: GET /api/v1/lookbook/:slug, or the club's for an owner). */
@@ -300,6 +311,11 @@ export interface LookbookSheet {
   care: string | null;
   /** The year the model was discontinued (P-R06), or null. */
   discontinuedYear: number | null;
+  /**
+   * P-X08, a RESERVED sheet read through the club (THE PRIVATE SALON): its price (or null), the lowest tier it is shown
+   * to, and the account's open request (null: none, REQUEST THIS PIECE is offered).
+   */
+  salon?: { priceLabel: string | null; minTier: number; request?: ShopRequest | null };
 }
 
 /** A release's state as the public reads it (P-R03): a DRAFT is never sent. */

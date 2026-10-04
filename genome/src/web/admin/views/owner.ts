@@ -53,7 +53,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
             title: 'Lock this account',
             eyebrow: o.email,
             body: [
-              h('p', { class: 'dialog__text' }, 'Every session of the account ends now, the transfers it offered are cancelled, the links it shared to ownership certificates are withdrawn and an open recovery code stops working.'),
+              h('p', { class: 'dialog__text' }, 'Every session of the account ends now, the transfers it offered are cancelled, the links it shared to ownership certificates are withdrawn, its open requests of the private salon are closed and an open recovery code stops working.'),
               h(
                 'p',
                 { class: 'dialog__text' },
@@ -65,9 +65,10 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
             submit: async () => {
               const r = await ctx.api.lockOwner(o.id);
               const links = r.certificatesRevoked > 0 ? `, ${formatCount(r.certificatesRevoked)} certificate ${r.certificatesRevoked === 1 ? 'link' : 'links'} withdrawn` : '';
+              const requests = r.shopRequestsClosed > 0 ? `, ${formatCount(r.shopRequestsClosed)} ${r.shopRequestsClosed === 1 ? 'request' : 'requests'} of the private salon closed` : '';
               const code = r.recoveryCodesRevoked > 0 ? ', the open recovery code revoked' : '';
               notify(
-                `Account locked. ${formatCount(r.sessionsRevoked)} ${r.sessionsRevoked === 1 ? 'session' : 'sessions'} ended, ${formatCount(r.transfersCancelled)} ${r.transfersCancelled === 1 ? 'transfer' : 'transfers'} cancelled${links}${code}.`,
+                `Account locked. ${formatCount(r.sessionsRevoked)} ${r.sessionsRevoked === 1 ? 'session' : 'sessions'} ended, ${formatCount(r.transfersCancelled)} ${r.transfersCancelled === 1 ? 'transfer' : 'transfers'} cancelled${links}${requests}${code}.`,
               );
             },
           }).then((r) => r && ctx.reload(), notifyError),

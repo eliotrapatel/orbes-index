@@ -18,16 +18,20 @@
  *  - The tiers (P-X04): the words of each tier's benefits, one per line, as
  *    the server holds them (600 characters, 8 lines), what is sent (null to
  *    restore the default words), and an account's tier on its sheet.
+ *  - The private salon's requests (P-X08): the status a `?status=` names,
+ *    who closes one (OPERATOR, an OPEN one), what the Close dialog's note
+ *    must be (required, 2 000 characters), and a request's model line.
  */
 import { formatDateTime } from '../format.js';
 import { can } from './permissions.js';
-import type { AdminRole, ClubTierSheet, Drop, DropChange, DropEntry, DropInput, OwnerSheet } from '../types.js';
+import { SHOP_REQUEST_STATUSES, type AdminRole, type ClubTierSheet, type Drop, type DropChange, type DropEntry, type DropInput, type OwnerSheet, type ShopRequest, type ShopRequestStatus } from '../types.js';
 
 /** The tabs of the Club page, in their order. */
 export const CLUB_TABS = [
   { id: 'drops', label: 'Drops' },
   { id: 'circle', label: 'Circle' },
   { id: 'tiers', label: 'Tiers' },
+  { id: 'requests', label: 'Requests' },
 ] as const;
 export type ClubTab = (typeof CLUB_TABS)[number]['id'];
 
@@ -286,4 +290,32 @@ export function tierStanding(t: OwnerSheet['tier'] | null | undefined): string {
   const pieces = `${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
   const years = t.seniority > 0 ? ` · ${t.seniority} ${t.seniority === 1 ? 'year' : 'years'}` : '';
   return `${tierName(t.level)} · ${pieces}${years}`;
+}
+
+// ── The private salon's requests (P-X08) ───────────────────────────────────
+
+/** The bounds the server holds a request to (services/salon.ts SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX). */
+export const SHOP_REQUEST_LIMITS = Object.freeze({ note: 500, resolution: 2000 });
+
+/** The status a `?status=` of the Requests tab names: OPEN, CLOSED, or every request (undefined). */
+export function shopRequestStatusOf(query: Record<string, string>): ShopRequestStatus | undefined {
+  return (SHOP_REQUEST_STATUSES as readonly string[]).includes(query.status ?? '') ? (query.status as ShopRequestStatus) : undefined;
+}
+
+/** Whether `role` may close the request now: an OPEN one, by an OPERATOR or an ADMIN. */
+export function canCloseRequest(role: AdminRole, r: Pick<ShopRequest, 'status'>): boolean {
+  return r.status === 'OPEN' && can(role, 'closeShopRequest');
+}
+
+/** What the server would refuse in the Close dialog, said before anything is sent; null when it may be sent. */
+export function closeRequestProblem(note: string): string | null {
+  const t = note.trim();
+  if (t.length === 0) return 'Say in the note what was done for the client.';
+  if (t.length > SHOP_REQUEST_LIMITS.resolution) return `The note must be at most ${SHOP_REQUEST_LIMITS.resolution} characters.`;
+  return null;
+}
+
+/** Said under a request's model: its type and, when the salon shows one, its price. */
+export function requestModelLine(r: Pick<ShopRequest, 'model'>): string {
+  return [r.model.type, r.model.priceLabel].filter((x): x is string => typeof x === 'string' && x.trim().length > 0).join(' · ');
 }

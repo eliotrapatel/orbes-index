@@ -132,6 +132,13 @@ export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
 export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 
+/**
+ * A request for a model of the private salon (shop_requests.status, migration 0020, P-X08): OPEN until the console
+ * closes it with a note (or the account is locked), then CLOSED.
+ */
+export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -213,6 +220,10 @@ export interface ModelsTable {
   discontinued_at: TimestampNullable;
   /** Migration 0019: admin_users.id of who discontinued it; NULL for a script, and with discontinued_at. */
   discontinued_by: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0020 (P-X08): the price THE PRIVATE SALON shows for a RESERVED model, 1..60 characters; NULL: none. */
+  price_label: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0020: the lowest tier a RESERVED model is shown to, 1 TITANE (default), 2 PLATINE, 3 PALLADIUM. */
+  private_min_tier: WithDefault<number>;
   created_at: TimestampDefault;
 }
 
@@ -690,6 +701,23 @@ export interface ClubTiersTable {
   updated_at: TimestampDefault;
 }
 
+/**
+ * A request for a model of the private salon (migration 0020, P-X08): at most one OPEN per account and model. `note` is
+ * the account's words (≤ 500 characters); `handled_by`, `handled_at` and `resolution_note` the console's when it closes
+ * it (a lock closes it without a note). id, account_id, model_id, created_at and note never change.
+ */
+export interface ShopRequestsTable {
+  id: Generated<string>;
+  account_id: string;
+  model_id: string;
+  note: string | null;                 // ≤ 500 characters, the account's
+  status: WithDefault<ShopRequestStatus>;
+  created_at: TimestampDefault;
+  handled_by: string | null;           // admin_users.id
+  handled_at: TimestampNullable;
+  resolution_note: string | null;      // ≤ 2 000 characters, the console's
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -782,6 +810,7 @@ export interface Database {
   circle_poll_votes: CirclePollVotesTable;
   circle_daily_visits: CircleDailyVisitsTable;
   club_tiers: ClubTiersTable;
+  shop_requests: ShopRequestsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;

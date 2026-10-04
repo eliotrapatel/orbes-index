@@ -12,34 +12,40 @@
  *     RING            PENDANT                its name and type,
  *     SEE THE MODEL   SEE THE MODEL          and its one text link
  *   └            ┘  └            ┘
- *   RESERVED FOR OWNERS                      signed in with a piece only
- *   …
+ *   THE PRIVATE SALON                        signed in with a piece only:
+ *   …                                        the models of its tier, priced
  *            [ SCAN ORBES CODE ]
  *   PRIVACY · TERMS · LEGAL · HELP
  *
  * A card is no control of its own: its text link is (BRAND §3.8, the
  * pointer is the controls'). The sheet: the collection, the model's name and
- * type (RESERVED FOR OWNERS when the club opened it, DISCONTINUED · <year>
- * once an ADMIN discontinued it, P-R06), its photographs on an
+ * type (THE PRIVATE SALON when the club opened it, P-X08, DISCONTINUED ·
+ * <year> once an ADMIN discontinued it, P-R06), its photographs on an
  * ivory plate (the cover, then the gallery, each contained, never cropped),
+ * for a model of the salon its price, the tier it is offered from and REQUEST
+ * THIS PIECE (the sheet's one hairline button, with an optional note; once
+ * requested, ORBES Client Services will contact you, and their contact),
  * THE STORY (shared/lookbook.ts, the paragraphs the console previews),
  * SPECIFICATIONS, CARE, then THE COLLECTION, back to the grid.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a
  * signed-in account, the club's reserved models (a 403 for an account that
  * holds no piece: no section, nothing said). A sheet reads the public sheet,
- * then, when that answers 404 to a signed-in account, the club's. Every
- * photograph loads lazily: a grid may hold many.
+ * then, when that answers 404 to a signed-in account, the club's (404 too
+ * below the model's tier). Every photograph loads lazily: a grid may hold
+ * many. REQUEST THIS PIECE is a same-origin JSON call through ApiClient (the
+ * session cookie, the CSRF token); server messages are shown as they come.
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { LOOKBOOK } from '../copy.js';
-import { lookbookGroups, sheetLine, sheetModel, type CardModel, type CollectionGroup, type LookbookPhoto, type SheetModel } from '../lookbook-model.js';
+import { lookbookGroups, SALON_NOTE_MAX, sheetLine, sheetModel, type CardModel, type CollectionGroup, type LookbookPhoto, type SheetModel } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
-import type { LookbookCard } from '../types.js';
-import { legalLinks, lookbookLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import type { ClientServices, LookbookCard } from '../types.js';
+import { salonContactModel } from '../view-model.js';
+import { contactBlock, legalLinks, lookbookLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 
 export interface LookbookView {
@@ -65,6 +71,8 @@ export interface SheetDeps {
   slug: string | null;
   /** THE COLLECTION: back to the grid. */
   onCollection(): void;
+  /** P-X08: the contact of ORBES Client Services, shown once a piece of the salon is requested ({} when none is configured). */
+  clientServices(): Promise<ClientServices>;
 }
 
 type GridLoad = { kind: 'loading' } | { kind: 'ready'; groups: CollectionGroup[]; reserved: CollectionGroup[] } | { kind: 'failed'; message: string };
@@ -211,6 +219,7 @@ class GridPage {
         h('div', { class: 'lookbook-card__frame', data: { photo: '' } }, c.image ? photo(c.image, { className: 'lookbook-card__img' }) : null),
         h('h3', { class: 'lookbook-card__name', id: `${id}-name` }, ...withNumerals(c.name)),
         h('p', { class: 'lookbook-card__type' }, ...withNumerals(c.type)),
+        c.price ? h('p', { class: 'lookbook-card__price', text: c.price }) : null,
         link,
       ),
     );
@@ -227,6 +236,14 @@ class SheetPage {
   private readonly body = h('div', { class: 'sheet__body', attrs: { 'aria-live': 'polite' } });
   private load: SheetLoad = { kind: 'loading' };
   private disposed = false;
+  /** P-X08: REQUEST THIS PIECE under way, its refusal, the note typed (kept across a render), the contact. */
+  private busy = false;
+  private requestError: string | null = null;
+  private readonly note = h('textarea', {
+    class: 'field__input sheet__note',
+    attrs: { id: 'sheet-note', name: 'note', rows: 3, maxlength: SALON_NOTE_MAX, 'aria-describedby': 'sheet-note-hint' },
+  });
+  private contacts: ClientServices = {};
 
   constructor(private readonly deps: SheetDeps) {
     this.root = viewRoot('sheet', 'sheet-title');
@@ -271,7 +288,10 @@ class SheetPage {
     try {
       const s = await this.deps.session.ensure();
       if (s.status !== 'signed-in') return { kind: 'missing' };
-      return { kind: 'ready', sheet: sheetModel(await this.deps.api.clubLookbookSheet(slug)) };
+      const sheet = sheetModel(await this.deps.api.clubLookbookSheet(slug));
+      // A model of the salon: the contact shown once it is requested (none configured: {}).
+      if (sheet.salon) this.contacts = await this.deps.clientServices().catch(() => ({}));
+      return { kind: 'ready', sheet };
     } catch (e) {
       this.deps.session.noteError(e);
       // Not an owner (403), not shown (404), signed out meanwhile (401): the model is not in the collection for this reader.
@@ -330,6 +350,7 @@ class SheetPage {
         ),
       );
     }
+    if (s.salon) sections.push(this.salonSection(s));
     const story = storyBlock(s.story, { className: 'sheet__story', paragraphClass: 'prose sheet__paragraph' });
     if (story) sections.push(h('section', { class: 'sheet__section', attrs: { 'aria-labelledby': 'sheet-story' } }, sectionLabel(LOOKBOOK.story, 'sheet-story'), story));
     if (s.specs.length > 0) sections.push(h('section', { class: 'sheet__section', attrs: { 'aria-labelledby': 'sheet-specs' } }, sectionLabel(LOOKBOOK.specs, 'sheet-specs'), rows(s.specs)));
@@ -337,5 +358,79 @@ class SheetPage {
       h('section', { class: 'sheet__section', attrs: { 'aria-labelledby': 'sheet-care' } }, sectionLabel(LOOKBOOK.care, 'sheet-care'), h('p', { class: 'prose sheet__care', text: s.care })),
     );
     this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
+    if (hadFocus && !this.body.contains(document.activeElement)) this.body.querySelector<HTMLElement>('#sheet-salon')?.focus({ preventScroll: true });
+  }
+
+  /**
+   * P-X08, THE PRIVATE SALON: the price and the tier it is offered from; then REQUEST THIS PIECE with an optional note,
+   * or, once requested, ORBES Client Services will contact you, and their contact.
+   */
+  private salonSection(s: SheetModel): HTMLElement {
+    const salon = s.salon!;
+    const heading = sectionLabel(LOOKBOOK.reserved, 'sheet-salon');
+    heading.tabIndex = -1;
+    const facts: [string, string][] = [];
+    if (salon.price) facts.push([LOOKBOOK.salon.price, salon.price]);
+    facts.push([LOOKBOOK.salon.tier, salon.tier]);
+    const out: (HTMLElement | null)[] = [heading, rows(facts, 'sheet__salon-rows')];
+    if (salon.request) {
+      const contact = salonContactModel(this.contacts, s.name, salon.request.id);
+      out.push(
+        h(
+          'div',
+          { class: 'sheet__requested', attrs: { role: 'status' } },
+          h('p', { class: 'ownership__status', text: LOOKBOOK.salon.requestedLabel }),
+          h('p', { class: 'prose sheet__requested-text', text: LOOKBOOK.salon.requested }),
+        ),
+        contact ? contactBlock(contact) : null,
+      );
+    } else {
+      out.push(
+        h('p', { class: 'prose sheet__salon-lead', text: LOOKBOOK.salon.lead }),
+        h(
+          'div',
+          { class: 'field sheet__note-field' },
+          h('label', { class: 'field__label', attrs: { for: 'sheet-note' }, text: LOOKBOOK.salon.note }),
+          this.note,
+          h('span', { class: 'field__hint', id: 'sheet-note-hint', text: LOOKBOOK.salon.noteHint }),
+        ),
+        this.requestError ? h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${LOOKBOOK.salon.requestFailed} ${this.requestError}` }) : null,
+        h(
+          'button',
+          {
+            class: 'btn sheet__request',
+            attrs: { type: 'button', disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' },
+            on: { click: () => void this.requestPiece() },
+            text: LOOKBOOK.salon.request,
+          },
+        ),
+      );
+    }
+    return h('section', { class: 'sheet__section sheet__salon', attrs: { 'aria-labelledby': 'sheet-salon' } }, ...out.filter((x): x is HTMLElement => x !== null));
+  }
+
+  /** REQUEST THIS PIECE: the request recorded, then the sheet says ORBES Client Services will contact you. */
+  private async requestPiece(): Promise<void> {
+    if (this.busy || this.load.kind !== 'ready' || !this.load.sheet.salon) return;
+    const sheet = this.load.sheet;
+    this.busy = true;
+    this.requestError = null;
+    this.render();
+    try {
+      const note = this.note.value.trim();
+      const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null);
+      if (this.disposed) return;
+      this.note.value = '';
+      this.load = { kind: 'ready', sheet: { ...sheet, salon: { ...sheet.salon!, request: { id: request.id } } } };
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      this.requestError = messageOf(e);
+    } finally {
+      this.busy = false;
+    }
+    if (this.disposed) return;
+    this.render();
+    this.root.querySelector<HTMLElement>('#sheet-salon')?.focus({ preventScroll: true });
   }
 }

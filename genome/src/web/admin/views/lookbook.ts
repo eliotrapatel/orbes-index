@@ -6,6 +6,8 @@
  *  - Publication: its place, Hidden, Public (everyone) or Reserved (the
  *    owners of an ORBES piece), and the address of its sheet (proposed from
  *    its name; fixed once first published);
+ *  - Private salon (P-X08): a Reserved model's price, as THE PRIVATE SALON
+ *    shows it, and the tier it is shown from (TITANE, PLATINE, PALLADIUM);
  *  - Story: plain paragraphs, previewed as the client reads them (shared
  *    renderer, src/web/shared/lookbook.ts), since a hidden model's sheet
  *    answers 404 in public;
@@ -34,6 +36,13 @@ import {
   publicationForm,
   publicationImpact,
   publicationProblem,
+  PRICE_LABEL_MAX,
+  SALON_TIER_OPTIONS,
+  salonChange,
+  salonForm,
+  salonImpact,
+  salonProblem,
+  salonTierName,
   sheetAddress,
   specsProblem,
   textChange,
@@ -102,6 +111,37 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
       { label: 'First published', value: m.publishedAt ? formatDate(m.publishedAt) : 'Never' },
     ]),
     { id: 'publication', tools: canEdit ? [button('Edit', { kind: 'ghost', testId: 'lookbook-edit', onClick: editPublication })] : [] },
+  );
+
+  // ── Private salon (P-X08) ────────────────────────────────────────────────
+  const editSalon = () => {
+    const form = salonForm(m);
+    void openDialog({
+      title: 'Private salon',
+      eyebrow,
+      body: h('p', { class: 'dialog__text', data: { testid: 'salon-impact' } }, salonImpact(m)),
+      fields: [
+        { name: 'priceLabel', label: 'Price', maxlength: PRICE_LABEL_MAX, value: form.priceLabel, hint: 'As the salon shows it: € 4 800, or Price on request. Empty: no price shown.' },
+        { name: 'minTier', label: 'Shown from', kind: 'select', options: [...SALON_TIER_OPTIONS], value: form.minTier },
+      ],
+      validate: (v) => {
+        const f = { priceLabel: v.priceLabel, minTier: v.minTier };
+        return salonProblem(f) ?? (Object.keys(salonChange(m, f)).length === 0 ? 'Nothing has changed.' : null);
+      },
+      confirmLabel: 'Save private salon',
+      submit: async (v) => {
+        await ctx.api.updateModel(m.id, salonChange(m, { priceLabel: v.priceLabel, minTier: v.minTier }));
+      },
+    }).then(done('Private salon saved.'));
+  };
+
+  const salon = section(
+    'Private salon',
+    defList([
+      { label: 'Price', value: h('span', { data: { testid: 'salon-price' } }, m.priceLabel ?? 'None shown') },
+      { label: 'Shown from', value: h('span', { data: { testid: 'salon-tier' } }, salonTierName(m.privateMinTier)), note: salonImpact(m) },
+    ]),
+    { id: 'salon', tools: canEdit ? [button('Edit', { kind: 'ghost', testId: 'salon-edit', onClick: editSalon })] : [] },
   );
 
   // ── Story ────────────────────────────────────────────────────────────────
@@ -264,6 +304,7 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
       actions: [linkButton('All models', `${href('catalogue')}`, 'ghost')],
     }),
     publication,
+    salon,
     story,
     specs,
     gallery,

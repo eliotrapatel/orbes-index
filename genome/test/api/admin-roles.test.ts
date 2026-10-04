@@ -4,7 +4,8 @@
  * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04,
  * and the drops of the Club page, P-R03: created, edited, published, cancelled, their entries
  * concluded and the next one offered; the posts of its circle, P-X01: created, edited, published,
- * withdrawn, their photographs; the words of its tiers' benefits, P-X04), ADMIN for keys, revocations, reinstatement, categories (created,
+ * withdrawn, their photographs; the words of its tiers' benefits, P-X04; the requests of its private salon closed,
+ * P-X08), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, and a model
  * discontinued or reinstated (P-R06);
@@ -126,6 +127,10 @@ const PROBES: Probe[] = [
   { group: 'tiers', method: 'GET', url: '/api/admin/club/tiers', min: 'AUDITOR' },
   { group: 'tiers', method: 'PATCH', url: '/api/admin/club/tiers/TITANE', body: INVALID, min: 'OPERATOR' },
   { group: 'tiers', method: 'PATCH', url: '/api/admin/club/tiers/PALLADIUM', body: INVALID, min: 'OPERATOR' },
+  // P-X08: the requests of the private salon, read by an AUDITOR, closed by an OPERATOR.
+  { group: 'requests', method: 'GET', url: '/api/admin/club/requests', min: 'AUDITOR' },
+  { group: 'requests', method: 'GET', url: '/api/admin/club/requests?status=CLOSED', min: 'AUDITOR' },
+  { group: 'requests', method: 'POST', url: `/api/admin/club/requests/${UUID}/close`, body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },

@@ -28,6 +28,11 @@
  * address never changes (409 SLUG_LOCKED: links to the sheet are out), and a
  * model shown always has one. Its gallery is MediaService's.
  *
+ * THE PRIVATE SALON (P-X08, migration 0020): a RESERVED model's price as the
+ * salon shows it (`priceLabel`, 1 to 60 characters, null: none) and the lowest
+ * tier it is shown to (`privateMinTier`, 1 TITANE by default, 2 PLATINE,
+ * 3 PALLADIUM) change through the same edit, audited `model.update`.
+ *
  * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
  * (`discontinueModel`, audited `model.discontinue`) and may open it again
  * (`reinstateModel`, `model.reinstate`). Discontinuing sets
@@ -48,7 +53,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
-import { normalizeSlug, normalizeSpecs, normalizeStory, storyFingerprint } from './lookbook.js';
+import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 
 export interface CatalogServiceDeps {
@@ -98,6 +103,10 @@ export interface ModelRecord {
   publishedAt: Date | null;
   /** When an ADMIN discontinued it (P-R06): then it is inactive, and said DISCONTINUED with this year; null while it is not. */
   discontinuedAt: Date | null;
+  /** P-X08: the price THE PRIVATE SALON shows while the model is RESERVED; null: none. */
+  priceLabel: string | null;
+  /** P-X08: the lowest tier the model is shown to while it is RESERVED: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  privateMinTier: number;
   /** The gallery of its sheet (MediaService), in its order, the cover aside. */
   gallery: GalleryImageRecord[];
   createdAt: Date;
@@ -125,10 +134,25 @@ export interface UpdateModelInput {
   slug?: string | null;
   story?: string | null;
   specs?: string | null;
+  /** THE PRIVATE SALON (P-X08). */
+  priceLabel?: string | null;
+  privateMinTier?: number;
 }
 
 /** The fields of a model a change may touch, in their API spelling. */
-export const MODEL_EDITABLE_FIELDS = Object.freeze(['name', 'defaultMaterial', 'careInstructions', 'collectionId', 'active', 'lookbook', 'slug', 'story', 'specs'] as const);
+export const MODEL_EDITABLE_FIELDS = Object.freeze([
+  'name',
+  'defaultMaterial',
+  'careInstructions',
+  'collectionId',
+  'active',
+  'lookbook',
+  'slug',
+  'story',
+  'specs',
+  'priceLabel',
+  'privateMinTier',
+] as const);
 
 /** Refused by `updateModel` (and by the PATCH body): a model's identity, written in the pieces already issued. */
 export const MODEL_IDENTITY_FIELDS = Object.freeze(['category', 'categoryCode', 'skuPrefix'] as const);
@@ -317,7 +341,8 @@ export class CatalogService {
 
   /**
    * Change what a model shows or offers (PATCH /api/admin/models/:id): its name, default material, care instructions,
-   * collection and `active`, and its lookbook (P-R02: `lookbook`, `slug`, `story`, `specs`). Never its category nor its
+   * collection and `active`, its lookbook (P-R02: `lookbook`, `slug`, `story`, `specs`) and its place in the private salon
+   * (P-X08: `priceLabel`, `privateMinTier`). Never its category nor its
    * SKU prefix (400, MODEL_IDENTITY_MESSAGE). Audited `model.update` with the changed fields before and after (a story as
    * its length and SHA-256) and the number of pieces issued with the model; nothing is written when nothing changes.
    *
@@ -354,6 +379,8 @@ export class CatalogService {
     if (input.slug !== undefined) after.slug = normalizeSlug(input.slug);
     if (input.story !== undefined) after.story = normalizeStory(input.story);
     if (input.specs !== undefined) after.specs = normalizeSpecs(input.specs);
+    if (input.priceLabel !== undefined) after.priceLabel = normalizePriceLabel(input.priceLabel);
+    if (input.privateMinTier !== undefined) after.privateMinTier = normalizeMinTier(input.privateMinTier);
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
     const id = modelId.toLowerCase();
 
@@ -361,7 +388,21 @@ export class CatalogService {
       await inTransaction(this.db, async (tx) => {
         const row = await tx
           .selectFrom('models')
-          .select(['name', 'default_material', 'care_instructions', 'collection_id', 'active', 'lookbook', 'slug', 'story', 'specs', 'published_at', 'discontinued_at'])
+          .select([
+            'name',
+            'default_material',
+            'care_instructions',
+            'collection_id',
+            'active',
+            'lookbook',
+            'slug',
+            'story',
+            'specs',
+            'price_label',
+            'private_min_tier',
+            'published_at',
+            'discontinued_at',
+          ])
           .where('id', '=', id)
           .forUpdate()
           .executeTakeFirst();
@@ -376,6 +417,8 @@ export class CatalogService {
           slug: row.slug,
           story: row.story,
           specs: row.specs,
+          priceLabel: row.price_label,
+          privateMinTier: row.private_min_tier,
         };
         const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
         if (changed.length === 0) return;
@@ -404,6 +447,8 @@ export class CatalogService {
           slug?: string | null;
           story?: string | null;
           specs?: string | null;
+          price_label?: string | null;
+          private_min_tier?: number;
           published_at?: Date;
         } = {};
         for (const k of changed) {
@@ -415,7 +460,9 @@ export class CatalogService {
           else if (k === 'lookbook') set.lookbook = after.lookbook;
           else if (k === 'slug') set.slug = after.slug;
           else if (k === 'story') set.story = after.story;
-          else set.specs = after.specs;
+          else if (k === 'specs') set.specs = after.specs;
+          else if (k === 'priceLabel') set.price_label = after.priceLabel;
+          else set.private_min_tier = after.privateMinTier;
         }
         if (publishedAt) set.published_at = publishedAt;
         await tx.updateTable('models').set(set).where('id', '=', id).execute();
@@ -522,6 +569,8 @@ export class CatalogService {
         'm.specs',
         'm.published_at',
         'm.discontinued_at',
+        'm.price_label',
+        'm.private_min_tier',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -576,6 +625,8 @@ interface ModelChange {
   slug?: string | null;
   story?: string | null;
   specs?: string | null;
+  priceLabel?: string | null;
+  privateMinTier?: number;
 }
 
 /** 409 MODEL_DISCONTINUED: an edit that would offer a discontinued model again (P-R06). */
@@ -630,6 +681,8 @@ type ModelQueryRow = {
   specs: string | null;
   published_at: Date | null;
   discontinued_at: Date | null;
+  price_label: string | null;
+  private_min_tier: number;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -658,6 +711,8 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRe
     specs: r.specs,
     publishedAt: r.published_at,
     discontinuedAt: r.discontinued_at,
+    priceLabel: r.price_label,
+    privateMinTier: r.private_min_tier,
     gallery,
     createdAt: r.created_at,
   };

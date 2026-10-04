@@ -13,6 +13,11 @@
  *   RESERVED  listed for the owners of a piece only (the club, ClubService):
  *             unlisted, not confidential. Its sheet answers 404 to the
  *             public, but its photographs stay public at /api/v1/media/…
+ *             P-X08: THE PRIVATE SALON. A RESERVED model is shown from the
+ *             tier `private_min_tier` up (1 TITANE by default), with its
+ *             price (`price_label`, salonFacts); below that tier its sheet is
+ *             the same 404 as any model not in the collection. An owner
+ *             requests it from its sheet (services/salon.ts).
  *
  * This module holds the rules both sides share: the address (`slug`), the
  * story (plain paragraphs, no Markdown: what is typed is what is shown), the
@@ -38,6 +43,29 @@ export const SPECS_MAX = 1000;
 /** A specification's label, set in the display face: no figure (Gravesend's one is its capital I), at most 40 characters. */
 export const SPEC_LABEL_MAX = 40;
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
+/** A RESERVED model's price as THE PRIVATE SALON shows it (P-X08, models.price_label): 1 to 60 characters once trimmed. */
+export const PRICE_LABEL_MAX = 60;
+
+/**
+ * The price of a model of the salon as the console sends it: trimmed, one line, 1 to PRICE_LABEL_MAX characters
+ * (« € 4 800 », « Price on request »); null, '' or blank text: no price shown (returned as null).
+ */
+export function normalizePriceLabel(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw validationError('The price must be text.');
+  const s = v.trim().replace(/\s+/g, ' ');
+  if (s === '') return null;
+  if (CONTROL_CHARS.test(s)) throw validationError('The price contains invalid characters.');
+  if (s.length > PRICE_LABEL_MAX) throw validationError(`The price must be at most ${PRICE_LABEL_MAX} characters.`);
+  return s;
+}
+
+/** The lowest tier a RESERVED model is shown to (P-X08, models.private_min_tier): 1 TITANE, 2 PLATINE or 3 PALLADIUM. */
+export function normalizeMinTier(v: unknown): 1 | 2 | 3 {
+  if (v !== 1 && v !== 2 && v !== 3) throw validationError('The tier of the private salon must be 1 (TITANE), 2 (PLATINE) or 3 (PALLADIUM).');
+  return v;
+}
 
 /** A model's place in the lookbook, as it changes (CatalogService.updateModel). */
 export const LOOKBOOK_SHOWN: readonly LookbookState[] = ['PUBLIC', 'RESERVED'];
@@ -142,6 +170,17 @@ export interface LookbookCard {
   imageUrl: string | null;
 }
 
+/** What THE PRIVATE SALON adds to a RESERVED model (P-X08): its price shown, and the lowest tier it is shown to. */
+export interface SalonFacts {
+  /** null: no price shown. */
+  priceLabel: string | null;
+  /** 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  minTier: 1 | 2 | 3;
+}
+
+/** One model of THE PRIVATE SALON (GET /api/v1/club/lookbook): a card, its price and its tier. */
+export type SalonCard = LookbookCard & SalonFacts;
+
 export interface LookbookImage {
   url: string;
   /** null: the sheet says what it shows (the model's name and type). */
@@ -166,6 +205,8 @@ export interface LookbookSheet {
   care: string | null;
   /** The year (UTC) the model was discontinued (P-R06), said « DISCONTINUED · <year> » on the sheet; null while it is not. */
   discontinuedYear: number | null;
+  /** P-X08: a RESERVED model's price and tier (THE PRIVATE SALON); absent on a PUBLIC sheet. */
+  salon?: SalonFacts;
 }
 
 export interface LookbookServiceDeps {
@@ -184,19 +225,30 @@ export class LookbookService {
     return this.cards('PUBLIC');
   }
 
-  /** The RESERVED models (the club's section; ClubService checks the reader holds a piece). */
-  listReserved(): Promise<LookbookCard[]> {
-    return this.cards('RESERVED');
+  /**
+   * THE PRIVATE SALON (P-X08): the RESERVED models shown to `tier` (those whose `private_min_tier` it reaches), each with
+   * its price and tier; none below TITANE. ClubService reads the account's tier.
+   */
+  async listReserved(tier: number): Promise<SalonCard[]> {
+    if (!(tier >= 1)) return [];
+    return (await this.cards('RESERVED', tier)) as SalonCard[];
   }
 
   /**
-   * A model's sheet by its address: a PUBLIC model, or with `reserved` (an owner, ClubService) a RESERVED one too.
-   * Anything else (HIDDEN, unknown, malformed) is the same 404 LOOKBOOK_NOT_FOUND.
+   * A model's sheet by its address: a PUBLIC model, or for `tier` ≥ 1 (an owner, ClubService) a RESERVED one whose
+   * `private_min_tier` it reaches, with its price and tier (`salon`). Anything else (HIDDEN, unknown, malformed, a RESERVED
+   * model above the reader's tier) is the same 404 LOOKBOOK_NOT_FOUND.
    */
-  async sheet(slug: string, opts: { reserved?: boolean } = {}): Promise<LookbookSheet> {
+  async sheet(slug: string, opts: { tier?: number } = {}): Promise<LookbookSheet> {
+    return (await this.sheetOf(slug, opts)).sheet;
+  }
+
+  /** The sheet (`sheet`) and its model's id, for the club's request (services/salon.ts). */
+  async sheetOf(slug: string, opts: { tier?: number } = {}): Promise<{ modelId: string; sheet: LookbookSheet }> {
     const key = typeof slug === 'string' ? slug.trim().toLowerCase() : '';
     if (key.length > SLUG_MAX || !SLUG_RE.test(key)) throw lookbookNotFound();
-    const shown: LookbookState[] = opts.reserved ? ['PUBLIC', 'RESERVED'] : ['PUBLIC'];
+    const tier = opts.tier ?? 0;
+    const shown: LookbookState[] = tier >= 1 ? ['PUBLIC', 'RESERVED'] : ['PUBLIC'];
     const m = await this.db
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
@@ -212,6 +264,8 @@ export class LookbookService {
         'm.care_instructions',
         'm.image_sha256',
         'm.discontinued_at',
+        'm.price_label',
+        'm.private_min_tier',
         'c.code as category_code',
         'c.name as category_name',
         'col.name as collection',
@@ -220,8 +274,10 @@ export class LookbookService {
       .where('m.lookbook', 'in', shown)
       .executeTakeFirst();
     if (!m || !m.slug || m.lookbook === 'HIDDEN') throw lookbookNotFound();
+    // P-X08: below the model's tier, the salon has no such model.
+    if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();
     const gallery = await this.db.selectFrom('model_images').select(['sha256', 'alt']).where('model_id', '=', m.id).orderBy('position').execute();
-    return {
+    const sheet: LookbookSheet = {
       slug: m.slug,
       lookbook: m.lookbook,
       name: m.name,
@@ -238,10 +294,12 @@ export class LookbookService {
       specs: parseSpecs(m.specs),
       care: m.care_instructions,
       discontinuedYear: m.discontinued_at ? m.discontinued_at.getUTCFullYear() : null,
+      ...(m.lookbook === 'RESERVED' ? { salon: salonFacts(m) } : {}),
     };
+    return { modelId: m.id, sheet };
   }
 
-  private async cards(state: 'PUBLIC' | 'RESERVED'): Promise<LookbookCard[]> {
+  private async cards(state: 'PUBLIC' | 'RESERVED', tier = 0): Promise<(LookbookCard | SalonCard)[]> {
     const rows = await this.db
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
@@ -251,6 +309,8 @@ export class LookbookService {
         'm.name',
         'm.type',
         'm.image_sha256',
+        'm.price_label',
+        'm.private_min_tier',
         'c.code as category_code',
         'c.name as category_name',
         'col.name as collection',
@@ -258,6 +318,7 @@ export class LookbookService {
       ])
       .where('m.lookbook', '=', state)
       .where('m.slug', 'is not', null)
+      .$if(state === 'RESERVED', (qb) => qb.where('m.private_min_tier', '<=', tier))
       .orderBy(sql`col.name IS NULL`)
       .orderBy('col.name')
       .orderBy('m.name')
@@ -270,6 +331,14 @@ export class LookbookService {
       category: { code: r.category_code.trim(), name: r.category_name },
       collection: r.collection,
       imageUrl: mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image),
+      // P-X08: the salon's price and tier, on its cards only (the public list names neither).
+      ...(state === 'RESERVED' ? salonFacts(r) : {}),
     }));
   }
+}
+
+/** A RESERVED model's price and tier as the salon gives them; a stored tier out of 1..3 (never written) reads 3, the safest. */
+function salonFacts(r: { price_label: string | null; private_min_tier: number }): SalonFacts {
+  const t = r.private_min_tier;
+  return { priceLabel: r.price_label, minTier: t === 1 || t === 2 ? t : 3 };
 }

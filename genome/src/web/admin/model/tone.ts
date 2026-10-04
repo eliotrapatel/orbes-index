@@ -57,6 +57,8 @@ const DROP: Record<string, Tone> = { DRAFT: 'outline', UPCOMING: 'outline', OPEN
 const DROP_ENTRY: Record<string, Tone> = { ENTERED: 'outline', SELECTED: 'alert', WAITLISTED: 'outline', CONFIRMED: 'solid', LAPSED: 'muted', WITHDRAWN: 'muted' };
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
+/** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
+const SHOP_REQUEST: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 /** An answer to an invitation of the circle (P-X01): a place taken, or declined. */
 const CIRCLE_ANSWER: Record<string, Tone> = { YES: 'solid', NO: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
@@ -89,7 +91,8 @@ export type ToneDomain =
   | 'drop'
   | 'dropEntry'
   | 'circle'
-  | 'circleAnswer';
+  | 'circleAnswer'
+  | 'shopRequest';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -109,6 +112,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   dropEntry: DROP_ENTRY,
   circle: CIRCLE,
   circleAnswer: CIRCLE_ANSWER,
+  shopRequest: SHOP_REQUEST,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

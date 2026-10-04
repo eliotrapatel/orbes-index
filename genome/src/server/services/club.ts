@@ -12,7 +12,9 @@
  * P-R02: the lookbook's RESERVED models (LookbookService), listed and opened
  * for an owner only (routes/club.ts); any other account is answered
  * 403 OWNERS_ONLY. RESERVED means unlisted, not confidential: the photographs
- * of those sheets stay public at /api/v1/media/…, like every other.
+ * of those sheets stay public at /api/v1/media/…, like every other. Since
+ * P-X08 they are THE PRIVATE SALON (services/salon.ts), each shown from its
+ * tier up, with its price, on request; SalonService reads `tierOf` here.
  *
  * P-R03: the tiers. `tierOf` counts the same pieces and gives the account's
  * standing in the club: its tier (CLUB_TIER_THRESHOLDS, 1 / 3 / 5 pieces:
@@ -46,7 +48,6 @@ import { DomainError, forbidden, notFound, validationError } from '../errors.js'
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { AccountDropEntry, DropService } from './drops.js';
-import type { LookbookCard, LookbookService, LookbookSheet } from './lookbook.js';
 
 /** The pieces that count for nothing in the club: revoked, flagged or retired by ORBES, whose ownership stays open (N3). */
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
@@ -285,7 +286,6 @@ export interface ClubTierSheet {
 
 export interface ClubServiceDeps {
   db: Db;
-  lookbook: LookbookService;
   drops: DropService;
   audit: AuditService;
   clock?: Clock;
@@ -293,14 +293,12 @@ export interface ClubServiceDeps {
 
 export class ClubService {
   private readonly db: Db;
-  private readonly lookbook: LookbookService;
   private readonly drops: DropService;
   private readonly audit: AuditService;
   private readonly clock: Clock;
 
   constructor(deps: ClubServiceDeps) {
     this.db = deps.db;
-    this.lookbook = deps.lookbook;
     this.drops = deps.drops;
     this.audit = deps.audit;
     this.clock = deps.clock ?? systemClock;
@@ -319,18 +317,6 @@ export class ClubService {
   /** 403 OWNERS_ONLY unless the account holds a piece now. */
   async requireOwner(accountId: string): Promise<void> {
     if ((await this.activePieces(accountId)) < 1) throw ownersOnly();
-  }
-
-  /** The lookbook's RESERVED models, for an owner (GET /api/v1/club/lookbook): no story. */
-  async reservedLookbook(accountId: string): Promise<LookbookCard[]> {
-    await this.requireOwner(accountId);
-    return this.lookbook.listReserved();
-  }
-
-  /** A sheet of the lookbook, PUBLIC or RESERVED, for an owner (GET /api/v1/club/lookbook/:slug); 404 LOOKBOOK_NOT_FOUND otherwise. */
-  async lookbookSheet(accountId: string, slug: string): Promise<LookbookSheet> {
-    await this.requireOwner(accountId);
-    return this.lookbook.sheet(slug, { reserved: true });
   }
 
   /**

@@ -474,7 +474,7 @@ class App {
     this.generation++;
     this.stopCamera();
     this.sheetSlug = slug;
-    const view = sheetView({ api: this.api, session: this.session, slug, onCollection: () => this.openLookbook() });
+    const view = sheetView({ api: this.api, session: this.session, slug, onCollection: () => this.openLookbook(), clientServices: () => this.contactDetails() });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;
     else view.dispose();
   }

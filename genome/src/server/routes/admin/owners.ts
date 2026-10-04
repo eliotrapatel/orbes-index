@@ -10,7 +10,8 @@
  *   POST /api/admin/owners/:id/recovery-code  ADMIN    a one-time recovery code, after an identity check
  *   POST /api/admin/owners/:id/lock           ADMIN    LOCKED: sessions end, pending transfers cancelled,
  *                                                      certificate links and open entries in the drops
- *                                                      withdrawn, the open recovery code revoked
+ *                                                      withdrawn, open requests of the private salon
+ *                                                      closed, the open recovery code revoked
  *   POST /api/admin/owners/:id/unlock         ADMIN    ACTIVE again
  *   GET  /api/admin/owners/:id/export         ADMIN    everything held about the account (right of
  *                                                      access), a JSON attachment
@@ -83,6 +84,7 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
       recoveryCodesRevoked: r.recoveryCodesRevoked,
       certificatesRevoked: r.certificatesRevoked,
       dropEntriesWithdrawn: r.dropEntriesWithdrawn,
+      shopRequestsClosed: r.shopRequestsClosed,
     };
   });
 

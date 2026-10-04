@@ -572,8 +572,9 @@ export const LEGAL = Object.freeze({
 /**
  * THE COLLECTION (P-R02, /verify/lookbook): the lookbook of the models ORBES shows, grouped by collection, each on an
  * ivory plate with SEE THE MODEL; then a model's sheet (/verify/lookbook/<slug>): its photographs, its story, its
- * specifications and its care. An owner signed in also sees the models RESERVED FOR OWNERS. Reached from the landing,
- * from MY PIECES and, under an authentic result, from SEE THE MODEL.
+ * specifications and its care. An owner signed in also sees THE PRIVATE SALON (P-X08): the reserved models its tier
+ * reaches, each with its price, requested from its sheet (REQUEST THIS PIECE) and concluded by ORBES Client Services.
+ * Reached from the landing, from MY PIECES and, under an authentic result, from SEE THE MODEL.
  */
 /**
  * DISCONTINUED (P-R06): a model an ADMIN discontinued is no longer made; its pieces verify as before. Said with the
@@ -594,9 +595,26 @@ export const LOOKBOOK = Object.freeze({
   loadFailed: 'The collection could not be shown just now.',
   retry: 'TRY AGAIN',
   empty: 'No model is shown in the collection yet.',
-  /** The section an owner of an ORBES piece sees, signed in; and the line of such a model's sheet. */
-  reserved: 'RESERVED FOR OWNERS',
-  reservedLead: 'Shown to the owners of an ORBES piece.',
+  /** P-X08: the section an owner of an ORBES piece sees, signed in; and the line of such a model's sheet. */
+  reserved: 'THE PRIVATE SALON',
+  reservedLead: 'Pieces offered to the owners of an ORBES piece, by tier, on request.',
+  /** P-X08: a model of the salon on its sheet: its price, the tier it is offered from, and REQUEST THIS PIECE. */
+  salon: Object.freeze({
+    price: 'PRICE',
+    tier: 'OFFERED FROM',
+    lead: 'Offered to the owners of an ORBES piece, on request. ORBES Client Services contacts you to conclude the sale: nothing is paid here.',
+    note: 'A NOTE FOR ORBES CLIENT SERVICES',
+    noteHint: 'Optional: a size, a finish, the best time to call.',
+    request: 'REQUEST THIS PIECE',
+    /** The status once requested, and what follows. */
+    requestedLabel: 'REQUESTED',
+    requested: 'ORBES Client Services will contact you.',
+    requestFailed: 'The request could not be sent.',
+    /** The subject of the email to ORBES Client Services (`ORBES — ECLIPSE — REQUEST`) and the lines of its body. */
+    contactSubject: 'REQUEST',
+    contactModel: 'MODEL',
+    contactRequest: 'REQUEST',
+  }),
   /** The text link of each card, and the one under an authentic result. */
   seeModel: 'SEE THE MODEL',
   scan: 'SCAN ORBES CODE',

@@ -47,6 +47,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageCircle: 'OPERATOR',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */
   manageClubTiers: 'OPERATOR',
+  /** The Club's requests (P-X08): close a request of the private salon, with a note. */
+  closeShopRequest: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
   discontinueModel: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */

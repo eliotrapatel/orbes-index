@@ -3,7 +3,8 @@
  * tab each (`?tab=`): Drops (P-R03), the releases of a model in a limited
  * number of pieces, entered from /verify and drawn by tier; Circle (P-X01),
  * what ORBES publishes for the owners of a piece (views/circle.ts); Tiers
- * (P-X04), the words of each tier's benefits (views/tiers.ts).
+ * (P-X04), the words of each tier's benefits (views/tiers.ts); Requests
+ * (P-X08), what owners requested from THE PRIVATE SALON (views/requests.ts).
  *
  * Drops: every drop, the latest created first, with its state, its window of
  * entries (UTC), its pieces and its entries; New release (OPERATOR) creates a
@@ -23,6 +24,7 @@ import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { circleTab } from './circle.js';
 import { pageParam, type ViewContext } from './context.js';
+import { requestsTab } from './requests.js';
 import { tiersTab } from './tiers.js';
 
 /** The fields of a drop's dialog: the active models to choose from, its values. */
@@ -74,11 +76,13 @@ const CLUB_LEADS = Object.freeze({
     'What the owners’ club of /verify offers. Circle: what ORBES publishes for the owners of a piece, by tier: notes, invitations they answer YES or NO, and polls whose results they read once they have voted.',
   tiers:
     'What the owners’ club of /verify offers. Tiers: TITANE, PLATINE and PALLADIUM, reached with 1, 3 and 5 pieces held now. MY PIECES shows each owner the tier, its benefits and the way to the next; the words of the benefits are set here.',
+  requests:
+    'What the owners’ club of /verify offers. Requests: the models of the private salon (the lookbook’s Reserved models, each from its tier, with its price) that owners asked for. ORBES Client Services contacts each client and concludes the sale, then closes the request with a note.',
 });
 
 export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
   const tab = clubTab(ctx.route.query);
-  const body = tab === 'circle' ? await circleTab(ctx) : tab === 'tiers' ? await tiersTab(ctx) : await dropsTab(ctx);
+  const body = tab === 'circle' ? await circleTab(ctx) : tab === 'tiers' ? await tiersTab(ctx) : tab === 'requests' ? await requestsTab(ctx) : await dropsTab(ctx);
   return h(
     'div',
     { class: 'view view--club' },

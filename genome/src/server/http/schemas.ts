@@ -24,6 +24,7 @@ import {
   REPORT_STATUSES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
+  SHOP_REQUEST_STATUSES,
   STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
@@ -33,8 +34,9 @@ import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPT
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
-import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
+import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
+import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
@@ -213,6 +215,14 @@ export const publicDropParams = z.object({ id: z.string().max(64) });
  */
 export const publicCircleParams = z.object({ id: z.string().max(64) });
 
+/**
+ * POST /api/v1/club/lookbook/:slug/request (P-X08, REQUEST THIS PIECE): the account's note for ORBES Client Services,
+ * optional (blank text or `null`: none; the body itself may be left out), at most 500 characters once trimmed.
+ */
+export const salonRequestBody = optionalBody({
+  note: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(SHOP_NOTE_MAX).nullable().optional()),
+});
+
 /** POST /api/v1/club/circle/:id/rsvp (P-X01): the account's answer to an invitation, YES or NO. */
 export const circleRsvpBody = body({ answer: z.enum(CIRCLE_RSVP_ANSWERS) });
 
@@ -385,7 +395,8 @@ const modelIdentity = z.never({ error: MODEL_IDENTITY_MESSAGE }).optional();
 /**
  * A model's change (A-10): its name, default material, care instructions, collection and `active`, and its lookbook
  * (P-R02: `lookbook`, `slug`, `story`, `specs`), at least one. `''`/`null` clears the material, the care instructions,
- * the collection, the slug (while the model was never published), the story or the specifications. The service holds
+ * the collection, the slug (while the model was never published), the story, the specifications or the price of the
+ * private salon (P-X08: `priceLabel`, and `privateMinTier` 1 to 3). The service holds
  * the rules of the lookbook (the slug's form and uniqueness, the lines of the specifications). Never `category`,
  * `categoryCode` nor `skuPrefix` (400); any other field is unknown (400).
  */
@@ -399,6 +410,8 @@ export const updateModelBody = body({
   slug: z.preprocess((v) => (v === '' ? null : v), z.string().trim().max(SLUG_MAX, `At most ${SLUG_MAX} characters`).nullable().optional()),
   story: z.preprocess((v) => (v === '' ? null : v), text(STORY_MAX).nullable().optional()),
   specs: z.preprocess((v) => (v === '' ? null : v), text(SPECS_MAX).nullable().optional()),
+  priceLabel: z.preprocess((v) => (v === '' ? null : v), text(PRICE_LABEL_MAX).nullable().optional()),
+  privateMinTier: z.number().int('Must be a tier: 1, 2 or 3').min(1, 'At least 1 (TITANE)').max(3, 'At most 3 (PALLADIUM)').optional(),
   category: modelIdentity,
   categoryCode: modelIdentity,
   skuPrefix: modelIdentity,
@@ -550,6 +563,16 @@ export const clubTierParams = z.object({ tier: z.enum(CLUB_TIER_NAMES) });
 export const updateClubTierBody = body({
   benefits: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(CLUB_TIER_BENEFITS_MAX * 2).nullable()),
 });
+
+// ── Admin: the private salon's requests (P-X08) ──────────────────────────
+
+/** GET /api/admin/club/requests: OPEN or CLOSED, or every request. */
+export const shopRequestsQuery = z.object({ status: queryOptional(z.enum(SHOP_REQUEST_STATUSES)) });
+
+export const shopRequestParams = z.object({ id: uuid });
+
+/** POST /api/admin/club/requests/:id/close: a note is required, what was done for the client or why nothing was. */
+export const closeShopRequestBody = body({ note: text(SHOP_RESOLUTION_MAX) });
 
 // ── Admin: products ────────────────────────────────────────────────────────
 

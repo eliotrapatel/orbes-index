@@ -24,7 +24,7 @@
  */
 import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, LOOKBOOK, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -82,12 +82,13 @@ export type OwnershipMode =
  * /api/v1/client-services; absent when neither a usable email nor a usable phone is configured.
  */
 export interface ContactModel {
-  placement: 'help' | 'warranty' | 'recovery' | 'piece' | 'release';
+  placement: 'help' | 'warranty' | 'recovery' | 'piece' | 'release' | 'salon';
   /**
    * mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and
    * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference; for a piece of
    * MY PIECES, the subject "ORBES — {product id} — {status}" and the piece; for a place held in a release (P-R03),
-   * the subject "ORBES — {release} — PLACE HELD", the release and the entry.
+   * the subject "ORBES — {release} — PLACE HELD", the release and the entry; for a request of the private salon (P-X08),
+   * the subject "ORBES — {model} — REQUEST", the model and the request.
    */
   mailto?: string;
   /** The number as configured, and its tel: link. */
@@ -530,6 +531,21 @@ export function releaseContactModel(cs: ClientServices | undefined, title: strin
     ? contactOf(lines, 'release', ['ORBES', title, status].filter((x) => x.length > 0).join(' — '), [
         [RELEASES.contactRelease, title],
         [RELEASES.contactEntry, entryId],
+      ])
+    : null;
+}
+
+/**
+ * ORBES Client Services for a request of the private salon (P-X08): they contact the account to conclude the sale, and
+ * it may write first. The email's subject names the model (`ORBES — ECLIPSE — REQUEST`), its body the model and the
+ * request's id. Null when nothing is configured.
+ */
+export function salonContactModel(cs: ClientServices | undefined, model: string, requestId: string): ContactModel | null {
+  const lines = cs ? contactLines(cs) : null;
+  return lines
+    ? contactOf(lines, 'salon', ['ORBES', model, LOOKBOOK.salon.contactSubject].filter((x) => x.length > 0).join(' — '), [
+        [LOOKBOOK.salon.contactModel, model],
+        [LOOKBOOK.salon.contactRequest, requestId],
       ])
     : null;
 }

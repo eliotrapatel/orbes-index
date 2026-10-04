@@ -374,6 +374,11 @@ describe('the owners\' circle (P-X01)', () => {
     await h.ctx.services.drops.publish(drop.id, { type: 'admin', id: post.createdBy!.id });
     await h.ctx.services.catalog.updateModel(catalog.modelId, { slug: 'monolithe-circle', lookbook: 'RESERVED' }, SYSTEM_ACTOR);
     expect((await read(m.client, post.id)).links).toMatchObject({ drop: { id: drop.id, title: 'MONOLITHE — release II' }, model: { slug: 'monolithe-circle', name: 'MONOLITHE', type: 'RING' } });
+    // P-X08: a RESERVED model shown from PLATINE in the private salon is no link for a TITANE member (its sheet is 404 to it).
+    await h.ctx.services.catalog.updateModel(catalog.modelId, { privateMinTier: 2 }, SYSTEM_ACTOR);
+    expect((await read(m.client, post.id)).links.model).toBeNull();
+    await h.ctx.services.catalog.updateModel(catalog.modelId, { privateMinTier: 1 }, SYSTEM_ACTOR);
+    expect((await read(m.client, post.id)).links.model).toMatchObject({ slug: 'monolithe-circle' });
 
     // Photographs: 4 at most, ordered, described, removed; the first is the feed's cover.
     const photos = [1, 2, 3, 4, 5].map((n) => jpegPhoto(20 + n, 20));

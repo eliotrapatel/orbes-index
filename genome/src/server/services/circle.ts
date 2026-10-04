@@ -261,7 +261,7 @@ export interface CirclePostView extends CircleCard {
   links: {
     /** A published drop: its page, /verify/releases/<id>. */
     drop: { id: string; title: string } | null;
-    /** A model shown in the lookbook (PUBLIC, or RESERVED: an owner reads it): /verify/lookbook/<slug>. */
+    /** A model shown in the lookbook (PUBLIC, or RESERVED from a tier the reader reaches, P-X08): /verify/lookbook/<slug>. */
     model: { slug: string; name: string; type: string } | null;
     /** An address on one of CIRCLE_LINK_HOSTS, and its host as shown beside it. */
     external: { url: string; host: string } | null;
@@ -854,7 +854,7 @@ export class CircleService {
       db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       db.selectFrom('circle_poll_votes').select('option_index').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       p.drop_id ? db.selectFrom('drops').select(['id', 'title', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at']).where('id', '=', p.drop_id).executeTakeFirst() : undefined,
-      p.model_id ? db.selectFrom('models').select(['slug', 'name', 'type', 'lookbook']).where('id', '=', p.model_id).executeTakeFirst() : undefined,
+      p.model_id ? db.selectFrom('models').select(['slug', 'name', 'type', 'lookbook', 'private_min_tier']).where('id', '=', p.model_id).executeTakeFirst() : undefined,
     ]);
     const photos = images.flatMap((i) => {
       const url = mediaUrl(i.sha256);
@@ -898,7 +898,8 @@ export class CircleService {
       poll,
       links: {
         drop: drop && dropState(drop, now) !== 'DRAFT' ? { id: drop.id, title: drop.title } : null,
-        model: model && model.lookbook !== 'HIDDEN' && model.slug ? { slug: model.slug, name: model.name, type: model.type } : null,
+        // A RESERVED model is linked only for a member whose tier reaches it in the private salon (P-X08): its sheet is 404 below.
+        model: model && model.slug && (model.lookbook === 'PUBLIC' || (model.lookbook === 'RESERVED' && model.private_min_tier <= tier)) ? { slug: model.slug, name: model.name, type: model.type } : null,
         external: p.external_url && host ? { url: p.external_url, host } : null,
       },
     };

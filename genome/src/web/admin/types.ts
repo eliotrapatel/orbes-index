@@ -92,6 +92,10 @@ export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
 export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 
+/** A request of the private salon (P-X08, shop_requests.status): OPEN until the console closes it with a note. */
+export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -272,6 +276,10 @@ export interface Model {
   publishedAt: Iso | null;
   /** When an ADMIN discontinued it (P-R06): inactive, and said DISCONTINUED with this year on /verify; null while it is not. */
   discontinuedAt: Iso | null;
+  /** P-X08: the price THE PRIVATE SALON shows while the model is RESERVED; null: none. */
+  priceLabel: string | null;
+  /** P-X08: the lowest tier it is shown to while RESERVED: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  privateMinTier: number;
   /** The gallery of its sheet, in its order (the reference photograph is the cover, apart). */
   gallery: GalleryImage[];
   createdAt: Iso;
@@ -305,6 +313,9 @@ export interface ModelChange {
   slug?: string;
   story?: string;
   specs?: string;
+  /** THE PRIVATE SALON (P-X08): '' clears the price. */
+  priceLabel?: string;
+  privateMinTier?: number;
 }
 
 // ── Products, genomes, codes ───────────────────────────────────────────────
@@ -764,6 +775,8 @@ export interface OwnerLock {
   certificatesRevoked: number;
   /** The account's entries in drops not drawn yet the lock withdrew (P-R03). */
   dropEntriesWithdrawn: number;
+  /** The account's open requests of the private salon the lock closed (P-X08). */
+  shopRequestsClosed: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */
@@ -1021,6 +1034,21 @@ export interface CircleStats {
 // ── The Club: the tiers (P-X04) ────────────────────────────────────────────
 
 /** One tier of GET /api/admin/club/tiers (and PATCH /api/admin/club/tiers/:tier). */
+/** A request of the private salon (P-X08; GET /api/admin/club/requests): the client's email masked for an AUDITOR. */
+export interface ShopRequest {
+  id: string;
+  status: ShopRequestStatus;
+  createdAt: Iso;
+  /** The client's words; null without a note. */
+  note: string | null;
+  account: { id: string; email: string };
+  model: { id: string; name: string; type: string; slug: string | null; priceLabel: string | null };
+  handledBy: { id: string; email: string } | null;
+  handledAt: Iso | null;
+  /** What was done; null while open, or closed with a lock of the account. */
+  resolutionNote: string | null;
+}
+
 export interface ClubTierSheet {
   tier: ClubTierName;
   level: 1 | 2 | 3;

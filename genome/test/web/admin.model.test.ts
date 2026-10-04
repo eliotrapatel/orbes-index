@@ -171,7 +171,8 @@ import {
   type ClubTierSheet as ServerClubTierSheet,
 } from '../../src/server/services/club.js';
 import type { ModelRecord as ServerModelRecord } from '../../src/server/services/catalog.js';
-import type { OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
+import type { LockOutcome as ServerLockOutcome, OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
+import type { AdminShopRequest as ServerShopRequest } from '../../src/server/services/salon.js';
 import {
   answersLine,
   circleActions,
@@ -252,6 +253,7 @@ describe('admin enums mirror the server', () => {
       'CIRCLE_POST_KINDS',
       'CIRCLE_RSVP_ANSWERS',
       'CLUB_TIER_NAMES',
+      'SHOP_REQUEST_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -411,6 +413,9 @@ export const clubTierFits = (t: Json<ServerClubTierSheet>): web.ClubTierSheet =>
 export const ownerTierFits = (t: Json<ServerOwnerSheet['tier']>): web.OwnerSheet['tier'] => t;
 /** A model of GET /api/admin/models (its discontinuation of P-R06 included), as the console reads it. */
 export const adminModelFits = (m: Json<ServerModelRecord>): web.Model => m;
+/** P-X08: a request of GET /api/admin/club/requests, and what a lock closed, as the console reads them. */
+export const shopRequestFits = (r: Json<ServerShopRequest>): web.ShopRequest => r;
+export const lockFits = (r: Omit<ServerLockOutcome, 'transfersCancelled'> & { transfersCancelled: number }): Omit<web.OwnerLock, 'status'> => r;
 
 describe('the Club\'s drops (P-R03)', () => {
   const base: web.Drop = {
@@ -523,9 +528,10 @@ describe('the Club\'s drops (P-R03)', () => {
     expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
   });
 
-  it('opens on the Drops tab, then the Circle tab (P-X01), then the Tiers tab (P-X04)', () => {
-    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle', 'tiers']);
-    expect(CLUB_TABS.map((t) => t.label)).toEqual(['Drops', 'Circle', 'Tiers']);
+  it('opens on the Drops tab, then the Circle tab (P-X01), the Tiers tab (P-X04), the Requests tab (P-X08)', () => {
+    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle', 'tiers', 'requests']);
+    expect(CLUB_TABS.map((t) => t.label)).toEqual(['Drops', 'Circle', 'Tiers', 'Requests']);
+    expect(clubTab({ tab: 'requests' })).toBe('requests');
     expect(clubTab({})).toBe('drops');
     expect(clubTab({ tab: 'nope' })).toBe('drops');
     expect(clubTab({ tab: 'circle' })).toBe('circle');
@@ -590,6 +596,29 @@ describe('the Club\'s tiers (P-X04)', () => {
     expect(can('AUDITOR', 'manageClubTiers')).toBe(false);
     expect(can('OPERATOR', 'manageClubTiers')).toBe(true);
     expect(can('ADMIN', 'manageClubTiers')).toBe(true);
+  });
+});
+
+describe('the Club\'s requests of the private salon (P-X08)', () => {
+  it('lets OPERATOR close a request, an AUDITOR read them; an open one waits for ORBES Client Services, as an open case does', () => {
+    expect(['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'].map((r) => can(r as web.AdminRole, 'closeShopRequest'))).toEqual([false, false, true, true]);
+    expect(serverSchema.SHOP_REQUEST_STATUSES.map((s) => toneOf('shopRequest', s))).toEqual(['alert', 'muted']);
+    expect(toneOf('shopRequest', 'OPEN')).toBe(toneOf('case', 'OPEN'));
+  });
+
+  it('reads a request as the server serialises it', () => {
+    const r: web.ShopRequest = shopRequestFits({
+      id: 'r',
+      status: 'OPEN',
+      createdAt: '2026-10-04T10:00:00.000Z',
+      note: null,
+      account: { id: 'a', email: 'j***@example.com' },
+      model: { id: 'm', name: 'ECLIPSE', type: 'PENDANT', slug: 'eclipse', priceLabel: null },
+      handledBy: null,
+      handledAt: null,
+      resolutionNote: null,
+    });
+    expect(r.status).toBe('OPEN');
   });
 });
 

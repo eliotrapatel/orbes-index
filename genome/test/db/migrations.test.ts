@@ -13,7 +13,7 @@ const EXPECTED_TABLES = [
   'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
   'collections', 'cryptographic_keys', 'drop_entries', 'drops', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
-  'scan_tokens', 'service_records', 'sessions', 'warranties',
+  'scan_tokens', 'service_records', 'sessions', 'shop_requests', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -123,6 +123,13 @@ describe('migrations', () => {
     expect(has(/INDEX club_tiers_updated_by_idx ON public\.club_tiers USING btree \(updated_by\)$/)).toBe(true);
     // 0019: the console user who discontinued a model, at the head of its own index.
     expect(has(/INDEX models_discontinued_by_idx ON public\.models USING btree \(discontinued_by\)$/)).toBe(true);
+    // 0020: a request's account, model and closer, each foreign key at the head of its own index; the queue; one open
+    // request per account and model.
+    expect(has(/INDEX shop_requests_account_idx ON public\.shop_requests USING btree \(account_id, created_at\)$/)).toBe(true);
+    expect(has(/INDEX shop_requests_model_idx ON public\.shop_requests USING btree \(model_id\)$/)).toBe(true);
+    expect(has(/INDEX shop_requests_handled_by_idx ON public\.shop_requests USING btree \(handled_by\)$/)).toBe(true);
+    expect(has(/INDEX shop_requests_queue_idx ON public\.shop_requests USING btree \(status, created_at\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX shop_requests_one_open ON public\.shop_requests USING btree \(account_id, model_id\) WHERE \(status = 'OPEN'::text\)$/)).toBe(true);
   });
 
   /**
@@ -897,6 +904,91 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
   });
 
+  it('0020 adds models.price_label and private_min_tier and the table shop_requests, and nothing else; down restores 0019 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withSalon, without: before } = await rollBackTo('0020_private_salon');
+    // What 0020 adds names its columns or its table (PGlite's PostgreSQL also lists a NOT NULL as a constraint; PostgreSQL 16 does not).
+    const of0020 = (o: string) => /price_label|private_min_tier|shop_requests/.test(o);
+    const added = withSalon.filter((o) => !before.includes(o));
+    expect(added.filter((o) => o.startsWith('table '))).toEqual([
+      'table models price_label text YES ',
+      'table models private_min_tier smallint NO 1',
+      'table shop_requests account_id uuid NO ',
+      'table shop_requests created_at timestamp with time zone NO now()',
+      'table shop_requests handled_at timestamp with time zone YES ',
+      'table shop_requests handled_by uuid YES ',
+      'table shop_requests id uuid NO gen_random_uuid()',
+      'table shop_requests model_id uuid NO ',
+      'table shop_requests note text YES ',
+      'table shop_requests resolution_note text YES ',
+      "table shop_requests status text NO 'OPEN'::text",
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger shop_requests shop_requests_immutable_identity']);
+    for (const c of [
+      /^constraint models models_price_label_check CHECK \(\(\(length\(btrim\(price_label\)\) >= 1\) AND \(length\(btrim\(price_label\)\) <= 60\)\)\)$/,
+      /^constraint models models_private_min_tier_check CHECK \(\(\(private_min_tier >= 1\) AND \(private_min_tier <= 3\)\)\)$/,
+      /^constraint shop_requests shop_requests_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint shop_requests shop_requests_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint shop_requests shop_requests_handled_by_fkey FOREIGN KEY \(handled_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint shop_requests shop_requests_closed CHECK /,
+      /^constraint shop_requests shop_requests_handled CHECK /,
+      /^constraint shop_requests shop_requests_resolution CHECK /,
+      /^constraint shop_requests shop_requests_handled_after CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => !of0020(o))).toEqual([]);
+    expect(before.filter(of0020)).toEqual([]);
+    expect(withSalon.filter((o) => !of0020(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0020_private_salon'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0020: a model shown from TITANE by default, its price 1 to 60 characters; one open request per account and model, closed with its date, its identity and note fixed', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (26, 'Z', 'Salon test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string; price_label: string | null; private_min_tier: number }>`
+      INSERT INTO models (category_id, name, type, sku_prefix) VALUES (26, 'S', 'RING', 'SALON') RETURNING id, price_label, private_min_tier`.execute(t.db)).rows[0];
+    // A model inserted as the previous image inserts it: no price, from TITANE.
+    expect([model.price_label, model.private_min_tier]).toEqual([null, 1]);
+    const setModel = (sets: string) => sql.raw(`UPDATE models SET ${sets} WHERE id = '${model.id}'`).execute(t.db);
+    for (const bad of [`price_label = '   '`, `price_label = '${'x'.repeat(61)}'`, `private_min_tier = 0`, `private_min_tier = 4`]) {
+      await expect(setModel(bad), bad).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    await setModel(`price_label = '${'x'.repeat(60)}', private_min_tier = 3`);
+    await setModel(`price_label = '€ 4 800', private_min_tier = 2`);
+
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('salon@example.com', 'salon@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('salon@orbes.test', 'salon@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const insert = (note: string | null) =>
+      sql<{ id: string; status: string }>`INSERT INTO shop_requests (account_id, model_id, note) VALUES (${account}, ${model.id}, ${note}) RETURNING id, status`.execute(t.db);
+    await expect(insert('   ')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert('x'.repeat(501))).rejects.toSatisfy((e) => isCheckViolation(e));
+    const first = (await insert('A size 52, please.')).rows[0];
+    expect(first.status).toBe('OPEN');
+    await expect(insert(null)).rejects.toSatisfy((e) => isUniqueViolation(e, 'shop_requests_one_open'));
+    const setRequest = (sets: string, id = first.id) => sql.raw(`UPDATE shop_requests SET ${sets} WHERE id = '${id}'`).execute(t.db);
+    // Closed without its date, a date while open, a closer without a date, a note while open, a date before its creation: refused.
+    await expect(setRequest(`status = 'CLOSED'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'shop_requests_closed'));
+    await expect(setRequest(`handled_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e, 'shop_requests_closed'));
+    await expect(setRequest(`resolution_note = 'Called.'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'shop_requests_resolution'));
+    await expect(setRequest(`status = 'CLOSED', handled_at = created_at - interval '1 second'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'shop_requests_handled_after'));
+    await expect(setRequest(`status = 'PENDING'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    // Its identity and its note never change.
+    for (const sets of [`note = 'Another.'`, `model_id = '${model.id}', account_id = '${admin}'`, `created_at = now() + interval '1 day'`]) {
+      await expect(setRequest(sets), sets).rejects.toSatisfy(isGuardViolation);
+    }
+    await setRequest(`status = 'CLOSED', handled_at = now(), handled_by = '${admin}', resolution_note = 'Called the client.'`);
+    // Closed, another may follow; a lock closes one without a closer's note.
+    const second = (await insert(null)).rows[0];
+    await setRequest(`status = 'CLOSED', handled_at = now(), handled_by = '${admin}'`, second.id);
+    await expect(sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await sql`DELETE FROM shop_requests WHERE account_id = ${account}`.execute(t.db);
+    await sql`DELETE FROM accounts WHERE id = ${account}`.execute(t.db);
+    await sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -942,6 +1034,7 @@ describe('migrations', () => {
       '0018_club_tiers',
       // Deployment B+C.
       '0019_model_discontinued',
+      '0020_private_salon',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

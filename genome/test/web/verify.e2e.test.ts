@@ -2033,7 +2033,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('THE COLLECTION (P-R02): the lookbook from the landing, a sheet, back to the lookbook then the landing; SEE THE MODEL under an authentic result; the reserved models for an owner signed in', async () => {
+  it('THE COLLECTION (P-R02): the lookbook from the landing, a sheet, back to the lookbook then the landing; SEE THE MODEL under an authentic result; THE PRIVATE SALON for an owner signed in, and REQUEST THIS PIECE', async () => {
     // Models of their own, so that no other result of this suite names a sheet.
     const category = (await srv.ctx.categories.getByCode('J'))!;
     const nocturne = await srv.ctx.db.insertInto('collections').values({ name: 'NOCTURNE 2026' }).returning('id').executeTakeFirstOrThrow();
@@ -2045,7 +2045,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await media.setModelImage(aurore.id, { mime: 'image/jpeg', bytes: jpegPhoto(600, 600) }, SYSTEM_ACTOR);
     await media.addModelGalleryImage(aurore.id, { mime: 'image/jpeg', bytes: jpegPhoto(400, 300) }, SYSTEM_ACTOR);
     await catalog.updateModel(aurore.id, { slug: 'aurore', lookbook: 'PUBLIC', story: 'The ring of dawn.\n\nCast in Paris.\nPolished by hand.', specs: 'Metal: 925 sterling silver\nWeight: 12 g' }, SYSTEM_ACTOR);
-    await catalog.updateModel(zenith.id, { slug: 'zenith', lookbook: 'RESERVED', story: 'Shown to the owners.' }, SYSTEM_ACTOR);
+    await catalog.updateModel(zenith.id, { slug: 'zenith', lookbook: 'RESERVED', story: 'Shown to the owners.', priceLabel: '€ 4 800' }, SYSTEM_ACTOR);
+    // P-X08: NADIR is in the private salon from PLATINE: a TITANE owner neither sees it nor opens it.
+    const nadir = await model('NADIR', 'NAD-RG', null);
+    await catalog.updateModel(nadir.id, { slug: 'nadir', lookbook: 'RESERVED', privateMinTier: 2 }, SYSTEM_ACTOR);
     // P-R06: ZENITH is discontinued; its sheet's line says so, with the year.
     const zenithYear = (await catalog.discontinueModel(zenith.id, SYSTEM_ACTOR)).discontinuedAt!.getUTCFullYear();
     const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: aurore.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
@@ -2156,7 +2159,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await catalog.reinstateModel(aurore.id, SYSTEM_ACTOR);
 
-    // An owner signed in (MY PIECES) sees the models RESERVED FOR OWNERS, and their sheets.
+    // An owner signed in (MY PIECES) sees THE PRIVATE SALON (P-X08): the reserved models of its tier, priced, and their sheets.
     const email = 'lookbook.owner@example.com';
     const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
     await ownedPiece(owner.account.id);
@@ -2168,22 +2171,49 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.locator('article.piece'), 1);
     await page.locator('.pieces__foot').getByRole('link', { name: 'THE COLLECTION' }).click();
     await textOf(page.locator('h1'), 'THE COLLECTION');
-    const reserved = page.getByRole('region', { name: 'RESERVED FOR OWNERS' });
+    const reserved = page.getByRole('region', { name: 'THE PRIVATE SALON' });
     await visible(reserved);
+    await textOf(reserved.locator('.lookbook__reserved-lead'), 'Pieces offered to the owners of an ORBES piece, by tier, on request.');
     const zenithCard = reserved.locator('article.lookbook-card', { hasText: 'ZENITH' });
     await visible(zenithCard);
+    await textOf(zenithCard.locator('.lookbook-card__price'), '€ 4 800');
+    await countOf(reserved.locator('article.lookbook-card', { hasText: 'NADIR' }), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
     await zenithCard.getByRole('link', { name: 'SEE THE MODEL' }).click();
     await textOf(page.locator('h1'), 'ZENITH');
-    await textOf(page.locator('.sheet__line'), `RING · RESERVED FOR OWNERS · DISCONTINUED · ${zenithYear}`);
+    await textOf(page.locator('.sheet__line'), `RING · THE PRIVATE SALON · DISCONTINUED · ${zenithYear}`);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await textsOf(page.locator('.sheet__paragraph'), ['Shown to the owners.']);
     // No photograph: no plate.
     await countOf(page.locator('.sheet__photos'), 0);
+    // THE PRIVATE SALON on the sheet: its price, the tier it is offered from, REQUEST THIS PIECE (the sheet's one button).
+    const salon = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+    await textsOf(salon.locator('.rows__label'), ['PRICE', 'OFFERED FROM']);
+    await textsOf(salon.locator('.rows__value'), ['€ 4 800', 'TITANE']);
+    await countOf(page.locator('.btn'), 1);
+    await keepsFloors(page, ['REQUEST THIS PIECE']);
+    await salon.getByLabel('A NOTE FOR ORBES CLIENT SERVICES').fill('A size 54, please.');
+    await salon.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
+    await textOf(salon.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
+    await textOf(salon.locator('.ownership__status'), 'REQUESTED');
+    // With the contact of ORBES Client Services: the email names the model and the request.
+    const mail = new URL((await salon.locator('.contact__email').getAttribute('href'))!);
+    expect(mail.searchParams.get('subject')).toBe('ORBES — ZENITH — REQUEST');
+    await countOf(page.locator('.btn'), 0);
+    const requested = await srv.ctx.db.selectFrom('shop_requests').select(['id', 'note', 'status']).where('account_id', '=', owner.account.id).execute();
+    expect(requested).toEqual([{ id: expect.any(String), note: 'A size 54, please.', status: 'OPEN' }]);
+    expect(mail.searchParams.get('body')).toContain(`REQUEST: ${requested[0]!.id}`);
     // Back: the lookbook, then the landing (MY PIECES' entry became the lookbook's).
     await page.goBack();
     await textOf(page.locator('h1'), 'THE COLLECTION');
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    // Read again, the sheet still says the piece is requested.
+    await page.goto(`${srv.origin}/verify/lookbook/zenith`);
+    await textOf(page.getByRole('region', { name: 'THE PRIVATE SALON' }).locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
+    // A model above the owner's tier: the same sentence as a model not in the collection.
+    await page.goto(`${srv.origin}/verify/lookbook/nadir`);
+    await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
     expect(problems).toEqual([]);
   }, 180_000);
 

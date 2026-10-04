@@ -464,6 +464,7 @@ docker images orbes-genome
   | Migration | Élément | Contenu |
   |---|---|---|
   | `0019_model_discontinued` | P-R06 | un modèle arrêté (`models.discontinued_at`, `discontinued_by`, nullables) : arrêté par un ADMIN, il devient inactif ; ses pièces disent DISCONTINUED et l'année ; réversible |
+  | `0020_private_salon` | P-X08 | le salon privé (`models.price_label`, nullable, et `private_min_tier`, 1 par défaut ; la table `shop_requests`) : les modèles réservés, par palier, avec leur prix, sur demande ; une seule demande ouverte par compte et par modèle |
 
 ## 3. Déploiement C : après B
 

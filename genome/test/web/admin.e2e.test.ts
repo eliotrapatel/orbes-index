@@ -2351,7 +2351,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=model-lookbook]').click();
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE');
     await p.waitForSelector('[data-testid=story-shown]');
-    for (const action of ['lookbook-edit', 'story-edit', 'specs-edit', 'gallery-add', 'gallery-earlier', 'gallery-alt', 'gallery-remove']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    for (const action of ['lookbook-edit', 'salon-edit', 'story-edit', 'specs-edit', 'gallery-add', 'gallery-earlier', 'gallery-alt', 'gallery-remove']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
     await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
@@ -2509,6 +2509,93 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
     expect(await cspViolations(a)).toEqual([]);
     await adminContext.close();
+  }, STEP_TIMEOUT);
+
+  it('sets the private salon of a Reserved model from the Catalogue and closes an owner\'s request from the Club page (P-X08); an AUDITOR reads, the emails masked', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // A model of its own, Reserved in the lookbook.
+    const category = (await ctx.categories.getByCode('J'))!;
+    const solstice = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-RG' }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.catalog.updateModel(solstice.id, { slug: 'solstice', lookbook: 'RESERVED' }, SYSTEM_ACTOR);
+    await go(p, `#/catalogue/${solstice.id}`, 'SOLSTICE');
+    expect(await p.locator('[data-testid=salon-price]').textContent()).toBe('None shown');
+    expect(await p.locator('[data-testid=salon-tier]').textContent()).toBe('TITANE');
+    // Its price and tier in their dialog: refused unchanged, then saved, the price as the server keeps it.
+    await p.click('[data-testid=salon-edit]');
+    expect(await p.locator('dialog [data-testid=salon-impact]').textContent()).toMatch(/in the private salon now\.$/);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await p.fill('dialog input[name=priceLabel]', '  €   4 800 ');
+    await p.selectOption('dialog select[name=minTier]', '2');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Private salon saved.")');
+    await expect.poll(() => p.locator('[data-testid=salon-price]').textContent()).toBe('€ 4 800');
+    expect(await p.locator('[data-testid=salon-tier]').textContent()).toBe('PLATINE');
+    expect(await ctx.db.selectFrom('models').select(['price_label', 'private_min_tier']).where('id', '=', solstice.id).executeTakeFirstOrThrow()).toEqual({ price_label: '€ 4 800', private_min_tier: 2 });
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+
+    // A PLATINE owner requests it on /verify (the service, as REQUEST THIS PIECE calls it).
+    const a = await ctx.services.auth.registerAccount({ email: 'vesper.owner@example.com', password: 'salon owner passphrase 2026' }, {});
+    for (let i = 0; i < 3; i++) {
+      const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
+      await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+      const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
+      await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
+    }
+    await ctx.services.salon.request(a.account.id, 'solstice', 'A size 54, and a call after six.', { type: 'account', id: a.account.id });
+
+    // The Club's Requests tab: the open request, its client (in clear for an ADMIN), its model and price, its note.
+    await go(p, '#/club', 'Club');
+    await p.click('[data-testid=club-tab-requests]');
+    await expect.poll(() => p.locator('[data-testid=club-tab-requests]').getAttribute('aria-current')).toBe('page');
+    expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=requests');
+    const row = p.locator('#requests tbody tr', { hasText: 'vesper.owner@example.com' });
+    await expect.poll(() => row.count()).toBe(1);
+    expect(await row.locator('[data-testid=request-model]').textContent()).toBe('SOLSTICE');
+    expect(await row.locator('.cell-sub').first().textContent()).toBe('RING · € 4 800');
+    expect(await row.locator('[data-testid=request-note]').textContent()).toBe('A size 54, and a call after six.');
+    expect(await row.locator('.status__text').textContent()).toBe('OPEN');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-requests', { full: true });
+    // Closed with a note: the row says who closed it and what was done.
+    await row.locator('[data-testid=close-request]').click();
+    await p.fill('dialog textarea[name=note]', 'Called the client: a fitting on Tuesday.');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Request closed.")');
+    await expect.poll(() => row.locator('.status__text').textContent()).toBe('CLOSED');
+    expect(await row.locator('.cell-details').last().textContent()).toBe('Called the client: a fitting on Tuesday.');
+    expect(await row.locator('[data-testid=close-request]').count()).toBe(0);
+    expect(await ctx.db.selectFrom('shop_requests').select(['status', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
+      { status: 'CLOSED', resolution_note: 'Called the client: a fitting on Tuesday.' },
+    ]);
+    // Narrowed to the open requests: none is left.
+    await p.selectOption('#requests select[name=status]', 'OPEN');
+    await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/club?tab=requests&status=OPEN');
+    await expect.poll(() => p.locator('#requests tbody tr', { hasText: 'vesper.owner@example.com' }).count()).toBe(0);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads the requests, the client's email masked, without an action; and the salon of the model, without Edit.
+    await ctx.services.salon.request(a.account.id, 'solstice', null, { type: 'account', id: a.account.id });
+    const auditor = { email: 'salon.audit@orbes.test', password: 'salon auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, '#/club?tab=requests&status=OPEN', 'Club');
+    await expect.poll(() => ap.locator('#requests [data-testid=request-client]').allTextContents()).toEqual(['v***@example.com']);
+    expect(await ap.locator('[data-testid=close-request]').count()).toBe(0);
+    await go(ap, `#/catalogue/${solstice.id}`, 'SOLSTICE');
+    await expect.poll(() => ap.locator('[data-testid=salon-price]').textContent()).toBe('€ 4 800');
+    expect(await ap.locator('[data-testid=salon-edit]').count()).toBe(0);
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
   }, STEP_TIMEOUT);
 
   it('raised no page error or CSP violation', () => {

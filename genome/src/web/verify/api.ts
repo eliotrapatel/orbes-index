@@ -40,6 +40,7 @@ import type {
   ReportInput,
   ServiceRecord,
   SessionInfo,
+  ShopRequest,
   TransferOffer,
   VerifyInput,
   VerifyOutcome,
@@ -163,6 +164,13 @@ export class ApiClient {
   /** A sheet, PUBLIC or RESERVED, for an account that holds a piece (the club). */
   clubLookbookSheet(slug: string): Promise<LookbookSheet> {
     return this.request<LookbookSheet>('GET', `/api/v1/club/lookbook/${encodeURIComponent(slug)}`);
+  }
+
+  /** P-X08, REQUEST THIS PIECE: a model of THE PRIVATE SALON, with the account's optional note (409 SHOP_REQUEST_OPEN while one is open). */
+  async requestPiece(slug: string, note: string | null): Promise<ShopRequest> {
+    const r = await this.request<{ request?: ShopRequest }>('POST', `/api/v1/club/lookbook/${encodeURIComponent(slug)}/request`, note ? { note } : {}, { csrf: true });
+    if (!r?.request || typeof r.request.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.request;
   }
 
   // ── The releases (P-R03) ─────────────────────────────────────────────────

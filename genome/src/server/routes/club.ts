@@ -2,10 +2,13 @@
  * The owners' club (contract §3 extension; API §10.9, §10.10;
  * services/club.ts, services/drops.ts), cookie `orbes_session`.
  *
- * P-R02 opens the lookbook's RESERVED models to the owners of a piece:
+ * P-R02 opens the lookbook's RESERVED models to the owners of a piece; P-X08
+ * makes them THE PRIVATE SALON (services/salon.ts), each from its tier up,
+ * with its price, on request:
  *
- *   GET  /api/v1/club/lookbook              the RESERVED models (no story)
- *   GET  /api/v1/club/lookbook/:slug        a sheet, PUBLIC or RESERVED
+ *   GET  /api/v1/club/lookbook                  the RESERVED models the account's tier reaches, with their prices (no story)
+ *   GET  /api/v1/club/lookbook/:slug            a sheet, PUBLIC or RESERVED (its price, its tier, the account's open request)
+ *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note; ORBES Client Services concludes
  *
  * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
  * the tiers):
@@ -33,7 +36,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { circleRsvpBody, circleVoteBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams } from '../http/schemas.js';
+import { circleRsvpBody, circleVoteBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { circleFeedPage } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
@@ -46,17 +49,27 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     reply.header('cache-control', 'no-store');
     return payload;
   });
-  const { club, drops, circle } = ctx.services;
+  const { club, drops, circle, salon } = ctx.services;
 
+  // P-X08: THE PRIVATE SALON, the RESERVED models from the tier of each.
   app.get('/api/v1/club/lookbook', async (request) => {
     const { account } = requireAccount(request);
-    return { models: await club.reservedLookbook(account.id) };
+    return { models: await salon.cards(account.id) };
   });
 
   app.get('/api/v1/club/lookbook/:slug', async (request) => {
     const { account } = requireAccount(request);
     const { slug } = parse(lookbookParams, request.params);
-    return club.lookbookSheet(account.id, slug);
+    return salon.sheet(account.id, slug);
+  });
+
+  app.post('/api/v1/club/lookbook/:slug/request', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { slug } = parse(lookbookParams, request.params);
+    const b = parse(salonRequestBody, request.body);
+    const created = await salon.request(account.id, slug, b.note ?? null, accountActor(request));
+    reply.code(201);
+    return created;
   });
 
   // P-R03: the account's tier and its entries in the drops, for MY PIECES and a release's page; P-X04: the benefits of

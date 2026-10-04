@@ -5,6 +5,10 @@
  * each says before it is saved, the specifications held to the server's rule
  * before they are sent, and the gallery's order.
  *
+ * THE PRIVATE SALON (P-X08): a reserved model's price (60 characters, '' for
+ * none) and the tier it is shown from (TITANE, PLATINE, PALLADIUM), with
+ * what the dialog sends and says.
+ *
  * The server keeps the rules (CatalogService, MediaService): an address
  * another model has is 409 SLUG_TAKEN, and a published model's address never
  * changes (409 SLUG_LOCKED). The console says so before anything is sent.
@@ -130,4 +134,64 @@ export function galleryImpact(m: Model): string {
       ? 'Shown on the model’s sheet once it is in the lookbook'
       : `Shown at once on the model’s sheet (${m.lookbook === 'PUBLIC' ? 'everyone' : 'the owners of an ORBES piece'}), after its cover`;
   return `${where}, in the order of the gallery. ${left === 1 ? 'One place is left' : `${formatCount(left)} places are left`} of ${GALLERY_MAX}. Every photograph at /api/v1/media is public, as the result’s are.`;
+}
+
+// ── THE PRIVATE SALON (P-X08) ──────────────────────────────────────────────
+
+/** Mirrors the server's PRICE_LABEL_MAX (services/lookbook.ts): the price the salon shows, one line. */
+export const PRICE_LABEL_MAX = 60;
+
+/** The tiers a reserved model is shown from, as the Private salon dialog offers them (CLUB_TIER_THRESHOLDS: 1, 3, 5 pieces). */
+export const SALON_TIER_OPTIONS: readonly { value: string; label: string }[] = Object.freeze([
+  { value: '1', label: 'TITANE — every owner (1 piece held)' },
+  { value: '2', label: 'PLATINE — 3 pieces held' },
+  { value: '3', label: 'PALLADIUM — 5 pieces held' },
+]);
+
+/** The name of a tier by its level, as the page says it. */
+export function salonTierName(level: number): string {
+  return level === 2 ? 'PLATINE' : level === 3 ? 'PALLADIUM' : 'TITANE';
+}
+
+/** The Private salon dialog's values (every control of a native form reads as a string). */
+export interface SalonForm {
+  priceLabel: string;
+  minTier: string;
+}
+
+export function salonForm(m: Pick<Model, 'priceLabel' | 'privateMinTier'>): SalonForm {
+  return { priceLabel: m.priceLabel ?? '', minTier: String(m.privateMinTier) };
+}
+
+/** The price as the server keeps it: trimmed, its runs of spaces made one ('' clears it). */
+function priceOf(typed: string): string {
+  return typed.trim().replace(/\s+/g, ' ');
+}
+
+/** What the server would refuse in the Private salon dialog, said before anything is sent; null when it may be sent. */
+export function salonProblem(f: SalonForm): string | null {
+  const price = priceOf(f.priceLabel);
+  if (price.length > PRICE_LABEL_MAX) return `The price must be at most ${PRICE_LABEL_MAX} characters.`;
+  if (/\p{Cc}/u.test(price)) return 'The price contains invalid characters.';
+  if (!['1', '2', '3'].includes(f.minTier)) return 'Choose the tier the model is shown from.';
+  return null;
+}
+
+/** What PATCH /api/admin/models/:id sends from the Private salon dialog: only what differs ('' clears the price). */
+export function salonChange(m: Pick<Model, 'priceLabel' | 'privateMinTier'>, f: SalonForm): ModelChange {
+  const out: ModelChange = {};
+  const price = priceOf(f.priceLabel);
+  if (price !== (m.priceLabel ?? '')) out.priceLabel = price;
+  const tier = Number(f.minTier);
+  if ((tier === 1 || tier === 2 || tier === 3) && tier !== m.privateMinTier) out.privateMinTier = tier;
+  return out;
+}
+
+/** Said in the Private salon dialog and section: where the price and the tier are read. */
+export function salonImpact(m: Pick<Model, 'lookbook'>): string {
+  const now =
+    m.lookbook === 'RESERVED'
+      ? 'The model is Reserved: it is in the private salon now.'
+      : 'They take effect once the model is Reserved (Publication); a Public model shows no price.';
+  return `THE PRIVATE SALON on /verify: the lookbook’s Reserved models, each shown to the owners from its tier up, with its price, and requested from its sheet (REQUEST THIS PIECE; the Club’s Requests tab). Below its tier, its sheet answers as a model not in the collection. ${now}`;
 }

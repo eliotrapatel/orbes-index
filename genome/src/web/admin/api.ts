@@ -67,6 +67,8 @@ import type {
   ModelChange,
   OwnerList,
   OwnerLock,
+  ShopRequest,
+  ShopRequestStatus,
   OwnerSheet,
   Paged,
   RecoveryCode,
@@ -761,6 +763,18 @@ export class AdminApi {
   /** A tier's benefits, one per line; null restores the words by default. */
   updateClubTier(tier: ClubTierName, benefits: string | null): Promise<ClubTierSheet> {
     return this.patch(`/api/admin/club/tiers/${encodeURIComponent(tier)}`, { benefits });
+  }
+
+  // ── The Club: the private salon's requests (P-X08) ───────────────────────
+
+  /** The requests, OPEN first, then the newest; or those of one status. */
+  shopRequests(q: { status?: ShopRequestStatus; page?: number; pageSize?: number } = {}): Promise<Paged<ShopRequest>> {
+    return this.get('/api/admin/club/requests', q);
+  }
+
+  /** OPERATOR: close a request with a note, what was done for the client. */
+  closeShopRequest(id: string, note: string): Promise<ShopRequest> {
+    return this.post(`/api/admin/club/requests/${encodeURIComponent(id)}/close`, { note });
   }
 
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {
