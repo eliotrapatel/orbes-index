@@ -10,7 +10,8 @@
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
  * photograph routes (media.ts: an image of at most 1 MiB, F-04; a photograph
- * of a model's lookbook gallery, P-R02). RETAIL (A-08, a seller's account)
+ * of a model's lookbook gallery, P-R02; a photograph of a post of the circle,
+ * P-X01). RETAIL (A-08, a seller's account)
  * reaches only the routes that declare it: the sale mode, the list of points
  * of sale and its own session, password and second factor.
  */
@@ -26,6 +27,7 @@ import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
 import { adminCatalogRoutes } from './catalog.js';
 import { adminCertificateRoutes } from './certificates.js';
+import { adminCircleRoutes } from './circle.js';
 import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminKeyRoutes } from './keys.js';
@@ -59,6 +61,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
   await app.register(adminDropRoutes, deps);
+  await app.register(adminCircleRoutes, deps);
   await app.register(adminReportRoutes, deps);
   await app.register(adminRevocationRoutes, deps);
   await app.register(adminKeyRoutes, deps);

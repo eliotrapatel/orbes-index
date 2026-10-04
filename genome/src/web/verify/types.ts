@@ -373,3 +373,58 @@ export interface ClubStatus {
   seniority: number;
   entries: ClubEntry[];
 }
+
+/** A post of the owners' circle (P-X01): a NOTE, an INVITATION (answered YES or NO) or a POLL (one vote). */
+export type CirclePostKind = 'NOTE' | 'INVITATION' | 'POLL';
+
+export const CIRCLE_POST_KINDS: readonly CirclePostKind[] = ['NOTE', 'INVITATION', 'POLL'];
+
+/** An answer to an invitation of the circle. */
+export type CircleAnswer = 'YES' | 'NO';
+
+export const CIRCLE_ANSWERS: readonly CircleAnswer[] = ['YES', 'NO'];
+
+/** A photograph of a post: `/api/v1/media/<sha256>`; `alt` null, the post's default. */
+export interface CirclePhoto {
+  url: string;
+  alt: string | null;
+}
+
+/** One post of the feed (GET /api/v1/club/circle): never its body. */
+export interface CircleCard {
+  id: string;
+  kind: CirclePostKind;
+  title: string;
+  /** The lowest tier that reads it: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  minTier: number;
+  publishedAt: string;
+  cover: CirclePhoto | null;
+  eventAt: string | null;
+  eventPlace: string | null;
+  /** The reader's answer to an invitation, null without one. */
+  answer: CircleAnswer | null;
+  /** Whether the reader voted in a poll. */
+  voted: boolean;
+}
+
+/** A page of the feed. */
+export interface CircleFeed {
+  items: CircleCard[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** A post (GET /api/v1/club/circle/:id, and the answer to POST …/rsvp and …/vote). */
+export interface CirclePost extends CircleCard {
+  body: string | null;
+  photos: CirclePhoto[];
+  invitation: { eventAt: string; place: string | null; capacity: number | null; placesLeft: number | null; open: boolean } | null;
+  /** `results` only once the reader voted. */
+  poll: { options: string[]; vote: number | null; results: { counts: number[]; total: number } | null } | null;
+  links: {
+    drop: { id: string; title: string } | null;
+    model: { slug: string; name: string; type: string } | null;
+    external: { url: string; host: string } | null;
+  };
+}

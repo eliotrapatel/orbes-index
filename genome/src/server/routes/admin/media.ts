@@ -1,25 +1,27 @@
 /**
  * Photographs (F-04): a model's reference photograph and the photograph of
- * one piece (API §13.4, §14.12); and the gallery of a model's lookbook sheet
- * (P-R02, §13.4: add, remove, order and alternative texts). OPERATOR, like
- * every other mutation of the catalogue and of a product; CSRF as for any
- * unsafe request.
+ * one piece (API §13.4, §14.12); the gallery of a model's lookbook sheet
+ * (P-R02, §13.4: add, remove, order and alternative texts); and the
+ * photographs of a post of the owners' circle (P-X01: the same four
+ * gestures, at most four photographs). OPERATOR, like every other mutation
+ * of the catalogue, of a product and of the circle; CSRF as for any unsafe
+ * request.
  *
  * The only routes whose body is not JSON: the image itself, sent as
- * `image/jpeg` or `image/webp`, at most 1 MiB, on the three upload routes
+ * `image/jpeg` or `image/webp`, at most 1 MiB, on the four upload routes
  * (MEDIA_UPLOAD_ROUTES). The two parsers live in this plugin's encapsulation
  * context, so no other route of the API accepts an image, nor a body over
- * 16 KB; here, any other type is a 415 that says what to send (the gallery's
- * order, a PATCH, is JSON). The service (MediaService) checks the bytes,
- * strips EXIF and XMP, stores the image once by its SHA-256 and audits the
- * change.
+ * 16 KB; here, any other type is a 415 that says what to send (the order of a
+ * gallery or of a post's photographs, a PATCH, is JSON). The service
+ * (MediaService) checks the bytes, strips EXIF and XMP, stores the image once
+ * by its SHA-256 and audits the change.
  *
  * The edge in front of the VPS lets these upload paths, and only them, carry
  * 1 200 KB instead of 64 KB (deploy/vps/Caddyfile, DEPLOYMENT §15).
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { DomainError } from '../../errors.js';
-import { catalogParams, emptyBody, galleryImageParams, galleryOrderBody, parse, productParams } from '../../http/schemas.js';
+import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, parse, productParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES, type ImageMime } from '../../media/image.js';
 import type { ImageUpload } from '../../services/media.js';
@@ -29,7 +31,12 @@ import type { AdminRouteDeps } from './index.js';
 export const MEDIA_BODY_LIMIT_BYTES = MAX_IMAGE_BYTES;
 
 /** The routes that take an image (POST, role OPERATOR, the default for a mutation): the edge gives exactly these 1 200 KB. */
-export const MEDIA_UPLOAD_ROUTES = Object.freeze(['/api/admin/models/:id/image', '/api/admin/products/:productId/photo', '/api/admin/models/:id/gallery'] as const);
+export const MEDIA_UPLOAD_ROUTES = Object.freeze([
+  '/api/admin/models/:id/image',
+  '/api/admin/products/:productId/photo',
+  '/api/admin/models/:id/gallery',
+  '/api/admin/circle/posts/:id/photos',
+] as const);
 
 /** A parsed image body: kept apart from a parsed JSON object, which these routes refuse. */
 class ImageBody implements ImageUpload {
@@ -48,7 +55,7 @@ function imageOf(body: unknown): ImageUpload {
 }
 
 export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { media, catalog } = ctx.services;
+  const { media, catalog, circle } = ctx.services;
 
   for (const mime of IMAGE_MIME_TYPES) {
     app.addContentTypeParser(mime, { parseAs: 'buffer', bodyLimit: MEDIA_BODY_LIMIT_BYTES }, (_request, body, done) => {
@@ -96,6 +103,29 @@ export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const b = parse(galleryOrderBody, request.body);
     await media.arrangeModelGallery(id, b.images, adminActor(request));
     return catalog.getModel(id);
+  });
+
+  // ── The photographs of a post of the circle (P-X01) ──────────────────────
+
+  app.post('/api/admin/circle/posts/:id/photos', { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request) => {
+    const { id } = parse(circlePostParams, request.params);
+    await media.addCirclePostPhoto(id, imageOf(request.body), adminActor(request));
+    return circle.get(id);
+  });
+
+  app.delete('/api/admin/circle/posts/:id/photos/:sha256', async (request) => {
+    const { id, sha256 } = parse(circlePhotoParams, request.params);
+    parse(emptyBody, request.body);
+    await media.removeCirclePostPhoto(id, sha256, adminActor(request));
+    return circle.get(id);
+  });
+
+  // The order and the alternative texts: JSON, every photograph of the post once, in the new order.
+  app.patch('/api/admin/circle/posts/:id/photos', async (request) => {
+    const { id } = parse(circlePostParams, request.params);
+    const b = parse(circlePhotoOrderBody, request.body);
+    await media.arrangeCirclePostPhotos(id, b.images, adminActor(request));
+    return circle.get(id);
   });
 
   // ── The photograph of one piece ──────────────────────────────────────────

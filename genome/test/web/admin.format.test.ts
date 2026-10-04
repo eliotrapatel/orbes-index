@@ -131,6 +131,11 @@ describe('admin hash router', () => {
     expect(parseHash('#/catalogue')).toMatchObject({ name: 'catalogue' });
     expect(parseHash(`#/catalogue/${modelId}`)).toMatchObject({ name: 'model', params: { modelId }, path: `/catalogue/${modelId}` });
     expect(href('model', { modelId })).toBe(`#/catalogue/${modelId}`);
+    // The Club's tabs by `?tab=`, a post of its circle (P-X01) under it, reached from its row.
+    const postId = '99f0cfce-65a1-4365-84f6-423d6dcbd3ce';
+    expect(parseHash('#/club?tab=circle')).toMatchObject({ name: 'club', query: { tab: 'circle' } });
+    expect(parseHash(`#/club/circle/${postId}`)).toMatchObject({ name: 'circlePost', params: { postId }, path: `/club/circle/${postId}` });
+    expect(href('circlePost', { postId })).toBe(`#/club/circle/${postId}`);
   });
 
   it('drops unsafe query keys and bounds values', () => {

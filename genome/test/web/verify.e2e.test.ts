@@ -32,7 +32,12 @@
  * the list from the landing, a release's page, its sign-in, ENTER THE DRAW
  * and WITHDRAW, YOUR RELEASES in MY PIECES, then, drawn, the place held with
  * the contact of ORBES Client Services, the seed checked on the phone and
- * the entries by rank), and the problem
+ * the entries by rank), THE CIRCLE (P-X01: signed out its sign-in, then the
+ * feed of an owner, each post from its tier up; an invitation answered YES
+ * then NO within its places; a poll, one option chosen then VOTE, then its
+ * results; a note's photographs, text and links, the release's page and a
+ * film on another site with its host; THE CIRCLE in MY PIECES; an account
+ * that holds no piece told it opens with one), and the problem
  * screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
@@ -50,7 +55,7 @@ import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CIRCLE, CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
@@ -2135,6 +2140,192 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'THE RELEASES');
     expect(new URL(page.url()).pathname).toBe('/verify/releases');
     expect(problems).toEqual([]);
+  }, 180_000);
+
+  it('THE CIRCLE (P-X01): the sign-in, then the feed of an owner from its tier; an invitation answered, a poll voted once and its results, a note\'s photographs and links; THE CIRCLE in MY PIECES; closed to an account without a piece', async () => {
+    const { ctx } = srv;
+    const { circle, media } = ctx.services;
+    const staff = await ctx.services.auth.createAdmin({ email: 'circle.staff@orbes.test', password: 'orbes circle passphrase 2026', role: 'OPERATOR' }, SYSTEM_ACTOR);
+    const actor = { type: 'admin' as const, id: staff.id };
+    // A release of a model of its own, published: the note links its page.
+    const category = (await ctx.categories.getByCode('J'))!;
+    const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'HALO', type: 'RING', sku_prefix: 'HAL-CR' }).returning('id').executeTakeFirstOrThrow();
+    const drop = await ctx.services.drops.create({ modelId: model.id, title: 'HALO — release I', quantity: 1, opensAt: new Date(Date.now() + 3_600_000), closesAt: new Date(Date.now() + 7_200_000) }, actor);
+    await ctx.services.drops.publish(drop.id, actor);
+    // Four posts: one kept for PLATINE and up, then a poll, an invitation and a note, published in that order.
+    const platine = await circle.create({ kind: 'NOTE', title: 'For PLATINE and up' , minTier: 2 }, actor);
+    const poll = await circle.create({ kind: 'POLL', title: 'The next stone', pollOptions: ['Onyx', 'Opal', 'Jade'] }, actor);
+    const dinner = await circle.create({ kind: 'INVITATION', title: 'Dinner at the atelier', eventAt: new Date(Date.now() + 7 * 86_400_000), eventPlace: 'Paris', capacity: 12 }, actor);
+    const note = await circle.create({ kind: 'NOTE', title: 'The atelier at night', body: 'Twelve hands.\n\nOne ring.', dropId: drop.id, externalUrl: 'https://www.youtube.com/watch?v=orbes' }, actor);
+    await media.addCirclePostPhoto(note.id, { mime: 'image/jpeg', bytes: jpegPhoto(600, 400) }, actor);
+    await media.addCirclePostPhoto(note.id, { mime: 'image/jpeg', bytes: jpegPhoto(400, 600) }, actor);
+    for (const p of [platine, poll, dinner, note]) {
+      await circle.publish(p.id, actor);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    // The owner holds one piece: TITANE.
+    const email = 'circle.owner@example.com';
+    const owner = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
+    await ownedPiece(owner.account.id);
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // Opened directly, signed out: the sign-in under its sentence.
+    await page.goto(`${srv.origin}/verify/circle`);
+    await textOf(page.locator('h1'), 'THE CIRCLE');
+    const panel = page.locator('.circle__signin');
+    await textOf(panel.locator('.ownership__text').first(), CIRCLE.signIn);
+    await panel.getByLabel('EMAIL').fill(email);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+
+    // The feed: the latest published first, nothing kept for PLATINE; each on its ivory plate with its one text link.
+    const cards = page.locator('article.circle-card');
+    await textsOf(cards.locator('.circle-card__title'), ['THE ATELIER AT NIGHT', 'DINNER AT THE ATELIER', 'THE NEXT STONE']);
+    await textsOf(cards.locator('.circle-card__kind'), ['NOTE', 'INVITATION', 'POLL']);
+    await textsOf(cards.locator('.circle-card__link'), ['READ THE NOTE', 'SEE THE INVITATION', 'SEE THE POLL']);
+    await textOf(cards.nth(1).locator('.circle-card__event'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · PARIS$/);
+    await attrOf(cards.first().locator('img.circle-card__img'), 'loading', 'lazy');
+    await attrOf(cards.first().locator('.circle-card__link'), 'href', `/verify/circle/${note.id}`);
+    expect(await cards.first().evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['READ THE NOTE', 'SEE THE INVITATION', 'SEE THE POLL', 'SCAN ORBES CODE', 'THE RELEASES', 'THE COLLECTION', 'MY PIECES', ...LEGAL_LINKS]);
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+      await keepsFloors(page, ['SEE THE INVITATION']);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-circle.png'), fullPage: true });
+
+    // The invitation: WHEN in UTC then on this phone, WHERE, PLACES; YES, then NO, until the event.
+    await cards.nth(1).getByRole('link', { name: 'SEE THE INVITATION' }).click();
+    await textOf(page.locator('h1'), 'DINNER AT THE ATELIER');
+    expect(new URL(page.url()).pathname).toBe(`/verify/circle/${dinner.id}`);
+    await textOf(page.locator('.circle-post__kind'), 'INVITATION');
+    await textsOf(page.locator('.circle-post__section > .section-label'), ['THE INVITATION', 'YOUR ANSWER']);
+    await textsOf(page.locator('.circle-post__rows .rows__label'), ['WHEN', 'WHERE', 'PLACES']);
+    const when = page.locator('.circle-post__rows .rows__row', { hasText: 'WHEN' });
+    await textOf(when.locator('.circle-post__utc'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await textOf(when.locator('.circle-post__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
+    const places = page.locator('.circle-post__rows .rows__row', { hasText: 'PLACES' }).locator('.rows__value');
+    await textOf(places, '12 LEFT OF 12');
+    const sentence = page.locator('.circle-post__reply .circle-post__sentence');
+    await textOf(sentence, CIRCLE.answer.none);
+    await keepsFloors(page, ['YES', 'NO', 'SCAN ORBES CODE', 'THE CIRCLE', ...LEGAL_LINKS]);
+    await page.locator('.circle-post__choice').getByRole('button', { name: 'YES' }).click();
+    await textOf(sentence, CIRCLE.answer.yes);
+    await attrOf(page.locator('.circle-post__choice [data-answer=YES]'), 'aria-pressed', 'true');
+    await textOf(places, '11 LEFT OF 12');
+    await page.locator('.circle-post__choice').getByRole('button', { name: 'NO' }).click();
+    await textOf(sentence, CIRCLE.answer.no);
+    await attrOf(page.locator('.circle-post__choice [data-answer=NO]'), 'aria-pressed', 'true');
+    await textOf(places, '12 LEFT OF 12');
+    expect(await ctx.db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', dinner.id).where('account_id', '=', owner.account.id).execute()).toEqual([{ answer: 'NO' }]);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-circle-invitation.png'), fullPage: true });
+    // Back: the feed, which says the answer.
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE CIRCLE');
+    await textOf(cards.nth(1).locator('.circle-card__mine'), 'YOU ANSWERED NO');
+
+    // The poll: an option chosen, then VOTE, the page's hairline button while it is offered; once voted, the results.
+    await cards.nth(2).getByRole('link', { name: 'SEE THE POLL' }).click();
+    await textOf(page.locator('h1'), 'THE NEXT STONE');
+    await textOf(page.locator('.circle-post__poll .circle-post__sentence'), CIRCLE.pollLead);
+    const vote = page.getByRole('button', { name: 'VOTE', exact: true });
+    await expect.poll(() => vote.isDisabled(), POLL).toBe(true);
+    await attrOf(page.locator('.circle-post__foot .circle-post__scan'), 'class', /\btextlink\b/);
+    await keepsFloors(page, ['ONYX', 'OPAL', 'JADE', 'VOTE', 'SCAN ORBES CODE', 'THE CIRCLE']);
+    await page.locator('.circle-post__options').getByRole('button', { name: 'OPAL' }).click();
+    await attrOf(page.locator('.circle-post__options [data-option="1"]'), 'aria-pressed', 'true');
+    await vote.click();
+    await textOf(page.locator('.circle-post__poll .circle-post__sentence'), CIRCLE.pollVoted);
+    await textsOf(page.locator('.circle-post__result-label'), ['ONYX', 'OPAL', 'JADE']);
+    await textsOf(page.locator('.circle-post__result-votes'), ['0 VOTES · 0%', '1 VOTE · 100%', '0 VOTES · 0%']);
+    await textOf(page.locator('.circle-post__result.is-mine .circle-post__result-mine'), 'YOUR VOTE');
+    await countOf(page.getByRole('button', { name: 'VOTE', exact: true }), 0);
+    await attrOf(page.locator('.circle-post__foot .circle-post__scan'), 'class', /\bbtn\b/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.goBack();
+    await textOf(cards.nth(2).locator('.circle-card__mine'), 'YOU VOTED');
+
+    // The note: its photographs (the first loaded at once), its paragraphs, its links.
+    await cards.first().getByRole('link', { name: 'READ THE NOTE' }).click();
+    await textOf(page.locator('h1'), 'THE ATELIER AT NIGHT');
+    const photos = page.getByRole('region', { name: 'Photographs of THE ATELIER AT NIGHT' });
+    await expect.poll(() => photos.locator('img').evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).getAttribute('loading'), (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
+      ['eager', 600],
+      ['lazy', 400],
+    ]);
+    await attrOf(photos.locator('img').first(), 'alt', 'THE ATELIER AT NIGHT, photographed by ORBES');
+    await textsOf(page.locator('.circle-post__paragraph'), ['Twelve hands.', 'One ring.']);
+    await textsOf(page.locator('.circle-post__link-title'), ['HALO — RELEASE I']);
+    await attrOf(page.locator('.circle-post__links').getByRole('link', { name: 'SEE THE RELEASE' }), 'href', `/verify/releases/${drop.id}`);
+    const film = page.locator('.circle-post__external');
+    await attrOf(film, 'href', 'https://www.youtube.com/watch?v=orbes');
+    await attrOf(film, 'target', '_blank');
+    await attrOf(film, 'rel', 'noopener noreferrer');
+    await attrOf(film, 'aria-label', 'Open the link on youtube.com, in a new tab');
+    await textOf(page.locator('.circle-post__host'), 'youtube.com');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['SEE THE RELEASE', 'OPEN THE LINK', 'SCAN ORBES CODE', 'THE CIRCLE', ...LEGAL_LINKS]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-circle-note.png'), fullPage: true });
+    // SEE THE RELEASE: its page over the releases' list; back through the list to the note.
+    await page.locator('.circle-post__links').getByRole('link', { name: 'SEE THE RELEASE' }).click();
+    await textOf(page.locator('h1'), 'HALO — RELEASE I');
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE RELEASES');
+    await page.goBack();
+    await textOf(page.locator('h1'), 'THE ATELIER AT NIGHT');
+    // The foot's THE CIRCLE: back to the feed, then the landing.
+    await page.locator('.circle-post__foot').getByRole('link', { name: 'THE CIRCLE' }).click();
+    await textOf(page.locator('h1'), 'THE CIRCLE');
+    expect(new URL(page.url()).pathname).toBe('/verify/circle');
+    await page.goBack();
+    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    expect(new URL(page.url()).pathname).toBe('/verify');
+
+    // MY PIECES: THE CIRCLE, for an owner, at the foot.
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const link = page.locator('.pieces__foot').getByRole('link', { name: 'THE CIRCLE' });
+    await visible(link);
+    await attrOf(link, 'href', '/verify/circle');
+    await link.click();
+    await textOf(page.locator('h1'), 'THE CIRCLE');
+    // An address under /verify/circle that is none: the feed, its address put back; a post kept for PLATINE: not in the circle.
+    await page.goto(`${srv.origin}/verify/circle/nowhere`);
+    await textOf(page.locator('h1'), 'THE CIRCLE');
+    expect(new URL(page.url()).pathname).toBe('/verify/circle');
+    await page.goto(`${srv.origin}/verify/circle/${platine.id}`);
+    await textOf(page.locator('.circle-post__missing'), CIRCLE.notFound);
+    // A longer feed: twenty posts at a time, then SHOW MORE for the next ones.
+    for (let i = 1; i <= 18; i++) await circle.publish((await circle.create({ kind: 'NOTE', title: `Note ${i}` }, actor)).id, actor);
+    await page.goto(`${srv.origin}/verify/circle`);
+    await countOf(cards, 20);
+    const more = page.getByRole('button', { name: 'SHOW MORE' });
+    await visible(more);
+    await keepsFloors(page, ['SHOW MORE', 'SCAN ORBES CODE']);
+    await more.click();
+    await countOf(cards, 21);
+    await textOf(cards.last().locator('.circle-card__title'), 'THE NEXT STONE');
+    await countOf(page.getByRole('button', { name: 'SHOW MORE' }), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    expect(problems).toEqual([]);
+
+    // An account that holds no piece: the circle says it opens once a piece is registered; MY PIECES shows no link to it.
+    const stranger = 'circle.stranger@example.com';
+    await ctx.services.auth.registerAccount({ email: stranger, password: PASSWORD }, {});
+    const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await other.page.goto(`${srv.origin}/verify/circle`);
+    const signIn = other.page.locator('.circle__signin');
+    await signIn.getByLabel('EMAIL').fill(stranger);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(other.page.locator('.circle__closed'), CIRCLE.ownersOnly);
+    await other.page.goto(`${srv.origin}/verify/pieces`);
+    await visible(other.page.locator('.pieces__empty'));
+    await countOf(other.page.locator('.pieces__foot').getByRole('link', { name: 'THE CIRCLE' }), 0);
+    expect(other.problems).toEqual([]);
   }, 180_000);
 
   it('explains a photo without a code, and offers another photo', async () => {

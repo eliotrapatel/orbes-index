@@ -5,7 +5,9 @@
  * `GET /api/v1/media/:sha256`; and the gallery of a model's lookbook sheet
  * (P-R02, `model_images`, migration 0014): at most GALLERY_MAX photographs
  * beside its cover (the reference photograph), in an order, each with its
- * alternative text.
+ * alternative text; and the photographs of a post of the owners' circle
+ * (P-X01, `circle_post_images`, migration 0016): at most CIRCLE_PHOTOS_MAX,
+ * in an order, each with its alternative text.
  *
  * Every image goes through `server/media/image.ts` first: its type checked by
  * its own bytes, EXIF and XMP removed, its dimensions read. It is then stored
@@ -18,9 +20,11 @@
  * The gallery's changes (`model.gallery.add`, `model.gallery.remove`,
  * `model.gallery.update`: its order and alternative texts) lock the model's
  * row first, so two of them on one model run one after the other, and keep
- * its positions 1 to n.
+ * its positions 1 to n. The photographs of a circle post go the same way
+ * (`circle.post.photo.add`, `circle.post.photo.remove`,
+ * `circle.post.photo.update`), under the post's row lock.
  *
- * An image no model, no gallery and no piece uses any more is deleted once
+ * An image no model, no gallery, no circle post and no piece uses any more is deleted once
  * the change has committed: a removed photograph stops being served. A concurrent
  * upload of the very same bytes keeps it: the upload locks the row (FOR KEY
  * SHARE) as soon as it has inserted it or found it there, so the delete
@@ -75,6 +79,12 @@ export interface GalleryItem {
 }
 
 const galleryImageNotFound = () => notFound('Photograph of this gallery', 'GALLERY_IMAGE_NOT_FOUND');
+
+/** The photographs of a post of the owners' circle (P-X01): positions 1 to CIRCLE_PHOTOS_MAX (migration 0016). */
+export const CIRCLE_PHOTOS_MAX = 4;
+
+const circlePostNotFound = () => notFound('Post of the circle', 'CIRCLE_POST_NOT_FOUND');
+const circlePhotoNotFound = () => notFound('Photograph of this post', 'CIRCLE_PHOTO_NOT_FOUND');
 
 /** An uploaded image as the HTTP layer received it: the declared type and the raw bytes. */
 export interface ImageUpload {
@@ -316,6 +326,107 @@ export class MediaService {
     });
   }
 
+  // ── The photographs of a post of the owners' circle (P-X01) ─────────────
+
+  /**
+   * Add a photograph to a post of the circle (POST /api/admin/circle/posts/:id/photos), last. At most CIRCLE_PHOTOS_MAX
+   * (409 CIRCLE_PHOTOS_FULL); the same photograph again writes nothing. Audited `circle.post.photo.add` with the
+   * image's facts and its position.
+   */
+  async addCirclePostPhoto(postId: string, upload: ImageUpload, actor: Actor): Promise<StoredImage> {
+    const image = sanitizeImage(upload?.bytes, upload?.mime);
+    const id = circlePostKey(postId);
+    const stored = describe(image);
+    await inTransaction(this.db, async (tx) => {
+      const post = await tx.selectFrom('circle_posts').select('id').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!post) throw circlePostNotFound();
+      const images = await tx.selectFrom('circle_post_images').select(['sha256', 'position']).where('post_id', '=', id).execute();
+      if (images.some((i) => i.sha256 === stored.sha256)) return;
+      if (images.length >= CIRCLE_PHOTOS_MAX) throw conflict('CIRCLE_PHOTOS_FULL', `A post of the circle holds ${CIRCLE_PHOTOS_MAX} photographs at most: remove one first.`);
+      await this.store(tx, stored.sha256, image, actor);
+      const position = images.length + 1;
+      await tx
+        .insertInto('circle_post_images')
+        .values({ post_id: id, sha256: stored.sha256, position, alt: null, created_by: adminId(actor), created_at: this.clock() })
+        .execute();
+      await this.audit.record({ actor, action: 'circle.post.photo.add', targetType: 'circle_post', targetId: id, details: { ...facts(stored), position } }, tx);
+    });
+    return stored;
+  }
+
+  /**
+   * Remove a photograph from a post of the circle (DELETE /api/admin/circle/posts/:id/photos/:sha256); the ones after
+   * it move up. 404 CIRCLE_PHOTO_NOT_FOUND when it is not this post's. Audited `circle.post.photo.remove`. The image,
+   * used nowhere else, is then deleted.
+   */
+  async removeCirclePostPhoto(postId: string, sha256: string, actor: Actor): Promise<void> {
+    const id = circlePostKey(postId);
+    const sha = typeof sha256 === 'string' ? sha256.toLowerCase() : '';
+    if (!SHA256_RE.test(sha)) throw circlePhotoNotFound();
+    await inTransaction(this.db, async (tx) => {
+      const post = await tx.selectFrom('circle_posts').select('id').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!post) throw circlePostNotFound();
+      const row = await tx.selectFrom('circle_post_images').select(['position']).where('post_id', '=', id).where('sha256', '=', sha).executeTakeFirst();
+      if (!row) throw circlePhotoNotFound();
+      await tx.deleteFrom('circle_post_images').where('post_id', '=', id).where('sha256', '=', sha).execute();
+      // Positions stay 1…n: the unique (post_id, position) is checked at commit, so the shift may pass over itself.
+      await tx
+        .updateTable('circle_post_images')
+        .set((eb) => ({ position: eb('position', '-', 1) }))
+        .where('post_id', '=', id)
+        .where('position', '>', row.position)
+        .execute();
+      await this.audit.record({ actor, action: 'circle.post.photo.remove', targetType: 'circle_post', targetId: id, details: { sha256: sha, position: row.position } }, tx);
+    });
+    await this.deleteIfUnused(sha);
+  }
+
+  /**
+   * The order and the alternative texts of a post's photographs (PATCH /api/admin/circle/posts/:id/photos): `items`
+   * names every photograph of the post once, in the new order, each with its text ('' or null: the post's default;
+   * left out: unchanged). A list that no longer matches (a photograph added or removed meanwhile) is 409
+   * CIRCLE_PHOTOS_CHANGED, and nothing is written. Audited `circle.post.photo.update` with the photographs before and
+   * after; nothing is written when nothing changes.
+   */
+  async arrangeCirclePostPhotos(postId: string, items: readonly GalleryItem[], actor: Actor): Promise<void> {
+    const id = circlePostKey(postId);
+    if (!Array.isArray(items) || items.length > CIRCLE_PHOTOS_MAX) throw validationError(`List the photographs of the post, ${CIRCLE_PHOTOS_MAX} at most.`);
+    const asked = items.map((item, i) => {
+      const sha = typeof item?.sha256 === 'string' ? item.sha256.toLowerCase() : '';
+      if (!SHA256_RE.test(sha)) throw validationError(`Photograph ${i + 1}: not a SHA-256.`);
+      return { sha256: sha, alt: item.alt === undefined ? undefined : normalizeAlt(item.alt), position: i + 1 };
+    });
+    await inTransaction(this.db, async (tx) => {
+      const post = await tx.selectFrom('circle_posts').select('id').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!post) throw circlePostNotFound();
+      const current = await tx.selectFrom('circle_post_images').select(['sha256', 'position', 'alt']).where('post_id', '=', id).orderBy('position').execute();
+      const named = new Set(asked.map((n) => n.sha256));
+      if (named.size !== asked.length || named.size !== current.length || current.some((c) => !named.has(c.sha256))) {
+        throw conflict('CIRCLE_PHOTOS_CHANGED', 'The photographs of this post changed meanwhile: reload them, then try again.');
+      }
+      const before = new Map(current.map((c) => [c.sha256, c]));
+      const next = asked.map((n) => ({ ...n, alt: n.alt === undefined ? before.get(n.sha256)!.alt : n.alt }));
+      const changed = next.filter((n) => before.get(n.sha256)!.position !== n.position || before.get(n.sha256)!.alt !== n.alt);
+      if (changed.length === 0) return;
+      for (const n of changed) {
+        await tx.updateTable('circle_post_images').set({ position: n.position, alt: n.alt }).where('post_id', '=', id).where('sha256', '=', n.sha256).execute();
+      }
+      await this.audit.record(
+        {
+          actor,
+          action: 'circle.post.photo.update',
+          targetType: 'circle_post',
+          targetId: id,
+          details: {
+            before: current.map((c) => ({ sha256: c.sha256, alt: c.alt })),
+            after: next.map((n) => ({ sha256: n.sha256, alt: n.alt })),
+          },
+        },
+        tx,
+      );
+    });
+  }
+
   /**
    * Store the image once: the same bytes uploaded again (for another model or piece) are the same row. The row is
    * then locked FOR KEY SHARE until this transaction ends: ON CONFLICT DO NOTHING takes no lock on a row that already
@@ -346,7 +457,7 @@ export class MediaService {
     throw new Error('media: the image could not be stored (deleted twice while it was being stored)');
   }
 
-  /** Delete an image no model, no gallery and no piece uses any more. Best effort, after the change committed. */
+  /** Delete an image no model, no gallery, no circle post and no piece uses any more. Best effort, after the change committed. */
   private async deleteIfUnused(sha256: string): Promise<void> {
     try {
       await this.db
@@ -354,6 +465,7 @@ export class MediaService {
         .where('sha256', '=', sha256)
         .where((eb) => eb.not(eb.exists(eb.selectFrom('models').select('id').where('image_sha256', '=', sha256))))
         .where((eb) => eb.not(eb.exists(eb.selectFrom('model_images').select('model_id').where('sha256', '=', sha256))))
+        .where((eb) => eb.not(eb.exists(eb.selectFrom('circle_post_images').select('post_id').where('sha256', '=', sha256))))
         .where((eb) => eb.not(eb.exists(eb.selectFrom('products').select('id').where('photo_sha256', '=', sha256))))
         .execute();
     } catch (e) {
@@ -372,6 +484,11 @@ function adminId(actor: Actor): string | null {
 function modelKey(modelId: string): string {
   if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
   return modelId.toLowerCase();
+}
+
+function circlePostKey(postId: string): string {
+  if (typeof postId !== 'string' || !UUID_RE.test(postId)) throw circlePostNotFound();
+  return postId.toLowerCase();
 }
 
 function describe(image: CleanImage): StoredImage {

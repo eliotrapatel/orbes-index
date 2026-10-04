@@ -5,7 +5,14 @@
  * browser's type, and the runtime checks compare the state lists.
  */
 import { describe, expect, it } from 'vitest';
-import { DROP_ENTRY_STATUSES as SERVER_ENTRY_STATUSES, REPORT_CHANNELS as SERVER_CHANNELS, VERIFICATION_STATES as SERVER_STATES } from '../../src/server/db/schema.js';
+import {
+  CIRCLE_POST_KINDS as SERVER_CIRCLE_KINDS,
+  CIRCLE_RSVP_ANSWERS as SERVER_CIRCLE_ANSWERS,
+  DROP_ENTRY_STATUSES as SERVER_ENTRY_STATUSES,
+  REPORT_CHANNELS as SERVER_CHANNELS,
+  VERIFICATION_STATES as SERVER_STATES,
+} from '../../src/server/db/schema.js';
+import type { CircleCard as ServerCircleCard, CirclePostView as ServerCirclePost } from '../../src/server/services/circle.js';
 import type { ClubStatus as ServerClubStatus } from '../../src/server/services/club.js';
 import {
   DROP_STATES as SERVER_DROP_STATES,
@@ -24,6 +31,8 @@ import type {
 import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet } from '../../src/server/services/lookbook.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import {
+  CIRCLE_ANSWERS,
+  CIRCLE_POST_KINDS,
   DROP_ENTRY_STATUSES,
   DROP_STATES,
   INCIDENT_TYPES,
@@ -37,6 +46,9 @@ import {
   type DropSheet,
   type CertificateLookup,
   type CertificateOffer,
+  type CircleCard,
+  type CircleFeed,
+  type CirclePost,
   type LookbookCard,
   type LookbookSheet,
   type OwnedPiece,
@@ -67,6 +79,10 @@ export const drawEntryFits = (e: Json<ServerDrawEntry>): DrawEntry => e;
 export const drawPageFits = (p: Json<Page<ServerDrawEntry>>): DrawEntriesPage => p;
 export const clubEntryFits = (e: Json<ServerAccountDropEntry>): ClubEntry => e;
 export const clubStatusFits = (s: Json<ServerClubStatus>): ClubStatus => s;
+// …and the circle's (P-X01): a post of the feed, a page of it, a post.
+export const circleCardFits = (c: Json<ServerCircleCard>): CircleCard => c;
+export const circleFeedFits = (p: Json<Page<ServerCircleCard>>): CircleFeed => p;
+export const circlePostFits = (p: Json<ServerCirclePost>): CirclePost => p;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
 type ProductKeys<T> = T extends { product?: infer P } ? keyof NonNullable<P> : never;
 export const productKeysMatch: [ProductKeys<ServerVerifyOutcome>] extends [ProductKeys<VerifyOutcome>] ? ([ProductKeys<VerifyOutcome>] extends [ProductKeys<ServerVerifyOutcome>] ? true : false) : false = true;
@@ -89,6 +105,11 @@ describe('verify wire types', () => {
     expect([...DROP_ENTRY_STATUSES]).toEqual([...SERVER_ENTRY_STATUSES]);
   });
 
+  it('know the same kinds of a post of the circle and the same answers to an invitation as the server (P-X01)', () => {
+    expect([...CIRCLE_POST_KINDS]).toEqual([...SERVER_CIRCLE_KINDS]);
+    expect([...CIRCLE_ANSWERS]).toEqual([...SERVER_CIRCLE_ANSWERS]);
+  });
+
   it('are structurally compatible (checked by tsc)', () => {
     expect(typeof outcomeFits).toBe('function');
     expect(typeof inputFits).toBe('function');
@@ -98,7 +119,7 @@ describe('verify wire types', () => {
     expect(typeof offerFits).toBe('function');
     expect(typeof cardFits).toBe('function');
     expect(typeof sheetFits).toBe('function');
-    for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits]) expect(typeof fits).toBe('function');
+    for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
   });
 });

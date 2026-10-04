@@ -52,6 +52,10 @@ const DROP: Record<string, Tone> = { DRAFT: 'outline', UPCOMING: 'outline', OPEN
  * force; an entry or the waiting list pending; a lapse or a withdrawal, historical.
  */
 const DROP_ENTRY: Record<string, Tone> = { ENTERED: 'outline', SELECTED: 'alert', WAITLISTED: 'outline', CONFIRMED: 'solid', LAPSED: 'muted', WITHDRAWN: 'muted' };
+/** A post of the circle (P-X01): in force once published; pending while it is not. */
+const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
+/** An answer to an invitation of the circle (P-X01): a place taken, or declined. */
+const CIRCLE_ANSWER: Record<string, Tone> = { YES: 'solid', NO: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
   AUTHENTIC: 'solid',
   AUTHENTIC_FIRST_REGISTRATION: 'solid',
@@ -80,7 +84,9 @@ export type ToneDomain =
   | 'catalogue'
   | 'lookbook'
   | 'drop'
-  | 'dropEntry';
+  | 'dropEntry'
+  | 'circle'
+  | 'circleAnswer';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -98,6 +104,8 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   lookbook: LOOKBOOK,
   drop: DROP,
   dropEntry: DROP_ENTRY,
+  circle: CIRCLE,
+  circleAnswer: CIRCLE_ANSWER,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

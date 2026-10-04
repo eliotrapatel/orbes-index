@@ -46,6 +46,7 @@ import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
+import { circlePostView } from './views/circle.js';
 import { clubView } from './views/club.js';
 import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
@@ -140,6 +141,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   club: { view: clubView, title: 'Club', nav: 'club' },
   drop: { view: dropView, title: 'Drop', nav: 'club' },
+  circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },

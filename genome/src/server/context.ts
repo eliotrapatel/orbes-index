@@ -28,6 +28,7 @@ import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
 import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
+import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { IssuanceService } from './services/issuance.js';
@@ -81,6 +82,8 @@ export interface AppServices {
   drops: DropService;
   /** The owners' club: what a signed-in account holds decides what it reads (P-R02: the lookbook's RESERVED models; P-R03: its tier and its entries). */
   club: ClubService;
+  /** The owners' circle (P-X01): posts by tier (notes, invitations, polls), their answers and votes, the visits by day. */
+  circle: CircleService;
 }
 
 export interface AppContext {
@@ -174,6 +177,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const lookbook = new LookbookService({ db });
     const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock });
     const club = new ClubService({ db, lookbook, drops, clock });
+    const circle = new CircleService({ db, audit, clock, log });
 
     const services: AppServices = {
       issuance,
@@ -196,6 +200,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       lookbook,
       drops,
       club,
+      circle,
       ...overrides.services,
     };
 

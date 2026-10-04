@@ -1,8 +1,8 @@
 /**
  * The Club page of the console (P-R03: its Drops tab) — pure helpers, no DOM.
  *
- *  - The tabs of the page, by `?tab=` (Drops today; the circle, the tiers and
- *    the private salon's requests of the same lot join them).
+ *  - The tabs of the page, by `?tab=` (Drops, P-R03; Circle, P-X01; the
+ *    tiers and the private salon's requests of the same lot join them).
  *  - A drop's dialog: its fields as the form holds them (the times as
  *    `datetime-local` values read in UTC, as the console says every time),
  *    what the server would refuse before anything is sent, and the change
@@ -18,7 +18,10 @@ import { can } from './permissions.js';
 import type { AdminRole, Drop, DropChange, DropEntry, DropInput } from '../types.js';
 
 /** The tabs of the Club page, in their order. */
-export const CLUB_TABS = [{ id: 'drops', label: 'Drops' }] as const;
+export const CLUB_TABS = [
+  { id: 'drops', label: 'Drops' },
+  { id: 'circle', label: 'Circle' },
+] as const;
 export type ClubTab = (typeof CLUB_TABS)[number]['id'];
 
 /** The tab a `?tab=` names; the first one otherwise. */

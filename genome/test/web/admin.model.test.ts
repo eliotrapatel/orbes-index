@@ -129,6 +129,38 @@ import {
   tierName,
   utcInstant,
 } from '../../src/web/admin/model/club.js';
+import {
+  answersLine,
+  circleActions,
+  circleAddress,
+  circleChange,
+  circleFormValues,
+  circleInput,
+  circleLead,
+  circleLinkProblem,
+  circleMemberBars,
+  circleProblem,
+  circleVisitDays,
+  CIRCLE_LIMITS,
+  CIRCLE_LINK_HOSTS,
+  linkableDrops,
+  linkableModels,
+  pollOptionLines,
+  pollResultLines,
+  tierReach,
+} from '../../src/web/admin/model/circle.js';
+import {
+  CIRCLE_BODY_MAX,
+  CIRCLE_CAPACITY_MAX,
+  CIRCLE_LINK_HOSTS as SERVER_CIRCLE_LINK_HOSTS,
+  CIRCLE_PLACE_MAX,
+  CIRCLE_POLL_OPTION_MAX,
+  CIRCLE_POLL_OPTIONS,
+  CIRCLE_TITLE_MAX,
+  CIRCLE_URL_MAX,
+  normalizeCircleUrl,
+} from '../../src/server/services/circle.js';
+import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX } from '../../src/server/services/media.js';
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
@@ -174,6 +206,8 @@ describe('admin enums mirror the server', () => {
       'REPORT_STATUSES',
       'LOOKBOOK_STATES',
       'DROP_ENTRY_STATUSES',
+      'CIRCLE_POST_KINDS',
+      'CIRCLE_RSVP_ANSWERS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -296,6 +330,9 @@ describe('permissions', () => {
     expect(can('OPERATOR', 'manageDrops')).toBe(true);
     expect(can('OPERATOR', 'drawDrop')).toBe(false);
     expect(can('ADMIN', 'drawDrop')).toBe(true);
+    // The Club's circle (P-X01): an OPERATOR writes, publishes, withdraws and photographs; an AUDITOR reads.
+    expect(can('AUDITOR', 'manageCircle')).toBe(false);
+    expect(can('OPERATOR', 'manageCircle')).toBe(true);
     expect(can(null, 'read')).toBe(false);
     for (const cap of Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[]) expect(can('ADMIN', cap), cap).toBe(true);
   });
@@ -392,16 +429,149 @@ describe('the Club\'s drops (P-R03)', () => {
     expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
   });
 
-  it('opens on the Drops tab, the one tab of the Club so far', () => {
-    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops']);
+  it('opens on the Drops tab, then the Circle tab (P-X01)', () => {
+    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle']);
     expect(clubTab({})).toBe('drops');
     expect(clubTab({ tab: 'nope' })).toBe('drops');
+    expect(clubTab({ tab: 'circle' })).toBe('circle');
   });
 
   it('gives each state and status a tone: a place held waits for ORBES Client Services, as an open case does', () => {
     expect(SERVER_DROP_STATES.map((s) => toneOf('drop', s))).toEqual(['outline', 'outline', 'solid', 'outline', 'solid', 'muted']);
     expect(serverSchema.DROP_ENTRY_STATUSES.map((s) => toneOf('dropEntry', s))).toEqual(['outline', 'alert', 'outline', 'solid', 'muted', 'muted']);
     expect(toneOf('dropEntry', 'SELECTED')).toBe(toneOf('case', 'OPEN'));
+  });
+});
+
+describe('the Club\'s circle (P-X01)', () => {
+  const base: web.CirclePost = {
+    id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c9d',
+    kind: 'INVITATION',
+    title: 'Dinner at the atelier',
+    body: 'Twelve places.',
+    minTier: 1,
+    eventAt: '2026-10-12T19:00:00.000Z',
+    eventPlace: 'Paris',
+    capacity: 12,
+    pollOptions: null,
+    drop: null,
+    model: null,
+    externalUrl: null,
+    published: false,
+    publishedAt: null,
+    createdAt: '2026-10-04T10:00:00.000Z',
+    createdBy: null,
+    photos: [],
+    answers: { YES: 3, NO: 1 },
+    results: null,
+  };
+  const values = (p: web.CirclePost, extra: Record<string, string> = {}) => ({ ...circleFormValues(p.kind, p, new Date()), ...extra });
+
+  it('holds the server\'s bounds and its hosts', () => {
+    expect(CIRCLE_LIMITS).toMatchObject({
+      title: CIRCLE_TITLE_MAX,
+      body: CIRCLE_BODY_MAX,
+      place: CIRCLE_PLACE_MAX,
+      capacity: CIRCLE_CAPACITY_MAX,
+      optionsMin: CIRCLE_POLL_OPTIONS.min,
+      optionsMax: CIRCLE_POLL_OPTIONS.max,
+      option: CIRCLE_POLL_OPTION_MAX,
+      url: CIRCLE_URL_MAX,
+      photos: CIRCLE_PHOTOS_MAX,
+      alt: GALLERY_ALT_MAX,
+    });
+    expect([...CIRCLE_LINK_HOSTS]).toEqual([...SERVER_CIRCLE_LINK_HOSTS]);
+    // The console refuses the links the server refuses, and lets through those it keeps.
+    for (const link of ['https://www.youtube.com/watch?v=x', 'https://vimeo.com/1', 'https://theorbes.com/', 'http://theorbes.com/', 'https://example.com/', 'https://user:pw@vimeo.com/', 'https://vimeo.com:8080/', 'vimeo.com/1']) {
+      let server: boolean;
+      try {
+        normalizeCircleUrl(link);
+        server = true;
+      } catch {
+        server = false;
+      }
+      expect(circleLinkProblem(link) === null, link).toBe(server);
+    }
+    expect(circleLinkProblem('')).toBeNull();
+  });
+
+  it('opens a new post of each kind with the fields of its kind, an invitation a week ahead at 19:00 UTC', () => {
+    expect(circleFormValues('INVITATION', null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ eventAt: '2026-10-11T19:00', minTier: '1', capacity: '' });
+    expect(circleFormValues('NOTE', null, new Date()).eventAt).toBe('');
+    expect(circleFormValues('POLL', { ...base, kind: 'POLL', pollOptions: ['Gold', 'Platinum'] }, new Date()).pollOptions).toBe('Gold\nPlatinum');
+    expect(pollOptionLines(' Gold \r\n\n Platinum\n')).toEqual(['Gold', 'Platinum']);
+  });
+
+  it('says what the server would refuse before anything is sent, and sends the fields of its kind only, then only what changed', () => {
+    expect(circleProblem('INVITATION', values(base))).toBeNull();
+    expect(circleProblem('INVITATION', values(base, { title: ' ' }))).toBe('Give the post a title.');
+    expect(circleProblem('INVITATION', values(base, { eventAt: '' }))).toMatch(/^Use the date and time picker/);
+    expect(circleProblem('INVITATION', values(base, { capacity: '0' }))).toMatch(/^An invitation has 1 to/);
+    expect(circleProblem('INVITATION', values(base, { capacity: '' }))).toBeNull();
+    expect(circleProblem('INVITATION', values(base, { externalUrl: 'https://example.com' }))).toMatch(/^A link is an https address on theorbes\.com, youtube\.com, vimeo\.com/);
+    expect(circleProblem('POLL', { ...values(base), pollOptions: 'Gold' })).toMatch(/^A poll has 2 to 6 options/);
+    expect(circleProblem('POLL', { ...values(base), pollOptions: 'Gold\ngold' })).toBe('Each option of a poll is different.');
+    expect(circleProblem('POLL', { ...values(base), pollOptions: `Gold\n${'x'.repeat(41)}` })).toMatch(/^An option has at most 40/);
+    expect(circleProblem('NOTE', { title: 'A note', body: '', minTier: '1' })).toBeNull();
+    expect(circleInput('NOTE', { title: ' A note ', body: '', minTier: '2', eventAt: '2026-10-12T19:00', pollOptions: 'A\nB', dropId: '', modelId: '', externalUrl: '' })).toEqual({
+      kind: 'NOTE',
+      title: 'A note',
+      body: null,
+      minTier: 2,
+      dropId: null,
+      modelId: null,
+      externalUrl: null,
+    });
+    expect(circleInput('POLL', { title: 'Q', body: '', minTier: '1', pollOptions: 'A\nB', dropId: '', modelId: '', externalUrl: '' }).pollOptions).toEqual(['A', 'B']);
+    expect(circleInput('INVITATION', values(base, { capacity: '' }))).toMatchObject({ eventAt: base.eventAt, eventPlace: 'Paris', capacity: null });
+    expect(circleChange(base, values(base))).toEqual({});
+    expect(circleChange(base, values(base, { capacity: '', eventAt: '2026-10-12T20:00', body: '', minTier: '2' }))).toEqual({ capacity: null, eventAt: '2026-10-12T20:00:00.000Z', body: null, minTier: 2 });
+    const poll = { ...base, kind: 'POLL' as const, eventAt: null, eventPlace: null, capacity: null, pollOptions: ['Gold', 'Platinum'] };
+    expect(circleChange(poll, values(poll))).toEqual({});
+    expect(circleChange(poll, values(poll, { pollOptions: 'Gold\nPlatinum\nTitanium' }))).toEqual({ pollOptions: ['Gold', 'Platinum', 'Titanium'] });
+  });
+
+  it('offers each action to the role that may take it, says the post\'s reach, its answers and its results', () => {
+    expect(circleActions(base, 'OPERATOR')).toEqual({ edit: true, publish: true, unpublish: false, photograph: true });
+    expect(circleActions({ published: true }, 'OPERATOR')).toEqual({ edit: true, publish: false, unpublish: true, photograph: true });
+    expect(circleActions({ published: true }, 'AUDITOR')).toEqual({ edit: false, publish: false, unpublish: false, photograph: false });
+    expect([1, 2, 3].map(tierReach)).toEqual(['TITANE and up', 'PLATINE and up', 'PALLADIUM']);
+    expect(circleLead(base)).toMatch(/^Not in the circle/);
+    expect(circleLead({ ...base, published: true, minTier: 3 })).toBe('In the circle on /verify: the PALLADIUM owners read it.');
+    expect(circleAddress(base)).toBe(`/verify/circle/${base.id}`);
+    expect(answersLine(base)).toBe('3 yes · 1 no · 9 of 12 places left');
+    expect(answersLine({ ...base, capacity: null })).toBe('3 yes · 1 no');
+    expect(pollResultLines({ pollOptions: ['Gold', 'Platinum'], results: { counts: [1, 3], total: 4 } })).toEqual([
+      { option: 'Gold', votes: 1, share: '25%' },
+      { option: 'Platinum', votes: 3, share: '75%' },
+    ]);
+    // The links offered: a release not cancelled, a model shown in the lookbook; the post's own kept.
+    const drop = (id: string, state: web.DropState) => ({ id, title: id, state }) as web.Drop;
+    expect(linkableDrops([drop('a', 'OPEN'), drop('b', 'CANCELLED'), drop('c', 'DRAFT')], null).map((d) => d.value)).toEqual(['a', 'c']);
+    expect(linkableDrops([drop('b', 'CANCELLED')], 'b').map((d) => d.value)).toEqual(['b']);
+    const model = (id: string, lookbook: web.LookbookState) => ({ id, name: 'M', type: 'RING', lookbook }) as web.Model;
+    expect(linkableModels([model('h', 'HIDDEN'), model('p', 'PUBLIC'), model('r', 'RESERVED')], null).map((m) => m.value)).toEqual(['p', 'r']);
+  });
+
+  it('reads the panel of Analytics: the members by tier, the days the circle was visited', () => {
+    const stats: web.CircleStats = {
+      from: '2026-10-01',
+      to: '2026-10-03',
+      days: 3,
+      members: { TITANE: 6, PLATINE: 3, PALLADIUM: 1, total: 10 },
+      visits: { total: 5, daily: [{ day: '2026-10-01', visits: 2 }, { day: '2026-10-02', visits: 0 }, { day: '2026-10-03', visits: 3 }] },
+    };
+    expect(circleMemberBars(stats).map((b) => [b.label, b.value, b.fraction, b.share])).toEqual([
+      ['TITANE', 6, 1, '60%'],
+      ['PLATINE', 3, 0.5, '30%'],
+      ['PALLADIUM', 1, 1 / 6, '10%'],
+    ]);
+    expect(circleVisitDays(stats)).toEqual([{ day: '2026-10-03', visits: 3 }, { day: '2026-10-01', visits: 2 }]);
+  });
+
+  it('gives a post and an answer their tones', () => {
+    expect([toneOf('circle', 'PUBLISHED'), toneOf('circle', 'UNPUBLISHED')]).toEqual(['solid', 'outline']);
+    expect(serverSchema.CIRCLE_RSVP_ANSWERS.map((a) => toneOf('circleAnswer', a))).toEqual(['solid', 'muted']);
   });
 });
 

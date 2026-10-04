@@ -25,7 +25,10 @@
  * fitting a 900 px screen; a release created, edited, published, drawn by an
  * ADMIN after a typed phrase, an entry confirmed, another lapsed after its
  * time, the next offered; read by an AUDITOR, emails masked, without an
- * action);
+ * action; P-X01: its Circle tab, an invitation and a poll written in their
+ * dialogs, a photograph added, published, the answers and the results read,
+ * an option refused once voted; the panel The Circle of Analytics; read by an
+ * AUDITOR, emails masked, without an action);
  * the Analytics view (90 and 30 days, its cursor, the countries of the
  * counterfeit signals), anomaly triage (the badge and the tab title, the
  * filters, a finding's scans, one dialog that marks the piece, revokes its
@@ -2013,6 +2016,169 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => ap.locator('#entries tbody tr').count()).toBe(3);
     for (const shown of await ap.locator('[data-testid=entry-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
     for (const action of ['drop-edit', 'drop-describe', 'drop-publish', 'drop-cancel', 'drop-draw', 'drop-offer-next', 'entry-confirm', 'entry-lapse']) {
+      expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    }
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
+  }, STEP_TIMEOUT);
+
+  it('writes in the circle from the Club page (P-X01): an invitation and a poll in their dialogs, a photograph, published; the answers and the results; the panel of Analytics; an AUDITOR reads', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await go(p, '#/club', 'Club');
+    await p.click('[data-testid=club-tab-circle]');
+    await expect.poll(() => p.locator('[data-testid=club-tab-circle]').getAttribute('aria-current')).toBe('page');
+    expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=circle');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
+    await expect.poll(() => p.locator('#circle .empty__text').count()).toBe(1);
+
+    // An invitation: the fields of its kind only; refused before anything is sent when a link goes elsewhere.
+    await p.click('[data-testid=circle-new-invitation]');
+    expect(await p.locator('dialog select[name=minTier] option').allTextContents()).toEqual(['Every owner (TITANE and up)', 'PLATINE and PALLADIUM', 'PALLADIUM only']);
+    expect(await p.locator('dialog [name=pollOptions]').count()).toBe(0);
+    await p.fill('dialog input[name=title]', 'Dinner at the atelier');
+    await p.fill('dialog textarea[name=body]', 'Twelve places.\n\nThe whole team.');
+    const event = new Date(Date.now() + 7 * 86_400_000);
+    await p.fill('dialog input[name=eventAt]', event.toISOString().slice(0, 16));
+    await p.fill('dialog input[name=eventPlace]', 'ORBES atelier, Paris');
+    await p.fill('dialog input[name=capacity]', '2');
+    await p.fill('dialog input[name=externalUrl]', 'https://example.com/film');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toMatch(/^A link is an https address on theorbes\.com, youtube\.com, vimeo\.com/);
+    await p.fill('dialog input[name=externalUrl]', 'https://vimeo.com/1');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dinner at the atelier');
+    const postId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    expect(new URL(p.url()).hash).toBe(`#/club/circle/${postId}`);
+    await expect.poll(() => p.locator('.side__link.is-active').textContent()).toBe('Club');
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Not published');
+    // Its text as a member reads it.
+    await expect.poll(() => p.locator('[data-testid=circle-text] .sheet-preview__paragraph').count()).toBe(2);
+    expect(await p.locator('#post .deflist__row', { hasText: 'Places' }).locator('.deflist__value').textContent()).toBe('2');
+    expect(await p.locator('[data-testid=circle-external]').getAttribute('rel')).toBe('noopener noreferrer');
+
+    // A photograph, through the photograph dialog.
+    await p.click('[data-testid=circle-photo-add]');
+    await p.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'circle.png'), 1200, 800));
+    await expect.poll(() => p.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: /);
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Photograph added.")');
+    await expect.poll(() => p.locator('[data-testid=circle-photo]').count()).toBe(1);
+
+    // Published: its page on /verify; then two owners answer, the second refused once the places are taken.
+    await p.click('[data-testid=circle-publish]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Published');
+    expect(await p.locator('[data-testid=circle-page]').getAttribute('href')).toBe(`/verify/circle/${postId}`);
+    const owners: string[] = [];
+    for (const n of [1, 2, 3]) {
+      const a = await ctx.services.auth.registerAccount({ email: `circle.owner${n}@example.com`, password: 'circle owner passphrase 2026' }, {});
+      const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
+      await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+      const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
+      await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
+      owners.push(a.account.id);
+    }
+    await ctx.services.circle.rsvp(owners[0]!, postId, 'YES', { type: 'account', id: owners[0]! });
+    await ctx.services.circle.rsvp(owners[1]!, postId, 'NO', { type: 'account', id: owners[1]! });
+    await ctx.services.circle.rsvp(owners[2]!, postId, 'YES', { type: 'account', id: owners[2]! });
+    await expect(ctx.services.circle.rsvp(owners[1]!, postId, 'YES', { type: 'account', id: owners[1]! })).rejects.toMatchObject({ code: 'CIRCLE_FULL' });
+    await p.reload();
+    await expect.poll(() => p.locator('#answers tbody tr').count()).toBe(3);
+    expect(await p.locator('#answers .panel__note').textContent()).toBe('2 yes · 1 no · 0 of 2 places left');
+    expect(await p.locator('[data-testid=answer-account]').allTextContents()).toEqual(expect.arrayContaining(['circle.owner1@example.com', 'circle.owner2@example.com']));
+    await p.selectOption('#answers select[name=answer]', 'NO');
+    await expect.poll(() => p.locator('#answers tbody tr').count()).toBe(1);
+    expect(await p.locator('[data-testid=answer-account]').textContent()).toBe('circle.owner2@example.com');
+    // A change: three places; a capacity under its YES is the server's refusal, said in the dialog.
+    await p.click('[data-testid=circle-edit]');
+    await p.fill('dialog input[name=capacity]', '1');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('2 places are taken already: the capacity cannot go under that.');
+    await p.fill('dialog input[name=capacity]', '3');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Post saved.")');
+    await expect.poll(() => p.locator('#post .deflist__row', { hasText: 'Places' }).locator('.deflist__value').textContent()).toBe('3');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-circle-post', { full: true });
+
+    // A poll: its options one per line; once voted, its results, and its options no longer change.
+    await go(p, '#/club?tab=circle', 'Club');
+    await p.click('[data-testid=circle-new-poll]');
+    await p.fill('dialog input[name=title]', 'The next stone');
+    await p.fill('dialog textarea[name=pollOptions]', 'Onyx\nOpal\nJade');
+    await p.selectOption('dialog select[name=minTier]', '1');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('The next stone');
+    const pollId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    await p.click('[data-testid=circle-publish]');
+    await confirmDialog(p);
+    await ctx.services.circle.vote(owners[0]!, pollId, 1);
+    await ctx.services.circle.vote(owners[1]!, pollId, 1);
+    await ctx.services.circle.vote(owners[2]!, pollId, 2);
+    await p.reload();
+    await expect.poll(() => p.locator('#results .bar').count()).toBe(3);
+    expect(await p.locator('#results .bar__label').allTextContents()).toEqual(['Onyx', 'Opal', 'Jade']);
+    expect(await p.locator('#results .bar__value').allTextContents()).toEqual(['0', '2', '1']);
+    expect(await p.locator('#results .panel__note').textContent()).toBe('3 votes');
+    await p.click('[data-testid=circle-edit]');
+    await p.fill('dialog textarea[name=pollOptions]', 'Onyx\nOpal');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Votes have been cast: the options of this poll no longer change.');
+    await p.click('[data-testid=dialog-cancel]');
+    // Withdrawn: out of the circle, its votes kept.
+    await p.click('[data-testid=circle-unpublish]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Not published');
+    // The tab lists both, its rows leading to their pages.
+    await go(p, '#/club?tab=circle', 'Club');
+    await expect.poll(() => p.locator('#circle tbody tr').count()).toBe(2);
+    expect(await p.locator('#circle [data-testid=circle-link]').allTextContents()).toEqual(['The next stone', 'Dinner at the atelier']);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-circle', { full: true });
+
+    // Analytics: the panel The Circle, the members by tier now, the visits by day (none counted before today).
+    await ctx.services.circle.feed(owners[0]!, { page: 1, pageSize: 20 });
+    await go(p, '#/analytics?days=30', 'Analytics');
+    const panel = p.locator('.panel--circle');
+    await expect.poll(() => panel.locator('[data-testid=circle-members] .bar__label').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+    // The accounts the club counts now: ACTIVE, holding a piece that is neither revoked, flagged nor retired.
+    const members = await ctx.db
+      .selectFrom('ownership as o')
+      .innerJoin('accounts as a', 'a.id', 'o.account_id')
+      .innerJoin('products as pr', 'pr.id', 'o.product_id')
+      .select('o.account_id')
+      .where('o.ended_at', 'is', null)
+      .where('a.status', '=', 'ACTIVE')
+      .where('pr.status', 'not in', ['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'])
+      .distinct()
+      .execute();
+    expect(await panel.locator('.panel__note').textContent()).toMatch(new RegExp(`^${members.length} members? · 0 visits · counted per day, without any account$`));
+    expect(await panel.locator('[data-testid=circle-visits] .empty__text').textContent()).toBe('No visit of the circle in these days.');
+    // The kpis of the scans stay four: the panel adds none.
+    expect(await p.locator('.view--analytics .kpi').count()).toBe(4);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads the circle and its answers, the emails masked, without an action.
+    const auditor = { email: 'circle.audit@orbes.test', password: 'circle auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, '#/club?tab=circle', 'Club');
+    for (const action of ['circle-new-note', 'circle-new-invitation', 'circle-new-poll']) expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    await ap.locator('#circle [data-testid=circle-link]', { hasText: 'Dinner at the atelier' }).click();
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dinner at the atelier');
+    await expect.poll(() => ap.locator('#answers tbody tr').count()).toBe(3);
+    for (const shown of await ap.locator('[data-testid=answer-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
+    for (const action of ['circle-edit', 'circle-publish', 'circle-unpublish', 'circle-photo-add', 'circle-photo-remove', 'circle-photo-alt']) {
       expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     expect(await cspViolations(ap)).toEqual([]);

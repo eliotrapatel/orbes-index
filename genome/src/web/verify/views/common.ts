@@ -2,13 +2,14 @@
  * Building blocks shared by the verification views: the orbit marks (drawn
  * from the geometry of the ORBES SEAL and the code's four moons), definition
  * rows, the contact of ORBES Client Services, the links to MY PIECES, to
- * THE COLLECTION and to THE RELEASES, the links to the legal pages, the
- * app's paths, the figures of a title set in the reading face, and the view
- * shell.
+ * THE COLLECTION, to THE RELEASES and to THE CIRCLE, the links to the legal
+ * pages, the app's paths, the figures of a title set in the reading face, and
+ * the view shell.
  */
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
-import { CONTACT, LEGAL, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { CIRCLE_PATH, circlePostPath } from '../circle-model.js';
+import { CIRCLE, CONTACT, LEGAL, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
 import { LOOKBOOK_PATH, lookbookSheetPath } from '../lookbook-model.js';
 import { releasePath, RELEASES_PATH } from '../releases-model.js';
 import type { ContactModel, Row, Tone } from '../view-model.js';
@@ -110,6 +111,8 @@ export const CERTIFICATE_PATH = '/verify/c';
 export { LOOKBOOK_PATH } from '../lookbook-model.js';
 /** THE RELEASES (P-R03): the list; a release's page is `/verify/releases/<id>`. */
 export { RELEASES_PATH } from '../releases-model.js';
+/** THE CIRCLE (P-X01): the feed; a post is `/verify/circle/<id>`. */
+export { CIRCLE_PATH } from '../circle-model.js';
 
 /**
  * A link of this app (`href`, a real address: a click that opens a new tab or window is left to the browser); a plain
@@ -144,6 +147,14 @@ export function lookbookLink(onOpen?: () => void, opts: { slug?: string; extraCl
  */
 export function releasesLink(onOpen?: () => void, opts: { id?: string; extraClass?: string } = {}): HTMLAnchorElement {
   return opts.id ? appLink(releasePath(opts.id), RELEASES.see, onOpen, opts.extraClass) : appLink(RELEASES_PATH, RELEASES.link, onOpen, opts.extraClass);
+}
+
+/**
+ * THE CIRCLE (P-X01): a text link to /verify/circle, in MY PIECES for an owner, at the foot of a post (back to the
+ * feed); or, with `id`, the link of one post of the feed (`label`: READ THE NOTE, SEE THE INVITATION, SEE THE POLL).
+ */
+export function circleLink(onOpen?: () => void, opts: { id?: string; label?: string; extraClass?: string } = {}): HTMLAnchorElement {
+  return opts.id ? appLink(circlePostPath(opts.id), opts.label ?? CIRCLE.link, onOpen, opts.extraClass) : appLink(CIRCLE_PATH, CIRCLE.link, onOpen, opts.extraClass);
 }
 
 /**

@@ -80,6 +80,14 @@ export type DropState = (typeof DROP_STATES)[number];
 export const DROP_ENTRY_STATUSES = ['ENTERED', 'SELECTED', 'WAITLISTED', 'CONFIRMED', 'LAPSED', 'WITHDRAWN'] as const;
 export type DropEntryStatus = (typeof DROP_ENTRY_STATUSES)[number];
 
+/** A post of the owners' circle (P-X01, circle_posts.kind): a NOTE, an INVITATION (answered YES or NO) or a POLL. */
+export const CIRCLE_POST_KINDS = ['NOTE', 'INVITATION', 'POLL'] as const;
+export type CirclePostKind = (typeof CIRCLE_POST_KINDS)[number];
+
+/** An answer to an invitation of the circle (P-X01, circle_rsvps.answer). */
+export const CIRCLE_RSVP_ANSWERS = ['YES', 'NO'] as const;
+export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -915,4 +923,79 @@ export interface DrawOutcome {
   places: number;
   selected: number;
   waitlisted: number;
+}
+
+// ── The Club: the circle (P-X01) ───────────────────────────────────────────
+
+/** A photograph of a post of the circle (4 at most). */
+export interface CirclePhoto {
+  sha256: string;
+  /** `/api/v1/media/<sha256>`. */
+  url: string;
+  /** null: the post's default (its title). */
+  alt: string | null;
+  position: number;
+}
+
+/** A post as the console reads it (GET /api/admin/circle/posts, /:id); the list leaves its body out. */
+export interface CirclePost {
+  id: string;
+  kind: CirclePostKind;
+  title: string;
+  /** Plain paragraphs; absent from the list, null without one. */
+  body?: string | null;
+  /** The lowest tier that reads it: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
+  minTier: number;
+  eventAt: Iso | null;
+  eventPlace: string | null;
+  /** The places answered YES at most; null: no limit. */
+  capacity: number | null;
+  pollOptions: string[] | null;
+  drop: { id: string; title: string; state: DropState } | null;
+  model: { id: string; name: string; type: string; lookbook: LookbookState; slug: string | null } | null;
+  externalUrl: string | null;
+  published: boolean;
+  publishedAt: Iso | null;
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  photos: CirclePhoto[];
+  answers: Record<CircleRsvpAnswer, number>;
+  /** A poll's votes by option; null for another kind. */
+  results: { counts: number[]; total: number } | null;
+}
+
+/** POST /api/admin/circle/posts: a post of `kind`, with the fields of its kind. */
+export interface CirclePostInput {
+  kind: CirclePostKind;
+  title: string;
+  body?: string | null;
+  minTier?: number;
+  eventAt?: Iso | null;
+  eventPlace?: string | null;
+  capacity?: number | null;
+  pollOptions?: string[] | null;
+  dropId?: string | null;
+  modelId?: string | null;
+  externalUrl?: string | null;
+}
+
+/** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */
+export type CirclePostChange = Partial<Omit<CirclePostInput, 'kind'>>;
+
+/** An answer to an invitation (GET /api/admin/circle/posts/:id/answers): the email masked for an AUDITOR. */
+export interface CircleAnswer {
+  accountId: string;
+  email: string;
+  answer: CircleRsvpAnswer;
+  createdAt: Iso;
+  answeredAt: Iso;
+}
+
+/** GET /api/admin/analytics/circle: the members of the club by tier now, the visits of the circle by day. */
+export interface CircleStats {
+  from: string;
+  to: string;
+  days: number;
+  members: { TITANE: number; PLATINE: number; PALLADIUM: number; total: number };
+  visits: { total: number; daily: { day: string; visits: number }[] };
 }

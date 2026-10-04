@@ -38,6 +38,12 @@ import type {
   CodeIds,
   CodeJson,
   Collection,
+  CircleAnswer,
+  CirclePost,
+  CirclePostChange,
+  CirclePostInput,
+  CircleRsvpAnswer,
+  CircleStats,
   DashboardData,
   DrawOutcome,
   Drop,
@@ -382,6 +388,11 @@ export class AdminApi {
     return this.get('/api/admin/analytics', q);
   }
 
+  /** The panel The Circle (P-X01): the members of the club by tier now, the visits of the same window by day. */
+  circleStats(q: { days?: number; from?: string; to?: string } = {}): Promise<CircleStats> {
+    return this.get('/api/admin/analytics/circle', q);
+  }
+
   categories(): Promise<Items<Category>> {
     return this.get('/api/admin/categories');
   }
@@ -683,6 +694,50 @@ export class AdminApi {
   /** OFFER NEXT: the first of the waiting list, SELECTED. */
   offerNextDropEntry(id: string): Promise<DropEntry> {
     return this.post(`/api/admin/drops/${encodeURIComponent(id)}/offer-next`);
+  }
+
+  // ── The Club: the circle (P-X01) ─────────────────────────────────────────
+
+  circlePosts(page = 1, pageSize = 50): Promise<Paged<CirclePost>> {
+    return this.get('/api/admin/circle/posts', { page, pageSize });
+  }
+
+  circlePost(id: string): Promise<CirclePost> {
+    return this.get(`/api/admin/circle/posts/${encodeURIComponent(id)}`);
+  }
+
+  createCirclePost(input: CirclePostInput): Promise<CirclePost> {
+    return this.post('/api/admin/circle/posts', input);
+  }
+
+  updateCirclePost(id: string, change: CirclePostChange): Promise<CirclePost> {
+    return this.patch(`/api/admin/circle/posts/${encodeURIComponent(id)}`, change);
+  }
+
+  publishCirclePost(id: string): Promise<CirclePost> {
+    return this.post(`/api/admin/circle/posts/${encodeURIComponent(id)}/publish`);
+  }
+
+  unpublishCirclePost(id: string): Promise<CirclePost> {
+    return this.post(`/api/admin/circle/posts/${encodeURIComponent(id)}/unpublish`);
+  }
+
+  circleAnswers(id: string, q: { answer?: CircleRsvpAnswer; page?: number; pageSize?: number } = {}): Promise<Paged<CircleAnswer>> {
+    return this.get(`/api/admin/circle/posts/${encodeURIComponent(id)}/answers`, q);
+  }
+
+  /** A photograph for a post of the circle: the image itself, added last (4 at most). */
+  addCirclePhoto(id: string, photo: Blob): Promise<CirclePost> {
+    return this.request('POST', `/api/admin/circle/posts/${encodeURIComponent(id)}/photos`, { upload: { type: photo.type || 'image/jpeg', data: photo } });
+  }
+
+  removeCirclePhoto(id: string, sha256: string): Promise<CirclePost> {
+    return this.del(`/api/admin/circle/posts/${encodeURIComponent(id)}/photos/${encodeURIComponent(sha256)}`);
+  }
+
+  /** The order and alternative texts of a post's photographs: every one once, in the new order ('' alt: the post's default). */
+  arrangeCirclePhotos(id: string, images: { sha256: string; alt: string }[]): Promise<CirclePost> {
+    return this.patch(`/api/admin/circle/posts/${encodeURIComponent(id)}/photos`, { images });
   }
 
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {

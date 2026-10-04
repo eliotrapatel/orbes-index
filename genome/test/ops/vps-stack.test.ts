@@ -17,9 +17,10 @@
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
  *    trusts no proxy in direct mode, strips query strings and headers from the
  *    access log, leaves HSTS to the app, and limits every request body to
- *    64 KB except the console's three photograph uploads (F-04: a model's
+ *    64 KB except the console's four photograph uploads (F-04: a model's
  *    reference photograph, a piece's; P-R02: a photograph of a model's
- *    lookbook gallery; 1 200 KB, over the app's 1 MiB);
+ *    lookbook gallery; P-X01: a photograph of a post of the owners' circle;
+ *    1 200 KB, over the app's 1 MiB);
  *  - the scripts are strict bash with --help, and the destructive ones have
  *    --dry-run; the systemd units point at scripts that exist;
  *  - whatever the operator's umask, the image's sources and Caddy's
@@ -351,7 +352,7 @@ describe('deploy/vps/Caddyfile', () => {
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
   });
 
-  it('limits every body to 64 KB, except the three photograph uploads of the console (F-04, P-R02): 1 200 KB, over the app\'s 1 MiB', () => {
+  it('limits every body to 64 KB, except the four photograph uploads of the console (F-04, P-R02, P-X01): 1 200 KB, over the app\'s 1 MiB', () => {
     const d = directives(caddyfile);
     // Caddy reads KB as 1 000 bytes.
     const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
@@ -370,10 +371,15 @@ describe('deploy/vps/Caddyfile', () => {
     expect(upload, 'the @photo_upload matcher').not.toBeNull();
     const pattern = upload![1];
     expect(d).toContain(`@not_photo_upload {\n\t\tnot {\n\t\t\tmethod POST\n\t\t\tpath_regexp ${pattern}\n\t\t}\n\t}`);
-    // The pattern is RE2 and JavaScript alike here: it matches the app's three routes, with or without a trailing slash…
+    // The pattern is RE2 and JavaScript alike here: it matches the app's four routes, with or without a trailing slash…
     const re = new RegExp(pattern);
     const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
-    expect([...MEDIA_UPLOAD_ROUTES]).toEqual(['/api/admin/models/:id/image', '/api/admin/products/:productId/photo', '/api/admin/models/:id/gallery']);
+    expect([...MEDIA_UPLOAD_ROUTES]).toEqual([
+      '/api/admin/models/:id/image',
+      '/api/admin/products/:productId/photo',
+      '/api/admin/models/:id/gallery',
+      '/api/admin/circle/posts/:id/photos',
+    ]);
     for (const route of MEDIA_UPLOAD_ROUTES) {
       expect(re.test(sample(route)), route).toBe(true);
       expect(re.test(`${sample(route)}/`), route).toBe(true);
@@ -389,6 +395,15 @@ describe('deploy/vps/Caddyfile', () => {
       `/api/admin/models/73c68b47-012d-4569-a59a-fd2effa613c1/gallery/${'ab'.repeat(32)}`,
       '/api/admin/models/73c68b47-012d-4569-a59a-fd2effa613c1/galleries',
       '/api/admin/models//gallery',
+      // A post of the circle: its photograph's removal and the order (a DELETE and a PATCH) keep 64 KB anyway; the post
+      // itself and its other routes are JSON.
+      `/api/admin/circle/posts/73c68b47-012d-4569-a59a-fd2effa613c1/photos/${'ab'.repeat(32)}`,
+      '/api/admin/circle/posts/73c68b47-012d-4569-a59a-fd2effa613c1',
+      '/api/admin/circle/posts/73c68b47-012d-4569-a59a-fd2effa613c1/photo',
+      '/api/admin/circle/posts/73c68b47-012d-4569-a59a-fd2effa613c1/publish',
+      '/api/admin/circle/posts//photos',
+      '/api/admin/circle/posts',
+      '/api/v1/club/circle/73c68b47-012d-4569-a59a-fd2effa613c1',
       '/api/v1/lookbook/monolithe-ring',
       '/api/admin/models//image',
       '/api/admin/x/models/1/image',

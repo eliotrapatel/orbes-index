@@ -13,6 +13,12 @@
  * reach yesterday. A count that fails is logged and the report still answers:
  * its `through` then says the last day really counted (`countedThrough`), and
  * the console says the days after it are not counted yet.
+ *
+ * GET /api/admin/analytics/circle?from&to (or ?days), the same window: the
+ * panel The Circle (P-X01). The members of the club by tier now (the ACTIVE
+ * accounts that hold a piece, as the club counts them), and the visits of the
+ * circle on each UTC day of the window: a count per day, which names no
+ * account (services/circle.ts). AUDITOR.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { analyticsQuery, parse } from '../../http/schemas.js';
@@ -29,5 +35,10 @@ export const adminAnalyticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
       request.log.error({ err: { message: (e as Error)?.message } }, 'scan statistics could not be counted before the report');
     }
     return scanStatsReport(ctx.db, window, now);
+  });
+
+  app.get('/api/admin/analytics/circle', async (request) => {
+    const window = analyticsWindow(parse(analyticsQuery, request.query), ctx.clock());
+    return ctx.services.circle.stats(window);
   });
 };

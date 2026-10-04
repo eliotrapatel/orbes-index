@@ -636,3 +636,67 @@ export const RELEASES = Object.freeze({
   contactRelease: 'RELEASE',
   contactEntry: 'ENTRY',
 });
+
+/**
+ * THE CIRCLE (P-X01, /verify/circle, API §10.11): what ORBES publishes for the owners of a piece, by tier: notes, its
+ * invitations, answered YES or NO until the event begins and within their places, and its polls, one vote per account,
+ * whose results show once the reader has voted. A signed-in account that holds a piece now reads it, each post from its
+ * tier up; it goes with the last piece. Reached from MY PIECES. A link to another site names its host beside it.
+ */
+export const CIRCLE = Object.freeze({
+  title: 'THE CIRCLE',
+  /** The text link of MY PIECES and of a post's foot (back to the feed). */
+  link: 'THE CIRCLE',
+  lead: 'For the owners of an ORBES piece: the news of the maison, its invitations and its questions.',
+  loading: 'ONE MOMENT…',
+  loadFailed: 'The circle could not be shown just now.',
+  retry: 'TRY AGAIN',
+  empty: 'Nothing has been published in the circle yet.',
+  more: 'SHOW MORE',
+  moreFailed: 'More posts could not be shown just now.',
+  scan: 'SCAN ORBES CODE',
+  /** Signed out: the sign-in follows. */
+  signIn: 'The circle is reserved for the owners of an ORBES piece. Sign in with your ORBES account.',
+  /** Signed in, no piece held now. */
+  ownersOnly: 'The circle is reserved for the owners of an ORBES piece. It opens once a piece is registered to your ORBES account.',
+  /** A post below the reader's tier, withdrawn, or an address that leads nowhere. */
+  notFound: 'This post is not in the circle.',
+  kind: Object.freeze({ NOTE: 'NOTE', INVITATION: 'INVITATION', POLL: 'POLL' }),
+  /** The text link of each post of the feed. */
+  see: Object.freeze({ NOTE: 'READ THE NOTE', INVITATION: 'SEE THE INVITATION', POLL: 'SEE THE POLL' }),
+  /** Who reads a post reserved to the higher tiers. */
+  reach: Object.freeze({ 2: 'PLATINE AND PALLADIUM', 3: 'PALLADIUM' }),
+  /** What the reader did, on a post of the feed. */
+  answered: (answer: string) => `YOU ANSWERED ${answer}`,
+  voted: 'YOU VOTED',
+  photosLabel: (title: string) => `Photographs of ${title}`,
+  /** A photograph whose own text is empty. */
+  photoAlt: (title: string) => `${title}, photographed by ORBES`,
+  section: Object.freeze({ invitation: 'THE INVITATION', answer: 'YOUR ANSWER', poll: 'THE POLL', links: 'TO SEE' }),
+  rows: Object.freeze({ when: 'WHEN', where: 'WHERE', places: 'PLACES' }),
+  places: (left: number, capacity: number) => (left === 0 ? `NONE LEFT OF ${capacity}` : `${left} LEFT OF ${capacity}`),
+  yes: 'YES',
+  no: 'NO',
+  /** The accessible name of the YES · NO choice. */
+  answerChoice: 'Your answer to this invitation',
+  answer: Object.freeze({
+    none: 'Will you come? Answer YES or NO: you may change your answer until the event begins.',
+    yes: 'You will come. You may change your answer until the event begins.',
+    no: 'You will not come. You may change your answer until the event begins.',
+    full: 'Every place is taken. One may open if an owner answers NO.',
+    closed: 'The event has begun: answers are closed.',
+  }),
+  /** The accessible name of the poll's options. */
+  pollChoice: 'The options of this poll',
+  pollLead: 'One vote per account, and it is final. The results show once you have voted.',
+  pollVoted: 'Your vote is counted. The results so far:',
+  /** The poll's hairline button, once an option is chosen: a vote is final. */
+  vote: 'VOTE',
+  votes: (n: number) => (n === 1 ? '1 VOTE' : `${n} VOTES`),
+  yourVote: 'YOUR VOTE',
+  /** A link to another site (its host is shown beside it); a release's and a model's links are SEE THE RELEASE and SEE THE MODEL. */
+  openLink: 'OPEN THE LINK',
+  /** The accessible name of a link to another site: where it leads. */
+  externalLabel: (host: string) => `Open the link on ${host}, in a new tab`,
+});
+

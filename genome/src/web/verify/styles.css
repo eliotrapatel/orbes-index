@@ -2313,6 +2313,348 @@ h1[tabindex="-1"]:focus,
   margin-top: 8px;
 }
 
+/* ── The circle (P-X01) ────────────────────────────────────────────────── */
+
+/* THE CIRCLE and a post: the column of THE RELEASES (560 px at most, 32 px
+   margins), the small wordmark, the title in the display face at 24 px. Each
+   post of the feed sits on an ivory plate framed like the GENOME's, one to a
+   row; a plate is no control of its own: its one text link is. */
+.view--circle,
+.view--circle-post {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
+}
+
+.circle__head,
+.circle-post__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.circle__wordmark,
+.circle-post__wordmark {
+  margin-bottom: 52px;
+}
+
+.circle__title,
+.circle-post__title {
+  max-width: 100%;
+  font-size: var(--fs-title);
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  overflow-wrap: anywhere;
+}
+
+.circle__lead {
+  max-width: 34ch;
+  margin-top: 22px;
+  text-wrap: balance;
+}
+
+.circle__body,
+.circle-post__body {
+  margin-top: 52px;
+}
+
+.circle__waiting {
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.circle__empty,
+.circle__closed,
+.circle-post__missing {
+  max-width: 34ch;
+  margin: 0 auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.circle__signin .ownership {
+  padding-top: 0;
+}
+
+.circle__list {
+  display: grid;
+  gap: 18px;
+  list-style: none;
+}
+
+.circle-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 26px 18px 8px;
+  background: var(--ivory);
+  color: var(--ink);
+  text-align: center;
+}
+
+.circle-card .bracket,
+.circle-post__plate .bracket {
+  color: var(--hairline-strong);
+}
+
+.circle-card .bracket--tl { top: 8px; left: 8px; }
+.circle-card .bracket--tr { top: 8px; right: 8px; }
+.circle-card .bracket--bl { bottom: 8px; left: 8px; }
+.circle-card .bracket--br { bottom: 8px; right: 8px; }
+
+/* Its first photograph, contained in its square, never cropped. */
+.circle-card__frame {
+  width: min(100%, 220px);
+  aspect-ratio: 1;
+  margin-bottom: 18px;
+}
+
+.circle-card__img,
+.circle-photo__img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
+
+/* Its kind, and the tiers it is kept for. */
+.circle-card__kind,
+.circle-post__kind {
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.circle-card__title {
+  max-width: 100%;
+  margin-top: 8px;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+  overflow-wrap: anywhere;
+}
+
+/* The day, an invitation's event, what the reader did: lines of the reading face. */
+.circle-card__date,
+.circle-card__event,
+.circle-card__mine {
+  color: var(--ink-soft);
+}
+
+.circle-card__date {
+  margin-top: 6px;
+}
+
+.circle-card__mine {
+  color: var(--ink);
+}
+
+/* Its one text link, on one line: the text link's 10 px, tracking and 44 px zone as they are. */
+.circle-card__link {
+  margin-top: 6px;
+  white-space: nowrap;
+}
+
+.circle__more {
+  display: block;
+  margin: 26px auto 0;
+}
+
+.circle__foot,
+.circle-post__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  margin-top: 60px;
+}
+
+/* A post: its kind over its title, its day under it. */
+.circle-post__kind {
+  margin-bottom: 18px;
+}
+
+.circle-post__date {
+  margin-top: 14px;
+  color: var(--ink-soft);
+}
+
+.circle-post__kind[hidden],
+.circle-post__date[hidden],
+.circle-post__photos[hidden],
+.circle-photo[hidden],
+.circle-card__frame[hidden],
+.pieces__circle[hidden] {
+  display: none;
+}
+
+/* Its photographs on ivory: the first across the plate, the others two by two. */
+.circle-post__plate {
+  display: grid;
+  gap: 18px;
+  padding: 26px 22px 22px;
+  background: var(--ivory);
+  color: var(--ink);
+}
+
+.circle-post__plate--many {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* By type: the plate's last children are its four brackets (absolutely placed, never grid items). */
+.circle-post__plate--many .circle-photo:first-of-type {
+  grid-column: 1 / -1;
+}
+
+/* The last photograph alone on its row: centred, at the width of a column. */
+.circle-post__plate--many .circle-photo:last-of-type:nth-of-type(even) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: calc(50% - 9px);
+}
+
+.circle-post__plate .bracket--tl { top: 10px; left: 10px; }
+.circle-post__plate .bracket--tr { top: 10px; right: 10px; }
+.circle-post__plate .bracket--bl { bottom: 10px; left: 10px; }
+.circle-post__plate .bracket--br { bottom: 10px; right: 10px; }
+
+.circle-photo {
+  min-width: 0;
+}
+
+.circle-post__text {
+  margin-top: 40px;
+}
+
+.circle-post__paragraph + .circle-post__paragraph {
+  margin-top: 14px;
+}
+
+.circle-post__section .section-label {
+  margin-top: 44px;
+}
+
+/* A time in UTC, then on this phone's clock under it. */
+.circle-post__utc,
+.circle-post__local {
+  display: block;
+}
+
+.circle-post__local {
+  margin-top: 4px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--ink-soft);
+}
+
+.circle-post__sentence {
+  margin-top: 12px;
+}
+
+.circle-post__choice {
+  margin-top: 22px;
+}
+
+/* YES and NO, narrower than a 44 px zone: they gain its width, as LOST does in MY PIECES. */
+.circle-post__choice .auth__option {
+  min-width: 44px;
+}
+
+/* A poll's options, one under the other: each a pressed option of the sign-in, its 44 px zone kept apart. */
+.circle-post__options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 30px;
+}
+
+.circle-post__option {
+  min-width: 44px;
+  max-width: 100%;
+  text-align: left;
+}
+
+.circle-post__vote {
+  margin-top: 30px;
+}
+
+/* The results: each option, its votes and share; the reader's own marked. */
+.circle-post__results {
+  margin-top: 14px;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}
+
+.circle-post__result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 14px;
+  padding: 12px 0 11px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.circle-post__result-label {
+  font-size: var(--fs-label);
+  letter-spacing: 0.12em;
+  overflow-wrap: anywhere;
+}
+
+.circle-post__result-votes {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.circle-post__result-mine {
+  flex: 1 1 100%;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.circle-post__result.is-mine .circle-post__result-label {
+  font-weight: 500;
+}
+
+/* TO SEE: a release, a model, a link to another site with its host beside it. */
+.circle-post__links {
+  margin-top: 6px;
+  list-style: none;
+}
+
+.circle-post__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.circle-post__link-title {
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  letter-spacing: var(--track-micro);
+  overflow-wrap: anywhere;
+}
+
+.circle-post__host {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles, status lines and tracked-capital labels in the display face
@@ -2361,7 +2703,15 @@ h1[tabindex="-1"]:focus,
 .release__eyebrow,
 .release__state,
 .release__model,
-.release__item-yours {
+.release__item-yours,
+.circle__title,
+.circle-card__kind,
+.circle-card__title,
+.circle-post__kind,
+.circle-post__title,
+.circle-post__result-label,
+.circle-post__result-mine,
+.circle-post__link-title {
   font-family: var(--font-display);
 }
 
@@ -2400,7 +2750,9 @@ h1[tabindex="-1"]:focus,
   .view--lookbook,
   .view--sheet,
   .view--releases,
-  .view--release {
+  .view--release,
+  .view--circle,
+  .view--circle-post {
     padding-left: 22px;
     padding-right: 22px;
   }

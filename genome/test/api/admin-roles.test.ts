@@ -3,7 +3,8 @@
  * mutates (the catalogue's models and collections included, created or
  * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04,
  * and the drops of the Club page, P-R03: created, edited, published, cancelled, their entries
- * concluded and the next one offered), ADMIN for keys, revocations, reinstatement, categories (created,
+ * concluded and the next one offered; the posts of its circle, P-X01: created, edited, published,
+ * withdrawn, their photographs), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08), a customer's recovery code, lock and export, and the draw of a drop;
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
@@ -107,6 +108,19 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
+  { group: 'circle', method: 'GET', url: '/api/admin/circle/posts', min: 'AUDITOR' },
+  { group: 'circle', method: 'POST', url: '/api/admin/circle/posts', body: INVALID, min: 'OPERATOR' },
+  { group: 'circle', method: 'GET', url: `/api/admin/circle/posts/${UUID}`, min: 'AUDITOR' },
+  { group: 'circle', method: 'PATCH', url: `/api/admin/circle/posts/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'circle', method: 'POST', url: `/api/admin/circle/posts/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
+  { group: 'circle', method: 'POST', url: `/api/admin/circle/posts/${UUID}/unpublish`, body: INVALID, min: 'OPERATOR' },
+  { group: 'circle', method: 'GET', url: `/api/admin/circle/posts/${UUID}/answers`, min: 'AUDITOR' },
+  { group: 'circle', method: 'GET', url: `/api/admin/circle/posts/${UUID}/answers?answer=YES`, min: 'AUDITOR' },
+  { group: 'circle', method: 'POST', url: `/api/admin/circle/posts/${UUID}/photos`, ...PHOTO, min: 'OPERATOR' },
+  { group: 'circle', method: 'DELETE', url: `/api/admin/circle/posts/${UUID}/photos/${'ab'.repeat(32)}`, min: 'OPERATOR' },
+  { group: 'circle', method: 'PATCH', url: `/api/admin/circle/posts/${UUID}/photos`, body: INVALID, min: 'OPERATOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
@@ -186,6 +200,7 @@ describe('admin role enforcement', () => {
       'media',
       'lookbook',
       'drops',
+      'circle',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

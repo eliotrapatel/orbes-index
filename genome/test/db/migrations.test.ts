@@ -9,7 +9,8 @@ import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js'
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
 
 const EXPECTED_TABLES = [
-  'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories', 'codes',
+  'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories',
+  'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'codes',
   'collections', 'cryptographic_keys', 'drop_entries', 'drops', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
   'scan_tokens', 'service_records', 'sessions', 'warranties',
@@ -645,6 +646,135 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
   });
 
+  it('0016 adds the five tables of the circle, and nothing else; down drops them alone, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withCircle, without: before } = await rollBackTo('0016_circle');
+    const of0016 = (o: string) => /\bcircle_(posts|post_images|rsvps|poll_votes|daily_visits)\b/.test(o);
+    const added = withCircle.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0016(o))).toEqual([]);
+    expect(before.filter(of0016)).toEqual([]);
+    expect(withCircle.filter((o) => !of0016(o))).toEqual(before);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('circle_posts')).toEqual([
+      'body', 'capacity', 'created_at', 'created_by', 'drop_id', 'event_at', 'event_place', 'external_url', 'id', 'kind', 'min_tier', 'model_id', 'poll_options',
+      'published_at', 'title',
+    ]);
+    expect(columns('circle_post_images')).toEqual(['alt', 'created_at', 'created_by', 'position', 'post_id', 'sha256']);
+    expect(columns('circle_rsvps')).toEqual(['account_id', 'answer', 'created_at', 'post_id', 'updated_at']);
+    expect(columns('circle_poll_votes')).toEqual(['account_id', 'created_at', 'option_index', 'post_id']);
+    // The visits of a day: a count, and no account.
+    expect(columns('circle_daily_visits')).toEqual(['day', 'visits']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger circle_poll_votes circle_poll_votes_final',
+      'trigger circle_post_images circle_post_images_immutable_identity',
+      'trigger circle_posts circle_posts_immutable_identity',
+      'trigger circle_rsvps circle_rsvps_immutable_identity',
+    ]);
+    for (const c of [
+      /^constraint circle_posts circle_posts_invitation CHECK /,
+      /^constraint circle_posts circle_posts_invitation_only CHECK /,
+      /^constraint circle_posts circle_posts_poll CHECK /,
+      /^constraint circle_posts circle_posts_poll_options CHECK /,
+      /^constraint circle_posts circle_posts_drop_id_fkey FOREIGN KEY \(drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint circle_posts circle_posts_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint circle_posts circle_posts_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint circle_post_images circle_post_images_position_key UNIQUE \(post_id, "?position"?\) DEFERRABLE INITIALLY DEFERRED$/,
+      /^constraint circle_post_images circle_post_images_sha256_fkey FOREIGN KEY \(sha256\) REFERENCES media_objects\(sha256\) ON DELETE RESTRICT$/,
+      /^constraint circle_rsvps circle_rsvps_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint circle_poll_votes circle_poll_votes_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^index CREATE INDEX circle_posts_published_idx ON public\.circle_posts USING btree \(published_at\) WHERE \(published_at IS NOT NULL\)$/,
+      /^index CREATE INDEX circle_rsvps_account_idx ON public\.circle_rsvps USING btree \(account_id, created_at\)$/,
+      /^index CREATE INDEX circle_poll_votes_account_idx ON public\.circle_poll_votes USING btree \(account_id, created_at\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0016_circle'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0016: a post holds the fields of its kind only, never changes kind; its photographs 1 to 4; one answer and one final vote per account; visits without an account', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (25, 'Y', 'Circle test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const insert = (v: Record<string, unknown> = {}) =>
+      sql<{ id: string; min_tier: number; published_at: Date | null }>`INSERT INTO circle_posts (kind, title, body, event_at, event_place, capacity, poll_options, external_url)
+          VALUES (${v.kind ?? 'NOTE'}, ${v.title ?? 'A note'}, ${v.body ?? null}, ${v.eventAt ?? null}, ${v.place ?? null}, ${v.capacity ?? null},
+                  ${v.options ?? null}::text[], ${v.url ?? null}) RETURNING id, min_tier, published_at`.execute(t.db);
+    await expect(insert({ kind: 'NEWS' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ title: '  ' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ title: 'x'.repeat(121) })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ body: 'x'.repeat(6001) })).rejects.toSatisfy((e) => isCheckViolation(e));
+    // An invitation has its event; nothing else has an event, a place or a capacity; a poll has 2 to 6 options, a poll only.
+    await expect(insert({ kind: 'INVITATION' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_invitation'));
+    await expect(insert({ eventAt: '2026-11-01T19:00:00Z' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_invitation'));
+    await expect(insert({ place: 'Paris' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_invitation_only'));
+    await expect(insert({ capacity: 10 })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_invitation_only'));
+    await expect(insert({ kind: 'INVITATION', eventAt: '2026-11-01T19:00:00Z', capacity: 0 })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ kind: 'POLL' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_poll'));
+    await expect(insert({ options: '{a,b}' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_poll'));
+    await expect(insert({ kind: 'POLL', options: '{a}' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_poll_options'));
+    await expect(insert({ kind: 'POLL', options: '{a,b,c,d,e,f,g}' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_poll_options'));
+    await expect(insert({ kind: 'POLL', options: '{a,NULL}' })).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_poll_options'));
+    await expect(insert({ url: 'http://youtube.com/watch' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(insert({ url: `https://theorbes.com/${'x'.repeat(480)}` })).rejects.toSatisfy((e) => isCheckViolation(e));
+    const note = (await insert({ body: 'Two paragraphs.\n\nThe second.', url: 'https://www.youtube.com/watch?v=x' })).rows[0];
+    expect([note.min_tier, note.published_at]).toEqual([1, null]);
+    const invitation = (await insert({ kind: 'INVITATION', title: 'A dinner', eventAt: '2026-11-01T19:00:00Z', place: 'Paris', capacity: 2 })).rows[0];
+    const poll = (await insert({ kind: 'POLL', title: 'A poll', options: '{"Paris, at night","Milan"}' })).rows[0];
+    expect((await sql<{ poll_options: string[] }>`SELECT poll_options FROM circle_posts WHERE id = ${poll.id}`.execute(t.db)).rows[0].poll_options).toEqual(['Paris, at night', 'Milan']);
+    for (const tier of [0, 4]) await expect(sql`UPDATE circle_posts SET min_tier = ${tier} WHERE id = ${note.id}`.execute(t.db), String(tier)).rejects.toSatisfy((e) => isCheckViolation(e));
+    for (const [col, value] of [['kind', `'POLL'`], ['id', 'gen_random_uuid()'], ['created_at', `now() + interval '1 day'`]] as const) {
+      await expect(sql.raw(`UPDATE circle_posts SET ${col} = ${value} WHERE id = '${note.id}'`).execute(t.db), col).rejects.toSatisfy(isGuardViolation);
+    }
+
+    // Photographs: positions 1 to 4, each once per post, never moved to another post.
+    const photo = async (n: number) => {
+      const bytes = new Uint8Array([0xff, 0xd8, 0x70 + n, 0xff, 0xd9]);
+      const sha = createHash('sha256').update(bytes).digest('hex');
+      await sql`INSERT INTO media_objects (sha256, mime, bytes, width, height) VALUES (${sha}, 'image/jpeg', ${bytes}, 10, 10)`.execute(t.db);
+      return sha;
+    };
+    const shas = await Promise.all([1, 2, 3, 4, 5].map(photo));
+    const add = (sha: string, position: number, postId = note.id) => sql`INSERT INTO circle_post_images (post_id, sha256, position) VALUES (${postId}, ${sha}, ${position})`.execute(t.db);
+    for (const [i, sha] of shas.slice(0, 4).entries()) await add(sha, i + 1);
+    await expect(add(shas[4]!, 5)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(add(shas[4]!, 2)).rejects.toSatisfy((e) => isUniqueViolation(e, 'circle_post_images_position_key'));
+    await expect(add(shas[0]!, 4, note.id)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(sql`UPDATE circle_post_images SET post_id = ${poll.id} WHERE post_id = ${note.id} AND position = 1`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`DELETE FROM media_objects WHERE sha256 = ${shas[0]!}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+
+    // Answers: YES or NO, one per account and post, changed in place; votes: one per account, final.
+    const account = async (n: number) =>
+      (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES (${`circle${n}@example.com`}, ${`circle${n}@example.com`}, 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const [a1, a2] = [await account(1), await account(2)];
+    const answer = (accountId: string, value: string) => sql`INSERT INTO circle_rsvps (post_id, account_id, answer) VALUES (${invitation.id}, ${accountId}, ${value})`.execute(t.db);
+    await expect(answer(a1, 'MAYBE')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await answer(a1, 'YES');
+    await expect(answer(a1, 'NO')).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await sql`UPDATE circle_rsvps SET answer = 'NO', updated_at = now() + interval '1 minute' WHERE post_id = ${invitation.id} AND account_id = ${a1}`.execute(t.db);
+    await expect(sql`UPDATE circle_rsvps SET account_id = ${a2} WHERE post_id = ${invitation.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`UPDATE circle_rsvps SET updated_at = created_at - interval '1 minute' WHERE post_id = ${invitation.id}`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+    const vote = (accountId: string, option: number) => sql`INSERT INTO circle_poll_votes (post_id, account_id, option_index) VALUES (${poll.id}, ${accountId}, ${option})`.execute(t.db);
+    await expect(vote(a1, 6)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await vote(a1, 1);
+    await expect(vote(a1, 0)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(sql`UPDATE circle_poll_votes SET option_index = 0 WHERE post_id = ${poll.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    // A post and an account stay while an answer or a vote names them.
+    await expect(sql`DELETE FROM circle_posts WHERE id = ${invitation.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`DELETE FROM accounts WHERE id = ${a1}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+
+    // The visits of a day: one row per day, a count of zero or more.
+    await expect(sql`INSERT INTO circle_daily_visits (day, visits) VALUES ('2026-10-04', -1)`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await sql`INSERT INTO circle_daily_visits (day, visits) VALUES ('2026-10-04', 3)`.execute(t.db);
+    await expect(sql`INSERT INTO circle_daily_visits (day) VALUES ('2026-10-04')`.execute(t.db)).rejects.toSatisfy((e) => isUniqueViolation(e));
+
+    await sql`DELETE FROM circle_daily_visits`.execute(t.db);
+    await sql`DELETE FROM circle_poll_votes`.execute(t.db);
+    await sql`DELETE FROM circle_rsvps`.execute(t.db);
+    await sql`DELETE FROM circle_post_images`.execute(t.db);
+    await sql`DELETE FROM media_objects WHERE sha256 IN (${sql.join(shas)})`.execute(t.db);
+    await sql`DELETE FROM circle_posts`.execute(t.db);
+    await sql`DELETE FROM accounts WHERE id IN (${a1}, ${a2})`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -685,6 +815,7 @@ describe('migrations', () => {
       // The « Potentiel » plan of 2026-10-03 (docs/launch/DEPLOY-POTENTIEL-2026-10.md): deployment A.
       '0014_model_lookbook',
       '0015_drops',
+      '0016_circle',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

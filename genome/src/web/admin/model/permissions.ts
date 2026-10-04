@@ -43,6 +43,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageDrops: 'OPERATOR',
   /** The draw of a drop (P-R03), once, after its entries close: ADMIN, with a phrase to type. */
   drawDrop: 'ADMIN',
+  /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
+  manageCircle: 'OPERATOR',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',

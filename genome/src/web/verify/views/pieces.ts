@@ -35,6 +35,8 @@
  *            [ SCAN ORBES CODE ]
  *            THE COLLECTION                  the lookbook (P-R02), a text link
  *            THE RELEASES                    the drops (P-R03), a text link
+ *            THE CIRCLE                      the owners' circle (P-X01), a text link
+ *                                            shown once the account is read holding a piece
  *   PRIVACY · TERMS · LEGAL · HELP            the legal pages (J-06), in a new tab,
  *   IP Geolocation by DB-IP                   signed out too (the sign-in collects data)
  *
@@ -62,7 +64,7 @@ import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { CertificateOffer, ClientServices, ClubEntry, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
@@ -80,6 +82,8 @@ export interface PiecesDeps {
   /** THE RELEASES (P-R03): the drops, in the app; and one release's page, from an entry. */
   onReleases?(): void;
   onRelease?(id: string): void;
+  /** THE CIRCLE (P-X01): the owners' circle, in the app. */
+  onCircle?(): void;
 }
 
 export interface PiecesView {
@@ -101,6 +105,8 @@ class PiecesPage {
   /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
   private readonly releases = h('section', { class: 'pieces__releases', attrs: { 'aria-labelledby': 'pieces-releases', hidden: true } });
   private readonly account = h('div', { class: 'pieces__account' });
+  /** THE CIRCLE (P-X01): shown once the club's status says the account holds a piece now. */
+  private readonly circle: HTMLAnchorElement;
   private unsubscribe: (() => void) | null;
   private disposed = false;
   /** The session and the contact of ORBES Client Services are known: the page can say what it holds. */
@@ -119,6 +125,8 @@ class PiecesPage {
   private busy = false;
 
   constructor(private readonly deps: PiecesDeps) {
+    this.circle = circleLink(deps.onCircle, { extraClass: 'pieces__circle' });
+    this.circle.hidden = true;
     this.root = viewRoot('pieces', 'pieces-title');
     this.root.append(
       h(
@@ -137,6 +145,7 @@ class PiecesPage {
         h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: PIECES.scan }),
         lookbookLink(deps.onCollection, { extraClass: 'pieces__collection' }),
         releasesLink(deps.onReleases, { extraClass: 'pieces__releases-link' }),
+        this.circle,
         // The legal pages (J-06), in a new tab: the account's data is collected here too (its sign-in, CREATE
         // ACCOUNT), and a form under way stays.
         legalLinks({ newTab: true, extraClass: 'pieces__legal' }),
@@ -186,6 +195,7 @@ class PiecesPage {
       this.load = { kind: 'idle' };
       this.cards = [];
       this.entries = [];
+      this.circle.hidden = true;
       this.changing = false;
       this.signIn ??= new OwnershipPanel(
         { kind: 'account' },
@@ -225,6 +235,8 @@ class PiecesPage {
           }),
       );
       this.entries = club ? club.entries : null;
+      // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
+      this.circle.hidden = !(club && club.tier.level >= 1);
       this.load = { kind: 'ready' };
     } catch (e) {
       if (gen !== this.loadGen || this.disposed) return;

@@ -356,9 +356,11 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.sessions).toEqual([expect.objectContaining({ userAgent: expect.stringContaining('iPhone') })]);
       expect(x.recoveryCodes).toEqual([expect.objectContaining({ usedAt: null, revokedAt: null })]);
       // No link to an ownership certificate here (the service test lists open and withdrawn ones), no entry in a drop
-      // (test/api/drops.test.ts lists them).
+      // (test/api/drops.test.ts lists them), no answer nor vote in the circle (test/api/circle.test.ts lists them).
       expect(x.certificates).toEqual([]);
       expect(x.dropEntries).toEqual([]);
+      expect(x.circleAnswers).toEqual([]);
+      expect(x.circleVotes).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -388,7 +390,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

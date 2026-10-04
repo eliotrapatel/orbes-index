@@ -13,6 +13,8 @@ import { z } from 'zod';
 import {
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
+  CIRCLE_POST_KINDS,
+  CIRCLE_RSVP_ANSWERS,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
   LOOKBOOK_STATES,
@@ -26,10 +28,11 @@ import {
 } from '../db/schema.js';
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
+import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
-import { GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
+import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { pageRequest, type PageRequest } from '../types.js';
@@ -200,6 +203,24 @@ export const lookbookParams = z.object({ slug: z.string().max(128) });
  * id. Any string the router passes (≤ 64 characters): one that is no id answers like an unknown drop, 404 DROP_NOT_FOUND.
  */
 export const publicDropParams = z.object({ id: z.string().max(64) });
+
+/**
+ * GET /api/v1/club/circle/:id, POST …/rsvp and …/vote (P-X01): a post of the circle. Any string the router passes (≤ 64
+ * characters): one that is no id answers like an unknown post, 404 CIRCLE_POST_NOT_FOUND.
+ */
+export const publicCircleParams = z.object({ id: z.string().max(64) });
+
+/** POST /api/v1/club/circle/:id/rsvp (P-X01): the account's answer to an invitation, YES or NO. */
+export const circleRsvpBody = body({ answer: z.enum(CIRCLE_RSVP_ANSWERS) });
+
+/** POST /api/v1/club/circle/:id/vote (P-X01): the index of one option of the poll, from 0. */
+export const circleVoteBody = body({
+  option: z
+    .number()
+    .int('Must be the index of an option')
+    .min(0, 'Must be the index of an option')
+    .max(CIRCLE_POLL_OPTIONS.max - 1, 'Must be the index of an option'),
+});
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
@@ -446,6 +467,62 @@ export const dropEntriesQuery = z.object({ status: queryOptional(z.enum(DROP_ENT
 /** POST …/entries/:entryId/confirm and …/lapse: the console's note on the entry, optional ('' and null: none). */
 export const dropEntryNoteBody = optionalBody({
   note: z.preprocess((v) => (v === '' ? null : v), text(DROP_NOTE_MAX).nullable().optional()),
+});
+
+// ── Admin: the circle (P-X01) ──────────────────────────────────────────────
+
+export const circlePostParams = z.object({ id: uuid });
+
+/** DELETE /api/admin/circle/posts/:id/photos/:sha256: a photograph of the post. */
+export const circlePhotoParams = z.object({ id: uuid, sha256: sha256Hex });
+
+const emptyToNull = (v: unknown) => (v === '' ? null : v);
+const circleTier = z.number().int('Must be a tier: 1, 2 or 3').min(1, 'At least 1 (TITANE)').max(3, 'At most 3 (PALLADIUM)');
+const circleCapacity = z.number().int('Must be a whole number of places').min(1, 'At least 1 place').max(CIRCLE_CAPACITY_MAX, `At most ${CIRCLE_CAPACITY_MAX} places`);
+const circlePollOptions = z
+  .array(text(CIRCLE_POLL_OPTION_MAX))
+  .min(CIRCLE_POLL_OPTIONS.min, `At least ${CIRCLE_POLL_OPTIONS.min} options`)
+  .max(CIRCLE_POLL_OPTIONS.max, `At most ${CIRCLE_POLL_OPTIONS.max} options`);
+/** The fields of a post, each optional; '' and null clear an optional one. The service holds the rules of each kind. */
+const circleFields = {
+  title: text(CIRCLE_TITLE_MAX).optional(),
+  body: z.preprocess(emptyToNull, text(CIRCLE_BODY_MAX).nullable().optional()),
+  minTier: circleTier.optional(),
+  eventAt: z.preprocess(emptyToNull, isoDateTime.nullable().optional()),
+  eventPlace: z.preprocess(emptyToNull, text(CIRCLE_PLACE_MAX).nullable().optional()),
+  capacity: circleCapacity.nullable().optional(),
+  pollOptions: circlePollOptions.nullable().optional(),
+  dropId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  modelId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  externalUrl: z.preprocess(emptyToNull, z.string().trim().max(CIRCLE_URL_MAX, `At most ${CIRCLE_URL_MAX} characters`).nullable().optional()),
+};
+
+/**
+ * POST /api/admin/circle/posts (P-X01): a post, not published yet: its kind (NOTE, INVITATION, POLL), its title, and
+ * the fields of its kind (an invitation's `eventAt`, `eventPlace` and `capacity`, a poll's `pollOptions`), its tier
+ * (1 by default) and its links. The service refuses the fields of another kind and the hosts off its list.
+ */
+export const createCirclePostBody = body({ kind: z.enum(CIRCLE_POST_KINDS), ...circleFields, title: text(CIRCLE_TITLE_MAX) });
+
+/** PATCH /api/admin/circle/posts/:id: any field but the kind (an unknown field, `kind` included, is 400); at least one. */
+export const updateCirclePostBody = body(circleFields).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the post to change');
+
+/** GET /api/admin/circle/posts/:id/answers: one answer, or every one. */
+export const circleAnswersQuery = z.object({ answer: queryOptional(z.enum(CIRCLE_RSVP_ANSWERS)) });
+
+/**
+ * PATCH /api/admin/circle/posts/:id/photos: every photograph of the post once, in the new order, each with its
+ * alternative text (`''`/`null`: the post's default; left out: unchanged).
+ */
+export const circlePhotoOrderBody = body({
+  images: z
+    .array(
+      z.strictObject({
+        sha256: sha256Hex,
+        alt: z.preprocess((v) => (v === '' ? null : v), text(GALLERY_ALT_MAX).nullable().optional()),
+      }),
+    )
+    .max(CIRCLE_PHOTOS_MAX, `At most ${CIRCLE_PHOTOS_MAX} photographs`),
 });
 
 // ── Admin: products ────────────────────────────────────────────────────────

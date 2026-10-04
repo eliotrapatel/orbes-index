@@ -10,9 +10,15 @@
  * MALFORMED CODE, SUSPICIOUS ACTIVITY) as hairline bars, then their
  * breakdown by result; the days with scans as a table. No map: the CSP admits no
  * external tiles, and the volume does not call for one.
+ *
+ * Then The Circle (P-X01, GET /api/admin/analytics/circle, the same window):
+ * the members of the club by tier now, and the visits of the circle by day,
+ * counted per day without any account (no follow-up of anyone). A panel that
+ * cannot be read says so; the rest of the page stands.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate } from '../format.js';
+import { circleMemberBars, circleVisitDays } from '../model/circle.js';
 import {
   ANALYTICS_RANGES,
   analyticsKpis,
@@ -28,7 +34,7 @@ import {
   type AnalyticsRange,
 } from '../model/analytics.js';
 import { href } from '../router.js';
-import type { AnalyticsData } from '../types.js';
+import type { AnalyticsData, CircleStats } from '../types.js';
 import { trendChart, sparkline } from '../ui/charts.js';
 import { barList, emptyState, kpi, pageHeader, section, statusMark, table } from '../ui/components.js';
 import type { ViewContext } from './context.js';
@@ -101,9 +107,45 @@ function dailyTable(d: AnalyticsData): HTMLElement {
   );
 }
 
+/** The Circle (P-X01): the members of the club by tier now, the visits of the window by day; never an account. */
+function circlePanel(c: CircleStats | null): HTMLElement {
+  if (!c) return section('The Circle', emptyState('The figures of the circle could not be read just now.'), { class: 'panel--circle' });
+  const days = circleVisitDays(c);
+  return section(
+    'The Circle',
+    h(
+      'div',
+      { class: 'grid grid--2' },
+      h(
+        'div',
+        { data: { testid: 'circle-members' } },
+        h('h3', { class: 'panel__subtitle' }, 'Members now, by tier'),
+        c.members.total === 0 ? emptyState('No account holds a piece now.') : barList(circleMemberBars(c)),
+      ),
+      h(
+        'div',
+        { data: { testid: 'circle-visits' } },
+        h('h3', { class: 'panel__subtitle' }, 'Visits by day'),
+        table(
+          [
+            { label: 'Day', cell: (x: { day: string; visits: number }) => formatDate(x.day), kind: ['nowrap'] },
+            { label: 'Visits', cell: (x: { day: string; visits: number }) => formatCount(x.visits), kind: ['num'] },
+          ],
+          days,
+          { empty: 'No visit of the circle in these days.', caption: 'Visits of the circle by day' },
+        ),
+      ),
+    ),
+    {
+      note: `${formatCount(c.members.total)} ${c.members.total === 1 ? 'member' : 'members'} · ${formatCount(c.visits.total)} ${c.visits.total === 1 ? 'visit' : 'visits'} · counted per day, without any account`,
+      class: 'panel--circle',
+    },
+  );
+}
+
 export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
   const range = analyticsRange(ctx.route.query);
-  const d = await ctx.api.analytics({ days: range });
+  const [d, circle] = await Promise.all([ctx.api.analytics({ days: range }), ctx.api.circleStats({ days: range }).catch(() => null)]);
   const none = d.total === 0;
 
   return h(
@@ -127,5 +169,6 @@ export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
     ),
     section('Signals by country and result', signalTable(d), { note: 'Country by country', class: 'panel--signal-table' }),
     section('Days with scans', dailyTable(d), { note: `${formatCount(d.daily.filter((x) => x.total > 0).length)} of ${formatCount(d.days)} days` }),
+    circlePanel(circle),
   );
 }

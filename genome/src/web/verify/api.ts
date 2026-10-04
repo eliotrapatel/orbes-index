@@ -18,6 +18,9 @@
 import type {
   CertificateLookup,
   CertificateOffer,
+  CircleAnswer,
+  CircleFeed,
+  CirclePost,
   ClientServices,
   ClubEntry,
   ClubStatus,
@@ -205,6 +208,30 @@ export class ApiClient {
     const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/withdraw`, undefined, { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
+  }
+
+  // ── The circle (P-X01) ───────────────────────────────────────────────────
+
+  /** A page of the circle's feed, the latest first, without the posts' bodies (403 OWNERS_ONLY without a piece, 401 signed out). */
+  async circle(page = 1, pageSize = 20): Promise<CircleFeed> {
+    const r = await this.request<CircleFeed>('GET', `/api/v1/club/circle?page=${page}&pageSize=${pageSize}`);
+    if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** A post of the circle (404 CIRCLE_POST_NOT_FOUND below its tier, unpublished or unknown). */
+  circlePost(id: string): Promise<CirclePost> {
+    return this.request<CirclePost>('GET', `/api/v1/club/circle/${encodeURIComponent(id)}`);
+  }
+
+  /** YES or NO to an invitation, until its event begins (409 CIRCLE_FULL past its places). Answered with the post. */
+  circleAnswer(id: string, answer: CircleAnswer): Promise<CirclePost> {
+    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/rsvp`, { answer }, { csrf: true });
+  }
+
+  /** One vote in a poll, by the index of its option; final. Answered with the post, its results shown. */
+  circleVote(id: string, option: number): Promise<CirclePost> {
+    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/vote`, { option }, { csrf: true });
   }
 
   // ── Account ──────────────────────────────────────────────────────────────

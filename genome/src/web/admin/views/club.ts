@@ -1,7 +1,8 @@
 /**
  * The Club (Clients), `#/club`: what the owners' club of /verify offers, one
- * tab each (`?tab=`). P-R03 opens it with Drops: the releases of a model in
- * a limited number of pieces, entered from /verify and drawn by tier.
+ * tab each (`?tab=`): Drops (P-R03), the releases of a model in a limited
+ * number of pieces, entered from /verify and drawn by tier; Circle (P-X01),
+ * what ORBES publishes for the owners of a piece (views/circle.ts).
  *
  * Drops: every drop, the latest created first, with its state, its window of
  * entries (UTC), its pieces and its entries; New release (OPERATOR) creates a
@@ -19,6 +20,7 @@ import type { Drop, Model } from '../types.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
+import { circleTab } from './circle.js';
 import { pageParam, type ViewContext } from './context.js';
 
 /** The fields of a drop's dialog: the active models to choose from, its values. */
@@ -54,8 +56,27 @@ function clubTabs(current: string): HTMLElement {
   );
 }
 
+/** What each tab of the Club page is, said under its title. */
+const CLUB_LEADS = Object.freeze({
+  drops:
+    'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces, entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
+  circle:
+    'What the owners’ club of /verify offers. Circle: what ORBES publishes for the owners of a piece, by tier: notes, invitations they answer YES or NO, and polls whose results they read once they have voted.',
+});
+
 export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
   const tab = clubTab(ctx.route.query);
+  const body = tab === 'circle' ? await circleTab(ctx) : await dropsTab(ctx);
+  return h(
+    'div',
+    { class: 'view view--club' },
+    pageHeader({ eyebrow: 'Clients', title: 'Club', lead: CLUB_LEADS[tab], actions: [clubTabs(tab)] }),
+    body,
+  );
+}
+
+/** The Drops tab: every drop, and New release. */
+async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
   const [list, models] = await Promise.all([ctx.api.drops(pageParam(ctx), 50), ctx.api.models()]);
   const canManage = can(ctx.session.admin.role, 'manageDrops');
 
@@ -81,7 +102,7 @@ export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
       ctx.navigate(href('drop', { dropId: created }));
     });
 
-  const drops = section(
+  return section(
     'Drops',
     [
       table<Drop>(
@@ -108,17 +129,5 @@ export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
       pager(list, (p) => ctx.setQuery({ page: p })),
     ],
     { id: 'drops', tools: canManage ? [button('New release', { kind: 'primary', testId: 'drop-new', onClick: newDrop })] : [] },
-  );
-
-  return h(
-    'div',
-    { class: 'view view--club' },
-    pageHeader({
-      eyebrow: 'Clients',
-      title: 'Club',
-      lead: 'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces, entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
-      actions: [clubTabs(tab)],
-    }),
-    drops,
   );
 }

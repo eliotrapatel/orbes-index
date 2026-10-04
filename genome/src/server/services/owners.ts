@@ -24,8 +24,9 @@
  *   export   GET  /api/admin/owners/:id/export (ADMIN): everything the registry
  *            holds about the account, for a request under the right of access,
  *            including the links to ownership certificates it created (never
- *            their tokens), its entries in the drops (P-R03) and every audit
- *            entry that names it, as target or as actor. Audited
+ *            their tokens), its entries in the drops (P-R03), its answers to
+ *            the circle's invitations and its votes in its polls (P-X01) and
+ *            every audit entry that names it, as target or as actor. Audited
  *            `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -46,6 +47,7 @@ import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clo
 import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
+import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import type { OwnershipService } from './ownership.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
@@ -245,6 +247,10 @@ export interface AccountExport {
    * drawn release publishes with its tier, seniority and rank) and the end of a place held; never the console's note.
    */
   dropEntries: ExportedDropEntry[];
+  /** The account's answers to the invitations of the circle (P-X01), oldest first: the post, YES or NO, when. */
+  circleAnswers: ExportedCircleAnswer[];
+  /** The account's votes in the polls of the circle (P-X01), oldest first: the post, the option and its words, when. */
+  circleVotes: ExportedCircleVote[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -499,6 +505,7 @@ export class OwnerService {
       // activity below does not name the account for it.
       const certificates = await accountCertificates(tx, a.id, now);
       const dropEntries = await accountDropEntries(tx, a.id);
+      const circle = await accountCircleData(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -572,6 +579,8 @@ export class OwnerService {
         recoveryCodes: codes.map((c) => ({ createdAt: c.created_at, expiresAt: c.expires_at, usedAt: c.used_at, revokedAt: c.revoked_at })),
         certificates,
         dropEntries,
+        circleAnswers: circle.answers,
+        circleVotes: circle.votes,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -598,6 +607,8 @@ export class OwnerService {
             recoveryCodes: out.recoveryCodes.length,
             certificates: out.certificates.length,
             dropEntries: out.dropEntries.length,
+            circleAnswers: out.circleAnswers.length,
+            circleVotes: out.circleVotes.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

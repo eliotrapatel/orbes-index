@@ -14,17 +14,26 @@
  *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal)
  *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
  *
+ * P-X01, the circle (services/circle.ts: an account that holds a piece now,
+ * each post from its tier up):
+ *
+ *   GET  /api/v1/club/circle                the feed, paginated, without the posts' bodies (its first page counts a visit)
+ *   GET  /api/v1/club/circle/:id            a post (404 below its tier)
+ *   POST /api/v1/club/circle/:id/rsvp       YES or NO to an invitation, within its capacity
+ *   POST /api/v1/club/circle/:id/vote       one vote in a poll, final; its results then shown
+ *
  * Every route needs a signed-in account (the scope's guard: 401 without one,
  * and for an unsafe method the CSRF token and a same-origin request); what
  * the account holds now decides the rest (403 OWNERS_ONLY for an account
- * that holds no piece, on the lookbook's routes). The club's mutations are
- * POSTs only. Its answers depend on the account, so they are never stored
- * (`no-store`). Rate group `api`, like the account's other reads.
+ * that holds no piece, on the lookbook's routes and the circle's). The club's
+ * mutations are POSTs only. Its answers depend on the account, so they are
+ * never stored (`no-store`). Rate group `api`, like the account's other reads.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { emptyBody, lookbookParams, parse, publicDropParams } from '../http/schemas.js';
+import { circleRsvpBody, circleVoteBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
+import { circleFeedPage } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
 
 export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
@@ -35,7 +44,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     reply.header('cache-control', 'no-store');
     return payload;
   });
-  const { club, drops } = ctx.services;
+  const { club, drops, circle } = ctx.services;
 
   app.get('/api/v1/club/lookbook', async (request) => {
     const { account } = requireAccount(request);
@@ -66,5 +75,31 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { id } = parse(publicDropParams, request.params);
     parse(emptyBody, request.body);
     return { entry: await drops.withdraw(account.id, id, accountActor(request)) };
+  });
+
+  // P-X01: the circle, for an account that holds a piece now; each post from its tier up.
+  app.get('/api/v1/club/circle', async (request) => {
+    const { account } = requireAccount(request);
+    return circle.feed(account.id, circleFeedPage(request.query));
+  });
+
+  app.get('/api/v1/club/circle/:id', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicCircleParams, request.params);
+    return circle.post(account.id, id);
+  });
+
+  app.post('/api/v1/club/circle/:id/rsvp', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicCircleParams, request.params);
+    const b = parse(circleRsvpBody, request.body);
+    return circle.rsvp(account.id, id, b.answer, accountActor(request));
+  });
+
+  app.post('/api/v1/club/circle/:id/vote', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicCircleParams, request.params);
+    const b = parse(circleVoteBody, request.body);
+    return circle.vote(account.id, id, b.option);
   });
 };

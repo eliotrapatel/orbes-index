@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0015) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0016) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -113,6 +113,17 @@ export type LookbookState = (typeof LOOKBOOK_STATES)[number];
  */
 export const DROP_ENTRY_STATUSES = ['ENTERED', 'SELECTED', 'WAITLISTED', 'CONFIRMED', 'LAPSED', 'WITHDRAWN'] as const;
 export type DropEntryStatus = (typeof DROP_ENTRY_STATUSES)[number];
+
+/**
+ * A post of the owners' circle (circle_posts.kind, migration 0016, P-X01): a NOTE (text and photographs), an INVITATION
+ * (an event, answered YES or NO, within its capacity) or a POLL (2 to 6 options, one vote per account).
+ */
+export const CIRCLE_POST_KINDS = ['NOTE', 'INVITATION', 'POLL'] as const;
+export type CirclePostKind = (typeof CIRCLE_POST_KINDS)[number];
+
+/** An account's answer to an invitation of the circle (circle_rsvps.answer, migration 0016, P-X01). */
+export const CIRCLE_RSVP_ANSWERS = ['YES', 'NO'] as const;
+export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
@@ -588,6 +599,68 @@ export interface DropEntriesTable {
   note: string | null;                 // ≤ 500 characters, the console's
 }
 
+/**
+ * A post of the owners' circle (migration 0016, P-X01), published for the accounts whose tier reaches `min_tier`. An
+ * INVITATION has its `event_at` (and may have a place and a capacity), a POLL its 2 to 6 `poll_options`; no other kind
+ * has either. id, kind, created_by and created_at never change.
+ */
+export interface CirclePostsTable {
+  id: Generated<string>;
+  kind: CirclePostKind;
+  title: string;                       // 1..120 characters
+  body: ColumnType<string | null, string | null | undefined, string | null>; // plain paragraphs, ≤ 6 000 characters
+  /** The lowest tier that reads it: 1 TITANE (the default), 2 PLATINE, 3 PALLADIUM. */
+  min_tier: WithDefault<number>;
+  /** INVITATION only: the time of the event. */
+  event_at: TimestampNullable;
+  event_place: ColumnType<string | null, string | null | undefined, string | null>; // INVITATION only, ≤ 200 characters
+  /** INVITATION only: the places answered YES at most; null: no limit. */
+  capacity: ColumnType<number | null, number | null | undefined, number | null>;
+  /** POLL only: 2 to 6 options. */
+  poll_options: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** https only, ≤ 500 characters; its host one of the service's list (services/circle.ts CIRCLE_LINK_HOSTS). */
+  external_url: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Shown in the circle while set; null: a draft, or withdrawn. */
+  published_at: TimestampNullable;
+  created_by: string | null;           // admin_users.id; null when a script created it
+  created_at: TimestampDefault;
+}
+
+/** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
+export interface CirclePostImagesTable {
+  post_id: string;
+  sha256: string;                      // media_objects.sha256
+  position: number;                    // smallint 1..4
+  alt: string | null;                  // ≤ 200 characters; null: the post's default
+  created_by: string | null;           // admin_users.id
+  created_at: TimestampDefault;
+}
+
+/** An account's answer to an invitation of the circle (migration 0016, P-X01): one per account and post, changed in place. */
+export interface CircleRsvpsTable {
+  post_id: string;
+  account_id: string;
+  answer: CircleRsvpAnswer;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/** An account's vote in a poll of the circle (migration 0016, P-X01): one per account and post, final. */
+export interface CirclePollVotesTable {
+  post_id: string;
+  account_id: string;
+  option_index: number;                // smallint 0..5, the index of its option in circle_posts.poll_options
+  created_at: TimestampDefault;
+}
+
+/** The visits of the circle per UTC day (migration 0016, P-X01): a count, and no account. */
+export interface CircleDailyVisitsTable {
+  day: string;                         // date 'YYYY-MM-DD' (UTC)
+  visits: WithDefault<number>;         // integer >= 0
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -674,6 +747,11 @@ export interface Database {
   media_objects: MediaObjectsTable;
   drops: DropsTable;
   drop_entries: DropEntriesTable;
+  circle_posts: CirclePostsTable;
+  circle_post_images: CirclePostImagesTable;
+  circle_rsvps: CircleRsvpsTable;
+  circle_poll_votes: CirclePollVotesTable;
+  circle_daily_visits: CircleDailyVisitsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -745,6 +823,12 @@ export type NewDrop = Insertable<DropsTable>;
 export type DropUpdate = Updateable<DropsTable>;
 export type DropEntryRow = Selectable<DropEntriesTable>;
 export type NewDropEntry = Insertable<DropEntriesTable>;
+export type CirclePostRow = Selectable<CirclePostsTable>;
+export type NewCirclePost = Insertable<CirclePostsTable>;
+export type CirclePostUpdate = Updateable<CirclePostsTable>;
+export type CirclePostImageRow = Selectable<CirclePostImagesTable>;
+export type CircleRsvpRow = Selectable<CircleRsvpsTable>;
+export type CirclePollVoteRow = Selectable<CirclePollVotesTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

@@ -6,6 +6,7 @@
  *      ├──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
  *      ├──THE COLLECTION──▶ the lookbook (/verify/lookbook, P-R02) ──SEE THE MODEL──▶ a sheet
  *      └──THE RELEASES──▶ the releases (/verify/releases, P-R03) ──SEE THE RELEASE──▶ a release's page
+ *   MY PIECES ──THE CIRCLE──▶ the owners' circle (/verify/circle, P-X01) ──SEE THE …──▶ a post
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
@@ -22,6 +23,8 @@
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
  *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
  *   /verify/releases/<id>     a release's page, its entry and its draw (an address that is none: the list);
+ *   /verify/circle            THE CIRCLE, the owners' feed (P-X01);
+ *   /verify/circle/<id>       a post, its answer or its vote (an address that is none: the feed);
  *   anything else    the landing, its address put back to /verify.
  *
  * History: the landing screen is the base entry and every other screen shares
@@ -33,11 +36,12 @@
  * scan's entry into the lookbook's). The releases (P-R03) are built alike: a
  * release's page lies on the list's entry, so back from it returns to the
  * list, then to the landing (from MY PIECES, an entry's release turns its
- * entry into the list's). Opened directly, MY PIECES, a certificate, the
- * lookbook or the releases puts a landing entry under itself, and a sheet or
- * a release's page the landing and its list, so back still leads through
- * the app rather than out of it; a reload keeps the entry it is on. A
- * certificate's fragment edited in place reads the certificate again.
+ * entry into the list's). The circle (P-X01) is built the same way: a post
+ * lies on the feed's entry. Opened directly, MY PIECES, a certificate, the
+ * lookbook, the releases or the circle puts a landing entry under itself, and
+ * a sheet, a release's page or a post the landing and its list, so back still
+ * leads through the app rather than out of it; a reload keeps the entry it is
+ * on. A certificate's fragment edited in place reads the certificate again.
  */
 import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
@@ -49,10 +53,12 @@ import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError
 import { SessionStore } from './session.js';
 import type { ClientServices, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
+import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { resultViewModel } from './view-model.js';
 import { certificateView } from './views/certificate.js';
+import { circlePostView, circleView } from './views/circle.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { landingView } from './views/landing.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
@@ -63,29 +69,31 @@ import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
- * sheet, the releases or a release's page.
+ * sheet, the releases or a release's page, the circle or a post.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release';
+type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'certificate', 'lookbook', 'sheet', 'releases', 'release'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
- * release's page, or the landing (also for a path the app does not know). In any case: the certificate's PDF letters
- * its address in capitals (the server redirects those to /verify/c).
+ * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
+ * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   const lookbook = lookbookRouteOf(path);
   if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
   const releases = releasesRouteOf(path);
   if (releases) return releases.release ? 'release' : 'releases';
+  const circle = circleRouteOf(path);
+  if (circle) return circle.post ? 'circlePost' : 'circle';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
@@ -94,6 +102,9 @@ const sheetSlugOf = (pathname: string): string | null => lookbookRouteOf(pathnam
 
 /** The id of the release a path names, or null. */
 const releaseIdOf = (pathname: string): string | null => releasesRouteOf(pathname)?.release ?? null;
+
+/** The id of the post a path names, or null. */
+const postIdOf = (pathname: string): string | null => circleRouteOf(pathname)?.post ?? null;
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
@@ -139,6 +150,8 @@ class App {
   private sheetSlug: string | null = null;
   /** The id of the release on show (P-R03), to tell another release from the same one. */
   private releaseId: string | null = null;
+  /** The id of the post on show (P-X01), to tell another post from the same one. */
+  private postId: string | null = null;
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -164,6 +177,11 @@ class App {
         if (!(this.screen === 'release' && this.releaseId === id)) void this.showRelease(id);
       } else if (entry === 'releases' || route === 'releases') {
         if (this.screen !== 'releases') void this.showReleases();
+      } else if (entry === 'circlePost' || route === 'circlePost') {
+        const id = postIdOf(location.pathname);
+        if (!(this.screen === 'circlePost' && this.postId === id)) void this.showCirclePost(id);
+      } else if (entry === 'circle' || route === 'circle') {
+        if (this.screen !== 'circle') void this.showCircle();
       } else if (this.screen !== 'landing') this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -212,6 +230,17 @@ class App {
       } else if (!id && location.pathname !== RELEASES_PATH) history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
       if (id) void this.showRelease(id, false);
       else void this.showReleases(false);
+    } else if (route === 'circle' || route === 'circlePost') {
+      // The circle (P-X01) over the landing; a post over both, so back from it returns to the feed. An address under
+      // /verify/circle that is none shows the feed, its own address put back.
+      const id = postIdOf(location.pathname);
+      if (entryOf(history.state) !== (id ? 'circlePost' : 'circle')) {
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
+        if (id) history.pushState({ screen: 'circlePost' }, '', circlePostPath(id));
+      } else if (!id && location.pathname !== CIRCLE_PATH) history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
+      if (id) void this.showCirclePost(id, false);
+      else void this.showCircle(false);
     } else {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       this.showLanding(false);
@@ -254,7 +283,7 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
     else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
     void this.showLookbook();
   }
@@ -269,9 +298,39 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
     else history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
     void this.showReleases();
+  }
+
+  /**
+   * THE CIRCLE (P-X01), from MY PIECES (in its entry, as the lookbook), or from a post (the feed is the entry under it:
+   * back to it).
+   */
+  private openCircle(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'circlePost') {
+      history.back();
+      return;
+    }
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
+    else history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
+    void this.showCircle();
+  }
+
+  /** A post of the circle, over the feed's entry (from a post of the feed). Back from it returns to the feed. */
+  private openCirclePost(id: string): void {
+    const entry = entryOf(history.state);
+    const address = circlePostPath(id);
+    if (entry === 'circlePost') history.replaceState({ screen: 'circlePost' }, '', address);
+    else {
+      if (entry !== 'circle') {
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
+        else history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
+      }
+      history.pushState({ screen: 'circlePost' }, '', address);
+    }
+    void this.showCirclePost(id);
   }
 
   /**
@@ -354,8 +413,46 @@ class App {
       onCollection: () => this.openLookbook(),
       onReleases: () => this.openReleases(),
       onRelease: (id) => this.openRelease(id),
+      onCircle: () => this.openCircle(),
     });
     if (await this.swap(view.root, 'pieces', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** THE CIRCLE (P-X01): the owners' feed, for a signed-in account that holds a piece; the sign-in otherwise. */
+  private async showCircle(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.postId = null;
+    const view = circleView({
+      api: this.api,
+      session: this.session,
+      onScan: () => void this.startScan(),
+      onPost: (id) => this.openCirclePost(id),
+      onReleases: () => this.openReleases(),
+      onCollection: () => this.openLookbook(),
+      onPieces: () => this.openPieces(),
+    });
+    if (await this.swap(view.root, 'circle', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** A post of the circle (P-X01); `id` null: an address that is none, said as a post not in the circle. */
+  private async showCirclePost(id: string | null, focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.postId = id;
+    const view = circlePostView({
+      api: this.api,
+      session: this.session,
+      id,
+      onScan: () => void this.startScan(),
+      onCircle: () => this.openCircle(),
+      onRelease: (releaseId) => this.openRelease(releaseId),
+      onModel: (slug) => this.openSheet(slug),
+      offsetMinutes: -new Date().getTimezoneOffset(),
+    });
+    if (await this.swap(view.root, 'circlePost', focus)) this.live = view;
     else view.dispose();
   }
 

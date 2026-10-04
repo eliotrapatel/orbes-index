@@ -19,9 +19,10 @@ export const ROUTES = [
   { name: 'analytics', path: '/analytics' },
   { name: 'owners', path: '/owners' },
   { name: 'owner', path: '/owners/:accountId' },
-  /** The Club (P-R03): its tabs (Drops) by `?tab=`; a drop's page from its row, no link of its own in the sidebar. */
+  /** The Club (P-R03): its tabs (Drops, Circle) by `?tab=`; a drop's page, a post's (P-X01), from its row, no link of their own in the sidebar. */
   { name: 'club', path: '/club' },
   { name: 'drop', path: '/club/drops/:dropId' },
+  { name: 'circlePost', path: '/club/circle/:postId' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },
   { name: 'cases', path: '/cases' },

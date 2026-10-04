@@ -25,6 +25,10 @@
  * club's status (GET /api/v1/club/status) is open to every signed-in account:
  * any ORBES account enters a drop (an account that holds no piece is drawn
  * after the tiers).
+ *
+ * P-X01: the circle (CircleService) reads `tierOf` at each request (a post
+ * from its tier up), and the console's Analytics counts the members of each
+ * tier now (`clubMembersByTier`: counts only, never an account).
  */
 import type { Db } from '../db/connection.js';
 import type { ProductStatus } from '../db/schema.js';
@@ -137,6 +141,45 @@ export async function clubStandings(db: Db, accountIds: readonly string[], now: 
 /** One account's standing in the club at `now` (clubStandings). */
 export async function tierOf(db: Db, accountId: string, now: Date): Promise<ClubStanding> {
   return (await clubStandings(db, [accountId], now)).get(String(accountId).toLowerCase()) ?? { pieces: 0, tier: 0, seniority: 0 };
+}
+
+/** The members of the club now, by tier (P-X01, the console's Analytics): counts only, never an account. */
+export interface ClubMembers {
+  TITANE: number;
+  PLATINE: number;
+  PALLADIUM: number;
+  /** The three together: the accounts that read the circle now. */
+  total: number;
+}
+
+/**
+ * How many ACTIVE accounts stand at each tier now: the pieces each holds, counted as `tierOf` counts them, grouped by
+ * their number, then each number given its tier (tierForPieces). A locked account reads nothing of the club, so it is
+ * left out. Read only (TERMS-FACTS N3); what comes back names no account.
+ */
+export async function clubMembersByTier(db: Db): Promise<ClubMembers> {
+  const held = db
+    .selectFrom('ownership as o')
+    .innerJoin('products as p', 'p.id', 'o.product_id')
+    .innerJoin('accounts as a', 'a.id', 'o.account_id')
+    .select((eb) => ['o.account_id', eb.fn.countAll<number>().as('pieces')])
+    .where('o.ended_at', 'is', null)
+    .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+    .where('a.status', '=', 'ACTIVE')
+    .groupBy('o.account_id');
+  const rows = await db
+    .selectFrom(held.as('h'))
+    .select((eb) => ['h.pieces', eb.fn.countAll<number>().as('accounts')])
+    .groupBy('h.pieces')
+    .execute();
+  const out: ClubMembers = { TITANE: 0, PLATINE: 0, PALLADIUM: 0, total: 0 };
+  for (const r of rows) {
+    const name = tierName(tierForPieces(Number(r.pieces)));
+    if (!name) continue;
+    out[name] += Number(r.accounts);
+    out.total += Number(r.accounts);
+  }
+  return out;
 }
 
 /** GET /api/v1/club/status: the account's standing, and its entries in the drops (newest drop first). */
