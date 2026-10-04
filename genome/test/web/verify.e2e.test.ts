@@ -42,8 +42,11 @@
  * then NO within its places; a poll, one option chosen then VOTE, then its
  * results; a note's photographs, text and links, the release's page and a
  * film on another site with its host; THE CIRCLE in MY PIECES; an account
- * that holds no piece told it opens with one), and the problem
- * screens. On each
+ * that holds no piece told it opens with one), the ceremony of a first
+ * registration (P-D01: the glyphs one by one, then the model and its
+ * collection, the vibration, SHARE THE GENOME shared or saved, without motion
+ * when it is reduced, kept by TRY AGAIN, never for a piece received), and the
+ * problem screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
  * to genome/out/ for design review.
@@ -54,6 +57,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, ConsoleMessage, Locator, Page } from 'playwright-core';
+import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fromBase64Url, toBase64Url } from '../../src/core/bytes.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
@@ -61,7 +65,7 @@ import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CIRCLE, CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CEREMONY, CIRCLE, CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
@@ -148,6 +152,32 @@ async function keepsFloors(page: Page, controls: string[]): Promise<void> {
   expect(problems).toEqual([]);
   expect(checked).toEqual(expect.arrayContaining(controls));
 }
+
+/**
+ * The ceremony's stand-ins (P-D01), set on the page before VIEW AS OWNER (the app is one page: they stay): the
+ * vibrations asked for, and a share sheet that accepts a file (`share`: the file and whether the tap was still
+ * active when it was handed over) or none (`save`: the browser cannot share a file, so the image is saved).
+ */
+async function standInsForCeremony(page: Page, mode: 'share' | 'save'): Promise<void> {
+  await page.evaluate((m) => {
+    const w = window as unknown as { vibrations: unknown[]; shared: unknown[] };
+    w.vibrations = [];
+    w.shared = [];
+    Object.defineProperty(navigator, 'vibrate', { configurable: true, value: (pattern: unknown) => (w.vibrations.push(pattern), true) });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d: ShareData) => m === 'share' && (d.files?.length ?? 0) === 1 });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (d: ShareData) => {
+        const file = d.files![0];
+        const entry = { name: file.name, type: file.type, title: d.title, activeTap: navigator.userActivation.isActive, png: false };
+        entry.png = [...new Uint8Array(await file.slice(0, 4).arrayBuffer())].join(',') === '137,80,78,71';
+        w.shared.push(entry);
+      },
+    });
+  }, mode);
+}
+
+const vibrationsOf = (page: Page) => page.evaluate(() => (window as unknown as { vibrations: unknown[] }).vibrations);
 
 /**
  * Console noise that is expected: Chromium logs every 4xx API answer as a failed resource
@@ -488,9 +518,37 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.ownership'), /Ownership verified with its claim code/);
 
     // Re-verify as the owner: the server now reports the ownership.
+    await standInsForCeremony(page, 'save');
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
     await countOf(page.locator('.result__notice'), 0);
+    // The ceremony of a first registration (P-D01), motion reduced: the GENOME plate first, the model and its
+    // collection under the glyphs, all at once, and the vibration with them.
+    await textOf(page.locator('.ceremony__name'), 'MONOLITHE');
+    await textOf(page.locator('.ceremony__collection'), 'ORBIT');
+    expect(await page.locator('.view--result').evaluate((el) => el.classList.contains('is-ceremony'))).toBe(false);
+    expect(await page.locator('.view--result > :nth-child(2)').evaluate((el) => el.classList.contains('result__genome'))).toBe(true);
+    expect(await page.locator('.result__genome g[data-layer="genome"]').evaluateAll((els) => els.map((el) => getComputedStyle(el).animationName))).toEqual(Array(8).fill('none'));
+    expect(await vibrationsOf(page)).toEqual([[18, 90, 18]]);
+    // SHARE THE GENOME, a text link held to the floors; where the browser cannot share a file, the image is saved.
+    const shareGenome = page.getByRole('button', { name: CEREMONY.share });
+    await visible(shareGenome);
+    expect(await shareGenome.evaluate((el) => el.classList.contains('textlink'))).toBe(true);
+    await keepsFloors(page, [CEREMONY.share, 'SCAN ANOTHER']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    const [image] = await Promise.all([page.waitForEvent('download'), shareGenome.click()]);
+    expect(image.suggestedFilename()).toBe('ORBES-GENOME.png');
+    const imagePath = join(srv.workDir, 'genome-share.png');
+    await image.saveAs(imagePath);
+    // For design review, beside the screenshots.
+    await image.saveAs(join(OUT_DIR, 'verify-share-genome.png'));
+    const png = PNG.sync.read(readFileSync(imagePath));
+    expect([png.width, png.height]).toEqual([1080, 1350]);
+    const pixel = (x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+    // On ivory, the SEAL's core in the ivory colourway's ink at the centre of the orbit.
+    expect(pixel(4, 4)).toEqual([246, 242, 234]);
+    expect(pixel(540, 640)).toEqual([17, 17, 17]);
+    expect(await page.evaluate(() => (window as unknown as { shared: unknown[] }).shared)).toEqual([]);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await page.getByRole('button', { name: 'CREATE TRANSFER CODE' }).click();
     await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
@@ -507,6 +565,60 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
     expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('opens the ceremony of a first registration with motion (P-D01): the glyphs one by one, the names, the vibration, SHARE THE GENOME', async () => {
+    const issued = await srv.issue({ variant: 'SIZE 48' });
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-21', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const { page, problems } = await openVerify(browser, srv);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'ceremony.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
+    // The scan itself is no ceremony.
+    await countOf(page.locator('.ceremony'), 0);
+    await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await page.getByLabel('EMAIL').fill('ceremony.p-d01@example.com');
+    await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await standInsForCeremony(page, 'share');
+
+    // The connection drops under VIEW AS OWNER: TRY AGAIN keeps the ceremony.
+    await page.route('**/api/v1/verify', (route) => route.abort('internetdisconnected'));
+    await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
+    const tryAgain = page.getByRole('button', { name: 'TRY AGAIN' });
+    await visible(tryAgain);
+    await page.unroute('**/api/v1/verify');
+    await tryAgain.click();
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toMatch(/^AUTHENTIC (OWNERSHIP VERIFIED|REGISTERED)$/);
+
+    // With motion: each of the eight glyphs (one group of the layer genome) appears in turn, from its --i.
+    await attrOf(page.locator('.view--result'), 'class', /\bis-ceremony\b/);
+    const glyphs = page.locator('.result__genome .genome-svg g[data-layer="genome"]');
+    await countOf(glyphs, 8);
+    const motion = await glyphs.evaluateAll((els) =>
+      els.map((el) => ({ i: (el as SVGGElement).style.getPropertyValue('--i'), name: getComputedStyle(el).animationName, delay: Number.parseFloat(getComputedStyle(el).animationDelay) })),
+    );
+    expect(motion.map((m) => [m.i, m.name])).toEqual(Array.from({ length: 8 }, (_, i) => [String(i), 'ceremony-glyph']));
+    for (let i = 1; i < 8; i++) expect(motion[i].delay).toBeGreaterThan(motion[i - 1].delay);
+    // Then the model and its collection rise under them, with the vibration.
+    const names = page.locator('.ceremony__name');
+    expect(await names.evaluate((el) => Number.parseFloat(getComputedStyle(el).animationDelay))).toBeGreaterThan(motion[7].delay);
+    await textOf(names, 'MONOLITHE');
+    await textOf(page.locator('.ceremony__collection'), 'ORBIT');
+    await expect.poll(() => vibrationsOf(page), POLL).toEqual([[18, 90, 18]]);
+
+    // SHARE THE GENOME: the PNG, ready before the tap, goes to the share sheet while the tap is still active.
+    const shareGenome = page.getByRole('button', { name: CEREMONY.share });
+    await expect.poll(() => shareGenome.evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
+    await keepsFloors(page, [CEREMONY.share, 'SCAN ANOTHER']);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-ceremony.png'), fullPage: true });
+    await shareGenome.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { shared: unknown[] }).shared), POLL)
+      .toEqual([{ name: 'ORBES-GENOME.png', type: 'image/png', title: CEREMONY.shareTitle, activeTap: true, png: true }]);
+    expect(problems.filter((p) => !/internetdisconnected|ERR_INTERNET_DISCONNECTED/.test(p))).toEqual([]);
   }, 120_000);
 
   it('receives a piece with its transfer code (F-03): scan, sign in, VERIFY AGAIN, the code of this piece only, then the owner view', async () => {
@@ -577,9 +689,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(buyer.acquiredVia).toBe('TRANSFER');
     expect((await srv.ctx.services.ownership.currentOwner(kept.product.id))?.accountId).toBe(seller.account.id);
 
-    // VIEW AS OWNER verifies again: the buyer's own piece.
+    // VIEW AS OWNER verifies again: the buyer's own piece. A piece received is no first registration: no ceremony (P-D01).
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await countOf(page.locator('.ceremony'), 0);
+    expect(await page.locator('.view--result').evaluate((el) => el.classList.contains('is-ceremony'))).toBe(false);
 
     // The new owner scans the piece signed out, then signs in on the result: no transfer is pending, and VERIFY AGAIN
     // shows the piece as theirs.
@@ -1508,9 +1622,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(card, /Ownership verified with its claim code/);
     expect(await srv.ctx.services.ownership.currentOwner(issued.product.id)).toBeTruthy();
 
-    // VIEW AS OWNER verifies again: the owner's own piece, with the unusual activity said once.
+    // VIEW AS OWNER verifies again: the owner's own piece, with the unusual activity said once. The certificate card
+    // made it a first registration: the ceremony (P-D01).
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
+    await textOf(page.locator('.ceremony__name'), 'MONOLITHE');
     await attrOf(page.locator('.view--result'), 'data-tone', 'authentic');
     await textOf(page.locator('.result__message'), /Unusual activity has been recorded for it/);
     await countOf(page.locator('.result__card'), 0);

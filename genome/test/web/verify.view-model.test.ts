@@ -392,6 +392,49 @@ describe('verify view-model: the second-hand guidance (J-02)', () => {
   });
 });
 
+describe('verify view-model: the ceremony of a first registration (P-D01)', () => {
+  const mine = { ownership: { registered: true, you: true } };
+
+  it('names the model and its collection, in capitals, on the result VIEW AS OWNER opens after a first registration', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', mine), { ceremony: true });
+    expect(vm.ceremony).toEqual({ name: 'MONOLITHE', collection: 'ORBIT' });
+    // Neither a rank nor a vintage (choice 6): the GENOME, then the name and the collection, nothing else.
+    expect(Object.keys(vm.ceremony!)).toEqual(['name', 'collection']);
+    // The piece registered without its claim code reads AUTHENTIC — REGISTERED to its owner: the same ceremony.
+    expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', mine), { ceremony: true }).ceremony).toEqual({ name: 'MONOLITHE', collection: 'ORBIT' });
+  });
+
+  it('leaves the collection out when the model has none', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, product: { ...PRODUCT, collection: undefined } }), { ceremony: true });
+    expect(vm.ceremony).toEqual({ name: 'MONOLITHE' });
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, product: { ...PRODUCT, collection: '  ' } }), { ceremony: true }).ceremony).toEqual({ name: 'MONOLITHE' });
+  });
+
+  it('is never there without the flag: every other result, a scan, VERIFY AGAIN, a piece received', () => {
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', mine)).ceremony).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', mine), { ceremony: false }).ceremony).toBeUndefined();
+  });
+
+  it('celebrates only a piece that is the reader\'s, authentic, with its GENOME and its model', () => {
+    // Another account signed in meanwhile: the piece is someone else's.
+    expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { ownership: { registered: true, you: false } }), { ceremony: true }).ceremony).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION'), { ceremony: true }).ceremony).toBeUndefined();
+    // Not authentic: no tabs, no product, no ceremony.
+    for (const state of ['SUSPICIOUS_ACTIVITY', 'REVOKED', 'UNKNOWN'] as const) {
+      expect(resultViewModel(outcome(state, mine), { ceremony: true }).ceremony, state).toBeUndefined();
+    }
+    // No GENOME to reveal (glyphs the app cannot read), or no model to name.
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, genome: { ...GENOME, glyphs: [1, 2, 3] } }), { ceremony: true }).ceremony).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, product: { ...PRODUCT, model: ' ' } }), { ceremony: true }).ceremony).toBeUndefined();
+  });
+
+  it('carries neither the identity of the piece nor anything of the account', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', mine), { ceremony: true });
+    const text = JSON.stringify(vm.ceremony);
+    for (const secret of [PRODUCT.productId, GENOME.fingerprint, GENOME.id]) expect(text).not.toContain(secret);
+  });
+});
+
 describe('verify view-model: negative states', () => {
   it('SUSPICIOUS_ACTIVITY shows the genome but no product, tabs or footnote', () => {
     // Defensive: even if a product block were present, a non-authentic result never shows it.

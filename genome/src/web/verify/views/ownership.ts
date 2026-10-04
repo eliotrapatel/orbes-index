@@ -52,8 +52,11 @@ export interface OwnershipDeps {
   session: SessionStore;
   /** Scan again (when the registration window of this scan has closed). */
   onRescan(): void;
-  /** Verify the same code again, so the whole result reflects the new ownership. */
-  onRefresh?(): void;
+  /**
+   * Verify the same code again, so the whole result reflects the new ownership. `ceremony` (P-D01): VIEW AS OWNER
+   * right after a first registration, whose result opens with the ceremony.
+   */
+  onRefresh?(opts?: { ceremony?: boolean }): void;
   /** ORBES Client Services under FORGOTTEN PASSWORD? (absent when not configured). */
   contact?: ContactModel;
   /** MY PIECES, from the account line (F-01); without it the link loads the page. */
@@ -343,7 +346,11 @@ export class OwnershipPanel {
     else out.push(this.text('This piece is now registered to your ORBES account. ORBES Client Services may ask for a proof of purchase to confirm it.'));
     const refresh = this.deps.onRefresh;
     if (refresh) {
-      out.push(h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => refresh() }, text: 'VIEW AS OWNER' })));
+      // A first registration (not a piece received with a transfer code) opens the ceremony (P-D01).
+      const ceremony = c.via === 'register';
+      out.push(
+        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => refresh({ ceremony }) }, text: 'VIEW AS OWNER' })),
+      );
     }
     return out;
   }

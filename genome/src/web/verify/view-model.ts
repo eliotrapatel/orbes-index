@@ -8,6 +8,8 @@
  * RECEIVING THIS PIECE),
  * the photographs of an authentic piece (F-04: its own, then its model's),
  * the sheet of its model in THE COLLECTION (P-R02: SEE THE MODEL),
+ * the ceremony of a first registration (P-D01: the GENOME, then the name of
+ * its model and its collection),
  * how product facts read as brand lines, which tabs exist and what the
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
  * registration token or a transfer window, the certificate-card or the
@@ -153,6 +155,13 @@ export interface ResultViewModel {
   warranty?: { status: string; rows: Row[]; note: string };
   care: string;
   ownership: OwnershipMode;
+  /**
+   * The ceremony of a first registration (P-D01): the result VIEW AS OWNER opens once a piece has just been
+   * registered to the reader's account. The GENOME appears glyph by glyph, then the name of its model and its
+   * collection (never a rank nor a vintage), with SHARE THE GENOME. Only on an authentic result of a piece that is
+   * the reader's, with its GENOME and its model.
+   */
+  ceremony?: CeremonyModel;
   /** Footnote on the limits of a code-based verification (positive results only). */
   footnote?: string;
   /** "1 OCT 2026 · 14:32" in the viewer's time zone. */
@@ -165,6 +174,12 @@ export interface ResultViewModel {
   recoveryContact?: ContactModel;
   /** Where the piece was seen or bought: results that were not authentic only. */
   report?: ReportModel;
+}
+
+/** What the ceremony names under the GENOME (P-D01), in capitals as the product lines: the model, then its collection. */
+export interface CeremonyModel {
+  name: string;
+  collection?: string;
 }
 
 const AUTHENTIC: ReadonlySet<VerificationState> = new Set([
@@ -307,9 +322,13 @@ function genomeVersionNumber(version: string): number {
  * adds the contact of ORBES Client Services where the result asks for it. `receivedAt` (this device's
  * clock, ms) is when the outcome arrived: the windows of the scan (registration, transfer) then end on
  * this device's clock 15 minutes after it, as they do on the server's after `verifiedAt`, whatever the
- * gap between the two clocks; without it, they end at the server's `expiresAt` as written.
+ * gap between the two clocks; without it, they end at the server's `expiresAt` as written. `ceremony` (P-D01): this
+ * result is the one VIEW AS OWNER opens right after a first registration.
  */
-export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: number; clientServices?: ClientServices; receivedAt?: number } = {}): ResultViewModel {
+export function resultViewModel(
+  outcome: VerifyOutcome,
+  opts: { offsetMinutes?: number; clientServices?: ClientServices; receivedAt?: number; ceremony?: boolean } = {},
+): ResultViewModel {
   const state: VerificationState = VERIFICATION_STATES.includes(outcome.state) ? outcome.state : 'MALFORMED_CODE';
   const authentic = AUTHENTIC.has(state);
   const title = splitTitle(outcome.title || FALLBACK_TITLES[state]);
@@ -384,6 +403,13 @@ export function resultViewModel(outcome: VerifyOutcome, opts: { offsetMinutes?: 
     if (warranty) vm.warranty = warranty;
     vm.ownership = ownershipMode(outcome, clockShift(outcome, opts.receivedAt));
     vm.footnote = ASSURANCE_NOTE;
+    // P-D01: the piece just registered, read again as its owner's. Nothing to celebrate on a piece that is not the
+    // reader's (another account signed in meanwhile), nor without the GENOME it reveals or the model it names.
+    const name = upper(p?.model);
+    if (opts.ceremony === true && vm.ownership.kind === 'yours' && vm.genome && name) {
+      const collection = upper(p?.collection);
+      vm.ceremony = collection ? { name, collection } : { name };
+    }
     // J-02: a registered piece reads the same for its owner signed out and for every copy of its code, so a buyer is
     // told what shows that the seller holds the registration. AUTHENTIC — REGISTERED only, and never over a notice of
     // unusual activity (said by the notice or by the server's message): that one comes first.

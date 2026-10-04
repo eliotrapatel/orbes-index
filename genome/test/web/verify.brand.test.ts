@@ -335,7 +335,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__badge-name', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__badge-name', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
@@ -467,8 +467,11 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
 
   it('sets them at the head of the result, above the GENOME, on an ivory plate framed like it', () => {
     const at = (needle: string) => resultView.indexOf(needle);
-    expect(at('sections.push(photoPlate(vm.photos));')).toBeGreaterThan(0);
-    expect(at('sections.push(photoPlate(vm.photos));')).toBeLessThan(at("class: 'result__genome'"));
+    expect(at('sections.push(photoPlate(vm.photos), plate);')).toBeGreaterThan(at("class: 'result__genome'"));
+    // Only the ceremony of a first registration (P-D01) opens on the GENOME, the photographs under it.
+    expect(at('if (ceremony && plate) {')).toBeLessThan(at('sections.push(plate, photoPlate(vm.photos));'));
+    expect(at('sections.push(plate, photoPlate(vm.photos));')).toBeLessThan(at('} else {\n    // At the head of an authentic result, above the GENOME'));
+    expect(at('} else {\n    // At the head of an authentic result, above the GENOME')).toBeLessThan(at('sections.push(photoPlate(vm.photos), plate);'));
     expect(rule(styles, '.photos__plate').background).toBe('var(--ivory)');
     expect(rule(styles, '.result__photos')['margin-top']).toBe(rule(styles, '.result__genome')['margin-top']);
     expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
@@ -556,6 +559,63 @@ describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-h
     expect(ownershipView).toContain('sectionLabel(RECEIVING.title, RECEIVING_ID)');
     expect(verifyCopy.RECEIVING.title).toBe('RECEIVING THIS PIECE');
     expect(styles).toMatch(/\.section-label\[tabindex="-1"\]:focus/);
+  });
+});
+
+describe('verify app: the ceremony of a first registration (P-D01)', () => {
+  const ownershipView = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
+  const mainSrc = readFileSync(join(WEB, 'verify/main.ts'), 'utf8');
+  const shareSrc = readFileSync(join(WEB, 'verify/share-image.ts'), 'utf8');
+
+  it('is asked for by VIEW AS OWNER after a first registration only, through retryVerify to the result', () => {
+    const block = ownershipView.slice(ownershipView.indexOf('private confirmationBlock'), ownershipView.indexOf('private accountLine'));
+    expect(block).toContain("const ceremony = c.via === 'register';");
+    expect(block).toContain('on: { click: () => refresh({ ceremony }) }, text: \'VIEW AS OWNER\'');
+    expect(mainSrc).toContain('onRefresh: (opts) => void this.retryVerify(input, opts?.ceremony === true)');
+    expect(mainSrc).toContain('await this.verify(input, gen, ceremony);');
+    expect(mainSrc).toContain('resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices, receivedAt, ceremony })');
+    // TRY AGAIN after a connection problem keeps it; the result, once on screen, is told so (its vibration).
+    expect(mainSrc).toContain('void this.retryVerify(this.lastInput, this.lastCeremony)');
+    expect(mainSrc).toMatch(/this\.live = view;\n\s*view\.shown\(\);/);
+  });
+
+  it('reveals the glyphs group by group (layer genome, --i set through the CSSOM), then the names, unless motion is reduced', () => {
+    expect(resultView).toContain(".genome-svg g[data-layer=\"genome\"]').forEach((g, i) => g.style.setProperty('--i', String(i)))");
+    expect(resultView).toMatch(/if \(!prefersReducedMotion\(\)\) \{\n\s*\/\/[^\n]*\n\s*root\.classList\.add\('is-ceremony'\);/);
+    const glyph = rule(styles, '.is-ceremony .genome-svg g[data-layer="genome"]');
+    expect(glyph).toMatchObject({ 'transform-box': 'fill-box', 'transform-origin': 'center', animation: 'ceremony-glyph 0.7s var(--ease) both' });
+    expect(glyph['animation-delay']).toContain('var(--i, 0)');
+    expect(styles).toMatch(/@keyframes ceremony-glyph \{\s*from \{ opacity: 0; transform: scale\(0\.55\); \}/);
+    // The names rise after the eighth glyph has appeared (0.9 s + 7 × 0.16 s, then its 0.7 s).
+    const names = rules(styles).find((r) => r.selectors.includes('.is-ceremony .ceremony__name'))!.decls;
+    expect(names.animation).toBe('brand-rise 1.2s var(--ease) both');
+    expect(Number.parseFloat(names['animation-delay'])).toBeGreaterThanOrEqual(0.9 + 7 * 0.16);
+    // With reduced motion the class is never set, and the stylesheet stops the animations as well.
+    const reduced = styles.slice(styles.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toMatch(/\.is-ceremony \.genome-svg g\[data-layer="genome"\],[\s\S]*?\{\s*animation: none;/);
+    // A vibration where the device has one, as the names rise (or at once without motion).
+    expect(resultView).toContain('navigator.vibrate?.([...CEREMONY_VIBRATION])');
+    expect(resultView).toContain("names.addEventListener('animationstart', vibration, { once: true })");
+  });
+
+  it('offers SHARE THE GENOME as a text link, its image prepared before the tap by a module imported statically', () => {
+    expect(verifyCopy.CEREMONY.share).toBe('SHARE THE GENOME');
+    expect(resultView).toContain("class: 'textlink ceremony__share'");
+    expect(resultView).toContain("import { prepareShareImage, shareGenomeImage } from '../share-image.js';");
+    // One bundle (verify.build.test.ts): no dynamic import anywhere in the app.
+    for (const src of [resultView, mainSrc, shareSrc]) expect(src).not.toMatch(/\bimport\(/);
+    // Drawn when the result is built; the tap only hands the ready file over.
+    const block = resultView.slice(resultView.indexOf('function ceremonyBlock'), resultView.indexOf('export function resultView'));
+    expect(block.indexOf('void prepareShareImage(')).toBeGreaterThan(0);
+    expect(block).toContain('on: { click: () => void (image && shareGenomeImage(image)) }');
+    expect(rule(styles, '.ceremony__share[hidden]').display).toBe('none');
+    // navigator.share({ files }) when navigator.canShare accepts it, else saveDownload; Path2D from genomeLayout.
+    expect(shareSrc).toContain("nav.canShare(data)");
+    expect(shareSrc).toContain("import { saveDownload } from '../shared/download.js';");
+    expect(shareSrc).toContain('new Path2D(primitiveToPathData(p))');
+    expect(shareSrc).toContain("genomeLayout(genome, 'orbit')");
+    // The names in the display face, their figures in the reading face.
+    expect(resultView).toContain("h('p', { class: 'ceremony__name' }, ...withNumerals(c.name))");
   });
 });
 

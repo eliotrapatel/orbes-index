@@ -761,3 +761,17 @@ export const CIRCLE = Object.freeze({
   externalLabel: (host: string) => `Open the link on ${host}, in a new tab`,
 });
 
+/**
+ * The ceremony of a first registration (P-D01), on the result VIEW AS OWNER opens: the GENOME appears glyph by glyph,
+ * then the name of its model and its collection; under them SHARE THE GENOME, a text link that shares (or saves) an
+ * image of the GENOME on ivory with the same two names. Neither the identity of the piece nor the account is in it.
+ */
+export const CEREMONY = Object.freeze({
+  /** The accessible name of the names under the GENOME. */
+  label: 'Your piece',
+  share: 'SHARE THE GENOME',
+  /** The title handed to the share sheet with the image. */
+  shareTitle: 'ORBES GENOME',
+  /** The image's file name, when it is shared or saved. */
+  filename: 'ORBES-GENOME.png',
+});

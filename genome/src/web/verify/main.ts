@@ -8,6 +8,7 @@
  *      └──THE RELEASES──▶ the releases (/verify/releases, P-R03) ──SEE THE RELEASE──▶ a release's page
  *   MY PIECES ──THE CIRCLE──▶ the owners' circle (/verify/circle, P-X01) ──SEE THE …──▶ a post
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
+ *   result ──REGISTER, then VIEW AS OWNER──▶ VERIFYING… ──▶ the result with the ceremony (P-D01)
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
@@ -138,6 +139,8 @@ class App {
   private generation = 0;
   /** The last verify request, for TRY AGAIN after a connection problem. */
   private lastInput: VerifyInput | null = null;
+  /** Whether that request was VIEW AS OWNER right after a first registration (P-D01): TRY AGAIN keeps its ceremony. */
+  private lastCeremony = false;
   /** ORBES Client Services details, fetched with the first verification (a failed fetch is tried again with the next). */
   private clientServices: Promise<ClientServices> | null = null;
   private zoomed = false;
@@ -538,7 +541,7 @@ class App {
   private onAction(a: ProblemAction): void {
     if (a === 'retry-scan') void this.startScan();
     else if (a === 'upload') this.pickPhoto();
-    else if (a === 'retry-verify' && this.lastInput) void this.retryVerify(this.lastInput);
+    else if (a === 'retry-verify' && this.lastInput) void this.retryVerify(this.lastInput, this.lastCeremony);
     else this.goHome();
   }
 
@@ -698,10 +701,11 @@ class App {
 
   // ── Verification ─────────────────────────────────────────────────────────
 
-  private async retryVerify(input: VerifyInput): Promise<void> {
+  /** Verify the same code again: TRY AGAIN, VERIFY AGAIN, VIEW AS OWNER (`ceremony`: right after a first registration, P-D01). */
+  private async retryVerify(input: VerifyInput, ceremony = false): Promise<void> {
     const gen = ++this.generation;
     if (!(await this.swap(verifyingView(STATUS.verifying).root, 'verifying'))) return;
-    await this.verify(input, gen);
+    await this.verify(input, gen, ceremony);
   }
 
   /**
@@ -717,8 +721,9 @@ class App {
     return settledWithin(this.clientServices, CONTACT_WAIT_MS, {});
   }
 
-  private async verify(input: VerifyInput, gen: number): Promise<void> {
+  private async verify(input: VerifyInput, gen: number, ceremony = false): Promise<void> {
     this.lastInput = input;
+    this.lastCeremony = ceremony;
     const started = performance.now();
     try {
       // Read in parallel with the verification: the contact makes the result wait 1 s at most (CONTACT_WAIT_MS). The
@@ -731,17 +736,20 @@ class App {
       if (rest > 0 && !prefersReducedMotion()) await sleep(rest);
       if (gen !== this.generation) return;
       this.lastInput = null;
+      this.lastCeremony = false;
       this.stopCamera();
-      const vm = resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices, receivedAt });
+      const vm = resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices, receivedAt, ceremony });
       const view = resultView(vm, {
         onScanAgain: () => void this.startScan(),
-        onRefresh: () => void this.retryVerify(input),
+        onRefresh: (opts) => void this.retryVerify(input, opts?.ceremony === true),
         ownership: { api: this.api, session: this.session, onPieces: () => this.openPieces() },
         report: { api: this.api },
         onModel: (slug) => this.openSheet(slug),
       });
-      if (await this.swap(view.root, 'result')) this.live = view;
-      else view.dispose();
+      if (await this.swap(view.root, 'result')) {
+        this.live = view;
+        view.shown();
+      } else view.dispose();
     } catch (e) {
       if (gen === this.generation) this.showProblem(problemForApiError(e));
     }

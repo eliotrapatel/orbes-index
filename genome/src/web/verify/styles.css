@@ -834,6 +834,70 @@ h1[tabindex="-1"]:focus,
   font-size: var(--fs-micro);
 }
 
+/* The ceremony of a first registration (P-D01): under the GENOME, the name of
+   the model and its collection, then SHARE THE GENOME (a text link). */
+.ceremony {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+
+.ceremony__name {
+  font-size: var(--fs-heading);
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  overflow-wrap: anywhere;
+}
+
+.ceremony__collection {
+  margin-top: 6px;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.ceremony__share {
+  margin-top: 10px;
+}
+
+.ceremony__share[hidden] {
+  display: none;
+}
+
+/* With motion: the eight glyphs appear one by one around the SEAL (each group
+   of the layer genome, its --i set by the view), then the names rise under
+   them. Without, they are simply there (.is-ceremony is never set). */
+.is-ceremony .genome-svg g[data-layer="genome"] {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ceremony-glyph 0.7s var(--ease) both;
+  animation-delay: calc(0.9s + var(--i, 0) * 0.16s);
+}
+
+.is-ceremony .ceremony__name,
+.is-ceremony .ceremony__collection,
+.is-ceremony .ceremony__share {
+  animation: brand-rise 1.2s var(--ease) both;
+  animation-delay: 2.3s;
+}
+
+.is-ceremony .ceremony__collection {
+  animation-delay: 2.5s;
+}
+
+.is-ceremony .ceremony__share {
+  animation-delay: 2.8s;
+}
+
+@keyframes ceremony-glyph {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .result__lines {
   margin-top: 46px;
   text-align: center;
@@ -2847,7 +2911,9 @@ h1[tabindex="-1"]:focus,
 .circle-post__title,
 .circle-post__result-label,
 .circle-post__result-mine,
-.circle-post__link-title {
+.circle-post__link-title,
+.ceremony__name,
+.ceremony__collection {
   font-family: var(--font-display);
 }
 
@@ -2915,5 +2981,11 @@ h1[tabindex="-1"]:focus,
   }
   .view--result > * {
     opacity: 1;
+  }
+  .is-ceremony .genome-svg g[data-layer="genome"],
+  .is-ceremony .ceremony__name,
+  .is-ceremony .ceremony__collection,
+  .is-ceremony .ceremony__share {
+    animation: none;
   }
 }
