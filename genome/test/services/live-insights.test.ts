@@ -302,6 +302,7 @@ describe('the live alerts: exactly three', () => {
 });
 
 describe('the live sell-out forecast', () => {
+  const none = { resumedAt: null };
   const entries = () => [
     confirmed(0, MINUTE, 2 * MINUTE),
     entry({ status: 'SECURED', turnAt: at(3 * MINUTE), turnExpiresAt: at(3.5 * MINUTE), securedAt: at(4 * MINUTE), holdExpiresAt: at(9 * MINUTE), gestureMs: 1500 }),
@@ -310,7 +311,7 @@ describe('the live sell-out forecast', () => {
   ];
 
   it('per size, from the pace secured and the line it can still serve; overall', () => {
-    const f = sellOutForecast(release(), entries(), at(5 * MINUTE))!;
+    const f = sellOutForecast(release(), entries(), none, at(5 * MINUTE))!;
     // 52: two secured in 5 min (0.4 a minute), every hold confirmed so far: 2 to confirm in 5 min; the line can give
     // 1 + 5 × 2/3 = 4.3. 54: nobody to serve it.
     expect(f.sizes.map((s) => [s.size.label, s.outlook, s.at, s.expectedLeft, s.remaining])).toEqual([
@@ -324,14 +325,48 @@ describe('the live sell-out forecast', () => {
   });
 
   it('the close first, no pace yet, paused; none before T0 or after the end', () => {
-    const close = sellOutForecast(release({ closesAt: at(8 * MINUTE) }), entries(), at(5 * MINUTE))!;
+    const close = sellOutForecast(release({ closesAt: at(8 * MINUTE) }), entries(), none, at(5 * MINUTE))!;
     expect(close.sizes[0]).toMatchObject({ outlook: 'CLOSE_FIRST', expectedLeft: 1 });
-    expect(sellOutForecast(release(), entries(), at(20 * SECOND))!.sizes[0]!.outlook).toBe('NO_PACE');
-    expect(sellOutForecast(release({ pausedAt: at(4 * MINUTE) }), entries(), at(5 * MINUTE))!.sizes[0]).toMatchObject({ outlook: 'NO_PACE' });
-    expect(sellOutForecast(release(), entries(), at(-MINUTE))).toBeNull();
-    expect(sellOutForecast(release({ endedAt: at(MINUTE), endedReason: 'ENDED' }), entries(), at(5 * MINUTE))).toBeNull();
+    expect(sellOutForecast(release(), entries(), none, at(20 * SECOND))!.sizes[0]!.outlook).toBe('NO_PACE');
+    expect(sellOutForecast(release({ pausedAt: at(4 * MINUTE) }), entries(), none, at(5 * MINUTE))!.sizes[0]).toMatchObject({ outlook: 'NO_PACE' });
+    expect(sellOutForecast(release(), entries(), none, at(-MINUTE))).toBeNull();
+    expect(sellOutForecast(release({ endedAt: at(MINUTE), endedReason: 'ENDED' }), entries(), none, at(5 * MINUTE))).toBeNull();
     const done = [confirmed(0, 10 * SECOND, MINUTE, { sizeId: 's54' }), confirmed(0, 10 * SECOND, 2 * MINUTE, { sizeId: 's54' })];
-    expect(sellOutForecast(release({ sizes: [{ id: 's54', label: '54', stock: 2 }] }), done, at(3 * MINUTE))).toMatchObject({ outlook: 'SOLD_OUT', at: at(2 * MINUTE) });
+    expect(sellOutForecast(release({ sizes: [{ id: 's54', label: '54', stock: 2 }] }), done, none, at(3 * MINUTE))).toMatchObject({ outlook: 'SOLD_OUT', at: at(2 * MINUTE) });
+  });
+
+  it('after a RESUME, the pace runs from it: a pause that has ended is not time on sale', () => {
+    // Paused from 10:06 to 10:09 (3 min), read at 10:10, sales until 10:13. In 52: a piece secured at 10:05:30 (before
+    // the pause) and confirmed, one secured at 10:09:30 and held, five waiting.
+    const r = release({ closesAt: at(13 * MINUTE), pausedMs: 3 * MINUTE });
+    const xs = [
+      confirmed(5 * MINUTE, 5.5 * MINUTE, 5.8 * MINUTE),
+      entry({ status: 'SECURED', turnAt: at(9 * MINUTE + 10 * SECOND), turnExpiresAt: at(9 * MINUTE + 40 * SECOND), securedAt: at(9.5 * MINUTE), holdExpiresAt: at(14.5 * MINUTE), gestureMs: 1500 }),
+      ...Array.from({ length: 5 }, () => entry()),
+    ];
+    const f = sellOutForecast(r, xs, { resumedAt: at(9 * MINUTE) }, at(10 * MINUTE))!;
+    // The window starts at the RESUME, not at 10:05: 1 min of sales and 1 piece secured in it, 1 a minute; 2 to confirm
+    // in 52 at every hold confirmed so far: sold out about 10:12, before the close. (Read over 10:05–10:10 with the pause
+    // in it, the pace would be 2 in 5 min, 0.4 a minute: the close first.)
+    expect(f).toMatchObject({ windowMs: MINUTE, secureRate: 1, payRate: 1 });
+    expect(f.sizes.map((z) => [z.size.label, z.outlook, z.pace, z.at, z.expectedLeft])).toEqual([
+      ['52', 'SELLS_OUT', 1, at(12 * MINUTE), null],
+      ['54', 'LINE_SHORT', 0, null, 2],
+    ]);
+    expect(f.reasoning[0]).toBe('The pace: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (1 min of sales, the pause before it left out).');
+    expect(f.sizes[0]!.reasoning[0]).toBe(
+      '2 pieces to confirm; the line can still give 6 (1 held, 0 in a turn, 5 waiting, at those shares). At 1.0 secured a minute, 1.0 confirmed: sold out about 02 NOV 2026 · 10:12:00 UTC.',
+    );
+    // A RESUME before the window changes nothing: the last 5 min, 2 secured in them.
+    expect(sellOutForecast(r, xs, { resumedAt: at(4 * MINUTE) }, at(10 * MINUTE))!).toMatchObject({ windowMs: 5 * MINUTE, sizes: [{ pace: 0.4, outlook: 'CLOSE_FIRST' }, {}] });
+    // Just resumed: no pace yet.
+    const fresh = sellOutForecast(r, xs, { resumedAt: at(9.9 * MINUTE) }, at(10 * MINUTE))!;
+    expect(fresh.windowMs).toBe(6 * SECOND);
+    expect(fresh.sizes[0]!.reasoning[0]).toContain('no pace to forecast from: the sales have run less than 30 s since the RESUME.');
+    // Paused again at 10:09:30: the 30 s since the RESUME, that pause left out too.
+    const again = sellOutForecast({ ...r, pausedAt: at(9.5 * MINUTE) }, xs, { resumedAt: at(9 * MINUTE) }, at(10 * MINUTE))!;
+    expect(again.windowMs).toBe(30 * SECOND);
+    expect(again.reasoning[0]).toBe('The pace: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (30 s of sales, the pause before it and the pause running now left out).');
   });
 });
 
@@ -371,7 +406,8 @@ function reportFixture() {
   const r = release({ endedAt: at(HOUR), endedReason: 'CLOSED', pausedMs: 0 });
   const e = {
     e1: confirmed(0, 20 * SECOND, MINUTE, { id: 'x1', accountId: 'p1', tier: 3, resolution: 'CONCLUDED', country: 'FR', position: 1 }),
-    e2: confirmed(0, 25 * SECOND, 2 * MINUTE, { id: 'x2', accountId: 'p2', tier: 2, country: 'FR', position: 2 }),
+    // Confirmed, then cancelled by ORBES Client Services: no revenue, its add-on neither.
+    e2: confirmed(0, 25 * SECOND, 2 * MINUTE, { id: 'x2', accountId: 'p2', tier: 2, resolution: 'CANCELLED', country: 'FR', position: 2 }),
     e3: missed(0, { id: 'x3', accountId: 'p3', tier: 1, position: 3 }),
     e4: confirmed(30 * SECOND, 50 * SECOND, 4 * MINUTE, { id: 'x4', accountId: 'p4', tier: 0, country: 'GB', position: 4 }),
     e5: entry({ id: 'x5', accountId: 'p5', status: 'ENDED', position: 5, endedAt: at(HOUR) }),
@@ -396,6 +432,7 @@ describe('the release report', () => {
       ],
       entryAddons: [
         { entryId: 'x1', addonId: 'eng', priceMinor: 15_000 },
+        { entryId: 'x2', addonId: 'eng', priceMinor: 15_000 },
         { entryId: 'x7', addonId: 'eng', priceMinor: 15_000 },
         { entryId: 'x7', addonId: 'box', priceMinor: 0 },
         // An add-on of a hold that ended is not revenue.
@@ -418,7 +455,8 @@ describe('the release report', () => {
       ['52', 3, 1, 3, 4 * MINUTE, 1, 1, 1, 0, 4],
       ['54', 2, 0, 1, null, 1, 1, 0, 1, 2],
     ]);
-    expect(rep).toMatchObject({ final: true, sellOutMs: null, missed: 1, expired: 1, released: 0, piecesRevenueMinor: 1_920_000, addonsRevenueMinor: 30_000, next: { quantity: 6 } });
+    // The revenue: 4 pieces confirmed, 1 of them cancelled: 3 × € 4 800; the add-ons of x1 and x7 (x2's cancelled).
+    expect(rep).toMatchObject({ final: true, sellOutMs: null, missed: 1, expired: 1, released: 0, cancelled: { reservations: 1, pieces: 1 }, piecesRevenueMinor: 1_440_000, addonsRevenueMinor: 30_000, next: { quantity: 6 } });
     expect(rep.addons).toEqual([
       { id: 'eng', label: 'ENGRAVING', reservations: 2, pieces: 2, revenueMinor: 30_000 },
       { id: 'box', label: 'GIFT BOX', reservations: 1, pieces: 1, revenueMinor: 0 },
@@ -432,13 +470,13 @@ describe('the release report', () => {
     const words = rep.reasoning.join(' ');
     expect(words).toContain('Not sold out: 4 pieces confirmed of 5.');
     // The house's money: a no-break space after the sign and between the thousands (live-console.ts liveMoney).
-    expect(words).toContain('€\u00a019\u00a0200 for the pieces, €\u00a0300 for the add-ons');
+    expect(words).toContain('€\u00a014\u00a0400 for the pieces, €\u00a0300 for the add-ons. The reservation ORBES Client Services cancelled (1 piece) is left out, add-ons included.');
     expect(words).toContain('Pieces were added after the announcement (« 5 PIECES · NEVER MORE »): 1 in 52 at 02 NOV 2026 · 10:02:00 UTC.');
     expect(words).toContain('52 × 4, 54 × 2: 6 pieces');
 
     const csv = releaseReportCsv(rep);
     expect(csv.split('\r\n')[0]).toBe('"section","item","value"');
-    for (const row of ['"funnel","interest","12"', '"size 52","seconds to sell out","240"', '"size 54","unserved pieces","1"', '"tier PALLADIUM","confirmed","1"', '"add-on ENGRAVING","revenue EUR","300.00"', '"revenue","pieces EUR","19200.00"', '"pieces added","2026-11-02T10:02:00.000Z size 52","1 (2 to 3)"', '"next time","quantity","6"']) {
+    for (const row of ['"funnel","interest","12"', '"size 52","seconds to sell out","240"', '"size 54","unserved pieces","1"', '"tier PALLADIUM","confirmed","1"', '"add-on ENGRAVING","revenue EUR","300.00"', '"revenue","pieces EUR","14400.00"', '"revenue","cancelled reservations left out","1"', '"revenue","cancelled pieces left out","1"', '"pieces added","2026-11-02T10:02:00.000Z size 52","1 (2 to 3)"', '"next time","quantity","6"']) {
       expect(csv, row).toContain(row);
     }
   });
@@ -449,6 +487,8 @@ describe('the release report', () => {
     expect(rep.sellOutMs).toBe(3 * MINUTE);
     expect(rep.reasoning.join(' ')).toContain('Sold out 3 min after T0');
     expect(rep.reasoning.join(' ')).toContain('No piece was added after the announcement');
+    expect(rep.reasoning.join(' ')).toContain('A reservation ORBES Client Services cancels is left out: none so far.');
+    expect(rep).toMatchObject({ cancelled: { reservations: 0, pieces: 0 }, piecesRevenueMinor: 960_000 });
   });
 });
 
@@ -494,10 +534,12 @@ describe('the release comparison', () => {
       { summary: summarize(sold, soldEntries, 3), current: false, added: 0, addonsRevenueMinor: 0 },
     ]);
     expect(cmp.releases.map((x) => [x.id, x.current, x.stock, x.room, x.presentAtT0, x.confirmedPieces, x.sellThrough, x.sellOutMs, x.missedShare, x.piecesRevenueMinor])).toEqual([
-      ['r', true, 5, 9, 8, 4, 0.8, null, 1 / 6, 1_920_000],
+      // 4 pieces confirmed, 1 cancelled by ORBES Client Services: 3 at € 4 800 in the revenue.
+      ['r', true, 5, 9, 8, 4, 0.8, null, 1 / 6, 1_440_000],
       ['q', false, 1, 1, 0, 1, 1, MINUTE, 0, 480_000],
     ]);
-    expect(cmp.reasoning).toHaveLength(3);
+    expect(cmp.reasoning).toHaveLength(4);
+    expect(cmp.reasoning[3]).toBe('The revenue: the pieces and add-ons of the confirmed reservations at their prices, those ORBES Client Services cancelled left out.');
   });
 
   it('reads the rates of the turns and holds a summary is made of', () => {
@@ -694,6 +736,26 @@ describe('LiveInsightsService on a database', () => {
     expect(await insights.signals({ ...(await drop()), opens_at: later(HOUR) }, now())).toEqual({ alerts: [], sellOut: null });
   });
 
+  it('reads the pace from the latest RESUME once a pause has ended', async () => {
+    const opensAt = later(HOUR);
+    const r = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + HOUR), sizes: [{ label: '52', stock: 3 }] });
+    const [a, b] = [await createAccount(t.db), await createAccount(t.db)];
+    f.clock.set(new Date(opensAt.getTime() - MINUTE));
+    for (const x of [a, b]) await f.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
+    f.clock.set(opensAt);
+    await f.live.advance(r.id);
+    const drop = async () => t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    // Paused from T0 + 1 min to T0 + 4 min, read at T0 + 5 min: 1 min of sales since the RESUME, not 5.
+    f.clock.set(new Date(opensAt.getTime() + MINUTE));
+    await f.live.pause(r.id, f.admin);
+    f.clock.set(new Date(opensAt.getTime() + 4 * MINUTE));
+    await f.live.resume(r.id, f.admin);
+    f.clock.set(new Date(opensAt.getTime() + 5 * MINUTE));
+    const sellOut = (await insights.signals(await drop(), now())).sellOut!;
+    expect(sellOut.windowMs).toBe(MINUTE);
+    expect(sellOut.reasoning[0]).toContain(`since ${utc(new Date(opensAt.getTime() + 4 * MINUTE))}, the latest RESUME (1 min of sales, the pause before it left out)`);
+  });
+
   it('compares the release with the others whose T0 has passed, latest first', async () => {
     const cmp = await insights.comparison(pastId);
     expect(cmp.releases[0]!.current).toBe(false);
@@ -701,5 +763,20 @@ describe('LiveInsightsService on a database', () => {
     expect(own).toMatchObject({ id: pastId, stock: 2, interest: 4, room: 4, presentAtT0: 3, confirmedPieces: 1, sellThrough: 0.5, missedShare: 2 / 3 });
     expect(cmp.releases.map((x) => x.opensAt.getTime())).toEqual([...cmp.releases.map((x) => x.opensAt.getTime())].sort((p, q) => q - p));
     expect(cmp.releases.length).toBeLessThanOrEqual(LIVE_INSIGHT_RULES.pastReleases + 1);
+  });
+
+  it('leaves a reservation ORBES Client Services cancelled out of the revenue, its add-ons included', async () => {
+    const reserved = await t.db.selectFrom('live_entries').select(['id', 'quantity']).where('drop_id', '=', pastId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
+    const { price_minor: price } = await t.db.selectFrom('drops').select('price_minor').where('id', '=', pastId).executeTakeFirstOrThrow();
+    const addon = await t.db.insertInto('live_addons').values({ drop_id: pastId, label: 'ENGRAVING', line: null, price_minor: 15_000, position: 1 }).returning('id').executeTakeFirstOrThrow();
+    await t.db.insertInto('live_entry_addons').values({ entry_id: reserved.id, addon_id: addon.id, price_minor: 15_000 }).execute();
+    const revenue = async () => {
+      const own = (await insights.comparison(pastId)).releases.find((x) => x.current)!;
+      const rep = await insights.report(pastId);
+      return [own.piecesRevenueMinor, own.addonsRevenueMinor, rep.piecesRevenueMinor, rep.addonsRevenueMinor, rep.cancelled];
+    };
+    expect(await revenue()).toEqual([price! * reserved.quantity, 15_000, price! * reserved.quantity, 15_000, { reservations: 0, pieces: 0 }]);
+    await t.db.updateTable('live_entries').set({ resolution: 'CANCELLED', handled_by: f.admin.id, handled_at: now() }).where('id', '=', reserved.id).execute();
+    expect(await revenue()).toEqual([0, 0, 0, 0, { reservations: 1, pieces: reserved.quantity }]);
   });
 });

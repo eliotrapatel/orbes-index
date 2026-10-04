@@ -308,6 +308,9 @@ export interface ReleaseSummary {
   confirmed: number;
   confirmedPieces: number;
   concluded: number;
+  /** The confirmed reservations ORBES Client Services cancelled (resolution CANCELLED) and their pieces: no revenue. */
+  cancelled: number;
+  cancelledPieces: number;
   missed: number;
   expired: number;
   released: number;
@@ -327,6 +330,7 @@ export function summarize(r: InsightRelease, entries: readonly InsightEntry[], i
   const conversion = conversionOf(rates);
   const confirmed = entries.filter((e) => e.status === 'CONFIRMED');
   const confirmedPieces = sumQ(confirmed);
+  const cancelled = confirmed.filter((e) => e.resolution === 'CANCELLED');
   const unservedPieces = sumQ(entries.filter(unserved));
   const stock = r.sizes.reduce((n, s) => n + s.stock, 0);
   const cohort = entries.filter((e) => atT0(r, e));
@@ -348,6 +352,8 @@ export function summarize(r: InsightRelease, entries: readonly InsightEntry[], i
     confirmed: confirmed.length,
     confirmedPieces,
     concluded: confirmed.filter((e) => e.resolution === 'CONCLUDED').length,
+    cancelled: cancelled.length,
+    cancelledPieces: sumQ(cancelled),
     missed: entries.filter((e) => e.status === 'MISSED').length,
     expired: entries.filter((e) => e.status === 'EXPIRED').length,
     released: entries.filter((e) => e.status === 'RELEASED').length,
@@ -818,18 +824,26 @@ export interface LiveSellOut {
   reasoning: string[];
 }
 
-/** The live sell-out forecast at `now` (after T0, until the end), or null before T0 and once the release has ended. */
-export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntry[], now: Date): LiveSellOut | null {
+/**
+ * The live sell-out forecast at `now` (after T0, until the end), or null before T0 and once the release has ended.
+ * The pace is read over the last LIVE_INSIGHT_RULES.pace.windowMinutes, from the latest RESUME at the earliest (a pause
+ * that has ended is not time on sale), a pause still running left out.
+ */
+export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntry[], controls: Pick<LiveControlTimes, 'resumedAt'>, now: Date): LiveSellOut | null {
   const t = now.getTime();
   if (t < r.opensAt.getTime() || r.endedAt || t >= r.closesAt.getTime()) return null;
   const rates = lineRates(entries);
   const s = rates.secureRate ?? 1;
   const c = rates.payRate ?? 1;
-  const start = Math.max(r.opensAt.getTime(), t - LIVE_INSIGHT_RULES.pace.windowMinutes * MINUTE);
+  const resumed = controls.resumedAt && controls.resumedAt.getTime() <= t ? controls.resumedAt.getTime() : null;
+  const windowStart = Math.max(r.opensAt.getTime(), t - LIVE_INSIGHT_RULES.pace.windowMinutes * MINUTE);
+  const fromResume = resumed !== null && resumed > windowStart;
+  const start = fromResume ? resumed : windowStart;
   const pausedInWindow = r.pausedAt ? t - Math.max(r.pausedAt.getTime(), start) : 0;
   const windowMs = Math.max(0, t - start - Math.max(0, pausedInWindow));
+  const outOfSale = [fromResume ? 'the pause before it' : '', pausedInWindow > 0 ? (fromResume ? 'the pause running now' : 'the pause') : ''].filter(Boolean).join(' and ');
   const why: string[] = [
-    `The pace: the pieces secured since ${utc(new Date(start))} (${duration(windowMs)} of sales${pausedInWindow > 0 ? ', the pause left out' : ''}).`,
+    `The pace: the pieces secured since ${utc(new Date(start))}${fromResume ? ', the latest RESUME' : ''} (${duration(windowMs)} of sales${outOfSale ? `, ${outOfSale} left out` : ''}).`,
     rates.turnsEnded || rates.holdsEnded
       ? `So far ${percent(s)} of the turns that ended were secured and ${percent(c)} of the holds that ended confirmed.`
       : 'No turn or hold has ended yet: each is assumed to be secured and confirmed.',
@@ -858,7 +872,7 @@ export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntr
       continue;
     }
     if (r.pausedAt || windowMs < LIVE_INSIGHT_RULES.pace.minSeconds * SECOND || pace * c <= 0) {
-      const reason = r.pausedAt ? 'the release is paused' : windowMs < LIVE_INSIGHT_RULES.pace.minSeconds * SECOND ? `the sales have run less than ${duration(LIVE_INSIGHT_RULES.pace.minSeconds * SECOND)}` : `no piece was secured in ${duration(windowMs)}`;
+      const reason = r.pausedAt ? 'the release is paused' : windowMs < LIVE_INSIGHT_RULES.pace.minSeconds * SECOND ? `the sales have run less than ${duration(LIVE_INSIGHT_RULES.pace.minSeconds * SECOND)}${fromResume ? ' since the RESUME' : ''}` : `no piece was secured in ${duration(windowMs)}`;
       sizes.push({ ...base, outlook: 'NO_PACE', at: null, expectedLeft: null, reasoning: [`${head}; no pace to forecast from: ${reason}.`] });
       continue;
     }
@@ -1057,6 +1071,8 @@ export interface ReleaseReport {
   expired: number;
   released: number;
   addons: { id: string; label: string; reservations: number; pieces: number; revenueMinor: number }[];
+  /** The confirmed reservations ORBES Client Services cancelled, left out of the revenue. */
+  cancelled: { reservations: number; pieces: number };
   piecesRevenueMinor: number;
   addonsRevenueMinor: number;
   additions: StockAddition[];
@@ -1108,7 +1124,8 @@ export function releaseReport(input: {
       nextDemand: confirmedPieces + Math.round(unservedPieces * sum.conversion),
     };
   });
-  const confirmedIds = new Set(input.entries.filter((e) => e.status === 'CONFIRMED').map((e) => e.id));
+  // The revenue: the confirmed reservations ORBES Client Services has not cancelled.
+  const confirmedIds = new Set(input.entries.filter((e) => e.status === 'CONFIRMED' && e.resolution !== 'CANCELLED').map((e) => e.id));
   const quantityOf = new Map(input.entries.map((e) => [e.id, e.quantity]));
   const addons = input.addons.map((a) => {
     const chosen = input.entryAddons.filter((x) => x.addonId === a.id && confirmedIds.has(x.entryId));
@@ -1120,7 +1137,7 @@ export function releaseReport(input: {
       revenueMinor: chosen.reduce((n, x) => n + x.priceMinor * (quantityOf.get(x.entryId) ?? 0), 0),
     };
   });
-  const piecesRevenueMinor = sum.confirmedPieces * r.priceMinor;
+  const piecesRevenueMinor = (sum.confirmedPieces - sum.cancelledPieces) * r.priceMinor;
   const addonsRevenueMinor = addons.reduce((n, a) => n + a.revenueMinor, 0);
   const stock = sizes.reduce((n, s) => n + s.stock, 0);
   why.push(
@@ -1131,7 +1148,11 @@ export function releaseReport(input: {
     `The unserved demand of a size: the pieces asked for by those who waited in its line and never had a turn (the release ended first, or they left the line). ${count(sum.unservedPieces)} in all.`,
     `A turn ended in a confirmed piece ${percent(sum.conversion)} of the time (${percent(sum.rates.secureRate ?? 1)} secured, ${percent(sum.rates.payRate ?? 1)} of those confirmed).`,
     `The funnel counts people: the interest (I'LL BE THERE), those who entered the room or the line, had a turn, held the seal, pressed PAY, and whose reservation ORBES Client Services concluded.`,
-    `Revenue at the prices of the release and of each add-on as chosen: ${liveMoney(piecesRevenueMinor, r.currency)} for the pieces, ${liveMoney(addonsRevenueMinor, r.currency)} for the add-ons.`,
+    `Revenue at the prices of the release and of each add-on as chosen: ${liveMoney(piecesRevenueMinor, r.currency)} for the pieces, ${liveMoney(addonsRevenueMinor, r.currency)} for the add-ons. ${
+      sum.cancelled
+        ? `The ${sum.cancelled === 1 ? 'reservation' : `${count(sum.cancelled)} reservations`} ORBES Client Services cancelled (${pieces(sum.cancelledPieces)}) ${sum.cancelled === 1 ? 'is' : 'are'} left out, add-ons included.`
+        : 'A reservation ORBES Client Services cancels is left out: none so far.'
+    }`,
   );
   if (input.additions.length) {
     why.push(
@@ -1174,6 +1195,7 @@ export function releaseReport(input: {
     expired: sum.expired,
     released: sum.released,
     addons,
+    cancelled: { reservations: sum.cancelled, pieces: sum.cancelledPieces },
     piecesRevenueMinor,
     addonsRevenueMinor,
     additions: [...input.additions],
@@ -1226,6 +1248,8 @@ export function releaseReportCsv(rep: ReleaseReport): string {
   }
   add('revenue', `pieces ${rep.currency}`, majorUnits(rep.piecesRevenueMinor));
   add('revenue', `add-ons ${rep.currency}`, majorUnits(rep.addonsRevenueMinor));
+  add('revenue', 'cancelled reservations left out', rep.cancelled.reservations);
+  add('revenue', 'cancelled pieces left out', rep.cancelled.pieces);
   for (const a of rep.additions) add('pieces added', `${a.at.toISOString()} size ${a.size}`, `${a.pieces} (${a.before} to ${a.after})`);
   add('next time', 'quantity', rep.next.quantity);
   for (const s of rep.next.sizes) add('next time', `size ${s.label}`, s.pieces);
@@ -1357,13 +1381,14 @@ export function compareReleases(rows: readonly { summary: ReleaseSummary; curren
       missedShare: s.turns > 0 ? s.missed / s.turns : null,
       expired: s.expired,
       conversion: s.conversion,
-      piecesRevenueMinor: s.confirmedPieces * s.priceMinor,
+      piecesRevenueMinor: (s.confirmedPieces - s.cancelledPieces) * s.priceMinor,
       addonsRevenueMinor,
     })),
     reasoning: [
       `The release beside the others whose T0 has passed (the latest ${count(LIVE_INSIGHT_RULES.pastReleases)}, cancelled ones left out), latest first.`,
       'The room counts everyone who entered; the line at T0, those placed at T0 itself. The sell-through: the pieces confirmed of the stock (the pieces added included). The missed share: the turns that ran out, of every turn.',
       'The time to sell out runs from T0 to the last piece confirmed, pauses included. A release not over yet shows its figures so far.',
+      'The revenue: the pieces and add-ons of the confirmed reservations at their prices, those ORBES Client Services cancelled left out.',
     ],
   };
 }
@@ -1495,10 +1520,11 @@ export class LiveInsightsService {
     if (now.getTime() < d.opens_at.getTime()) return { alerts: [], sellOut: null };
     const [sizes, entries] = await Promise.all([this.sizes(d.id), this.entries([d.id])]);
     const release = insightRelease(d, sizes);
-    // The audit log is read only when a turn has been due long enough to be a stall without a console action since.
+    // The audit log is read only when it can change a reading: a turn due long enough to be a stall without a console
+    // action since, or a pause that has ended (the pace is read from the latest RESUME).
     const due = dueTurns(release, entries, now).some((c) => now.getTime() - c.since >= LIVE_INSIGHT_RULES.stallSeconds * SECOND);
-    const controls = due ? await this.controlTimes(d.id) : { resumedAt: null, stockAt: null };
-    return { alerts: liveAlerts(release, entries, controls, now), sellOut: sellOutForecast(release, entries, now) };
+    const controls = due || release.pausedMs > 0 ? await this.controlTimes(d.id) : { resumedAt: null, stockAt: null };
+    return { alerts: liveAlerts(release, entries, controls, now), sellOut: sellOutForecast(release, entries, controls, now) };
   }
 
   /** The release report (final once the release is over). */
@@ -1775,7 +1801,7 @@ export class LiveInsightsService {
     return { addons, chosen };
   }
 
-  /** The add-ons' revenue of confirmed reservations, per release. */
+  /** The add-ons' revenue of confirmed reservations, per release; those ORBES Client Services cancelled left out. */
   private async addonRevenue(ids: readonly string[]): Promise<Map<string, number>> {
     if (ids.length === 0) return new Map();
     const rows = await this.db
@@ -1784,6 +1810,7 @@ export class LiveInsightsService {
       .select((eb) => ['e.drop_id', eb.fn.sum<number>(sql`x.price_minor * e.quantity`).as('minor')])
       .where('e.drop_id', 'in', [...ids])
       .where('e.status', '=', 'CONFIRMED')
+      .where('e.resolution', 'is distinct from', 'CANCELLED')
       .groupBy('e.drop_id')
       .execute();
     return new Map(rows.map((r) => [r.drop_id, Number(r.minor ?? 0)]));

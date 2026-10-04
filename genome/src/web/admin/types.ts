@@ -1331,6 +1331,8 @@ export interface LiveReleaseReport {
   expired: number;
   released: number;
   addons: { id: string; label: string; reservations: number; pieces: number; revenueMinor: number }[];
+  /** The confirmed reservations ORBES Client Services cancelled, left out of the revenue. */
+  cancelled: { reservations: number; pieces: number };
   piecesRevenueMinor: number;
   addonsRevenueMinor: number;
   additions: { at: Iso; sizeId: string; size: string; pieces: number; before: number; after: number }[];
