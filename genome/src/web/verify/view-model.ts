@@ -470,13 +470,14 @@ export function pieceContactModel(cs: ClientServices | undefined, productId: str
 
 /**
  * ORBES Client Services for a place held in a release (P-R03): they contact the account to conclude the sale, and it
- * may write first. The email's subject names the release, its body the release and the entry's id (the one its page
- * publishes). Null when nothing is configured.
+ * may write first. The email's subject names the release and the place (`status`: PLACE HELD, or PLACE RESERVED for a
+ * direct reservation, P-X02), its body the release and the entry's id (the one its page publishes). Null when nothing
+ * is configured.
  */
-export function releaseContactModel(cs: ClientServices | undefined, title: string, entryId: string): ContactModel | null {
+export function releaseContactModel(cs: ClientServices | undefined, title: string, entryId: string, status: string = RELEASES.statusLabel.SELECTED): ContactModel | null {
   const lines = cs ? contactLines(cs) : null;
   return lines
-    ? contactOf(lines, 'release', ['ORBES', title, RELEASES.statusLabel.SELECTED].filter((x) => x.length > 0).join(' — '), [
+    ? contactOf(lines, 'release', ['ORBES', title, status].filter((x) => x.length > 0).join(' — '), [
         [RELEASES.contactRelease, title],
         [RELEASES.contactEntry, entryId],
       ])

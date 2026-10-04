@@ -111,7 +111,17 @@ import {
 import { formatCount } from '../../src/web/admin/format.js';
 import { carePreview, categoryImpact, collectionImpact, MODEL_STATUS_OPTIONS, modelChange, modelForm, modelImpact } from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
-import { DROP_STATES as SERVER_DROP_STATES, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import {
+  DROP_STATES as SERVER_DROP_STATES,
+  DROP_DESCRIPTION_MAX,
+  DROP_NOTE_MAX,
+  DROP_QUANTITY_MAX,
+  DROP_TITLE_MAX,
+  EARLY_ACCESS_HOURS,
+  PURCHASE_WINDOW_HOURS,
+  type AdminDrop as ServerAdminDrop,
+  type AdminDropEntry as ServerAdminDropEntry,
+} from '../../src/server/services/drops.js';
 import {
   CLUB_TABS,
   clubTab,
@@ -120,11 +130,15 @@ import {
   dropChange,
   dropFormValues,
   dropInput,
+  dropLead,
   dropPhrase,
   dropProblem,
+  earlyAccessLine,
+  earlyAccessOnPublish,
   entryActions,
   localUtc,
   placesTaken,
+  placesToDraw,
   releaseAddress,
   tierName,
   utcInstant,
@@ -354,6 +368,12 @@ describe('permissions', () => {
   });
 });
 
+/** A server value as JSON carries it: dates become ISO strings. */
+type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
+// Compile-time: the console's drop and entry are what the server sends (P-R03, with the early access of P-X02).
+export const adminDropFits = (d: Json<ServerAdminDrop>): web.Drop => d;
+export const adminDropEntryFits = (e: Json<ServerAdminDropEntry>): web.DropEntry => e;
+
 describe('the Club\'s drops (P-R03)', () => {
   const base: web.Drop = {
     id: '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d',
@@ -364,6 +384,8 @@ describe('the Club\'s drops (P-R03)', () => {
     opensAt: '2026-10-12T10:00:00.000Z',
     closesAt: '2026-10-14T10:00:00.000Z',
     purchaseWindowHours: 48,
+    earlyAccessHours: 48,
+    earlyAccessOpensAt: '2026-10-10T10:00:00.000Z',
     state: 'DRAFT',
     publishedAt: null,
     cancelledAt: null,
@@ -373,18 +395,49 @@ describe('the Club\'s drops (P-R03)', () => {
     seedHash: 'ab'.repeat(32),
     seed: null,
     entries: { ENTERED: 0, SELECTED: 0, WAITLISTED: 0, CONFIRMED: 0, LAPSED: 0, WITHDRAWN: 0 },
+    reserved: 0,
   };
   const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, new Date()), ...extra });
 
   it('holds the server\'s bounds, and reads the times of the dialog in UTC', () => {
     expect(DROP_LIMITS).toMatchObject({ title: DROP_TITLE_MAX, description: DROP_DESCRIPTION_MAX, quantity: DROP_QUANTITY_MAX, note: DROP_NOTE_MAX });
     expect([DROP_LIMITS.windowMin, DROP_LIMITS.windowMax, DROP_LIMITS.windowDefault]).toEqual([PURCHASE_WINDOW_HOURS.min, PURCHASE_WINDOW_HOURS.max, PURCHASE_WINDOW_HOURS.default]);
+    expect([DROP_LIMITS.earlyMin, DROP_LIMITS.earlyMax, DROP_LIMITS.earlyDefault]).toEqual([EARLY_ACCESS_HOURS.min, EARLY_ACCESS_HOURS.max, EARLY_ACCESS_HOURS.default]);
+    expect(typeof adminDropFits).toBe('function');
+    expect(typeof adminDropEntryFits).toBe('function');
     expect(localUtc('2026-10-12T10:05:00.000Z')).toBe('2026-10-12T10:05');
     expect(utcInstant('2026-10-12T10:05')).toBe('2026-10-12T10:05:00.000Z');
     expect(utcInstant('12/10/2026')).toBeNull();
     expect(localUtc(null)).toBe('');
-    // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours.
-    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48' });
+    // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours, after an early access of 48 hours.
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48', earlyAccessHours: '48' });
+  });
+
+  it('sets the early access of a draft (P-X02): 0 to 336 hours, sent when changed; said with its time, and the places the draw gives', () => {
+    expect(dropFormValues(base, new Date())).toMatchObject({ earlyAccessHours: '48' });
+    for (const bad of ['337', '-1', '1.5', '']) expect(dropProblem(values({ earlyAccessHours: bad })), bad).toBe('The early access lasts 0 to 336 hours (0: none).');
+    expect(dropProblem(values({ earlyAccessHours: '0' }))).toBeNull();
+    expect(dropInput(values({ earlyAccessHours: '0' }))).toMatchObject({ earlyAccessHours: 0 });
+    expect(dropChange(base, values({ earlyAccessHours: '24' }))).toEqual({ earlyAccessHours: 24 });
+    expect(dropChange(base, values())).toEqual({});
+    // Said with its time; none at 0, or for a release published once open.
+    expect(earlyAccessLine(base)).toBe('48 hours · from 10 OCT 2026 · 10:00 UTC');
+    expect(earlyAccessLine({ earlyAccessHours: 1, earlyAccessOpensAt: '2026-10-12T09:00:00.000Z' })).toBe('1 hour · from 12 OCT 2026 · 09:00 UTC');
+    expect(earlyAccessLine({ earlyAccessHours: 0, earlyAccessOpensAt: null })).toBe('None');
+    expect(earlyAccessLine({ earlyAccessHours: 48, earlyAccessOpensAt: null })).toBe('None');
+    // Published now: at its time, at once when it has begun, never once entries are open or without one.
+    expect(earlyAccessOnPublish(base, new Date('2026-10-09T10:00:00Z'))).toBe('from 10 OCT 2026 · 10:00 UTC');
+    expect(earlyAccessOnPublish(base, new Date('2026-10-11T10:00:00Z'))).toBe('from its publication');
+    expect(earlyAccessOnPublish(base, new Date('2026-10-12T10:00:00Z'))).toBe('none');
+    expect(earlyAccessOnPublish({ ...base, earlyAccessOpensAt: null }, new Date('2026-10-09T10:00:00Z'))).toBe('none');
+    // The draw gives the pieces the direct reservations leave, never fewer than none.
+    expect(placesToDraw({ ...base, quantity: 3, entries: { ...base.entries, SELECTED: 1, CONFIRMED: 1 } })).toBe(1);
+    expect(placesToDraw({ ...base, quantity: 2, entries: { ...base.entries, SELECTED: 2, CONFIRMED: 1 } })).toBe(0);
+    // The lead says the early access of a published release, and asks a lapse before the draw where places are reserved.
+    expect(dropLead({ ...base, state: 'UPCOMING', publishedAt: '2026-10-05T10:00:00.000Z' })).toMatch(/PLATINE and PALLADIUM owners reserve a place directly/);
+    expect(dropLead({ ...base, state: 'UPCOMING', earlyAccessHours: 0, earlyAccessOpensAt: null })).toBe('Published: its page on /verify announces it. Entries open at the time below.');
+    expect(dropLead({ ...base, state: 'CLOSED', reserved: 1 })).toMatch(/Lapse first a reservation whose time has passed unconcluded/);
+    expect(dropLead({ ...base, state: 'CLOSED' })).toBe('Entries are closed. An ADMIN runs the draw, once: tier, seniority, then the seed’s order.');
   });
 
   it('says what the server would refuse before anything is sent, and sends only what changed', () => {
@@ -421,7 +474,7 @@ describe('the Club\'s drops (P-R03)', () => {
   });
 
   it('confirms a place held at any time, lapses it only once its time has passed', () => {
-    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', handledBy: null, handledAt: null, note: null };
+    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', reserved: false, handledBy: null, handledAt: null, note: null };
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T10:59:59Z'))).toEqual({ confirm: true, lapse: false });
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'))).toEqual({ confirm: true, lapse: true });
     expect(entryActions(entry, 'AUDITOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });

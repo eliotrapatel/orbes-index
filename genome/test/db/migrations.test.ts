@@ -775,6 +775,43 @@ describe('migrations', () => {
     await sql`DELETE FROM accounts WHERE id IN (${a1}, ${a2})`.execute(t.db);
   });
 
+  it('0017 adds drops.early_access_hours, and nothing else; down restores 0016 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withEarly, without: before } = await rollBackTo('0017_drop_early_access');
+    // What 0017 adds names its column (PGlite's PostgreSQL also lists its NOT NULL as a constraint; PostgreSQL 16 does not).
+    const of0017 = (o: string) => o.includes('early_access_hours');
+    const added = withEarly.filter((o) => !before.includes(o));
+    expect(added.filter((o) => o.startsWith('table '))).toEqual(['table drops early_access_hours smallint NO 48']);
+    expect(added.some((o) => /^constraint drops drops_early_access_hours_check CHECK \(\(\(early_access_hours >= 0\) AND \(early_access_hours <= 336\)\)\)$/.test(o))).toBe(true);
+    expect(added.filter((o) => !of0017(o))).toEqual([]);
+    expect(before.filter(of0017)).toEqual([]);
+    expect(withEarly.filter((o) => !of0017(o))).toEqual(before);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0017_drop_early_access'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0017: the early access of a drop, 48 hours by default, 0 (none) to 336; a direct reservation is an entry SELECTED with its tier and no rank', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (24, 'X', 'Early access test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (24, 'E', 'RING', 'EARLY') RETURNING id`.execute(t.db)).rows[0];
+    const seedHash = createHash('sha256').update(new Uint8Array(32).fill(5)).digest();
+    const drop = (
+      await sql<{ id: string; early_access_hours: number }>`INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash)
+          VALUES (${model.id}, 'Release', 2, '2026-11-01T10:00:00Z', '2026-11-03T10:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash})
+          RETURNING id, early_access_hours`.execute(t.db)
+    ).rows[0];
+    expect(drop.early_access_hours).toBe(48);
+    const set = (hours: number) => sql`UPDATE drops SET early_access_hours = ${hours} WHERE id = ${drop.id}`.execute(t.db);
+    for (const hours of [-1, 337]) await expect(set(hours), String(hours)).rejects.toSatisfy((e) => isCheckViolation(e));
+    for (const hours of [0, 336, 48]) await set(hours);
+    // The reservation of the early access: SELECTED at once, held until its time, the tier of the request, never a rank.
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('early@example.com', 'early@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    await sql`INSERT INTO drop_entries (drop_id, account_id, status, tier, seniority, respond_by) VALUES (${drop.id}, ${account}, 'SELECTED', 2, 0, '2026-10-31T10:00:00Z')`.execute(t.db);
+    await sql`DELETE FROM drop_entries WHERE drop_id = ${drop.id}`.execute(t.db);
+    await sql`DELETE FROM drops WHERE id = ${drop.id}`.execute(t.db);
+    await sql`DELETE FROM accounts WHERE id = ${account}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -816,6 +853,7 @@ describe('migrations', () => {
       '0014_model_lookbook',
       '0015_drops',
       '0016_circle',
+      '0017_drop_early_access',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

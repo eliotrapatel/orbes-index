@@ -7,7 +7,8 @@
  * cancelled only before its draw. Its state is computed (`dropState`):
  *
  *   DRAFT      not published: nowhere but the console;
- *   UPCOMING   published, before `opens_at`;
+ *   UPCOMING   published, before `opens_at` (its early access, P-X02, at
+ *              the end of it: see below);
  *   OPEN       `opens_at` ≤ now < `closes_at`: any ORBES account enters;
  *   CLOSED     after `closes_at`, not drawn yet;
  *   DRAWN      the draw has run (ADMIN), its seed revealed;
@@ -22,6 +23,23 @@
  * id, back to ENTERED: never a deletion and a new row, which would let a
  * draw be run again with other ids.
  *
+ * The early access (P-X02): `early_access_hours` before `opens_at` (48 by
+ * default, 0 to 336; 0: none), and from the drop's publication at the
+ * earliest (`earlyAccessOpensAt`), an account PLATINE or PALLADIUM (the
+ * club's tier 2 or 3, read by `tierOf` at the moment of its request)
+ * RESERVES a place directly (`reserve`): its entry is SELECTED at once,
+ * the place held for `purchase_window_hours` (`respond_by`), with the tier
+ * and seniority of that moment and no rank. First come, first served,
+ * under the drop's row lock (FOR UPDATE), within `quantity`: once the
+ * places held or sold (SELECTED, CONFIRMED) reach it, the drop is full
+ * (409 DROP_FULL). Any other account waits for `opens_at`, as does a
+ * reservation asked outside that window (409) or by a lower tier (403).
+ * From `opens_at` on, the places left follow the draw: the entries, then
+ * the draw after `closes_at`, which draws only `quantity` less the places
+ * held or sold. A reservation is never withdrawn by its account; ORBES
+ * Client Services concludes it (CONFIRMED) or lets it lapse after its time
+ * (LAPSED), as a place drawn, and its place then returns to the draw.
+ *
  * The draw (ADMIN, a phrase typed in the console): refused before
  * `closes_at`, and a second time. Its seed, 32 random bytes, was drawn at
  * the drop's creation, sealed (`seed_enc`, a key derived from
@@ -35,7 +53,8 @@
  * (descending), the seniority (descending), then
  * `sha256(32 bytes of the seed ‖ the entry's id in lower-case ASCII)` in
  * hexadecimal (ascending), ties by id. The places left (`quantity` less the
- * entries SELECTED or CONFIRMED already) go SELECTED, held for
+ * entries SELECTED or CONFIRMED already: the direct reservations of the
+ * early access, P-X02) go SELECTED, held for
  * `purchase_window_hours` (`respond_by`); the others WAITLISTED; each keeps
  * its rank. With fewer entries than places, every one is SELECTED. The
  * public page then lists every entry drawn by its id, tier, seniority and
@@ -48,8 +67,9 @@
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
  * each sale; no email is sent (the account's page says it).
  *
- * The audit log names the drop and the entry's id, never an email: ENTER and
- * WITHDRAW (`drop.enter`, `drop.withdraw`, the account as actor), the draw
+ * The audit log names the drop and the entry's id, never an email: ENTER,
+ * WITHDRAW and a direct reservation (`drop.enter`, `drop.withdraw`,
+ * `drop.reserve` with the tier that allowed it, the account as actor), the draw
  * (`drop.draw`, with the seed it reveals) and every console action
  * (`drop.create`, `drop.update`, `drop.publish`, `drop.cancel`,
  * `drop.entry.confirm`, `drop.entry.lapse`, `drop.entry.offer`). A lock of
@@ -67,7 +87,7 @@ import type { DropEntryStatus, DropRow, DropUpdate } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
-import { clubStandings, type ClubTier } from './club.js';
+import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { readActingAccount } from './ownership.js';
@@ -87,6 +107,13 @@ export const DROP_DESCRIPTION_MAX = 2000;
 export const DROP_QUANTITY_MAX = 10_000;
 /** How long a place drawn is held, in hours: 1 to 336 (14 days), 48 by default (drop_entries.respond_by). */
 export const PURCHASE_WINDOW_HOURS = Object.freeze({ min: 1, max: 336, default: 48 });
+/**
+ * The early access of a drop (P-X02), in hours before `opens_at`: 0 (none) to 336 (14 days), 48 by default (the plan's
+ * choice 10, set per drop).
+ */
+export const EARLY_ACCESS_HOURS = Object.freeze({ min: 0, max: 336, default: 48 });
+/** The lowest tier that reserves a place directly during an early access: PLATINE (then PALLADIUM). */
+export const EARLY_ACCESS_MIN_TIER: ClubTier = 2;
 /** The console's note on an entry it concludes (CONFIRMED, LAPSED). */
 export const DROP_NOTE_MAX = 500;
 /** The public list of drops: the latest by their opening. */
@@ -110,6 +137,32 @@ export function dropState(d: Pick<DropRow, 'published_at' | 'cancelled_at' | 'dr
   if (t < new Date(d.opens_at).getTime()) return 'UPCOMING';
   if (t < new Date(d.closes_at).getTime()) return 'OPEN';
   return 'CLOSED';
+}
+
+/**
+ * When the early access of a drop begins (P-X02): `opens_at − early_access_hours`, or its publication when that came
+ * later (nothing of a drop is open before it is published); null without one (0 hours, or a drop published at or after
+ * its opening).
+ */
+export function earlyAccessOpensAt(d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at'>): Date | null {
+  const hours = Number(d.early_access_hours) || 0;
+  if (hours <= 0) return null;
+  const opens = new Date(d.opens_at).getTime();
+  const published = d.published_at ? new Date(d.published_at).getTime() : null;
+  if (published !== null && published >= opens) return null;
+  return new Date(Math.max(opens - hours * HOUR_MS, published ?? Number.NEGATIVE_INFINITY));
+}
+
+/** Whether direct reservations are open at `now`: a published drop, neither cancelled nor drawn, within its early access. */
+export function inEarlyAccess(d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at' | 'cancelled_at' | 'drawn_at'>, now: Date): boolean {
+  if (!d.published_at || d.cancelled_at || d.drawn_at) return false;
+  const from = earlyAccessOpensAt(d);
+  return from !== null && now.getTime() >= from.getTime() && now.getTime() < new Date(d.opens_at).getTime();
+}
+
+/** Whether an entry is a direct reservation of the early access: a tier read at its request, and no rank (never drawn). */
+export function isReservation(e: { tier: number | null; rank: number | null }): boolean {
+  return e.tier !== null && e.rank === null;
 }
 
 /** The draw's key of an entry: SHA-256 of the 32 bytes of the seed followed by the entry's id in lower-case ASCII, in hexadecimal. */
@@ -174,6 +227,14 @@ const dropNotClosed = () => conflict('DROP_NOT_CLOSED', 'Its entries are still o
 const dropNotOpen = () => conflict('DROP_NOT_OPEN', 'Entries to this release are not open.');
 const dropNotDrawn = () => conflict('DROP_NOT_DRAWN', 'This release has not been drawn yet.');
 const alreadyEntered = () => conflict('DROP_ALREADY_ENTERED', 'You are already entered in this draw.');
+const alreadyReserved = () => conflict('DROP_ALREADY_RESERVED', 'You have already reserved a place in this release.');
+/** A time of a refusal: `2026-10-10 10:00 UTC`. */
+const utcMinute = (t: Date) => `${t.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+const earlyAccessNotOpen = (from: Date) => conflict('DROP_EARLY_ACCESS_NOT_OPEN', `Direct reservations for this release open on ${utcMinute(from)}.`);
+const earlyAccessClosed = (none: boolean) =>
+  conflict('DROP_EARLY_ACCESS_CLOSED', none ? 'This release offers no direct reservation: its places go to the draw.' : 'Direct reservations for this release are closed: the places left go to the draw.');
+const tierRequired = () =>
+  new DomainError('DROP_TIER_REQUIRED', 403, `Only ${tierName(EARLY_ACCESS_MIN_TIER)} and ${tierName(3)} owners reserve a place directly: from ${CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]} pieces held.`);
 const notEntered = () => conflict('DROP_NOT_ENTERED', 'You are not entered in this draw.');
 const entryNotSelected = () => conflict('DROP_ENTRY_NOT_SELECTED', 'Only an entry whose place is held can be concluded.');
 const placeHeld = (until: Date) => conflict('DROP_PLACE_HELD', `The place is held until ${until.toISOString().slice(0, 16).replace('T', ' ')} UTC: it lapses only after that time.`);
@@ -207,6 +268,8 @@ export interface CreateDropInput {
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours?: number;
+  /** P-X02: hours of early access before `opensAt` (EARLY_ACCESS_HOURS; 48 when omitted, 0 for none). */
+  earlyAccessHours?: number;
 }
 
 /** A change of a drop: any field while it is a DRAFT; once published, `description` only. */
@@ -218,6 +281,7 @@ export interface DropChange {
   opensAt?: Date;
   closesAt?: Date;
   purchaseWindowHours?: number;
+  earlyAccessHours?: number;
 }
 
 function cleanTitle(v: unknown): string {
@@ -245,6 +309,13 @@ function cleanQuantity(v: unknown): number {
 function cleanWindow(v: unknown): number {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < PURCHASE_WINDOW_HOURS.min || v > PURCHASE_WINDOW_HOURS.max) {
     throw validationError(`A place is held ${PURCHASE_WINDOW_HOURS.min} to ${PURCHASE_WINDOW_HOURS.max} hours.`);
+  }
+  return v;
+}
+
+function cleanEarlyAccess(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < EARLY_ACCESS_HOURS.min || v > EARLY_ACCESS_HOURS.max) {
+    throw validationError(`The early access lasts ${EARLY_ACCESS_HOURS.min} to ${EARLY_ACCESS_HOURS.max} hours.`);
   }
   return v;
 }
@@ -284,6 +355,12 @@ export interface DropCard {
   quantity: number;
   opensAt: Date;
   closesAt: Date;
+  /** P-X02: the hours of early access before `opensAt` the drop was published with (0: none). */
+  earlyAccessHours: number;
+  /** When PLATINE and PALLADIUM may reserve a place directly (earlyAccessOpensAt); null without an early access. */
+  earlyAccessOpensAt: Date | null;
+  /** Whether direct reservations are open now (inEarlyAccess). */
+  earlyAccessOpen: boolean;
 }
 
 /** A drop's page (GET /api/v1/drops/:id): its rule's commitment, then, once drawn, its seed and how many entries took part. */
@@ -300,6 +377,11 @@ export interface DropSheet extends DropCard {
   seed: string | null;
   /** The entries that took part in the draw (each has a rank), once drawn; null before. */
   entries: number | null;
+  /**
+   * P-X02: the places reserved directly during the early access that are held or sold (SELECTED, CONFIRMED): before
+   * the draw, `quantity` less this is what remains; at `quantity`, the drop is full.
+   */
+  reserved: number;
 }
 
 /** An entry as the drawn drop's page lists it (GET /api/v1/drops/:id/entries): never its account. */
@@ -323,6 +405,8 @@ export interface AccountDropEntry {
   rank: number | null;
   /** A SELECTED (or concluded) entry: the end of the place held. */
   respondBy: Date | null;
+  /** P-X02: a place reserved directly during the early access (isReservation), not drawn. */
+  reserved: boolean;
   opensAt: Date;
   closesAt: Date;
   drawnAt: Date | null;
@@ -341,6 +425,10 @@ export interface AdminDrop {
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours: number;
+  /** P-X02: hours of early access before `opensAt` (0: none). */
+  earlyAccessHours: number;
+  /** When direct reservations begin (earlyAccessOpensAt: a DRAFT's from its opening, a published drop's not before its publication); null without one. */
+  earlyAccessOpensAt: Date | null;
   state: DropState;
   publishedAt: Date | null;
   cancelledAt: Date | null;
@@ -350,6 +438,8 @@ export interface AdminDrop {
   seedHash: string;
   seed: string | null;
   entries: DropEntryCounts;
+  /** P-X02: the entries SELECTED or CONFIRMED that are direct reservations (the rest of `entries` SELECTED or CONFIRMED was drawn). */
+  reserved: number;
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -364,6 +454,8 @@ export interface AdminDropEntry {
   seniority: number | null;
   rank: number | null;
   respondBy: Date | null;
+  /** P-X02: a place reserved directly during the early access (its tier and seniority those of its request). */
+  reserved: boolean;
   handledBy: { id: string; email: string } | null;
   handledAt: Date | null;
   note: string | null;
@@ -421,6 +513,7 @@ function entryView(r: EntryRow): AdminDropEntry {
     seniority: r.seniority,
     rank: r.rank,
     respondBy: r.respond_by,
+    reserved: isReservation(r),
     handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
     handledAt: r.handled_at,
     note: r.note,
@@ -432,6 +525,7 @@ type AccountEntryRow = Pick<DropRow, 'title' | 'opens_at' | 'closes_at' | 'publi
   drop_id: string;
   status: DropEntryStatus;
   created_at: Date;
+  tier: number | null;
   rank: number | null;
   respond_by: Date | null;
 };
@@ -446,6 +540,7 @@ function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
     enteredAt: r.created_at,
     rank: r.rank,
     respondBy: r.respond_by,
+    reserved: isReservation(r),
     opensAt: r.opens_at,
     closesAt: r.closes_at,
     drawnAt: r.drawn_at,
@@ -600,6 +695,7 @@ export class DropService {
           ).n,
         )
       : null;
+    const reserved = (await this.tallies(this.db, [id])).get(id)?.reserved ?? 0;
     return {
       ...this.card(r, now),
       description: r.description,
@@ -610,6 +706,7 @@ export class DropService {
       seedHash: toHex(r.seed_hash),
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
       entries: drawn,
+      reserved,
     };
   }
 
@@ -648,7 +745,8 @@ export class DropService {
   /**
    * ENTER: the account enters an OPEN drop. A WITHDRAWN entry becomes ENTERED again, the same row and id. Refused: a
    * LOCKED account (403 ACCOUNT_LOCKED), an unknown or unpublished drop (404 DROP_NOT_FOUND), a cancelled or drawn one,
-   * one not open (409), an account already entered (409 DROP_ALREADY_ENTERED). Audited `drop.enter`.
+   * one not open (409), an account already entered (409 DROP_ALREADY_ENTERED), or holding a place it reserved directly
+   * during the early access (409 DROP_ALREADY_RESERVED). Audited `drop.enter`.
    */
   async enter(accountId: string, dropId: string, actor: Actor): Promise<AccountDropEntry> {
     assertAccount(accountId);
@@ -661,10 +759,11 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
       if (dropState(d, now) !== 'OPEN') throw dropNotOpen();
-      const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      const existing = await tx.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       let entry: string;
       let again = false;
       if (existing) {
+        if (isReservation(existing)) throw alreadyReserved();
         if (existing.status !== 'WITHDRAWN') throw alreadyEntered();
         await tx.updateTable('drop_entries').set({ status: 'ENTERED' }).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
         entry = existing.id;
@@ -708,17 +807,75 @@ export class DropService {
     return this.accountEntry(accountId, entryId);
   }
 
+  /**
+   * RESERVE (P-X02): during the early access of a published drop (earlyAccessOpensAt ≤ now < `opens_at`), an account
+   * PLATINE or PALLADIUM at the moment of its request (tierOf, read in this transaction) holds a place at once: its entry
+   * is SELECTED, the place held for `purchase_window_hours` (`respond_by`), its tier and seniority of that moment kept,
+   * no rank (the draw ranks only the entries ENTERED). First come, first served: the drop's row FOR UPDATE, so two
+   * requests count the places one after the other, within `quantity` (the entries SELECTED or CONFIRMED). Refused: a
+   * LOCKED account (403 ACCOUNT_LOCKED), an unknown or unpublished drop (404 DROP_NOT_FOUND), a cancelled or drawn one
+   * (409), before the early access (409 DROP_EARLY_ACCESS_NOT_OPEN), from `opens_at` on or without one (409
+   * DROP_EARLY_ACCESS_CLOSED), a tier below PLATINE (403 DROP_TIER_REQUIRED), an account that already holds an entry in
+   * it (409 DROP_ALREADY_RESERVED), a full drop (409 DROP_FULL). Audited `drop.reserve` with the entry and its tier.
+   */
+  async reserve(accountId: string, dropId: string, actor: Actor): Promise<AccountDropEntry> {
+    assertAccount(accountId);
+    const id = knownId(dropId, dropNotFound);
+    const entryId = await inTransaction(this.db, async (tx) => {
+      const now = this.clock();
+      const account = await readActingAccount(tx, accountId);
+      if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
+      const d = await this.lockPublished(tx, id, 'update');
+      if (d.cancelled_at) throw dropCancelled();
+      if (d.drawn_at) throw dropDrawn();
+      const from = earlyAccessOpensAt(d);
+      if (from === null || now.getTime() >= d.opens_at.getTime()) throw earlyAccessClosed(from === null);
+      if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
+      const standing = await tierOf(tx, accountId, now);
+      if (standing.tier < EARLY_ACCESS_MIN_TIER) throw tierRequired();
+      const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
+      const held = await tx
+        .selectFrom('drop_entries')
+        .select((eb) => eb.fn.countAll<number>().as('n'))
+        .where('drop_id', '=', id)
+        .where('status', 'in', ['SELECTED', 'CONFIRMED'])
+        .executeTakeFirstOrThrow();
+      if (Number(held.n) >= d.quantity) throw dropFull();
+      const place = { status: 'SELECTED' as const, tier: standing.tier, seniority: standing.seniority, respond_by: new Date(now.getTime() + d.purchase_window_hours * HOUR_MS) };
+      let entry: string;
+      if (existing) {
+        // Never a deletion and a new row: a withdrawn entry (none can be before the opening, but the rule holds) is taken up.
+        await tx.updateTable('drop_entries').set(place).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
+        entry = existing.id;
+      } else {
+        try {
+          entry = (await tx.insertInto('drop_entries').values({ drop_id: id, account_id: accountId, created_at: now, ...place }).returning('id').executeTakeFirstOrThrow()).id;
+        } catch (e) {
+          if (isUniqueViolation(e, 'drop_entries_drop_account_key')) throw alreadyReserved();
+          throw e;
+        }
+      }
+      await this.audit.record(
+        { actor, action: 'drop.reserve', targetType: 'drop', targetId: id, details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString() } },
+        tx,
+      );
+      return entry;
+    });
+    return this.accountEntry(accountId, entryId);
+  }
+
   // ── The console (routes/admin/drops.ts) ──────────────────────────────────
 
   /** Every drop, the latest created first. */
   async list(page: PageRequest): Promise<Page<AdminDrop>> {
     const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await this.reads(this.db).orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
-    const counts = await this.counts(this.db, rows.map((r) => r.id));
+    const tallies = await this.tallies(this.db, rows.map((r) => r.id));
     const creators = await this.staffEmails(this.db, rows.map((r) => r.created_by));
     const now = this.clock();
     return makePage(
-      rows.map((r) => this.adminView(r, now, counts.get(r.id), creators)),
+      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators)),
       Number(total.n),
       page,
     );
@@ -739,6 +896,7 @@ export class DropService {
     const closesAt = cleanTime(input.closesAt, 'The close');
     checkWindow(opensAt, closesAt);
     const hours = cleanWindow(input.purchaseWindowHours ?? PURCHASE_WINDOW_HOURS.default);
+    const early = cleanEarlyAccess(input.earlyAccessHours ?? EARLY_ACCESS_HOURS.default);
     const modelId = knownId(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
@@ -761,6 +919,7 @@ export class DropService {
           opens_at: opensAt,
           closes_at: closesAt,
           purchase_window_hours: hours,
+          early_access_hours: early,
           seed_enc: sealed,
           seed_hash: seedHash,
           created_by: actor.id!,
@@ -773,7 +932,16 @@ export class DropService {
           action: 'drop.create',
           targetType: 'drop',
           targetId: id,
-          details: { modelId, title, quantity, opensAt: opensAt.toISOString(), closesAt: closesAt.toISOString(), purchaseWindowHours: hours, seedHash: toHex(seedHash) },
+          details: {
+            modelId,
+            title,
+            quantity,
+            opensAt: opensAt.toISOString(),
+            closesAt: closesAt.toISOString(),
+            purchaseWindowHours: hours,
+            earlyAccessHours: early,
+            seedHash: toHex(seedHash),
+          },
         },
         tx,
       );
@@ -782,9 +950,9 @@ export class DropService {
   }
 
   /**
-   * Change a drop: any field while it is a DRAFT (not cancelled); once published, its description only (409
-   * DROP_PUBLISHED). Audited `drop.update` with each value before and after (the description as its length and
-   * SHA-256); nothing changed, nothing audited.
+   * Change a drop: any field while it is a DRAFT (not cancelled), its early access included (P-X02); once published,
+   * its description only (409 DROP_PUBLISHED). Audited `drop.update` with each value before and after (the description
+   * as its length and SHA-256); nothing changed, nothing audited.
    */
   async update(dropId: string, change: DropChange, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'change a release');
@@ -802,13 +970,14 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours'] as const).filter((k) => change[k] !== undefined);
+      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours'] as const).filter((k) => change[k] !== undefined);
       if (structural.length > 0) {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
         if (change.title !== undefined) note('title', 'title', d.title, cleanTitle(change.title));
         if (change.quantity !== undefined) note('quantity', 'quantity', d.quantity, cleanQuantity(change.quantity));
         if (change.purchaseWindowHours !== undefined) note('purchaseWindowHours', 'purchase_window_hours', d.purchase_window_hours, cleanWindow(change.purchaseWindowHours));
+        if (change.earlyAccessHours !== undefined) note('earlyAccessHours', 'early_access_hours', d.early_access_hours, cleanEarlyAccess(change.earlyAccessHours));
         const opensAt = change.opensAt !== undefined ? cleanTime(change.opensAt, 'The opening') : d.opens_at;
         const closesAt = change.closesAt !== undefined ? cleanTime(change.closesAt, 'The close') : d.closes_at;
         checkWindow(opensAt, closesAt);
@@ -834,7 +1003,8 @@ export class DropService {
 
   /**
    * Publish a DRAFT: it shows on /verify/releases with the SHA-256 of its seed. Refused once published or cancelled,
-   * when its entries would already be closed, and for a model no longer offered (409). Audited `drop.publish`.
+   * when its entries would already be closed, and for a model no longer offered (409). Audited `drop.publish`, with the
+   * time its direct reservations open (P-X02: its early access, from the publication at the earliest; null without one).
    */
   async publish(dropId: string, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'publish a release');
@@ -848,13 +1018,21 @@ export class DropService {
       const model = await tx.selectFrom('models').select('active').where('id', '=', d.model_id).executeTakeFirstOrThrow();
       if (!model.active) throw modelInactive();
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
+      const early = earlyAccessOpensAt({ ...d, published_at: now });
       await this.audit.record(
         {
           actor,
           action: 'drop.publish',
           targetType: 'drop',
           targetId: id,
-          details: { seedHash: toHex(d.seed_hash), quantity: d.quantity, opensAt: d.opens_at.toISOString(), closesAt: d.closes_at.toISOString() },
+          details: {
+            seedHash: toHex(d.seed_hash),
+            quantity: d.quantity,
+            opensAt: d.opens_at.toISOString(),
+            closesAt: d.closes_at.toISOString(),
+            earlyAccessHours: d.early_access_hours,
+            earlyAccessOpensAt: early ? early.toISOString() : null,
+          },
         },
         tx,
       );
@@ -872,7 +1050,7 @@ export class DropService {
       if (d.drawn_at) throw dropDrawn();
       if (d.cancelled_at) throw dropCancelled();
       await tx.updateTable('drops').set({ cancelled_at: now }).where('id', '=', id).execute();
-      const counts = (await this.counts(tx, [id])).get(id) ?? EMPTY_COUNTS();
+      const counts = (await this.tallies(tx, [id])).get(id)?.counts ?? EMPTY_COUNTS();
       await this.audit.record({ actor, action: 'drop.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, entered: counts.ENTERED } }, tx);
       return this.adminDrop(tx, id);
     });
@@ -1046,9 +1224,13 @@ export class DropService {
     return d;
   }
 
-  /** A published drop's row FOR SHARE (ENTER, WITHDRAW): a DRAFT answers as an unknown drop. */
-  private async lockPublished(tx: Db, id: string): Promise<DropRow> {
-    const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).where('published_at', 'is not', null).forShare().executeTakeFirst();
+  /**
+   * A published drop's row FOR SHARE (ENTER, WITHDRAW), or FOR UPDATE (RESERVE, P-X02: the places counted one request
+   * after the other); a DRAFT answers as an unknown drop.
+   */
+  private async lockPublished(tx: Db, id: string, mode: 'share' | 'update' = 'share'): Promise<DropRow> {
+    const q = tx.selectFrom('drops').selectAll().where('id', '=', id).where('published_at', 'is not', null);
+    const d = await (mode === 'update' ? q.forUpdate() : q.forShare()).executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
   }
@@ -1092,22 +1274,38 @@ export class DropService {
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,
+      earlyAccessHours: r.early_access_hours,
+      earlyAccessOpensAt: earlyAccessOpensAt(r),
+      earlyAccessOpen: inEarlyAccess(r, now),
     };
   }
 
-  private async counts(db: Db, ids: readonly string[]): Promise<Map<string, DropEntryCounts>> {
-    const out = new Map<string, DropEntryCounts>();
+  /**
+   * The entries of each drop of `ids` by status, and how many of those SELECTED or CONFIRMED are direct reservations of
+   * the early access (P-X02; isReservation): what the places held or sold owe to it.
+   */
+  private async tallies(db: Db, ids: readonly string[]): Promise<Map<string, { counts: DropEntryCounts; reserved: number }>> {
+    const out = new Map<string, { counts: DropEntryCounts; reserved: number }>();
     if (ids.length === 0) return out;
     const rows = await db
       .selectFrom('drop_entries')
-      .select(['drop_id', 'status', (eb) => eb.fn.countAll<number>().as('n')])
+      .select((eb) => [
+        'drop_id',
+        'status',
+        eb.fn.countAll<number>().as('n'),
+        eb.fn
+          .countAll<number>()
+          .filterWhere((w) => w.and([w('tier', 'is not', null), w('rank', 'is', null)]))
+          .as('reserved'),
+      ])
       .where('drop_id', 'in', [...ids])
       .groupBy(['drop_id', 'status'])
       .execute();
     for (const r of rows) {
-      const c = out.get(r.drop_id) ?? EMPTY_COUNTS();
-      c[r.status] = Number(r.n);
-      out.set(r.drop_id, c);
+      const t = out.get(r.drop_id) ?? { counts: EMPTY_COUNTS(), reserved: 0 };
+      t.counts[r.status] = Number(r.n);
+      if (r.status === 'SELECTED' || r.status === 'CONFIRMED') t.reserved += Number(r.reserved);
+      out.set(r.drop_id, t);
     }
     return out;
   }
@@ -1119,7 +1317,7 @@ export class DropService {
     return new Map(rows.map((r) => [r.id, r.email]));
   }
 
-  private adminView(r: DropReadRow, now: Date, counts: DropEntryCounts | undefined, creators: Map<string, string>): AdminDrop {
+  private adminView(r: DropReadRow, now: Date, tally: { counts: DropEntryCounts; reserved: number } | undefined, creators: Map<string, string>): AdminDrop {
     return {
       id: r.id,
       title: r.title,
@@ -1129,6 +1327,8 @@ export class DropService {
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       purchaseWindowHours: r.purchase_window_hours,
+      earlyAccessHours: r.early_access_hours,
+      earlyAccessOpensAt: earlyAccessOpensAt(r),
       state: dropState(r, now),
       publishedAt: r.published_at,
       cancelledAt: r.cancelled_at,
@@ -1138,16 +1338,17 @@ export class DropService {
       seedHash: toHex(r.seed_hash),
       // Never before the draw: until then only the sealed seed exists, which no route returns.
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
-      entries: counts ?? EMPTY_COUNTS(),
+      entries: tally?.counts ?? EMPTY_COUNTS(),
+      reserved: tally?.reserved ?? 0,
     };
   }
 
   private async adminDrop(db: Db, id: string): Promise<AdminDrop> {
     const r = await this.reads(db).where('d.id', '=', id).executeTakeFirst();
     if (!r) throw dropNotFound();
-    const counts = await this.counts(db, [id]);
+    const tallies = await this.tallies(db, [id]);
     const creators = await this.staffEmails(db, [r.created_by]);
-    return this.adminView(r, this.clock(), counts.get(id), creators);
+    return this.adminView(r, this.clock(), tallies.get(id), creators);
   }
 
   /** The rows of a drop's entries as the console reads them: the account's email, the console user who concluded it. */
@@ -1165,12 +1366,12 @@ export class DropService {
     return entryView(r);
   }
 
-  /** The rows of an account's entries with their drops (the club's status, ENTER and WITHDRAW). */
+  /** The rows of an account's entries with their drops (the club's status, ENTER, WITHDRAW and RESERVE). */
   private accountEntryRows(db: Db) {
     return db
       .selectFrom('drop_entries as e')
       .innerJoin('drops as d', 'd.id', 'e.drop_id')
-      .select(['e.id', 'e.drop_id', 'e.status', 'e.created_at', 'e.rank', 'e.respond_by', 'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at']);
+      .select(['e.id', 'e.drop_id', 'e.status', 'e.created_at', 'e.tier', 'e.rank', 'e.respond_by', 'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at']);
   }
 
   private async accountEntry(accountId: string, entryId: string): Promise<AccountDropEntry> {

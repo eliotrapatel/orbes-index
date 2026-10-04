@@ -874,6 +874,10 @@ export interface Drop {
   closesAt: Iso;
   /** How long a place drawn is held, in hours (1 to 336). */
   purchaseWindowHours: number;
+  /** P-X02: the early access before the opening, in hours (0, none, to 336). */
+  earlyAccessHours: number;
+  /** When PLATINE and PALLADIUM may reserve a place directly (from the publication at the earliest); null without an early access. */
+  earlyAccessOpensAt: Iso | null;
   state: DropState;
   publishedAt: Iso | null;
   cancelledAt: Iso | null;
@@ -885,6 +889,8 @@ export interface Drop {
   /** The seed, once drawn. */
   seed: string | null;
   entries: Record<DropEntryStatus, number>;
+  /** P-X02: of the entries SELECTED or CONFIRMED, those reserved directly during the early access. */
+  reserved: number;
 }
 
 /** POST /api/admin/drops; any field of PATCH /api/admin/drops/:id while a DRAFT (the description only once published). */
@@ -896,6 +902,8 @@ export interface DropInput {
   opensAt: Iso;
   closesAt: Iso;
   purchaseWindowHours?: number;
+  /** P-X02: hours of early access (48 when omitted, 0 for none). */
+  earlyAccessHours?: number;
 }
 
 export type DropChange = Partial<DropInput>;
@@ -911,6 +919,8 @@ export interface DropEntry {
   seniority: number | null;
   rank: number | null;
   respondBy: Iso | null;
+  /** P-X02: a place reserved directly during the early access (its tier and seniority those of its request, no rank). */
+  reserved: boolean;
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
   note: string | null;

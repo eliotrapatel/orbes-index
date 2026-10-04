@@ -25,7 +25,13 @@
  *    sha256(seed ‖ the entry's id) in hexadecimal; every entry SELECTED when
  *    there are fewer than places;
  *  - a lock withdraws the account's open entries (audited), and the
- *    right-of-access export lists every entry.
+ *    right-of-access export lists every entry;
+ *  - the early access (P-X02): 48 hours by default, 0 to 336, set while a
+ *    DRAFT; during it an account PLATINE or PALLADIUM at the moment of its
+ *    request reserves a place at once (SELECTED, held, no rank), first come,
+ *    first served under the drop's lock, within the pieces; refused outside
+ *    it, below PLATINE, twice; once the pieces are held the drop is full;
+ *    the draw then gives only the places left.
  */
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -48,6 +54,8 @@ interface AdminDropJson {
   opensAt: string;
   closesAt: string;
   purchaseWindowHours: number;
+  earlyAccessHours: number;
+  earlyAccessOpensAt: string | null;
   state: string;
   publishedAt: string | null;
   cancelledAt: string | null;
@@ -55,6 +63,7 @@ interface AdminDropJson {
   seedHash: string;
   seed: string | null;
   entries: Record<string, number>;
+  reserved: number;
 }
 
 interface EntryJson {
@@ -66,6 +75,7 @@ interface EntryJson {
   enteredAt: string;
   rank: number | null;
   respondBy: string | null;
+  reserved: boolean;
 }
 
 interface AdminEntryJson {
@@ -77,6 +87,7 @@ interface AdminEntryJson {
   seniority: number | null;
   rank: number | null;
   respondBy: string | null;
+  reserved: boolean;
   handledBy: { id: string; email: string } | null;
   handledAt: string | null;
   note: string | null;
@@ -96,6 +107,10 @@ interface SheetJson {
   seed: string | null;
   drawnAt: string | null;
   entries: number | null;
+  earlyAccessHours: number;
+  earlyAccessOpensAt: string | null;
+  earlyAccessOpen: boolean;
+  reserved: number;
 }
 
 describe('the club tiers (P-R03): pieces held now, thresholds of the code, full years', () => {
@@ -542,5 +557,207 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect(await h.ctx.db.selectFrom('drops').select(['seed', 'drawn_at']).where('id', '=', d.id).executeTakeFirstOrThrow()).toEqual({ seed: null, drawn_at: null });
     // The server's own key opens it.
     await expect(h.ctx.services.drops.draw(d.id, actor)).resolves.toMatchObject({ entries: 0, selected: 0 });
+  });
+
+  describe('the early access, with a direct reservation (P-X02)', () => {
+    const reserve = (c: Client, id: string) => c.post(`/api/v1/club/drops/${id}/reserve`);
+    /** An account holding `n` pieces (3 make it PLATINE, 5 PALLADIUM), with its pieces and its id. */
+    async function owner(n: number): Promise<{ client: Client; email: string; id: string; pieces: IssueResult[] }> {
+      const a = await accountClient(h);
+      const pieces: IssueResult[] = [];
+      for (let i = 0; i < n; i++) pieces.push(await ownedPiece(a.client));
+      return { ...a, id: await accountIdOf(a.email), pieces };
+    }
+    const entryOf = async (res: Awaited<ReturnType<typeof reserve>>) => {
+      expect(res.statusCode, res.body).toBe(200);
+      return (safeJson(res) as { entry: EntryJson }).entry;
+    };
+    const iso = (ms: number) => new Date(ms).toISOString();
+
+    it('sets a DRAFT\'s early access, 48 hours by default, 0 to 336, audited; fixed once published, public with its time, from the publication at the earliest', async () => {
+      await staff();
+      for (const earlyAccessHours of [-1, 337, 1.5, '48']) {
+        const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', quantity: 1, opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours });
+        expect([res.statusCode, errorOf(res).code], String(earlyAccessHours)).toEqual([400, 'VALIDATION_FAILED']);
+      }
+      const d = await draft({}, 72 * HOUR);
+      const opensAt = Date.parse(d.opensAt);
+      expect(d).toMatchObject({ earlyAccessHours: 48, earlyAccessOpensAt: iso(opensAt - 48 * HOUR), reserved: 0 });
+      expect((await audits('drop.create', d.id))[0]!.details).toMatchObject({ earlyAccessHours: 48 });
+      expect(await draft({ earlyAccessHours: 0 }, 72 * HOUR)).toMatchObject({ earlyAccessHours: 0, earlyAccessOpensAt: null });
+      // A DRAFT changes it, audited before and after; once published it is fixed.
+      expect(safeJson(await operator.patch(adminUrl(d.id), { earlyAccessHours: 24 }))).toMatchObject({ earlyAccessHours: 24, earlyAccessOpensAt: iso(opensAt - 24 * HOUR) });
+      expect((await audits('drop.update', d.id)).map((e) => e.details)).toEqual([{ before: { earlyAccessHours: 48 }, after: { earlyAccessHours: 24 } }]);
+      expect(errorOf(await operator.patch(adminUrl(d.id), { earlyAccessHours: 400 })).code).toBe('VALIDATION_FAILED');
+      await publish(d.id);
+      expect((await audits('drop.publish', d.id))[0]!.details).toMatchObject({ earlyAccessHours: 24, earlyAccessOpensAt: iso(opensAt - 24 * HOUR) });
+      const fixed = await operator.patch(adminUrl(d.id), { earlyAccessHours: 48 });
+      expect([fixed.statusCode, errorOf(fixed).code]).toEqual([409, 'DROP_PUBLISHED']);
+      // Public: the early access and its time, not open yet, nothing reserved; in the list too.
+      expect(await sheet(d.id)).toMatchObject({ state: 'UPCOMING', earlyAccessHours: 24, earlyAccessOpensAt: iso(opensAt - 24 * HOUR), earlyAccessOpen: false, reserved: 0 });
+      const listed = (safeJson(await h.client().get('/api/v1/drops')) as { drops: SheetJson[] }).drops.find((x) => x.id === d.id);
+      expect(listed).toMatchObject({ earlyAccessHours: 24, earlyAccessOpensAt: iso(opensAt - 24 * HOUR), earlyAccessOpen: false });
+      // Published inside its early access: the reservations open with the publication.
+      const late = await draft({}, 10 * HOUR);
+      await publish(late.id);
+      expect(await sheet(late.id)).toMatchObject({ state: 'UPCOMING', earlyAccessOpensAt: h.clock.now().toISOString(), earlyAccessOpen: true });
+      expect((await audits('drop.publish', late.id))[0]!.details).toMatchObject({ earlyAccessOpensAt: h.clock.now().toISOString() });
+      // Published once its entries are open: no early access at all.
+      const open = await draft({}, -HOUR, 3);
+      await publish(open.id);
+      expect(await sheet(open.id)).toMatchObject({ state: 'OPEN', earlyAccessHours: 48, earlyAccessOpensAt: null, earlyAccessOpen: false });
+    });
+
+    it('reserves a place at once for an account PLATINE or PALLADIUM at its request, during the early access only: refused before it, from the opening, below PLATINE, twice', async () => {
+      // Two pieces, entries opening in 72 hours: the early access of 48 hours opens in 24.
+      const d = await draft({ quantity: 2 }, 72 * HOUR, 2);
+      await publish(d.id);
+      const platine = await owner(3);
+      const titane = await owner(1);
+      const nobody = await accountClient(h);
+      const before = await reserve(platine.client, d.id);
+      expect([before.statusCode, errorOf(before).code]).toEqual([409, 'DROP_EARLY_ACCESS_NOT_OPEN']);
+      expect(errorOf(before).message).toBe(`Direct reservations for this release open on ${iso(Date.parse(d.opensAt) - 48 * HOUR).slice(0, 16).replace('T', ' ')} UTC.`);
+
+      h.clock.advance(24 * HOUR);
+      await staff();
+      expect(await sheet(d.id)).toMatchObject({ state: 'UPCOMING', earlyAccessOpen: true });
+      // Signed out, without the CSRF token, with a body, an unknown release: refused. Below PLATINE: refused, and the
+      // account waits for the opening.
+      expect((await h.client().post(`/api/v1/club/drops/${d.id}/reserve`)).statusCode).toBe(401);
+      expect(errorOf(await platine.client.post(`/api/v1/club/drops/${d.id}/reserve`, undefined, { noCsrf: true })).code).toBe('CSRF_FAILED');
+      expect(errorOf(await platine.client.post(`/api/v1/club/drops/${d.id}/reserve`, { tier: 3 })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await reserve(platine.client, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6')).code).toBe('DROP_NOT_FOUND');
+      for (const c of [titane, nobody]) {
+        const res = await reserve(c.client, d.id);
+        expect([res.statusCode, errorOf(res).code]).toEqual([403, 'DROP_TIER_REQUIRED']);
+        expect(errorOf(res).message).toBe('Only PLATINE and PALLADIUM owners reserve a place directly: from 3 pieces held.');
+        expect(errorOf(await enter(c.client, d.id)).code).toBe('DROP_NOT_OPEN');
+      }
+      // PLATINE: the place held at once for the release's window, without a rank, the tier of the moment kept.
+      const res = await reserve(platine.client, d.id);
+      expect(res.headers['cache-control']).toBe('no-store');
+      const entry = await entryOf(res);
+      expect(entry).toMatchObject({ dropId: d.id, state: 'UPCOMING', status: 'SELECTED', reserved: true, rank: null, respondBy: iso(h.clock.now().getTime() + 48 * HOUR) });
+      expect((await audits('drop.reserve', d.id)).map((e) => [e.actor_type, e.actor_id, e.details])).toEqual([['account', platine.id, { entryId: entry.id, tier: 2, respondBy: entry.respondBy }]]);
+      expect(JSON.stringify(await audits('drop.reserve', d.id))).not.toContain(platine.email);
+      // Once: again, ENTER and WITHDRAW are refused; the account's status lists it, with its id.
+      expect(errorOf(await reserve(platine.client, d.id)).code).toBe('DROP_ALREADY_RESERVED');
+      expect(errorOf(await withdraw(platine.client, d.id)).code).toBe('DROP_NOT_ENTERED');
+      expect((await status(platine.client)).entries).toEqual([expect.objectContaining({ id: entry.id, dropId: d.id, status: 'SELECTED', reserved: true, rank: null })]);
+      // The console and the public page count it (never drawn: no rank, no entry of the draw); the export lists it.
+      expect((await adminEntries(operator, d.id)).items).toEqual([expect.objectContaining({ id: entry.id, accountId: platine.id, status: 'SELECTED', reserved: true, tier: 2, seniority: 0, rank: null })]);
+      expect(safeJson(await auditor.get(adminUrl(d.id)))).toMatchObject({ reserved: 1, entries: { SELECTED: 1 } });
+      expect(await sheet(d.id)).toMatchObject({ reserved: 1, entries: null });
+      const exported = safeJson(await admin.get(`/api/admin/owners/${platine.id}/export`)) as { dropEntries: Record<string, unknown>[] };
+      expect(exported.dropEntries).toEqual([expect.objectContaining({ entryId: entry.id, dropId: d.id, status: 'SELECTED', tier: 2, rank: null })]);
+      // The tier is the one of the request: PLATINE gives a piece away, and is TITANE now.
+      const giver = await owner(3);
+      const offer = safeJson(await giver.client.post('/api/v1/ownership/transfers', { productId: giver.pieces[0]!.product.productId })) as { transferCode: string };
+      const recipient = (await accountClient(h)).client;
+      expect((await recipient.post('/api/v1/ownership/transfers/accept', await scanToReceive(recipient, giver.pieces[0]!.code.data, offer.transferCode))).statusCode).toBe(200);
+      expect(errorOf(await reserve(giver.client, d.id)).code).toBe('DROP_TIER_REQUIRED');
+      // PALLADIUM: its tier kept with its place.
+      const palladium = await owner(5);
+      const top = await entryOf(await reserve(palladium.client, d.id));
+      expect((await adminEntries(operator, d.id)).items.find((e) => e.id === top.id)).toMatchObject({ tier: 3, reserved: true });
+
+      // From the opening (48 hours on): no reservation any more; ENTER for every account but the one that holds a place.
+      h.clock.advance(48 * HOUR);
+      await staff();
+      expect(await sheet(d.id)).toMatchObject({ state: 'OPEN', earlyAccessOpen: false, reserved: 2 });
+      const other = await owner(3);
+      const closed = await reserve(other.client, d.id);
+      expect([closed.statusCode, errorOf(closed).code, errorOf(closed).message]).toEqual([409, 'DROP_EARLY_ACCESS_CLOSED', 'Direct reservations for this release are closed: the places left go to the draw.']);
+      expect((await enter(titane.client, d.id)).statusCode).toBe(200);
+      expect(errorOf(await enter(platine.client, d.id)).code).toBe('DROP_ALREADY_RESERVED');
+      // A release without an early access: never.
+      const none = await draft({ earlyAccessHours: 0 }, HOUR, 2);
+      await publish(none.id);
+      const never = await reserve(platine.client, none.id);
+      expect([never.statusCode, errorOf(never).code, errorOf(never).message]).toEqual([409, 'DROP_EARLY_ACCESS_CLOSED', 'This release offers no direct reservation: its places go to the draw.']);
+    });
+
+    it('counts the places first come, first served under the drop\'s lock: at its pieces the release is full; a lapse gives one back', async () => {
+      // Two pieces, a place held 1 hour; published inside its early access: reservations open at once.
+      const d = await draft({ quantity: 2, purchaseWindowHours: 1 }, 10 * HOUR, 2);
+      await publish(d.id);
+      const accounts = [await owner(3), await owner(3), await owner(5)];
+      // Three at once for two places: two hold one, the third is told every piece is held.
+      const three = await Promise.all(accounts.map((a) => reserve(a.client, d.id)));
+      expect(three.map((r) => r.statusCode).sort()).toEqual([200, 200, 409]);
+      const refused = three.findIndex((r) => r.statusCode === 409);
+      expect(errorOf(three[refused]!).code).toBe('DROP_FULL');
+      const held = await h.ctx.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'rank']).where('drop_id', '=', d.id).execute();
+      expect(held.map((e) => [e.status, e.rank])).toEqual([
+        ['SELECTED', null],
+        ['SELECTED', null],
+      ]);
+      expect(await sheet(d.id)).toMatchObject({ quantity: 2, reserved: 2, earlyAccessOpen: true });
+      expect(safeJson(await operator.get(adminUrl(d.id)))).toMatchObject({ reserved: 2, entries: { SELECTED: 2 } });
+      const late = accounts[refused]!;
+      expect(errorOf(await reserve(late.client, d.id)).code).toBe('DROP_FULL');
+      // ORBES Client Services concludes one sale; the other place lapses after its hour, never before: a place is free again.
+      const [sold, lapsing] = held;
+      expect((await operator.post(`${adminUrl(d.id)}/entries/${sold!.id}/confirm`)).statusCode).toBe(200);
+      expect(errorOf(await operator.post(`${adminUrl(d.id)}/entries/${lapsing!.id}/lapse`)).code).toBe('DROP_PLACE_HELD');
+      expect(errorOf(await reserve(late.client, d.id)).code).toBe('DROP_FULL');
+      h.clock.advance(HOUR);
+      await staff();
+      expect(safeJson(await operator.post(`${adminUrl(d.id)}/entries/${lapsing!.id}/lapse`))).toMatchObject({ status: 'LAPSED', reserved: true });
+      expect(await sheet(d.id)).toMatchObject({ reserved: 1 });
+      await entryOf(await reserve(late.client, d.id));
+      expect(await sheet(d.id)).toMatchObject({ reserved: 2 });
+      // The account whose place lapsed has had its chance: its entry is the lapsed one.
+      const lapsedAccount = accounts.find((a) => a.id === lapsing!.account_id)!;
+      expect(errorOf(await reserve(lapsedAccount.client, d.id)).code).toBe('DROP_ALREADY_RESERVED');
+    });
+
+    it('draws only the places the direct reservations leave, and lists only the entries it ranked', async () => {
+      // Three pieces: one reserved then sold, one reserved and held, during the early access; the third goes to the draw.
+      const d = await draft({ quantity: 3 }, 10 * HOUR, 2);
+      await publish(d.id);
+      const [p1, p2] = [await owner(3), await owner(3)];
+      const sold = await entryOf(await reserve(p1.client, d.id));
+      const kept = await entryOf(await reserve(p2.client, d.id));
+      expect((await operator.post(`${adminUrl(d.id)}/entries/${sold.id}/confirm`, { note: 'Sold in the Paris boutique.' })).statusCode).toBe(200);
+      // Entries open: a TITANE and two accounts that hold no piece enter.
+      h.clock.advance(10 * HOUR);
+      await staff();
+      expect((await sheet(d.id)).state).toBe('OPEN');
+      const entrants = [await owner(1), await owner(0), await owner(0)];
+      for (const e of entrants) expect((await enter(e.client, d.id)).statusCode).toBe(200);
+      h.clock.advance(2 * HOUR);
+      await staff();
+      // The draw: three entries for the one place left.
+      const outcome = safeJson(await admin.post(`${adminUrl(d.id)}/draw`)) as { drop: AdminDropJson; entries: number; places: number; selected: number; waitlisted: number };
+      expect(outcome).toMatchObject({ entries: 3, places: 1, selected: 1, waitlisted: 2 });
+      expect(outcome.drop).toMatchObject({ state: 'DRAWN', reserved: 2, entries: { ENTERED: 0, SELECTED: 2, CONFIRMED: 1, WAITLISTED: 2 } });
+      expect((await audits('drop.draw', d.id))[0]!.details).toMatchObject({ entries: 3, places: 1, selected: 1, waitlisted: 2 });
+      // The page lists the three entries the draw ranked, never the reservations, which keep their place without a rank.
+      const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}/entries?pageSize=200`)) as { items: { id: string; rank: number }[]; total: number };
+      expect([page.total, page.items.map((e) => e.rank)]).toEqual([3, [1, 2, 3]]);
+      for (const reservation of [sold.id, kept.id]) expect(page.items.map((e) => e.id)).not.toContain(reservation);
+      expect(await sheet(d.id)).toMatchObject({ state: 'DRAWN', entries: 3, reserved: 2 });
+      const mine = async (c: Client) => (await status(c)).entries.find((e) => e.dropId === d.id);
+      expect(await mine(p1.client)).toMatchObject({ id: sold.id, status: 'CONFIRMED', reserved: true, rank: null });
+      expect(await mine(p2.client)).toMatchObject({ id: kept.id, status: 'SELECTED', reserved: true, rank: null });
+      // The TITANE entrant, first of the draw, holds the place it gave; the others wait, by rank.
+      expect(await mine(entrants[0]!.client)).toMatchObject({ status: 'SELECTED', rank: 1, reserved: false });
+      expect((await mine(entrants[1]!.client))?.status).toBe('WAITLISTED');
+
+      // A release whose every piece is reserved: its draw gives no place, and ranks every entry on the waiting list.
+      const full = await draft({ quantity: 1 }, 10 * HOUR, 2);
+      await publish(full.id);
+      await entryOf(await reserve(p1.client, full.id));
+      h.clock.advance(10 * HOUR);
+      await staff();
+      const waiting = await owner(0);
+      expect((await enter(waiting.client, full.id)).statusCode).toBe(200);
+      h.clock.advance(2 * HOUR);
+      await staff();
+      expect(safeJson(await admin.post(`${adminUrl(full.id)}/draw`))).toMatchObject({ entries: 1, places: 0, selected: 0, waitlisted: 1 });
+      expect((await status(waiting.client)).entries.find((e) => e.dropId === full.id)).toMatchObject({ status: 'WAITLISTED', rank: 1 });
+    });
   });
 });

@@ -12,6 +12,9 @@
  *    CONFIRMED (its place held) and LAPSED (only once that time has passed),
  *    OFFER NEXT while places are left; the phrases typed before the
  *    irreversible ones (the draw, a cancellation).
+ *  - Its early access (P-X02): the hours before the opening when PLATINE
+ *    and PALLADIUM reserve a place directly (0 for none, 48 by default),
+ *    said with its time, and the places the draw will give.
  */
 import { formatDateTime } from '../format.js';
 import { can } from './permissions.js';
@@ -29,8 +32,8 @@ export function clubTab(query: Record<string, string>): ClubTab {
   return CLUB_TABS.find((t) => t.id === query.tab)?.id ?? CLUB_TABS[0].id;
 }
 
-/** The bounds the server holds a drop to (services/drops.ts). */
-export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, note: 500 });
+/** The bounds the server holds a drop to (services/drops.ts; the early access, P-X02, EARLY_ACCESS_HOURS). */
+export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, earlyDefault: 48, note: 500 });
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -61,11 +64,21 @@ export function dropFormValues(d: Drop | null, now: Date): Record<string, string
       opensAt: localUtc(d.opensAt),
       closesAt: localUtc(d.closesAt),
       purchaseWindowHours: String(d.purchaseWindowHours),
+      earlyAccessHours: String(d.earlyAccessHours),
     };
   }
   const opens = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 10));
   const closes = new Date(opens.getTime() + 2 * 86_400_000);
-  return { modelId: '', title: '', description: '', quantity: '1', opensAt: localUtc(opens.toISOString()), closesAt: localUtc(closes.toISOString()), purchaseWindowHours: String(DROP_LIMITS.windowDefault) };
+  return {
+    modelId: '',
+    title: '',
+    description: '',
+    quantity: '1',
+    opensAt: localUtc(opens.toISOString()),
+    closesAt: localUtc(closes.toISOString()),
+    purchaseWindowHours: String(DROP_LIMITS.windowDefault),
+    earlyAccessHours: String(DROP_LIMITS.earlyDefault),
+  };
 }
 
 const wholeNumber = (v: string): number | null => (/^\s*\d{1,6}\s*$/.test(v ?? '') ? Number(v) : null);
@@ -85,6 +98,8 @@ export function dropProblem(v: Record<string, string>): string | null {
   if (Date.parse(closes) <= Date.parse(opens)) return 'Entries close after they open.';
   const hours = wholeNumber(v.purchaseWindowHours);
   if (hours === null || hours < DROP_LIMITS.windowMin || hours > DROP_LIMITS.windowMax) return `A place is held ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours.`;
+  const early = wholeNumber(v.earlyAccessHours);
+  if (early === null || early < DROP_LIMITS.earlyMin || early > DROP_LIMITS.earlyMax) return `The early access lasts ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours (${DROP_LIMITS.earlyMin}: none).`;
   return null;
 }
 
@@ -99,6 +114,7 @@ export function dropInput(v: Record<string, string>): DropInput {
     opensAt: utcInstant(v.opensAt)!,
     closesAt: utcInstant(v.closesAt)!,
     purchaseWindowHours: Number(v.purchaseWindowHours),
+    earlyAccessHours: Number(v.earlyAccessHours),
   };
 }
 
@@ -113,6 +129,7 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
   if (Date.parse(next.opensAt) !== Date.parse(d.opensAt)) out.opensAt = next.opensAt;
   if (Date.parse(next.closesAt) !== Date.parse(d.closesAt)) out.closesAt = next.closesAt;
   if (next.purchaseWindowHours !== d.purchaseWindowHours) out.purchaseWindowHours = next.purchaseWindowHours;
+  if (next.earlyAccessHours !== d.earlyAccessHours) out.earlyAccessHours = next.earlyAccessHours;
   return out;
 }
 
@@ -124,6 +141,27 @@ export function dropPhrase(action: 'draw' | 'cancel', d: Pick<Drop, 'id'>): stri
 /** The entries of a drop that hold a place or bought one: what OFFER NEXT is measured against. */
 export function placesTaken(d: Pick<Drop, 'entries'>): number {
   return (d.entries.SELECTED ?? 0) + (d.entries.CONFIRMED ?? 0);
+}
+
+/** P-X02: the places a draw would give now: the pieces less those held or sold (the direct reservations, before it). */
+export function placesToDraw(d: Pick<Drop, 'entries' | 'quantity'>): number {
+  return Math.max(0, d.quantity - placesTaken(d));
+}
+
+/** P-X02: the early access as the console says it: `48 hours · from 10 OCT 2026 · 10:00 UTC`, or `None`. */
+export function earlyAccessLine(d: Pick<Drop, 'earlyAccessHours' | 'earlyAccessOpensAt'>): string {
+  if (!d.earlyAccessOpensAt || !(d.earlyAccessHours > 0)) return 'None';
+  return `${d.earlyAccessHours} ${d.earlyAccessHours === 1 ? 'hour' : 'hours'} · from ${formatDateTime(d.earlyAccessOpensAt)}`;
+}
+
+/**
+ * P-X02: when the direct reservations of a DRAFT would open if it were published at `now`: at its early access, at
+ * once when that has begun, or never when entries are already open or it has none.
+ */
+export function earlyAccessOnPublish(d: Pick<Drop, 'earlyAccessOpensAt' | 'opensAt'>, now: Date): string {
+  const from = d.earlyAccessOpensAt ? Date.parse(d.earlyAccessOpensAt) : Number.NaN;
+  if (Number.isNaN(from) || now.getTime() >= Date.parse(d.opensAt)) return 'none';
+  return from <= now.getTime() ? 'from its publication' : `from ${formatDateTime(d.earlyAccessOpensAt)}`;
 }
 
 export interface DropActions {
@@ -181,11 +219,15 @@ export function dropLead(d: Drop): string {
     case 'DRAFT':
       return 'A draft: nothing of it is public. Edit it freely, then publish it: its page shows the fingerprint of its seed from then on, and only its description changes after.';
     case 'UPCOMING':
-      return 'Published: its page on /verify announces it. Entries open at the time below.';
+      return d.earlyAccessOpensAt
+        ? 'Published: its page on /verify announces it. During the early access below, PLATINE and PALLADIUM owners reserve a place directly, first come, first served; entries open to everyone at the time below, for the places left.'
+        : 'Published: its page on /verify announces it. Entries open at the time below.';
     case 'OPEN':
       return 'Entries are open: any ORBES account enters from the release’s page.';
     case 'CLOSED':
-      return 'Entries are closed. An ADMIN runs the draw, once: tier, seniority, then the seed’s order.';
+      return d.reserved > 0
+        ? 'Entries are closed. An ADMIN runs the draw, once: tier, seniority, then the seed’s order, for the places the direct reservations leave. Lapse first a reservation whose time has passed unconcluded: its place then goes to the draw.'
+        : 'Entries are closed. An ADMIN runs the draw, once: tier, seniority, then the seed’s order.';
     case 'DRAWN':
       return 'Drawn: the places held wait for ORBES Client Services to conclude each sale. A lapse comes only after the time a place is held; then OFFER NEXT gives it to the first of the waiting list.';
     default:

@@ -565,6 +565,11 @@ export interface DropsTable {
   closes_at: Timestamp;                // > opens_at
   /** How long a place drawn is held (drop_entries.respond_by): 1..336 hours, 48 by default. */
   purchase_window_hours: WithDefault<number>;
+  /**
+   * The early access (migration 0017, P-X02): how long before `opens_at` an account PLATINE or PALLADIUM reserves a
+   * place directly, first come, first served, within `quantity`: 0..336 hours, 48 by default; 0, none.
+   */
+  early_access_hours: WithDefault<number>;
   published_at: TimestampNullable;
   cancelled_at: TimestampNullable;
   /** secretbox `v1.<iv>.<ciphertext>` of the 32-byte seed, the drop's id as associated data; never changes. */
@@ -582,7 +587,8 @@ export interface DropsTable {
  * An account's entry in a drop (migration 0015, P-R03): one per account and drop, reactivated rather than deleted and
  * inserted again. `tier`, `seniority` and `rank` are written by the draw; `respond_by` by the draw or an offer to the
  * next of the waiting list; `handled_by`, `handled_at` and `note` by the console. id, drop_id, account_id and
- * created_at never change.
+ * created_at never change. A direct reservation of the early access (P-X02) is an entry SELECTED at once, with its
+ * `respond_by`, the `tier` and `seniority` of the moment of the request, and no `rank` (the draw ranks only ENTERED).
  */
 export interface DropEntriesTable {
   id: Generated<string>;
@@ -590,8 +596,8 @@ export interface DropEntriesTable {
   account_id: string;
   created_at: TimestampDefault;
   status: WithDefault<DropEntryStatus>;
-  tier: number | null;                 // smallint 0..3, the club's tier at the draw (0: no piece held)
-  seniority: number | null;            // smallint ≥ 0, full years since the account's first ownership, at the draw
+  tier: number | null;                 // smallint 0..3, the club's tier at the draw (0: no piece held), or at a direct reservation
+  seniority: number | null;            // smallint ≥ 0, full years since the account's first ownership, at the draw (or reservation)
   rank: number | null;                 // int ≥ 1, the entry's place in the draw's order
   respond_by: TimestampNullable;
   handled_by: string | null;           // admin_users.id

@@ -32,7 +32,10 @@
  * the list from the landing, a release's page, its sign-in, ENTER THE DRAW
  * and WITHDRAW, YOUR RELEASES in MY PIECES, then, drawn, the place held with
  * the contact of ORBES Client Services, the seed checked on the phone and
- * the entries by rank), THE CIRCLE (P-X01: signed out its sign-in, then the
+ * the entries by rank; P-X02: the early access, both openings under the
+ * state, RESERVE A PLACE for a PLATINE owner and the place held at once, a
+ * TITANE owner who waits, the privilege recalled in MY PIECES and THE
+ * CIRCLE), THE CIRCLE (P-X01: signed out its sign-in, then the
  * feed of an owner, each post from its tier up; an invitation answered YES
  * then NO within its places; a poll, one option chosen then VOTE, then its
  * results; a note's photographs, text and links, the release's page and a
@@ -2140,6 +2143,105 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'THE RELEASES');
     expect(new URL(page.url()).pathname).toBe('/verify/releases');
     expect(problems).toEqual([]);
+  }, 180_000);
+
+  it('THE RELEASES, early access (P-X02): both openings under the state; RESERVE A PLACE for a PLATINE owner, the place held at once; a TITANE owner waits; the privilege recalled in MY PIECES and THE CIRCLE', async () => {
+    const { ctx } = srv;
+    const category = (await ctx.categories.getByCode('J'))!;
+    const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-EA' }).returning('id').executeTakeFirstOrThrow();
+    const staff = await ctx.services.auth.createAdmin({ email: 'early.access@orbes.test', password: 'orbes early access passphrase 2026', role: 'ADMIN' }, SYSTEM_ACTOR);
+    const actor = { type: 'admin' as const, id: staff.id };
+    // Two pieces, entries open to everyone in a day: published inside its early access of 48 hours, which opens with it.
+    const drop = await ctx.services.drops.create(
+      { modelId: model.id, title: 'SOLSTICE — release I', quantity: 2, opensAt: new Date(Date.now() + 86_400_000), closesAt: new Date(Date.now() + 2 * 86_400_000) },
+      actor,
+    );
+    await ctx.services.drops.publish(drop.id, actor);
+    // A PLATINE owner (three pieces) and a TITANE one (one piece).
+    const platineEmail = 'early.platine@example.com';
+    const platine = await ctx.services.auth.registerAccount({ email: platineEmail, password: PASSWORD }, {});
+    for (let i = 0; i < 3; i++) await ownedPiece(platine.account.id);
+    const titaneEmail = 'early.titane@example.com';
+    const titane = await ctx.services.auth.registerAccount({ email: titaneEmail, password: PASSWORD }, {});
+    await ownedPiece(titane.account.id);
+
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The list: EARLY ACCESS while PLATINE and PALLADIUM reserve.
+    await page.goto(`${srv.origin}/verify/releases`);
+    const card = page.locator('article.release-card', { hasText: 'SOLSTICE — RELEASE I' });
+    await textOf(card.locator('.release-card__state'), 'EARLY ACCESS');
+    // Its page: both openings under its state, the early access among its facts and its paragraph, the rule.
+    await card.getByRole('link', { name: 'SEE THE RELEASE' }).click();
+    await textOf(page.locator('h1'), 'SOLSTICE — RELEASE I');
+    await textOf(page.locator('.release__state'), 'EARLY ACCESS');
+    await textOf(page.locator('.release__access'), /^PLATINE AND PALLADIUM: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · EVERYONE: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await textsOf(page.locator('.release__rows .rows__label'), ['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD', 'RESERVED DIRECTLY']);
+    await textOf(page.locator('.release__rows .rows__row', { hasText: 'EARLY ACCESS' }).locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
+    const reserved = page.locator('.release__rows .rows__row', { hasText: 'RESERVED DIRECTLY' }).locator('.release__utc');
+    await textOf(reserved, '0 OF 2 PIECES');
+    await textOf(page.locator('.release__early'), RELEASES.earlyNote);
+    await textOf(page.locator('.release__rule'), RELEASES.rule);
+    // Signed in as the PLATINE owner: RESERVE A PLACE, the page's hairline button.
+    const panel = page.locator('.release__signin');
+    await panel.getByLabel('EMAIL').fill(platineEmail);
+    await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    const reserve = page.getByRole('button', { name: 'RESERVE A PLACE' });
+    await visible(reserve);
+    await textOf(
+      page.locator('.release__sentence'),
+      /^As a PLATINE owner, you may reserve a place now, until entries open to everyone on \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\)\. First come, first served, within the pieces of the release\.$/,
+    );
+    await attrOf(reserve, 'class', /\bbtn\b/);
+    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\btextlink\b/);
+    await countOf(page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['RESERVE A PLACE', 'SCAN ORBES CODE', 'THE RELEASES', ...LEGAL_LINKS]);
+    for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-release-early.png'), fullPage: true });
+    await reserve.click();
+    // The place held at once until its time, the contact of ORBES Client Services; the page read again counts it.
+    await textOf(page.locator('.release__entry .ownership__status'), 'PLACE RESERVED');
+    await textOf(page.locator('.release__sentence'), /^You reserved a place directly\. It is held until \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\) — ORBES Client Services will contact you\.$/);
+    await visible(page.locator('.release__entry').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await textOf(reserved, '1 OF 2 PIECES');
+    const row = await ctx.db.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank']).where('drop_id', '=', drop.id).where('account_id', '=', platine.account.id).executeTakeFirstOrThrow();
+    expect(row).toMatchObject({ status: 'SELECTED', tier: 2, rank: null });
+    await textOf(page.locator('.release__entry-id'), `YOUR ENTRY ${row.id}`);
+    await countOf(page.getByRole('button', { name: 'RESERVE A PLACE' }), 0);
+    await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
+    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    // MY PIECES: the privilege in the account's own words, and the place reserved among its releases.
+    await page.goto(`${srv.origin}/verify/pieces`);
+    await textOf(page.locator('.pieces__early .section-label'), 'EARLY ACCESS');
+    await textOf(page.locator('.pieces__early-text'), RELEASES.earlyAccess.yours('PLATINE'));
+    await textOf(page.locator('.pieces__releases .pieces__entry-state'), 'ENTRIES OPEN SOON · PLACE RESERVED');
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    expect(problems).toEqual([]);
+
+    // The TITANE owner: told PLATINE and PALLADIUM owners reserve now, nothing to press; the privilege recalled.
+    const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await other.page.goto(`${srv.origin}/verify/releases/${drop.id}`);
+    const signIn = other.page.locator('.release__signin');
+    await signIn.getByLabel('EMAIL').fill(titaneEmail);
+    await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
+    await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
+    await textOf(other.page.locator('.release__sentence'), /^PLATINE and PALLADIUM owners are reserving their places now\. Entries open to everyone on .+\.$/);
+    await countOf(other.page.getByRole('button', { name: 'RESERVE A PLACE' }), 0);
+    await countOf(other.page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
+    await attrOf(other.page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
+    await other.page.goto(`${srv.origin}/verify/pieces`);
+    await textOf(other.page.locator('.pieces__early-text'), RELEASES.earlyAccess.recall);
+    await other.page.goto(`${srv.origin}/verify/circle`);
+    await textOf(other.page.locator('.circle__early .section-label'), 'EARLY ACCESS');
+    await textOf(other.page.locator('.circle__early-text'), RELEASES.earlyAccess.recall);
+    expect(await figuresInDisplayFace(other.page)).toEqual([]);
+    expect(other.problems).toEqual([]);
   }, 180_000);
 
   it('THE CIRCLE (P-X01): the sign-in, then the feed of an owner from its tier; an invitation answered, a poll voted once and its results, a note\'s photographs and links; THE CIRCLE in MY PIECES; closed to an account without a piece', async () => {

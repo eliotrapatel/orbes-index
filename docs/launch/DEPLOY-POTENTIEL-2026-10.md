@@ -35,6 +35,7 @@ Le point de départ : la production tourne le commit `3660154006b5016509856930a0
   | `0014_model_lookbook` | P-R02 | le lookbook des modèles : l'adresse de la fiche (`slug`), sa place (cachée, publique ou réservée aux propriétaires), le récit, les spécifications, la date de publication, et la galerie de photos (`model_images`, 8 au plus par modèle) |
   | `0015_drops` | P-R03 | les sorties (drops) et leurs inscriptions : la règle du tirage, la graine chiffrée puis révélée, les places tenues 48 h |
   | `0016_circle` | P-X01 | le cercle des propriétaires : les publications par palier (note, invitation, sondage), leurs photos (4 au plus), les réponses aux invitations, les votes et les visites par jour (sans compte) |
+  | `0017_drop_early_access` | P-X02 | l'accès anticipé d'une sortie (`drops.early_access_hours`, 48 h par défaut, de 0 à 336) : PLATINE et PALLADIUM y réservent directement une place avant l'ouverture à tous, le reste part au tirage |
 
   Chaque migration de l'étape s'ajoute à ce tableau avec son élément (`0015` à `0018` : P-R03, P-X01, P-X02, P-X04).
 
@@ -257,7 +258,7 @@ Sortie attendue, dans l'ordre (les heures du début de chaque ligne sont remplac
    … [deploy.sh] ── roll out orbes-genome:<TAG_A>
    … [deploy.sh] postgres is healthy
    … [deploy.sh] stopping the running app before migrating to <TAG_A>
-   Applied 3 migration(s): 0014_model_lookbook, 0015_drops, 0016_circle
+   Applied 4 migration(s): 0014_model_lookbook, 0015_drops, 0016_circle, 0017_drop_early_access
    … [deploy.sh] database ready: migrations applied, app role orbes_app has DML rights only
    … [deploy.sh] app is healthy
    … [deploy.sh] caddy is healthy
@@ -279,7 +280,7 @@ Sortie attendue, dans l'ordre (les heures du début de chaque ligne sont remplac
 7. **La fin** :
 
    ```text
-   … [deploy.sh] deployed orbes-genome:<TAG_A> (previous: 3660154006b5). This release applied the migration(s) 0014_model_lookbook, 0015_drops, 0016_circle:
+   … [deploy.sh] deployed orbes-genome:<TAG_A> (previous: 3660154006b5). This release applied the migration(s) 0014_model_lookbook, 0015_drops, 0016_circle, 0017_drop_early_access:
    … [deploy.sh] orbes-genome:3660154006b5 cannot run on this schema any more (scripts/deploy.sh --image 3660154006b5 refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image <TAG_A> after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7).
    ```
 
@@ -314,7 +315,7 @@ Sur le serveur, toujours en `orbes` dans `deploy/vps` :
 tail -n 1 .state/deploys.log
 ```
 
-Sortie attendue : `… deploy <TAG_A> OK (previous 3660154006b5; migrations 0014_model_lookbook, 0015_drops, 0016_circle)`.
+Sortie attendue : `… deploy <TAG_A> OK (previous 3660154006b5; migrations 0014_model_lookbook, 0015_drops, 0016_circle, 0017_drop_early_access)`.
 
 **2. Les trois services.**
 
@@ -330,7 +331,7 @@ Sortie attendue : `caddy`, `app`, `postgres`, chacun `Up … (healthy)`.
 docker compose exec app node --import tsx scripts/db.ts status
 ```
 
-Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les 16 lignes `applied`, de `0001_initial` à `0016_circle`, aucune `PENDING`.
+Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les 17 lignes `applied`, de `0001_initial` à `0017_drop_early_access`, aucune `PENDING`.
 
 **4. La ligne des photos, sur le nouveau schéma** (`--dry-run` : rien n'est écrit).
 

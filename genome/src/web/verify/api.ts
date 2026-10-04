@@ -210,6 +210,16 @@ export class ApiClient {
     return r.entry;
   }
 
+  /**
+   * RESERVE A PLACE (P-X02): during a release's early access, a PLATINE or PALLADIUM account holds a place at once (403
+   * DROP_TIER_REQUIRED below, 409 outside the early access or once every piece is held).
+   */
+  async reserveDrop(id: string): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, undefined, { csrf: true });
+    if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entry;
+  }
+
   // ── The circle (P-X01) ───────────────────────────────────────────────────
 
   /** A page of the circle's feed, the latest first, without the posts' bodies (403 OWNERS_ONLY without a piece, 401 signed out). */

@@ -22,7 +22,8 @@
  * a one-time recovery code issued from an owner's row (C-04); a client found
  * by email and by REF, the owner's sheet, its lock, unlock and export (A-06);
  * the Club page (P-R03: its one link in the Clients group, the sidebar still
- * fitting a 900 px screen; a release created, edited, published, drawn by an
+ * fitting a 900 px screen; a release created with its early access (P-X02),
+ * edited, published, drawn by an
  * ADMIN after a typed phrase, an entry confirmed, another lapsed after its
  * time, the next offered; read by an AUDITOR, emails masked, without an
  * action; P-X01: its Circle tab, an invitation and a poll written in their
@@ -1926,10 +1927,15 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const local = (d: Date) => d.toISOString().slice(0, 16);
     await p.fill('dialog input[name=opensAt]', local(opens));
     await p.fill('dialog input[name=closesAt]', local(closes));
+    // The early access (P-X02): 48 hours by default, set here to 24.
+    expect(await p.inputValue('dialog input[name=earlyAccessHours]')).toBe('48');
+    await p.fill('dialog input[name=earlyAccessHours]', '24');
     await confirmDialog(p);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE — release I');
     const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAFT');
+    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toMatch(/^24 hours · from \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    expect(await p.locator('[data-testid=drop-reserved]').textContent()).toBe('0 of 3');
     const seedHash = (await ctx.db.selectFrom('drops').select('seed_hash').where('id', '=', dropId).executeTakeFirstOrThrow()).seed_hash;
     expect(await p.locator('[data-testid=drop-seed-hash] .mono').getAttribute('title')).toBe(Buffer.from(seedHash).toString('hex'));
     expect(await p.locator('[data-testid=drop-seed]').count()).toBe(0);
@@ -1938,10 +1944,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name=quantity]', '2');
     await confirmDialog(p);
     await expect.poll(() => p.locator('#release .deflist__row', { hasText: 'Pieces' }).locator('.deflist__value').textContent()).toBe('2');
-    // Published: its page on /verify; only the description changes from then on.
+    // Published: its page on /verify; only the description changes from then on. Its entries are open already: no early access.
     await p.click('[data-testid=drop-publish]');
+    await expect.poll(() => p.locator('dialog').textContent()).toContain('Direct reservations of PLATINE and PALLADIUM owners: none.');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('OPEN');
+    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=drop-edit]').count()).toBe(0);
     expect(await p.locator('[data-testid=drop-page]').getAttribute('href')).toBe(`/verify/releases/${dropId}`);
     await p.click('[data-testid=drop-describe]');

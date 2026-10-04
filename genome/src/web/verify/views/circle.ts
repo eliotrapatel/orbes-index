@@ -5,6 +5,8 @@
  *              ORBES                         small wordmark
  *            T H E   C I R C L E             the page's title
  *   For the owners of an ORBES piece: …
+ *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM in the
+ *   PLATINE and PALLADIUM owners reserve …   releases (P-X02), recalled above the feed
  *   ┌                              ┐
  *     [ photo ]                              ivory plates, one per post: its
  *     INVITATION · PLATINE AND PALLADIUM     kind (and the tiers it is kept
@@ -43,7 +45,7 @@ import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { circleCards, circlePostModel, type CircleCardModel, type CirclePhotoModel, type CirclePostModel } from '../circle-model.js';
-import { CIRCLE } from '../copy.js';
+import { CIRCLE, RELEASES } from '../copy.js';
 import type { SessionStore } from '../session.js';
 import type { CircleAnswer, CircleCard } from '../types.js';
 import { circleLink, legalLinks, lookbookLink, piecesLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
@@ -251,7 +253,15 @@ class FeedPage {
         return;
       default: {
         const cards = circleCards(l.items);
-        const out: HTMLElement[] = [];
+        // P-X02: the early access of PLATINE and PALLADIUM in the releases, recalled to the owners above their feed.
+        const out: HTMLElement[] = [
+          h(
+            'section',
+            { class: 'circle__early', attrs: { 'aria-labelledby': 'circle-early' } },
+            sectionLabel(RELEASES.earlyAccess.label, 'circle-early'),
+            h('p', { class: 'prose circle__early-text', text: RELEASES.earlyAccess.recall }),
+          ),
+        ];
         if (cards.length === 0) out.push(h('p', { class: 'prose circle__empty', text: CIRCLE.empty }));
         else out.push(h('ul', { class: 'circle__list' }, ...cards.map((c) => h('li', { class: 'circle__item' }, this.card(c)))));
         if (l.more === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: CIRCLE.moreFailed }));

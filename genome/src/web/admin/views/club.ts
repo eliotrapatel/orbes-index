@@ -39,7 +39,15 @@ export function dropFields(models: readonly Model[], values: Record<string, stri
       required: true,
       maxlength: 3,
       value: values.purchaseWindowHours,
-      hint: `How long a place drawn is held for its entrant: ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours, ${DROP_LIMITS.windowDefault} by default.`,
+      hint: `How long a place drawn or reserved is held for its entrant: ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours, ${DROP_LIMITS.windowDefault} by default.`,
+    },
+    {
+      name: 'earlyAccessHours',
+      label: 'Early access (hours)',
+      required: true,
+      maxlength: 3,
+      value: values.earlyAccessHours,
+      hint: `Before entries open, PLATINE and PALLADIUM owners reserve a place directly, first come, first served, within the pieces: ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours, ${DROP_LIMITS.earlyDefault} by default, ${DROP_LIMITS.earlyMin} for none. The draw gives the places left.`,
     },
   ];
 }
@@ -59,7 +67,7 @@ function clubTabs(current: string): HTMLElement {
 /** What each tab of the Club page is, said under its title. */
 const CLUB_LEADS = Object.freeze({
   drops:
-    'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces, entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
+    'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces, reserved directly by PLATINE and PALLADIUM owners during its early access, then entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
   circle:
     'What the owners’ club of /verify offers. Circle: what ORBES publishes for the owners of a piece, by tier: notes, invitations they answer YES or NO, and polls whose results they read once they have voted.',
 });

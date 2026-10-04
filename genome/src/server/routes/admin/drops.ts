@@ -56,6 +56,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         opensAt: b.opensAt,
         closesAt: b.closesAt,
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
+        ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
       },
       adminActor(request),
     );
@@ -81,6 +82,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         ...(b.opensAt !== undefined ? { opensAt: b.opensAt } : {}),
         ...(b.closesAt !== undefined ? { closesAt: b.closesAt } : {}),
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
+        ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
       },
       adminActor(request),
     );

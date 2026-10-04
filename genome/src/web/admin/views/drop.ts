@@ -2,26 +2,46 @@
  * A drop (P-R03), `#/club/drops/:dropId`, reached from the Club page's Drops
  * tab (no link of its own in the sidebar).
  *
- *  - The release: its state, model, pieces, window of entries (UTC), how
- *    long a place drawn is held, its publication, the fingerprint of its
- *    seed (committed at creation) and, once drawn, the seed itself; its
- *    page on /verify once published.
+ *  - The release: its state, model, pieces, early access (P-X02: when
+ *    PLATINE and PALLADIUM reserve a place directly, and the places so
+ *    reserved), window of entries (UTC), how long a place drawn or reserved
+ *    is held, its publication, the fingerprint of its seed (committed at
+ *    creation) and, once drawn, the seed itself; its page on /verify once
+ *    published.
  *  - Edit (every field of a DRAFT), Description (once published: the only
  *    field that still changes), Publish, Cancel (before the draw, a phrase
  *    to type) — OPERATOR; Draw (ADMIN, once its entries are closed, a
  *    phrase to type): tier, then seniority read at that moment, then the
  *    seed's order; the places held 48 hours by default, the others on the
  *    waiting list.
- *  - Its entries, by rank once drawn: the account (its email masked for an
- *    AUDITOR, a link to its sheet), the tier and seniority of the draw, the
- *    status and until when a place is held; Confirm (the sale concluded) and
+ *  - Its entries, by rank once drawn (the direct reservations, without a
+ *    rank, after them): the account (its email masked for an AUDITOR, a link
+ *    to its sheet), the tier and seniority of the draw or of the
+ *    reservation, the status and until when a place is held; Confirm (the
+ *    sale concluded) and
  *    Lapse (only once the place's time has passed) on a place held; Offer
  *    next while places are left. Each is one request under the drop's lock,
  *    audited by the server; then the page is read again.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
-import { DROP_LIMITS, dropActions, dropChange, dropFormValues, dropLead, dropPhrase, dropProblem, dropWindow, entryActions, placesTaken, releaseAddress, tierName } from '../model/club.js';
+import {
+  DROP_LIMITS,
+  dropActions,
+  dropChange,
+  dropFormValues,
+  dropLead,
+  dropPhrase,
+  dropProblem,
+  dropWindow,
+  earlyAccessLine,
+  earlyAccessOnPublish,
+  entryActions,
+  placesTaken,
+  placesToDraw,
+  releaseAddress,
+  tierName,
+} from '../model/club.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { DROP_ENTRY_STATUSES, type Drop, type DropEntry, type DropEntryStatus } from '../types.js';
@@ -81,7 +101,8 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow,
       body: [
         h('p', { class: 'dialog__text' }, `Its page on /verify announces it from now on, with the fingerprint of its seed. Entries: ${dropWindow(d)}.`),
-        h('p', { class: 'dialog__text' }, 'Once published, only its description changes: its model, pieces, dates and the place held are fixed.'),
+        h('p', { class: 'dialog__text' }, `Direct reservations of PLATINE and PALLADIUM owners: ${earlyAccessOnPublish(d, ctx.now())}.`),
+        h('p', { class: 'dialog__text' }, 'Once published, only its description changes: its model, pieces, dates, early access and the place held are fixed.'),
       ],
       confirmLabel: 'Publish',
       submit: async () => {
@@ -113,7 +134,11 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow,
       danger: true,
       body: [
-        h('p', { class: 'dialog__text' }, `${formatCount(d.entries.ENTERED)} ${d.entries.ENTERED === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'}.`),
+        h(
+          'p',
+          { class: 'dialog__text' },
+          `${formatCount(d.entries.ENTERED)} ${d.entries.ENTERED === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(placesToDraw(d))} ${placesToDraw(d) === 1 ? 'place' : 'places'} of ${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'}${placesTaken(d) > 0 ? ` (${formatCount(placesTaken(d))} already held or sold by direct reservations: lapse first those whose time has passed)` : ''}.`,
+        ),
         h(
           'p',
           { class: 'dialog__text' },
@@ -144,6 +169,12 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'State', value: h('span', { data: { testid: 'drop-state' } }, statusMark(humanize(d.state), toneOf('drop', d.state))) },
     { label: 'Model', value: `${humanize(d.model.name)} · ${humanize(d.model.type)}`, note: d.model.active ? undefined : 'No longer offered for new pieces.' },
     { label: 'Pieces', value: formatCount(d.quantity) },
+    {
+      label: 'Early access',
+      value: h('span', { data: { testid: 'drop-early-access' } }, earlyAccessLine(d)),
+      note: d.earlyAccessOpensAt ? 'PLATINE and PALLADIUM owners reserve a place directly until entries open, first come, first served.' : undefined,
+    },
+    ...(d.earlyAccessOpensAt || d.reserved > 0 ? [{ label: 'Reserved directly', value: h('span', { data: { testid: 'drop-reserved' } }, `${formatCount(d.reserved)} of ${formatCount(d.quantity)}`), note: 'Places held or sold by a direct reservation: the draw gives the others.' }] : []),
     { label: 'Entries open', value: formatDateTime(d.opensAt) },
     { label: 'Entries close', value: formatDateTime(d.closesAt) },
     { label: 'Place held', value: `${d.purchaseWindowHours} ${d.purchaseWindowHours === 1 ? 'hour' : 'hours'}` },
@@ -173,13 +204,15 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const conclude = (e: DropEntry, to: 'confirm' | 'lapse') =>
     void openDialog({
       title: to === 'confirm' ? 'Sale concluded' : 'Place lapsed',
-      eyebrow: `${e.email} · RANK ${e.rank ?? '—'}`,
+      eyebrow: `${e.email} · ${e.reserved ? 'RESERVED DIRECTLY' : `RANK ${e.rank ?? '—'}`}`,
       body: h(
         'p',
         { class: 'dialog__text' },
         to === 'confirm'
           ? 'ORBES Client Services concluded the sale of a piece of this release with this entrant: the entry reads CONFIRMED.'
-          : 'The place held was not taken up in time: the entry reads LAPSED, and the place can be offered to the next of the waiting list.',
+          : e.reserved && !d.drawnAt
+            ? 'The place reserved was not taken up in time: the entry reads LAPSED, and the place goes to the draw.'
+            : 'The place held was not taken up in time: the entry reads LAPSED, and the place can be offered to the next of the waiting list.',
       ),
       fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: DROP_LIMITS.note, hint: 'For ORBES Client Services: kept with the entry, never in the audit log. Optional.' }],
       confirmLabel: to === 'confirm' ? 'Confirm the sale' : 'Lapse the place',
@@ -214,6 +247,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
                 'span',
                 { data: { testid: 'entry-status' } },
                 statusMark(humanize(e.status), toneOf('dropEntry', e.status)),
+                e.reserved ? h('span', { class: 'cell-sub', data: { testid: 'entry-reserved' } }, 'Reserved directly') : null,
                 e.status === 'SELECTED' && e.respondBy ? h('span', { class: 'cell-sub' }, `Held until ${formatDateTime(e.respondBy)}`) : null,
                 e.handledBy ? h('span', { class: 'cell-sub' }, `${e.handledBy.email} · ${formatDateTime(e.handledAt)}`) : null,
                 e.note ? h('span', { class: 'cell-details' }, e.note) : null,
@@ -235,7 +269,13 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
         ],
         entries.items,
         {
-          empty: status ? 'No entry has this status.' : d.state === 'DRAFT' || d.state === 'UPCOMING' ? 'No entry yet: entries open at the time above.' : 'No entry.',
+          empty: status
+            ? 'No entry has this status.'
+            : d.state === 'DRAFT' || d.state === 'UPCOMING'
+              ? d.earlyAccessOpensAt
+                ? 'No entry yet: direct reservations and entries open at the times above.'
+                : 'No entry yet: entries open at the time above.'
+              : 'No entry.',
           caption: 'Entries',
         },
       ),
@@ -243,7 +283,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     ],
     {
       id: 'entries',
-      note: `${formatCount(d.entries.ENTERED + d.entries.SELECTED + d.entries.WAITLISTED + d.entries.CONFIRMED + d.entries.LAPSED)} entered · ${formatCount(placesTaken(d))} of ${formatCount(d.quantity)} held or sold`,
+      note: `${formatCount(d.entries.ENTERED + d.entries.SELECTED + d.entries.WAITLISTED + d.entries.CONFIRMED + d.entries.LAPSED)} entered · ${formatCount(placesTaken(d))} of ${formatCount(d.quantity)} held or sold${d.reserved > 0 ? `, ${formatCount(d.reserved)} by direct reservation` : ''}`,
       tools: acts.offerNext ? [button('Offer next', { kind: 'ghost', testId: 'drop-offer-next', onClick: offerNext })] : [],
     },
   );

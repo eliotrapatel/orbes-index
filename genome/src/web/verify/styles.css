@@ -2126,8 +2126,19 @@ h1[tabindex="-1"]:focus,
   margin-top: 14px;
 }
 
+/* P-X02: the early access under the state, PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, in the reading face (its
+   figures are times). */
+.release__access {
+  max-width: 100%;
+  margin-top: 8px;
+  line-height: 1.8;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
 .release__eyebrow[hidden],
 .release__state[hidden],
+.release__access[hidden],
 .release__photo[hidden] {
   display: none;
 }
@@ -2184,6 +2195,11 @@ h1[tabindex="-1"]:focus,
   letter-spacing: 0.06em;
   text-transform: none;
   color: var(--ink-soft);
+}
+
+/* P-X02: the paragraph on the early access, under the release's facts. */
+.release__early {
+  margin-top: 14px;
 }
 
 .release__status {
@@ -2278,11 +2294,30 @@ h1[tabindex="-1"]:focus,
   margin-top: 14px;
 }
 
+/* MY PIECES (P-X02): the early access of PLATINE and PALLADIUM, recalled under the pieces. */
+.pieces__early {
+  margin-top: 72px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__early[hidden] {
+  display: none;
+}
+
+.pieces__early-text {
+  margin-top: 10px;
+}
+
 /* MY PIECES: the account's entries in the drops, under its pieces. */
 .pieces__releases {
   margin-top: 72px;
   padding-top: 4px;
   border-top: 1px solid var(--hairline);
+}
+
+.pieces__early:not([hidden]) + .pieces__releases {
+  margin-top: 44px;
 }
 
 .pieces__releases[hidden] {
@@ -2378,6 +2413,21 @@ h1[tabindex="-1"]:focus,
 
 .circle__signin .ownership {
   padding-top: 0;
+}
+
+/* P-X02: the early access of PLATINE and PALLADIUM, recalled above the feed, between hairlines. */
+.circle__early {
+  margin-bottom: 36px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.circle__early .section-label {
+  margin-top: 0;
+}
+
+.circle__early-text {
+  margin-top: 10px;
 }
 
 .circle__list {

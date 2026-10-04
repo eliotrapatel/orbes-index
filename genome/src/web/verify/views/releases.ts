@@ -17,18 +17,23 @@
  *   THE COLLECTION
  *   PRIVACY · TERMS · LEGAL · HELP
  *
- * A release's page: its collection (or model), its title and state, the
- * model's photograph on an ivory plate, its description; THE RELEASE (the
- * model, with SEE THE MODEL when its sheet is public, the pieces, the times
- * in UTC then on this phone, how long a place drawn is held); YOUR ENTRY
- * (signed out: the sign-in and CREATE ACCOUNT of the OWNERSHIP panel, any
- * account may enter; signed in: what the entry means now, ENTER THE DRAW
- * or WITHDRAW, and for a place held the contact of ORBES Client Services);
- * THE DRAW (its rule, word for word, and the seed's fingerprint; once drawn
- * the seed, checked on this phone against the fingerprint, and the entries
- * by rank, the account's own marked, a hundred at a time). ENTER THE DRAW
- * is the page's hairline button while it is offered (the foot's SCAN ORBES
- * CODE is then a text link), as DOWNLOAD PDF is on a certificate.
+ * A release's page: its collection (or model), its title and state, then,
+ * with an early access (P-X02), the line PLATINE AND PALLADIUM: FROM … ·
+ * EVERYONE: FROM … (UTC); the model's photograph on an ivory plate, its
+ * description; THE RELEASE (the model, with SEE THE MODEL when its sheet is
+ * public, the pieces, the times in UTC then on this phone, the early access
+ * among them, how long a place drawn is held, the places reserved directly,
+ * and the paragraph on the early access); YOUR ENTRY (signed out: the sign-in
+ * and CREATE ACCOUNT of the OWNERSHIP panel, any account may enter; signed
+ * in: what the entry means now, ENTER THE DRAW or WITHDRAW, RESERVE A PLACE
+ * for a PLATINE or PALLADIUM account during the early access, and for a
+ * place held the contact of ORBES Client Services); THE DRAW (its rule,
+ * word for word, and the seed's fingerprint; once drawn the seed, checked
+ * on this phone against the fingerprint, and the entries by rank, the
+ * account's own marked, a hundred at a time). ENTER THE DRAW, or RESERVE A
+ * PLACE, is the page's hairline button while it is offered (the foot's
+ * SCAN ORBES CODE is then a text link), as DOWNLOAD PDF is on a
+ * certificate. After a reservation, the page is read again: its places.
  *
  * Every action is a same-origin JSON call through ApiClient (the session
  * cookie, the CSRF token); server messages are shown as they come. A 401
@@ -234,6 +239,8 @@ class ReleasePage {
   private readonly title = h('h1', { class: 'release__title', id: 'release-title', text: RELEASES.title });
   private readonly eyebrow = h('p', { class: 'release__eyebrow', attrs: { hidden: true } });
   private readonly stateLine = h('p', { class: 'release__state', attrs: { hidden: true } });
+  /** P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM … (UTC), with an early access. */
+  private readonly accessLine = h('p', { class: 'release__access micro', attrs: { hidden: true } });
   private readonly body = h('div', { class: 'release__body', attrs: { 'aria-live': 'polite' } });
   private readonly entrySection = h('section', { class: 'release__section release__entry', attrs: { 'aria-labelledby': 'release-entry' } });
   private readonly drawSection = h('section', { class: 'release__section release__draw', attrs: { 'aria-labelledby': 'release-draw' } });
@@ -251,10 +258,12 @@ class ReleasePage {
   private disposed = false;
   /** Bumped on each read of the account's entry: an older answer is dropped. */
   private entryGen = 0;
+  /** The account's tier now, read with its entry (the club's status): PLATINE and PALLADIUM reserve during the early access. */
+  private tier = 0;
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
-    this.root.append(h('header', { class: 'release__head' }, wordmark('release__wordmark'), this.eyebrow, this.title, this.stateLine), this.body, this.foot);
+    this.root.append(h('header', { class: 'release__head' }, wordmark('release__wordmark'), this.eyebrow, this.title, this.stateLine, this.accessLine), this.body, this.foot);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.render();
     void this.start();
@@ -306,6 +315,7 @@ class ReleasePage {
     } else {
       this.entryGen++;
       this.entry = { kind: 'none' };
+      this.tier = 0;
       this.actionError = null;
     }
     this.render();
@@ -320,6 +330,7 @@ class ReleasePage {
     try {
       const status = await this.deps.api.clubStatus();
       if (gen !== this.entryGen || this.disposed) return;
+      this.tier = Number(status.tier?.level) || 0;
       this.entry = { kind: 'ready', entry: status.entries.find((e) => e.dropId === id) ?? null };
     } catch (e) {
       if (gen !== this.entryGen || this.disposed) return;
@@ -363,14 +374,15 @@ class ReleasePage {
     this.renderDraw();
   }
 
-  private async act(kind: 'enter' | 'withdraw'): Promise<void> {
+  private async act(kind: 'enter' | 'withdraw' | 'reserve'): Promise<void> {
     if (this.busy || this.load.kind !== 'ready') return;
     const id = this.load.sheet.id;
     this.busy = true;
     this.actionError = null;
     this.renderEntry();
     try {
-      const entry = kind === 'enter' ? await this.deps.api.enterDrop(id) : await this.deps.api.withdrawDrop(id);
+      const api = this.deps.api;
+      const entry = kind === 'enter' ? await api.enterDrop(id) : kind === 'withdraw' ? await api.withdrawDrop(id) : await api.reserveDrop(id);
       if (this.disposed) return;
       this.entry = { kind: 'ready', entry };
     } catch (e) {
@@ -380,9 +392,24 @@ class ReleasePage {
     } finally {
       this.busy = false;
     }
+    // A reservation, made or refused (every piece held, the early access over), changes the release's places: read again.
+    if (kind === 'reserve') await this.refreshSheet();
+    if (this.disposed) return;
     this.render();
     // Keyboard focus on what the page now says of the entry.
     this.root.querySelector<HTMLElement>('#release-entry')?.focus({ preventScroll: true });
+  }
+
+  /** The release read again (its places, its state), the page as it was otherwise; kept as it was if it cannot be read. */
+  private async refreshSheet(): Promise<void> {
+    if (this.load.kind !== 'ready') return;
+    try {
+      const sheet = await this.deps.api.drop(this.load.sheet.id);
+      if (this.disposed || this.load.kind !== 'ready') return;
+      this.load = { kind: 'ready', sheet: releaseSheet(sheet, this.deps.offsetMinutes) };
+    } catch {
+      return;
+    }
   }
 
   // ── Rendering ────────────────────────────────────────────────────────────
@@ -394,6 +421,7 @@ class ReleasePage {
     if (l.kind !== 'ready') {
       this.eyebrow.hidden = true;
       this.stateLine.hidden = true;
+      this.accessLine.hidden = true;
       this.title.textContent = RELEASES.title;
       this.foot.replaceChildren(this.scanButton('btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
     }
@@ -420,6 +448,8 @@ class ReleasePage {
     this.title.replaceChildren(...withNumerals(s.title));
     this.stateLine.textContent = s.stateLabel;
     this.stateLine.hidden = false;
+    this.accessLine.textContent = s.access ?? '';
+    this.accessLine.hidden = s.access === null;
 
     const sections: (HTMLElement | null)[] = [];
     if (s.image) {
@@ -435,6 +465,7 @@ class ReleasePage {
         sectionLabel(RELEASES.section.release, 'release-facts'),
         h('div', { class: 'release__model-line' }, model, s.lookbookSlug ? lookbookLink(() => this.deps.onModel(s.lookbookSlug!), { slug: s.lookbookSlug, extraClass: 'release__see-model' }) : null),
         releaseRows(s.rows),
+        s.earlyNote ? h('p', { class: 'prose release__early', text: s.earlyNote }) : null,
       ),
     );
     sections.push(this.entrySection, this.drawSection);
@@ -455,7 +486,7 @@ class ReleasePage {
     const session = this.deps.session.state;
     const heading = sectionLabel(RELEASES.section.entry, 'release-entry');
     heading.tabIndex = -1;
-    let offersEnter = false;
+    let offersAction = false;
     const out: (HTMLElement | null)[] = [heading];
     if (session.status !== 'signed-in') {
       // No account needed to read; ENTER THE DRAW needs one (any): the OWNERSHIP panel's sign-in and CREATE ACCOUNT.
@@ -478,15 +509,20 @@ class ReleasePage {
       if (m.entryId) out.push(h('p', { class: 'release__entry-id micro soft', text: RELEASES.entryId(m.entryId) }));
       if (this.actionError) out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: this.actionError }));
       if (m.canEnter) {
-        offersEnter = true;
+        offersAction = true;
         out.push(h('button', { class: 'btn release__enter', attrs: { type: 'button', disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' }, on: { click: () => void this.act('enter') }, text: RELEASES.enter }));
+      }
+      // P-X02: during the early access, a PLATINE or PALLADIUM account holds a place at once.
+      if (m.canReserve) {
+        offersAction = true;
+        out.push(h('button', { class: 'btn release__reserve', attrs: { type: 'button', disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' }, on: { click: () => void this.act('reserve') }, text: RELEASES.reserve }));
       }
       if (m.canWithdraw) out.push(h('div', { class: 'ownership__actions' }, h('button', { class: 'textlink release__withdraw', attrs: { type: 'button', disabled: this.busy }, on: { click: () => void this.act('withdraw') }, text: RELEASES.withdraw })));
       if (m.contact) out.push(contactBlock(m.contact));
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
-    // One hairline button on the page: ENTER THE DRAW while it is offered, SCAN ORBES CODE otherwise.
-    this.foot.replaceChildren(this.scanButton(offersEnter ? 'textlink' : 'btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
+    // One hairline button on the page: ENTER THE DRAW or RESERVE A PLACE while it is offered, SCAN ORBES CODE otherwise.
+    this.foot.replaceChildren(this.scanButton(offersAction ? 'textlink' : 'btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
   }
 
@@ -495,11 +531,11 @@ class ReleasePage {
   }
 
   private releaseOf(s: ReleaseSheetModel) {
-    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt };
+    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt, earlyAccess: s.earlyAccess, full: s.full };
   }
 
   private entryOpts() {
-    return { offsetMinutes: this.deps.offsetMinutes, clientServices: this.contacts };
+    return { offsetMinutes: this.deps.offsetMinutes, clientServices: this.contacts, tier: this.tier };
   }
 
   /** THE DRAW: its rule and commitment; once drawn, the seed, the phone's check and the entries by rank. */

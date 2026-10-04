@@ -3,7 +3,9 @@
  * (releases-model.ts): the addresses, the times in UTC then on the phone's clock, the facts of a release, the seed only
  * once drawn, the draw's list, and what an entry means now (ENTER THE DRAW, WITHDRAW, a place held with the contact of
  * ORBES Client Services); the copy held to the lexicon (DRAW, never "lottery") and the rule it states held to the
- * server's. Pure: no DOM. The pages are driven in Chromium by verify.e2e.test.ts.
+ * server's. The early access (P-X02): the line PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, its facts, EARLY
+ * ACCESS while it lasts, EVERY PIECE RESERVED once full, RESERVE A PLACE for a PLATINE or PALLADIUM account only, and
+ * the place reserved. Pure: no DOM. The pages are driven in Chromium by verify.e2e.test.ts.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -40,6 +42,10 @@ function card(extra: Partial<DropCard> = {}): DropCard {
     quantity: 3,
     opensAt: '2026-10-12T10:00:00.000Z',
     closesAt: '2026-10-14T10:00:00.000Z',
+    // A release published without an early access (P-X02): the tests of P-R03 read it as they did.
+    earlyAccessHours: 0,
+    earlyAccessOpensAt: null,
+    earlyAccessOpen: false,
     ...extra,
   };
 }
@@ -55,9 +61,13 @@ function sheet(extra: Partial<DropSheet> = {}): DropSheet {
     seedHash: HASH,
     seed: null,
     entries: null,
+    reserved: 0,
     ...extra,
   };
 }
+
+/** A release with its early access (P-X02): 48 hours before its opening, from 10 OCT 2026 · 10:00 UTC. */
+const EARLY = { earlyAccessHours: 48, earlyAccessOpensAt: '2026-10-10T10:00:00.000Z' } as const;
 
 function entry(extra: Partial<ClubEntry> = {}): ClubEntry {
   return {
@@ -69,6 +79,7 @@ function entry(extra: Partial<ClubEntry> = {}): ClubEntry {
     enteredAt: '2026-10-12T11:00:00.000Z',
     rank: null,
     respondBy: null,
+    reserved: false,
     opensAt: '2026-10-12T10:00:00.000Z',
     closesAt: '2026-10-14T10:00:00.000Z',
     drawnAt: null,
@@ -194,6 +205,77 @@ describe('an account\'s entry (P-R03)', () => {
   });
 });
 
+describe('the early access of a release (P-X02)', () => {
+  it('says both openings under the state, the early access among the facts, EARLY ACCESS while it lasts, and EVERY PIECE RESERVED once full', () => {
+    // Before the early access: its line, its time in UTC then on this phone, its paragraph; no count of places yet.
+    const before = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING' }), 120);
+    expect(before).toMatchObject({
+      stateLabel: 'ENTRIES OPEN SOON',
+      access: 'PLATINE AND PALLADIUM: FROM 10 OCT 2026 · 10:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC',
+      earlyNote: RELEASES.earlyNote,
+      earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: false },
+      full: false,
+    });
+    expect(before.rows.map((r) => r.label)).toEqual(['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD']);
+    expect(before.rows[1]).toEqual({ label: 'EARLY ACCESS', value: '10 OCT 2026 · 10:00 UTC', local: '10 OCT 2026 · 12:00 on this phone (UTC+02:00)' });
+    // During it: EARLY ACCESS, and the places reserved directly.
+    const during = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 1 }), 0);
+    expect(during).toMatchObject({ stateLabel: 'EARLY ACCESS', earlyAccess: { open: true }, full: false });
+    expect(during.rows.find((r) => r.label === 'RESERVED DIRECTLY')).toEqual({ label: 'RESERVED DIRECTLY', value: '1 OF 3 PIECES' });
+    // Every piece reserved: said after the state until the draw, entries opened or not.
+    expect(releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 3 }), 0)).toMatchObject({ stateLabel: 'EARLY ACCESS · EVERY PIECE RESERVED', full: true });
+    expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', reserved: 3 }), 0)).toMatchObject({ stateLabel: 'ENTRIES OPEN · EVERY PIECE RESERVED', full: true, earlyAccess: { open: false } });
+    const drawn = releaseSheet(sheet({ ...EARLY, state: 'DRAWN', reserved: 3, seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z', entries: 2 }), 0);
+    expect(drawn).toMatchObject({ stateLabel: 'DRAWN', full: false });
+    expect(drawn.rows.find((r) => r.label === 'RESERVED DIRECTLY')?.value).toBe('3 OF 3 PIECES');
+    // A server that says the early access is open after the opening is not believed; one piece says PIECE.
+    expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', earlyAccessOpen: true, reserved: 0, quantity: 1 }), 0)).toMatchObject({ stateLabel: 'ENTRIES OPEN', earlyAccess: { open: false } });
+    expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', quantity: 1 }), 0).rows.find((r) => r.label === 'RESERVED DIRECTLY')?.value).toBe('0 OF 1 PIECE');
+    // Without an early access (0 hours, or a release published once open), or a time that is none: no line, no fact.
+    for (const s of [sheet(), sheet({ earlyAccessHours: 48, earlyAccessOpensAt: 'nonsense' })]) {
+      const m = releaseSheet(s, 0);
+      expect(m).toMatchObject({ access: null, earlyNote: null, earlyAccess: null });
+      expect(m.rows.map((r) => r.label)).not.toContain('EARLY ACCESS');
+    }
+    // The list: EARLY ACCESS while it lasts, the time of the opening as before.
+    const [early, soon] = releaseCards([card({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true }), card({ ...EARLY, id: ID.replace('8a1d', '8a1e'), state: 'UPCOMING' })]);
+    expect(early).toMatchObject({ stateLabel: 'EARLY ACCESS', state: 'UPCOMING', line: '3 PIECES · ENTRIES OPEN 12 OCT 2026 · 10:00 UTC' });
+    expect(soon).toMatchObject({ stateLabel: 'ENTRIES OPEN SOON' });
+  });
+
+  it('offers RESERVE A PLACE to a PLATINE or PALLADIUM account during the early access only, while a piece is left', () => {
+    const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'UPCOMING' as const, opensAt: '2026-10-12T10:00:00.000Z', earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: true }, full: false };
+    const opts = { offsetMinutes: 120, clientServices: { email: 'support@theorbes.com' } };
+    const opens = '12 October 2026, 12:00 (UTC+02:00)';
+    expect(entryModel(release, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: true, canEnter: false, sentence: RELEASES.status.early('PLATINE', opens) });
+    expect(entryModel(release, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: true, sentence: RELEASES.status.early('PALLADIUM', opens) });
+    expect(RELEASES.status.early('PLATINE', opens)).toBe(`As a PLATINE owner, you may reserve a place now, until entries open to everyone on ${opens}. First come, first served, within the pieces of the release.`);
+    // A TITANE account, an account without a piece or whose tier is unknown: it waits for the opening.
+    for (const tier of [1, 0, undefined]) {
+      expect(entryModel(release, null, { ...opts, tier }), String(tier)).toMatchObject({ canReserve: false, canEnter: false, sentence: RELEASES.status.earlyOthers(opens) });
+    }
+    // Every piece reserved: nothing to reserve, the waiting list of the draw after the opening.
+    expect(entryModel({ ...release, full: true }, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.full(opens) });
+    expect(entryModel({ ...release, state: 'OPEN', earlyAccess: { ...release.earlyAccess, open: false }, full: true }, null, { ...opts, tier: 3 })).toMatchObject({ canEnter: true, canReserve: false, sentence: RELEASES.status.openFull });
+    // Before the early access: a PLATINE account is told when it may reserve, any other when entries open.
+    const soon = { ...release, earlyAccess: { ...release.earlyAccess, open: false } };
+    expect(entryModel(soon, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.earlySoon('PLATINE', '10 October 2026, 12:00 (UTC+02:00)') });
+    expect(entryModel(soon, null, { ...opts, tier: 1 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.upcoming(opens) });
+    // Once entries are open, RESERVE A PLACE is gone: ENTER THE DRAW, for everyone.
+    expect(entryModel({ ...soon, state: 'OPEN' }, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: false, canEnter: true, sentence: RELEASES.status.open });
+
+    // The place reserved: PLACE RESERVED until its time, the contact of ORBES Client Services; no WITHDRAW.
+    const mine = entry({ state: 'UPCOMING', status: 'SELECTED', reserved: true, respondBy: '2026-10-12T09:00:00.000Z' });
+    const held = entryModel(release, mine, { ...opts, tier: 2 });
+    expect(held).toMatchObject({ label: 'PLACE RESERVED', canReserve: false, canEnter: false, canWithdraw: false, entryId: ENTRY });
+    expect(held.sentence).toBe('You reserved a place directly. It is held until 12 October 2026, 11:00 (UTC+02:00) — ORBES Client Services will contact you.');
+    expect(decodeURIComponent(held.contact!.mailto!)).toContain('subject=ORBES — MONOLITHE — RELEASE I — PLACE RESERVED');
+    // Concluded or lapsed, as a place drawn; MY PIECES names it so.
+    expect(entryModel(release, { ...mine, status: 'CONFIRMED' }, opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed });
+    expect(myEntries([mine], opts).map((e) => [e.stateLabel, e.entry.label])).toEqual([['ENTRIES OPEN SOON', 'PLACE RESERVED']]);
+  });
+});
+
 describe('the releases\' copy (P-R03)', () => {
   const lines = Object.values(RELEASES).flatMap((v): string[] => {
     if (typeof v === 'string') return [v];
@@ -206,6 +288,9 @@ describe('the releases\' copy (P-R03)', () => {
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(lines.join('\n')).not.toMatch(/!|lotter|raffle|sweepstake/i);
     expect(RELEASES.enter).toBe('ENTER THE DRAW');
+    // P-X02: the plan's line, word for word, and the action of the early access.
+    expect(RELEASES.access('…', '…')).toBe('PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …');
+    expect(RELEASES.reserve).toBe('RESERVE A PLACE');
     expect(RELEASES.status.selected('16 October 2026, 14:00 (UTC+02:00)')).toBe('Your place is held until 16 October 2026, 14:00 (UTC+02:00) — ORBES Client Services will contact you.');
     // The server's 404 says what the page says.
     expect(dropNotFound().publicMessage).toBe(RELEASES.notFound);
@@ -213,7 +298,7 @@ describe('the releases\' copy (P-R03)', () => {
   });
 
   it('states the rule the server applies: the tier, the seniority, then SHA-256 of the seed and the entry\'s id in lower case', () => {
-    for (const s of ['PALLADIUM', 'PLATINE', 'TITANE', 'seniority', 'SHA-256 of the 32 bytes of the seed', 'lower-case', 'increasing hexadecimal order', 'moment of the draw', 'waiting list']) {
+    for (const s of ['PALLADIUM', 'PLATINE', 'TITANE', 'seniority', 'SHA-256 of the 32 bytes of the seed', 'lower-case', 'increasing hexadecimal order', 'moment of the draw', 'waiting list', 'pieces left after the direct reservations']) {
       expect(RELEASES.rule, s).toContain(s);
     }
     // The server's order, from what the page publishes: the seed and each entry's id, tier and seniority.

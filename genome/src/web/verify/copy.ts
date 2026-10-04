@@ -558,6 +558,11 @@ export const LOOKBOOK = Object.freeze({
  * which the draw reveals, with every entry by its id, tier, seniority and rank. A place drawn is held until a time;
  * ORBES Client Services concludes each sale and sends no email: the account's page says it. Reached from the landing
  * and from MY PIECES, which groups the account's entries. The word is DRAW, never another (BRAND §4.5).
+ *
+ * The early access (P-X02): before entries open to everyone (48 hours by default, set per release), the owners
+ * PLATINE and PALLADIUM reserve a place directly, first come, first served, within the pieces of the release; the
+ * pieces left then go to the draw. The release's page says both times, the privilege is recalled in THE CIRCLE and in
+ * MY PIECES.
  */
 export const RELEASES = Object.freeze({
   title: 'THE RELEASES',
@@ -575,6 +580,15 @@ export const RELEASES = Object.freeze({
   notFound: 'This release is not known to ORBES.',
   /** A release's state, as its page and the list say it. */
   state: Object.freeze({ UPCOMING: 'ENTRIES OPEN SOON', OPEN: 'ENTRIES OPEN', CLOSED: 'ENTRIES CLOSED', DRAWN: 'DRAWN', CANCELLED: 'CANCELLED' }),
+  /** P-X02: the state of a release while PLATINE and PALLADIUM reserve their places (before entries open to everyone). */
+  earlyState: 'EARLY ACCESS',
+  /** P-X02: said after the state once every piece is held by a direct reservation, before the draw. */
+  fullState: 'EVERY PIECE RESERVED',
+  /** P-X02: the line under a release's state, its two openings in UTC (the facts say them on this phone too). */
+  access: (early: string, everyone: string) => `PLATINE AND PALLADIUM: FROM ${early} · EVERYONE: FROM ${everyone}`,
+  /** P-X02: THE RELEASE's paragraph on its early access (its times are the line under the state and the facts). */
+  earlyNote:
+    'Before entries open to everyone, PLATINE and PALLADIUM owners reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
   pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
   hours: (n: number) => (n === 1 ? '1 HOUR' : `${n} HOURS`),
   /** A time shown in UTC, then on the phone's own clock. */
@@ -584,12 +598,16 @@ export const RELEASES = Object.freeze({
   opensLine: (pieces: string, time: string) => `${pieces} · ENTRIES OPEN ${time} UTC`,
   closesLine: (pieces: string, time: string) => `${pieces} · ENTRIES CLOSE ${time} UTC`,
   section: Object.freeze({ release: 'THE RELEASE', entry: 'YOUR ENTRY', draw: 'THE DRAW', entries: 'THE ENTRIES' }),
-  rows: Object.freeze({ model: 'MODEL', pieces: 'PIECES', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', drawn: 'DRAWN' }),
+  rows: Object.freeze({ model: 'MODEL', pieces: 'PIECES', early: 'EARLY ACCESS', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', reserved: 'RESERVED DIRECTLY', drawn: 'DRAWN' }),
+  /** P-X02: the places reserved directly, of the release's pieces (`1 OF 3 PIECES`). */
+  reservedOf: (n: number, quantity: number) => `${n} OF ${quantity === 1 ? '1 PIECE' : `${quantity} PIECES`}`,
   photosLabel: (title: string) => `The model of ${title}, photographed by ORBES`,
   /** Signed out, on a release's page: any ORBES account may enter, the sign-in and CREATE ACCOUNT follow. */
   signIn: 'Enter the draw with your ORBES account: sign in, or create one. Any account may enter, one entry per person.',
   enter: 'ENTER THE DRAW',
   withdraw: 'WITHDRAW',
+  /** P-X02: the page's hairline button during the early access, for a PLATINE or PALLADIUM account. */
+  reserve: 'RESERVE A PLACE',
   /** The account's own entry id, the one the draw's list publishes. */
   entryId: (id: string) => `YOUR ENTRY ${id}`,
   /** What the account's entry, or its absence, means now. */
@@ -607,14 +625,26 @@ export const RELEASES = Object.freeze({
     waitlisted: (rank: number) => `You are on the waiting list, rank ${rank}. ORBES Client Services will contact you if a place opens.`,
     confirmed: 'Your purchase is concluded with ORBES Client Services.',
     lapsed: 'The time to conclude has passed: the place held for you has lapsed.',
+    /** P-X02, a PLATINE or PALLADIUM account before its early access, then during it. */
+    earlySoon: (tier: string, from: string) => `As a ${tier} owner, you may reserve a place directly from ${from}, before entries open to everyone.`,
+    early: (tier: string, until: string) => `As a ${tier} owner, you may reserve a place now, until entries open to everyone on ${until}. First come, first served, within the pieces of the release.`,
+    /** P-X02, any other account during the early access. */
+    earlyOthers: (until: string) => `PLATINE and PALLADIUM owners are reserving their places now. Entries open to everyone on ${until}.`,
+    /** P-X02, every piece held by a direct reservation: before entries open, then once they are. */
+    full: (until: string) => `Every piece of this release has been reserved. Entries open to everyone on ${until}: the draw then ranks a waiting list, should a place open.`,
+    openFull: 'Every piece of this release has been reserved. You may still enter: the draw ranks a waiting list, and ORBES Client Services contacts its first ranks should a place open.',
+    /** P-X02, the account's own direct reservation. */
+    reserved: (until: string) => `You reserved a place directly. It is held until ${until} — ORBES Client Services will contact you.`,
   }),
   /** The status of an entry, as MY PIECES and a release's page name it. */
   statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
+  /** P-X02: a place held by a direct reservation (SELECTED, not drawn). */
+  reservedLabel: 'PLACE RESERVED',
   /** A selection obliges no one; no email is sent. */
   noObligation: 'A place drawn obliges you to nothing: ORBES Client Services concludes each sale with you, and sends no email. Your entries are followed in MY PIECES.',
   /** The rule of the draw, exactly as the server applies it (services/drops.ts drawOrder). */
   rule:
-    'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces, are selected; the next are on the waiting list, in that order.',
+    'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces left after the direct reservations of PLATINE and PALLADIUM owners, are selected; the next are on the waiting list, in that order.',
   commitment: 'The seed was drawn when the release was created, and its fingerprint published with it. Once the draw has taken place, the seed is published here: its SHA-256 is that fingerprint, and anyone can rank the entries below again.',
   /** Labels in the display face, so no figure: the commitment's sentence names SHA-256. */
   seedHash: 'SEED FINGERPRINT',
@@ -635,6 +665,12 @@ export const RELEASES = Object.freeze({
   /** The facts of the email to ORBES Client Services about a place held. */
   contactRelease: 'RELEASE',
   contactEntry: 'ENTRY',
+  /** P-X02: the privilege of PLATINE and PALLADIUM, recalled in THE CIRCLE and in MY PIECES (its own words for a PLATINE or PALLADIUM account). */
+  earlyAccess: Object.freeze({
+    label: 'EARLY ACCESS',
+    recall: 'PLATINE and PALLADIUM owners reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.',
+    yours: (tier: string) => `As a ${tier} owner, you reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.`,
+  }),
 });
 
 /**

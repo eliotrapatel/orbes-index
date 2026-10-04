@@ -318,6 +318,12 @@ export interface DropCard {
   quantity: number;
   opensAt: string;
   closesAt: string;
+  /** P-X02: the hours of early access before `opensAt` (0: none). */
+  earlyAccessHours: number;
+  /** When PLATINE and PALLADIUM may reserve a place directly; null without an early access. */
+  earlyAccessOpensAt: string | null;
+  /** Whether direct reservations are open now (the server's clock). */
+  earlyAccessOpen: boolean;
 }
 
 /** A release's page (GET /api/v1/drops/:id): the seed's SHA-256 from the publication, the seed itself once drawn. */
@@ -333,6 +339,8 @@ export interface DropSheet extends DropCard {
   seed: string | null;
   /** The entries that took part in the draw, once drawn; null before. */
   entries: number | null;
+  /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full. */
+  reserved: number;
 }
 
 /** One entry of a drawn release (GET /api/v1/drops/:id/entries): never its account. `tier` 0 is no tier. */
@@ -361,6 +369,8 @@ export interface ClubEntry {
   enteredAt: string;
   rank: number | null;
   respondBy: string | null;
+  /** P-X02: a place reserved directly during the early access, not drawn. */
+  reserved: boolean;
   opensAt: string;
   closesAt: string;
   drawnAt: string | null;

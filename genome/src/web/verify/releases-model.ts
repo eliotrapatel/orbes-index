@@ -13,6 +13,11 @@
  *  - The account's entry: one sentence for what it means now (a place held
  *    until a time, the waiting list's rank, …), and whether ENTER THE DRAW
  *    or WITHDRAW is offered.
+ *  - The early access (P-X02): the line under a release's state
+ *    (PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …), its facts (when it
+ *    opens, the places reserved directly), and, for an account PLATINE or
+ *    PALLADIUM while it lasts, RESERVE A PLACE; a release whose every piece
+ *    is reserved says so.
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, an address only if it is one.
@@ -49,6 +54,27 @@ export function releasesRouteOf(path: string): { release: string | null } | null
 
 const STATES = new Set<DropState>(['UPCOMING', 'OPEN', 'CLOSED', 'DRAWN', 'CANCELLED']);
 const stateOf = (s: unknown): DropState => (STATES.has(s as DropState) ? (s as DropState) : 'CLOSED');
+
+/** The lowest tier that reserves a place directly during an early access (P-X02): PLATINE (server: EARLY_ACCESS_MIN_TIER). */
+export const EARLY_ACCESS_MIN_TIER = 2;
+
+/** The early access of a release as the server sent it (P-X02): when it opens, and whether it is open now; null without one. */
+export interface EarlyAccess {
+  opensAt: string;
+  open: boolean;
+}
+
+/** A release's early access, when the server names a valid time for it, and only before entries open to everyone. */
+export function earlyAccessOf(c: Pick<DropCard, 'state' | 'earlyAccessOpensAt' | 'earlyAccessOpen'>): EarlyAccess | null {
+  const at = c?.earlyAccessOpensAt;
+  if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) return null;
+  return { opensAt: at, open: c.earlyAccessOpen === true && stateOf(c.state) === 'UPCOMING' };
+}
+
+/** A release's state as its page and the list say it: EARLY ACCESS while PLATINE and PALLADIUM reserve. */
+function stateLabelOf(state: DropState, early: EarlyAccess | null): string {
+  return early?.open ? RELEASES.earlyState : RELEASES.state[state];
+}
 
 /** A time in UTC (`12 OCT 2026 · 10:00 UTC`), then on the phone's clock when it is not UTC. */
 export interface TwoClocks {
@@ -95,7 +121,7 @@ export function releaseCards(cards: readonly DropCard[]): ReleaseCardModel[] {
       href: releasePath(c.id),
       title: upper(c.title),
       state,
-      stateLabel: RELEASES.state[state],
+      stateLabel: stateLabelOf(state, earlyAccessOf(c)),
       model: modelLine(c.model ?? { name: '', type: '' }),
       line,
       image: typeof c.model?.imageUrl === 'string' && MEDIA_SRC.test(c.model.imageUrl) ? { src: c.model.imageUrl, alt: RELEASES.photosLabel(upper(c.title)) } : null,
@@ -123,6 +149,14 @@ export interface ReleaseSheetModel {
   lookbookSlug: string | null;
   /** When entries open, as the server sent it (ISO 8601). */
   opensAt: string;
+  /** P-X02: its early access (when it opens, whether it is open now); null without one. */
+  earlyAccess: EarlyAccess | null;
+  /** P-X02: `PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …` (UTC), under the state; null without an early access. */
+  access: string | null;
+  /** P-X02: THE RELEASE's paragraph on the early access; null without one. */
+  earlyNote: string | null;
+  /** P-X02: every piece held by a direct reservation, before the draw (the page says so, an entry joins a waiting list). */
+  full: boolean;
   image: ReleasePhoto | null;
   description: string | null;
   rows: ReleaseRow[];
@@ -146,16 +180,24 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const state = stateOf(s.state);
   const opens = twoClocks(s.opensAt, offsetMinutes);
   const closes = twoClocks(s.closesAt, offsetMinutes);
-  const rows: ReleaseRow[] = [
-    { label: RELEASES.rows.pieces, value: String(Number(s.quantity) || 0) },
+  const early = earlyAccessOf(s);
+  const quantity = Number(s.quantity) || 0;
+  const reserved = Number.isInteger(s.reserved) && s.reserved > 0 ? s.reserved : 0;
+  const rows: ReleaseRow[] = [{ label: RELEASES.rows.pieces, value: String(quantity) }];
+  const earlyAt = early ? twoClocks(early.opensAt, offsetMinutes) : null;
+  if (earlyAt) rows.push({ label: RELEASES.rows.early, value: earlyAt.utc, local: earlyAt.local });
+  rows.push(
     { label: RELEASES.rows.opens, value: opens.utc, local: opens.local },
     { label: RELEASES.rows.closes, value: closes.utc, local: closes.local },
     { label: RELEASES.rows.held, value: RELEASES.hours(Number(s.purchaseWindowHours) || 0) },
-  ];
+  );
+  // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces.
+  if (early && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
   if (s.drawnAt) {
     const drawn = twoClocks(s.drawnAt, offsetMinutes);
     rows.push({ label: RELEASES.rows.drawn, value: drawn.utc, local: drawn.local });
   }
+  const full = quantity > 0 && reserved >= quantity && (state === 'UPCOMING' || state === 'OPEN' || state === 'CLOSED');
   const seedHashHex = typeof s.seedHash === 'string' && HEX64.test(s.seedHash) ? s.seedHash : '';
   const seedHex = state === 'DRAWN' && typeof s.seed === 'string' && HEX64.test(s.seed) ? s.seed : null;
   const model = s.model ?? { name: '', type: '', collection: null, imageUrl: null, lookbook: null };
@@ -163,7 +205,11 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     id: s.id,
     title: upper(s.title),
     state,
-    stateLabel: RELEASES.state[state],
+    stateLabel: [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
+    earlyAccess: early,
+    access: earlyAt && opens.utc ? RELEASES.access(earlyAt.utc, opens.utc) : null,
+    earlyNote: early ? RELEASES.earlyNote : null,
+    full,
     eyebrow: model.collection && model.collection.trim() ? upper(model.collection) : upper(model.name),
     model: modelLine(model),
     lookbookSlug: isLookbookSlug(model.lookbook) ? model.lookbook : null,
@@ -200,15 +246,17 @@ export function drawLines(entries: readonly DrawEntry[], yours: string | null): 
     .map((e) => ({ id: e.id, rank: e.rank, line: RELEASES.entryLine(e.rank, tierLabel(e.tier), Math.max(0, Math.trunc(e.seniority) || 0)), yours: e.id === yours }));
 }
 
-/** What the account's entry (or none) means now, and what it may do: ENTER THE DRAW, WITHDRAW, or nothing. */
+/** What the account's entry (or none) means now, and what it may do: ENTER THE DRAW, WITHDRAW, RESERVE A PLACE, or nothing. */
 export interface EntryModel {
-  /** The status, as a label (ENTERED, PLACE HELD…); null without an entry. */
+  /** The status, as a label (ENTERED, PLACE HELD, PLACE RESERVED…); null without an entry. */
   label: string | null;
   sentence: string;
   /** The entry's id (the one the draw publishes); null without one. */
   entryId: string | null;
   canEnter: boolean;
   canWithdraw: boolean;
+  /** P-X02: RESERVE A PLACE, for a PLATINE or PALLADIUM account while the early access lasts and a piece is left. */
+  canReserve: boolean;
   /** A place held: ORBES Client Services will contact the account; their contact follows. */
   contact: ContactModel | null;
 }
@@ -219,20 +267,39 @@ function inSentence(iso: string, offsetMinutes: number): string {
   return t ? `${t} (${utcOffsetLabel(offsetMinutes)})` : '';
 }
 
+/** The name of a tier that reserves directly (P-X02), null below it. */
+function reservingTier(tier: number | undefined): string | null {
+  return typeof tier === 'number' && tier >= EARLY_ACCESS_MIN_TIER && tier <= 3 ? tierLabel(tier) : null;
+}
+
+/**
+ * What the account's entry means now. `release.earlyAccess` and `release.full` (P-X02) come from its page; `opts.tier`
+ * is the account's tier now (the club's status; 0 or absent: none), which decides RESERVE A PLACE during the early access.
+ */
 export function entryModel(
-  release: { id: string; title: string; state: DropState; opensAt: string },
-  entry: Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> | null,
-  opts: { offsetMinutes: number; clientServices?: ClientServices },
+  release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean },
+  entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean }) | null,
+  opts: { offsetMinutes: number; clientServices?: ClientServices; tier?: number },
 ): EntryModel {
   const st = RELEASES.status;
-  const none = (sentence: string, canEnter = false): EntryModel => ({ label: null, sentence, entryId: null, canEnter, canWithdraw: false, contact: null });
+  const none = (sentence: string, canEnter = false, canReserve = false): EntryModel => ({ label: null, sentence, entryId: null, canEnter, canWithdraw: false, canReserve, contact: null });
   const open = release.state === 'OPEN';
+  const opens = inSentence(release.opensAt, opts.offsetMinutes);
   if (!entry) {
     switch (release.state) {
       case 'OPEN':
-        return none(st.open, true);
-      case 'UPCOMING':
-        return none(st.upcoming(inSentence(release.opensAt, opts.offsetMinutes)));
+        return none(release.full ? st.openFull : st.open, true);
+      case 'UPCOMING': {
+        const early = release.earlyAccess ?? null;
+        const tier = reservingTier(opts.tier);
+        if (early?.open) {
+          if (release.full) return none(st.full(opens));
+          return tier ? none(st.early(tier, opens), false, true) : none(st.earlyOthers(opens));
+        }
+        // Before the early access: a PLATINE or PALLADIUM account is told when it may reserve.
+        if (early && tier && Date.parse(early.opensAt) < Date.parse(release.opensAt)) return none(st.earlySoon(tier, inSentence(early.opensAt, opts.offsetMinutes)));
+        return none(release.full ? st.full(opens) : st.upcoming(opens));
+      }
       case 'CLOSED':
         return none(st.closed);
       case 'DRAWN':
@@ -241,20 +308,23 @@ export function entryModel(
         return none(st.cancelled);
     }
   }
-  const label = RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null;
-  const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, contact: null };
+  const reserved = entry.reserved === true && entry.status === 'SELECTED';
+  const label = reserved ? RELEASES.reservedLabel : (RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null);
+  const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, canReserve: false, contact: null };
   if (release.state === 'CANCELLED') return { ...base, sentence: st.cancelled };
   switch (entry.status) {
     case 'ENTERED':
       return { ...base, sentence: open ? st.entered : st.enteredClosed, canWithdraw: release.state === 'OPEN' || release.state === 'CLOSED' };
     case 'WITHDRAWN':
       return { ...base, sentence: open ? st.withdrawn : st.withdrawnClosed, canEnter: open };
-    case 'SELECTED':
+    case 'SELECTED': {
+      const until = entry.respondBy ? inSentence(entry.respondBy, opts.offsetMinutes) : '';
       return {
         ...base,
-        sentence: st.selected(entry.respondBy ? inSentence(entry.respondBy, opts.offsetMinutes) : ''),
-        contact: releaseContactModel(opts.clientServices, release.title, entry.id),
+        sentence: reserved ? st.reserved(until) : st.selected(until),
+        contact: releaseContactModel(opts.clientServices, release.title, entry.id, label ?? undefined),
       };
+    }
     case 'WAITLISTED':
       return { ...base, sentence: st.waitlisted(entry.rank ?? 0) };
     case 'CONFIRMED':
@@ -285,6 +355,7 @@ export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: 
         href: releasePath(e.dropId),
         title: upper(e.title),
         stateLabel: RELEASES.state[state],
+        // An entry exists: the early access no longer decides anything (a reservation reads PLACE RESERVED).
         entry: entryModel({ id: e.dropId, title: upper(e.title), state, opensAt: e.opensAt }, e, opts),
       };
     });

@@ -26,6 +26,9 @@
  *                           the open links, each with WITHDRAW; read again
  *                           after a creation, TRY AGAIN while unreadable)
  *   ── next piece ──
+ *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
+ *     As a PLATINE owner, you reserve …       recalled: the account's own words from its tier,
+ *                                            the general rule below it
  *   YOUR RELEASES                            the account's entries in the drops (P-R03):
  *     MONOLITHE — RELEASE I · DRAWN          each release (a link to its page), its state,
  *     PLACE HELD · Your place is held until … — ORBES Client Services will contact you.
@@ -61,7 +64,7 @@ import { ACCOUNT_PASSWORD, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
-import { myEntries, type MyEntryModel } from '../releases-model.js';
+import { EARLY_ACCESS_MIN_TIER, myEntries, tierLabel, type MyEntryModel } from '../releases-model.js';
 import type { CertificateOffer, ClientServices, ClubEntry, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
 import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
@@ -102,6 +105,8 @@ class PiecesPage {
   readonly root: HTMLElement;
   private readonly lead = h('p', { class: 'prose pieces__lead', attrs: { hidden: true }, text: PIECES.lead });
   private readonly body = h('div', { class: 'pieces__body' });
+  /** EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM, recalled once the club's status is read. */
+  private readonly early = h('section', { class: 'pieces__early', attrs: { 'aria-labelledby': 'pieces-early', hidden: true } });
   /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
   private readonly releases = h('section', { class: 'pieces__releases', attrs: { 'aria-labelledby': 'pieces-releases', hidden: true } });
   private readonly account = h('div', { class: 'pieces__account' });
@@ -116,6 +121,8 @@ class PiecesPage {
   private cards: PieceCard[] = [];
   /** The account's entries in the drops; null when they could not be read. */
   private entries: ClubEntry[] | null = [];
+  /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
+  private tier: number | null = null;
   private load: Load = { kind: 'idle' };
   /** Bumped on every load; an answer to an older one is dropped. */
   private loadGen = 0;
@@ -137,6 +144,7 @@ class PiecesPage {
         this.lead,
       ),
       this.body,
+      this.early,
       this.releases,
       this.account,
       h(
@@ -195,6 +203,7 @@ class PiecesPage {
       this.load = { kind: 'idle' };
       this.cards = [];
       this.entries = [];
+      this.tier = null;
       this.circle.hidden = true;
       this.changing = false;
       this.signIn ??= new OwnershipPanel(
@@ -235,6 +244,7 @@ class PiecesPage {
           }),
       );
       this.entries = club ? club.entries : null;
+      this.tier = club ? Number(club.tier?.level) || 0 : null;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
       this.circle.hidden = !(club && club.tier.level >= 1);
       this.load = { kind: 'ready' };
@@ -260,6 +270,7 @@ class PiecesPage {
   private renderBody(): void {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
+    this.renderEarly();
     this.renderReleases();
     if (!this.ready) {
       this.body.replaceChildren(this.waiting());
@@ -294,6 +305,23 @@ class PiecesPage {
 
   private waiting(): HTMLElement {
     return h('p', { class: 'ownership__meta micro soft pieces__waiting', attrs: { 'aria-busy': 'true' }, text: PIECES.loading });
+  }
+
+  /**
+   * EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM recalled, once the pieces and the club's status are
+   * read, signed in: in the account's own words when its tier reserves directly, the general rule otherwise.
+   */
+  private renderEarly(): void {
+    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.tier !== null;
+    if (!shown) {
+      this.early.hidden = true;
+      this.early.replaceChildren();
+      return;
+    }
+    const tier = this.tier ?? 0;
+    const text = tier >= EARLY_ACCESS_MIN_TIER ? RELEASES.earlyAccess.yours(tierLabel(tier)) : RELEASES.earlyAccess.recall;
+    this.early.hidden = false;
+    this.early.replaceChildren(sectionLabel(RELEASES.earlyAccess.label, 'pieces-early'), h('p', { class: 'prose pieces__early-text', text }));
   }
 
   /**

@@ -29,7 +29,7 @@ import {
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
-import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
+import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
@@ -199,8 +199,9 @@ export const mediaParams = z.object({ sha256: sha256Hex });
 export const lookbookParams = z.object({ slug: z.string().max(128) });
 
 /**
- * GET /api/v1/drops/:id and /entries, POST /api/v1/club/drops/:id/enter and /withdraw (§8.9, §10.10, P-R03): a drop's
- * id. Any string the router passes (≤ 64 characters): one that is no id answers like an unknown drop, 404 DROP_NOT_FOUND.
+ * GET /api/v1/drops/:id and /entries, POST /api/v1/club/drops/:id/enter, /withdraw (§8.9, §10.10, P-R03) and /reserve
+ * (P-X02): a drop's id. Any string the router passes (≤ 64 characters): one that is no id answers like an unknown drop,
+ * 404 DROP_NOT_FOUND.
  */
 export const publicDropParams = z.object({ id: z.string().max(64) });
 
@@ -432,10 +433,18 @@ const purchaseWindowHours = z
   .int('Must be a whole number of hours')
   .min(PURCHASE_WINDOW_HOURS.min, `At least ${PURCHASE_WINDOW_HOURS.min} hour`)
   .max(PURCHASE_WINDOW_HOURS.max, `At most ${PURCHASE_WINDOW_HOURS.max} hours`);
+/** P-X02: the early access before the opening, 0 (none) to 336 hours. */
+const earlyAccessHours = z
+  .number()
+  .int('Must be a whole number of hours')
+  .min(EARLY_ACCESS_HOURS.min, `At least ${EARLY_ACCESS_HOURS.min} hours`)
+  .max(EARLY_ACCESS_HOURS.max, `At most ${EARLY_ACCESS_HOURS.max} hours`);
 
 /**
  * POST /api/admin/drops (§16.19): a DRAFT of a model's release, its entries' window (`closesAt` after `opensAt`), its
- * pieces and how long a place drawn is held (48 hours when omitted). The description is plain text ('' and null: none).
+ * pieces, how long a place drawn is held (48 hours when omitted) and its early access (P-X02: the hours before the
+ * opening when PLATINE and PALLADIUM reserve a place directly, 48 when omitted, 0 for none). The description is plain
+ * text ('' and null: none).
  */
 export const createDropBody = body({
   modelId: uuid,
@@ -445,6 +454,7 @@ export const createDropBody = body({
   opensAt: isoDateTime,
   closesAt: isoDateTime,
   purchaseWindowHours: purchaseWindowHours.optional(),
+  earlyAccessHours: earlyAccessHours.optional(),
 }).refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] });
 
 /**
@@ -459,6 +469,7 @@ export const updateDropBody = body({
   opensAt: isoDateTime.optional(),
   closesAt: isoDateTime.optional(),
   purchaseWindowHours: purchaseWindowHours.optional(),
+  earlyAccessHours: earlyAccessHours.optional(),
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change');
 
 /** GET /api/admin/drops/:id/entries: one status, or every entry. */

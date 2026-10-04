@@ -13,6 +13,7 @@
  *   GET  /api/v1/club/status                the account's tier, pieces and seniority, and its entries
  *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal)
  *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
+ *   POST /api/v1/club/drops/:id/reserve     P-X02: a place held at once, during the early access, PLATINE and PALLADIUM
  *
  * P-X01, the circle (services/circle.ts: an account that holds a piece now,
  * each post from its tier up):
@@ -75,6 +76,14 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { id } = parse(publicDropParams, request.params);
     parse(emptyBody, request.body);
     return { entry: await drops.withdraw(account.id, id, accountActor(request)) };
+  });
+
+  // P-X02: during a release's early access, an account PLATINE or PALLADIUM now reserves a place directly.
+  app.post('/api/v1/club/drops/:id/reserve', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    parse(emptyBody, request.body);
+    return { entry: await drops.reserve(account.id, id, accountActor(request)) };
   });
 
   // P-X01: the circle, for an account that holds a piece now; each post from its tier up.
