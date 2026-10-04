@@ -717,9 +717,17 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
       .filter((e) => e.status === 'QUEUED' && e.quantity <= servable)
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
     if (!head || head.quantity > free) continue;
-    let since = r.opensAt.getTime();
+    // The clock moves only on what makes this turn due or shows the engine at work: T0, the head's own place in the line,
+    // a turn given, pieces returned (a turn or a hold that ended), a place ahead of the head left, a confirmation that
+    // passes over a place ahead wanting more than the size can still give. A collector joining or leaving behind the head
+    // does neither: a busy line must not hide an engine that has stopped.
+    const place = head.position ?? 0;
+    const ahead = (e: InsightEntry) => e.position !== null && e.position < place;
+    const passedOver = own.some((e) => e.status === 'QUEUED' && ahead(e));
+    let since = Math.max(r.opensAt.getTime(), head.queuedAt?.getTime() ?? 0);
     for (const e of own) {
-      for (const d of [e.turnAt, e.endedAt, e.queuedAt]) if (d && d.getTime() > since) since = d.getTime();
+      const moves = [e.turnAt, e.turnAt !== null || ahead(e) ? e.endedAt : null, passedOver ? e.confirmedAt : null];
+      for (const d of moves) if (d && d.getTime() > since) since = d.getTime();
       // A turn or a hold the engine has not marked yet frees its pieces at its deadline.
       if (e.status === 'TURN' && lapsed(e.turnExpiresAt, r, now)) since = Math.max(since, effectiveDeadline(e.turnExpiresAt!, { paused_at: r.pausedAt }, now).getTime());
       if (e.status === 'SECURED' && lapsed(e.holdExpiresAt, r, now)) since = Math.max(since, effectiveDeadline(e.holdExpiresAt!, { paused_at: r.pausedAt }, now).getTime());

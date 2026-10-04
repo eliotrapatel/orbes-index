@@ -299,6 +299,26 @@ describe('the live alerts: exactly three', () => {
     const big = entry({ sizeId: 's54', position: 9, quantity: 2 });
     expect(liveAlerts(r, [lapsed, big], none, at(11 * MINUTE))).toEqual([]);
   });
+
+  it('a busy line does not hide a stopped engine: arrivals and departures behind the head leave its clock where it was', () => {
+    const r = release({ sizes: [{ id: 's52', label: '52', stock: 2 }] });
+    const stalled = (entries: InsightEntry[]) => liveAlerts(r, entries, none, now).map((a) => [a.kind, a.since]);
+    const head = entry({ position: 1 });
+    // A late arrival every five seconds for ten minutes, each behind the head: no turn is given, the line is stalled since T0.
+    const arrivals = Array.from({ length: 120 }, (_, i) => entry({ position: 2 + i, joinedAt: at((i + 1) * 5 * SECOND), queuedAt: at((i + 1) * 5 * SECOND) }));
+    const alerts = liveAlerts(r, [head, ...arrivals], none, now);
+    expect(alerts.map((a) => [a.kind, a.since])).toEqual([['LINE_STALLED', T0]]);
+    expect(alerts[0]!.text).toBe('The line of size 52 has stalled for 10 min.');
+    // One behind the head left its place a second ago: still stalled since T0.
+    expect(stalled([head, entry({ status: 'LEFT', position: 200, endedAt: at(10 * MINUTE - SECOND) })])).toEqual([['LINE_STALLED', T0]]);
+    // What makes the head's turn due does move it: a place ahead left, a turn that ran out, a confirmation passing over a
+    // place ahead that wants more than the size can still give (a confirmation alone does not).
+    expect(stalled([entry({ status: 'LEFT', position: 0, endedAt: at(10 * MINUTE - 5 * SECOND) }), head])).toEqual([]);
+    expect(stalled([missed(10 * MINUTE - 35 * SECOND), head])).toEqual([]);
+    const paid = confirmed(MINUTE, MINUTE + 10 * SECOND, 10 * MINUTE - 5 * SECOND);
+    expect(stalled([head, paid])).toEqual([['LINE_STALLED', at(MINUTE)]]);
+    expect(stalled([entry({ position: 0, quantity: 2 }), head, paid])).toEqual([]);
+  });
 });
 
 describe('the live sell-out forecast', () => {
