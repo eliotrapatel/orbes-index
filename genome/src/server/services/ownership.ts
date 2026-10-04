@@ -168,6 +168,8 @@ export interface OwnedProduct {
   /** The model's reference photograph and the piece's own (F-04): `/api/v1/media/<sha256>`, or null. */
   imageUrl: string | null;
   photoUrl: string | null;
+  /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
+  care: string | null;
 }
 
 export interface OwnershipHistoryEntry {
@@ -830,7 +832,7 @@ export class OwnershipService {
       .select([
         'p.id as uuid', 'p.product_id', 'p.status', 'p.variant', 'p.material', 'p.year',
         'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.type as model_type', 'col.name as collection_name',
-        'm.image_sha256', 'p.photo_sha256',
+        'm.image_sha256', 'p.photo_sha256', 'm.care_instructions',
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
@@ -889,6 +891,7 @@ export class OwnershipService {
         },
         imageUrl: mediaUrl(r.image_sha256),
         photoUrl: mediaUrl(r.photo_sha256),
+        care: r.care_instructions,
       };
     });
   }

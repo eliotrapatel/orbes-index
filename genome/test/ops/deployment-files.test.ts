@@ -78,6 +78,9 @@ describe('.env.example', () => {
     // The Client Services contact is the brand's to supply: empty in the template, so no contact is shown.
     for (const name of ['CLIENT_SERVICES_EMAIL', 'CLIENT_SERVICES_PHONE', 'CLIENT_SERVICES_HOURS']) expect(example.active.get(name), name).toBe('');
     expect(c.clientServices).toEqual({});
+    // ORBES Care (P-M02): no subscription page until ORBES publishes one, so the CARE tab says subscriptions open soon.
+    expect(example.active.get('CARE_SUBSCRIBE_URL')).toBe('');
+    expect(c.careSubscribeUrl).toBeNull();
     // A transfer is accepted for the piece scanned, with that scan (F-03): on unless an operator turns it off.
     expect(c.transferAcceptRequireProduct).toBe(true);
     expect(example.active.has('TRANSFER_ACCEPT_REQUIRE_PRODUCT')).toBe(false);

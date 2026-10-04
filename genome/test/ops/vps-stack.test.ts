@@ -11,7 +11,8 @@
  *  - the app environment built by compose from deploy/vps/.env.example (with
  *    secrets filled in) is a valid production configuration (GEO_MODE=mmdb);
  *  - every app setting of genome/.env.example reaches the app (the ORBES
- *    Client Services contact included, empty until the brand supplies it),
+ *    Client Services contact included, empty until the brand supplies it,
+ *    and the ORBES Care subscription page, empty until it opens),
  *    and every variable compose interpolates is documented in
  *    deploy/vps/.env.example;
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
@@ -276,6 +277,25 @@ describe('deploy/vps/compose.yaml', () => {
       phone: '+33 1 23 45 67 89',
       hours: 'Monday to Saturday, 10:00–19:00 (Paris)',
     });
+  });
+
+  it('hands the ORBES Care subscription page (CARE_SUBSCRIBE_URL, P-M02) from .env to the app, empty meaning none yet', () => {
+    const appEnv = environment(svc.get('app')!);
+    expect(appEnv.get('CARE_SUBSCRIBE_URL')).toBe('${CARE_SUBSCRIBE_URL:-}');
+    expect(example.active.get('CARE_SUBSCRIBE_URL')).toBe('');
+    const vars = new Map(example.active);
+    vars.set('POSTGRES_APP_PASSWORD', randomBytes(24).toString('hex'));
+    vars.set('COOKIE_SECRET', randomBytes(48).toString('base64url'));
+    vars.set('IP_HASH_PEPPER', randomBytes(48).toString('base64url'));
+    vars.set('KEY_ENCRYPTION_KEY', randomBytes(32).toString('base64url'));
+    const build = () => {
+      const env: Record<string, string> = {};
+      for (const [k, v] of appEnv) env[k] = interpolate(v, vars);
+      return loadConfig(env);
+    };
+    expect(build().careSubscribeUrl).toBeNull();
+    vars.set('CARE_SUBSCRIBE_URL', 'https://whop.com/orbes/care');
+    expect(build().careSubscribeUrl).toBe('https://whop.com/orbes/care');
   });
 
   it('migrates as the schema owner and grants the app role DML only (scripts)', () => {

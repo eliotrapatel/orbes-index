@@ -67,6 +67,12 @@ export interface AppConfig {
    */
   clientServices: ClientServicesConfig;
   /**
+   * CARE_SUBSCRIBE_URL (P-M02): where SUBSCRIBE of ORBES Care leads, in a new tab, from the CARE tab of MY PIECES (the
+   * subscription page of Whop, later). Optional, https only, served publicly by GET /api/v1/client-services
+   * (`careSubscribeUrl`). null (unset, the default): the tab reads "Subscriptions open soon", with nothing to press.
+   */
+  careSubscribeUrl: string | null;
+  /**
    * TRANSFER_ACCEPT_REQUIRE_PRODUCT (default true, F-03): an acceptance of a transfer must name the piece the
    * recipient scanned (`productId`, refused with 409 TRANSFER_PRODUCT_MISMATCH when the code is another piece's)
    * and carry the TRANSFER_ACCEPT token of that scan. false makes both optional, for an acceptance assisted by
@@ -197,6 +203,19 @@ const zHours = z
   .string()
   .max(120, 'must be at most 120 characters')
   .regex(/^[^\p{Cc}]+$/u, 'must be one line of plain text');
+/** A public https link, opened as it is in a new tab: no credentials, no space, at most 2 048 characters. */
+const zHttpsLink = z
+  .string()
+  .max(2_048, 'must be at most 2048 characters')
+  .regex(/^[^\s\p{Cc}]+$/u, 'must be a URL without spaces')
+  .refine((s) => {
+    try {
+      const u = new URL(s);
+      return u.protocol === 'https:' && u.hostname !== '' && u.username === '' && u.password === '';
+    } catch {
+      return false;
+    }
+  }, 'must be an https:// URL without credentials');
 
 // ── loadConfig ─────────────────────────────────────────────────────────────
 
@@ -403,6 +422,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
+  // ORBES Care (P-M02): the subscription page SUBSCRIBE opens; unset, the CARE tab says subscriptions open soon.
+  const careSubscribeUrl = field('CARE_SUBSCRIBE_URL', zHttpsLink, e.CARE_SUBSCRIBE_URL) ?? null;
+
   // Transfers (F-03): the scanned piece and its scan, required unless ORBES Client Services assists an acceptance.
   const transferAcceptRequireProduct = field('TRANSFER_ACCEPT_REQUIRE_PRODUCT', zSwitch, e.TRANSFER_ACCEPT_REQUIRE_PRODUCT) ?? true;
 
@@ -428,6 +450,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     adminRequireMfa,
     scanRetentionDays,
     clientServices,
+    careSubscribeUrl,
     transferAcceptRequireProduct,
   };
 
@@ -562,6 +585,7 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
       phone: c.clientServices.phone ? '[set]' : undefined,
       hours: c.clientServices.hours ? '[set]' : undefined,
     },
+    careSubscribeUrl: c.careSubscribeUrl ? '[set]' : undefined,
     transferAcceptRequireProduct: c.transferAcceptRequireProduct,
   };
 }

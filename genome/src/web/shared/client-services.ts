@@ -6,7 +6,8 @@
  * Shared by the verification app (verify/view-model.ts: the contact under a
  * result, in a warranty, under FORGOTTEN PASSWORD?, in MY PIECES) and the
  * legal pages (legal/main.ts, fillContacts: the publisher's contact and the
- * privacy policy's, J-06).
+ * privacy policy's, J-06). Also where SUBSCRIBE of ORBES Care leads
+ * (careSubscribeHref, P-M02: the CARE tab of MY PIECES).
  */
 
 /** A plain mailbox: nothing a mailto: link would read as syntax. */
@@ -41,4 +42,24 @@ export function contactLines(cs: unknown): ContactLines | null {
 /** The tel: link of a number in the international format: `+33 1 23 45 67 89` → `tel:+33123456789`. */
 export function phoneHref(phone: string): string {
   return `tel:+${phone.replace(/\D/g, '')}`;
+}
+
+/**
+ * Where SUBSCRIBE of ORBES Care leads (P-M02, `careSubscribeUrl`, CARE_SUBSCRIBE_URL): an https:// page without
+ * credentials, as the server's rule (config.ts), checked again before it becomes a link; null otherwise, and then the
+ * CARE tab of MY PIECES says subscriptions open soon.
+ */
+export function careSubscribeHref(cs: unknown): string | null {
+  if (cs === null || typeof cs !== 'object') return null;
+  const v = (cs as Record<string, unknown>).careSubscribeUrl;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  if (t.length === 0 || t.length > 2048 || /[\s\p{Cc}]/u.test(t)) return null;
+  let u: URL;
+  try {
+    u = new URL(t);
+  } catch {
+    return null;
+  }
+  return u.protocol === 'https:' && u.hostname !== '' && u.username === '' && u.password === '' ? u.href : null;
 }

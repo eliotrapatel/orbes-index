@@ -266,7 +266,7 @@ export const PIECES = Object.freeze({
   loadFailed: 'Your pieces could not be shown just now.',
   retry: 'TRY AGAIN',
   scan: 'SCAN ORBES CODE',
-  tabs: Object.freeze({ ownership: 'OWNERSHIP', warranty: 'WARRANTY', service: 'SERVICE' }),
+  tabs: Object.freeze({ ownership: 'OWNERSHIP', warranty: 'WARRANTY', service: 'SERVICE', care: 'CARE' }),
   status: Object.freeze({ yours: 'REGISTERED TO YOU', lost: 'REPORTED LOST', stolen: 'REPORTED STOLEN', transfer: 'TRANSFER PENDING', service: 'IN SERVICE' }),
   acquired: Object.freeze({ FIRST_REGISTRATION: 'FIRST REGISTRATION', TRANSFER: 'TRANSFER', RESALE: 'RESALE', ADMIN: 'ORBES CLIENT SERVICES' }),
   verified: 'VERIFIED',
@@ -338,6 +338,28 @@ export const PIECES = Object.freeze({
   withdraw: 'WITHDRAW',
   withdrawn: 'The link has been withdrawn: it no longer leads to the certificate.',
   certificatesFailed: 'Your certificate links could not be shown just now.',
+});
+
+/**
+ * The CARE tab of a piece in MY PIECES (P-M02): the care of its model (the result's CARE text), then ORBES Care, the
+ * subscription that looks after the owner's pieces. SUBSCRIBE opens its page in a new tab once ORBES publishes one
+ * (CARE_SUBSCRIBE_URL); until then, a plain sentence says subscriptions open soon, with nothing to press.
+ */
+export const ORBES_CARE = Object.freeze({
+  /** The label of the model's care instructions. */
+  careLabel: 'CARING FOR THIS PIECE',
+  /** The label of the subscription's presentation, and its accessible name. */
+  label: 'ORBES CARE',
+  lead: 'ORBES Care looks after your pieces, year after year:',
+  benefits: Object.freeze([
+    'An annual care service by the ORBES atelier: inspection, cleaning and polishing.',
+    'Priority repair with ORBES Client Services.',
+    'An extended warranty.',
+  ]),
+  subscribe: 'SUBSCRIBE',
+  /** The accessible name of SUBSCRIBE: it opens another page, in a new tab. */
+  subscribeLabel: 'Subscribe to ORBES Care, in a new tab',
+  soon: 'Subscriptions open soon.',
 });
 
 /**

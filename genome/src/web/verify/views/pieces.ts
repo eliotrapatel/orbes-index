@@ -24,7 +24,7 @@
  *     [ this piece ] [ model ]               the photographs ORBES holds (F-04),
  *   └                      ┘                 on ivory, as on an authentic result
  *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
- *   OWNERSHIP · WARRANTY · SERVICE            tabs (the result's tablist)
+ *   OWNERSHIP · WARRANTY · SERVICE · CARE     tabs (the result's tablist)
  *     REGISTERED TO YOU · SINCE · ACQUIRED · OWNERSHIP · TRANSFER
  *     REPORT LOST / STOLEN  (confirmed: LOST · STOLEN, then CONFIRM REPORT;
  *                           a piece the server would refuse to report, revoked,
@@ -35,6 +35,11 @@
  *                           CREATE LINK; the link shown once, COPY LINK, OPEN;
  *                           the open links, each with WITHDRAW; read again
  *                           after a creation, TRY AGAIN while unreadable)
+ *     CARE (P-M02): CARING FOR THIS PIECE, the model's care (else the
+ *                   general care text), then ORBES CARE: annual care,
+ *                   priority repair, extended warranty; SUBSCRIBE, a text
+ *                   link to its page in a new tab (CARE_SUBSCRIBE_URL), or
+ *                   "Subscriptions open soon." while none is published
  *   ── next piece ──
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
  *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
@@ -70,9 +75,9 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, PHOTOS, PIECES, RELEASES } from '../copy.js';
+import { ACCOUNT_PASSWORD, ORBES_CARE, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
-import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
+import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
@@ -628,7 +633,43 @@ class PieceCard {
       case 'service':
         if (this.services === null) void this.loadServices();
         return this.servicePanel;
+      case 'care':
+        return this.carePanel();
     }
+  }
+
+  /**
+   * CARE (P-M02): the care of the piece's model, as a result's CARE tab reads it, then ORBES Care: what it offers, and
+   * SUBSCRIBE, a text link (the page keeps one hairline button) to its subscription page in a new tab, or a plain
+   * sentence while ORBES publishes none.
+   */
+  private carePanel(): HTMLElement {
+    const offer = careOfferModel(this.deps.contacts);
+    const offerId = `${this.key}-care-offer`;
+    return h(
+      'div',
+      { class: 'panel piece__care' },
+      sectionLabel(ORBES_CARE.careLabel),
+      h('p', { class: 'prose panel__care piece__care-text', text: this.model.care }),
+      h(
+        'section',
+        { class: 'piece__care-offer', attrs: { 'aria-labelledby': offerId } },
+        sectionLabel(offer.label, offerId),
+        h('p', { class: 'prose piece__care-lead', text: offer.lead }),
+        h('ul', { class: 'pieces__benefits piece__care-benefits' }, ...offer.benefits.map((b) => h('li', { class: 'prose pieces__benefit', text: b }))),
+        offer.subscribe
+          ? h(
+              'div',
+              { class: 'ownership__actions' },
+              h('a', {
+                class: 'textlink piece__subscribe',
+                attrs: { href: offer.subscribe.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': offer.subscribe.label },
+                text: offer.subscribe.text,
+              }),
+            )
+          : h('p', { class: 'prose panel__note piece__care-soon', text: offer.soon ?? '' }),
+      ),
+    );
   }
 
   private warrantyPanel(): HTMLElement {

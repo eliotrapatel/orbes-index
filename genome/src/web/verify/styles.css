@@ -2426,6 +2426,18 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
+/* The CARE tab of a piece (P-M02): the model's care under its label, then
+   ORBES CARE, its benefits as the tier's (the hairline list), and SUBSCRIBE
+   (a text link) or the sentence that says subscriptions open soon. */
+.section-label + .piece__care-text,
+.piece__care-lead {
+  margin-top: 10px;
+}
+
+.piece__care-benefits {
+  margin-top: 14px;
+}
+
 .pieces__next {
   margin-top: 28px;
 }

@@ -310,6 +310,26 @@ describe('loadConfig — operations settings', () => {
     expect(issues({ CLIENT_SERVICES_PHONE: '+33 1 23 45 67 89', CLIENT_SERVICES_HOURS: 'Monday\nto Saturday' })).toEqual(['CLIENT_SERVICES_HOURS: must be one line of plain text']);
   });
 
+  it('CARE_SUBSCRIBE_URL (P-M02): optional, none by default, an https:// URL without credentials, masked in the log', () => {
+    expect(loadConfig({}).careSubscribeUrl).toBeNull();
+    expect(loadConfig(PROD).careSubscribeUrl).toBeNull();
+    expect(loadConfig({ CARE_SUBSCRIBE_URL: '' }).careSubscribeUrl).toBeNull();
+    expect(testConfig().careSubscribeUrl).toBeNull();
+    expect(loadConfig({ ...PROD, CARE_SUBSCRIBE_URL: ' https://whop.com/orbes/care ' }).careSubscribeUrl).toBe('https://whop.com/orbes/care');
+    expect(loadConfig({ CARE_SUBSCRIBE_URL: 'https://whop.com/checkout/plan_X1?d=1' }).careSubscribeUrl).toBe('https://whop.com/checkout/plan_X1?d=1');
+    // https only (it becomes a link as it is), no credentials, no space, at most 2 048 characters.
+    for (const bad of ['http://whop.com/orbes', 'javascript:alert(1)', 'whop.com/orbes', '//whop.com/orbes', 'https://user:pw@whop.com/orbes', 'https://whop.com/a b', 'ftp://whop.com', `https://whop.com/${'a'.repeat(2048)}`]) {
+      expect(issues({ CARE_SUBSCRIBE_URL: bad }).map((i) => i.split(':')[0]), bad).toEqual(['CARE_SUBSCRIBE_URL']);
+    }
+    // No warning either way: unset is the expected state until the subscription opens.
+    expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: '395' }))).toEqual([]);
+    expect(configWarnings(loadConfig({ ...PROD, SCAN_RETENTION_DAYS: '395', CARE_SUBSCRIBE_URL: 'https://whop.com/orbes' }))).toEqual([]);
+    const text = JSON.stringify(redactConfig(loadConfig({ CARE_SUBSCRIBE_URL: 'https://whop.com/orbes/care' })));
+    expect(text).not.toContain('whop.com');
+    expect(redactConfig(loadConfig({ CARE_SUBSCRIBE_URL: 'https://whop.com/orbes/care' }))).toMatchObject({ careSubscribeUrl: '[set]' });
+    expect(redactConfig(loadConfig({})).careSubscribeUrl).toBeUndefined();
+  });
+
   it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {
     const c = loadConfig({ RATE_LIMIT_API_PER_MINUTE: '42', RATE_LIMIT_ADMIN_PER_MINUTE: '500' });
     expect(c.rateLimits).toMatchObject({ apiPerMinute: 42, adminPerMinute: 500 });

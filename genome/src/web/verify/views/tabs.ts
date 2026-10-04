@@ -1,6 +1,6 @@
 /**
  * PRODUCT · WARRANTY · CARE · OWNERSHIP on a result, OWNERSHIP · WARRANTY ·
- * SERVICE on each piece of MY PIECES — an ARIA tablist (manual activation
+ * SERVICE · CARE on each piece of MY PIECES (P-M02) — an ARIA tablist (manual activation
  * is unnecessary here: panels are light, so arrow keys select).
  * Keyboard: ←/→ move, Home/End jump; only the selected tab is in the tab
  * order (roving tabindex). Panels are built lazily on first selection.

@@ -65,7 +65,7 @@ import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CEREMONY, CIRCLE, CLAIM_HELD, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CEREMONY, CIRCLE, CLAIM_HELD, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
@@ -1064,12 +1064,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
     await textOf(card.locator('.genome__meta'), `${older.genome.fingerprint} · GENOME-01`);
     await textsOf(card.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE']);
+    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
     await attrOf(card.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
     await textOf(card.locator('.piece__ownership .rows'), /^SINCE \d{1,2} [A-Z]{3} \d{4} ACQUIRED FIRST REGISTRATION OWNERSHIP VERIFIED$/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    const listControls = ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'REPORT LOST / STOLEN', 'CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE'];
+    const listControls = ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE', 'REPORT LOST / STOLEN', 'CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE'];
     await keepsFloors(page, listControls);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces.png'), fullPage: true });
     for (const width of PHONE_WIDTHS) {
@@ -1084,17 +1084,31 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('WARRANTY'), 'aria-selected', 'true');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('WARRANTY');
-    expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1]);
+    expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1, -1]);
     await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty until 20 September 2028\./);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('SERVICE'), 'aria-selected', 'true');
     // The service history, without staff notes.
     await textOf(card.getByRole('tabpanel').locator('.rows'), /^POLISH \d{1,2} [A-Z]{3} \d{4} · PARIS ATELIER$/);
     await countOf(card.getByText('staff note'), 0);
+    // CARE (P-M02): the care of the piece's model, then ORBES Care; no subscription page is published on this server,
+    // so a plain sentence says subscriptions open soon, with nothing to press.
+    await page.keyboard.press('ArrowRight');
+    await attrOf(tab('CARE'), 'aria-selected', 'true');
+    const carePanel = card.getByRole('tabpanel');
+    await textsOf(carePanel.locator('.section-label'), ['CARING FOR THIS PIECE', 'ORBES CARE']);
+    await textOf(carePanel.locator('.piece__care-text'), 'Store on its own in the ORBES pouch. Wipe with a soft, dry cloth after wearing; avoid perfume, chlorine and abrasive cleaners.');
+    await visible(carePanel.getByRole('region', { name: 'ORBES CARE' }));
+    await textsOf(carePanel.locator('.pieces__benefit'), [...ORBES_CARE.benefits]);
+    await textOf(carePanel.locator('.piece__care-soon'), 'Subscriptions open soon.');
+    await countOf(carePanel.getByRole('link'), 0);
+    await countOf(carePanel.getByRole('button'), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
     await page.keyboard.press('End');
-    await attrOf(tab('SERVICE'), 'aria-selected', 'true');
+    await attrOf(tab('CARE'), 'aria-selected', 'true');
     await page.keyboard.press('Home');
     await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('OWNERSHIP');
@@ -1102,15 +1116,35 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(other.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await countOf(other.getByRole('tabpanel'), 1);
 
-    // A reload stays on MY PIECES, signed in.
+    // A reload stays on MY PIECES, signed in. This time the server publishes the subscription page of ORBES Care
+    // (CARE_SUBSCRIBE_URL, served by GET /api/v1/client-services): CARE offers SUBSCRIBE, a text link in a new tab.
+    const careUrl = 'https://whop.com/orbes/care';
+    await page.route('**/api/v1/client-services', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...((await response.json()) as object), careSubscribeUrl: careUrl } });
+    });
     await page.reload();
     await textOf(page.locator('h1'), 'MY PIECES');
     await countOf(pieces, 2);
     expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    await tab('CARE').click();
+    const subscribe = card.getByRole('tabpanel').getByRole('link', { name: 'Subscribe to ORBES Care, in a new tab' });
+    await textOf(subscribe, 'SUBSCRIBE');
+    await attrOf(subscribe, 'href', careUrl);
+    await attrOf(subscribe, 'target', '_blank');
+    await attrOf(subscribe, 'rel', 'noopener noreferrer');
+    expect(await subscribe.getAttribute('class')).toMatch(/\btextlink\b/);
+    await countOf(card.locator('.piece__care-soon'), 0);
+    // The page keeps its one hairline button, SCAN ORBES CODE.
+    await countOf(page.locator('.view--pieces .btn'), 1);
+    await keepsFloors(page, ['SUBSCRIBE']);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-care.png'), fullPage: true });
+    await page.unroute('**/api/v1/client-services');
+    await tab('OWNERSHIP').click();
 
     // REPORT LOST / STOLEN, confirmed: LOST or STOLEN first, then CONFIRM REPORT.
     await card.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
-    await textOf(card.locator('.section-label'), 'REPORT LOST / STOLEN');
+    await textOf(card.locator('.piece__ownership .section-label'), 'REPORT LOST / STOLEN');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORT LOST / STOLEN');
     await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
     await textOf(card.getByRole('alert'), 'Choose LOST or STOLEN.');

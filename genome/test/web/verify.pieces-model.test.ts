@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
-import { CONTACT, PIECES } from '../../src/web/verify/copy.js';
-import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows } from '../../src/web/verify/pieces-model.js';
+import { CONTACT, DEFAULT_CARE, ORBES_CARE, PIECES } from '../../src/web/verify/copy.js';
+import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows } from '../../src/web/verify/pieces-model.js';
 import type { OwnedPiece, ServiceRecord } from '../../src/web/verify/types.js';
 import { pieceContactModel, productLines, resultViewModel, warrantyModel } from '../../src/web/verify/view-model.js';
 
@@ -36,6 +36,7 @@ function piece(extra: Partial<OwnedPiece> = {}): OwnedPiece {
     warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
     imageUrl: null,
     photoUrl: null,
+    care: 'Store on its own in the ORBES pouch.',
     ...extra,
   };
 }
@@ -81,9 +82,20 @@ describe('MY PIECES: a piece on its plate', () => {
     expect(pieceModel(piece({ photoUrl: 'https://example.com/a.jpg', imageUrl: `${ref}?x` })).photos).toEqual([]);
   });
 
-  it('opens on OWNERSHIP, then WARRANTY and SERVICE', () => {
-    expect(PIECE_TABS).toEqual(['ownership', 'warranty', 'service']);
-    expect(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t])).toEqual(['OWNERSHIP', 'WARRANTY', 'SERVICE']);
+  it('opens on OWNERSHIP, then WARRANTY, SERVICE and CARE (P-M02): four labels, the width of the result\'s four', () => {
+    expect(PIECE_TABS).toEqual(['ownership', 'warranty', 'service', 'care']);
+    expect(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t])).toEqual(['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
+    // SERVICE in place of the result's PRODUCT: the same seven letters, so the four fit as the result's do.
+    const result = resultViewModel({
+      state: 'AUTHENTIC',
+      scanId: '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b',
+      verifiedAt: '2026-10-01T08:30:00.000Z',
+      title: 'AUTHENTIC',
+      message: 'm',
+      product: { productId: 'O26-J-00184', category: { code: 'J', name: 'Jewelry' }, model: 'M', type: 'T', material: 'S', createdYear: 2026 },
+    });
+    const width = (labels: string[]) => labels.join('').length;
+    expect(width(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t]))).toBe(width(result.tabs.map((t) => t.toUpperCase())));
   });
 
   it('says since when the piece is the owner\'s, how it came, whether the ownership is verified', () => {
@@ -139,6 +151,59 @@ describe('MY PIECES: a piece on its plate', () => {
     });
     expect(vm.warranty).toEqual(warrantyModel(w));
     expect(pieceModel(piece({ warranty: { status: 'BROKEN' as 'ACTIVE' } })).warranty).toBeUndefined();
+  });
+});
+
+describe('MY PIECES: the CARE tab (P-M02)', () => {
+  it('shows the care of the piece\'s model as a result\'s CARE tab does, else the general care text', () => {
+    expect(pieceModel(piece()).care).toBe('Store on its own in the ORBES pouch.');
+    expect(pieceModel(piece({ care: '  Wipe with a soft cloth.  ' })).care).toBe('Wipe with a soft cloth.');
+    for (const care of [null, '', '   ']) expect(pieceModel(piece({ care })).care, String(care)).toBe(DEFAULT_CARE);
+    // The very text of the result's CARE tab for the same model.
+    const vm = resultViewModel({
+      state: 'AUTHENTIC',
+      scanId: '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b',
+      verifiedAt: '2026-10-01T08:30:00.000Z',
+      title: 'AUTHENTIC',
+      message: 'm',
+      product: { productId: 'O26-J-00184', category: { code: 'J', name: 'Jewelry' }, model: 'M', type: 'T', material: 'S', createdYear: 2026, care: 'Store on its own in the ORBES pouch.' },
+    });
+    expect(pieceModel(piece()).care).toBe(vm.care);
+  });
+
+  it('presents ORBES Care: annual care, priority repair and an extended warranty', () => {
+    const m = careOfferModel({});
+    expect(m.label).toBe('ORBES CARE');
+    expect(m.benefits).toHaveLength(3);
+    expect(m.benefits[0]).toMatch(/annual care/i);
+    expect(m.benefits[1]).toMatch(/priority repair/i);
+    expect(m.benefits[2]).toMatch(/extended warranty/i);
+  });
+
+  it('offers SUBSCRIBE, a link to the subscription page, only when ORBES publishes an https one; otherwise says subscriptions open soon', () => {
+    const url = 'https://whop.com/orbes/care';
+    expect(careOfferModel({ careSubscribeUrl: url })).toMatchObject({
+      subscribe: { href: url, text: 'SUBSCRIBE', label: 'Subscribe to ORBES Care, in a new tab' },
+      soon: null,
+    });
+    // The contact of ORBES Client Services is not needed for it, nor does it need the link.
+    expect(careOfferModel({ email: 'clientservices@theorbes.com', careSubscribeUrl: url }).subscribe?.href).toBe(url);
+    for (const cs of [undefined, {}, { email: 'clientservices@theorbes.com' }]) {
+      expect(careOfferModel(cs)).toMatchObject({ subscribe: null, soon: 'Subscriptions open soon.' });
+    }
+    // Checked again in the browser, as the server does (config.ts): https only, no credentials, no space.
+    for (const bad of ['http://whop.com/orbes', 'javascript:alert(1)', 'https://user:pw@whop.com/orbes', 'https://whop.com/a b', '//whop.com/orbes', 'whop.com/orbes', `https://whop.com/${'a'.repeat(2048)}`, '']) {
+      expect(careOfferModel({ careSubscribeUrl: bad }), bad).toMatchObject({ subscribe: null, soon: ORBES_CARE.soon });
+    }
+    expect(careOfferModel({ careSubscribeUrl: 42 as unknown as string }).subscribe).toBeNull();
+  });
+
+  it('speaks of pieces and care, never products, in the brand\'s words', () => {
+    const lines = [ORBES_CARE.careLabel, ORBES_CARE.label, ORBES_CARE.lead, ...ORBES_CARE.benefits, ORBES_CARE.subscribe, ORBES_CARE.subscribeLabel, ORBES_CARE.soon];
+    for (const line of lines) expect(line, line).not.toMatch(/\bproducts?\b|\btokens?\b|\bNFT\b|crypto|lottery|\bREAL\b|alert|warning|!/i);
+    for (const label of [ORBES_CARE.careLabel, ORBES_CARE.label, ORBES_CARE.subscribe]) expect(label).toMatch(/^[A-Z ]+$/);
+    // A plain sentence, nothing to press, while no subscription page is published.
+    expect(ORBES_CARE.soon).toBe('Subscriptions open soon.');
   });
 });
 

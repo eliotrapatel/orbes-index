@@ -99,6 +99,27 @@ describe('public API', () => {
         await cs.close();
       }
     });
+
+    it('serves where SUBSCRIBE of ORBES Care leads (CARE_SUBSCRIBE_URL, P-M02) once it is set, beside the contact or alone', async () => {
+      const url = 'https://whop.com/orbes/care';
+      const both = await createHarness({ config: { clientServices: { email: 'clientservices@theorbes.com' }, careSubscribeUrl: url } });
+      try {
+        const res = await both.client().get('/api/v1/client-services');
+        expect(safeJson(res)).toEqual({ email: 'clientservices@theorbes.com', careSubscribeUrl: url });
+        expect(res.headers['cache-control']).toBe('public, max-age=300');
+      } finally {
+        await both.close();
+      }
+      const alone = await createHarness({ config: { careSubscribeUrl: url } });
+      try {
+        expect(safeJson(await alone.client().get('/api/v1/client-services'))).toEqual({ careSubscribeUrl: url });
+      } finally {
+        await alone.close();
+      }
+      // Unset (the default): nothing, and the CARE tab says subscriptions open soon.
+      expect(h.ctx.config.careSubscribeUrl).toBeNull();
+      expect(safeJson(await h.client().get('/api/v1/client-services'))).not.toHaveProperty('careSubscribeUrl');
+    });
   });
 
   describe('POST /api/v1/verify', () => {

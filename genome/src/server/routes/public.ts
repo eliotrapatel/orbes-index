@@ -128,11 +128,13 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
   });
 
   // How ORBES Client Services is reached (CLIENT_SERVICES_*), for the contact the verification app offers on
-  // non-authentic results and on a warranty that no longer applies. `{}` when nothing is configured: no contact shown.
+  // non-authentic results and on a warranty that no longer applies; and where SUBSCRIBE of ORBES Care leads
+  // (CARE_SUBSCRIBE_URL, P-M02: the CARE tab of MY PIECES). `{}` when nothing is configured: no contact, no SUBSCRIBE.
   app.get('/api/v1/client-services', async (_request, reply) => {
     reply.header('cache-control', 'public, max-age=300');
     const { email, phone, hours } = ctx.config.clientServices;
-    return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}) };
+    const careSubscribeUrl = ctx.config.careSubscribeUrl;
+    return { ...(email ? { email } : {}), ...(phone ? { phone } : {}), ...(hours ? { hours } : {}), ...(careSubscribeUrl ? { careSubscribeUrl } : {}) };
   });
 
   // The photographs of an authentic result (§8.6): a model's reference photograph, a piece's own; and those of the

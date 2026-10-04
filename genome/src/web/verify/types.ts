@@ -87,11 +87,16 @@ export interface VerifyOutcome {
   staffScan?: true;
 }
 
-/** GET /api/v1/client-services: how ORBES Client Services is reached; `{}` when nothing is configured. */
+/**
+ * GET /api/v1/client-services: how ORBES Client Services is reached, and where SUBSCRIBE of ORBES Care leads (P-M02,
+ * CARE_SUBSCRIBE_URL); `{}` when nothing is configured.
+ */
 export interface ClientServices {
   email?: string;
   phone?: string;
   hours?: string;
+  /** An https:// page, opened in a new tab from the CARE tab of MY PIECES; absent: "Subscriptions open soon". */
+  careSubscribeUrl?: string;
 }
 
 /** Where the customer saw or bought the piece of a result that was not authentic (POST /api/v1/reports). */
@@ -177,6 +182,8 @@ export interface OwnedPiece {
   imageUrl: string | null;
   /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`, or null. */
   photoUrl: string | null;
+  /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
+  care: string | null;
 }
 
 /** One after-sales service of a piece (GET /api/v1/products/:productId/service-history), without staff notes. */

@@ -121,6 +121,8 @@ services:
       CLIENT_SERVICES_EMAIL: ${CLIENT_SERVICES_EMAIL:-}
       CLIENT_SERVICES_PHONE: ${CLIENT_SERVICES_PHONE:-}
       CLIENT_SERVICES_HOURS: ${CLIENT_SERVICES_HOURS:-}
+      # ORBES Care (P-M02): the subscription page of SUBSCRIBE; unset = "Subscriptions open soon".
+      CARE_SUBSCRIBE_URL: ${CARE_SUBSCRIBE_URL:-}
       # Optional tunables (genome/.env.example); unset = the app's defaults.
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ADMIN_REQUIRE_MFA: ${ADMIN_REQUIRE_MFA:-}

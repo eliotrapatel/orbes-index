@@ -5,16 +5,18 @@
  *
  * The owner's view says what the registry holds about their own piece: since when it is theirs, how
  * they acquired it, whether their ownership is verified, a transfer under way, the warranty, the
- * services, their own declaration (LOST or STOLEN), and the photographs ORBES holds of it (F-04), as an
- * authentic result shows them. It never names an internal status.
+ * services, their own declaration (LOST or STOLEN), the photographs ORBES holds of it (F-04), as an
+ * authentic result shows them, and the care of its model with ORBES Care (P-M02). It never names an internal status.
  */
-import { PIECES } from './copy.js';
-import type { IncidentType, OwnedPiece, ServiceRecord } from './types.js';
+import { careSubscribeHref } from '../shared/client-services.js';
+import { DEFAULT_CARE, ORBES_CARE, PIECES } from './copy.js';
+import type { ClientServices, IncidentType, OwnedPiece, ServiceRecord } from './types.js';
 import { formatDate, formatDateLong, photoModels, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
 
-export type PieceTabId = 'ownership' | 'warranty' | 'service';
+export type PieceTabId = 'ownership' | 'warranty' | 'service' | 'care';
 
-export const PIECE_TABS: readonly PieceTabId[] = ['ownership', 'warranty', 'service'];
+/** OWNERSHIP · WARRANTY · SERVICE · CARE (P-M02): four labels, the width of the result's four. */
+export const PIECE_TABS: readonly PieceTabId[] = ['ownership', 'warranty', 'service', 'care'];
 
 export const PIECE_TAB_LABELS: Readonly<Record<PieceTabId, string>> = PIECES.tabs;
 
@@ -55,6 +57,31 @@ export interface PieceModel {
    */
   certificateOffered: boolean;
   warranty?: { status: string; rows: Row[]; note: string };
+  /** The CARE tab (P-M02): the model's care instructions, else the general care text of a result's CARE tab. */
+  care: string;
+}
+
+/**
+ * ORBES Care in the CARE tab (P-M02): its presentation, then SUBSCRIBE, a link to the subscription page in a new tab
+ * when ORBES publishes one (`careSubscribeUrl`, https only, checked again here); otherwise `soon`, a plain sentence.
+ */
+export interface CareOfferModel {
+  label: string;
+  lead: string;
+  benefits: string[];
+  subscribe: { href: string; text: string; label: string } | null;
+  soon: string | null;
+}
+
+export function careOfferModel(cs: ClientServices | undefined): CareOfferModel {
+  const href = careSubscribeHref(cs);
+  return {
+    label: ORBES_CARE.label,
+    lead: ORBES_CARE.lead,
+    benefits: [...ORBES_CARE.benefits],
+    subscribe: href ? { href, text: ORBES_CARE.subscribe, label: ORBES_CARE.subscribeLabel } : null,
+    soon: href ? null : ORBES_CARE.soon,
+  };
 }
 
 const PRODUCT_ID = /^O[0-9]{2}-[A-Z]-[0-9]{5,6}$/;
@@ -125,6 +152,7 @@ export function pieceModel(p: OwnedPiece): PieceModel {
     incident,
     // A server that predates the flag sends none: offered, as before (the server still refuses what it must).
     certificateOffered: notReported && p.certificateAllowed !== false,
+    care: typeof p.care === 'string' && p.care.trim() ? p.care.trim() : DEFAULT_CARE,
   };
   const genome = pieceGenomeModel(p.genome);
   if (genome) model.genome = genome;

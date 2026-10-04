@@ -845,6 +845,12 @@ describe('OwnershipService', () => {
       });
       // No raw lifecycle status in the owner view.
       expect(list[0]).not.toHaveProperty('status');
+      // The model's care instructions (P-M02, the CARE tab of MY PIECES), as the model holds them now; null without.
+      const { model_id } = await t.db.selectFrom('products').select('model_id').where('id', '=', p.id).executeTakeFirstOrThrow();
+      await t.db.updateTable('models').set({ care_instructions: null }).where('id', '=', model_id).execute();
+      expect((await ownership.listForAccount(owner.id))[0].care).toBeNull();
+      await t.db.updateTable('models').set({ care_instructions: 'Wipe with a soft, dry cloth.' }).where('id', '=', model_id).execute();
+      expect((await ownership.listForAccount(owner.id))[0].care).toBe('Wipe with a soft, dry cloth.');
       expect(await ownership.listForAccount((await account()).id)).toEqual([]);
     });
 
