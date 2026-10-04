@@ -291,6 +291,11 @@ describe('the console of the LIVE RELEASES', () => {
     });
     expect(livePartProblem(r, 'times', { ...livePartValues(r, 'times'), silhouetteAt: 'soon' })).toMatch(/the silhouette, or leave it empty/);
     expect(livePartProblem(r, 'times', { ...livePartValues(r, 'times'), roomOpensMinutes: '61' })).toMatch(/1 to 60 minutes/);
+    // Published and announced later: the announcement emptied would be the publication, past, the release announced at once.
+    const hidden = release({ phase: 'HIDDEN', publishedAt: '2026-11-01T09:00:00.000Z', announcedAt: '2026-11-10T09:00:00.000Z', announceAt: '2026-11-10T09:00:00.000Z' });
+    expect(livePartProblem(hidden, 'times', { ...livePartValues(hidden, 'times'), announceAt: '' })).toBe('A published release keeps an announcement time; set one later than now.');
+    expect(livePartProblem(hidden, 'times', livePartValues(hidden, 'times'))).toBeNull();
+    expect(livePartProblem(r, 'times', { ...livePartValues(r, 'times'), announceAt: '' })).toBeNull();
     // Turns: the release's, and the overrides per tier (PALLADIUM: 10 minutes to pay).
     expect(livePartValues(r, 'turns')).toMatchObject({ turnSeconds: '30', payMinutes: '5', 'pay:3': '10', 'turn:3': '', 'pay:0': '' });
     expect(livePartChange(r, 'turns', { ...livePartValues(r, 'turns'), 'turn:2': '60', 'pay:3': '' })).toEqual({ tierWindows: [{ tier: 2, turnSeconds: 60, payMinutes: null }] });
@@ -308,6 +313,9 @@ describe('the console of the LIVE RELEASES', () => {
     const draft = release();
     expect(liveActions(draft, 'AUDITOR', NOW)).toEqual({ edit: false, publish: false, cancel: false, boardLink: false, pause: false, resume: false, extend: false, addPieces: false, message: false, end: false });
     expect(liveActions(draft, 'OPERATOR', NOW)).toMatchObject({ edit: true, publish: true, cancel: true, boardLink: true, pause: false, extend: false, end: false });
+    // Published, not announced yet: the sizes change in the settings, not by ADD PIECES (the quantity line follows them).
+    const hidden = release({ phase: 'HIDDEN', editable: true, publishedAt: '2026-11-01T09:00:00.000Z' });
+    expect(liveActions(hidden, 'OPERATOR', NOW)).toMatchObject({ edit: true, cancel: true, addPieces: false, extend: true, message: true });
     const announced = release({ phase: 'ANNOUNCED', editable: false, publishedAt: '2026-11-01T09:00:00.000Z' });
     expect(liveActions(announced, 'OPERATOR', NOW)).toMatchObject({ edit: false, publish: false, cancel: true, addPieces: true, extend: true, message: true, pause: false });
     const live = release({ phase: 'LIVE', editable: false, publishedAt: '2026-11-01T09:00:00.000Z' });

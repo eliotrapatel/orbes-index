@@ -202,21 +202,24 @@ export class LiveHub {
 
   /**
    * Open a console's stream (the route has checked its session and role): the live board, its emails as `inClear`
-   * says, for as long as its session reads the console. 429 LIVE_STREAMS_LIMIT past the console user's streams; 204 for a
-   * release that is not published, cancelled or over (the page then reads the board once).
+   * says, for as long as its session reads the console. False, nothing sent, for a release that is not a LIVE RELEASE
+   * (the route's 404); 429 LIVE_STREAMS_LIMIT past the console user's streams; 204 for a release that is not published,
+   * cancelled or over (the page then reads the board once).
    */
-  async openConsole(request: FastifyRequest, reply: FastifyReply, dropId: string, staff: { adminId: string; sessionId: string; inClear: boolean }): Promise<void> {
+  async openConsole(request: FastifyRequest, reply: FastifyReply, dropId: string, staff: { adminId: string; sessionId: string; inClear: boolean }): Promise<boolean> {
     if (!this.console) throw new DomainError('NOT_FOUND', 404, 'Not found.');
+    // The board read once: it says whether the release exists, then starts the stream.
+    const board = await this.consoleBoard(dropId, false);
+    if (!board) return false;
     const key = `admin:${staff.adminId}`;
     const held = this.accounts.get(key) ?? 0;
     if (held >= this.perAccount) throw liveStreamsLimit();
     this.accounts.set(key, held + 1);
     let registered = false;
     try {
-      const board = await this.consoleBoard(dropId, false);
-      if (!board || board.phase === 'DRAFT' || board.phase === 'CANCELLED' || board.over) {
+      if (board.phase === 'DRAFT' || board.phase === 'CANCELLED' || board.over) {
         reply.code(204).send();
-        return;
+        return true;
       }
       const stream: ConsoleStream = { kind: 'console', dropId, adminId: staff.adminId, sessionId: staff.sessionId, inClear: staff.inClear, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
@@ -225,6 +228,7 @@ export class LiveHub {
     } finally {
       if (!registered) this.release(key);
     }
+    return true;
   }
 
   /**

@@ -8,7 +8,8 @@
  *    models and the collection of its rule, the per-tier windows);
  *  - edit everything before the announcement (a published release announced later too), the lists replaced, their ids
  *    kept, the quantity line following the stock while it is the default, nothing written when nothing changes; after
- *    the announcement only ADD PIECES raises the stock (409 LIVE_ANNOUNCED);
+ *    the announcement only ADD PIECES raises the stock (409 LIVE_ANNOUNCED), and not before it (409 LIVE_NOT_ANNOUNCED); a
+ *    published release keeps its announcement time;
  *  - publish, with a post of the circle shown from the announcement and kept in step until then, its link naming the
  *    release once its name is revealed; cancel before the room opens only, the scheduled post withdrawn;
  *  - the silhouette (an image body), the boutique board's link issued once and revoked;
@@ -270,6 +271,16 @@ describe('LIVE RELEASES: the console', () => {
       const published = safeJson(await op.post(`/api/admin/live/${r.id}/publish`, {})) as Json;
       expect(published).toMatchObject({ phase: 'HIDDEN', editable: true });
       expect((await op.patch(`/api/admin/live/${r.id}`, { priceMinor: 500_000 })).statusCode).toBe(200);
+      // Until the announcement the stock is a setting, its default quantity line following it: no ADD PIECES yet.
+      const early = await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[0].id, pieces: 2 });
+      expect(early.statusCode).toBe(409);
+      expect(errorOf(early)).toMatchObject({ code: 'LIVE_NOT_ANNOUNCED', message: expect.stringMatching(/in the settings until the announcement/) });
+      expect(await audits('drop.live.stock', r.id)).toHaveLength(0);
+      // Emptied once published, the announcement would be the publication, past: refused, the release still hidden.
+      const emptied = await op.patch(`/api/admin/live/${r.id}`, { announceAt: null });
+      expect(emptied.statusCode).toBe(400);
+      expect(errorOf(emptied).message).toBe('A published release keeps an announcement time; set one later than now.');
+      expect(safeJson(await op.get(`/api/admin/live/${r.id}`)) as Json).toMatchObject({ phase: 'HIDDEN', editable: true, quantityLine: '5 PIECES', sizes: [{ stock: 3 }, { stock: 2 }] });
       h.clock.advance(HOUR);
       const announced = safeJson(await op.get(`/api/admin/live/${r.id}`)) as Json;
       expect(announced).toMatchObject({ phase: 'ANNOUNCED', editable: false, priceMinor: 500_000 });
@@ -560,6 +571,8 @@ describe('LIVE RELEASES: the console', () => {
       await secure(b, r.id);
       const addons = (safeJson(await op.get(`/api/admin/live/${r.id}`)) as Json).addons as Json[];
       await f.live.setAddons(a.id, r.id, [addons[0]!.id, addons[1]!.id], a.actor);
+      // b's only add-on starts with « = »: its CSV cell starts with it, read as text.
+      await f.live.setAddons(b.id, r.id, [addons[1]!.id], b.actor);
       await f.live.confirm(a.id, r.id, a.actor);
       h.clock.advance(SECOND);
       await f.live.confirm(b.id, r.id, b.actor);
@@ -582,7 +595,7 @@ describe('LIVE RELEASES: the console', () => {
         totalMinor: 2 * (480_000 + 15_000),
         resolution: null,
       });
-      expect(list.items[1]).toMatchObject({ email: b.email, size: { label: '54' }, quantity: 1, totalMinor: 480_000 });
+      expect(list.items[1]).toMatchObject({ email: b.email, size: { label: '54' }, quantity: 1, addons: [{ label: '=GIFT BOX', priceMinor: 0 }], totalMinor: 480_000 });
       expect(((safeJson(await auditor.get(`/api/admin/live/${r.id}/reservations`)) as { items: Json[] }).items[0]!.email)).toBe(`${a.email[0]}***@example.com`);
 
       expect((await auditor.post(`/api/admin/live/${r.id}/entries/${ea.id}/resolve`, { resolution: 'CONCLUDED' })).statusCode).toBe(403);
@@ -611,6 +624,8 @@ describe('LIVE RELEASES: the console', () => {
       expect(lines[0]).toBe('"reference","entry","account","size","pieces","currency","price","add-ons","total","confirmed at","resolution","note","handled by","handled at"');
       expect(lines[1]).toContain(`"${liveReference(ea.id)}","${ea.id}","${a.email}","52","2","EUR","4800.00","ENGRAVING (150.00); =GIFT BOX (0.00)","9900.00"`);
       expect(lines[1]).toContain('"CONCLUDED","Paid by transfer; delivered in Paris."');
+      // No formula run: a cell starting with « = » is prefixed with an apostrophe.
+      expect(lines[2]).toContain(`"${b.email}","54","1","EUR","4800.00","'=GIFT BOX (0.00)","4800.00"`);
       const masked = await auditor.get(`/api/admin/live/${r.id}/reservations.csv`);
       expect(masked.body).not.toContain(a.email);
       expect(masked.body).toContain(`${a.email[0]}***@example.com`);

@@ -10,8 +10,9 @@
  *  2. A release live now: the board follows the console's stream (no reload): the line, LET IN, the turns given by the
  *     engine, a seal held, FREE, REMOVE (ADMIN), PAUSE and RESUME, a host message, ADD PIECES with what the quantity line
  *     promised; Client Services concludes a reservation with a note and downloads the CSV; END NOW after the typed phrase.
- *  3. An OPERATOR runs the controls but neither ends nor removes; an AUDITOR reads the board, the line and the
- *     reservations with the emails masked, without one action.
+ *  3. An OPERATOR runs the controls but neither ends nor removes; a page left while its open entries are on their way
+ *     starts no stream once they arrive, the page on screen keeping its own; an AUDITOR reads the board, the line and
+ *     the reservations with the emails masked, without one action.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -190,6 +191,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     }
     await go(p, '#/club?tab=drops', 'Club');
     await expect.poll(() => p.locator('#live-releases .empty__text').textContent()).toMatch(/^No live release yet/);
+    // One primary action on the tab: New live release; a draw's New release beside it, a ghost.
+    expect(await p.locator('.club__drops .cbtn--primary').count()).toBe(1);
+    expect(await p.locator('[data-testid=live-new]').getAttribute('class')).toContain('cbtn--primary');
+    expect(await p.locator('[data-testid=drop-new]').getAttribute('class')).toContain('cbtn--ghost');
     await p.click('[data-testid=live-new]');
     await p.selectOption('dialog select[name=modelId]', modelId);
     await p.fill('dialog input[name=title]', 'THE MONOLITHE RING');
@@ -422,6 +427,48 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(await o.locator('[data-testid=live-end]').count()).toBe(0);
     expect(await o.locator('[data-testid=live-remove]').count()).toBe(0);
     expect(await o.locator('[data-testid=live-entry-account]').first().textContent()).toBe(w.email);
+
+    // A stale page starts nothing: the console leaves a release's page while its open entries are still on their way;
+    // once they arrive, the page now on screen keeps the one stream, and its board still follows it.
+    await o.addInitScript(() => {
+      const Native = window.EventSource;
+      const all: EventSource[] = [];
+      window.EventSource = class extends Native {
+        constructor(url: string | URL, init?: EventSourceInit) {
+          super(url, init);
+          all.push(this);
+        }
+      };
+      (window as unknown as { __streams: () => string[] }).__streams = () => all.filter((e) => e.readyState !== EventSource.CLOSED).map((e) => new URL(e.url).pathname);
+    });
+    await o.reload();
+    await expect.poll(() => o.locator('[data-testid=live-pause]').count()).toBe(1);
+    const streams = () => o.evaluate(() => (window as unknown as { __streams: () => string[] }).__streams());
+    await expect.poll(streams).toEqual([`/api/admin/live/${live2.id}/stream`]);
+    let arrive!: () => void;
+    const held = new Promise<void>((resolve) => (arrive = resolve));
+    let asked!: () => void;
+    const pending = new Promise<void>((resolve) => (asked = resolve));
+    await o.route(
+      (u) => u.pathname === `/api/admin/live/${r.id}/entries` && u.searchParams.get('status') === 'OPEN',
+      async (route) => {
+        asked();
+        await held;
+        await route.continue();
+      },
+    );
+    await o.evaluate((h) => (location.hash = h), `#/club/live/${r.id}?status=OPEN`);
+    await pending;
+    await go(o, '#/club?tab=drops', 'Club');
+    await go(o, `#/club/live/${live2.id}`, 'THE SECOND RING');
+    await expect.poll(streams).toEqual([`/api/admin/live/${live2.id}/stream`]);
+    arrive();
+    await sleep(1000);
+    expect(await streams()).toEqual([`/api/admin/live/${live2.id}/stream`]);
+    await ctx.services.live.message(live2.id, 'The line moves in its order.', admin);
+    await expect.poll(() => o.locator('[data-testid=live-message]').textContent(), { timeout: 10_000 }).toContain('« The line moves in its order. »');
+    expect(await o.locator('[data-testid=live-updated]').textContent()).toMatch(/^LIVE · /);
+    await o.unrouteAll();
     await o.context().close();
 
     // An AUDITOR reads the board, the line and the reservations, the emails masked, without one action.

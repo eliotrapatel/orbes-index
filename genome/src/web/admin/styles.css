@@ -3115,6 +3115,14 @@ a.bar__label:hover {
   margin: 6px 0 18px;
 }
 
+/* The state and its marks: the polite region, apart from the time of the last update. */
+.live__marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
+}
+
 .live__updated,
 .live__note {
   font-size: var(--fs-micro);

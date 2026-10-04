@@ -143,10 +143,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const published = hasBoard(r.phase);
   const [boardRead, entries, reservations] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
-    published && status && status !== 'OPEN' ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
+    published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
     published ? ctx.api.liveReservations(id, reservationsPage, 50) : Promise.resolve(null),
   ]);
-  // The console moved on while the release was read: this page is stale, and starts nothing.
+  // The console moved on while the release was read: this page is stale, and starts nothing. Every read is above this
+  // line, so the follower below starts only for the page on screen.
   if (asked !== screens) return h('div', { class: 'view view--live' });
 
   const role = ctx.session.admin.role;
@@ -160,7 +161,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   // ── The live board ───────────────────────────────────────────────────────
   let board: LiveBoard | null = boardRead?.board ?? null;
-  const stateLine = h('p', { class: 'live__state', attrs: { 'aria-live': 'polite' }, data: { testid: 'live-board-state' } });
+  // Only the state and its marks are announced, and only when they change: the time of the last update is not.
+  const stateMarks = h('span', { class: 'live__marks', attrs: { 'aria-live': 'polite' } });
+  const updated = h('span', { class: 'live__updated', data: { testid: 'live-updated' } });
+  const stateLine = h('p', { class: 'live__state', data: { testid: 'live-board-state' } }, stateMarks, updated);
+  let stateKey = '';
   const figures = h('div', { class: ['kpis', 'live__figures'] });
   const messageLine = h('p', { class: 'live__message', data: { testid: 'live-message' } });
   const sizesBox = h('div', { class: 'live__sizes' });
@@ -247,17 +252,21 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     },
   ];
 
-  let lastUpdate = '';
   const render = (b: LiveBoard, via: 'stream' | 'poll' | 'read') => {
     board = b;
-    lastUpdate = `${via === 'stream' ? 'LIVE' : 'READ'} · ${formatDateTime(ctx.now(), { seconds: true })}`;
-    mount(
-      stateLine,
-      statusMark(liveStateLabel({ phase: b.phase, endedReason: b.endedReason }), toneOf('livePhase', b.phase)),
-      b.paused ? statusMark('PAUSED', 'alert') : null,
-      b.phase === 'ENDED' && !b.over ? h('span', { class: 'live__note' }, 'Turns and holds finish at their deadlines') : null,
-      h('span', { class: 'live__updated', data: { testid: 'live-updated' } }, lastUpdate),
-    );
+    const label = liveStateLabel({ phase: b.phase, endedReason: b.endedReason });
+    const finishing = b.phase === 'ENDED' && !b.over;
+    const key = JSON.stringify([label, b.phase, b.paused, finishing]);
+    if (key !== stateKey) {
+      stateKey = key;
+      mount(
+        stateMarks,
+        statusMark(label, toneOf('livePhase', b.phase)),
+        b.paused ? statusMark('PAUSED', 'alert') : null,
+        finishing ? h('span', { class: 'live__note' }, 'Turns and holds finish at their deadlines') : null,
+      );
+    }
+    updated.textContent = `${via === 'stream' ? 'LIVE' : 'READ'} · ${formatDateTime(ctx.now(), { seconds: true })}`;
     mount(figures, ...liveBoardFigures(b).map((f) => {
       const el = kpi(f.label, f.value, f.note);
       el.setAttribute('data-testid', f.testId);
@@ -393,11 +402,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   let entriesSection: HTMLElement | null = null;
   if (published) {
     const body: Child[] = [filterBar(field('Entries', statusFilter))];
-    if (status === 'OPEN') {
-      const open = await ctx.api.liveEntries(r.id, { status: 'OPEN', page: entriesPage, pageSize: 50 });
-      body.push(table(entryColumns(board), open.items, { caption: 'Open entries', empty: 'No open entry.' }), pager(open, (p) => ctx.setQuery({ page: p })));
-    } else if (entries) {
-      body.push(table(entryColumns(board), entries.items, { caption: 'Entries', empty: 'No entry has this status.' }), pager(entries, (p) => ctx.setQuery({ page: p })));
+    if (entries) {
+      const open = status === 'OPEN';
+      body.push(
+        table(entryColumns(board), entries.items, { caption: open ? 'Open entries' : 'Entries', empty: open ? 'No open entry.' : 'No entry has this status.' }),
+        pager(entries, (p) => ctx.setQuery({ page: p })),
+      );
     } else body.push(lineBox);
     entriesSection = section('Entries', body, { id: 'live-entries', note: board ? `${formatCount(board.lineTotal)} open · ${formatCount(Object.values(r.entries).reduce((n, c) => n + c, 0))} in all` : undefined });
   }
@@ -543,7 +553,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       'times',
       'Times (UTC)',
       [
-        { name: 'announceAt', label: 'Announcement', kind: 'datetime', value: v.announceAt, hint: 'Empty: when the release is published.' },
+        { name: 'announceAt', label: 'Announcement', kind: 'datetime', value: v.announceAt, hint: r.publishedAt ? 'Later than now: a published release keeps its announcement time.' : 'Empty: when the release is published.' },
         { name: 'silhouetteAt', label: 'Silhouette revealed', kind: 'datetime', value: v.silhouetteAt, hint: 'Empty: at the announcement. Each stage comes after the one before it.' },
         { name: 'nameAt', label: 'Name revealed', kind: 'datetime', value: v.nameAt, hint: 'Empty: at the announcement.' },
         { name: 'photoAt', label: 'Photograph revealed', kind: 'datetime', value: v.photoAt, hint: 'Empty: at the announcement. Every stage before the room opens.' },

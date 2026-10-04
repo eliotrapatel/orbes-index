@@ -286,6 +286,7 @@ const notInterested = () => conflict('LIVE_NOT_INTERESTED', 'You have not said y
 const addonUnknown = () => new DomainError('LIVE_ADDON_UNKNOWN', 400, 'Choose among the add-ons of this release.');
 const liveNotStarted = () => conflict('LIVE_NOT_STARTED', 'This release has not opened yet.');
 const liveEnded = () => conflict('LIVE_ENDED', 'This release has ended.');
+const liveNotAnnounced = () => conflict('LIVE_NOT_ANNOUNCED', 'This release is not announced yet: change its sizes in the settings until the announcement.');
 const alreadyPaused = () => conflict('LIVE_ALREADY_PAUSED', 'This release is already paused.');
 const notPaused = () => conflict('LIVE_NOT_PAUSED', 'This release is not paused.');
 const noFreePiece = () => conflict('LIVE_NO_FREE_PIECE', 'No piece of this size is free for this entry.');
@@ -1222,7 +1223,8 @@ export class LiveService {
   }
 
   /**
-   * ADD PIECES to a size (LIVE_ADD_PIECES), before the end: its stock and the release's quantity raised; a turn goes at
+   * ADD PIECES to a size (LIVE_ADD_PIECES), from the announcement (409 LIVE_NOT_ANNOUNCED before: the sizes are a
+   * setting until then) to the end: its stock and the release's quantity raised; a turn goes at
    * once to whoever they serve. Audited `drop.live.stock` with the stock before and after, and the quantity line the
    * announcement promised (the plan's choice 36: every addition reported).
    */
@@ -1233,6 +1235,8 @@ export class LiveService {
     }
     const size = knownId(sizeId, sizeUnknown);
     return this.control(dropId, async (tx, d, now) => {
+      // Before the announcement the stock is a setting (its quantity line following it): ADD PIECES comes after.
+      if (!isAnnounced(d, now)) throw liveNotAnnounced();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       const s = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).where('id', '=', size).forUpdate().executeTakeFirst();
       if (!s) throw sizeUnknown();

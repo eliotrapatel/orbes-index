@@ -329,6 +329,8 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       for (const [k, label] of [['announceAt', 'the announcement'], ['silhouetteAt', 'the silhouette'], ['nameAt', 'the name'], ['photoAt', 'the photograph']] as const) {
         if ((v[k] ?? '').trim() !== '' && utcInstant(v[k]) === null) return `Use the date and time picker (UTC) for ${label}, or leave it empty.`;
       }
+      // Emptied on a published release, the announcement would be its publication, already past: announced at once.
+      if (r.publishedAt !== null && utcInstant(v.announceAt) === null) return 'A published release keeps an announcement time; set one later than now.';
       return null;
     }
     case 'turns': {
@@ -436,7 +438,7 @@ export interface LiveActions {
   pause: boolean;
   resume: boolean;
   extend: boolean;
-  /** ADD PIECES: published, not ended. */
+  /** ADD PIECES: announced, not ended (before the announcement, the sizes are changed in the settings). */
   addPieces: boolean;
   message: boolean;
   /** ADMIN, a phrase to type. */
@@ -458,7 +460,7 @@ export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publish
     pause: manage && live && r.pausedAt === null,
     resume: manage && r.pausedAt !== null && published,
     extend: manage && running,
-    addPieces: manage && running,
+    addPieces: manage && running && !r.editable,
     message: manage && running,
     end: can(role, 'endLiveRelease') && running,
   };

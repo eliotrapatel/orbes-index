@@ -134,9 +134,8 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.get('/api/admin/live/:id/stream', async (request, reply) => {
     const { id } = parse(liveAdminParams, request.params);
-    if (!(await liveConsole.board(id))) throw dropNotFound();
     const { admin, session } = requireAdmin(request);
-    await app.liveHub.openConsole(request, reply, id, { adminId: admin.id, sessionId: session.id, inClear: readsClientEmails(request) });
+    if (!(await app.liveHub.openConsole(request, reply, id, { adminId: admin.id, sessionId: session.id, inClear: readsClientEmails(request) }))) throw dropNotFound();
     return reply;
   });
 

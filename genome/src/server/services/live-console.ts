@@ -339,7 +339,7 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
 
 /**
  * The times of a release that is not announced yet, at `now`: the end after T0, the room's opening still ahead, the
- * announcement ahead (none: at the publication, `publishedAt` or now) and before the room, each stage after the one it
+ * announcement ahead (none: at the publication, now; once published, one is kept) and before the room, each stage after the one it
  * follows and before the room, a NULL one read as the announcement (as `drops_live_stages` reads it: a stage set after
  * an empty one is refused, the empty one being earlier).
  */
@@ -349,8 +349,10 @@ function checkTimes(s: Settings, now: Date, publishedAt: Date | null): void {
   if (room <= now.getTime()) throw roomPast();
   if (s.announceAt && s.announceAt.getTime() <= now.getTime()) throw validationError('The announcement comes later than now; leave it empty to announce the release when it is published.');
   if (s.announceAt && s.announceAt.getTime() > room) throw validationError('The announcement comes before the room opens.');
+  // Emptied once published, the announcement would be the publication, already past: the release announced at once.
+  if (!s.announceAt && publishedAt) throw validationError('A published release keeps an announcement time; set one later than now.');
   // A stage left empty is at the announcement, as the database reads it (drops_live_stages): never before the one it follows.
-  const base = (s.announceAt ?? publishedAt ?? now).getTime();
+  const base = (s.announceAt ?? now).getTime();
   let after = base;
   for (const [label, at] of [['The silhouette', s.silhouetteAt], ['The name', s.nameAt], ['The photograph', s.photoAt]] as const) {
     const t = at ? at.getTime() : base;

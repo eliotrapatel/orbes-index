@@ -203,7 +203,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       ),
       pager(list, (p) => ctx.setQuery({ page: p })),
     ],
-    { id: 'drops', tools: canManage ? [button('New release', { kind: 'primary', testId: 'drop-new', onClick: newDrop })] : [] },
+    { id: 'drops', tools: canManage ? [button('New release', { kind: 'ghost', testId: 'drop-new', onClick: newDrop })] : [] },
   );
   return h('div', { class: 'club__drops' }, liveSection, drawsSection);
 }
