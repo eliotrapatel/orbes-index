@@ -878,10 +878,6 @@ export const LIVE = Object.freeze({
     signIn: 'Sign in to say you will be there, with your size.',
     count: (n: number) => (n === 1 ? '1 COLLECTOR WILL BE THERE' : `${n} COLLECTORS WILL BE THERE`),
   }),
-  /** The banner of /verify and MY PIECES (house style): LIVE RELEASE · <name> · OPENS IN … / THE ROOM IS OPEN / LIVE NOW. */
-  banner: Object.freeze({
-    days: (n: number) => (n === 1 ? 'OPENS IN 1 DAY' : `OPENS IN ${n} DAYS`),
-  }),
   /** The boutique board: the countdown, the door, the pieces left overall, live. */
   board: Object.freeze({
     of: (quantity: number) => `OF ${quantity} LEFT`,

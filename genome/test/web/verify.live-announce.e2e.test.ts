@@ -203,12 +203,31 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await clear();
     const t = Date.now();
     const live = await release({ opensAt: new Date(t + 2 * SECOND), closesAt: new Date(t + 2 * 3_600_000), roomOpensMinutes: 1 });
-    const { page, problems } = await phone(null);
+    const { page, problems, urls } = await phone(null);
     // This page's timers on a clock the test moves on (its time still flowing meanwhile).
     await page.clock.install();
     await page.goto(`${srv.origin}/verify/releases`);
     const card = page.locator('article.live-card').filter({ has: page.locator(`#release-${live.id}-title`) });
     await textOf(card.locator('.live-card__kind'), 'LIVE RELEASE · LIVE NOW');
+    // The list's live region as each draw left it: a quiet read reads nothing again to a screen reader.
+    await sleep(1500);
+    await page.evaluate(() => {
+      const body = document.querySelector('.releases__body')!;
+      const w = window as unknown as { liveDraws: (string | null)[]; liveCard: Element | null };
+      w.liveDraws = [];
+      w.liveCard = document.querySelector('article.live-card');
+      new MutationObserver(() => w.liveDraws.push(body.getAttribute('aria-live'))).observe(body, { childList: true, subtree: true });
+    });
+    const draws = () => page.evaluate(() => (window as unknown as { liveDraws: (string | null)[] }).liveDraws);
+    const reads = () => urls.filter((u) => new URL(u).pathname === '/api/v1/live').length;
+    // The minute's read bringing the same list: the list kept as it is, its nodes and its live region.
+    const before = reads();
+    await page.clock.fastForward(BANNER_REFRESH_MS + SECOND);
+    await expect.poll(reads, POLL).toBeGreaterThan(before);
+    await sleep(500);
+    expect(await draws()).toEqual([]);
+    expect(await card.evaluate((el) => el === (window as unknown as { liveCard: Element | null }).liveCard)).toBe(true);
+    expect(await page.locator('.releases__body').getAttribute('aria-live')).toBe('polite');
     // Sold out at once: ended long before its time, its end two hours away.
     await srv.ctx.db.updateTable('drops').set({ ended_at: new Date(), ended_reason: 'SOLD_OUT' }).where('id', '=', live.id).execute();
     await page.clock.fastForward(BANNER_REFRESH_MS - 5 * SECOND);
@@ -217,6 +236,10 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await page.clock.fastForward(10 * SECOND);
     await expect.poll(() => card.count(), POLL).toBe(0);
     expect(await page.locator('article.live-card').count()).toBe(0);
+    // Drawn with its live region off, polite again for the next read asked for.
+    expect((await draws()).length).toBeGreaterThan(0);
+    expect(new Set(await draws())).toEqual(new Set(['off']));
+    await expect.poll(() => page.locator('.releases__body').getAttribute('aria-live'), POLL).toBe('polite');
     expect(problems).toEqual([]);
   }, 60_000);
 

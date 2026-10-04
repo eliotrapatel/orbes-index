@@ -615,9 +615,9 @@ export interface BannerModel {
   phase: 'ANNOUNCED' | 'ROOM' | 'LIVE';
   /** `LIVE RELEASE · MONOLITHE`, or `LIVE RELEASE` before the name. */
   lead: string;
-  /** `OPENS IN`, `OPENS IN 3 DAYS`, `THE ROOM IS OPEN`, `LIVE NOW`. */
+  /** `OPENS IN`, `THE ROOM IS OPEN`, `LIVE NOW`. */
   state: string;
-  /** Within a day of the opening: `02:14:09`; null otherwise. */
+  /** Until the opening: `02:14:09`, its hours past 24 a day or more ahead (`73:14:09`); null otherwise. */
   clock: string | null;
 }
 
@@ -632,12 +632,9 @@ export function bannerModel(b: LiveBanner | null, now: number): BannerModel | nu
   const base = { id: b.id, href: releasePath(b.id), lead };
   if (now >= opens) return { ...base, phase: 'LIVE', state: LIVE.phase.LIVE, clock: null };
   if (now >= room) return { ...base, phase: 'ROOM', state: LIVE.phase.ROOM, clock: null };
-  // OPENS IN counts to T0, as the release's page does; the room opens a few minutes before it. A day or more ahead it
-  // says the days (OPENS IN 3 DAYS), as the page's countdown does, the plan's hh:mm:ss from the last day: hours past 24
-  // would read as a number to work out, not a time.
-  const left = opens - now;
-  if (left >= DAY) return { ...base, phase: 'ANNOUNCED', state: LIVE.banner.days(Math.floor(left / DAY)), clock: null };
-  const total = Math.ceil(left / SECOND);
+  // OPENS IN hh:mm:ss counts to T0, as the release's page does (the room opens a few minutes before it); hh:mm:ss
+  // throughout, as the plan words it, its hours past 24 a day or more ahead.
+  const total = Math.ceil((opens - now) / SECOND);
   const two = (n: number) => String(n).padStart(2, '0');
   return { ...base, phase: 'ANNOUNCED', state: LIVE.opensIn, clock: `${two(Math.floor(total / 3600))}:${two(Math.floor((total % 3600) / 60))}:${two(total % 60)}` };
 }

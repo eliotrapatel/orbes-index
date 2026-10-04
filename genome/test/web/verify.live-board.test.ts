@@ -103,6 +103,9 @@ describe('the boutique board: what it shows', () => {
 
   it('at the end: SOLD OUT when no piece is left, else THE RELEASE HAS ENDED; at its close on the server\'s clock too', () => {
     expect(boardModel(board({ phase: 'ENDED', over: true, left: 0 }), T0 + 60_000)).toMatchObject({ phase: 'ENDED', overline: 'SOLD OUT', door: 'open', countdown: null, left: { value: '0' } });
+    // Ended at its close or by END NOW while every piece left is still held: not sold out, a hold may yet expire.
+    expect(boardModel(board({ phase: 'ENDED', over: false, left: 0 }), T0 + 60_000).overline).toBe('THE RELEASE HAS ENDED');
+    expect(boardModel(board({ phase: 'LIVE', over: false, left: 0 }), T0 + 3_600_000).overline).toBe('THE RELEASE HAS ENDED');
     expect(boardModel(board({ phase: 'ENDED', over: true, left: 4 }), T0 + 60_000).overline).toBe('THE RELEASE HAS ENDED');
     expect(boardModel(board({ phase: 'LIVE', left: 4 }), T0 + 3_600_000)).toMatchObject({ phase: 'ENDED', overline: 'THE RELEASE HAS ENDED' });
   });

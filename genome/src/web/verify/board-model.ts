@@ -92,7 +92,7 @@ export type BoardPhase = 'ANNOUNCED' | 'ROOM' | 'LIVE' | 'ENDED';
 
 export interface BoardModel {
   phase: BoardPhase;
-  /** LIVE RELEASE, THE ROOM IS OPEN, LIVE NOW, PAUSED; at the end SOLD OUT or THE RELEASE HAS ENDED. */
+  /** LIVE RELEASE, THE ROOM IS OPEN, LIVE NOW, PAUSED; at the end SOLD OUT (once final with no piece left, not while a hold runs) or THE RELEASE HAS ENDED. */
   overline: string;
   /** The model's name once revealed, else TO BE REVEALED. */
   name: string;
@@ -132,7 +132,7 @@ export function boardModel(b: LiveBoard, now: number): BoardModel {
   const left = Math.min(quantity, Math.max(0, Math.trunc(b.left) || 0));
   const named = typeof b.release?.name === 'string' && b.release.name.trim().length > 0;
   const overline =
-    phase === 'ENDED' ? (left === 0 ? LIVE.board.soldOut : LIVE.board.ended) : b.paused && phase === 'LIVE' ? LIVE.paused : phase === 'ANNOUNCED' ? LIVE.kind : LIVE.phase[phase];
+    phase === 'ENDED' ? (b.over && left === 0 ? LIVE.board.soldOut : LIVE.board.ended) : b.paused && phase === 'LIVE' ? LIVE.paused : phase === 'ANNOUNCED' ? LIVE.kind : LIVE.phase[phase];
   return {
     phase,
     overline,

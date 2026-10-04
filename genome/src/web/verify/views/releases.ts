@@ -154,6 +154,13 @@ type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; li
 const CHANGE_MARGIN_MS = 600;
 /** …and at the latest this often while it is open. */
 const CHANGE_MAX_MS = 6 * 3_600_000;
+/** A quiet read that changed the list draws it with its live region off, turned back on this long after. */
+const QUIET_DRAW_MS = 1000;
+
+/** What a list on show is drawn from (its models are plain data), null while none is. */
+function keyOf(l: ListLoad): string | null {
+  return l.kind === 'ready' ? JSON.stringify({ live: l.live, liveFailed: l.liveFailed, cards: l.cards }) : null;
+}
 
 class ListPage {
   readonly root: HTMLElement;
@@ -163,6 +170,9 @@ class ListPage {
   /** The server's clock against this phone's, once measured (the moments of the LIVE RELEASES are the server's). */
   private offset: number | null = null;
   private changeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** What the list on show was drawn from: a quiet read bringing the same leaves it as it is, its nodes and its reader. */
+  private drawn: string | null = null;
+  private politeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: ReleasesDeps) {
     this.root = viewRoot('releases', 'releases-title');
@@ -190,6 +200,7 @@ class ListPage {
   dispose(): void {
     this.disposed = true;
     if (this.changeTimer) clearTimeout(this.changeTimer);
+    if (this.politeTimer) clearTimeout(this.politeTimer);
   }
 
   /**
@@ -220,6 +231,7 @@ class ListPage {
       }
       this.load = { kind: 'failed', message: messageOf(e) };
     }
+    if (quiet && this.drawn !== null && keyOf(this.load) === this.drawn) return;
     this.render(quiet);
   }
 
@@ -237,12 +249,26 @@ class ListPage {
     this.changeTimer = setTimeout(() => void this.fetch(true), Math.min(CHANGE_MAX_MS, next - now + CHANGE_MARGIN_MS));
   }
 
-  /** `keepFocus`: a quiet read drawn again: the link the keyboard was on keeps it, when it is still there. */
-  private render(keepFocus = false): void {
+  /**
+   * `quiet`: a quiet read that changed the list (a stage reached, a release gone): the link the keyboard was on keeps
+   * it, when it is still there; and the live region is off for that draw, so a screen reader is not read the whole list
+   * again for one card changed (it is polite again QUIET_DRAW_MS later, for the next read asked for).
+   */
+  private render(quiet = false): void {
     const hadFocus = this.body.contains(document.activeElement);
-    const focused = keepFocus && hadFocus ? (document.activeElement as HTMLElement).getAttribute('href') : null;
+    const focused = quiet && hadFocus ? (document.activeElement as HTMLElement).getAttribute('href') : null;
+    if (this.politeTimer) clearTimeout(this.politeTimer);
+    this.politeTimer = null;
+    this.body.setAttribute('aria-live', quiet ? 'off' : 'polite');
     this.draw(hadFocus);
+    this.drawn = keyOf(this.load);
     if (focused) this.body.querySelector<HTMLElement>(`a[href="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+    if (quiet) {
+      this.politeTimer = setTimeout(() => {
+        this.politeTimer = null;
+        this.body.setAttribute('aria-live', 'polite');
+      }, QUIET_DRAW_MS);
+    }
   }
 
   private draw(hadFocus: boolean): void {

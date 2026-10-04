@@ -508,8 +508,10 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 
   it('says the banner OPENS IN to T0 on the server\'s clock, then THE ROOM IS OPEN, then LIVE NOW; hidden at the end; the name once revealed', () => {
     const b = { id: ID, phase: 'ANNOUNCED' as const, name: null, nameAt: iso(T0 - 3_600_000), roomOpensAt: iso(T0 - 300_000), opensAt: iso(T0), closesAt: iso(T0 + 3_600_000) };
-    expect(bannerModel(b, T0 - 3 * 86_400_000 - 1)).toMatchObject({ phase: 'ANNOUNCED', lead: 'LIVE RELEASE', state: 'OPENS IN 3 DAYS', clock: null, href: `/verify/releases/${ID}` });
-    expect(bannerModel(b, T0 - 86_400_000)!.state).toBe('OPENS IN 1 DAY');
+    // hh:mm:ss throughout, as the plan words it: its hours past 24 a day or more ahead.
+    expect(bannerModel(b, T0 - 3 * 86_400_000 - (14 * 60 + 9) * 1000)).toMatchObject({ phase: 'ANNOUNCED', lead: 'LIVE RELEASE', state: 'OPENS IN', clock: '72:14:09', href: `/verify/releases/${ID}` });
+    expect(bannerModel(b, T0 - 86_400_000)!.clock).toBe('24:00:00');
+    expect(bannerModel(b, T0 - 30 * 86_400_000)!.clock).toBe('720:00:00');
     expect(bannerModel(b, T0 - (2 * 3600 + 14 * 60 + 9) * 1000)).toMatchObject({ state: 'OPENS IN', clock: '02:14:09' });
     expect(bannerModel(b, T0 - 300_001)!.clock).toBe('00:05:01');
     expect(bannerModel({ ...b, name: 'Monolithe' }, T0 - 300_000)).toMatchObject({ phase: 'ROOM', lead: 'LIVE RELEASE · MONOLITHE', state: 'THE ROOM IS OPEN', clock: null });

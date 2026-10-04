@@ -2,7 +2,7 @@
  * The banner of the LIVE RELEASES (plan of 2026-10-04, The experience: the banner), on /verify and MY PIECES: an ink
  * strip in the house style across the top of the page, a link to the release's page.
  *
- *   LIVE RELEASE · MONOLITHE · OPENS IN 02:14:09      announced (OPENS IN 3 DAYS a day or more ahead)
+ *   LIVE RELEASE · MONOLITHE · OPENS IN 02:14:09      announced (its hours past 24 a day or more ahead: 73:14:09)
  *   LIVE RELEASE · MONOLITHE · THE ROOM IS OPEN       from the room's opening
  *   LIVE RELEASE · MONOLITHE · LIVE NOW               from T0 to the end; then hidden
  *
