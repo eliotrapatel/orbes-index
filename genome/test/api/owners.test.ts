@@ -189,7 +189,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const locked = await cs.post(`/api/admin/owners/${id}/lock`);
       expect(locked.statusCode).toBe(200);
-      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0, shopRequestsClosed: 0 });
+      expect(safeJson(locked)).toEqual({ status: 'LOCKED', sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0, shopRequestsClosed: 0, liveEntriesRemoved: 0, liveInterestWithdrawn: 0 });
 
       // The sessions have ended; the right password is refused with the lock, a wrong one as ever.
       expect((await owner.client.get('/api/v1/account/me')).statusCode).toBe(401);
@@ -227,7 +227,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // The audit log names the account, the counts and the admin; never the email.
       const lockEntry = (await h.ctx.audit.list({ action: 'account.lock', targetId: id })).items;
       expect(lockEntry).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0, shopRequestsClosed: 0 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { sessionsRevoked: 2, transfersCancelled: 1, recoveryCodesRevoked: 1, certificatesRevoked: 1, dropEntriesWithdrawn: 0, shopRequestsClosed: 0, liveEntriesRemoved: 0, liveInterestWithdrawn: 0 } }),
       ]);
       expect(JSON.stringify(lockEntry)).not.toContain(owner.email);
       expect((await h.ctx.audit.list({ action: 'ownership.transfer.cancel', targetId: productId })).items[0].details).toMatchObject({ reason: 'account_locked' });
@@ -357,12 +357,15 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.recoveryCodes).toEqual([expect.objectContaining({ usedAt: null, revokedAt: null })]);
       // No link to an ownership certificate here (the service test lists open and withdrawn ones), no entry in a drop
       // (test/api/drops.test.ts lists them), no answer nor vote in the circle (test/api/circle.test.ts lists them), no
-      // request of the private salon (test/api/salon.test.ts lists them).
+      // request of the private salon (test/api/salon.test.ts lists them), no entry nor interest in a LIVE RELEASE
+      // (test/services/live.test.ts lists them).
       expect(x.certificates).toEqual([]);
       expect(x.dropEntries).toEqual([]);
       expect(x.circleAnswers).toEqual([]);
       expect(x.circleVotes).toEqual([]);
       expect(x.shopRequests).toEqual([]);
+      expect(x.liveEntries).toEqual([]);
+      expect(x.liveInterest).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -379,7 +382,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       ]);
       const declared = await h.ctx.audit.list({ action: 'ownership.incident', targetId: productId });
       expect(x.activity[7].occurredAt).toBe(declared.items[0].occurredAt.toISOString());
-      expect(x.notIncluded).toHaveLength(3);
+      expect(x.notIncluded).toHaveLength(4);
       expect(x.notIncluded[1]).toMatch(/ownership certificates: only a one-way SHA-256 of their token/);
       // No secret and no pseudonym: neither the password hash, the code's hash, nor the scan's IP or device keys.
       const stored = await h.ctx.db.selectFrom('scan_events').select(['ip_hash', 'device_hash']).where('id', '=', bad.scanId).executeTakeFirstOrThrow();
@@ -392,7 +395,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

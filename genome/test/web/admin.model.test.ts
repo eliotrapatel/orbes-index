@@ -254,6 +254,10 @@ describe('admin enums mirror the server', () => {
       'CIRCLE_RSVP_ANSWERS',
       'CLUB_TIER_NAMES',
       'SHOP_REQUEST_STATUSES',
+      'DROP_MODES',
+      'LIVE_END_REASONS',
+      'LIVE_ENTRY_STATUSES',
+      'LIVE_RESOLUTIONS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

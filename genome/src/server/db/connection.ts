@@ -133,6 +133,8 @@ export const ADVISORY_LOCK = Object.freeze({
   ANOMALY_UNREGISTERED: 0x4f52_0101,
   /** AuthService role changes and (de)activation of console users: the last active ADMIN check must see every concurrent change. */
   ADMIN_ROSTER: 0x4f52_0201,
+  /** The engine of the LIVE RELEASES (services/live-engine.ts): a session lock, held by the one process that ticks. */
+  LIVE_ENGINE: 0x4f52_0301,
 });
 
 /**

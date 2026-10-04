@@ -67,6 +67,10 @@
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
  * each sale; no email is sent (the account's page says it).
  *
+ * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages,
+ * its entries (ENTER, WITHDRAW, RESERVE), the draw and OFFER NEXT know only the drops whose `mode` is DRAW, and answer
+ * for a LIVE one as for an unknown drop (404) or refuse it (409 DROP_LIVE).
+ *
  * The audit log names the drop and the entry's id, never an email: ENTER,
  * WITHDRAW and a direct reservation (`drop.enter`, `drop.withdraw`,
  * `drop.reserve` with the tier that allowed it, the account as actor), the draw
@@ -212,6 +216,25 @@ export function deriveDropSeedKey(config: Pick<AppConfig, 'keys' | 'cookieSecret
 const seedAad = (dropId: string): string => `orbes/drop/${dropId.toLowerCase()}`;
 const sha256 = (b: Uint8Array): Uint8Array => new Uint8Array(createHash('sha256').update(b).digest());
 
+/**
+ * The seed of a drop, opened with its associated data and checked against its commitment; 503 DROP_SEED_UNAVAILABLE
+ * otherwise. The draw reveals it; a LIVE RELEASE (services/live.ts) orders its line at T0 with it and never reveals it.
+ * The caller zeroes it once used.
+ */
+export function openDropSeed(seedKey: Uint8Array, d: Pick<DropRow, 'id' | 'seed_enc' | 'seed_hash'>): Uint8Array {
+  let seed: Uint8Array;
+  try {
+    seed = open(seedKey, d.seed_enc, seedAad(d.id));
+  } catch (e) {
+    throw seedUnavailable(e);
+  }
+  const hash = sha256(seed);
+  if (seed.length !== DROP_SEED_BYTES || hash.length !== d.seed_hash.length || !hash.every((b, i) => b === d.seed_hash[i])) {
+    throw seedUnavailable(new Error('seed does not match its commitment'));
+  }
+  return seed;
+}
+
 // ── Errors ─────────────────────────────────────────────────────────────────
 
 /** Said as the verification app's page says it (verify/copy.ts RELEASES.notFound). */
@@ -241,6 +264,7 @@ const placeHeld = (until: Date) => conflict('DROP_PLACE_HELD', `The place is hel
 const dropFull = () => conflict('DROP_FULL', 'Every piece of this release is held or sold.');
 const waitlistEmpty = () => conflict('DROP_WAITLIST_EMPTY', 'No entry is left on the waiting list.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
+const dropLive = () => conflict('DROP_LIVE', 'This release is a LIVE RELEASE: it has no draw and no waiting list.');
 const seedUnavailable = (cause: unknown) =>
   new DomainError('DROP_SEED_UNAVAILABLE', 503, 'The seed of this draw cannot be read: the draw cannot run.', { detail: cause instanceof Error ? cause.name : 'unknown' });
 
@@ -676,6 +700,7 @@ export class DropService {
     const now = this.clock();
     const rows = await this.reads(this.db)
       .where('d.published_at', 'is not', null)
+      .where('d.mode', '=', 'DRAW')
       .orderBy('d.opens_at', 'desc')
       .orderBy('d.id')
       .limit(DROP_LIST_LIMIT)
@@ -687,7 +712,7 @@ export class DropService {
   async sheet(dropId: string): Promise<DropSheet> {
     const id = knownId(dropId, dropNotFound);
     const now = this.clock();
-    const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).executeTakeFirst();
+    const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
     if (!r) throw dropNotFound();
     const drawn = r.drawn_at
       ? Number(
@@ -719,7 +744,7 @@ export class DropService {
   /** The entries a published drop's draw ranked, by rank, never their accounts (409 DROP_NOT_DRAWN before the draw). */
   async drawEntries(dropId: string, page: PageRequest): Promise<Page<DrawEntry>> {
     const id = knownId(dropId, dropNotFound);
-    const d = await this.db.selectFrom('drops').select(['id', 'drawn_at']).where('id', '=', id).where('published_at', 'is not', null).executeTakeFirst();
+    const d = await this.db.selectFrom('drops').select(['id', 'drawn_at']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
     if (!d) throw dropNotFound();
     if (!d.drawn_at) throw dropNotDrawn();
     const ranked = this.db.selectFrom('drop_entries').where('drop_id', '=', id).where('rank', 'is not', null);
@@ -1075,11 +1100,12 @@ export class DropService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const d = await this.lock(tx, id);
+      if (d.mode === 'LIVE') throw dropLive();
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
       if (!d.published_at) throw dropNotPublished();
       if (now.getTime() < d.closes_at.getTime()) throw dropNotClosed();
-      const seed = this.openSeed(d);
+      const seed = openDropSeed(this.seedKey, d);
       const entered = await tx.selectFrom('drop_entries').select(['id', 'account_id']).where('drop_id', '=', id).where('status', '=', 'ENTERED').orderBy('id').execute();
       const standings = await clubStandings(tx, entered.map((e) => e.account_id), now);
       const order = drawOrder(
@@ -1172,6 +1198,7 @@ export class DropService {
     const entryId = await inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const d = await this.lock(tx, id);
+      if (d.mode === 'LIVE') throw dropLive();
       if (!d.drawn_at) throw dropNotDrawn();
       const held = await tx
         .selectFrom('drop_entries')
@@ -1234,28 +1261,13 @@ export class DropService {
 
   /**
    * A published drop's row FOR SHARE (ENTER, WITHDRAW), or FOR UPDATE (RESERVE, P-X02: the places counted one request
-   * after the other); a DRAFT answers as an unknown drop.
+   * after the other); a DRAFT, and a LIVE RELEASE, answer as an unknown drop.
    */
   private async lockPublished(tx: Db, id: string, mode: 'share' | 'update' = 'share'): Promise<DropRow> {
-    const q = tx.selectFrom('drops').selectAll().where('id', '=', id).where('published_at', 'is not', null);
+    const q = tx.selectFrom('drops').selectAll().where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW');
     const d = await (mode === 'update' ? q.forUpdate() : q.forShare()).executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
-  }
-
-  /** The seed of a drop: opened with its associated data and checked against its commitment; 503 otherwise. */
-  private openSeed(d: DropRow): Uint8Array {
-    let seed: Uint8Array;
-    try {
-      seed = open(this.seedKey, d.seed_enc, seedAad(d.id));
-    } catch (e) {
-      throw seedUnavailable(e);
-    }
-    const hash = sha256(seed);
-    if (seed.length !== DROP_SEED_BYTES || hash.length !== d.seed_hash.length || !hash.every((b, i) => b === d.seed_hash[i])) {
-      throw seedUnavailable(new Error('seed does not match its commitment'));
-    }
-    return seed;
   }
 
   private reads(db: Db) {

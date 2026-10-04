@@ -96,6 +96,22 @@ export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
 
+/** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
+export const DROP_MODES = ['DRAW', 'LIVE'] as const;
+export type DropMode = (typeof DROP_MODES)[number];
+
+/** How a LIVE RELEASE ended (drops.ended_reason): every piece confirmed, at its close, or by an ADMIN. */
+export const LIVE_END_REASONS = ['SOLD_OUT', 'CLOSED', 'ENDED'] as const;
+export type LiveEndReason = (typeof LIVE_END_REASONS)[number];
+
+/** An entry of a LIVE RELEASE (live_entries.status): in the room, in the line, its turn, secured, confirmed, or out of it. */
+export const LIVE_ENTRY_STATUSES = ['WAITING', 'QUEUED', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED'] as const;
+export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
+
+/** How ORBES Client Services concluded a confirmed reservation of a LIVE RELEASE (live_entries.resolution). */
+export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
+export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -777,6 +793,10 @@ export interface OwnerLock {
   dropEntriesWithdrawn: number;
   /** The account's open requests of the private salon the lock closed (P-X08). */
   shopRequestsClosed: number;
+  /** The account's open entries in the LIVE RELEASES the lock removed. */
+  liveEntriesRemoved: number;
+  /** The account's interest in LIVE RELEASES not opened yet the lock withdrew. */
+  liveInterestWithdrawn: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */

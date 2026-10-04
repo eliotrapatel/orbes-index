@@ -5,8 +5,9 @@
  *  - its starting point is the production of 2026-10-03 (commit 3660154, image 3660154006b5, migrations 0001 to
  *    0013), the end of the previous runbook (DEPLOY-RECOMMANDATIONS-2026-10.md, deploy-runbook.test.ts);
  *  - every migration after 0013 belongs to one deployment of the plan's table (A: 0014 to 0018, B: 0019 and 0020,
- *    C: none), and deployment A applies exactly A's migrations that exist, in order: the table of §1.0, the line
- *    `db.ts migrate` prints, those deploy.sh prints after it, and the count `db.ts status` shows;
+ *    C: none), or to deployment D of the LIVE RELEASE (plan of 2026-10-04: 0021, with its own runbook), and
+ *    deployment A applies exactly A's migrations that exist, in order: the table of §1.0, the line `db.ts migrate`
+ *    prints, those deploy.sh prints after it, and the count `db.ts status` shows;
  *  - every message it expects from deploy.sh, backup.sh, restore.sh and lib.sh is still one they print;
  *  - the rules of the shared host: never 03:00–05:30 UTC, the pre-check of DEPLOYMENT §15.7 before and after,
  *    restore.sh only ever run to watch it refuse (--dry-run), no prune, the fast-forward to the final commit after
@@ -37,6 +38,8 @@ const START_MIGRATIONS = NAMES.filter((n) => n <= '0013_ownership_certificates')
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 const DEPLOY_A = NAMES.filter((n) => numberOf(n) >= 14 && numberOf(n) <= 18);
 const DEPLOY_B = NAMES.filter((n) => numberOf(n) >= 19 && numberOf(n) <= 20);
+/** Deployment D, the LIVE RELEASE (plan of 2026-10-04): 0021, deployed after this runbook's three, with its own runbook. */
+const DEPLOY_D = NAMES.filter((n) => numberOf(n) === 21);
 
 /** The rows `| \`0014_…\` |` of the migrations table of a section. */
 const tableRows = (md: string): string[] => [...md.matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]!);
@@ -100,8 +103,10 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
   });
 
   it('gives every migration after 0013 to a deployment of the plan, and deployment A exactly its own, in order, as the scripts print them', () => {
-    // The plan's table: A 0014–0018, B 0019–0020, C none. A later number needs the plan (and this runbook) first.
-    expect(NAMES.filter((n) => numberOf(n) > 13)).toEqual([...DEPLOY_A, ...DEPLOY_B]);
+    // The plan's table: A 0014–0018, B 0019–0020, C none; then the LIVE RELEASE's D, 0021. A later number needs a plan
+    // (and a runbook) first.
+    expect(NAMES.filter((n) => numberOf(n) > 13)).toEqual([...DEPLOY_A, ...DEPLOY_B, ...DEPLOY_D]);
+    expect(DEPLOY_D).toEqual(['0021_live_release']);
     expect(DEPLOY_A[0]).toBe('0014_model_lookbook');
     // The tables of §1.0 and §2: the existing migrations of each deployment, nothing else.
     expect(tableRows(section(runbook, '### 1.0'))).toEqual(DEPLOY_A);

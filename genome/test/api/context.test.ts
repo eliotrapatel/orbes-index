@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
-import { createContext, startHousekeeping } from '../../src/server/context.js';
+import { createContext, startHousekeeping, startLiveEngine } from '../../src/server/context.js';
 import { migrationStatus } from '../../src/server/db/migrate.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { createManualClock, type Logger } from '../../src/server/types.js';
 import { createTestDb } from '../support/db.js';
+import { accountOfTier, createLiveRelease, liveFixture } from '../support/live.js';
 import { PASSWORD } from './support.js';
 
 function captureLog(): Logger & { lines: { level: string; o: unknown; m?: string }[] } {
@@ -29,7 +30,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'circle', 'club', 'drops', 'issuance', 'lifecycle', 'lookbook', 'media', 'owners', 'ownership', 'ownershipCertificates', 'recovery', 'reports', 'retailers', 'sale', 'verification', 'warranty'].sort(),
+        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'circle', 'club', 'drops', 'issuance', 'lifecycle', 'live', 'lookbook', 'media', 'owners', 'ownership', 'ownershipCertificates', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'verification', 'warranty'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);
@@ -79,6 +80,32 @@ describe('createContext', () => {
   });
 });
 
+describe('the LIVE RELEASES\' engine', () => {
+  it('starts with the context, on PGlite\'s one connection: forms the line at T0 and gives the turns, then stops and hands its lock back', async () => {
+    const t = await createTestDb();
+    const f = await liveFixture(t.db, '2026-12-01T09:00:00.000Z');
+    const ctx = await createContext(testConfig(), { db: t.db, clock: f.clock.now });
+    const opensAt = new Date('2026-12-01T10:00:00.000Z');
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 1 }] });
+    const [a, b] = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
+    f.clock.set('2026-12-01T09:58:00.000Z');
+    for (const x of [a, b]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
+    f.clock.set(opensAt);
+    const engine = startLiveEngine(ctx, { tickMs: 20, standbyMs: 50 });
+    try {
+      const statuses = async () => (await t.db.selectFrom('live_entries').select(['account_id', 'status']).where('drop_id', '=', r.id).orderBy('position').execute()).map((e) => [e.account_id, e.status]);
+      for (let i = 0; i < 200 && (await statuses()).join() !== [[a.id, 'TURN'], [b.id, 'QUEUED']].join(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(await statuses()).toEqual([[a.id, 'TURN'], [b.id, 'QUEUED']]);
+      expect(engine.leading).toBe(true);
+    } finally {
+      await engine.stop();
+      await ctx.close();
+      await t.close();
+    }
+    expect(engine.leading).toBe(false);
+  });
+});
+
 describe('housekeeping', () => {
   it('purges expired sessions and stale scan tokens', async () => {
     const t = await createTestDb();
@@ -88,7 +115,10 @@ describe('housekeeping', () => {
     try {
       const { account, session } = await ctx.services.auth.registerAccount({ email: 'hk@example.com', password: PASSWORD });
       expect(account.email).toBe('hk@example.com');
-      expect((await hk.runOnce()).sessions).toBe(0);
+      const first = await hk.runOnce();
+      expect(first.sessions).toBe(0);
+      // The LIVE RELEASES' network hashes are erased 30 days after their release (services/live.ts): none here.
+      expect(first.liveNetworks).toBe(0);
       clock.advance(ctx.config.sessionTtlHours.account * 3_600_000 + 1);
       const r = await hk.runOnce();
       expect(r.sessions).toBe(1);

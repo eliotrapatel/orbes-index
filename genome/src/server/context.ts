@@ -16,6 +16,7 @@
  *      created on demand in development/test, self-tested in production.
  */
 import { closeDb, createDb, type Db } from './db/connection.js';
+import { parseDatabaseUrl } from './db/url.js';
 import { migrateToLatest, migrationStatus } from './db/migrate.js';
 import type { AppConfig } from './config.js';
 import { GeoResolver } from './geo/resolver.js';
@@ -31,6 +32,8 @@ import { CertificateService } from './services/certificates.js';
 import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
+import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
+import { LiveEngine } from './services/live-engine.js';
 import { IssuanceService } from './services/issuance.js';
 import { LifecycleService } from './services/lifecycle.js';
 import { LookbookService } from './services/lookbook.js';
@@ -87,6 +90,8 @@ export interface AppServices {
   salon: SalonService;
   /** The owners' circle (P-X01): posts by tier (notes, invitations, polls), their answers and votes, the visits by day. */
   circle: CircleService;
+  /** The LIVE RELEASES (plan of 2026-10-04): the room, the line at T0, the turns and holds, the console's live controls; the engine's pass (startLiveEngine). */
+  live: LiveService;
 }
 
 export interface AppContext {
@@ -182,6 +187,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const club = new ClubService({ db, drops, audit, clock });
     const salon = new SalonService({ db, audit, lookbook, club, clock });
     const circle = new CircleService({ db, audit, clock, log });
+    const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey: deriveLiveTurnKey(config), clock });
 
     const services: AppServices = {
       issuance,
@@ -206,6 +212,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       club,
       salon,
       circle,
+      live,
       ...overrides.services,
     };
 
@@ -251,7 +258,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; scanHistory: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; scanHistory: number; liveNetworks: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
@@ -260,7 +267,9 @@ export interface Housekeeping {
  * Purges expired sessions and scan tokens, expires stale transfers, counts
  * the scans of every complete UTC day into scan_daily_stats and, when
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
- * period, every `intervalMs` (default 10 min).
+ * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
+ * after their release ended (services/live.ts), every `intervalMs` (default
+ * 10 min).
  *
  * The daily statistics always run before the purge, and a pass whose
  * statistics failed purges nothing: no scan leaves the history before it is
@@ -276,7 +285,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, scanHistory: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, scanHistory: 0, liveNetworks: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -298,6 +307,7 @@ export function startHousekeeping(
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );
     }
+    await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     if (Object.values(result).some((n) => n > 0)) ctx.log.info(result, 'housekeeping');
     return result;
   };
@@ -317,4 +327,24 @@ export function startHousekeeping(
       await running;
     },
   };
+}
+
+// ── The LIVE RELEASES' engine ──────────────────────────────────────────────
+
+/**
+ * Start the engine of the LIVE RELEASES (services/live-engine.ts): a pass every 250 ms by the one process that holds
+ * its advisory lock. On PostgreSQL the lock and the passes use one reserved connection of the pool; on PGlite, its only
+ * connection. Stop it before closing the context.
+ */
+export function startLiveEngine(ctx: AppContext, opts: { tickMs?: number; standbyMs?: number; connection?: 'reserved' | 'shared' } = {}): LiveEngine {
+  const engine = new LiveEngine({
+    db: ctx.db,
+    live: ctx.services.live,
+    log: ctx.log,
+    connection: opts.connection ?? (parseDatabaseUrl(ctx.config.databaseUrl).kind === 'pglite' ? 'shared' : 'reserved'),
+    ...(opts.tickMs !== undefined ? { tickMs: opts.tickMs } : {}),
+    ...(opts.standbyMs !== undefined ? { standbyMs: opts.standbyMs } : {}),
+  });
+  engine.start();
+  return engine;
 }

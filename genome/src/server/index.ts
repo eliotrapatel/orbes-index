@@ -3,11 +3,13 @@
  *
  *   1. load and validate the configuration (fail fast, all problems at once);
  *   2. build the context (database, migrations, services, bootstrap admin);
- *   3. build the Fastify app, start housekeeping, listen;
+ *   3. build the Fastify app, start housekeeping and the LIVE RELEASES'
+ *      engine (services/live-engine.ts), listen;
  *   4. on SIGTERM/SIGINT: stop accepting connections, let in-flight requests
- *      finish (bounded by SHUTDOWN_GRACE_MS), stop housekeeping, close the
- *      database, exit. An unhandled error triggers the same shutdown with
- *      exit code 1 so the orchestrator restarts a clean process.
+ *      finish (bounded by SHUTDOWN_GRACE_MS), stop the engine (its lock goes
+ *      back to the next process) and housekeeping, close the database, exit.
+ *      An unhandled error triggers the same shutdown with exit code 1 so the
+ *      orchestrator restarts a clean process.
  *
  * Migrations run automatically outside production. In production they run
  * only with `--migrate` or MIGRATE_ON_START=true (otherwise the server
@@ -23,7 +25,8 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
 import { ConfigError, configWarnings, loadConfig, redactConfig, type AppConfig } from './config.js';
-import { createContext, startHousekeeping, type AppContext, type Housekeeping } from './context.js';
+import { createContext, startHousekeeping, startLiveEngine, type AppContext, type Housekeeping } from './context.js';
+import type { LiveEngine } from './services/live-engine.js';
 import { demoBanner, demoRefusal, startDemo, type DemoStart } from './demo.js';
 import { createForwardingLogger, loggerOptions } from './http/logging.js';
 import { APP_VERSION } from './routes/public.js';
@@ -34,6 +37,7 @@ const log = createForwardingLogger();
 let app: FastifyInstance | undefined;
 let ctx: AppContext | undefined;
 let housekeeping: Housekeeping | undefined;
+let liveEngine: LiveEngine | undefined;
 let shuttingDown = false;
 
 function flag(name: string, env: string | undefined): boolean {
@@ -55,6 +59,7 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
   force.unref();
   try {
     await app?.close(); // stops accepting, answers 503 to new requests, waits for in-flight ones
+    await liveEngine?.stop(); // the pass under way finishes, the engine's lock goes back
     await housekeeping?.stop();
     await ctx?.close();
     log.info({}, 'shutdown complete');
@@ -100,6 +105,7 @@ async function main(): Promise<void> {
     log.attach(app.log);
     for (const warning of configWarnings(config)) log.warn({ warning }, 'risky configuration');
     housekeeping = startHousekeeping(ctx);
+    liveEngine = startLiveEngine(ctx);
     await app.listen({ host: config.host, port: config.port });
     log.info({ version: APP_VERSION, demo: demoMode, config: redactConfig(config) }, 'ORBES GENOME server started');
     if (demo) process.stdout.write(demoBanner(demo, config.publicOrigin));

@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0016) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0021) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -138,6 +138,33 @@ export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
  */
 export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
+
+/**
+ * The kind of a drop (drops.mode, migration 0021): a DRAW (P-R03, the default: a waiting list, then a draw by tier) or a
+ * LIVE RELEASE (an instant drop lived in real time: a room, a line at T0, a turn, a hold, PAY).
+ */
+export const DROP_MODES = ['DRAW', 'LIVE'] as const;
+export type DropMode = (typeof DROP_MODES)[number];
+
+/**
+ * How a LIVE RELEASE ended (drops.ended_reason, migration 0021): SOLD_OUT (every piece confirmed), CLOSED (at
+ * `closes_at`) or ENDED (by an ADMIN).
+ */
+export const LIVE_END_REASONS = ['SOLD_OUT', 'CLOSED', 'ENDED'] as const;
+export type LiveEndReason = (typeof LIVE_END_REASONS)[number];
+
+/**
+ * An entry of a LIVE RELEASE (live_entries.status, migration 0021): WAITING in the room before T0, QUEUED in the line,
+ * TURN (hold the seal), SECURED (the seal held: press PAY), CONFIRMED (PAY pressed); or out of it: MISSED (the turn ran
+ * out), EXPIRED (the hold ran out or was freed), RELEASED (given back), LEFT, REMOVED (by the console), ENDED (by the
+ * end of the release).
+ */
+export const LIVE_ENTRY_STATUSES = ['WAITING', 'QUEUED', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED'] as const;
+export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
+
+/** How ORBES Client Services concluded a confirmed reservation of a LIVE RELEASE (live_entries.resolution, migration 0021). */
+export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
+export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
@@ -603,6 +630,45 @@ export interface DropsTable {
   drawn_at: TimestampNullable;
   created_by: string | null;           // admin_users.id; null when a script created it
   created_at: TimestampDefault;
+  /** Migration 0021: DRAW (the default) or LIVE. The columns below are required for LIVE and NULL for DRAW, but where said. */
+  mode: WithDefault<DropMode>;
+  /** Who may enter a LIVE RELEASE: 0 (any account) to 3 (PALLADIUM); narrowed by live_access_models and access_collection_id. */
+  live_min_tier: ColumnType<number | null, number | null | undefined, number | null>;
+  /** The line at T0 by tier first, then the seed. */
+  tier_priority: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  /** The room opens that long before `opens_at` (T0): 1..60 minutes. */
+  room_opens_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  /** To hold the seal once it is one's turn: 10..300 seconds. */
+  turn_seconds: ColumnType<number | null, number | null | undefined, number | null>;
+  /** To press PAY once the seal is held: 1..60 minutes. */
+  pay_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Pieces per person: 1..5. */
+  per_account: ColumnType<number | null, number | null | undefined, number | null>;
+  /** The price of a piece in minor units (cents), ≥ 0. */
+  price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  /** ISO 4217, three capital letters. */
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The staged reveals: NULL announce_at is the publication; a NULL stage is the announcement; in order, before the room. */
+  announce_at: TimestampNullable;
+  silhouette_at: TimestampNullable;
+  name_at: TimestampNullable;
+  photo_at: TimestampNullable;
+  /** An uploaded silhouette (media_objects.sha256); without one, the seal. */
+  silhouette_sha256: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The owners of a piece of this collection may enter (with live_access_models: of either). */
+  access_collection_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The quantity as the announcement says it, 1..40 characters (« 25 PIECES »). */
+  quantity_line: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A pause in progress since then: no new turn, the deadlines frozen. */
+  paused_at: TimestampNullable;
+  /** Every pause of the release, in milliseconds (bigint, NOT NULL DEFAULT 0; 0 for a DRAW). */
+  paused_ms_total: WithDefault<number>;
+  /** When the end began (SOLD_OUT, CLOSED at closes_at, ENDED by an ADMIN), with its reason. */
+  ended_at: TimestampNullable;
+  ended_reason: ColumnType<LiveEndReason | null, LiveEndReason | null | undefined, LiveEndReason | null>;
+  /** SHA-256 of the boutique board's link secret, 32 bytes, unique; with the time it was issued. */
+  board_token_hash: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  board_token_issued_at: TimestampNullable;
 }
 
 /**
@@ -718,6 +784,109 @@ export interface ShopRequestsTable {
   resolution_note: string | null;      // ≤ 2 000 characters, the console's
 }
 
+/**
+ * A size of a LIVE RELEASE (migration 0021): 1 to 24 per drop (`position`), a `label` of 1..12 characters unique per
+ * drop, its `stock` (≥ 0). The release's quantity is the sum of its stock. id and drop_id never change.
+ */
+export interface DropSizesTable {
+  id: Generated<string>;
+  drop_id: string;
+  label: string;
+  position: number;                    // smallint 1..24
+  stock: number;                       // integer 0..10 000
+}
+
+/**
+ * An account's entry in a LIVE RELEASE (migration 0021): one per account and drop, in a size of that drop, for 1..5
+ * pieces; each status carries the columns it requires (the CHECKs of the migration). id, drop_id and account_id never
+ * change.
+ */
+export interface LiveEntriesTable {
+  id: Generated<string>;
+  drop_id: string;
+  account_id: string;
+  size_id: string;                     // drop_sizes.id of the same drop
+  quantity: number;                    // smallint 1..5
+  status: WithDefault<LiveEntryStatus>;
+  /** The club's tier at entry, read again for the line at T0 (0: no piece held). */
+  tier: number;
+  /** The place in the line, unique per drop; NULL before it (WAITING). */
+  position: ColumnType<number | null, number | null | undefined, number | null>;
+  joined_at: TimestampDefault;
+  queued_at: TimestampNullable;
+  turn_at: TimestampNullable;
+  turn_expires_at: TimestampNullable;
+  /** SHA-256 of the turn's secret (services/live.ts liveTurnToken), 32 bytes. */
+  turn_token_hash: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  /** The press of the seal, on the server's clock. */
+  press_started_at: TimestampNullable;
+  /** From the press to the secure, in milliseconds, ≥ 1 400. */
+  gesture_ms: ColumnType<number | null, number | null | undefined, number | null>;
+  secured_at: TimestampNullable;
+  hold_expires_at: TimestampNullable;
+  confirmed_at: TimestampNullable;
+  /** When the entry left for good (MISSED, EXPIRED, RELEASED, LEFT, REMOVED, ENDED). */
+  ended_at: TimestampNullable;
+  let_in_by: ColumnType<string | null, string | null | undefined, string | null>;   // admin_users.id
+  removed_by: ColumnType<string | null, string | null | undefined, string | null>;  // admin_users.id
+  removed_at: TimestampNullable;
+  handled_by: ColumnType<string | null, string | null | undefined, string | null>;  // admin_users.id
+  handled_at: TimestampNullable;
+  resolution: ColumnType<LiveResolution | null, LiveResolution | null | undefined, LiveResolution | null>;
+  resolution_note: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 500 characters, the console's
+  /** Keyed SHA-256 of the entry's network prefix, 32 bytes; erased 30 days after the release's end. */
+  network_hash: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  country: ColumnType<string | null, string | null | undefined, string | null>;     // two capital letters
+}
+
+/** The models whose owners may enter a LIVE RELEASE (migration 0021). */
+export interface LiveAccessModelsTable {
+  drop_id: string;
+  model_id: string;
+}
+
+/** An add-on offered at the reveal of a LIVE RELEASE (migration 0021): at most 6 per drop. id and drop_id never change. */
+export interface LiveAddonsTable {
+  id: Generated<string>;
+  drop_id: string;
+  label: string;                       // 1..40 characters
+  line: string | null;                 // ≤ 120 characters
+  price_minor: number;                 // ≥ 0, per piece
+  position: number;                    // smallint 1..6
+}
+
+/** An add-on an entry chose, with its price at the time (migration 0021). */
+export interface LiveEntryAddonsTable {
+  entry_id: string;
+  addon_id: string;
+  price_minor: number;
+}
+
+/** I'LL BE THERE (migration 0021): one per account and drop, with a size of that drop. */
+export interface LiveInterestTable {
+  drop_id: string;
+  account_id: string;
+  size_id: string;
+  created_at: TimestampDefault;
+}
+
+/** A host message of a LIVE RELEASE (migration 0021): 1..140 characters, never changed. */
+export interface LiveMessagesTable {
+  id: Generated<string>;
+  drop_id: string;
+  text: string;
+  created_by: string | null;           // admin_users.id; null when a script wrote it
+  created_at: TimestampDefault;
+}
+
+/** The turn and pay windows of one tier, overriding the release's (migration 0021): at least one of the two. */
+export interface LiveTierWindowsTable {
+  drop_id: string;
+  tier: number;                        // smallint 0..3
+  turn_seconds: number | null;         // 10..300
+  pay_minutes: number | null;          // 1..60
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -811,6 +980,14 @@ export interface Database {
   circle_daily_visits: CircleDailyVisitsTable;
   club_tiers: ClubTiersTable;
   shop_requests: ShopRequestsTable;
+  drop_sizes: DropSizesTable;
+  live_entries: LiveEntriesTable;
+  live_access_models: LiveAccessModelsTable;
+  live_addons: LiveAddonsTable;
+  live_entry_addons: LiveEntryAddonsTable;
+  live_interest: LiveInterestTable;
+  live_messages: LiveMessagesTable;
+  live_tier_windows: LiveTierWindowsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -889,6 +1066,12 @@ export type CirclePostImageRow = Selectable<CirclePostImagesTable>;
 export type CircleRsvpRow = Selectable<CircleRsvpsTable>;
 export type CirclePollVoteRow = Selectable<CirclePollVotesTable>;
 export type ClubTierRow = Selectable<ClubTiersTable>;
+export type DropSizeRow = Selectable<DropSizesTable>;
+export type LiveEntryRow = Selectable<LiveEntriesTable>;
+export type LiveEntryUpdate = Updateable<LiveEntriesTable>;
+export type LiveAddonRow = Selectable<LiveAddonsTable>;
+export type LiveMessageRow = Selectable<LiveMessagesTable>;
+export type LiveTierWindowRow = Selectable<LiveTierWindowsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

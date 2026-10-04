@@ -11,7 +11,8 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories',
   'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
-  'collections', 'cryptographic_keys', 'drop_entries', 'drops', 'genomes', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
+  'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops', 'genomes', 'live_access_models', 'live_addons', 'live_entries',
+  'live_entry_addons', 'live_interest', 'live_messages', 'live_tier_windows', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
   'scan_tokens', 'service_records', 'sessions', 'shop_requests', 'warranties',
 ];
@@ -130,6 +131,31 @@ describe('migrations', () => {
     expect(has(/INDEX shop_requests_handled_by_idx ON public\.shop_requests USING btree \(handled_by\)$/)).toBe(true);
     expect(has(/INDEX shop_requests_queue_idx ON public\.shop_requests USING btree \(status, created_at\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX shop_requests_one_open ON public\.shop_requests USING btree \(account_id, model_id\) WHERE \(status = 'OPEN'::text\)$/)).toBe(true);
+    // 0021: the LIVE RELEASE. A release's silhouette, collection and board link; a size, an entry and an interest of
+    // their own drop; the line and its head; the pieces held per size; an account's entries; every console user named.
+    expect(has(/INDEX drops_silhouette_sha256_idx ON public\.drops USING btree \(silhouette_sha256\)$/)).toBe(true);
+    expect(has(/INDEX drops_access_collection_id_idx ON public\.drops USING btree \(access_collection_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drops_board_token_hash_key ON public\.drops USING btree \(board_token_hash\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drop_sizes_label_key ON public\.drop_sizes USING btree \(drop_id, label\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drop_sizes_position_key ON public\.drop_sizes USING btree \(drop_id, "?position"?\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drop_sizes_drop_size_key ON public\.drop_sizes USING btree \(drop_id, id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_entries_drop_account_key ON public\.live_entries USING btree \(drop_id, account_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_entries_drop_position_key ON public\.live_entries USING btree \(drop_id, "?position"?\)$/)).toBe(true);
+    expect(has(/INDEX live_entries_line_idx ON public\.live_entries USING btree \(drop_id, status, "?position"?\)$/)).toBe(true);
+    expect(has(/INDEX live_entries_size_status_idx ON public\.live_entries USING btree \(drop_id, size_id, status\)$/)).toBe(true);
+    expect(has(/INDEX live_entries_account_idx ON public\.live_entries USING btree \(account_id, joined_at\)$/)).toBe(true);
+    for (const by of ['let_in_by', 'removed_by', 'handled_by']) expect(has(new RegExp(`INDEX live_entries_${by}_idx ON public\\.live_entries USING btree \\(${by}\\)$`)), by).toBe(true);
+    expect(has(/UNIQUE INDEX live_access_models_pkey ON public\.live_access_models USING btree \(drop_id, model_id\)$/)).toBe(true);
+    expect(has(/INDEX live_access_models_model_idx ON public\.live_access_models USING btree \(model_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_addons_position_key ON public\.live_addons USING btree \(drop_id, "?position"?\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_entry_addons_pkey ON public\.live_entry_addons USING btree \(entry_id, addon_id\)$/)).toBe(true);
+    expect(has(/INDEX live_entry_addons_addon_idx ON public\.live_entry_addons USING btree \(addon_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_interest_pkey ON public\.live_interest USING btree \(drop_id, account_id\)$/)).toBe(true);
+    expect(has(/INDEX live_interest_account_idx ON public\.live_interest USING btree \(account_id\)$/)).toBe(true);
+    expect(has(/INDEX live_interest_size_idx ON public\.live_interest USING btree \(drop_id, size_id\)$/)).toBe(true);
+    expect(has(/INDEX live_messages_drop_idx ON public\.live_messages USING btree \(drop_id, created_at\)$/)).toBe(true);
+    expect(has(/INDEX live_messages_created_by_idx ON public\.live_messages USING btree \(created_by\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_tier_windows_pkey ON public\.live_tier_windows USING btree \(drop_id, tier\)$/)).toBe(true);
   });
 
   /**
@@ -989,6 +1015,259 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id = ${model.id}`.execute(t.db);
   });
 
+  /** The columns 0021 adds to drops, and what names an object of 0021 in a snapshot. */
+  const DROPS_0021 = [
+    'access_collection_id', 'announce_at', 'board_token_hash', 'board_token_issued_at', 'currency', 'ended_at', 'ended_reason', 'live_min_tier', 'mode',
+    'name_at', 'paused_at', 'paused_ms_total', 'pay_minutes', 'per_account', 'photo_at', 'price_minor', 'quantity_line', 'room_opens_minutes',
+    'silhouette_at', 'silhouette_sha256', 'tier_priority', 'turn_seconds',
+  ];
+  const of0021 = (o: string) =>
+    /\b(drop_sizes|live_entries|live_access_models|live_addons|live_entry_addons|live_interest|live_messages|live_tier_windows)\b/.test(o) ||
+    DROPS_0021.some((c) => o.startsWith(`table drops ${c} `) || o.startsWith(`constraint drops drops_${c}_`)) ||
+    /^constraint drops drops_(draw_fields|live_fields|live_stages|live_ended|live_paused|board_token) /.test(o) ||
+    /^index CREATE (UNIQUE )?INDEX drops_(silhouette_sha256_idx|access_collection_id_idx|board_token_hash_key) /.test(o);
+
+  it('0021 adds the LIVE RELEASE (drops\' mode and settings, the sizes, entries, access, add-ons, interest, messages, per-tier windows), and nothing else; down cancels the LIVE drops and restores 0020 exactly, and up again', async () => {
+    const latest = await snapshot();
+    // A LIVE drop published before the rollback: the previous image would read it as a draw, so the down step cancels it.
+    await sql`INSERT INTO categories (id, code, name) VALUES (24, 'X', 'Live test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (24, 'L', 'RING', 'LIVEDOWN') RETURNING id`.execute(t.db)).rows[0].id;
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    const live = (await sql<{ id: string }>`
+      INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash, early_access_hours, published_at,
+                         mode, live_min_tier, tier_priority, room_opens_minutes, turn_seconds, pay_minutes, per_account, price_minor, currency, quantity_line)
+      VALUES (${model}, 'Live', 1, '2026-12-01T10:00:00Z', '2026-12-01T11:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash}, 0, now(),
+              'LIVE', 0, true, 5, 30, 5, 1, 505000, 'EUR', '1 PIECE') RETURNING id`.execute(t.db)).rows[0].id;
+    const { with: withLive, without: before } = await rollBackTo('0021_live_release');
+    const added = withLive.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0021(o))).toEqual([]);
+    expect(before.filter(of0021)).toEqual([]);
+    expect(withLive.filter((o) => !of0021(o))).toEqual(before);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('drops')).toEqual(DROPS_0021);
+    expect(added.filter((o) => o.startsWith('table drops '))).toContain("table drops mode text NO 'DRAW'::text");
+    expect(added.filter((o) => o.startsWith('table drops '))).toContain('table drops paused_ms_total bigint NO 0');
+    expect(columns('drop_sizes')).toEqual(['drop_id', 'id', 'label', 'position', 'stock']);
+    expect(columns('live_entries')).toEqual([
+      'account_id', 'confirmed_at', 'country', 'drop_id', 'ended_at', 'gesture_ms', 'handled_at', 'handled_by', 'hold_expires_at', 'id', 'joined_at', 'let_in_by',
+      'network_hash', 'position', 'press_started_at', 'quantity', 'queued_at', 'removed_at', 'removed_by', 'resolution', 'resolution_note', 'secured_at', 'size_id',
+      'status', 'tier', 'turn_at', 'turn_expires_at', 'turn_token_hash',
+    ]);
+    expect(columns('live_access_models')).toEqual(['drop_id', 'model_id']);
+    expect(columns('live_addons')).toEqual(['drop_id', 'id', 'label', 'line', 'position', 'price_minor']);
+    expect(columns('live_entry_addons')).toEqual(['addon_id', 'entry_id', 'price_minor']);
+    expect(columns('live_interest')).toEqual(['account_id', 'created_at', 'drop_id', 'size_id']);
+    expect(columns('live_messages')).toEqual(['created_at', 'created_by', 'drop_id', 'id', 'text']);
+    expect(columns('live_tier_windows')).toEqual(['drop_id', 'pay_minutes', 'tier', 'turn_seconds']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger drop_sizes drop_sizes_immutable_identity',
+      'trigger live_addons live_addons_immutable_identity',
+      'trigger live_entries live_entries_immutable_identity',
+      'trigger live_messages live_messages_immutable',
+    ]);
+    for (const c of [
+      /^constraint drops drops_mode_check CHECK \(\(mode = ANY \(ARRAY\['DRAW'::text, 'LIVE'::text\]\)\)\)$/,
+      /^constraint drops drops_ended_reason_check CHECK \(\(ended_reason = ANY \(ARRAY\['SOLD_OUT'::text, 'CLOSED'::text, 'ENDED'::text\]\)\)\)$/,
+      /^constraint drops drops_draw_fields CHECK \(\(\(mode = 'LIVE'::text\) OR /,
+      /^constraint drops drops_live_fields CHECK \(\(\(mode = 'DRAW'::text\) OR .*\(early_access_hours = 0\) AND \(drawn_at IS NULL\)\)\)\)$/,
+      /^constraint drops drops_live_stages CHECK /,
+      /^constraint drops drops_live_ended CHECK /,
+      /^constraint drops drops_board_token CHECK \(\(\(board_token_hash IS NULL\) = \(board_token_issued_at IS NULL\)\)\)$/,
+      /^constraint drops drops_silhouette_sha256_fkey FOREIGN KEY \(silhouette_sha256\) REFERENCES media_objects\(sha256\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_access_collection_id_fkey FOREIGN KEY \(access_collection_id\) REFERENCES collections\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_sizes drop_sizes_drop_id_fkey FOREIGN KEY \(drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_entries live_entries_size_fkey FOREIGN KEY \(drop_id, size_id\) REFERENCES drop_sizes\(drop_id, id\) ON DELETE RESTRICT$/,
+      /^constraint live_entries live_entries_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_entries live_entries_status_check CHECK \(\(status = ANY \(ARRAY\['WAITING'::text, 'QUEUED'::text, 'TURN'::text, 'SECURED'::text, 'CONFIRMED'::text, 'MISSED'::text, 'EXPIRED'::text, 'RELEASED'::text, 'LEFT'::text, 'REMOVED'::text, 'ENDED'::text\]\)\)\)$/,
+      /^constraint live_entries live_entries_gesture_ms_check CHECK \(\(gesture_ms >= 1400\)\)$/,
+      /^constraint live_interest live_interest_size_fkey FOREIGN KEY \(drop_id, size_id\) REFERENCES drop_sizes\(drop_id, id\) ON DELETE RESTRICT$/,
+      /^constraint live_entry_addons live_entry_addons_entry_id_fkey FOREIGN KEY \(entry_id\) REFERENCES live_entries\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_entry_addons live_entry_addons_addon_id_fkey FOREIGN KEY \(addon_id\) REFERENCES live_addons\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_messages live_messages_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_tier_windows live_tier_windows_some CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    for (const status of ['waiting', 'queued', 'turn', 'secured', 'confirmed', 'missed', 'returned', 'left', 'removed']) {
+      expect(added.some((o) => o.startsWith(`constraint live_entries live_entries_status_${status} CHECK `)), status).toBe(true);
+    }
+    expect((await sql<{ cancelled: boolean }>`SELECT cancelled_at IS NOT NULL AS cancelled FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].cancelled).toBe(true);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0021_live_release']);
+    expect(await snapshot()).toEqual(latest);
+    // Up again, it is a DRAW (cancelled): the LIVE settings went with the down step.
+    expect((await sql<{ mode: string }>`SELECT mode FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].mode).toBe('DRAW');
+    await sql`DELETE FROM drops WHERE id = ${live}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
+  });
+
+  it('0021: a LIVE drop has every setting and no draw, a DRAW none; stages in order before the room; an end with its reason; sizes, entries, interest and add-ons of their own drop, each status with its columns; a message never changes', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (24, 'X', 'Live test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (24, 'L', 'RING', 'LIVECHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('live@example.com', 'live@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const other = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('live2@example.com', 'live2@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('live@orbes.test', 'live@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    const sealed = `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`;
+    const LIVE: Record<string, unknown> = {
+      mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 505000,
+      currency: 'EUR', quantity_line: '25 PIECES', early_access_hours: 0,
+    };
+    const insert = (v: Record<string, unknown>) => {
+      const cols = { model_id: model, title: 'Live', quantity: 25, opens_at: '2026-12-01T10:00:00Z', closes_at: '2026-12-01T11:00:00Z', seed_enc: sealed, seed_hash: seedHash, ...v };
+      return sql<{ id: string; mode: string; paused_ms_total: number; live_min_tier: number | null }>`
+        INSERT INTO drops (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id, mode, paused_ms_total, live_min_tier`.execute(t.db);
+    };
+    // As the previous image inserts a drop: a DRAW, nothing of a LIVE RELEASE.
+    const draw = (await insert({})).rows[0];
+    expect([draw.mode, draw.paused_ms_total, draw.live_min_tier]).toEqual(['DRAW', 0, null]);
+    for (const [k, v] of Object.entries({ live_min_tier: 0, tier_priority: true, quantity_line: '1', announce_at: '2026-11-30T10:00:00Z', ended_at: '2026-12-01T11:00:00Z', paused_ms_total: 1 })) {
+      await expect(insert({ [k]: v }), k).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_draw_fields'));
+    }
+    // A LIVE drop: every setting, no early access, never drawn.
+    const ok = (await insert(LIVE)).rows[0];
+    expect(ok.mode).toBe('LIVE');
+    for (const k of ['live_min_tier', 'tier_priority', 'room_opens_minutes', 'turn_seconds', 'pay_minutes', 'per_account', 'price_minor', 'currency', 'quantity_line']) {
+      await expect(insert({ ...LIVE, [k]: null }), k).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_fields'));
+    }
+    await expect(insert({ ...LIVE, early_access_hours: 48 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_fields'));
+    await expect(insert({ ...LIVE, mode: 'AUCTION' })).rejects.toSatisfy((e) => isCheckViolation(e));
+    for (const [k, v] of Object.entries({ live_min_tier: 4, room_opens_minutes: 61, turn_seconds: 9, pay_minutes: 0, per_account: 6, price_minor: -1, currency: 'eur', quantity_line: ' ' })) {
+      await expect(insert({ ...LIVE, [k]: v }), k).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    await expect(insert({ ...LIVE, quantity_line: 'x'.repeat(41) })).rejects.toSatisfy((e) => isCheckViolation(e));
+    // The stages in order (a NULL stage is the announcement), all before the room opens (T0 − 5 min).
+    for (const bad of [
+      { announce_at: '2026-11-30T12:00:00Z', silhouette_at: '2026-11-30T11:00:00Z' },
+      { silhouette_at: '2026-11-30T12:00:00Z', name_at: '2026-11-30T11:00:00Z' },
+      { announce_at: '2026-11-30T10:00:00Z', silhouette_at: '2026-11-30T12:00:00Z' },
+      { name_at: '2026-11-30T12:00:00Z', photo_at: '2026-11-30T11:00:00Z' },
+      { photo_at: '2026-12-01T09:55:00.001Z' },
+    ]) {
+      await expect(insert({ ...LIVE, ...bad }), JSON.stringify(bad)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_stages'));
+    }
+    await insert({ ...LIVE, announce_at: '2026-11-28T10:00:00Z', silhouette_at: '2026-11-29T10:00:00Z', name_at: '2026-11-30T10:00:00Z', photo_at: '2026-12-01T09:55:00Z' });
+    await insert({ ...LIVE, announce_at: '2026-11-28T10:00:00Z', photo_at: '2026-11-29T10:00:00Z' });
+    // The end with its reason, once published; a pause once published; the board's link, its hash unique.
+    const set = (sets: string, id = ok.id) => sql.raw(`UPDATE drops SET ${sets} WHERE id = '${id}'`).execute(t.db);
+    await expect(set(`ended_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_ended'));
+    await expect(set(`ended_at = now(), ended_reason = 'ENDED'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_ended'));
+    await expect(set(`paused_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_paused'));
+    await set(`published_at = '2026-11-28T10:00:00Z'`);
+    await expect(set(`ended_at = now(), ended_reason = 'GONE'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await set(`paused_at = now(), paused_ms_total = 1500`);
+    await expect(set(`board_token_hash = '\\x00'::bytea, board_token_issued_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(set(`board_token_hash = sha256('x')`)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_board_token'));
+    await set(`board_token_hash = sha256('x'), board_token_issued_at = now()`);
+    const second = (await insert(LIVE)).rows[0];
+    await expect(set(`board_token_hash = sha256('x'), board_token_issued_at = now()`, second.id)).rejects.toSatisfy((e) => isUniqueViolation(e, 'drops_board_token_hash_key'));
+
+    // Sizes: a label of 1 to 12 characters, trimmed, unique per drop; positions 1 to 24; stock ≥ 0; never moved to another drop.
+    const size = (dropId: string, label: string, position: number, stock = 2) =>
+      sql<{ id: string }>`INSERT INTO drop_sizes (drop_id, label, position, stock) VALUES (${dropId}, ${label}, ${position}, ${stock}) RETURNING id`.execute(t.db);
+    for (const [label, position, stock] of [['', 1, 1], ['x'.repeat(13), 1, 1], [' 52', 1, 1], ['52', 0, 1], ['52', 25, 1], ['52', 1, -1]] as const) {
+      await expect(size(ok.id, label, position, stock), `${label} ${position} ${stock}`).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const s52 = (await size(ok.id, '52', 1)).rows[0].id;
+    await expect(size(ok.id, '52', 2)).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_sizes_label_key'));
+    await expect(size(ok.id, '54', 1)).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_sizes_position_key'));
+    const elsewhere = (await size(second.id, '52', 1)).rows[0].id;
+    await expect(sql`UPDATE drop_sizes SET drop_id = ${second.id} WHERE id = ${s52}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+
+    // Entries: a size of their own drop, one per account, a place unique per drop, each status with its columns.
+    const entry = (sets: Record<string, unknown>) => {
+      const cols = { drop_id: ok.id, account_id: account, size_id: s52, quantity: 1, tier: 0, ...sets };
+      return sql<{ id: string; status: string }>`INSERT INTO live_entries (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id, status`.execute(t.db);
+    };
+    await expect(entry({ size_id: elsewhere })).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    for (const bad of [{ quantity: 0 }, { quantity: 6 }, { tier: 4 }, { country: 'fr' }, { network_hash: new Uint8Array(31) }, { status: 'PAID' }]) {
+      await expect(entry(bad), JSON.stringify(bad)).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const e1 = (await entry({ country: 'FR', network_hash: new Uint8Array(32) })).rows[0];
+    expect(e1.status).toBe('WAITING');
+    await expect(entry({})).rejects.toSatisfy((e) => isUniqueViolation(e, 'live_entries_drop_account_key'));
+    const upd = (sets: string, id = e1.id) => sql.raw(`UPDATE live_entries SET ${sets} WHERE id = '${id}'`).execute(t.db);
+    const T = `joined_at + interval '1 minute'`;
+    const cases: [string, string][] = [
+      [`position = 1`, 'live_entries_line'],
+      [`ended_at = now()`, 'live_entries_status_waiting'],
+      [`status = 'QUEUED'`, 'live_entries_status_queued'],
+      [`status = 'QUEUED', position = 1, queued_at = joined_at - interval '1 second'`, 'live_entries_line'],
+      [`status = 'TURN', position = 1, queued_at = joined_at`, 'live_entries_status_turn'],
+      [`status = 'TURN', position = 1, queued_at = joined_at, turn_at = ${T}, turn_expires_at = ${T} + interval '30 seconds'`, 'live_entries_turn_fields'],
+      [`status = 'TURN', position = 1, queued_at = joined_at, turn_at = ${T}, turn_expires_at = ${T}, turn_token_hash = sha256('t')`, 'live_entries_turn_fields'],
+      [`status = 'MISSED', position = 1, queued_at = joined_at, turn_at = ${T}, turn_expires_at = ${T} + interval '30 seconds', turn_token_hash = sha256('t')`, 'live_entries_status_missed'],
+      [`status = 'LEFT'`, 'live_entries_status_left'],
+      [`status = 'REMOVED', ended_at = now()`, 'live_entries_status_removed'],
+      [`status = 'REMOVED', removed_at = now(), ended_at = now() + interval '1 second'`, 'live_entries_removed_fields'],
+      [`status = 'CONFIRMED'`, 'live_entries_status_confirmed'],
+      [`let_in_by = '${admin}'`, 'live_entries_let_in_turn'],
+      [`resolution = 'CONCLUDED', handled_at = now()`, 'live_entries_handled_fields'],
+      [`press_started_at = now()`, 'live_entries_press_after_turn'],
+    ];
+    for (const [sets, constraint] of cases) await expect(upd(sets), sets).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    // Into the line, its turn, the seal held 1.4 s at least, confirmed, concluded by Client Services.
+    await upd(`status = 'QUEUED', position = 1, queued_at = joined_at`);
+    const e2 = (await entry({ account_id: other, status: 'QUEUED', position: 2, queued_at: new Date(Date.now() + 1000) })).rows[0];
+    await expect(upd(`position = 1`, e2.id)).rejects.toSatisfy((e) => isUniqueViolation(e, 'live_entries_drop_position_key'));
+    await upd(`status = 'TURN', turn_at = ${T}, turn_expires_at = ${T} + interval '30 seconds', turn_token_hash = sha256('t'), press_started_at = ${T}`);
+    const held = `secured_at = ${T} + interval '2 seconds', hold_expires_at = ${T} + interval '5 minutes'`;
+    await expect(upd(`status = 'SECURED', ${held}, gesture_ms = 1399`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(upd(`status = 'SECURED', ${held}`)).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_secured_fields'));
+    await expect(upd(`status = 'SECURED', secured_at = ${T} - interval '1 second', hold_expires_at = ${T} + interval '5 minutes', gesture_ms = 1500`)).rejects.toSatisfy((e) =>
+      isCheckViolation(e),
+    );
+    await upd(`status = 'SECURED', ${held}, gesture_ms = 2000`);
+    await expect(upd(`status = 'ENDED', ended_at = now() + interval '1 hour'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_status_left'));
+    await upd(`status = 'CONFIRMED', confirmed_at = ${T} + interval '1 minute'`);
+    await expect(upd(`resolution = 'REFUNDED', handled_at = now()`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(upd(`resolution_note = 'Called.'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_handled_fields'));
+    await expect(upd(`resolution = 'CONCLUDED', handled_at = now(), resolution_note = '${'x'.repeat(501)}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await upd(`resolution = 'CONCLUDED', handled_at = now() + interval '2 hours', handled_by = '${admin}', resolution_note = 'Concluded by phone.'`);
+    await expect(upd(`account_id = '${other}'`)).rejects.toSatisfy(isGuardViolation);
+    await upd(`status = 'REMOVED', removed_by = '${admin}', removed_at = now() + interval '3 minutes', ended_at = now() + interval '3 minutes'`, e2.id);
+
+    // Interest: a size of its own drop, one per account and drop. Add-ons: 1 to 6, each once per entry.
+    const interest = (sizeId: string) => sql`INSERT INTO live_interest (drop_id, account_id, size_id) VALUES (${ok.id}, ${account}, ${sizeId})`.execute(t.db);
+    await expect(interest(elsewhere)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await interest(s52);
+    await expect(interest(s52)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    const addon = (label: string, position: number, price = 1500) =>
+      sql<{ id: string }>`INSERT INTO live_addons (drop_id, label, price_minor, position) VALUES (${ok.id}, ${label}, ${price}, ${position}) RETURNING id`.execute(t.db);
+    for (const [label, position, price] of [['', 1, 1], ['x'.repeat(41), 1, 1], ['GIFT BOX', 7, 1], ['GIFT BOX', 1, -1]] as const) {
+      await expect(addon(label, position, price)).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const box = (await addon('GIFT BOX', 1)).rows[0].id;
+    await expect(addon('ENGRAVING', 1)).rejects.toSatisfy((e) => isUniqueViolation(e, 'live_addons_position_key'));
+    await sql`INSERT INTO live_entry_addons (entry_id, addon_id, price_minor) VALUES (${e1.id}, ${box}, 1500)`.execute(t.db);
+    await expect(sql`INSERT INTO live_entry_addons (entry_id, addon_id, price_minor) VALUES (${e1.id}, ${box}, 1500)`.execute(t.db)).rejects.toSatisfy((e) => isUniqueViolation(e));
+
+    // Messages: one line of 1 to 140 characters, never changed. Per-tier windows: one of the two at least, within bounds.
+    const message = (text: string) => sql<{ id: string }>`INSERT INTO live_messages (drop_id, text, created_by) VALUES (${ok.id}, ${text}, ${admin}) RETURNING id`.execute(t.db);
+    await expect(message('  ')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(message('x'.repeat(141))).rejects.toSatisfy((e) => isCheckViolation(e));
+    const m = (await message('The room opens in five minutes.')).rows[0].id;
+    await expect(sql`UPDATE live_messages SET text = 'Changed' WHERE id = ${m}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    const window = (tier: number, turn: number | null, pay: number | null) =>
+      sql`INSERT INTO live_tier_windows (drop_id, tier, turn_seconds, pay_minutes) VALUES (${ok.id}, ${tier}, ${turn}, ${pay})`.execute(t.db);
+    await expect(window(3, null, null)).rejects.toSatisfy((e) => isCheckViolation(e, 'live_tier_windows_some'));
+    for (const [tier, turn, pay] of [[4, 30, null], [3, 9, null], [3, null, 61]] as const) await expect(window(tier, turn, pay)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await window(3, null, 10);
+    await expect(window(3, 60, null)).rejects.toSatisfy((e) => isUniqueViolation(e));
+
+    // Everything a release holds keeps it, and its console users and accounts, from being deleted.
+    await expect(sql`DELETE FROM drops WHERE id = ${ok.id}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    for (const table of ['live_tier_windows', 'live_entry_addons', 'live_interest']) await sql`DELETE FROM ${sql.table(table)}`.execute(t.db);
+    await sql`DELETE FROM live_messages WHERE drop_id = ${ok.id}`.execute(t.db);
+    await sql`DELETE FROM live_addons WHERE drop_id = ${ok.id}`.execute(t.db);
+    await sql`DELETE FROM live_entries WHERE drop_id = ${ok.id}`.execute(t.db);
+    await sql`DELETE FROM drop_sizes`.execute(t.db);
+    await sql`DELETE FROM drops WHERE model_id = ${model}`.execute(t.db);
+    await sql`DELETE FROM accounts WHERE id IN (${account}, ${other})`.execute(t.db);
+    await sql`DELETE FROM admin_users WHERE id = ${admin}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -1035,6 +1314,8 @@ describe('migrations', () => {
       // Deployment B+C.
       '0019_model_discontinued',
       '0020_private_salon',
+      // Deployment D: the LIVE RELEASE (plan of 2026-10-04).
+      '0021_live_release',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

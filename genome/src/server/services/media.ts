@@ -457,7 +457,7 @@ export class MediaService {
     throw new Error('media: the image could not be stored (deleted twice while it was being stored)');
   }
 
-  /** Delete an image no model, no gallery, no circle post and no piece uses any more. Best effort, after the change committed. */
+  /** Delete an image no model, no gallery, no circle post, no piece and no release's silhouette uses any more. Best effort, after the change committed. */
   private async deleteIfUnused(sha256: string): Promise<void> {
     try {
       await this.db
@@ -467,6 +467,7 @@ export class MediaService {
         .where((eb) => eb.not(eb.exists(eb.selectFrom('model_images').select('model_id').where('sha256', '=', sha256))))
         .where((eb) => eb.not(eb.exists(eb.selectFrom('circle_post_images').select('post_id').where('sha256', '=', sha256))))
         .where((eb) => eb.not(eb.exists(eb.selectFrom('products').select('id').where('photo_sha256', '=', sha256))))
+        .where((eb) => eb.not(eb.exists(eb.selectFrom('drops').select('id').where('silhouette_sha256', '=', sha256))))
         .execute();
     } catch (e) {
       // Used again meanwhile (the foreign key refused the delete): it stays, as it should.
