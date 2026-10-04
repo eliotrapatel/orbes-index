@@ -37,6 +37,7 @@ import {
   placeAnnouncement,
   readyChecks,
   releaseTime,
+  servable,
   sizeChoices,
   tickSecond,
   windowLeft,
@@ -287,8 +288,13 @@ describe('the room', () => {
       { id: S48, label: '48', available: true, selected: false },
       { id: S52, label: '52', available: true, selected: true },
     ]);
-    // After T0, a size whose pieces are all taken cannot be chosen.
-    expect(sizeChoices(s, room({ sizes: [{ id: S48, label: '48', stock: 3, left: 0, held: 1 }] }), null)[0]!.available).toBe(false);
+    // After T0, the server's rule for a late entry: a size whose pieces are all in turns or held can still be chosen (one
+    // may return, the late arrival joins behind); only a size whose every piece is confirmed cannot.
+    const late = (left: number, held: number) => room({ sizes: [{ id: S48, label: '48', stock: 3, left, held }] });
+    expect(sizeChoices(s, late(0, 1), null)[0]!.available).toBe(true);
+    expect(sizeChoices(s, late(0, 3), null)[0]!.available).toBe(true);
+    expect(sizeChoices(s, late(0, 0), null)[0]!.available).toBe(false);
+    expect([servable(late(0, 1).sizes[0]!), servable(late(2, 1).sizes[0]!), servable(null)]).toEqual([1, 3, null]);
     const interest = { dropId: ID, size: { id: S48, label: '48' }, since: iso(T0 - 86_400_000) };
     expect(initialSize(s, null, interest)).toBe(S48);
     expect(initialSize(s, entry(), interest)).toBe(S52);
@@ -376,6 +382,7 @@ describe('the release announced, and its card in THE RELEASES', () => {
       named: true,
       line: 'RING · ORBIT',
       price: '€ 4 800',
+      offer: '€ 4 800 · 25 PIECES',
       when: { paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: 'SUNDAY 11 OCTOBER · 13:00 ON THIS PHONE' },
       access: 'FOR OWNERS FROM PLATINE',
       quantity: '25 PIECES · ONE PER COLLECTOR',

@@ -518,13 +518,21 @@ class App {
     this.stopCamera();
     this.releaseId = id;
     if (id !== null) {
-      // The LIVE page answers 404 for any other id, a draw's included; a release that cannot be read now is said there.
+      // The LIVE page answers 404 for any other id, a draw's included. When it cannot be read now (a refusal of its own
+      // rate group, an error), the draw's page is read: a draw's address shows its draw; when neither can be read, the
+      // failure is said on the LIVE page (its TRY AGAIN reads both again).
       let sheet: LiveSheet | LiveEndedSheet | null = null;
       let failure: string | null = null;
       try {
         sheet = await this.api.liveRelease(id);
       } catch (e) {
-        if (!(e instanceof ApiError && e.status === 404)) failure = messageOf(e);
+        if (!(e instanceof ApiError && e.status === 404)) {
+          const draw = await this.api.drop(id).then(
+            () => true,
+            () => false,
+          );
+          if (!draw) failure = messageOf(e);
+        }
       }
       if (gen !== this.generation) return;
       if (sheet || failure !== null) {

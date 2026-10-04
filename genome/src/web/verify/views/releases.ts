@@ -142,7 +142,8 @@ function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
 
 // ── The list ───────────────────────────────────────────────────────────────
 
-type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
+/** `liveFailed`: the LIVE half could not be read (a refusal of its own rate group, an error): the draws show all the same. */
+type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; liveFailed: boolean; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
 
 class ListPage {
   readonly root: HTMLElement;
@@ -181,9 +182,11 @@ class ListPage {
     this.load = { kind: 'loading' };
     this.render();
     try {
-      const [drops, live] = await Promise.all([this.deps.api.drops(), this.deps.api.liveReleases()]);
+      // The two halves read apart: the LIVE one failing (its own rate group, an error) leaves the draws on show, said above
+      // them; the draws failing is the failure of the page.
+      const [drops, live] = await Promise.all([this.deps.api.drops(), this.deps.api.liveReleases().catch(() => null)]);
       if (this.disposed) return;
-      this.load = { kind: 'ready', live: liveCards(live, this.deps.localZone), cards: releaseCards(drops) };
+      this.load = { kind: 'ready', live: live ? liveCards(live, this.deps.localZone) : [], liveFailed: live === null, cards: releaseCards(drops) };
     } catch (e) {
       if (this.disposed) return;
       this.load = { kind: 'failed', message: messageOf(e) };
@@ -206,11 +209,22 @@ class ListPage {
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
+    const partial = l.liveFailed
+      ? h(
+          'div',
+          { class: 'releases__partial' },
+          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: RELEASES.liveFailed }),
+          h('button', { class: 'textlink releases__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: RELEASES.retry }),
+        )
+      : null;
     if (l.cards.length === 0 && l.live.length === 0) {
-      this.body.replaceChildren(h('p', { class: 'prose releases__empty', text: RELEASES.empty }));
+      // Nothing to show: no release announced, or none known while the LIVE half could not be read.
+      this.body.replaceChildren(partial ?? h('p', { class: 'prose releases__empty', text: RELEASES.empty }));
+      if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
     this.body.replaceChildren(
+      ...(partial ? [partial] : []),
       h(
         'ul',
         { class: 'releases__list' },

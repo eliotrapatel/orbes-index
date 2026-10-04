@@ -241,9 +241,9 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
       case 'LEFT':
         return 'left';
       case 'QUEUED': {
-        const size = roomSize(i.room, entry.size.id);
         // Sold out in its size: not enough pieces free nor held (which may return) to serve it.
-        return size && size.left + size.held < entry.quantity ? 'soldOut' : 'line';
+        const left = servable(roomSize(i.room, entry.size.id));
+        return left !== null && left < entry.quantity ? 'soldOut' : 'line';
       }
       case 'WAITING':
         return 'room';
@@ -290,19 +290,24 @@ export function readyChecks(o: { access: LiveAccess | null; size: string | null;
 export interface SizeChoice {
   id: string;
   label: string;
-  /** A piece of it can still be given (its stock, less what is confirmed and, after T0, held). */
+  /** A piece of it can still be given: one not confirmed (free, or held in a turn or a hold that may return). */
   available: boolean;
   selected: boolean;
 }
 
-/** The sizes with stock, in order; `available` from the room's pieces left once it has them. */
+/**
+ * The pieces of a size the line can still serve, as the server counts them when an account enters after T0: its stock
+ * less what is confirmed (free, or held and possibly returning). Null without the room.
+ */
+export function servable(size: LiveRoomSize | null): number | null {
+  return size ? size.left + size.held : null;
+}
+
+/** The sizes with stock, in order; `available` while the room says a piece of it can still be served. */
 export function sizeChoices(sheet: LiveSheet, room: LiveRoom | null, selected: string | null): SizeChoice[] {
   return sheet.sizes
     .filter((s) => s.stock > 0)
-    .map((s) => {
-      const r = roomSize(room, s.id);
-      return { id: s.id, label: s.label, available: r ? r.left > 0 : true, selected: s.id === selected };
-    });
+    .map((s) => ({ id: s.id, label: s.label, available: (servable(roomSize(room, s.id)) ?? 1) >= 1, selected: s.id === selected }));
 }
 
 /**
@@ -426,6 +431,11 @@ export function pictureOf(c: Pick<LiveCard, 'imageUrl' | 'silhouetteUrl' | 'name
   return silhouette ? { src: silhouette, alt: `The silhouette of ${name}`, kind: 'silhouette' } : null;
 }
 
+/** The price and the quantity line: `€ 5 050 · 25 PIECES`. */
+export function offerLine(r: Pick<LiveCard, 'priceMinor' | 'currency' | 'quantityLine'>): string {
+  return [formatMoney(r.priceMinor, r.currency), upper(r.quantityLine)].filter((x) => x.length > 0).join(' · ');
+}
+
 export interface LiveSheetModel {
   id: string;
   /** The model's name once revealed, else TO BE REVEALED. */
@@ -434,6 +444,8 @@ export interface LiveSheetModel {
   /** `RING · ORBIT` once the name is revealed. */
   line: string | null;
   price: string;
+  /** `€ 5 050 · 25 PIECES`: the price and the quantity line, as the room and the release's card say them. */
+  offer: string;
   when: { paris: string; local: string | null };
   /** `FOR OWNERS FROM PLATINE` */
   access: string;
@@ -454,6 +466,7 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     named: name !== null,
     line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     price: formatMoney(s.priceMinor, s.currency),
+    offer: offerLine(s),
     when: releaseTime(s.opensAt, localZone),
     access: LIVE.forWhom(s.access.text),
     quantity: [upper(s.quantityLine), LIVE.perAccount(s.perAccount)].filter((x) => x.length > 0).join(' · '),
@@ -491,7 +504,7 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
       kind: c.phase === 'ANNOUNCED' ? LIVE.kind : `${LIVE.kind} · ${LIVE.phase[c.phase]}`,
       title: c.name ? upper(c.name) : LIVE.unnamed,
       when: releaseTime(c.opensAt, localZone),
-      line: [formatMoney(c.priceMinor, c.currency), upper(c.quantityLine)].filter((x) => x.length > 0).join(' · '),
+      line: offerLine(c),
       access: LIVE.forWhom(c.access.text),
       picture: pictureOf(c),
     }));

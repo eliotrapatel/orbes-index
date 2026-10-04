@@ -4,19 +4,23 @@
  *
  *  - Announced: its vault plate in THE RELEASES among the draws' ivory ones, then its page (B1): the piece, OPENS IN,
  *    the time in Paris then on this phone, the rule, ADD TO CALENDAR.
- *  - The room (B2): the closed door, its lock the seal; READY CHECK; the size of I'LL BE THERE preselected; ENTER; the
- *    size changeable until T0. The last minute the lock's orbits turn back, the last ten seconds tick (ten soft voices
+ *  - The room (B2): the model, its price and the quantity line; the closed door, its lock the seal; READY CHECK; the size
+ *    of I'LL BE THERE preselected; ENTER; the size changeable until T0. The last minute the lock's orbits turn back, the last ten seconds tick (ten soft voices
  *    of the sound module); at T0 the lock aligns and the door opens on the piece under its light sweep.
  *  - The line (B3): the place, who is ahead in the size, the pieces left and held, the size never offered again.
  *  - The turn (B4), a piece returned: a pointer let go too early resets the seal; held, it secures the piece. The
- *    reveal (B5): P-D01's motion on the seal's glyphs, the chord, the vibrations; the add-ons, PAY · total, 5:00.
+ *    reveal (B5), even when the stream says SECURED before the secure's own answer: P-D01's motion on the seal's glyphs,
+ *    the chord, the vibrations; the add-ons, PAY · total, 5:00.
  *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES.
  *  - A phone whose clock is wrong counts on the server's; the host message under the header.
- *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0 the
- *    size then ENTER THE LINE; a pause said under the header, the seal not offered and its time still; the seal held
- *    from the keyboard (the space bar); RELEASE MY PLACE confirmed by a second tap.
+ *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0, its one
+ *    piece in another collector's turn, the size still offered then ENTER THE LINE, behind; the piece returned; a pause
+ *    said under the header, the seal not offered and its time still; the seal held from the keyboard (the space bar); a
+ *    pause on the piece held, its time to confirm still; RELEASE MY PLACE confirmed by a second tap.
  *  - Every edge page: not signed in, not eligible, turn passed, hold ended, place released, left the line, removed, sold
  *    out in your size, the release ended before your turn, the release over.
+ *  - The LIVE RELEASES refused (429, their own rate group): THE RELEASES still shows the draws and says the LIVE half is
+ *    missing; a draw's address shows its draw; a LIVE one says its failure, TRY AGAIN reading it again.
  *
  * On every screen: the text's contrast on its ground computed from the page's own colours (at least 4.5 : 1), at most
  * one primary action (filled ivory), no figure in the display face, and the floors of BRAND-DESIGN-SYSTEM §3.8 (44 px
@@ -34,7 +38,7 @@ import { startLiveEngine } from '../../src/server/context.js';
 import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
-import { LIVE } from '../../src/web/verify/copy.js';
+import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -266,6 +270,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // B2: the room, open. The door closed, its lock the seal (the specimen: thirteen orbits, eight glyphs).
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
     await textOf(page.locator('.live__room > .live__overline'), 'THE ROOM IS OPEN');
+    // The model, its price and the quantity line.
+    await textOf(page.locator('.live__room > h1'), 'MONOLITHE');
+    await textOf(page.locator('.live__room > .live__offer'), '€ 5 050 · 25 PIECES');
     await visible(page.locator('.live-door .live-door__seal'));
     expect(await page.locator('.live-door__seal .live-seal__ring').count()).toBe(13);
     expect(await page.locator('.live-door__seal g[data-layer="genome"]').count()).toBe(8);
@@ -352,6 +359,17 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset')).toBe((2 * Math.PI * 116).toFixed(2));
     await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe(LIVE.announce.reset);
     expect((await statusOf(r.id, me.id))?.status).toBe('TURN');
+    // The secure's own answer held back 3 s: the stream says SECURED first, and the reveal still plays.
+    let answered = false;
+    await page.route(
+      (u) => u.pathname === `/api/v1/live/${r.id}/secure`,
+      async (route) => {
+        const response = await route.fetch();
+        await sleep(3_000);
+        answered = true;
+        await route.fulfill({ response });
+      },
+    );
     // Held: the ring fills, the piece is secured.
     await page.mouse.down();
     await sleep(2_100);
@@ -359,6 +377,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
     // B5: the reveal (P-D01's motion on the seal's glyphs), the chord, the vibrations; then the add-ons and PAY.
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
+    expect(answered).toBe(false);
     expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
     expect(await page.locator('.live__piece-seal g[data-layer="genome"]').first().evaluate((g) => getComputedStyle(g).animationName)).toBe('ceremony-glyph');
     await expect.poll(async () => (await live(page)).tones.filter((t) => t === 293.66).length).toBe(1);
@@ -366,6 +385,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe(LIVE.announce.secured('MONOLITHE'));
     await textOf(page.locator('.live__secured-at'), /^SECURED AT \d{2}:\d{2}:\d{2}$/);
     await textOf(page.locator('.live__deadline'), /^0[45]:\d{2} TO CONFIRM$/);
+    // The answer, once it comes, plays nothing twice.
+    await expect.poll(() => answered, POLL).toBe(true);
+    await page.unroute((u) => u.pathname === `/api/v1/live/${r.id}/secure`);
+    await sleep(300);
+    expect((await live(page)).tones.filter((t) => t === 293.66)).toHaveLength(1);
+    expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
     const pay = page.locator('.live__pay');
     await textOf(pay, 'PAY · € 5 050');
     await keepsVault(page, 'PAY · € 5 050', ['ENGRAVING + € 150', 'GIFT BOX + € 90', 'PAY · € 5 050', 'RELEASE MY PLACE']);
@@ -404,8 +429,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(problems).toEqual([]);
   }, 240_000);
 
-  it('with reduced motion and no stream: no orbit turned, no reveal; after T0 the size, then ENTER THE LINE; the state polled; a pause; the seal held from the keyboard; RELEASE MY PLACE on a second tap', async () => {
+  it('with reduced motion and no stream: no orbit turned, no reveal; after T0, its one piece in a turn, the size still offered, ENTER THE LINE, behind; the state polled; a pause; the seal held from the keyboard; a pause on the piece held; RELEASE MY PLACE on a second tap', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 4_000), sizes: [{ label: 'ONE SIZE', stock: 1 }] });
+    // A collector in the room before T0: at T0 the one piece is in its turn.
+    const first = await account(0);
+    await srv.ctx.services.live.enter(first.id, r.id, { sizeId: r.sizes[0]!.id }, first.actor);
     const me = await account(0);
     const { page, problems } = await phone(me.token, { reducedMotion: 'reduce', noStream: true });
     const polls: number[] = [];
@@ -418,13 +446,25 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await page.locator('.live-seal__ring').evaluateAll((gs) => gs.every((g) => (g as SVGGElement).style.transform === ''))).toBe(true);
     await textOf(page.locator('.live__join > .live__overline'), 'LIVE NOW');
     await textOf(page.locator('.live__join-line'), LIVE.joinLine);
+    // Arrived after T0, its one piece in the first collector's turn (none free, one that may return): the size is still
+    // offered, as the server takes a late entry while a piece is not confirmed.
+    await expect.poll(async () => (await statusOf(r.id, first.id))?.status, POLL).toBe('TURN');
+    await textOf(page.locator('.live__join .live__left'), '0 OF 1 LEFT');
     // A one-size release: its one size preselected.
-    expect(await page.locator('.live__size').getAttribute('aria-pressed')).toBe('true');
+    const only = page.locator('.live__size');
+    expect(await only.getAttribute('aria-pressed')).toBe('true');
+    expect([await only.isEnabled(), await only.getAttribute('aria-label')]).toEqual([true, null]);
+    expect(await page.getByRole('button', { name: 'ENTER THE LINE' }).isEnabled()).toBe(true);
     await keepsVault(page, 'ENTER THE LINE', ['ONE SIZE', 'ENTER THE LINE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-join.png'), fullPage: true });
     await page.getByRole('button', { name: 'ENTER THE LINE' }).click();
-    // Alone in the line: its turn at once. The keyboard holds the seal with the space bar.
-    await textOf(page.locator('.live__turn > .live__overline'), 'YOUR TURN');
+    // Behind the first collector: the line, the held piece that may return.
+    await textOf(page.locator('.live__place'), '2');
+    await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
+    expect((await statusOf(r.id, me.id))?.status).toBe('QUEUED');
+    // The first collector lets the turn go: the piece has returned. The keyboard holds the seal with the space bar.
+    await srv.ctx.services.live.leave(first.id, r.id, first.actor);
+    await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
     await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
     // Without a stream the page reads the state every two seconds, and follows the room all the same.
     expect(await page.evaluate(() => 'EventSource' in window)).toBe(false);
@@ -448,6 +488,16 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await page.keyboard.up(' ');
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
     expect(await page.locator('.live__secured').getAttribute('class')).not.toMatch(/is-revealing/);
+    // Paused with the piece held: the time to confirm stands still across the polls (each moves the deadline by the
+    // pause so far), then runs again.
+    await srv.ctx.services.live.pause(r.id, f.admin);
+    await textOf(page.locator('.live__notice .live__paused'), `PAUSED ${LIVE.pausedLine}`);
+    const held = await page.locator('.live__deadline-time').innerText();
+    await sleep(4_500);
+    expect(await page.locator('.live__deadline-time').innerText()).toBe(held);
+    await srv.ctx.services.live.resume(r.id, f.admin);
+    await expect.poll(() => page.locator('.live__notice .live__paused').count(), POLL).toBe(0);
+    await expect.poll(() => page.locator('.live__deadline-time').innerText(), POLL).not.toBe(held);
     // RELEASE MY PLACE: the first tap asks again, the second gives the piece back.
     await page.getByRole('button', { name: 'RELEASE MY PLACE' }).click();
     await visible(page.getByRole('button', { name: LIVE.releaseConfirm }));
@@ -525,4 +575,42 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       await context.close();
     }
   }, 180_000);
+
+  it('the LIVE RELEASES refused (429): THE RELEASES keeps the draws and says the LIVE half missing; a draw\'s address shows its draw; a LIVE one its failure, then TRY AGAIN', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 2 * 86_400_000) });
+    const draw = await f.drops.create({ modelId: f.modelId, title: 'MONOLITHE — release II', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000), earlyAccessHours: 0 }, f.admin);
+    await f.drops.publish(draw.id, f.admin);
+    const { page, context, problems } = await phone(null);
+    // The rate group of the LIVE RELEASES refuses this phone: their list and every release's page.
+    const refused = (u: URL) => u.pathname === '/api/v1/live' || /^\/api\/v1\/live\/[0-9a-f-]{36}$/.test(u.pathname);
+    await page.route(refused, (route) =>
+      route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again in a moment.' } }) }),
+    );
+
+    await page.goto(`${srv.origin}/verify/releases`);
+    const card = page.locator('article.release-card', { hasText: 'MONOLITHE — RELEASE II' });
+    await visible(card);
+    await textOf(page.locator('.releases__partial .form__error'), RELEASES.liveFailed);
+    expect(await page.locator('article.live-card').count()).toBe(0);
+
+    // A draw's address: its draw, read when the LIVE page cannot be.
+    await page.goto(`${srv.origin}/verify/releases/${draw.id}`);
+    await textOf(page.locator('h1'), 'MONOLITHE — RELEASE II');
+    expect(await page.locator('.view--live').count()).toBe(0);
+
+    // A LIVE RELEASE's address: no draw by that id either, so its failure, said in the vault; TRY AGAIN reads it again.
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await textOf(page.locator('.live__edge .form__error'), /^The release could not be shown just now\. Too many attempts\./);
+    await page.unroute(refused);
+    await page.getByRole('button', { name: 'TRY AGAIN' }).click();
+    await textOf(page.locator('h1'), 'MONOLITHE');
+    await textOf(page.locator('.live__screen > .live__overline').first(), 'LIVE RELEASE');
+
+    // THE RELEASES again, answered: the LIVE half back, TRY AGAIN gone.
+    await page.goto(`${srv.origin}/verify/releases`);
+    await visible(page.locator('article.live-card').filter({ has: page.locator(`#release-${r.id}-title`) }));
+    expect(await page.locator('.releases__partial').count()).toBe(0);
+    expect(problems).toEqual([]);
+    await context.close();
+  }, 120_000);
 });

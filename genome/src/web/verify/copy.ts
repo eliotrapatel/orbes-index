@@ -647,6 +647,8 @@ export const RELEASES = Object.freeze({
   lead: 'Pieces released in a limited number. Enter the draw with your ORBES account: ORBES Client Services concludes each sale.',
   loading: 'ONE MOMENT…',
   loadFailed: 'The releases could not be shown just now.',
+  /** The LIVE RELEASES could not be read while the draws could: said above the draws. */
+  liveFailed: 'The LIVE RELEASES could not be shown just now.',
   retry: 'TRY AGAIN',
   empty: 'No release is announced yet.',
   /** The text link of each release of the list. */

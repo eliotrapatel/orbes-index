@@ -2152,6 +2152,12 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
+/* The LIVE half could not be read: said above the draws, with TRY AGAIN. */
+.releases__partial {
+  margin-bottom: 26px;
+  text-align: center;
+}
+
 .releases__empty,
 .release__missing {
   max-width: 34ch;
@@ -3213,6 +3219,11 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 }
 
 .live__kindline {
+  margin-top: 10px;
+}
+
+/* B2: the price and the quantity line under the model's name. */
+.live__offer {
   margin-top: 10px;
 }
 

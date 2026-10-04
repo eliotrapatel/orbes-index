@@ -5,8 +5,9 @@
  *   announced   LIVE RELEASE · the piece on its plate (photograph, else silhouette, else the seal) · its name, price ·
  *               OPENS IN dd:hh:mm or hh:mm:ss · the time in Paris, then on this phone · the rule, the quantity line and
  *               the limit per collector, when the room opens · ADD TO CALENDAR · how the places are drawn
- *   room        THE ROOM IS OPEN · the closed vault door, its lock the seal · the countdown on ORBES time · N IN THE ROOM ·
- *               READY CHECK · YOUR SIZE (the size of I'LL BE THERE preselected) · ENTER THE ROOM, then YOU'RE READY.
+ *   room        THE ROOM IS OPEN · the model, its price and the quantity line · the closed vault door, its lock the seal ·
+ *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
+ *               preselected) · ENTER THE ROOM, then YOU'RE READY.
  *               The last minute the seal's orbits turn back into alignment, the last ten seconds tick (P-D07's
  *               sound, its preference); at T0, on the server's second, the lock aligns, the door opens and the piece
  *               appears under a light sweep: DRAWING THE PLACES
@@ -54,6 +55,7 @@ import {
   PRESS_GAP_MS,
   readyChecks,
   roomSize,
+  servable,
   sizeChoices,
   tickSecond,
   windowLeft,
@@ -185,7 +187,9 @@ class LivePage {
   private returned = false;
   /** A room seen while the entry waited in the line had no piece free in its size. */
   private sizeWasFull = false;
-  /** The piece was secured on this page: the secured screen opens with the reveal. */
+  /** The secure was sent from this page's seal, for the turn under way. */
+  private securing = false;
+  /** The piece was secured on this page: the secured screen opens with the reveal (consumed when it mounts). */
   private reveal = false;
   private hold: Hold | null = null;
   /** RELEASE MY PLACE or LEAVE THE LINE armed for its second tap until this time (performance.now). */
@@ -193,6 +197,8 @@ class LivePage {
   private lastTick: number | null = null;
   private lastPlace: string | null = null;
   private frozenTurn: number | null = null;
+  /** The hold's time left when a pause began: it stands still until the pause ends. */
+  private frozenHold: number | null = null;
   /** How many of the stage times and the room's opening had passed at the last pulse. */
   private stagesDue: number | null = null;
   private disposed = false;
@@ -359,6 +365,9 @@ class LivePage {
   private setEntry(entry: LiveEntry | null): void {
     const before = this.entry?.status;
     if (entry?.status === 'TURN' && before !== 'TURN') this.returned = this.sizeWasFull;
+    // The reveal on the transition itself, whichever brings it first (the secure's answer, the stream, a poll).
+    if (before === 'TURN' && entry?.status === 'SECURED' && this.securing) this.reveal = true;
+    if (entry?.status !== 'TURN') this.securing = false;
     if (entry?.status !== 'QUEUED' && entry?.status !== 'TURN') this.sizeWasFull = false;
     this.entry = entry;
     const held = heldEntry(entry);
@@ -507,7 +516,8 @@ class LivePage {
     this.screen?.dispose?.();
     this.error = previous === kind ? this.error : null;
     const revealing = kind === 'secured' && this.reveal;
-    const screen = this.build(kind);
+    this.reveal = false;
+    const screen = this.build(kind, revealing);
     this.screen = screen;
     screen.el.classList.add('live__screen');
     this.stage.replaceChildren(screen.el);
@@ -553,7 +563,7 @@ class LivePage {
     this.foot.replaceChildren(...[back, sound, legalLinks({ extraClass: 'live__legal' })].filter((x): x is HTMLElement => x !== null));
   }
 
-  private build(kind: LiveScreenKind | 'failed'): Screen {
+  private build(kind: LiveScreenKind | 'failed', revealing = false): Screen {
     switch (kind) {
       case 'failed':
         return this.failedScreen();
@@ -576,7 +586,7 @@ class LivePage {
       case 'turn':
         return this.turnScreen();
       case 'secured':
-        return this.securedScreen();
+        return this.securedScreen(revealing);
       case 'confirmed':
         return this.confirmedScreen();
       default:
@@ -829,6 +839,7 @@ class LivePage {
       { class: 'live__room' },
       overline,
       this.title(m.name),
+      this.fact(m.offer, 'live__offer'),
       door,
       h('div', { class: 'live__count-block' }, count, until, presence),
       drawing,
@@ -934,8 +945,9 @@ class LivePage {
         setFact(left, room ? LIVE.left(room.left, room.quantity) : '');
         picker.update(true);
         this.showError(errorLine);
-        const size = roomSize(room, this.picked.sizeId ?? undefined);
-        enter.disabled = this.busy || this.picked.sizeId === null || (size !== null && size.left === 0);
+        // The server's rule for a late entry: the pieces of the size not confirmed (held ones may return) serve it.
+        const pieces = servable(roomSize(room, this.picked.sizeId ?? undefined));
+        enter.disabled = this.busy || this.picked.sizeId === null || (pieces !== null && pieces < this.picked.quantity);
         enter.setAttribute('aria-busy', String(this.busy));
       },
     };
@@ -1198,6 +1210,7 @@ class LivePage {
       fill.setAttribute('stroke-dashoffset', (HOLD_RING * (1 - progress)).toFixed(2));
       if (progress >= 1 && hold.pressedAt !== null && performance.now() - hold.pressedAt >= PRESS_GAP_MS && !hold.sent) {
         hold.sent = true;
+        this.securing = true;
         void this.secure(s.id, token);
         return;
       }
@@ -1229,12 +1242,7 @@ class LivePage {
   }
 
   private async secure(id: string, token: string): Promise<void> {
-    await this.act(
-      () => this.deps.api.liveSecure(id, token),
-      (e) => {
-        if (e.status === 'SECURED') this.reveal = true;
-      },
-    );
+    await this.act(() => this.deps.api.liveSecure(id, token));
     if (this.hold) {
       cancelAnimationFrame(this.hold.frame);
       this.hold = null;
@@ -1242,8 +1250,8 @@ class LivePage {
     if (this.entry?.status === 'TURN') this.resetHoldView?.();
   }
 
-  /** B5: the piece secured, its reveal, the add-ons, PAY. */
-  private securedScreen(): Screen {
+  /** B5: the piece secured, its reveal (`revealing`: secured on this page, just now), the add-ons, PAY. */
+  private securedScreen(revealing: boolean): Screen {
     const s = this.live();
     const seal = sealSvg('live__piece-seal');
     const securedAt = this.fact('', 'live__secured-at');
@@ -1272,7 +1280,7 @@ class LivePage {
     const release = h('button', { class: 'textlink live__release', attrs: { type: 'button' }, on: { click: () => this.armed(() => this.act(() => this.deps.api.liveGiveBack(s!.id))) } });
     const el = h(
       'section',
-      { class: ['live__secured', this.reveal && !prefersReducedMotion() ? 'is-revealing' : null] },
+      { class: ['live__secured', revealing && !prefersReducedMotion() ? 'is-revealing' : null] },
       this.overline(LIVE.secured),
       reveal,
       this.title(this.name()),
@@ -1285,12 +1293,12 @@ class LivePage {
       this.note(LIVE.payNote, 'live__pay-note'),
       release,
     );
-    if (this.reveal) {
+    if (revealing) {
       // The reveal (P-D01's motion on the seal's glyphs): the chord and the vibration where the phone allows it; once.
-      this.reveal = false;
       this.deps.sound.play();
       navigator.vibrate?.([...CEREMONY_VIBRATION]);
     }
+    this.frozenHold = null;
     return {
       kind: 'secured',
       el,
@@ -1315,7 +1323,12 @@ class LivePage {
         }
         pay.disabled = this.busy;
         pay.setAttribute('aria-busy', String(this.busy));
-        const { remainingMs } = windowLeft(e.hold.securedAt, e.hold.expiresAt, this.now());
+        let { remainingMs } = windowLeft(e.hold.securedAt, e.hold.expiresAt, this.now());
+        // Paused: the time to confirm stands still (the server moves the hold's deadline by the pause at every read).
+        if (this.room?.paused === true) {
+          this.frozenHold ??= remainingMs;
+          remainingMs = this.frozenHold;
+        } else this.frozenHold = null;
         (deadline.firstChild as HTMLElement).textContent = clockText(remainingMs);
         release.textContent = this.armedUntil ? LIVE.releaseConfirm : LIVE.release;
         release.disabled = this.busy;
