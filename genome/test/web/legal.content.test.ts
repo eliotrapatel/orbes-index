@@ -19,7 +19,10 @@
  *    names and lifetimes, the IP pseudonym, the rounding of the location and
  *    DB-IP, the session's length, the scrypt hashes, the retention left unset
  *    in production, the backups' archives, the masked access log, a CSP
- *    that loads nothing from another site;
+ *    that loads nothing from another site; what a LIVE RELEASE records (the
+ *    network's keyed fingerprint of its /24 or /48 and its 30 days, the
+ *    country alone, an interest deleted when withdrawn, the export without
+ *    the fingerprint);
  *  - the FAQ against the code and the customer's copy: every duration and
  *    limit equals its constant, every label of the app it quotes exists, and
  *    the second-hand answer is RESALE_GUIDANCE (J-02), in French as the
@@ -36,7 +39,9 @@ import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
 import { roundCoord } from '../../src/server/geo/resolver.js';
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE_S } from '../../src/server/http/device.js';
 import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
+import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
+import { LIVE_NETWORK_RETENTION_DAYS, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
 import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '../../src/server/services/ownership.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { cookieName, SESSION_COOKIE } from '../../src/server/services/sessions.js';
@@ -400,9 +405,42 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('says what a LIVE RELEASE records, as the code keeps it: the network as a keyed fingerprint for 30 days, the country alone', () => {
+    // The network: the /24 of an IPv4 address (its first three parts), the /48 of an IPv6 one (its first three groups).
+    expect(liveNetworkPrefix('203.0.113.77')).toBe('203.0.113.0/24');
+    expect(liveNetworkPrefix('2001:db8:1234:5678::1')).toBe('2001:db8:1234::/48');
+    // Keyed with the server's secret: one network, one fingerprint; another secret, another fingerprint; never the address.
+    const a = liveNetworkHash('pepper-a', '203.0.113.77');
+    expect(a).toHaveLength(32);
+    expect(Buffer.from(liveNetworkHash('pepper-a', '203.0.113.200')).equals(Buffer.from(a))).toBe(true);
+    expect(Buffer.from(liveNetworkHash('pepper-b', '203.0.113.77')).equals(Buffer.from(a))).toBe(false);
+    expect(readDoc('genome/src/server/routes/live.ts')).toContain('networkHash: liveNetworkHash(ctx.config.ipHashPepper, request.ip), country: ctx.geo.resolve(request).country ?? null');
+    // An entry keeps no address, no user agent, no coordinate: the country, two letters.
+    const entries = LIVE_MIGRATION.find((sql) => sql.startsWith('CREATE TABLE live_entries'))!;
+    expect(entries).toContain("country          text        NULL CHECK (country ~ '^[A-Z]{2}$')");
+    expect(entries).not.toMatch(/\bip\b|ip_hash|user_agent|latitude|longitude/);
+    expect(LIVE_NETWORK_RETENTION_DAYS).toBe(30);
+    for (const [lang, says] of [
+      ['en', ['HMAC-SHA-256 of the first three parts of an IPv4 address, or of the first three groups of an IPv6 one', `it is erased ${LIVE_NETWORK_RETENTION_DAYS} days after the end of the release`, 'never the address itself', 'Withdrawing it deletes it.', 'the fingerprint of your network excepted', 'in milliseconds']],
+      ['fr', ["HMAC-SHA-256 des trois premières parties d'une adresse IPv4, ou des trois premiers groupes d'une adresse IPv6", `elle est effacée ${LIVE_NETWORK_RETENTION_DAYS} jours après la fin de la sortie`, "jamais l'adresse elle-même", 'Le retirer le supprime.', "l'empreinte de votre réseau exceptée", 'en millisecondes']],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'live');
+      for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
+    }
+    expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain(`the fingerprint of the network, ${LIVE_NETWORK_RETENTION_DAYS} days after the end of the release`);
+    expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain(`l'empreinte du réseau, ${LIVE_NETWORK_RETENTION_DAYS} jours après la fin de la sortie`);
+    // A withdrawn interest is deleted; the export leaves the network's fingerprint out, and keeps the gesture's length.
+    const live = readDoc('genome/src/server/services/live.ts');
+    expect(live).toContain(".deleteFrom('live_interest').where('drop_id', '=', id).where('account_id', '=', account)");
+    const exported = /export interface ExportedLiveEntry \{([\s\S]*?)\n\}/.exec(live)?.[1] ?? '';
+    expect(exported).toContain('gestureMs: number | null;');
+    expect(exported).toContain('country: string | null;');
+    expect(exported).not.toMatch(/network/i);
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights']));
+    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live']));
     // The contact of ORBES Client Services, where the page asks the reader to write to them.
     for (const lang of LANGS) expect(DOCUMENTS.privacy[lang].sections[0].blocks).toContainEqual({ contact: true });
   });
@@ -537,7 +575,11 @@ describe('legal pages: both languages, links, lexicon', () => {
     // and their early access, P-X02: terms article 12; the circle, P-X01: terms article 13; the tiers' benefits, P-X04;
     // the privacy policy's entries, reservations, answers, votes and visits); its items until that deployment move this
     // line, never another.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3' };
+    // 2026-10-06: deployment D, the LIVE RELEASE (plan of 2026-10-04), one version for the whole deployment (the terms'
+    // article 13 and the articles it moves, the privacy policy's LIVE RELEASES). 2026-10-05 is deployment B+C's, on its
+    // own branch: D comes after it. The date is a placeholder until deployment D is fixed (its runbook, §0 rule 6): this
+    // line and LEGAL_VERSION then take that day, with the fingerprint of the texts as they are then.
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-06': 'fc069b4ec1bc8d39' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

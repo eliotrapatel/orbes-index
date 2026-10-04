@@ -111,19 +111,24 @@ genome/
                          points of sale and the sale mode, photographs of models and pieces (media),
                          ownership certificates (shared links), the lookbook of the models and the owners' club,
                          the releases (drops), their early access and their draw by tier, the owners' circle,
-                         the tiers' benefits
+                         the tiers' benefits, the LIVE RELEASES (live: the rules and actions; live-engine: the
+                         ticker; live-room: what the public and a viewer read; live-console: the console;
+                         live-insights: the intelligence)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
-    http/                sessions, CSRF, rate limiting, security headers, validation, static files
-    routes/              public, account, ownership, club, admin
+    http/                sessions, CSRF, rate limiting, security headers, validation, static files; the LIVE
+                         RELEASES' streams (live-stream.ts: LiveHub, Server-Sent Events fanned out once a second)
+    routes/              public, account, ownership, club, live (the LIVE RELEASES), admin
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
                          the ownership certificate's PDF
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES (/verify/pieces, YOUR TIER at its head);
                          THE COLLECTION (/verify/lookbook); THE RELEASES (/verify/releases); THE CIRCLE (/verify/circle);
-                         an ownership certificate (/verify/c#token)
-    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (Drops, Circle, Tiers);
+                         an ownership certificate (/verify/c#token); a LIVE RELEASE's vault (/verify/releases/<id>,
+                         views/live.ts) and its boutique board (/verify/releases/<id>/board#secret)
+    admin/               admin console: catalogue, generator, keys, anomalies, analytics, audit, the Club (Drops, Circle, Tiers;
+                         a LIVE RELEASE's page, #/club/live/:dropId);
                          the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
@@ -157,6 +162,19 @@ What a signed-in account holds now decides what it reads in the club. One functi
 - **The tiers' benefits** (P-X04, `services/club.ts`, `ClubService.tiers`, `updateTier`, `normalizeBenefits`; `routes/admin/club.ts`): the words of each tier's benefits, by default code constants (`CLUB_TIER_DEFAULT_BENEFITS`), changed from the console (`club_tiers`, at most `CLUB_TIER_BENEFITS_MAX` = 600 characters in `CLUB_TIER_BENEFIT_LINES` = 8 lines), audited through `AuditService` (`club.tier.update`). `ClubService.status` (`GET /api/v1/club/status`) gives the account its tier, the benefits of its tier and those below it, the next tier, and its entries.
 
 The web side: in `web/verify/`, `releases-model.ts` and `views/releases.ts` (THE RELEASES, the early access line and RESERVE A PLACE), `circle-model.ts` and `views/circle.ts` (THE CIRCLE: the routes `/verify/circle` and `/verify/circle/<id>` in `main.ts`'s `routeOf`, like `/verify/pieces`), `tier-model.ts` and `views/pieces.ts` (YOUR TIER at the head of MY PIECES, read from the club's status; THE CIRCLE at its foot for an owner). In `web/admin/`, the Club page (`views/club.ts`, `#/club`, its tabs `drops`, `circle`, `tiers`), a release's page (`views/drop.ts`, `#/club/drops/:dropId`), a post's page (`views/circle.ts`, route `circlePost`, `#/club/circle/:postId`, its view-model `model/circle.ts`), the Tiers tab (`views/tiers.ts`, its rules in `model/club.ts`), the Analytics panel *The Circle* (`views/analytics.ts`), and the capabilities `manageDrops`, `drawDrop` (ADMIN), `manageCircle` and `manageClubTiers` (OPERATOR) in `model/permissions.ts`.
+
+### B.7 The LIVE RELEASE (plan of 2026-10-04)
+
+A second kind of release beside the draw: `drops.mode` LIVE (migration `0021`), lived live and without a draw. Its rules hold in one service, its time in one engine, its audience in one hub.
+
+- **`LiveService`** (`services/live.ts`): access (`accessOf`: the tier now through `tierOf`, and a piece of the models or the collection the release names), the staged reveals (`liveStages`), the phases (`livePhase`), the customer's actions (interest, enter, change size, leave, press, secure, add-ons, confirm, release) and the console's controls (pause, resume, extend, add pieces, free, let in, message, end, remove, the board's link). Each runs in one short transaction: the account's row `FOR SHARE`, the release's row, then the entry's, the clock read once they are held, the audit entries written last (`drop.live.*`).
+- **`LiveEngine`** (`services/live-engine.ts`, started and stopped by `index.ts`): every 250 ms, `LiveService.advance` for each release in its live window, one transaction each with the release's row `FOR UPDATE`: the line at T0 (`formLine`: the tier read at T0, then `lineOrder`, `sha256(seed ‖ entry id)` from the release's sealed seed, `drops.ts` `drawKey` and `openDropSeed`), the turns and holds run out (not while paused), the end (`SOLD_OUT`, `CLOSED`), then the turns (`giveTurnsNow`: per size, the first `QUEUED` entry whose quantity fits the free pieces). One process ticks, the one holding the session advisory lock `LIVE_ENGINE` on a connection it keeps; nothing is kept in memory, the logical times are written (a turn MISSED at its deadline), so a restart or an overlap changes nothing.
+- **`LiveRoomService`** (`services/live-room.ts`): what the public reads (the list, a page, the banner, the `.ics`, the board), each stage at its time, and the room as its viewers read it (`frame`: counts, never a person; the board's share of it); who may read a room (`viewer`: an account the rule lets in, or holding an entry).
+- **`LiveHub`** (`http/live-stream.ts`, `app.liveHub`): the streams of the process (a viewer's room and own entry, the boutique board, the console's live board). Once a second, for each release with a stream open, the frame is built once and every viewer's entry read in one query, then each event is serialised once and fanned out from memory; database work grows with the releases, never with the audience. Sessions, roles and board links are read again at every pulse. Measured: 1 000 in the room on the VPS profile ([reports/live-load.md](reports/live-load.md), `scripts/live-load.ts`).
+- **`LiveConsoleService`** (`services/live-console.ts`): the settings until the announcement, the publication with its optional post of the circle (through `CircleService`'s table), the cancellation, the live board, the entries, the Client Services list and its CSV. **`LiveInsightsService`** (`services/live-insights.ts`): nine readings from ORBES's own data by written rules (`LIVE_INSIGHT_RULES`), each with its reasoning; the live alerts and the sell-out forecast ride on the live board. **`MediaService`**: the silhouette.
+- **Elsewhere**: `DropService` leaves a LIVE release out of the draw's routes (`409 DROP_LIVE`); `OwnerService.lock` removes an account's open entries and withdraws its interest (`removeAccountLiveEntries`), its export adds `liveEntries` and `liveInterest`; housekeeping erases the entries' network hashes 30 days after the end; the rate group `live` counts networks and accounts.
+
+The web side: in `web/verify/`, `views/live.ts` (a LIVE RELEASE's page: the announcement, I'LL BE THERE, the room behind the vault door, the line, the turn and its hold ring, the reveal, the add-ons and PAY, CONFIRMED in ivory, every edge page), its pure logic `live-model.ts` (screens, the clock sync, countdowns, the lock's angles, money), `live-seal.ts` (the specimen seal, drawn by the core renderer from a fixed payload that is no piece's code), `views/live-banner.ts` (the banner of /verify and MY PIECES), `views/board.ts` and `board-model.ts` (the boutique board), the LIVE cards of `views/releases.ts`, MY PIECES' entries in `views/pieces.ts`, the ticks of `sound.ts`; its look is the vault ([BRAND-DESIGN-SYSTEM](BRAND-DESIGN-SYSTEM.md), THE LIVE RELEASE). In `web/admin/`, the Drops tab's `Live releases` (`views/club.ts`), a release's page `views/live.ts` (`#/club/live/:dropId`: the live board on its stream, the controls by role, the entries, Client Services, the settings) with `model/live.ts`, and the intelligence's panels (`views/live-intelligence.ts`, `model/live-intelligence.ts`); the capabilities `endLiveRelease` and `removeLiveEntry` (ADMIN) in `model/permissions.ts`.
 
 ---
 

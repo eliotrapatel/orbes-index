@@ -41,6 +41,20 @@
  *    computed from ownership at each request (services/club.ts tierOf), not
  *    stored but with an entry; the tiers' words (club_tiers, P-X04) are
  *    staff text, nothing personal;
+ *  - the LIVE RELEASES (plan of 2026-10-04, services/live.ts): I'LL BE THERE
+ *    (live_interest: the account, the release, the size, the time; deleted
+ *    when withdrawn; the page shows a count); an entry (live_entries: the
+ *    account, the size and quantity, the tier at entry and at T0, the place,
+ *    the time of each step, `gesture_ms`, the add-ons with their price,
+ *    the status and the reservation's outcome with Client Services' note);
+ *    the country (two letters, ctx.geo) and `network_hash`, HMAC-SHA-256 of
+ *    the /24 or /48 with IP_HASH_PEPPER (liveNetworkHash), erased
+ *    LIVE_NETWORK_RETENTION_DAYS (30) days after the end by housekeeping;
+ *    the console reads the emails, masked for an AUDITOR; the audit log
+ *    names ids only (`drop.live.*`, the gesture's length on `.secure`); the
+ *    room's stream and the boutique board carry counts, never a person; the
+ *    export holds every entry, its add-ons and the interest, never the
+ *    network's hash (AccountExport.liveEntries, liveInterest);
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com.
  *
@@ -121,7 +135,20 @@ const EN: LegalDocument = {
         "When you answer an invitation, ORBES records your answer: the account, the post, YES or NO, and the times of your first answer and of its latest change. ORBES staff read the answers to an invitation with the email address of their account, to welcome the guests; a staff member with read-only access sees it masked. Your answer is also written to the service's audit log, which names your account by its identifier only.",
         'When you vote in a poll, ORBES records your vote: the account, the post, the option chosen and the time. Members see the results only as totals by option, after their own vote. A vote is never written to the audit log.',
         'The visits of the circle are counted per day, as a number only: without any account, address or device.',
-        'Your tier (TITANE, PLATINE or PALLADIUM) is computed at each request from the pieces registered to your account. It is not stored, except with an entry in a release (above).',
+        'Your tier (TITANE, PLATINE or PALLADIUM) is computed at each request from the pieces registered to your account. It is not stored, except with an entry in a release or a LIVE RELEASE (above and below).',
+      ],
+    },
+    {
+      id: 'live',
+      title: 'Your LIVE RELEASES',
+      blocks: [
+        'A LIVE RELEASE is entered signed in to your ORBES account. ORBES processes the data below to run the release you enter, under the [terms of use](/legal/terms), and, for the fingerprint of your network and the length of your hold, for its legitimate interest in keeping each release fair against automated entries.',
+        "When you say I'LL BE THERE, ORBES records the account, the release, the size and the time. Withdrawing it deletes it. The page of the release shows only how many accounts said so.",
+        'When you enter, ORBES records your entry: the account, the release, the size and the quantity, your tier when you enter and at the opening, your place in the line, the time of each step (entering, the line, your turn, the start of your press, the piece secured, its confirmation, the end), the length of your hold on the ORBES CODE of the room, in milliseconds, the options you choose with their price, and what becomes of the entry and of its reservation, with the note ORBES Client Services may add when it concludes or cancels it.',
+        'From your connection when you enter, ORBES records its country, found from the IP address in the location database installed on its server, and a keyed fingerprint of your network (HMAC-SHA-256 of the first three parts of an IPv4 address, or of the first three groups of an IPv6 one, made with a secret only ORBES holds), never the address itself. The fingerprint lets ORBES see many entries coming from one network; it is erased 30 days after the end of the release.',
+        "ORBES staff read the entries of a release with the email address of their account, to follow the release and to conclude each reservation; a staff member with read-only access sees it masked. The console computes from them counts by tier and by country, and lists the accounts that came without securing a piece. Every step of your entry is written to the service's audit log, which names your account and your entry by their identifiers only, with the length of your hold.",
+        'In the room, the other accounts see only counts: the people in the room, the length of the line, the pieces left. Your own entry, and the secret of your turn, reach your own screen only. A screen in a boutique may show the countdown and the pieces left of a release, never a person.',
+        "Your entries, their options and your I'LL BE THERE are kept as long as the account exists, and are in the copy of your data (see [Your rights](#rights)), the fingerprint of your network excepted.",
       ],
     },
     {
@@ -162,6 +189,7 @@ const EN: LegalDocument = {
           '- **Sessions**: deleted when they end, at sign-out or 30 days after sign-in at most.',
           '- **Your account and what it records**: as long as the account exists. The service does not yet let you delete your account: ask ORBES Client Services.',
           '- **Entries and reservations in releases**: as long as the account exists. What the draw publishes (the identifier, tier, seniority and rank of each entry) stays on the page of the release.',
+          "- **Entries, options and I'LL BE THERE in the LIVE RELEASES**: as long as the account exists; the fingerprint of the network, 30 days after the end of the release.",
           "- **Answers to the circle's invitations and votes in its polls**: as long as the account exists. The daily count of the circle's visits names no one, and is kept.",
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
           '- **The audit log**: permanent; it names accounts by their identifier only.',
@@ -263,7 +291,20 @@ const FR: LegalDocument = {
         "Quand vous répondez à une invitation, ORBES enregistre votre réponse : le compte, la publication, YES ou NO, et les heures de votre première réponse et de sa dernière modification. Le personnel d'ORBES lit les réponses à une invitation avec l'adresse e-mail de leur compte, pour accueillir les invités ; un membre du personnel en lecture seule la voit masquée. Votre réponse est aussi inscrite au journal d'audit du service, qui ne désigne votre compte que par son identifiant.",
         "Quand vous votez à un sondage, ORBES enregistre votre vote : le compte, la publication, l'option choisie et l'heure. Les membres ne voient les résultats qu'en totaux par option, après leur propre vote. Un vote n'est jamais inscrit au journal d'audit.",
         'Les visites du cercle sont comptées par jour, comme un simple nombre : sans aucun compte, adresse ni appareil.',
-        "Votre palier (TITANE, PLATINE ou PALLADIUM) est calculé à chaque requête à partir des pièces enregistrées à votre compte. Il n'est pas conservé, sauf avec une inscription à une sortie (ci-dessus).",
+        "Votre palier (TITANE, PLATINE ou PALLADIUM) est calculé à chaque requête à partir des pièces enregistrées à votre compte. Il n'est pas conservé, sauf avec une inscription à une sortie ou une entrée à une LIVE RELEASE (ci-dessus et ci-dessous).",
+      ],
+    },
+    {
+      id: 'live',
+      title: 'Vos LIVE RELEASES',
+      blocks: [
+        "On entre dans une LIVE RELEASE connecté à son compte ORBES. ORBES traite les données ci-dessous pour faire vivre la sortie dans laquelle vous entrez, selon les [conditions générales d'utilisation](/legal/terms), et, pour l'empreinte de votre réseau et la durée de votre appui, pour son intérêt légitime à garder chaque sortie équitable face aux entrées automatisées.",
+        "Quand vous dites I'LL BE THERE, ORBES enregistre le compte, la sortie, la taille et l'heure. Le retirer le supprime. La page de la sortie n'affiche que le nombre de comptes qui l'ont dit.",
+        "Quand vous entrez, ORBES enregistre votre entrée : le compte, la sortie, la taille et la quantité, votre palier à l'entrée et à l'ouverture, votre place dans la file, l'heure de chaque étape (l'entrée, la file, votre tour, le début de votre appui, la pièce sécurisée, sa confirmation, la fin), la durée de votre appui sur l'ORBES CODE de la salle, en millisecondes, les options que vous choisissez avec leur prix, et ce que deviennent l'entrée et sa réservation, avec la note qu'ORBES Client Services peut y ajouter quand il la conclut ou l'annule.",
+        "De votre connexion au moment où vous entrez, ORBES enregistre son pays, déduit de l'adresse IP dans la base de localisation installée sur son serveur, et une empreinte à clé de votre réseau (HMAC-SHA-256 des trois premières parties d'une adresse IPv4, ou des trois premiers groupes d'une adresse IPv6, calculée avec un secret que seul ORBES détient), jamais l'adresse elle-même. L'empreinte permet à ORBES de voir de nombreuses entrées venues d'un même réseau ; elle est effacée 30 jours après la fin de la sortie.",
+        "Le personnel d'ORBES lit les entrées d'une sortie avec l'adresse e-mail de leur compte, pour suivre la sortie et conclure chaque réservation ; un membre du personnel en lecture seule la voit masquée. La console en tire des comptes par palier et par pays, et la liste des comptes venus sans sécuriser de pièce. Chaque étape de votre entrée est inscrite au journal d'audit du service, qui ne désigne votre compte et votre entrée que par leurs identifiants, avec la durée de votre appui.",
+        "Dans la salle, les autres comptes ne voient que des nombres : les personnes dans la salle, la longueur de la file, les pièces restantes. Votre propre entrée, et le secret de votre tour, n'arrivent que sur votre écran. Un écran en boutique peut montrer le compte à rebours et les pièces restantes d'une sortie, jamais une personne.",
+        "Vos entrées, leurs options et votre I'LL BE THERE sont conservés tant que le compte existe, et figurent dans la copie de vos données (voir [Vos droits](#rights)), l'empreinte de votre réseau exceptée.",
       ],
     },
     {
@@ -304,6 +345,7 @@ const FR: LegalDocument = {
           '- **Sessions** : supprimées à leur fin, à la déconnexion ou 30 jours au plus après la connexion.',
           "- **Votre compte et ce qu'il enregistre** : tant que le compte existe. Le service ne permet pas encore de supprimer votre compte : adressez-vous à ORBES Client Services.",
           "- **Inscriptions et réservations aux sorties** : tant que le compte existe. Ce que publie le tirage (l'identifiant, le palier, l'ancienneté et le rang de chaque inscription) reste sur la page de la sortie.",
+          "- **Entrées, options et I'LL BE THERE des LIVE RELEASES** : tant que le compte existe ; l'empreinte du réseau, 30 jours après la fin de la sortie.",
           '- **Réponses aux invitations du cercle et votes de ses sondages** : tant que le compte existe. Le compte quotidien des visites du cercle ne désigne personne, et il est conservé.',
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",
           "- **Journal d'audit** : permanent ; il ne désigne les comptes que par leur identifiant.",

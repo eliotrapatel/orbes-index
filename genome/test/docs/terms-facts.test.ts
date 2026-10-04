@@ -9,9 +9,11 @@
  *    holding what the rule says (the statuses that end a certificate, those
  *    that allow a transfer, the tiers of the club and the statuses they leave
  *    out, the early access of the releases and the hosts of the circle's
- *    links), and every absence of §10 (no email, no reset link, no undoing
- *    an accepted transfer, no account deletion, no age check, no vote of the
- *    circle in the audit log) holding in the code;
+ *    links, the settings of the LIVE RELEASES and the days their networks'
+ *    fingerprints are kept), and every absence of §10 (no email, no reset
+ *    link, no undoing an accepted transfer, no account deletion, no age
+ *    check, no vote of the circle in the audit log, no payment taken, no
+ *    public view of a LIVE RELEASE's room) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -44,6 +46,15 @@ import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces, tierName } from '../../src/server/services/club.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import {
+  LIVE_ADDONS_MAX,
+  LIVE_GESTURE_MIN_MS,
+  LIVE_NETWORK_RETENTION_DAYS,
+  LIVE_PAY_MINUTES,
+  LIVE_PER_ACCOUNT,
+  LIVE_ROOM_OPENS_MINUTES,
+  LIVE_TURN_SECONDS,
+} from '../../src/server/services/live.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
   CERTIFICATE_ENDING_STATUSES,
@@ -315,6 +326,42 @@ const CONSTANTS: Record<string, ConstantSpec> = {
       for (const host of CIRCLE_LINK_HOSTS) expect(rule).toContain(host);
     },
   },
+  // The LIVE RELEASES (plan of 2026-10-04): the defaults of the plan's choices 15 and 16 and their bounds.
+  LIVE_ROOM_OPENS_MINUTES: {
+    value: `${LIVE_ROOM_OPENS_MINUTES.default} minutes par défaut, de ${LIVE_ROOM_OPENS_MINUTES.min} à ${LIVE_ROOM_OPENS_MINUTES.max}`,
+    fr: [`${LIVE_ROOM_OPENS_MINUTES.default} minutes avant`, `de ${LIVE_ROOM_OPENS_MINUTES.min} à ${LIVE_ROOM_OPENS_MINUTES.max} minutes`],
+    en: [`${LIVE_ROOM_OPENS_MINUTES.default} minutes before`, `from ${LIVE_ROOM_OPENS_MINUTES.min} to ${LIVE_ROOM_OPENS_MINUTES.max} minutes`],
+  },
+  LIVE_PER_ACCOUNT: {
+    value: `${LIVE_PER_ACCOUNT.default} pièce par défaut, au plus ${LIVE_PER_ACCOUNT.max}`,
+    fr: [`jusqu'à ${LIVE_PER_ACCOUNT.max}`],
+    en: [`up to ${LIVE_PER_ACCOUNT.max}`],
+    // The articles say « one piece » in words: the default must be one.
+    holds: () => expect(LIVE_PER_ACCOUNT.default).toBe(1),
+  },
+  LIVE_TURN_SECONDS: {
+    value: `${LIVE_TURN_SECONDS.default} secondes par défaut, de ${LIVE_TURN_SECONDS.min} à ${LIVE_TURN_SECONDS.max}`,
+    fr: [`${LIVE_TURN_SECONDS.default} secondes`, `de ${LIVE_TURN_SECONDS.min} à ${LIVE_TURN_SECONDS.max} secondes`],
+    en: [`${LIVE_TURN_SECONDS.default} seconds`, `from ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds`],
+  },
+  LIVE_GESTURE_MIN_MS: {
+    value: `${String(LIVE_GESTURE_MIN_MS / 1000).replace('.', ',')} seconde`,
+    fr: [`${String(LIVE_GESTURE_MIN_MS / 1000).replace('.', ',')} seconde`],
+    en: [`${LIVE_GESTURE_MIN_MS / 1000} seconds`],
+    // The ring of the page asks 1.5 s: the server's floor stays under it, so a held seal is never refused.
+    holds: () => expect(LIVE_GESTURE_MIN_MS).toBeLessThan(1500),
+  },
+  LIVE_PAY_MINUTES: {
+    value: `${LIVE_PAY_MINUTES.default} minutes par défaut, de ${LIVE_PAY_MINUTES.min} à ${LIVE_PAY_MINUTES.max}`,
+    fr: [`pendant ${LIVE_PAY_MINUTES.default} minutes`, `de ${LIVE_PAY_MINUTES.min} à ${LIVE_PAY_MINUTES.max} minutes`],
+    en: [`for ${LIVE_PAY_MINUTES.default} minutes`, `from ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes`],
+  },
+  LIVE_ADDONS_MAX: { value: `${LIVE_ADDONS_MAX} options`, fr: [`${LIVE_ADDONS_MAX} au plus`], en: [`at most ${LIVE_ADDONS_MAX}`] },
+  LIVE_NETWORK_RETENTION_DAYS: {
+    value: `${LIVE_NETWORK_RETENTION_DAYS} jours`,
+    fr: [`${LIVE_NETWORK_RETENTION_DAYS} jours`],
+    en: [`${LIVE_NETWORK_RETENTION_DAYS} days`],
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -348,6 +395,20 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'external links on the allowed hosts only (P-X01)': 'if (!CIRCLE_LINK_HOSTS.some((h) => host === h',
   'the export lists the answers and votes (P-X01)': 'circleVotes: circle.votes,',
   'the tiers\' words set from the console, the thresholds never (P-X04)': "app.patch('/api/admin/club/tiers/:tier'",
+  'no stage of a LIVE RELEASE before its time (choice 30)': 'photo: t >= photoAt,',
+  'access by tier, model or collection, read again at each step (choices 1, 35)': "if (tier < (d.live_min_tier ?? 0)) return { allowed: false, tier, missing: 'TIER' };",
+  'the room opens before T0 (choice 16)': 'if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));',
+  'the size never changes after T0 (choice 6)': 'throw sizeLocked();',
+  'the line at T0 by tier, then the sealed seed (choices 2, 14)': 'const seed = openDropSeed(this.seedKey, d);',
+  'arrivals after T0 behind, in arrival order (choice 2)': "const place = late ? { status: 'QUEUED' as const, position: (await this.lastPosition(tx, id)) + 1, queued_at: now }",
+  'the hold gesture checked on the server (choice 8)': 'if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();',
+  'PAY confirms a reservation, nothing paid (choices 4, 33)': ".set({ status: 'CONFIRMED', confirmed_at: now })",
+  'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",
+  'add-ons at their price when chosen (choice 34)': 'addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))',
+  'pieces added, each recorded with the quantity line (choice 36)': 'quantityLine: d.quantity_line',
+  'a person in the line let take their turn (choice 3)': 'await this.grant(tx, d, [entry], now, admin);',
+  'closed at the sell-out (choice 26)': "soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT'",
+  'the network\'s fingerprint erased after 30 days': 'const cutoff = new Date(now.getTime() - LIVE_NETWORK_RETENTION_DAYS * DAY_MS);',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -416,6 +477,30 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(vote).toContain("insertInto('circle_poll_votes')");
     expect(vote).not.toMatch(/audit/);
     expect(matches(/action:\s*'([a-z.]*vote[a-z._]*)'/g).map((m) => m.match[1])).toEqual([]);
+  },
+  N7: () => {
+    // PAY confirms a reservation (the plan's choices 4 and 33): no payment library, no route that takes a payment.
+    const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+    expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
+    expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge|invoice/i.test(r.path))).toEqual([]);
+    // The confirmation is a status, and the only one PAY writes.
+    expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
+  },
+  N8: () => {
+    // The room's state and stream: a signed-in viewer the rule lets in (or holding an entry), never a public route.
+    const routes = readDoc('genome/src/server/routes/live.ts');
+    for (const path of ['/api/v1/live/:id/state', '/api/v1/live/:id/stream']) {
+      const declared = new RegExp(`app\\.get\\('${path.replace(/[/:.]/g, (c) => `\\${c}`)}',([^\n]*)\n([\\s\\S]*?)\n {2}\\}\\);`).exec(routes);
+      expect(declared, path).not.toBeNull();
+      expect(declared![1], path).not.toContain('PUBLIC');
+      expect(declared![2], path).toContain('requireAccount(request)');
+      expect(declared![2], path).toContain('liveRoom.viewer(');
+    }
+    // The boutique board names no one, and shows neither the room, the line, the sizes nor a message.
+    const board = /export interface LiveBoard \{([\s\S]*?)\n\}/.exec(readDoc('genome/src/server/services/live-room.ts'))?.[1] ?? '';
+    expect(board).toContain('quantityLine');
+    expect(board).not.toMatch(/\b(?:account|email|inRoom|line|sizes|message|entries)\??:/);
   },
 };
 

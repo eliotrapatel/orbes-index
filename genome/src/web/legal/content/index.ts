@@ -2,7 +2,7 @@
  * The content of the legal pages (J-06): the four documents in English and
  * French, the words of the pages around them, and LEGAL_VERSION, the date of
  * this version of the texts, shown under each title. Change LEGAL_VERSION
- * with any change of a text: the terms (article 17, docs/legal/TERMS-FACTS.md
+ * with any change of a text: the terms (article 18, docs/legal/TERMS-FACTS.md
  * R57) and the privacy policy tell their readers that the version in force
  * and its date are shown here. test/web/legal.content.test.ts pins the
  * fingerprint of DOCUMENTS to this version: a text changed without a new
@@ -18,11 +18,16 @@ import type { Lang, LegalDocument } from './types.js';
 export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } from './types.js';
 
 /**
- * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment
- * (deployment A of the plan of 2026-10-03: the releases of P-R03 and their early access, P-X02, in the terms, article
- * 12; the owners' circle, P-X01, article 13; the tiers' benefits, P-X04; and the privacy policy).
+ * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment, and a
+ * date already published never changes. 2026-10-04 was deployment A of the plan of 2026-10-03 (the releases of P-R03
+ * and their early access, P-X02, in the terms, article 12; the owners' circle, P-X01; the tiers' benefits, P-X04; and
+ * the privacy policy). 2026-10-06 is the one version of deployment D, the LIVE RELEASE (plan of 2026-10-04): the
+ * terms' article 13 (the LIVE RELEASES, the circle becoming article 14 and those after it moving by one), articles 1,
+ * 2, 3, 15 and 16, and the privacy policy's LIVE RELEASES. Deployment B+C published 2026-10-05, so D's date comes after
+ * it; 2026-10-06 is a placeholder, the earliest the rule allows: the day deployment D is fixed, this constant and its
+ * line in test/web/legal.content.test.ts take that day (docs/launch/DEPLOY-LIVE-RELEASE.md §0, rule 6).
  */
-export const LEGAL_VERSION = '2026-10-04';
+export const LEGAL_VERSION = '2026-10-06';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

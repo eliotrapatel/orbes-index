@@ -7,7 +7,7 @@
  * comma or the full stop before it), or with its whole sentence, and then
  * with the bold lead of that sentence and the sentences that refer back to
  * it: article 11 publishes no warranty conditions ("those conditions" would
- * point at nothing) and article 18 names no mediator until counsel fills
+ * point at nothing) and article 19 names no mediator until counsel fills
  * them; nothing else changes. The drafts' links lead to the pages here, and
  * the privacy policy they name is linked.
  * test/web/legal.content.test.ts holds this file to the drafts: a draft that
@@ -20,14 +20,14 @@ import type { LegalDocument } from './types.js';
 
 const EN: LegalDocument = {
   title: 'Terms of use',
-  summary: "The rules of the verification service and of the ORBES account: what a result says, registration, transfer, loss and theft, the warranty, the releases, the owners' circle.",
+  summary: "The rules of the verification service and of the ORBES account: what a result says, registration, transfer, loss and theft, the warranty, the releases, the LIVE RELEASES, the owners' circle.",
   intro: [],
   sections: [
     {
       id: 'article-1',
       title: 'Article 1 — Purpose',
       blocks: [
-        "These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, and the owners' circle.",
+        "These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the LIVE RELEASES, and the owners' circle.",
         'The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](/legal/notice). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.',
       ],
     },
@@ -35,14 +35,14 @@ const EN: LegalDocument = {
       id: 'article-2',
       title: 'Article 2 — Definitions',
       blocks: [
-        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).\n- **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).\n- **Owners\' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 13).\n- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).',
+        '- **Piece**: an ORBES object that carries an ORBES CODE.\n- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.\n- **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.\n- **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.\n- **ORBES account**: the account created on the service with an email address and a password.\n- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.\n- **Transfer code**: the code the registered owner creates to pass on the registration of a piece.\n- **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.\n- **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).\n- **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).\n- **LIVE RELEASE**: a release that takes place live, without a draw: a room before its opening, a line at its opening, a turn for each account in its order (article 13).\n- **Owners\' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 14).\n- **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).',
       ],
     },
     {
       id: 'article-3',
       title: 'Article 3 — Access to the service',
       blocks: [
-        "Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and, for the owners of a piece, to read the owners' circle.",
+        "Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and the LIVE RELEASES and, for the owners of a piece, to read the owners' circle.",
         'ORBES endeavours to keep the service available, without committing to it: it may be interrupted, in particular for maintenance. ORBES has its pieces verified only at theorbes.com/verify, which leads to verify.theorbes.com. Another address, or a code printed beside the piece, does not come from ORBES.',
       ],
     },
@@ -138,7 +138,7 @@ const EN: LegalDocument = {
         'ORBES may offer a model in a limited number of pieces in a release, announced on the service (THE RELEASES) with its number of pieces, the dates of its entries and the rule of its draw. ORBES may cancel a release until its draw.',
         '**Entering.** Any ORBES account may enter a release while its entries are open, whether or not pieces are registered to it. Entering is free and obliges you to nothing. An account enters a release once: it may withdraw its entry until the draw, and enter again, under the same entry, while entries are open. One entry per person: ORBES Client Services may decline to conclude the sale of a second account of the same person.',
         '**Tiers and seniority.** The tier of an account is read from the pieces registered to it: TITANE from 1 piece, PLATINE from 3, PALLADIUM from 5. A piece revoked, set aside by ORBES after review, or withdrawn does not count. The seniority of an account is the number of full years since a piece was first registered to it.',
-        '**Benefits of the tiers.** MY PIECES describes, for information, the benefits of each tier. ORBES may change their terms, never the thresholds of the tiers. A benefit creates no obligation beyond what this article and article 13 say.',
+        '**Benefits of the tiers.** MY PIECES describes, for information, the benefits of each tier. ORBES may change their terms, never the thresholds of the tiers. A benefit creates no obligation beyond what this article and article 14 say.',
         '**Early access.** Before its entries open to everyone, a release may offer an early access, 48 hours by default: its length is set for each release, and its page gives the times. During it, PLATINE and PALLADIUM owners (from 3 pieces) may reserve a place directly, without a draw, each by their tier at the time of the request: first come, first served, within the pieces of the release. Once all its pieces are reserved, the release is full. An account holds a single entry or reservation per release. A place reserved is held until the time stated, like a place drawn. It obliges you to nothing: ORBES Client Services concludes the sale with you, or lets it lapse once its time has passed. The pieces left then go to the draw.',
         '**The draw.** After its entries close, ORBES runs the draw of a release once. It ranks the entries by the tier of their account, then by its seniority, both read at the time of the draw, then by the SHA-256 of a seed of 32 bytes followed by the identifier of the entry, in increasing order. The seed is drawn when the release is created, and its fingerprint is published with the release. The seed itself is published after the draw, with the identifier, the tier, the seniority and the rank of each entry, never its account: anyone can check the order. MY PIECES shows each account the identifier of its entry.',
         '**Place held.** The first ranks, as many as there are pieces left after the direct reservations of the early access, are selected; the next are on the waiting list, in their order. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. The service sends no email: MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.',
@@ -147,48 +147,67 @@ const EN: LegalDocument = {
     },
     {
       id: 'article-13',
-      title: "Article 13 — The owners' circle",
+      title: 'Article 13 — LIVE RELEASES',
+      blocks: [
+        'A LIVE RELEASE is a release that takes place live, without a draw: ORBES announces it on the service (THE RELEASES) with the day and time it opens, its price, its quantity as ORBES words it (for example "25 PIECES"), the pieces each person may take and who may enter it. Its piece may be revealed in stages, a silhouette, then its name, then its photograph, each at the time its page gives. ORBES may cancel a LIVE RELEASE until its room opens.',
+        "**Who may enter.** ORBES sets, for each LIVE RELEASE, who may enter it: every ORBES account, the owners from a tier (article 12), or the owners of a piece of a model or a collection it names. The service checks this rule when you say I'LL BE THERE, when you enter and when you secure a piece: an account that no longer meets it at that moment is refused.",
+        "**I'LL BE THERE.** From the announcement until the opening, an account that meets the rule may say it will be there, with a size, change that size and withdraw it. The service shows how many accounts said so, never which. It reserves nothing and obliges you to nothing.",
+        "**The room.** The room opens 5 minutes before the opening, unless the release sets another time, from 1 to 60 minutes. You enter it signed in, with a size of the release. An account enters a release once, for one piece unless the release offers more, up to 5. One entry per person: ORBES Client Services may decline to conclude the reservation of a second account of the same person. You may change your size and leave the room until the opening; from the opening, your size no longer changes. Only the accounts that may enter a release, or that hold an entry in it, see its room. The times are those of ORBES's server.",
+        '**The line.** At the opening, the accounts in the room form the line. Unless the release provides otherwise, the line follows the tier first, read at the opening: PALLADIUM, PLATINE, TITANE, then the accounts without a tier. Within a tier, or for every account when the release does not follow the tiers, the order is that of the SHA-256 of a seed of the release followed by the identifier of the entry: the seed is drawn and sealed when the release is created, and is never published. An account that leaves the room before the opening may enter it again; an entry that has had its place in the line never returns to it. An account that enters after the opening chooses its size as it enters and joins the line behind, in the order of arrival.',
+        "**Your turn.** When enough pieces of your size are free for the quantity you chose and you are next in the line for that size, it is your turn. You then have 30 seconds, unless the release sets another time (from 10 to 300 seconds, which may differ by tier), to press and hold, on your screen, the ORBES CODE of the room, a specimen that is no piece's code, until its ring is full. The service secures the piece only for a hold of at least 1.4 seconds, measured by its own clock. A turn not taken in time passes, and its piece goes to the next in line.",
+        '**Your piece.** Once secured, the piece is held for you for 5 minutes, unless the release sets another time (from 1 to 60 minutes, which may differ by tier). Meanwhile you may choose the options the release offers, at most 6, for example an engraving, a gift box or ORBES Care, each at the price the release sets, kept as it was when you chose it; then press PAY, or give the piece back with RELEASE MY PLACE. A piece not confirmed in time is no longer held, and its options lapse with it.',
+        '**PAY.** PAY confirms the reservation of the piece held, with its options and their total. Nothing is paid on the service: ORBES Client Services contacts you for payment and delivery, then concludes the sale with you, outside the service, or cancels the reservation. MY PIECES shows your reservation and its reference.',
+        '**A piece that returns.** A piece whose turn passes, whose hold ends, that is given back, or whose entry ORBES removes returns to the line: the next account in the line for its size gets a turn at once.',
+        '**What ORBES may do.** During a release, ORBES may pause it, no turn being given meanwhile and the turns and holds under way stopping, then resuming with the time they had left; extend its end; add pieces to a size; let a person in the line take their turn at once; remove an entry; or end the release early. The quantity announced is the quantity ORBES offers; ORBES may nevertheless add pieces during the release, and each addition is recorded.',
+        "**No piece guaranteed.** Saying I'LL BE THERE, entering the room or the line, and even a turn, give no right to a piece until it is secured: the pieces are limited, and go to the line in its order.",
+        '**The end.** A LIVE RELEASE ends once every piece is confirmed (SOLD OUT), at the end time its page gives, or when ORBES ends it. From then, no turn is given and the accounts still waiting leave the line. At the end time, a turn under way may still be secured until its time; in every case, a piece held may still be confirmed until its own. A reservation cancelled after the end does not return to the line: ORBES Client Services handles it. The release then leaves THE RELEASES; your entry and its outcome stay in MY PIECES. The service sends no email.',
+        '**What is recorded.** For each entry, the service records the account, the size and the quantity, the tier, the place in the line, the time of each step, the length of the hold, the options chosen and the outcome of the reservation; and, from the connection, its country and a keyed fingerprint of its network, never its address. That fingerprint is erased 30 days after the end of the release. These data serve to run the release and to spot automated entries; the [privacy policy](/legal/privacy) says more (article 16).',
+      ],
+    },
+    {
+      id: 'article-14',
+      title: "Article 14 — The owners' circle",
       blocks: [
         "In the owners' circle (THE CIRCLE), ORBES publishes content of the maison for the owners of a piece: notes, invitations and polls. The circle is free and obliges you to nothing. ORBES chooses what it publishes there, and may change or withdraw a post.",
         '**Access.** The circle is reserved for signed-in ORBES accounts to which at least one piece is registered (article 12). Each post is reserved for a tier and the tiers above it. Access is checked at each visit: it ends with the last piece registered to the account.',
         '**Invitations.** You answer an invitation YES or NO, within its places. You may change your answer until the event begins. Answering obliges you to nothing.',
         '**Polls.** Each account votes once in a poll, and that vote is final. The results, as totals by option, show once you have voted.',
         '**Links.** A post links only to sites authorised by ORBES. The service shows the name of the site beside the link.',
-        "**What is recorded.** Your answer to an invitation is written to the service's audit log; your vote never is. Visits to the circle are counted per day, without any account. Your answers and votes are in the copy of your data you may ask ORBES Client Services for (article 15).",
-      ],
-    },
-    {
-      id: 'article-14',
-      title: 'Article 14 — Locking an account',
-      blocks: [
-        'ORBES Client Services may lock an ORBES account.',
-        "The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.",
+        "**What is recorded.** Your answer to an invitation is written to the service's audit log; your vote never is. Visits to the circle are counted per day, without any account. Your answers and votes are in the copy of your data you may ask ORBES Client Services for (article 16).",
       ],
     },
     {
       id: 'article-15',
-      title: 'Article 15 — Personal data',
+      title: 'Article 15 — Locking an account',
       blocks: [
-        'ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, answers and votes in the circle) as its [privacy policy](/legal/privacy) describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account.',
+        'ORBES Client Services may lock an ORBES account.',
+        "The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), removes its entries under way in the LIVE RELEASES and withdraws its I'LL BE THERE in those not yet open (article 13), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, a reservation confirmed in a LIVE RELEASE stays for ORBES Client Services to conclude, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.",
       ],
     },
     {
       id: 'article-16',
-      title: 'Article 16 — Liability',
+      title: 'Article 16 — Personal data',
+      blocks: [
+        "ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers and votes in the circle) as its [privacy policy](/legal/privacy) describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy.",
+      ],
+    },
+    {
+      id: 'article-17',
+      title: 'Article 17 — Liability',
       blocks: [
         'ORBES describes faithfully what the service checks and what it does not (article 4). A result does not guarantee that an object is the one ORBES made: before buying, ask the seller for a transfer code, and when in doubt, ORBES Client Services can inspect the piece.',
       ],
     },
     {
-      id: 'article-17',
-      title: 'Article 17 — Changes to these terms',
+      id: 'article-18',
+      title: 'Article 18 — Changes to these terms',
       blocks: [
         'ORBES may change these terms. The version in force and its date are published on the service.',
       ],
     },
     {
-      id: 'article-18',
-      title: 'Article 18 — Applicable law and disputes',
+      id: 'article-19',
+      title: 'Article 19 — Applicable law and disputes',
       blocks: [
         'These terms are governed by the laws of the State of Wyoming, United States, without regard to its conflict-of-laws rules. Nothing in them deprives a consumer of the protection of the mandatory rules of the law of the country where they live. In a dispute, you may first turn to ORBES Client Services. Any dispute relating to these terms will be handled in the courts located in Wyoming, United States, subject to those mandatory rules.',
       ],
@@ -198,14 +217,14 @@ const EN: LegalDocument = {
 
 const FR: LegalDocument = {
   title: "Conditions générales d'utilisation",
-  summary: "Les règles du service de vérification et du compte ORBES : ce que dit un résultat, l'enregistrement, le transfert, la perte et le vol, la garantie, les sorties, le cercle des propriétaires.",
+  summary: "Les règles du service de vérification et du compte ORBES : ce que dit un résultat, l'enregistrement, le transfert, la perte et le vol, la garantie, les sorties, les LIVE RELEASES, le cercle des propriétaires.",
   intro: [],
   sections: [
     {
       id: 'article-1',
       title: 'Article 1 — Objet',
       blocks: [
-        "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, et le cercle des propriétaires.",
+        "Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les LIVE RELEASES, et le cercle des propriétaires.",
         "Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](/legal/notice). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.",
       ],
     },
@@ -213,14 +232,14 @@ const FR: LegalDocument = {
       id: 'article-2',
       title: 'Article 2 — Définitions',
       blocks: [
-        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).\n- **Palier** : TITANE, PLATINE ou PALLADIUM, le rang d'un compte selon le nombre de pièces qui y sont enregistrées (article 12).\n- **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 13).\n- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).",
+        "- **Pièce** : un objet ORBES qui porte un ORBES CODE.\n- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.\n- **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.\n- **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.\n- **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.\n- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.\n- **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.\n- **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.\n- **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).\n- **Palier** : TITANE, PLATINE ou PALLADIUM, le rang d'un compte selon le nombre de pièces qui y sont enregistrées (article 12).\n- **LIVE RELEASE** : une sortie qui se vit en direct, sans tirage : une salle avant son ouverture, une file à son ouverture, un tour pour chaque compte dans son ordre (article 13).\n- **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 14).\n- **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).",
       ],
     },
     {
       id: 'article-3',
       title: 'Article 3 — Accès au service',
       blocks: [
-        "La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires.",
+        "La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties, à entrer dans les LIVE RELEASES et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires.",
         "ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut être interrompu, notamment pour maintenance. ORBES ne fait vérifier ses pièces qu'à l'adresse theorbes.com/verify, qui mène à verify.theorbes.com. Une autre adresse, ou un code imprimé à côté de la pièce, ne vient pas d'ORBES.",
       ],
     },
@@ -316,7 +335,7 @@ const FR: LegalDocument = {
         "ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie, annoncée sur le service (THE RELEASES) avec son nombre de pièces, les dates de ses inscriptions et la règle de son tirage. ORBES peut annuler une sortie tant que son tirage n'a pas eu lieu.",
         "**Inscription.** Tout compte ORBES peut s'inscrire à une sortie pendant que ses inscriptions sont ouvertes, que des pièces y soient enregistrées ou non. L'inscription est gratuite et ne vous oblige à rien. Un compte s'inscrit une fois à une sortie : il peut retirer son inscription jusqu'au tirage, et s'inscrire de nouveau, sous la même inscription, tant que les inscriptions sont ouvertes. Une inscription par personne : ORBES Client Services peut refuser de conclure la vente d'un second compte de la même personne.",
         "**Paliers et ancienneté.** Le palier d'un compte se lit sur les pièces qui y sont enregistrées : TITANE dès 1 pièce, PLATINE dès 3, PALLADIUM dès 5. Une pièce révoquée, écartée par ORBES après examen ou retirée ne compte pas. L'ancienneté d'un compte est le nombre d'années pleines depuis qu'une pièce y a été enregistrée pour la première fois.",
-        "**Avantages des paliers.** MY PIECES décrit, à titre d'information, les avantages de chaque palier. ORBES peut en modifier les termes, jamais les seuils des paliers. Un avantage ne crée aucune obligation au-delà de ce que disent le présent article et l'article 13.",
+        "**Avantages des paliers.** MY PIECES décrit, à titre d'information, les avantages de chaque palier. ORBES peut en modifier les termes, jamais les seuils des paliers. Un avantage ne crée aucune obligation au-delà de ce que disent le présent article et l'article 14.",
         "**Accès anticipé.** Avant l'ouverture de ses inscriptions à tous, une sortie peut offrir un accès anticipé, de 48 heures par défaut : sa durée est fixée pour chaque sortie, et sa page en donne les heures. Pendant cet accès, les propriétaires PLATINE et PALLADIUM (dès 3 pièces) peuvent réserver directement une place, sans tirage, chacun selon son palier au moment de sa demande : premier arrivé, premier servi, dans la limite des pièces de la sortie. Une fois toutes ses pièces réservées, la sortie est complète. Un compte détient une seule inscription ou réservation par sortie. La place réservée est tenue jusqu'à l'heure indiquée, comme une place tirée. Elle ne vous oblige à rien : ORBES Client Services conclut la vente avec vous, ou la laisse expirer après son échéance. Les pièces qui restent passent ensuite au tirage.",
         "**Tirage.** Après la clôture de ses inscriptions, ORBES procède au tirage d'une sortie, une seule fois. Il classe les inscriptions selon le palier de leur compte, puis selon son ancienneté, tous deux lus au moment du tirage, puis selon le SHA-256 d'une graine de 32 octets suivie de l'identifiant de l'inscription, par ordre croissant. La graine est tirée à la création de la sortie, et son empreinte est publiée avec la sortie. La graine elle-même est publiée après le tirage, avec l'identifiant, le palier, l'ancienneté et le rang de chaque inscription, jamais son compte : chacun peut vérifier l'ordre. MY PIECES montre à chaque compte l'identifiant de son inscription.",
         "**Place réservée.** Les premiers rangs, autant qu'il reste de pièces après les réservations directes de l'accès anticipé, sont sélectionnés ; les suivants sont sur la liste d'attente, dans leur ordre. Quand moins de comptes s'inscrivent qu'il n'y a de pièces, toutes les inscriptions sont sélectionnées. La place d'une inscription sélectionnée est réservée pendant la durée que fixe sa sortie, 48 heures sauf mention contraire. Le service n'envoie aucun e-mail : MY PIECES montre le statut de chaque inscription, et ORBES Client Services contacte les comptes sélectionnés.",
@@ -325,48 +344,67 @@ const FR: LegalDocument = {
     },
     {
       id: 'article-13',
-      title: 'Article 13 — Le cercle des propriétaires',
+      title: 'Article 13 — LIVE RELEASES',
+      blocks: [
+        "Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'annonce sur le service (THE RELEASES) avec le jour et l'heure de son ouverture, son prix, sa quantité telle qu'ORBES la formule (par exemple « 25 PIECES »), les pièces que chacun peut prendre et qui peut y entrer. Sa pièce peut se révéler par étapes, une silhouette, puis son nom, puis sa photographie, chacune à l'heure que donne sa page. ORBES peut annuler une LIVE RELEASE tant que sa salle n'est pas ouverte.",
+        "**Qui peut entrer.** ORBES fixe, pour chaque LIVE RELEASE, qui peut y entrer : tout compte ORBES, les propriétaires à partir d'un palier (article 12), ou les propriétaires d'une pièce d'un modèle ou d'une collection qu'elle nomme. Le service vérifie cette règle quand vous dites I'LL BE THERE, quand vous entrez et quand vous sécurisez une pièce : un compte qui ne la remplit plus à ce moment est refusé.",
+        "**I'LL BE THERE.** De l'annonce à l'ouverture, un compte qui remplit la règle peut dire qu'il sera là, avec une taille, changer cette taille et le retirer. Le service affiche combien de comptes l'ont dit, jamais lesquels. Cela ne réserve rien et ne vous oblige à rien.",
+        "**La salle.** La salle ouvre 5 minutes avant l'ouverture, sauf si la sortie fixe un autre délai, de 1 à 60 minutes. Vous y entrez connecté, avec une taille de la sortie. Un compte entre une fois dans une sortie, pour une pièce sauf si la sortie en offre davantage, jusqu'à 5. Une entrée par personne : ORBES Client Services peut refuser de conclure la réservation d'un second compte de la même personne. Vous pouvez changer de taille et quitter la salle jusqu'à l'ouverture ; à partir de l'ouverture, votre taille ne change plus. Seuls les comptes qui peuvent entrer dans une sortie, ou qui y ont une entrée, voient sa salle. Les heures sont celles du serveur d'ORBES.",
+        "**La file.** À l'ouverture, les comptes de la salle forment la file. Sauf si la sortie en dispose autrement, la file suit d'abord le palier, lu à l'ouverture : PALLADIUM, PLATINE, TITANE, puis les comptes sans palier. Dans un palier, ou pour tous les comptes quand la sortie ne suit pas les paliers, l'ordre est celui du SHA-256 d'une graine de la sortie suivie de l'identifiant de l'entrée : la graine est tirée et scellée à la création de la sortie, et n'est jamais publiée. Un compte qui quitte la salle avant l'ouverture peut y entrer de nouveau ; une entrée qui a eu sa place dans la file n'y revient jamais. Un compte qui entre après l'ouverture choisit sa taille en entrant et prend place derrière la file, dans l'ordre d'arrivée.",
+        "**Votre tour.** Quand assez de pièces de votre taille sont libres pour la quantité choisie et que vous êtes le suivant de la file dans cette taille, c'est votre tour. Vous avez alors 30 secondes, sauf si la sortie fixe un autre délai (de 10 à 300 secondes, qui peut varier selon le palier), pour appuyer à l'écran sur l'ORBES CODE de la salle, un spécimen qui n'est le code d'aucune pièce, et le maintenir jusqu'à ce que son anneau soit plein. Le service ne sécurise la pièce que pour un appui d'au moins 1,4 seconde, mesuré par sa propre horloge. Un tour qui n'est pas pris à temps passe, et sa pièce va au suivant de la file.",
+        "**Votre pièce.** Une fois sécurisée, la pièce vous est tenue pendant 5 minutes, sauf si la sortie fixe un autre délai (de 1 à 60 minutes, qui peut varier selon le palier). Pendant ce temps, vous pouvez choisir les options que propose la sortie, 6 au plus, par exemple une gravure, un coffret ou ORBES Care, chacune au prix que fixe la sortie, gardé tel qu'il était quand vous l'avez choisie ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE. Une pièce qui n'est pas confirmée à temps n'est plus tenue, et ses options tombent avec elle.",
+        "**PAY.** PAY confirme la réservation de la pièce tenue, avec ses options et leur total. Rien n'est payé sur le service : ORBES Client Services vous contacte pour le paiement et la livraison, puis conclut la vente avec vous, hors du service, ou annule la réservation. MY PIECES montre votre réservation et sa référence.",
+        "**Une pièce qui revient.** Une pièce dont le tour passe, dont la tenue prend fin, qui est rendue, ou dont ORBES retire l'entrée, revient à la file : le compte suivant de la file dans sa taille reçoit aussitôt un tour.",
+        "**Ce qu'ORBES peut faire.** Pendant une sortie, ORBES peut la suspendre, aucun tour n'étant alors donné et les tours et les tenues en cours s'arrêtant, puis reprenant avec le temps qui leur restait ; prolonger sa fin ; ajouter des pièces à une taille ; faire passer une personne de la file à son tour aussitôt ; retirer une entrée ; ou mettre fin à la sortie avant son terme. La quantité annoncée est celle qu'ORBES propose ; ORBES peut néanmoins ajouter des pièces pendant la sortie, et chaque ajout est enregistré.",
+        "**Aucune pièce garantie.** Dire I'LL BE THERE, entrer dans la salle ou la file, et même un tour, ne donnent droit à aucune pièce tant qu'elle n'est pas sécurisée : les pièces sont limitées, et vont à la file dans son ordre.",
+        "**La fin.** Une LIVE RELEASE prend fin quand toutes ses pièces sont confirmées (SOLD OUT), à l'heure de fin que donne sa page, ou quand ORBES y met fin. Dès lors, aucun tour n'est donné et les comptes qui attendent encore quittent la file. À l'heure de fin, un tour en cours peut encore être sécurisé jusqu'à son échéance ; dans tous les cas, une pièce tenue peut encore être confirmée jusqu'à la sienne. Une réservation annulée après la fin ne revient pas à la file : ORBES Client Services s'en occupe. La sortie quitte alors THE RELEASES ; votre entrée et son issue restent dans MY PIECES. Le service n'envoie aucun e-mail.",
+        "**Ce qui est enregistré.** Pour chaque entrée, le service enregistre le compte, la taille et la quantité, le palier, la place dans la file, l'heure de chaque étape, la durée de l'appui, les options choisies et l'issue de la réservation ; et, de la connexion, son pays et une empreinte à clé de son réseau, jamais son adresse. Cette empreinte est effacée 30 jours après la fin de la sortie. Ces données servent à faire vivre la sortie et à repérer les entrées automatisées ; la [politique de confidentialité](/legal/privacy) en dit plus (article 16).",
+      ],
+    },
+    {
+      id: 'article-14',
+      title: 'Article 14 — Le cercle des propriétaires',
       blocks: [
         "ORBES publie dans le cercle des propriétaires (THE CIRCLE), pour les propriétaires d'une pièce, des contenus de la maison : des notes, des invitations et des sondages. Le cercle est gratuit et ne vous oblige à rien. ORBES choisit ce qu'il y publie, et peut modifier ou retirer une publication.",
         "**Accès.** Le cercle est réservé aux comptes ORBES connectés auxquels au moins une pièce est enregistrée (article 12). Chaque publication est réservée à un palier et aux paliers supérieurs. L'accès est vérifié à chaque consultation : il prend fin avec la dernière pièce enregistrée au compte.",
         "**Invitations.** Vous répondez à une invitation par YES ou NO, dans la limite de ses places. Vous pouvez changer votre réponse jusqu'au début de l'événement. Répondre ne vous oblige à rien.",
         "**Sondages.** Chaque compte vote une fois à un sondage, et ce vote est définitif. Les résultats, en totaux par option, s'affichent une fois votre vote fait.",
         "**Liens.** Une publication ne renvoie qu'à des sites autorisés par ORBES. Le service affiche le nom du site à côté du lien.",
-        "**Ce qui est enregistré.** Votre réponse à une invitation est inscrite au journal d'audit du service ; votre vote ne l'est jamais. Les visites du cercle sont comptées par jour, sans aucun compte. Vos réponses et vos votes figurent dans la copie de vos données que vous pouvez demander à ORBES Client Services (article 15).",
-      ],
-    },
-    {
-      id: 'article-14',
-      title: 'Article 14 — Verrouillage du compte',
-      blocks: [
-        'ORBES Client Services peut verrouiller un compte ORBES.',
-        "Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.",
+        "**Ce qui est enregistré.** Votre réponse à une invitation est inscrite au journal d'audit du service ; votre vote ne l'est jamais. Les visites du cercle sont comptées par jour, sans aucun compte. Vos réponses et vos votes figurent dans la copie de vos données que vous pouvez demander à ORBES Client Services (article 16).",
       ],
     },
     {
       id: 'article-15',
-      title: 'Article 15 — Données personnelles',
+      title: 'Article 15 — Verrouillage du compte',
       blocks: [
-        'ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, réponses et votes du cercle) comme le décrit sa [politique de confidentialité](/legal/privacy). Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte.',
+        'ORBES Client Services peut verrouiller un compte ORBES.',
+        "Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), retire ses entrées en cours dans les LIVE RELEASES et son I'LL BE THERE pour celles qui n'ont pas encore ouvert (article 13), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, une réservation confirmée dans une LIVE RELEASE reste à conclure par ORBES Client Services, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.",
       ],
     },
     {
       id: 'article-16',
-      title: 'Article 16 — Responsabilité',
+      title: 'Article 16 — Données personnelles',
+      blocks: [
+        "ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses et votes du cercle) comme le décrit sa [politique de confidentialité](/legal/privacy). Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie.",
+      ],
+    },
+    {
+      id: 'article-17',
+      title: 'Article 17 — Responsabilité',
       blocks: [
         "ORBES décrit fidèlement ce que vérifie le service et ce qu'il ne vérifie pas (article 4). Un résultat ne garantit pas qu'un objet est celui qu'ORBES a fabriqué : avant un achat, demandez un code de transfert au vendeur, et en cas de doute, ORBES Client Services peut examiner la pièce.",
       ],
     },
     {
-      id: 'article-17',
-      title: 'Article 17 — Modification des conditions',
+      id: 'article-18',
+      title: 'Article 18 — Modification des conditions',
       blocks: [
         'ORBES peut modifier les présentes conditions. La version en vigueur et sa date sont publiées sur le service.',
       ],
     },
     {
-      id: 'article-18',
-      title: 'Article 18 — Droit applicable et litiges',
+      id: 'article-19',
+      title: 'Article 19 — Droit applicable et litiges',
       blocks: [
         "Les présentes conditions sont régies par le droit de l'État du Wyoming (États-Unis), sans égard à ses règles de conflit de lois. Rien dans ces conditions ne prive un consommateur de la protection des règles impératives de la loi du pays où il réside. En cas de litige, vous pouvez vous adresser d'abord à ORBES Client Services. Tout litige relatif aux présentes conditions relève des tribunaux situés dans le Wyoming (États-Unis), sous réserve de ces règles impératives.",
       ],

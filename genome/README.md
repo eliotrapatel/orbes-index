@@ -40,24 +40,33 @@ genome/
                          certificates (shared links), the lookbook of the models and the owners' club
                          (club.ts: tierOf, clubMembersByTier, the tiers' benefits), the releases
                          (drops.ts: DropService, the draw by tier, the early access and its direct
-                         reservation, DropService.reserve), the owners' circle (circle.ts: CircleService)
+                         reservation, DropService.reserve), the owners' circle (circle.ts: CircleService),
+                         the LIVE RELEASES (live.ts: LiveService, the rules and the actions; live-engine.ts:
+                         the ticker under an advisory lock; live-room.ts: what the public and a viewer read;
+                         live-console.ts: the console; live-insights.ts: the intelligence)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
     routes/              public, account, ownership, club (the lookbook's reserved models, the club's status,
                          ENTER, WITHDRAW and RESERVE a release, the circle's feed, posts, answers and votes),
                          admin/ (drops.ts, circle.ts and club.ts for the Club page; media.ts for every
-                         photograph, a circle post's included; analytics.ts, its circle panel too)
-    http/ geo/ render/
+                         photograph, a circle post's and a LIVE RELEASE's silhouette included; analytics.ts,
+                         its circle panel too; live.ts, the LIVE RELEASES' console), live.ts (the LIVE
+                         RELEASES: the public pages, the boutique board, the account's room, line and turn)
+    http/ geo/ render/   (http/live-stream.ts: the LIVE RELEASES' streams, LiveHub)
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
                          (/verify/pieces), an ownership certificate's page (/verify/c#token),
                          THE COLLECTION, the lookbook of the models (/verify/lookbook),
                          THE RELEASES, the drops, their early access and their draw (/verify/releases),
                          THE CIRCLE, the owners' posts (/verify/circle, circle-model.ts, views/circle.ts),
-                         and YOUR TIER at the head of MY PIECES (tier-model.ts)
+                         and YOUR TIER at the head of MY PIECES (tier-model.ts); a LIVE RELEASE's vault
+                         (/verify/releases/<id>: live-model.ts, live-seal.ts, views/live.ts), its banner
+                         (views/live-banner.ts) and its boutique board (/verify/releases/<id>/board#secret:
+                         board-model.ts, views/board.ts)
     admin/               admin console: catalogue, generator, keys, anomalies, analytics (and its panel The Circle),
-                         audit, the Club (Drops, Circle with a post's page #/club/circle/:postId, Tiers);
+                         audit, the Club (Drops, Circle with a post's page #/club/circle/:postId, Tiers;
+                         a LIVE RELEASE's page #/club/live/:dropId, its live board, controls and intelligence);
                          the sale mode (decoder worker of verify/)
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share
@@ -191,6 +200,7 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | `npx tsx scripts/payload-encodings.ts` | Payload size in the fixed layout vs deterministic CBOR and JSON → the table of CRYPTOGRAPHY §3.1 (`--json` for raw figures). |
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
 | `npx tsx scripts/certificate-specimen.ts` | Certificate card specimen of BRAND §7 (`docs/assets/certificate-card-specimen*.svg` and the production PDF). Re-run after any change to the card; `test/render/certificate.test.ts` fails on stale files. |
+| `npx tsx scripts/live-load.ts` | The LIVE RELEASES' load test: for each level (`--levels 500,1000,1500,2000`), the app, PGlite and N phones in three processes, N streams in the room, a burst of entries, then every turn taken to the sell-out; the actions' and the fan-out's p95, memory and CPU on the VPS profile (`--vps-factor 2`). Writes `out/live-load/results.json`; the figures and the method are in `docs/reports/live-load.md` (1 000 in the room measured, `LIVE_ROOM_CAPACITY`). |
 | `npx tsx scripts/favicons.ts` | The tab icons of the apps (`src/web/verify/favicon.svg`, the same for the legal pages, `src/web/legal/favicon.svg`, and `src/web/admin/favicon.svg`), drawn from the brand monogram (BRAND §3.9). Re-run after any change to them; `test/web/monogram.test.ts` fails on stale files. |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.

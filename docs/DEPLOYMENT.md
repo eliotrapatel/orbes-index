@@ -874,7 +874,8 @@ docker compose exec app node --import tsx scripts/admin.ts enable --email ops@th
 | New CRITICAL anomaly (`VALID_SIGNATURE_UNREGISTERED`, `CODE_MISMATCH`) | SQL query of §7.5 step 5, polled every few minutes, or `GET /api/admin/anomalies?severity=CRITICAL&status=OPEN` (`GET /api/admin/anomalies/summary`: `open.CRITICAL`). In the console, the badge on ANOMALIES and the `(n)` of the tab title count the OPEN HIGH and CRITICAL findings | Page: possible key compromise |
 | New `UNSOLD_PIECE_SCAN` anomaly (console: UNSOLD PIECE SCANNED): a piece not sold yet, scanned outside the console | `GET /api/admin/anomalies?type=UNSOLD_PIECE_SCAN&status=OPEN`, or `anomalies` rows with `type = 'UNSOLD_PIECE_SCAN' AND status = 'OPEN'` (country in `details`), daily | Ticket: stock possibly diverted (API §9.7, THREAT-MODEL W) |
 | `verification flagged` (SUSPICIOUS ACTIVITY) | Log (warn) | Ticket / dashboard |
-| `housekeeping job failed`, `health check: database unavailable` | Log (error; `job: scanStats` also holds back that pass's scan-history purge) | Ticket |
+| `housekeeping job failed`, `health check: database unavailable` | Log (error; `job: scanStats` also holds back that pass's scan-history purge; `job: liveNetworks`, the erasure of the LIVE RELEASES' network fingerprints after 30 days) | Ticket |
+| `live engine: a pass failed`, `live engine: a release could not advance`, `live engine: the lock could not be taken or kept` | Log (error), from the engine of the LIVE RELEASES (§11) | Page while a LIVE RELEASE is open (its turns stop being given; the console's LINE STALLED says so too), ticket otherwise |
 | Audit chain broken | `GET /api/admin/audit/verify` (daily job) returns `ok: false` | Page |
 | Spikes of `429` | Request logs | Dashboard (abuse or a misconfigured `TRUST_PROXY`) |
 
@@ -924,7 +925,9 @@ The service is stateless apart from a few per-process pieces. Sessions, scan tok
 |---|---|---|
 | Rate limits | In-process LRU stores (`@fastify/rate-limit`), per group | With N instances behind round-robin, a client gets up to N × the configured budget. Divide the limits by N, or enforce a global limit at the edge (CDN or nginx `limit_req`). |
 | Public-key cache | 30 s TTL (5 s for unknown key ids), per process | Rotations and revocations made on another instance or by the CLI take up to 30 s to apply everywhere. Restart for immediate effect (§7.5). Issuance is never affected: it re-checks the key row in its own transaction. |
-| Housekeeping | Every 10 min per process (expired sessions, scan tokens, stale transfers, the daily scan statistics, then the scan-history purge) | Idempotent, so running it on every instance is harmless: two instances counting the same day write the same counts. |
+| Housekeeping | Every 10 min per process (expired sessions, scan tokens, stale transfers, the daily scan statistics, then the scan-history purge, and the LIVE RELEASES' network fingerprints 30 days after their end) | Idempotent, so running it on every instance is harmless: two instances counting the same day write the same counts. |
+| The LIVE RELEASES' engine (`services/live-engine.ts`) | One pass every 250 ms over the releases in their live window, by **one process at a time**: the one that holds the session advisory lock `LIVE_ENGINE` (DATABASE §8.3) on a connection it keeps from its pool while it leads (`live engine: leading` in its log); the others try again every second, so a process that stops is replaced within one. Nothing is kept in memory: a restart, or the overlap of two containers during a deployment, changes nothing | Any number of instances. The leader keeps one of its 10 connections for itself: size `max_connections` with it. |
+| The LIVE RELEASES' streams (`http/live-stream.ts`) | Server-Sent Events held by the process that serves them (`/api/v1/live/:id/stream`, `…/board/stream`, `/api/admin/live/:id/stream`): each process builds, once a second, the room of each release it streams, and fans it out from memory; at most two streams per account and per console user, per process | With N instances, each builds the frames its own streams need (database work per second grows with instances × releases, never with the audience), and the two-stream cap is per instance. A proxy in front must not buffer or compress them (§15.7). Measured on the VPS profile: **1 000 people in the room** within every target ([the load report](reports/live-load.md)); the console's audience forecast says when a release may draw more. |
 | Migrations | Advisory lock | Safe if several instances start with `--migrate`, but prefer one migration step per release (§6.2). |
 | Database connections | 10 per process | Size `max_connections`. Prefer PostgreSQL directly over transaction-mode poolers (§6.3). |
 | CPU | Node is single-threaded. Verification is cheap (Ed25519 verification plus a few indexed queries; p95 target < 300 ms excluding network, see [docs/reports/performance.md](reports/performance.md)). Rendering PNG/PDF artifacts in the admin console is the heaviest work. | Scale out with one process per vCPU. |
@@ -1261,6 +1264,30 @@ head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 
 #   413
 ```
 
+**The LIVE RELEASES' streams at the edge (deployment D).** The three routes that stream (`LIVE_STREAM_ROUTES` in `genome/src/server/http/live-stream.ts`: a signed-in viewer's room, `GET /api/v1/live/:id/stream`; the boutique board, `POST /api/v1/live/:id/board/stream`; the console's live board, `GET /api/admin/live/:id/stream`; [API §8.10, §10.12, §16.22](API.md#810-the-live-releases-get-apiv1live-and-the-boutique-board-extension-of-the-contract)) are Server-Sent Events: each event must reach the phone the moment the app writes it. Compression would hold the first bytes back until a block fills, so the Caddyfile serves them through two mutually exclusive matchers: `@live_stream` takes exactly these paths, uncompressed (`encode @not_live_stream zstd gzip`) and flushed at once (`flush_interval -1`) by their own `reverse_proxy`; every other request keeps the compression and the proxy it had. Both proxies import the same `app_upstream` snippet (the client IP contract, the retries across an app restart, the timeouts); no `handle` block is used, so the admin allowlist (`ADMIN_ALLOWED_IPS`) still covers the console's stream:
+
+```caddyfile
+@live_stream {
+	path_regexp ^/api/(v1/live/[^/]+/(stream|board/stream)|admin/live/[^/]+/stream)/?$
+}
+@not_live_stream {
+	not path_regexp ^/api/(v1/live/[^/]+/(stream|board/stream)|admin/live/[^/]+/stream)/?$
+}
+
+encode @not_live_stream zstd gzip
+
+reverse_proxy @live_stream app:8080 {
+	import app_upstream
+	flush_interval -1
+}
+
+reverse_proxy @not_live_stream app:8080 {
+	import app_upstream
+}
+```
+
+The app writes `X-Accel-Buffering: no` on every stream and sends a comment line every 20 s, under Caddy's and the browsers' idle timeouts (`response_header_timeout` applies to the headers only, sent at once). `genome/test/ops/vps-stack.test.ts` checks the matcher pair, the single `encode`, the flush, and that the pattern matches exactly `LIVE_STREAM_ROUTES`, which in turn are exactly the routes the app registers ending in `/stream`. This change of the shared VPS's edge, with the silhouette's upload above, goes out with deployment D, proposed to the host's owner first ([its runbook](launch/DEPLOY-LIVE-RELEASE.md), §1.1). Check after the deployment: the board's stream answers `content-type: text/event-stream` without `content-encoding`, and its first event arrives at once (the runbook's §1.7).
+
 **Repair forward: the decision of 2026-10-03 for the shared server.** This server is never restored from a backup (`restore.sh` refuses there, `RESTORE_ALLOWED=false`, §15.9), and a release that migrated is never undone by changing the image. This is a declared deviation from the rollback by restore that this runbook described until then (§12.2; COMPLIANCE §7, H3). The facts behind it:
 
 - `scripts/db.ts migrate` applies all the pending migrations of a release in **one transaction**, under an advisory lock ([DATABASE §9.2](DATABASE.md#92-behaviour)). If one fails, none is applied, the schema stays as it was, and the automatic rollback to the previous image works.
@@ -1297,7 +1324,7 @@ docker image rm orbes-genome:<tag>         # one old tag at a time
 
 Never run `docker image prune`, `docker system prune` or `docker volume prune` on the shared host. A bare `docker image prune` deletes the dangling images of the other stacks on the same Docker daemon, and does not even remove old `orbes-genome` tags. With `-a` or `--volumes`, and the stack stopped, they delete the rollback images, the database and the signing keys (COMPLIANCE §7, house rules).
 
-**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md); the « Potentiel » lot of 2026-10-03, deployments A, B and C with migrations `0014`–`0020`, has its own: [DEPLOY-POTENTIEL-2026-10](launch/DEPLOY-POTENTIEL-2026-10.md)):
+**Before a deployment on the shared server** (lots with migrations above all, such as deployment 2 with migrations `0004`–`0013`; its step-by-step runbook, in French, with the expected output of each command: [DEPLOY-RECOMMANDATIONS-2026-10](launch/DEPLOY-RECOMMANDATIONS-2026-10.md); the « Potentiel » lot of 2026-10-03, deployments A, B and C with migrations `0014`–`0020`, has its own: [DEPLOY-POTENTIEL-2026-10](launch/DEPLOY-POTENTIEL-2026-10.md); and so has the LIVE RELEASE, deployment D with migration `0021` and its change of the edge: [DEPLOY-LIVE-RELEASE](launch/DEPLOY-LIVE-RELEASE.md)):
 
 1. Not between 03:00 and 05:30 UTC (the nightly backups of the host). Tell the host owner first.
 2. Check `.env`: `RESTORE_ALLOWED=false` (add the line if it is missing; deployment 2 adds it), and nothing exported in the shell (`env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='` prints nothing).
