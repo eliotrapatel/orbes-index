@@ -95,12 +95,14 @@ const VERIFY_LABELS = [
   'Your ORBES account does not meet the rule of this release.', 'SIGN IN TO ENTER', 'READY CHECK', 'SYNCED TO ORBES', 'ENTER THE ROOM',
   'IN THE ROOM', 'SOUND ON', 'DRAWING THE PLACES', 'YOUR PLACE', 'PRESS AND HOLD THE SEAL', 'PAUSED', 'RELEASE MY PLACE', 'A PIECE HAS RETURNED',
   'YOUR PLACE IS RELEASED', 'Your piece is reserved in size', 'THE RELEASE HAS ENDED', 'THIS RELEASE IS OVER', 'THIS BOARD IS NOT AVAILABLE',
-  'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ',
+  'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ', 'TO BE REVEALED',
 ] as const;
 const CONSOLE_LABELS = [
   'Club', 'Drops', 'New live release', 'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Sizes', 'Access', 'Add-ons',
   'Publish the release', 'Boutique board', 'Issue the link', 'Copy the link', 'Pause', 'Resume', 'Message', 'Add pieces', 'End now',
   'Client Services', 'Cancel the reservation', 'Download CSV', 'How it is read', 'Revoke the board’s link',
+  'Times (UTC)', 'Silhouette revealed', 'Name revealed', 'Photograph revealed', 'Silhouette', 'Choose a photograph', 'To be sent: ', 'Save photograph',
+  'Silhouette saved.',
 ] as const;
 
 function sources(dir: string): string {
@@ -224,7 +226,7 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
   it('checks every feature once, live, with only labels the apps show', () => {
     const checks = section(runbook, '### 1.7');
     const features = [...checks.matchAll(/^\| ([^|]+) \| [^|]+ \| [^|]+ \| [^|]+ \|$/gm)].map((m) => m[1].trim()).filter((f) => f !== 'Élément' && !/^-+$/.test(f));
-    for (const f of ['L\'annonce', 'I\'LL BE THERE', 'ADD TO CALENDAR', 'La bannière', 'Le tableau de la boutique', 'Le flux, à travers Caddy', 'Pas éligible', 'Pas de spectateur', 'La salle', 'La dernière minute', 'T0', 'Le tour', 'Le tableau en direct', 'La seconde chance', 'Les options et PAY', 'La fin', 'ORBES Client Services', 'L\'intelligence', 'Le lien du tableau']) {
+    for (const f of ['L\'annonce', 'Les étapes', 'I\'LL BE THERE', 'ADD TO CALENDAR', 'La bannière', 'Le tableau de la boutique', 'Le flux, à travers Caddy', 'Pas éligible', 'Pas de spectateur', 'La salle', 'La dernière minute', 'T0', 'Le tour', 'Le tableau en direct', 'La seconde chance', 'Les options et PAY', 'La fin', 'ORBES Client Services', 'L\'intelligence', 'Le lien du tableau']) {
       expect(features.some((x) => x.startsWith(f)), f).toBe(true);
     }
     const verify = sources(join(REPO, 'genome/src/web/verify'));
@@ -237,6 +239,9 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
       expect(admin, label).toContain(label);
       expect(checks, label).toContain(label);
     }
+    // The silhouette's check through the edge: a photograph over the 64 KB default, through the console's own upload.
+    expect(checks).toContain('bien au-delà de 64 Ko');
+    expect(checks).toContain('sans `413` (l\'exception de Caddy, §1.0)');
     // The stream's check through the edge: the board's own route, by its secret from a variable read without echo.
     expect(commands).toContain('curl -sN -D - -H \'accept-encoding: gzip, zstd\' -H \'origin: https://verify.theorbes.com\' -H \'content-type: application/json\' --data "{\\"token\\":\\"$ORBES_BOARD\\"}" https://verify.theorbes.com/api/v1/live/<ID>/board/stream');
     expect(checks).toContain('`read -rs ORBES_BOARD`');

@@ -438,6 +438,41 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(exported).not.toMatch(/network/i);
   });
 
+  it('says which LIVE RELEASE actions reach the audit log, as the code records them: the account’s and the staff’s on an entry, the rest as counts', () => {
+    // What the policy names, each with the `drop.live.*` action that records it.
+    const NAMED: ReadonlyArray<readonly [string, string, string]> = [
+      ['drop.live.interest', "I'LL BE THERE", "I'LL BE THERE"],
+      ['drop.live.interest.withdraw', 'its withdrawal', 'son retrait'],
+      ['drop.live.enter', 'entering', "l'entrée"],
+      ['drop.live.size', 'changing size', 'le changement de taille'],
+      ['drop.live.leave', 'leaving', 'le départ'],
+      ['drop.live.secure', 'securing the piece with the length of your hold', 'la pièce sécurisée avec la durée de votre appui'],
+      ['drop.live.addons', 'the options', 'les options'],
+      ['drop.live.confirm', 'PAY', 'PAY'],
+      ['drop.live.release', 'giving the piece back', 'la pièce rendue'],
+      ['drop.live.let_in', 'letting you in', 'vous faire entrer'],
+      ['drop.live.free', 'freeing your piece', 'libérer votre pièce'],
+      ['drop.live.remove', 'removing your entry', 'retirer votre entrée'],
+      ['drop.live.resolve', 'concluding or cancelling your reservation, never its note', 'conclure ou annuler votre réservation, jamais sa note'],
+    ];
+    // What the code records about one account: an action whose details carry the entry, or the interest's own.
+    const code = ['genome/src/server/services/live.ts', 'genome/src/server/services/live-console.ts'].map(readDoc).join('\n');
+    const details = new Map<string, string[]>();
+    for (const m of code.matchAll(/action: '(drop\.live\.[a-z_.]+)',[\s\S]{0,200}?details: \{([^}]*)\}/g)) details.set(m[1]!, [...(details.get(m[1]!) ?? []), m[2]!]);
+    const personal = [...details].filter(([action, d]) => action.startsWith('drop.live.interest') || d.some((x) => /\bentryId\b/.test(x))).map(([action]) => action);
+    expect(personal.sort()).toEqual(NAMED.map(([action]) => action).sort());
+    expect(details.get('drop.live.secure')!.join()).toContain('gestureMs');
+    expect(details.get('drop.live.resolve')!.join()).not.toMatch(/note:/);
+    // The engine's own: the line at the opening and the end, as counts, naming no entry.
+    expect(details.get('drop.live.queue')).toEqual([' entries: placed.length ']);
+    expect(details.get('drop.live.end')!.join()).not.toMatch(/entryId|account/);
+    for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture et la fin d'une sortie n'y sont inscrites qu'en nombres."]] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'live');
+      for (const row of NAMED) expect(text, `${lang}: ${row[0]}`).toContain(row[i]);
+      expect(text).toContain(counts);
+    }
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
     expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live']));
@@ -579,7 +614,7 @@ describe('legal pages: both languages, links, lexicon', () => {
     // article 13 and the articles it moves, the privacy policy's LIVE RELEASES). 2026-10-05 is deployment B+C's, on its
     // own branch: D comes after it. The date is a placeholder until deployment D is fixed (its runbook, §0 rule 6): this
     // line and LEGAL_VERSION then take that day, with the fingerprint of the texts as they are then.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-06': 'fc069b4ec1bc8d39' };
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-06': 'f59b54e84cfe2f93' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);
