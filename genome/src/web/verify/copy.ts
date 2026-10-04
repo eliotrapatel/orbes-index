@@ -825,3 +825,13 @@ export const CEREMONY = Object.freeze({
   /** The image's file name, when it is shared or saved. */
   filename: 'ORBES-GENOME.png',
 });
+
+/**
+ * The sound signature (P-D07): SOUND ON / OFF, a text link at the foot of the landing. Its accessible name is SOUND,
+ * its state is said by aria-pressed (ON or OFF beside the word is for the eye). On by default; kept on this device.
+ */
+export const SOUND = Object.freeze({
+  label: 'SOUND',
+  on: 'ON',
+  off: 'OFF',
+});

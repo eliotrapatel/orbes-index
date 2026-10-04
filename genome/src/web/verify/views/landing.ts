@@ -18,13 +18,16 @@
  * account, reading them none).
  *
  * At the foot (J-06), under the centre and in the page's flow, so a short
- * screen scrolls to them rather than covering the actions: the legal pages,
- * PRIVACY · TERMS · LEGAL · HELP, and DB-IP's attribution, then the
- * decorative line © ORBES · GENOME CODE · PARIS.
+ * screen scrolls to them rather than covering the actions: SOUND ON / OFF
+ * (P-D07), the switch of the sound signature an authentic result plays, then
+ * the legal pages, PRIVACY · TERMS · LEGAL · HELP, and DB-IP's attribution,
+ * then the decorative line © ORBES · GENOME CODE · PARIS.
  */
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
+import { SOUND } from '../copy.js';
 import type { SessionStore } from '../session.js';
+import type { SoundSwitch } from '../sound.js';
 import { legalLinks, lookbookLink, orbitReticle, piecesLink, releasesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
@@ -37,6 +40,28 @@ export interface LandingHandlers {
   onCollection?(): void;
   /** THE RELEASES (P-R03): the drops, in the app. */
   onReleases?(): void;
+  /** The sound signature (P-D07): SOUND ON / OFF at the foot. */
+  sound?: SoundSwitch;
+}
+
+/**
+ * SOUND ON / OFF (P-D07): a text link that switches the sound signature, its state in aria-pressed. Its accessible
+ * name is SOUND; ON or OFF beside the word says the state to the eye (hidden from assistive technologies, which hear
+ * the pressed state instead).
+ */
+function soundToggle(sound: SoundSwitch): HTMLButtonElement {
+  const state = h('span', { class: 'landing__sound-state', attrs: { 'aria-hidden': 'true' } });
+  const button = h('button', { class: 'textlink landing__sound', attrs: { type: 'button' } }, `${SOUND.label} `, state);
+  const render = (): void => {
+    button.setAttribute('aria-pressed', String(sound.on));
+    state.textContent = sound.on ? SOUND.on : SOUND.off;
+  };
+  button.addEventListener('click', () => {
+    sound.set(!sound.on);
+    render();
+  });
+  render();
+  return button;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
@@ -87,6 +112,7 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
     h(
       'footer',
       { class: 'landing__foot' },
+      handlers.sound ? soundToggle(handlers.sound) : null,
       legalLinks({ extraClass: 'landing__legal' }),
       h('div', { class: 'landing__meta nano' }, h('span', { text: '© ORBES' }), h('span', { text: 'GENOME CODE' }), h('span', { text: 'PARIS' })),
     ),

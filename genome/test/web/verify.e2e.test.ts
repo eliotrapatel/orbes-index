@@ -45,7 +45,10 @@
  * that holds no piece told it opens with one), the ceremony of a first
  * registration (P-D01: the glyphs one by one, then the model and its
  * collection, the vibration, SHARE THE GENOME shared or saved, without motion
- * when it is reduced, kept by TRY AGAIN, never for a piece received), and the
+ * when it is reduced, kept by TRY AGAIN, never for a piece received), the
+ * sound signature (P-D07: the chord on an authentic result only, its
+ * AudioContext created in the tap UPLOAD A PHOTO or SCAN ORBES CODE, SOUND ON /
+ * OFF at the foot of the landing, kept on the device across a reload), and the
  * problem screens. On each
  * screen the floors of BRAND-DESIGN-SYSTEM §3.8 are measured: 10 px type
  * and 44 × 44 px tap zones for every button, link and tab. Mobile screenshots of the landing and result screens are written
@@ -178,6 +181,44 @@ async function standInsForCeremony(page: Page, mode: 'share' | 'save'): Promise<
 }
 
 const vibrationsOf = (page: Page) => page.evaluate(() => (window as unknown as { vibrations: unknown[] }).vibrations);
+
+/** What the sound signature (P-D07) did on the page: each AudioContext created, then each voice of a chord (its Hz). */
+interface SoundRecord {
+  contexts: { activeTap: boolean; session: string }[];
+  notes: number[];
+}
+
+/**
+ * The sound signature's stand-ins (P-D07), set on the page before the tap (the app is one page: they stay until a
+ * reload): Safari's navigator.audioSession, and the page's AudioContext, recording whether the tap was still active
+ * when it was created, the session's type then, and the frequency of every voice scheduled on it.
+ */
+async function recordSound(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const rec: SoundRecord = { contexts: [], notes: [] };
+    const w = window as unknown as { __sound: SoundRecord; AudioContext: typeof AudioContext };
+    w.__sound = rec;
+    const session = { type: 'auto' };
+    Object.defineProperty(navigator, 'audioSession', { configurable: true, value: session });
+    const Native = w.AudioContext;
+    w.AudioContext = class extends Native {
+      constructor() {
+        super();
+        rec.contexts.push({ activeTap: navigator.userActivation.isActive, session: session.type });
+      }
+      override createOscillator(): OscillatorNode {
+        const osc = super.createOscillator();
+        const set = osc.frequency.setValueAtTime.bind(osc.frequency);
+        osc.frequency.setValueAtTime = (value: number, time: number) => (rec.notes.push(Math.round(value)), set(value, time));
+        return osc;
+      }
+    };
+  });
+}
+
+const soundOf = (page: Page) => page.evaluate(() => (window as unknown as { __sound: SoundRecord }).__sound);
+/** The chord's voices, rounded to the hertz (src/web/verify/sound.ts). */
+const CHORD = [294, 440, 554, 659];
 
 /**
  * Console noise that is expected: Chromium logs every 4xx API answer as a failed resource
@@ -449,6 +490,70 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The result is still there.
     await attrOf(page.locator('.view--result'), 'data-state', 'AUTHENTIC');
     await keepsFloors(page, ['SCAN ANOTHER', ...LEGAL_LINKS]);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('plays the sound signature on an authentic result only, from the tap UPLOAD A PHOTO; SOUND ON / OFF at the foot of the landing, kept on the device (P-D07)', async () => {
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // At the foot of the landing, above the legal pages: a text link in the display face, on by default.
+    const toggle = page.getByRole('button', { name: 'SOUND', exact: true });
+    await visible(toggle);
+    await countOf(page.locator('.landing__foot > .textlink.landing__sound'), 1);
+    await attrOf(toggle, 'aria-pressed', 'true');
+    await textOf(toggle, 'SOUND ON');
+    expect(await toggle.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
+    const box = (await toggle.boundingBox())!;
+    expect(box.y).toBeGreaterThan((await page.locator('.landing__actions').boundingBox())!.y);
+    expect((await page.locator('.landing__legal').boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height - 8);
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SOUND ON', ...LEGAL_LINKS]);
+    expect(await page.evaluate(() => localStorage.length)).toBe(0);
+
+    // Nothing is created before a tap; UPLOAD A PHOTO creates the AudioContext in the tap, the session ambient first.
+    await recordSound(page);
+    expect(await soundOf(page)).toEqual({ contexts: [], notes: [] });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'sound.png', plain));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    await expect.poll(() => soundOf(page), POLL).toEqual({ contexts: [{ activeTap: true, session: 'ambient' }], notes: CHORD });
+
+    // A result that is not authentic: no chord.
+    await page.goBack();
+    await visible(toggle);
+    const issued = await srv.issue();
+    const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
+    signature[10] ^= 0x01;
+    const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'sound-forged.png', forged));
+    expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
+    await page.waitForTimeout(300);
+    expect(await soundOf(page)).toEqual({ contexts: [{ activeTap: true, session: 'ambient' }], notes: CHORD });
+
+    // SOUND OFF: pressed no more, kept on the device, read back after a reload; an authentic result is then silent.
+    await page.goBack();
+    await visible(toggle);
+    await toggle.click();
+    await attrOf(toggle, 'aria-pressed', 'false');
+    await textOf(toggle, 'SOUND OFF');
+    expect(await page.evaluate(() => ({ ...localStorage }))).toEqual({ 'orbes.sound': 'off' });
+    await page.reload();
+    await visible(toggle);
+    await attrOf(toggle, 'aria-pressed', 'false');
+    await textOf(toggle, 'SOUND OFF');
+    await recordSound(page);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'sound-off.png', plain));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    await page.waitForTimeout(300);
+    expect(await soundOf(page)).toEqual({ contexts: [], notes: [] });
+
+    // SOUND ON again: the key is removed (on is the default), and the next authentic result sounds.
+    await page.goBack();
+    await visible(toggle);
+    await toggle.click();
+    await attrOf(toggle, 'aria-pressed', 'true');
+    await textOf(toggle, 'SOUND ON');
+    expect(await page.evaluate(() => localStorage.length)).toBe(0);
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'sound-on.png', plain));
+    expect(await resultTitle(page)).toBe('AUTHENTIC');
+    await expect.poll(() => soundOf(page), POLL).toEqual({ contexts: [{ activeTap: true, session: 'ambient' }], notes: CHORD });
     expect(problems).toEqual([]);
   }, 120_000);
 
@@ -2766,6 +2871,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera scan (Chromium fake captu
         return stream;
       };
     });
+    await recordSound(page);
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
     await page.locator('.view--scan').waitFor();
     // The status line is a polite live region.
@@ -2775,6 +2881,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera scan (Chromium fake captu
     await page.screenshot({ path: join(OUT_DIR, 'verify-scan-locked.png') });
     expect(await resultTitle(page)).toBe('AUTHENTIC');
     await textOf(page.locator('.genome__id'), issued.product.productId);
+    // The sound signature (P-D07): its AudioContext created in the tap SCAN ORBES CODE, the chord as the result appeared.
+    await expect.poll(() => soundOf(page), POLL).toEqual({ contexts: [{ activeTap: true, session: 'ambient' }], notes: CHORD });
     // The camera was opened once (rear camera requested) and released once the code was read.
     const tracks = await page.evaluate(() =>
       (window as unknown as { __streams: MediaStream[] }).__streams.flatMap((st) => st.getTracks().map((t) => ({ kind: t.kind, state: t.readyState }))),

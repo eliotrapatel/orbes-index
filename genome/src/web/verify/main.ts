@@ -9,6 +9,7 @@
  *   MY PIECES ──THE CIRCLE──▶ the owners' circle (/verify/circle, P-X01) ──SEE THE …──▶ a post
  *   result ──SEE THE MODEL──▶ its model's sheet (/verify/lookbook/<slug>), the lookbook under it
  *   result ──REGISTER, then VIEW AS OWNER──▶ VERIFYING… ──▶ the result with the ceremony (P-D01)
+ *   an AUTHENTIC_* result ──▶ the sound signature (P-D07), its AudioContext created in the tap SCAN or UPLOAD
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
@@ -52,6 +53,7 @@ import { HINTS, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type P
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
+import { SoundSignature } from './sound.js';
 import type { ClientServices, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
@@ -130,6 +132,8 @@ class App {
   private readonly api = new ApiClient();
   private readonly session = new SessionStore(this.api);
   private readonly camera = new Camera();
+  /** The sound signature of an authentic result (P-D07), on unless turned off on this device. */
+  private readonly sound = new SoundSignature();
   private decoder: DecoderClient | null = null;
   private scan: { view: ScanView; session: ScanSession } | null = null;
   /** The screen on show that holds listeners (a result, MY PIECES): released when another takes its place. */
@@ -400,6 +404,7 @@ class App {
       onPieces: () => this.openPieces(),
       onCollection: () => this.openLookbook(),
       onReleases: () => this.openReleases(),
+      sound: this.sound,
     });
     void this.swap(view, 'landing', focus);
   }
@@ -564,7 +569,13 @@ class App {
     return this.decoder;
   }
 
-  private async startScan(): Promise<void> {
+  /**
+   * The scanner. `gesture`: called from a tap (SCAN ORBES CODE, SCAN AGAIN, TRY AGAIN…), which creates or resumes the
+   * sound signature's AudioContext (P-D07) before anything is awaited; false when the scan resumes by itself (the page
+   * back in view), where no tap allows it.
+   */
+  private async startScan(gesture = true): Promise<void> {
+    if (gesture) this.sound.prime();
     const gen = ++this.generation;
     this.stopCamera();
     const decoder = this.decoderClient();
@@ -668,14 +679,15 @@ class App {
       }
     } else if (this.resumeScan) {
       this.resumeScan = false;
-      if (this.screen === 'scan') void this.startScan();
+      if (this.screen === 'scan') void this.startScan(false);
     }
   }
 
   // ── Photo path ───────────────────────────────────────────────────────────
 
   private pickPhoto(): void {
-    // Runs inside the user's click: required for the picker to open on iOS.
+    // Runs inside the user's click: required for the picker to open on iOS, and for the sound's AudioContext (P-D07).
+    this.sound.prime();
     this.photoInput.click();
   }
 
@@ -749,6 +761,8 @@ class App {
       if (await this.swap(view.root, 'result')) {
         this.live = view;
         view.shown();
+        // P-D07: the chord, as an AUTHENTIC_* result appears (and for no other).
+        this.sound.resultShown(vm.state);
       } else view.dispose();
     } catch (e) {
       if (gen === this.generation) this.showProblem(problemForApiError(e));
