@@ -71,6 +71,9 @@ export { liveStages, type LiveStages } from './live.js';
 /** Where an announced release stands for the public. */
 export type LivePublicPhase = 'ANNOUNCED' | 'ROOM' | 'LIVE';
 
+/** A stage of the staged reveals. */
+export type LiveRevealStage = 'SILHOUETTE' | 'NAME' | 'PHOTO';
+
 /** A LIVE RELEASE in THE RELEASES (GET /api/v1/live). */
 export interface LiveCard {
   id: string;
@@ -80,6 +83,11 @@ export interface LiveCard {
   revealed: { silhouette: boolean; name: boolean; photo: boolean };
   /** When each one is (or was). */
   stages: { silhouetteAt: Date; nameAt: Date; photoAt: Date };
+  /**
+   * The calendar of the reveals still to come, in order: each stage not revealed yet that will show something (the
+   * silhouette when one is uploaded, the name, the photograph when the model has one), and its time; never what it shows.
+   */
+  reveals: { stage: LiveRevealStage; at: Date }[];
   /** From the name's stage: the release's title, its model's name, type and collection; null before. */
   title: string | null;
   name: string | null;
@@ -102,6 +110,8 @@ export interface LiveCard {
   perAccount: number;
   /** Who may enter: the lowest tier (0 any ORBES account … 3 PALLADIUM), and the rule in words after « for » (« owners from PLATINE »). */
   access: { minTier: number; text: string };
+  /** I'LL BE THERE: how many accounts said so (« 428 COLLECTORS WILL BE THERE »), public. */
+  interest: number;
 }
 
 /** A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live. */
@@ -112,8 +122,6 @@ export interface LiveSheet extends LiveCard {
   sizes: { id: string; label: string; stock: number }[];
   /** The add-ons offered with a piece held, in order, their price per piece. */
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
-  /** I'LL BE THERE: how many accounts said so. */
-  interest: number;
   roomOpensMinutes: number;
   turnSeconds: number;
   payMinutes: number;
@@ -132,7 +140,10 @@ export interface LiveEndedSheet {
 export interface LiveBanner {
   id: string;
   phase: LivePublicPhase;
+  /** The model's name from its stage; null before. */
   name: string | null;
+  /** When the name is (or was) revealed: the banner reads the release again then. */
+  nameAt: Date;
   roomOpensAt: Date;
   opensAt: Date;
   closesAt: Date;
@@ -341,7 +352,8 @@ export class LiveRoomService {
   async list(): Promise<LiveCard[]> {
     const now = this.clock();
     const rows = await this.current(now);
-    return Promise.all(rows.map((r) => this.card(r, now)));
+    const interest = await this.interestCounts(rows.map((r) => r.id));
+    return Promise.all(rows.map((r) => this.card(r, now, interest.get(r.id) ?? 0)));
   }
 
   /** A release's page: 404 before its announcement; once ended, only that it is. */
@@ -350,19 +362,18 @@ export class LiveRoomService {
     const now = this.clock();
     const r = await this.publicRow(id, now);
     if (livePhase(r, now) === 'ENDED') return { id, kind: 'LIVE', phase: 'ENDED' };
-    const card = await this.card(r, now);
     const stages = liveStages(r, now)!;
     const [sizes, addons, interest] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
-      this.db.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow(),
+      this.interestCounts([id]),
     ]);
+    const card = await this.card(r, now, interest.get(id) ?? 0);
     return {
       ...card,
       description: stages.name ? r.description : null,
       sizes,
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
-      interest: Number(interest.n),
       roomOpensMinutes: r.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
       turnSeconds: r.turn_seconds ?? LIVE_TURN_SECONDS.default,
       payMinutes: r.pay_minutes ?? LIVE_PAY_MINUTES.default,
@@ -380,7 +391,15 @@ export class LiveRoomService {
       .sort((a, b) => rank[a.phase] - rank[b.phase] || a.r.opens_at.getTime() - b.r.opens_at.getTime())[0];
     if (!pick) return null;
     const stages = liveStages(pick.r, now)!;
-    return { id: pick.r.id, phase: pick.phase, name: stages.name ? pick.r.model_name : null, roomOpensAt: roomOpensAt(pick.r), opensAt: pick.r.opens_at, closesAt: pick.r.closes_at };
+    return {
+      id: pick.r.id,
+      phase: pick.phase,
+      name: stages.name ? pick.r.model_name : null,
+      nameAt: stages.nameAt,
+      roomOpensAt: roomOpensAt(pick.r),
+      opensAt: pick.r.opens_at,
+      closesAt: pick.r.closes_at,
+    };
   }
 
   /** The .ics of an announced release not ended (404 otherwise). */
@@ -621,7 +640,19 @@ export class LiveRoomService {
     return r;
   }
 
-  private async card(r: ReadRow, now: Date): Promise<LiveCard> {
+  /** I'LL BE THERE, counted per release: one read for all of them. */
+  private async interestCounts(ids: readonly string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .selectFrom('live_interest')
+      .select((eb) => ['drop_id', eb.fn.countAll<number>().as('n')])
+      .where('drop_id', 'in', [...ids])
+      .groupBy('drop_id')
+      .execute();
+    return new Map(rows.map((x) => [x.drop_id, Number(x.n)]));
+  }
+
+  private async card(r: ReadRow, now: Date, interest: number): Promise<LiveCard> {
     const stages = liveStages(r, now)!;
     const rule = await liveAccessRule(this.db, r, now);
     return {
@@ -630,6 +661,11 @@ export class LiveRoomService {
       phase: livePhase(r, now) as LivePublicPhase,
       revealed: { silhouette: stages.silhouette, name: stages.name, photo: stages.photo },
       stages: { silhouetteAt: stages.silhouetteAt, nameAt: stages.nameAt, photoAt: stages.photoAt },
+      reveals: [
+        ...(!stages.silhouette && r.silhouette_sha256 ? [{ stage: 'SILHOUETTE' as const, at: stages.silhouetteAt }] : []),
+        ...(!stages.name ? [{ stage: 'NAME' as const, at: stages.nameAt }] : []),
+        ...(!stages.photo && (r.model_image || (r.model_lookbook === 'PUBLIC' && r.model_slug)) ? [{ stage: 'PHOTO' as const, at: stages.photoAt }] : []),
+      ],
       title: stages.name ? r.title : null,
       name: stages.name ? r.model_name : null,
       type: stages.name ? r.model_type : null,
@@ -646,6 +682,7 @@ export class LiveRoomService {
       quantityLine: r.quantity_line ?? '',
       perAccount: r.per_account ?? LIVE_PER_ACCOUNT.default,
       access: { minTier: rule.minTier, text: liveRuleText(rule) },
+      interest,
     };
   }
 }

@@ -26,6 +26,8 @@ import {
 import type { LiveAccess as ServerLiveAccess, LiveEntryView as ServerLiveEntry, LiveInterestView as ServerLiveInterest } from '../../src/server/services/live.js';
 import type {
   LiveAccountEntry as ServerLiveAccountEntry,
+  LiveBanner as ServerLiveBanner,
+  LiveBoard as ServerLiveBoard,
   LiveCard as ServerLiveCard,
   LiveEndedSheet as ServerLiveEndedSheet,
   LiveRoom as ServerLiveRoom,
@@ -64,6 +66,8 @@ import {
   type CirclePost,
   type LiveAccess,
   type LiveAccountEntry,
+  type LiveBanner,
+  type LiveBoard,
   type LiveCard,
   type LiveEndedSheet,
   type LiveEntry,
@@ -119,6 +123,8 @@ export const liveEntryFits = (e: Json<ServerLiveEntry>): LiveEntry => e;
 export const liveAccessFits = (a: Json<ServerLiveAccess>): LiveAccess => a;
 export const liveInterestFits = (i: Json<ServerLiveInterest>): LiveInterest => i;
 export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry => e;
+export const liveBannerFits = (b: Json<ServerLiveBanner>): LiveBanner => b;
+export const liveBoardFits = (b: Json<ServerLiveBoard>): LiveBoard => b;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
 type ProductKeys<T> = T extends { product?: infer P } ? keyof NonNullable<P> : never;
 export const productKeysMatch: [ProductKeys<ServerVerifyOutcome>] extends [ProductKeys<VerifyOutcome>] ? ([ProductKeys<VerifyOutcome>] extends [ProductKeys<ServerVerifyOutcome>] ? true : false) : false = true;

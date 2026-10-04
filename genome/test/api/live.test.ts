@@ -179,6 +179,15 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(await refusals()).toEqual(Array(3).fill({ code: 'LIVE_NOT_ELIGIBLE', message: 'This release is for owners of this model.' }));
       expect(s.json.stages).toEqual({ silhouetteAt: new Date(t + HOUR).toISOString(), nameAt: new Date(t + 2 * HOUR).toISOString(), photoAt: new Date(t + 3 * HOUR).toISOString() });
       for (const word of ['NOCTURNE', 'CUFF', 'night', sha, photoSha]) expect(leaks(s, word)).toEqual([]);
+      // The calendar of the reveals: each stage to come and its time, never what it shows.
+      expect(s.json.reveals).toEqual([
+        { stage: 'SILHOUETTE', at: new Date(t + HOUR).toISOString() },
+        { stage: 'NAME', at: new Date(t + 2 * HOUR).toISOString() },
+        { stage: 'PHOTO', at: new Date(t + 3 * HOUR).toISOString() },
+      ]);
+      expect(JSON.parse(s.card).reveals).toEqual(s.json.reveals);
+      // The banner knows when the name comes (it reads the release again then), never the name before it.
+      expect((JSON.parse(s.banner) as { release: unknown }).release).toMatchObject({ id: r.id, phase: 'ANNOUNCED', name: null, nameAt: new Date(t + 2 * HOUR).toISOString() });
 
       // The silhouette.
       h.clock.set(t + HOUR);
@@ -186,6 +195,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(s.json).toMatchObject({ revealed: { silhouette: true, name: false, photo: false }, silhouetteUrl: `/api/v1/media/${sha}`, name: null, imageUrl: null });
       expect(leaks(s, sha).sort()).toEqual(['board', 'card', 'sheet']);
       for (const word of ['NOCTURNE', 'CUFF', 'night', photoSha]) expect(leaks(s, word)).toEqual([]);
+      expect((s.json.reveals as { stage: string }[]).map((x) => x.stage)).toEqual(['NAME', 'PHOTO']);
 
       // The name: the title, the model, its type, the description; the rule names it; the banner and the .ics too.
       h.clock.set(t + 2 * HOUR - 1);
@@ -198,13 +208,21 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(s.json.access).toEqual({ minTier: 0, text: 'owners of NOCTURNE' });
       expect(leaks(s, 'NOCTURNE').sort()).toEqual(['banner', 'board', 'card', 'ics', 'sheet']);
       expect(leaks(s, photoSha)).toEqual([]);
+      expect((s.json.reveals as { stage: string }[]).map((x) => x.stage)).toEqual(['PHOTO']);
 
       // The photograph.
       h.clock.set(t + 3 * HOUR);
       s = await surfaces();
       expect(s.json).toMatchObject({ revealed: { photo: true }, imageUrl: `/api/v1/media/${photoSha}` });
       expect(leaks(s, photoSha).sort()).toEqual(['board', 'card', 'sheet']);
+      expect(s.json.reveals).toEqual([]);
       await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', r.id).execute();
+
+      // Without a silhouette uploaded, nor a photograph of the model, the calendar promises only the name.
+      const bare = await release(h, f, { inMinutes: 5 * 60 });
+      await h.ctx.db.updateTable('drops').set({ silhouette_at: new Date(t + 4 * HOUR), name_at: new Date(t + 4 * HOUR), photo_at: new Date(t + 4 * HOUR) }).where('id', '=', bare.id).execute();
+      expect((safeJson(await c.get(`/api/v1/live/${bare.id}`)) as { reveals: unknown }).reveals).toEqual([{ stage: 'NAME', at: new Date(t + 4 * HOUR).toISOString() }]);
+      await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', bare.id).execute();
     });
 
     it('reveals every stage at the room’s opening at the latest, and never names a stage in the room or the account’s state', async () => {
@@ -248,13 +266,18 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const later = await release(h, f, { inMinutes: 120, minTier: 2 });
       const soon = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }], perAccount: 2 });
       const banner = safeJson(await c.get('/api/v1/live/next')) as { release: Record<string, unknown> };
-      expect(banner.release).toEqual({ id: soon.id, phase: 'ROOM', name: 'MONOLITHE', roomOpensAt: expect.any(String), opensAt: expect.any(String), closesAt: expect.any(String) });
+      expect(banner.release).toEqual({ id: soon.id, phase: 'ROOM', name: 'MONOLITHE', nameAt: expect.any(String), roomOpensAt: expect.any(String), opensAt: expect.any(String), closesAt: expect.any(String) });
       const list = safeJson(await c.get('/api/v1/live')) as { releases: Record<string, unknown>[] };
       expect(list.releases.map((x) => x.id)).toEqual([soon.id, later.id]);
       expect(list.releases[1]).toMatchObject({ kind: 'LIVE', phase: 'ANNOUNCED', access: { minTier: 2, text: 'owners from PLATINE' }, perAccount: 1, currency: 'EUR' });
       const fan = await member(h, f, 1);
       expect((await fan.client.request('PUT', `/api/v1/live/${soon.id}/interest`, { body: { sizeId: soon.sizes[1]!.id } })).statusCode).toBe(200);
       expect((await fan.client.request('PUT', `/api/v1/live/${later.id}/interest`, { body: { sizeId: later.sizes[0]!.id } })).statusCode).toBe(403);
+      // The count of I'LL BE THERE is public: on each card of the calendar, as on the page.
+      expect((safeJson(await c.get('/api/v1/live')) as { releases: Record<string, unknown>[] }).releases.map((x) => [x.id, x.interest])).toEqual([
+        [soon.id, 1],
+        [later.id, 0],
+      ]);
       const sheet = await c.get(`/api/v1/live/${soon.id}`);
       expect(sheet.headers['cache-control']).toBe('public, max-age=15');
       expect(safeJson(sheet)).toMatchObject({

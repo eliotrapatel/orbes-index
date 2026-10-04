@@ -14,6 +14,8 @@
  *   an AUTHENTIC_* result ──▶ the sound signature (P-D07), its AudioContext created in the tap SCAN or UPLOAD
  *   the scan as a ritual (P-D10): the ring searches, tightens around the centre on a seal seen (onSeal), locks on the
  *                    code; VERIFYING… takes the ring up, and the result's GENOME plate opens from the centre
+ *   the landing, MY PIECES ──▶ the banner of the LIVE RELEASES over them (an ink strip): its release's page
+ *   a boutique board's link ──▶ the board of a LIVE RELEASE (/verify/releases/<id>/board#secret), on its own
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
  *
@@ -29,6 +31,8 @@
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
  *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
  *   /verify/releases/<id>     a release's page, its entry and its draw, or a LIVE RELEASE's (an address that is none: the list);
+ *   /verify/releases/<id>/board#…  a LIVE RELEASE's boutique board, its secret the fragment: a screen of its own, with no
+ *                             entry under it (a boutique's screen has nowhere to go back to);
  *   /verify/circle            THE CIRCLE, the owners' feed (P-X01);
  *   /verify/circle/<id>       a post, its answer or its vote (an address that is none: the feed);
  *   anything else    the landing, its address put back to /verify.
@@ -62,14 +66,17 @@ import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './t
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
+import { boardTokenOf } from './board-model.js';
 import { releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { resultViewModel } from './view-model.js';
+import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
 import { landingView } from './views/landing.js';
 import { liveView } from './views/live.js';
+import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
@@ -78,7 +85,7 @@ import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'circle' | 'circlePost';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
@@ -94,13 +101,13 @@ const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'certificate', 'lookbook
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   const lookbook = lookbookRouteOf(path);
   if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
   const releases = releasesRouteOf(path);
-  if (releases) return releases.release ? 'release' : 'releases';
+  if (releases) return releases.board ? 'board' : releases.release ? 'release' : 'releases';
   const circle = circleRouteOf(path);
   if (circle) return circle.post ? 'circlePost' : 'circle';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
@@ -174,6 +181,8 @@ class App {
   private releaseId: string | null = null;
   /** The id of the post on show (P-X01), to tell another post from the same one. */
   private postId: string | null = null;
+  /** The banner of the LIVE RELEASES, over the landing and MY PIECES (and nowhere else). */
+  private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -186,7 +195,9 @@ class App {
       // a scan's entry (its screen is gone), the landing.
       const entry = entryOf(ev.state);
       const route = routeOf(location.pathname);
-      if (entry === 'pieces' || route === 'pieces') {
+      if (route === 'board') {
+        if (this.screen !== 'board') void this.showBoard();
+      } else if (entry === 'pieces' || route === 'pieces') {
         if (this.screen !== 'pieces') void this.showPieces();
       } else if (entry === 'certificate' || route === 'certificate') this.onCertificateAddress();
       else if (entry === 'sheet' || route === 'sheet') {
@@ -208,14 +219,22 @@ class App {
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
     window.addEventListener('hashchange', () => {
-      if (routeOf(location.pathname) === 'certificate') this.onCertificateAddress();
+      const route = routeOf(location.pathname);
+      if (route === 'certificate') this.onCertificateAddress();
+      // A board's secret pasted or changed in place: the board of the new one.
+      else if (route === 'board') void this.showBoard();
     });
     document.addEventListener('visibilitychange', () => this.onVisibility());
     window.addEventListener('pagehide', () => this.stopCamera());
 
     document.body.prepend(viewportCorners());
+    this.host.before(this.banner.el);
     const route = routeOf(location.pathname);
-    if (route === 'pieces') {
+    if (route === 'board') {
+      // The boutique board: on its own, nothing under it; its secret stays in its own address.
+      history.replaceState({ screen: 'board' }, '');
+      void this.showBoard(false);
+    } else if (route === 'pieces') {
       // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES.
       if (entryOf(history.state) !== 'pieces') {
         history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
@@ -267,7 +286,9 @@ class App {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       this.showLanding(false);
     }
-    // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen.
+    // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen; a
+    // boutique board never scans.
+    if (route === 'board') return;
     const warm = () => void this.decoderClient()?.warm();
     const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     if (idle) idle.call(window, warm);
@@ -404,6 +425,7 @@ class App {
     document.body.dataset.screen = screen;
     this.host.replaceChildren(next);
     this.screen = screen;
+    this.banner.show(screen === 'landing' || screen === 'pieces');
     window.scrollTo(0, 0);
     if (focus) focusFirst(next);
     return true;
@@ -565,6 +587,19 @@ class App {
       offsetMinutes: -new Date().getTimezoneOffset(),
     });
     if (await this.swap(view.root, 'release', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /**
+   * A LIVE RELEASE's boutique board (plan of 2026-10-04, choice 31), by its secret link: the release from the path, the
+   * secret from the fragment (THIS BOARD IS NOT AVAILABLE without one that answers).
+   */
+  private async showBoard(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const id = releasesRouteOf(location.pathname)?.release ?? '';
+    const view = boardView({ api: this.api, id, token: boardTokenOf(location.hash) });
+    if (await this.swap(view.root, 'board', focus)) this.live = view;
     else view.dispose();
   }
 

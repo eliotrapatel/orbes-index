@@ -4126,6 +4126,424 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   white-space: nowrap;
 }
 
+/* The release calendar: the reveals still to come on a LIVE RELEASE's card, and how many will be there. */
+.live-card__reveals {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  max-width: 300px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+.live-card__reveal-stage,
+.live-card__reveal-when,
+.live-card__interest {
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+}
+
+.live-card__reveal-stage {
+  color: var(--ink);
+}
+
+.live-card__reveal-when {
+  color: var(--ink-soft);
+}
+
+.live-card__reveal + .live-card__reveal {
+  margin-top: 4px;
+}
+
+.live-card__interest {
+  margin-top: 12px;
+  color: var(--ink);
+}
+
+/* B1: the reveals still to come, each with its time; then I'LL BE THERE. */
+.live__reveals {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 26px;
+}
+
+.live__reveals-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.live__reveal-stage,
+.live__reveal-when {
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+}
+
+.live__reveal-when {
+  color: var(--ink-soft);
+}
+
+.live__there {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.live__there-count {
+  margin-top: 20px;
+  color: var(--ink);
+}
+
+.live__there-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.live__there-body:empty {
+  display: none;
+}
+
+.live__there-said {
+  margin-top: 18px;
+}
+
+.live__there .live__picker {
+  margin-top: 18px;
+}
+
+.live__there-lead,
+.live__there-rule {
+  margin-top: 14px;
+}
+
+.btn.live__there-action {
+  margin-top: 18px;
+}
+
+.live__there-open,
+.live__there-withdraw {
+  margin-top: 12px;
+}
+
+.live__there-panel:empty {
+  display: none;
+}
+
+/* ── The banner of the LIVE RELEASES (house style): an ink strip across the top of /verify and MY PIECES ── */
+
+.live-banner-host {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  /* Over the page's corner marks (brand.css .corners, 30): the strip is the top edge itself. */
+  z-index: 31;
+  animation: brand-fade 0.7s ease both;
+}
+
+.live-banner-host[hidden] {
+  display: none;
+}
+
+/* One line, as every control's label: a long name gives way (an ellipsis), never the state nor the countdown. */
+.live-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: var(--safe-top) calc(16px + var(--safe-right)) 0 calc(16px + var(--safe-left));
+  background: var(--ink);
+  color: var(--white);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: var(--track-micro);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.live-banner__lead {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-banner__dot,
+.live-banner__state,
+.live-banner__clock {
+  flex: none;
+}
+
+.live-banner:focus-visible {
+  outline: 1px solid var(--white);
+  outline-offset: -6px;
+}
+
+.live-banner__dot {
+  opacity: 0.6;
+}
+
+.live-banner__clock {
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-banner__clock[hidden] {
+  display: none;
+}
+
+/* MY PIECES makes room for the strip; the landing's own space above its emblem holds it. */
+body[data-banner] .view--pieces {
+  padding-top: calc(60px + 56px + var(--safe-top));
+}
+
+/* ── The boutique board: landscape, full screen, the vault ── */
+
+body[data-screen="board"] {
+  background-color: var(--vault-ground);
+  background-image: var(--vault-light);
+  background-repeat: no-repeat;
+  background-size: 100% 100vh;
+}
+
+body[data-screen="board"] .corners {
+  color: var(--vault-ink);
+}
+
+.view--board {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(4vh + var(--safe-top)) calc(5vw + var(--safe-right)) calc(3vh + var(--safe-bottom)) calc(5vw + var(--safe-left));
+  color: var(--ink);
+}
+
+.view--board [hidden] {
+  display: none !important;
+}
+
+.board__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: max(var(--fs-micro), 1.6vh);
+  letter-spacing: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.board__status .live__dot {
+  animation: none;
+  background: var(--metal);
+}
+
+.board__status.is-live {
+  color: var(--ink);
+}
+
+.board__status.is-live .live__dot {
+  background: var(--ink);
+  animation: live-breathe 2.4s ease-in-out infinite;
+}
+
+.board__body {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+
+.board__stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6vw;
+  width: 100%;
+  max-width: 1600px;
+}
+
+.board__door-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.live-door.board__door {
+  max-width: none;
+  max-height: 72vh;
+  margin: 0 auto;
+}
+
+.board__plate {
+  max-width: none;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* A door already open when the board was drawn: open at once, unmoving. */
+.live-door.is-still .live-door__leaf,
+.live-door.is-still .live-door__lock,
+.live-door.is-still .live-door__inside,
+.live-door.is-still .live__sweep {
+  animation: none;
+  transition: none;
+}
+
+.board__info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.board__info .live__overline,
+.board__info .live__fact {
+  font-size: max(var(--fs-micro), 1.7vh);
+  text-indent: 0;
+}
+
+.board__title {
+  margin-top: 1.6vh;
+  font-size: max(var(--fs-display), 5vh);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: var(--track-display);
+  overflow-wrap: anywhere;
+}
+
+.board__title:focus {
+  outline: none;
+}
+
+.board__quantity {
+  margin-top: 1.4vh;
+}
+
+.board__rule {
+  max-width: none;
+  margin-top: 3.4vh;
+}
+
+.board__count {
+  margin-top: 3.4vh;
+}
+
+.board__countdown {
+  display: flex;
+  align-items: flex-start;
+  gap: 2vw;
+  margin-top: 1.4vh;
+}
+
+.board__countdown .live__unit {
+  align-items: flex-start;
+}
+
+.board__digits {
+  font-size: max(var(--fs-count), 12vh);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.board__colon {
+  font-size: max(var(--fs-count), 10vh);
+  font-weight: 200;
+  line-height: 0.95;
+  color: var(--metal);
+}
+
+.board__countdown .live__unit-label {
+  font-size: max(var(--fs-micro), 1.5vh);
+  text-indent: 0;
+}
+
+.board__left {
+  width: 100%;
+  margin-top: 4vh;
+}
+
+.board__left-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4vw;
+}
+
+.board__left-value {
+  font-size: max(var(--fs-place), 16vh);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.board__left .board__left-of {
+  margin-top: 0;
+  color: var(--ink);
+}
+
+.live__meter.board__meter {
+  max-width: none;
+  margin-top: 2.4vh;
+}
+
+.board__meter .live__cell {
+  height: 2.6vh;
+}
+
+.board__when {
+  margin-top: 3vh;
+}
+
+.board__foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.board__edge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.board__edge .board__title {
+  font-size: var(--fs-display);
+}
+
+.board__note {
+  max-width: 420px;
+  margin-top: 16px;
+}
+
+/* A screen held upright: the door over the release. */
+@media (max-aspect-ratio: 1/1) {
+  .board__stage {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4vh;
+  }
+  .live-door.board__door {
+    max-height: 40vh;
+  }
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles, status lines and tracked-capital labels in the display face
@@ -4200,7 +4618,15 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 .live-card__title,
 .live-card__when,
 .live-card__line,
-.live-card__access {
+.live-card__access,
+.live-card__reveal-stage,
+.live-card__reveal-when,
+.live-card__interest,
+.live__reveal-stage,
+.live__reveal-when,
+.live-banner,
+.board__status,
+.board__title {
   font-family: var(--font-display);
 }
 
@@ -4211,6 +4637,11 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 
 /* The zoom control shows a figure (1×, 2×): Gravesend's one is its capital I. */
 .scan__zoom {
+  font-family: var(--font);
+}
+
+/* The banner's countdown: figures, in the reading face. */
+.live-banner__clock {
   font-family: var(--font);
 }
 
@@ -4245,6 +4676,10 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   .view--live {
     padding-left: 22px;
     padding-right: 22px;
+  }
+  .live-banner {
+    padding-left: 12px;
+    padding-right: 12px;
   }
   .tabs__list {
     gap: 6px;
@@ -4287,7 +4722,9 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
      rather than part, the reveal and the sweep are not played (the view sets no .is-revealing). */
   .live-seal__ring,
   .live__dot,
-  .live__sweep {
+  .board__status.is-live .live__dot,
+  .live__sweep,
+  .live-banner-host {
     animation: none;
     transition: none;
   }

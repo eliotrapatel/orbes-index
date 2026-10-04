@@ -66,6 +66,21 @@ describe('static web apps', () => {
     }
   });
 
+  it('never lets a LIVE RELEASE’s boutique board be indexed: its shell says noindex, no other page does', async () => {
+    const c = h.client();
+    const id = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    for (const url of [`/verify/releases/${id}/board`, `/verify/releases/${id}/board/`, `/verify/releases/${id}/board?x=1`]) {
+      const res = await c.get(url);
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body).toContain('<title>VERIFY</title>');
+      expect(res.headers['x-robots-tag'], url).toBe('noindex, nofollow');
+      expect(res.headers['cache-control']).toBe(REVALIDATE_CACHE);
+    }
+    for (const url of ['/verify', `/verify/releases/${id}`, '/verify/releases', `/verify/releases/${id}/boards`, '/admin/board']) {
+      expect((await c.get(url)).headers['x-robots-tag'], url).toBeUndefined();
+    }
+  });
+
   it('serves the privacy policy (J-06) at /legal/privacy: 200, no-cache, the CSP and the headers of every page, with its query', async () => {
     const res = await h.client().get('/legal/privacy?lang=fr');
     expect(res.statusCode).toBe(200);

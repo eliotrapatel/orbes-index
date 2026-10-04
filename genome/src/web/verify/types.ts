@@ -500,6 +500,9 @@ export type LiveEntryStatus = 'WAITING' | 'QUEUED' | 'TURN' | 'SECURED' | 'CONFI
 
 export const LIVE_ENTRY_STATUSES: readonly LiveEntryStatus[] = ['WAITING', 'QUEUED', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED'];
 
+/** A stage of the staged reveals: the silhouette, the name, the photograph. */
+export type LiveRevealStage = 'SILHOUETTE' | 'NAME' | 'PHOTO';
+
 /** A LIVE RELEASE in THE RELEASES (GET /api/v1/live): each stage only from its time (null before). */
 export interface LiveCard {
   id: string;
@@ -507,6 +510,8 @@ export interface LiveCard {
   phase: LivePhase;
   revealed: { silhouette: boolean; name: boolean; photo: boolean };
   stages: { silhouetteAt: string; nameAt: string; photoAt: string };
+  /** The calendar of the reveals still to come, in order: each stage that will show something, and its time. */
+  reveals: { stage: LiveRevealStage; at: string }[];
   title: string | null;
   name: string | null;
   type: string | null;
@@ -526,6 +531,8 @@ export interface LiveCard {
   perAccount: number;
   /** The lowest tier allowed (0 any account), and the rule in words after « for ». */
   access: { minTier: number; text: string };
+  /** I'LL BE THERE: how many accounts said so (public). */
+  interest: number;
 }
 
 /** A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live. */
@@ -533,8 +540,6 @@ export interface LiveSheet extends LiveCard {
   description: string | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
-  /** I'LL BE THERE: how many accounts said so. */
-  interest: number;
   roomOpensMinutes: number;
   turnSeconds: number;
   payMinutes: number;
@@ -546,6 +551,37 @@ export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+}
+
+/** The banner of /verify and MY PIECES (GET /api/v1/live/next): the release live now, else the room open, else the next. */
+export interface LiveBanner {
+  id: string;
+  phase: LivePhase;
+  /** The model's name from its stage; null before. */
+  name: string | null;
+  /** When the name is (or was) revealed. */
+  nameAt: string;
+  roomOpensAt: string;
+  opensAt: string;
+  closesAt: string;
+}
+
+/**
+ * The boutique board (POST /api/v1/live/:id/board, and its stream's `board` events): the countdown, the door, the
+ * pieces left overall, the piece by stage; never a person, never the room's count, a host message nor a size.
+ */
+export interface LiveBoard {
+  id: string;
+  phase: LivePhase | 'ENDED';
+  paused: boolean;
+  over: boolean;
+  roomOpensAt: string;
+  opensAt: string;
+  closesAt: string;
+  quantity: number;
+  quantityLine: string;
+  left: number;
+  release: { revealed: { silhouette: boolean; name: boolean; photo: boolean }; name: string | null; silhouetteUrl: string | null; imageUrl: string | null };
 }
 
 /** A size in the room: its stock, the pieces free now, and those in a turn or held that may return. */

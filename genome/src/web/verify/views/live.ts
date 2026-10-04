@@ -4,7 +4,10 @@
  *
  *   announced   LIVE RELEASE · the piece on its plate (photograph, else silhouette, else the seal) · its name, price ·
  *               OPENS IN dd:hh:mm or hh:mm:ss · the time in Paris, then on this phone · the rule, the quantity line and
- *               the limit per collector, when the room opens · ADD TO CALENDAR · how the places are drawn
+ *               the limit per collector, when the room opens · THE REVEALS still to come, each with its time (each stage
+ *               appears at its own, the page reading the release again then) · N COLLECTORS WILL BE THERE · I'LL BE
+ *               THERE with a size for an account the rule lets in (another size changes it, WITHDRAW until T0); signed
+ *               out, the sign-in under it; outside the rule, the rule and why · ADD TO CALENDAR · how the places are drawn
  *   room        THE ROOM IS OPEN · the model, its price and the quantity line · the closed vault door, its lock the seal ·
  *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
  *               preselected) · ENTER THE ROOM, then YOU'RE READY.
@@ -45,6 +48,7 @@ import {
   heldEntry,
   HOLD_MS,
   initialSize,
+  interestLine,
   isEndedSheet,
   lineFacts,
   liveReference,
@@ -54,6 +58,7 @@ import {
   placeAnnouncement,
   PRESS_GAP_MS,
   readyChecks,
+  revealCalendar,
   roomSize,
   servable,
   sizeChoices,
@@ -175,6 +180,8 @@ class LivePage {
   private pulseTimer: ReturnType<typeof setInterval> | null = null;
   private screen: Screen | null = null;
   private signIn: OwnershipPanel | null = null;
+  /** The sign-in under I'LL BE THERE on the announced page, once asked for (signed out). */
+  private thereSignIn: OwnershipPanel | null = null;
   private unsubscribe: (() => void) | null;
   private contacts: ClientServices = {};
   private busy = false;
@@ -229,6 +236,8 @@ class LivePage {
     this.unsubscribe = null;
     this.signIn?.dispose();
     this.signIn = null;
+    this.thereSignIn?.dispose();
+    this.thereSignIn = null;
     this.endHold(true);
     this.closeStream();
     this.stopPolling();
@@ -276,14 +285,19 @@ class LivePage {
     if (!this.disposed) this.onSession();
   }
 
-  /** The session changed: the account's standing follows (read once the room is open, or once the release is over). */
+  /**
+   * The session changed: the account's standing follows. Announced, it is read once (I'LL BE THERE, or the rule and why);
+   * from the room's opening, it is followed (the stream, or the polling while it is lost).
+   */
   private onSession(): void {
     if (this.disposed || !this.sheet) return;
     const s = this.deps.session.state;
     if (s.status === 'signed-in') {
       this.signIn?.dispose();
       this.signIn = null;
-      if (this.viewer !== 'ready' && this.roomTime()) void this.readState(true);
+      this.thereSignIn?.dispose();
+      this.thereSignIn = null;
+      if (this.viewer !== 'ready') void this.readState(this.roomTime());
     } else if (s.status === 'anonymous') {
       this.viewer = 'signed-out';
       this.entry = null;
@@ -464,7 +478,9 @@ class LivePage {
       const due = [sheet.stages.silhouetteAt, sheet.stages.nameAt, sheet.stages.photoAt, sheet.roomOpensAt].filter((t) => Date.parse(t) <= now).length;
       if (this.stagesDue !== null && due !== this.stagesDue) {
         void this.refreshSheet().then(() => {
-          if (this.viewer === 'unknown' && this.roomTime() && this.deps.session.state.status === 'signed-in') void this.readState(true);
+          // The room open: the account's standing read again (it may have changed since the announcement), then followed.
+          const following = this.stream !== null || this.pollTimer !== null;
+          if (!following && this.roomTime() && this.deps.session.state.status === 'signed-in') void this.readState(true);
         });
       }
       this.stagesDue = due;
@@ -713,6 +729,20 @@ class LivePage {
     );
     const description = storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' });
     const calendar = h('a', { class: 'textlink live__calendar', attrs: { href: m.calendarHref, download: 'orbes-live-release.ics' }, text: LIVE.calendar });
+    const dates = revealCalendar(s);
+    const reveals = dates.length
+      ? h(
+          'div',
+          { class: 'live__reveals' },
+          h('p', { class: 'live__overline', id: 'live-reveals', text: LIVE.reveals }),
+          h(
+            'dl',
+            { class: 'live__reveals-list', attrs: { 'aria-labelledby': 'live-reveals' } },
+            ...dates.map((d) => h('div', { class: 'live__reveal-date' }, h('dt', { class: 'live__reveal-stage', text: d.label }), h('dd', { class: 'live__reveal-when' }, ...withNumerals(d.when)))),
+          ),
+        )
+      : null;
+    const there = this.thereBlock();
     const el = h(
       'section',
       { class: 'live__announced' },
@@ -727,6 +757,8 @@ class LivePage {
       this.fact(m.when.paris, 'live__when'),
       m.when.local ? this.fact(m.when.local, 'live__when live__when--local') : null,
       h('div', { class: 'live__facts' }, this.fact(m.access), this.fact(m.quantity), this.fact(m.roomOpens)),
+      reveals,
+      there.el,
       description,
       calendar,
       this.note(m.rule, 'live__rule-note'),
@@ -735,6 +767,7 @@ class LivePage {
       kind: 'announced',
       el,
       update: () => {
+        there.update();
         countdown(Date.parse(s.opensAt) - this.now()).forEach((p, i) => {
           if (!units[i]) return;
           if (units[i]!.value.textContent !== p.value) units[i]!.value.textContent = p.value;
@@ -742,6 +775,140 @@ class LivePage {
         });
       },
     };
+  }
+
+  /**
+   * I'LL BE THERE on the announced page: the public count; for an account the rule lets in, its size and the action (once
+   * said, another size changes it, WITHDRAW takes it back, until T0); signed out, a text link opening the sign-in; outside
+   * the rule, the rule and why. Its part is built again only when what it offers changes.
+   */
+  private thereBlock(): { el: HTMLElement; update(): void } {
+    const count = this.fact('', 'live__there-count');
+    const body = h('div', { class: 'live__there-body' });
+    const el = h('section', { class: 'live__there', attrs: { 'aria-label': LIVE.there.action } }, this.hairline(), count, body);
+    let mode = '';
+    let refresh: () => void = () => undefined;
+    const build = (next: string): void => {
+      mode = next;
+      refresh = () => undefined;
+      const s = this.live();
+      if (!s) return body.replaceChildren();
+      switch (next) {
+        case 'signed-out': {
+          const open = h('button', { class: 'textlink live__there-open', attrs: { type: 'button' }, text: LIVE.there.action });
+          const panel = h('div', { class: 'live__panel live__there-panel' });
+          const show = (): void => {
+            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
+            panel.replaceChildren(this.thereSignIn.root);
+            open.hidden = true;
+          };
+          open.addEventListener('click', () => {
+            show();
+            panel.querySelector<HTMLInputElement>('input')?.focus();
+          });
+          body.replaceChildren(open, panel);
+          // Opened before (the page drawn again since): it stays open.
+          if (this.thereSignIn) show();
+          return;
+        }
+        case 'not-eligible':
+          body.replaceChildren(this.note([this.refusal, LIVE.edge.notEligible.text].filter(Boolean).join(' '), 'live__there-rule'));
+          return;
+        case 'choose':
+        case 'said': {
+          const said = this.subtitleLine('live__there-said');
+          const lead = this.note(next === 'said' ? LIVE.there.change : LIVE.there.lead, 'live__there-lead');
+          const picker = this.picker((id) => this.pickThere(id), null);
+          const errorLine = this.errorLine();
+          const action = h('button', { class: 'btn live__primary live__there-action', attrs: { type: 'button' }, on: { click: () => this.sayThere() }, text: LIVE.there.action });
+          const withdraw = h('button', { class: 'textlink live__there-withdraw', attrs: { type: 'button' }, on: { click: () => void this.setThere(null) }, text: LIVE.there.withdraw });
+          body.replaceChildren(said, picker.el, lead, errorLine, next === 'said' ? withdraw : action);
+          refresh = () => {
+            setFact(said, this.interest ? LIVE.there.said(this.interest.size.label) : '');
+            said.hidden = !this.interest;
+            picker.update(next === 'choose');
+            this.showError(errorLine);
+            action.disabled = this.busy || this.picked.sizeId === null;
+            action.setAttribute('aria-busy', String(this.busy));
+            withdraw.disabled = this.busy;
+          };
+          return;
+        }
+        default:
+          body.replaceChildren();
+      }
+    };
+    return {
+      el,
+      update: () => {
+        const line = interestLine(this.live()?.interest ?? 0);
+        setFact(count, line ?? '');
+        count.hidden = line === null;
+        const next = this.viewer === 'ready' ? (this.interest ? 'said' : 'choose') : this.viewer;
+        if (next !== mode) build(next);
+        refresh();
+      },
+    };
+  }
+
+  /** A line in the display face of a fact said (`YOU'LL BE THERE · SIZE 52`), its figures in the reading face. */
+  private subtitleLine(extra: string): HTMLParagraphElement {
+    return h('p', { class: ['live__subtitle', extra] });
+  }
+
+  /** A size picked under I'LL BE THERE: kept until it is said; once said, the interest changed to it. */
+  private pickThere(sizeId: string): void {
+    if (this.busy) return;
+    if (this.interest) {
+      if (this.interest.size.id !== sizeId) void this.setThere(sizeId);
+      return;
+    }
+    this.picked = { ...this.picked, sizeId };
+    this.screen?.update();
+  }
+
+  private sayThere(): void {
+    const sizeId = this.picked.sizeId;
+    if (sizeId) void this.setThere(sizeId);
+  }
+
+  /**
+   * I'LL BE THERE with a size (null: withdrawn). The public count follows the account's own change at once (the next read
+   * of the release brings everyone's); a refusal reads as the server wrote it, the rule's own (403) saying it instead.
+   */
+  private async setThere(sizeId: string | null): Promise<void> {
+    const s = this.live();
+    if (!s || this.busy) return;
+    this.busy = true;
+    this.error = null;
+    this.screen?.update();
+    const before = this.interest;
+    const from = document.activeElement;
+    try {
+      let after: LiveInterest | null = null;
+      if (sizeId === null) await this.deps.api.liveWithdrawInterest(s.id);
+      else after = await this.deps.api.liveInterest(s.id, sizeId);
+      if (this.disposed) return;
+      this.interest = after;
+      if (after) this.picked = { ...this.picked, sizeId: after.size.id };
+      const delta = (after ? 1 : 0) - (before ? 1 : 0);
+      const sheet = this.live();
+      if (delta !== 0 && sheet) this.sheet = { ...sheet, interest: Math.max(0, sheet.interest + delta) };
+      this.say(after ? LIVE.there.said(after.size.label) : LIVE.there.withdrawn);
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      if (e instanceof ApiError && e.status === 401) this.viewer = 'signed-out';
+      else if (isApi(e, 'LIVE_NOT_ELIGIBLE')) {
+        this.viewer = 'not-eligible';
+        this.refusal = e instanceof ApiError ? e.message : null;
+      } else this.error = messageOf(e);
+    } finally {
+      this.busy = false;
+    }
+    this.render();
+    // The action gone (said, or withdrawn): the keyboard's focus on the size now said, else on the action back.
+    if (from && !from.isConnected) requestAnimationFrame(() => this.root.querySelector<HTMLElement>('.live__there .live__size[aria-pressed="true"], .live__there-action')?.focus());
   }
 
   private signInScreen(): Screen {
@@ -769,7 +936,7 @@ class LivePage {
    * The size picker and the quantity, while they can change (never after T0: the room hides them then). `choosing`:
    * before ENTER, the size picked is outlined (ENTER is the one filled action); once entered, it is filled.
    */
-  private picker(onPick: (sizeId: string) => void, onQuantity: (q: number) => void): { el: HTMLElement; update(choosing: boolean): void } {
+  private picker(onPick: (sizeId: string) => void, onQuantity: ((q: number) => void) | null): { el: HTMLElement; update(choosing: boolean): void } {
     const s = this.live()!;
     const label = h('p', { class: 'live__overline live__size-label', id: 'live-size', text: LIVE.yourSize });
     const grid = h('div', { class: 'live__sizes', attrs: { role: 'group', 'aria-labelledby': 'live-size' } });
@@ -779,10 +946,11 @@ class LivePage {
       buttons.set(c.id, b);
       grid.append(b);
     }
-    const max = s.perAccount;
+    // I'LL BE THERE says a size only (`onQuantity` null): the quantity is chosen in the room.
+    const max = onQuantity ? s.perAccount : 1;
     const value = h('span', { class: 'live__qty-value', attrs: { 'aria-live': 'polite' } });
-    const fewer = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.fewer }, on: { click: () => onQuantity(this.picked.quantity - 1) }, text: '−' });
-    const more = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.more }, on: { click: () => onQuantity(this.picked.quantity + 1) }, text: '+' });
+    const fewer = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.fewer }, on: { click: () => onQuantity?.(this.picked.quantity - 1) }, text: '−' });
+    const more = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.more }, on: { click: () => onQuantity?.(this.picked.quantity + 1) }, text: '+' });
     const quantity = max > 1 ? h('div', { class: 'live__qty', attrs: { role: 'group', 'aria-labelledby': 'live-qty' } }, h('span', { class: 'live__overline', id: 'live-qty', text: LIVE.quantity }), fewer, value, more) : null;
     const el = h('div', { class: 'live__picker' }, label, grid, quantity);
     return {

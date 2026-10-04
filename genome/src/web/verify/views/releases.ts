@@ -36,9 +36,12 @@
  * certificate. After a reservation, the page is read again: its places.
  *
  * THE RELEASES lists the LIVE RELEASES first (plan of 2026-10-04: LIVE RELEASE cards), each on a vault plate among
- * the ivory ones of the draws: its picture of the stage reached (the seal before any), LIVE RELEASE and where it
- * stands, its name once revealed, its opening in Paris (then on this phone), its price and quantity line, its rule and
- * SEE THE RELEASE; its page is the LIVE RELEASE's (views/live.ts).
+ * the ivory ones of the draws: the release calendar. Its picture of the stage reached (the seal before any), LIVE
+ * RELEASE and where it stands, its name once revealed, its opening in Paris (then on this phone), its price and quantity
+ * line, its rule, the reveals still to come with their times, N COLLECTORS WILL BE THERE, and
+ * SEE THE RELEASE; its page is the LIVE RELEASE's (views/live.ts). The list is read again at each moment that changes a
+ * LIVE RELEASE's card, on the server's clock (a stage, its room, T0, its end): each stage shows at its time, and the
+ * release leaves THE RELEASES at its end.
  *
  * Every action is a same-origin JSON call through ApiClient (the session
  * cookie, the CSRF token); server messages are shown as they come. A 401
@@ -48,8 +51,8 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { RELEASES } from '../copy.js';
-import { liveCards, type LiveCardModel } from '../live-model.js';
+import { LIVE, RELEASES } from '../copy.js';
+import { liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import { sealSvg } from '../live-seal.js';
 import {
   drawLines,
@@ -145,11 +148,19 @@ function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
 /** `liveFailed`: the LIVE half could not be read (a refusal of its own rate group, an error): the draws show all the same. */
 type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; liveFailed: boolean; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
 
+/** THE RELEASES reads its releases again at the next moment that changes a LIVE RELEASE's card, this long after it. */
+const CHANGE_MARGIN_MS = 600;
+/** …and at the latest this often while it is open. */
+const CHANGE_MAX_MS = 6 * 3_600_000;
+
 class ListPage {
   readonly root: HTMLElement;
   private readonly body = h('div', { class: 'releases__body', attrs: { 'aria-live': 'polite' } });
   private load: ListLoad = { kind: 'loading' };
   private disposed = false;
+  /** The server's clock against this phone's, once measured (the moments of the LIVE RELEASES are the server's). */
+  private offset: number | null = null;
+  private changeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: ReleasesDeps) {
     this.root = viewRoot('releases', 'releases-title');
@@ -176,26 +187,57 @@ class ListPage {
 
   dispose(): void {
     this.disposed = true;
+    if (this.changeTimer) clearTimeout(this.changeTimer);
   }
 
-  private async fetch(): Promise<void> {
-    this.load = { kind: 'loading' };
-    this.render();
+  /**
+   * The releases. `quiet`: read again at a moment of a LIVE RELEASE (a stage, its room, T0, its end), the list kept on
+   * show meanwhile and kept as it was should the read fail; the release that has ended leaves it then.
+   */
+  private async fetch(quiet = false): Promise<void> {
+    if (this.changeTimer) clearTimeout(this.changeTimer);
+    this.changeTimer = null;
+    if (!quiet) {
+      this.load = { kind: 'loading' };
+      this.render();
+    }
     try {
       // The two halves read apart: the LIVE one failing (its own rate group, an error) leaves the draws on show, said above
       // them; the draws failing is the failure of the page.
       const [drops, live] = await Promise.all([this.deps.api.drops(), this.deps.api.liveReleases().catch(() => null)]);
       if (this.disposed) return;
+      if (live && live.length > 0 && this.offset === null) this.offset = (await measureClock(() => this.deps.api.liveClock(), 1))?.offset ?? null;
+      if (this.disposed) return;
       this.load = { kind: 'ready', live: live ? liveCards(live, this.deps.localZone) : [], liveFailed: live === null, cards: releaseCards(drops) };
+      if (live) this.schedule(live);
     } catch (e) {
       if (this.disposed) return;
+      if (quiet && this.load.kind === 'ready') {
+        this.changeTimer = setTimeout(() => void this.fetch(true), 60_000);
+        return;
+      }
       this.load = { kind: 'failed', message: messageOf(e) };
     }
-    this.render();
+    this.render(quiet);
   }
 
-  private render(): void {
+  /** The next read: at the next moment that changes a LIVE RELEASE's card, on the server's clock. */
+  private schedule(live: Parameters<typeof nextChange>[0]): void {
+    const now = Date.now() + (this.offset ?? 0);
+    const next = nextChange(live, now);
+    if (next === null) return;
+    this.changeTimer = setTimeout(() => void this.fetch(true), Math.min(CHANGE_MAX_MS, next - now + CHANGE_MARGIN_MS));
+  }
+
+  /** `keepFocus`: a quiet read drawn again: the link the keyboard was on keeps it, when it is still there. */
+  private render(keepFocus = false): void {
     const hadFocus = this.body.contains(document.activeElement);
+    const focused = keepFocus && hadFocus ? (document.activeElement as HTMLElement).getAttribute('href') : null;
+    this.draw(hadFocus);
+    if (focused) this.body.querySelector<HTMLElement>(`a[href="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+  }
+
+  private draw(hadFocus: boolean): void {
     const l = this.load;
     if (l.kind === 'loading') {
       this.body.replaceChildren(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
@@ -256,6 +298,15 @@ class ListPage {
         c.when.local ? h('p', { class: 'live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
         h('p', { class: 'live-card__line' }, ...withNumerals(c.line)),
         h('p', { class: 'live-card__access' }, ...withNumerals(c.access)),
+        // The calendar of the reveals still to come: each stage's time, never what it shows.
+        c.reveals.length
+          ? h(
+              'dl',
+              { class: 'live-card__reveals', attrs: { 'aria-label': LIVE.reveals } },
+              ...c.reveals.map((d) => h('div', { class: 'live-card__reveal' }, h('dt', { class: 'live-card__reveal-stage', text: d.label }), h('dd', { class: 'live-card__reveal-when' }, ...withNumerals(d.when)))),
+            )
+          : null,
+        c.interest ? h('p', { class: 'live-card__interest' }, ...withNumerals(c.interest)) : null,
         link,
       ),
     );

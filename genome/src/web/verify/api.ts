@@ -15,7 +15,8 @@
  * - The ownership certificate's PDF (F-06) is the one answer that is not
  *   JSON: it comes back as a blob with its file name, for the page to save.
  * - A LIVE RELEASE's stream is no fetch: the page opens an EventSource on
- *   `liveStreamUrl` (same origin, the session cookie with it).
+ *   `liveStreamUrl` (same origin, the session cookie with it). The boutique
+ *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
   CertificateLookup,
@@ -34,9 +35,12 @@ import type {
   IncidentResolution,
   IncidentType,
   LiveAccountEntry,
+  LiveBanner,
+  LiveBoard,
   LiveCard,
   LiveEndedSheet,
   LiveEntry,
+  LiveInterest,
   LiveSheet,
   LiveState,
   LookbookCard,
@@ -277,6 +281,61 @@ export class ApiClient {
     const r = await this.request<{ entries?: unknown }>('GET', '/api/v1/live/mine');
     if (!Array.isArray(r?.entries)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entries as LiveAccountEntry[];
+  }
+
+  /** The banner of /verify and MY PIECES: the release live now, else the room open, else the next announced; null when none. */
+  async liveNext(): Promise<LiveBanner | null> {
+    const r = await this.request<{ release?: unknown }>('GET', '/api/v1/live/next');
+    if (!r || typeof r !== 'object' || !('release' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return (r.release ?? null) as LiveBanner | null;
+  }
+
+  /** I'LL BE THERE, with a size, until T0 (the same again with another size changes it). */
+  async liveInterest(id: string, sizeId: string): Promise<LiveInterest> {
+    const r = await this.request<{ interest?: LiveInterest }>('PUT', `/api/v1/live/${encodeURIComponent(id)}/interest`, { sizeId }, { csrf: true });
+    if (!r?.interest || typeof r.interest.size?.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.interest;
+  }
+
+  /** I'LL BE THERE withdrawn, until T0. */
+  async liveWithdrawInterest(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/live/${encodeURIComponent(id)}/interest`, undefined, { csrf: true });
+  }
+
+  /**
+   * The boutique board, by its link's secret (from the page's fragment, sent in the body: never in an address or a log);
+   * 404 DROP_NOT_FOUND for a secret that is not the release's own, revoked, or a release not announced or over.
+   */
+  async liveBoard(id: string, token: string): Promise<LiveBoard & { now: string }> {
+    const r = await this.request<LiveBoard & { now: string }>('POST', `/api/v1/live/${encodeURIComponent(id)}/board`, { token }, { timeoutMs: LIVE_STATE_TIMEOUT_MS });
+    if (typeof r?.now !== 'string' || typeof r.left !== 'number' || !r.release) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * The board's stream (SSE, `board` events), opened by a POST with the secret in its body: no EventSource can, so the
+   * page reads the body itself. Its body, once the server has accepted it; null (204) when the release is over; the same
+   * refusals as liveBoard otherwise. It runs until `signal` aborts it, the server ends it, or the network drops it.
+   */
+  async liveBoardStream(id: string, token: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array> | null> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.base}/api/v1/live/${encodeURIComponent(id)}/board/stream`, {
+        method: 'POST',
+        headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        signal,
+      });
+    } catch {
+      throw new ApiError(0, 'NETWORK', 'The service could not be reached.');
+    }
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    if (res.status === 204) return null;
+    if (!res.body || !(res.headers.get('content-type') ?? '').startsWith('text/event-stream')) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return res.body;
   }
 
   /** ENTER the room (before T0) or the line (after it), with a size and, where the release allows more, a quantity. */

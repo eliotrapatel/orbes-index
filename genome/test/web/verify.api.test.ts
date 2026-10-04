@@ -311,6 +311,55 @@ describe('ApiClient', () => {
     for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
   });
 
+  it('LIVE RELEASE: the banner; I’LL BE THERE said, changed and withdrawn with the CSRF header; the board by its secret in a POST body', async () => {
+    const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const SECRET = 'A'.repeat(43);
+    const banner = { id: ID, phase: 'ANNOUNCED', name: null, nameAt: 'n', roomOpensAt: 'r', opensAt: 'o', closesAt: 'c' };
+    const board = { now: '2026-10-11T17:00:00.000Z', id: ID, phase: 'ROOM', left: 3, release: { name: null } };
+    const interest = { dropId: ID, size: { id: 's52', label: '52' }, since: 's' };
+    const sse = new Response('event: board\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    const f = fakeFetch([
+      () => json(200, { release: banner }),
+      () => json(200, { release: null }),
+      () => json(200, SESSION('tok')),
+      () => json(200, { interest }),
+      () => json(200, { interest: null }),
+      () => json(200, board),
+      () => sse,
+      () => new Response(null, { status: 204 }),
+      () => json(404, { error: { code: 'DROP_NOT_FOUND', message: 'This release is not available.' } }),
+      () => json(200, {}),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.liveNext()).toEqual(banner);
+    expect(await api.liveNext()).toBeNull();
+    await api.me();
+    expect(await api.liveInterest(ID, 's52')).toEqual(interest);
+    await api.liveWithdrawInterest(ID);
+    expect(await api.liveBoard(ID, SECRET)).toEqual(board);
+    const signal = new AbortController().signal;
+    const body = await api.liveBoardStream(ID, SECRET, signal);
+    expect(await new Response(body).text()).toBe('event: board\ndata: {}\n\n');
+    expect(await api.liveBoardStream(ID, SECRET, signal)).toBeNull();
+    await expect(api.liveBoardStream(ID, SECRET, signal)).rejects.toMatchObject({ status: 404, code: 'DROP_NOT_FOUND' });
+    await expect(api.liveNext()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(f.calls.map((c) => [c.method, c.url, c.body, c.headers['x-csrf-token']])).toEqual([
+      ['GET', '/api/v1/live/next', undefined, undefined],
+      ['GET', '/api/v1/live/next', undefined, undefined],
+      ['GET', '/api/v1/account/session', undefined, undefined],
+      ['PUT', `/api/v1/live/${ID}/interest`, { sizeId: 's52' }, 'tok'],
+      ['DELETE', `/api/v1/live/${ID}/interest`, undefined, 'tok'],
+      // The board's secret travels in the body, never in the address; no session, no CSRF header.
+      ['POST', `/api/v1/live/${ID}/board`, { token: SECRET }, undefined],
+      ['POST', `/api/v1/live/${ID}/board/stream`, { token: SECRET }, undefined],
+      ['POST', `/api/v1/live/${ID}/board/stream`, { token: SECRET }, undefined],
+      ['POST', `/api/v1/live/${ID}/board/stream`, { token: SECRET }, undefined],
+      ['GET', '/api/v1/live/next', undefined, undefined],
+    ]);
+    for (const c of f.calls) expect(c.url).not.toContain(SECRET);
+    expect(f.calls[6]!.headers.accept).toBe('text/event-stream');
+  });
+
   it('filenameOf: the attachment\'s name when it is a plain one, else the fallback', () => {
     expect(filenameOf('attachment; filename="ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf"', 'x.pdf')).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
     expect(filenameOf('attachment; filename="../../etc/passwd"', 'x.pdf')).toBe('x.pdf');

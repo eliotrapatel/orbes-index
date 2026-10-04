@@ -8,7 +8,8 @@
  *                                                     /verify/lookbook THE COLLECTION and /verify/lookbook/<slug> a
  *                                                     model's sheet, P-R02; /verify/releases and a release's page,
  *                                                     P-R03; /verify/circle THE CIRCLE and /verify/circle/<id> a
- *                                                     post, P-X01)
+ *                                                     post, P-X01; /verify/releases/<id>/board#… a LIVE RELEASE's
+ *                                                     boutique board, its secret in the fragment, never indexed)
  *   /VERIFY/C and any other spelling of /verify/c → 301 /verify/c   (the certificate's PDF letters it in capitals)
  *   /admin,  /admin/*   → dist/web/admin/index.html
  *   /legal,  /legal/*   → dist/web/legal/index.html    (the legal pages, J-06: /legal/privacy, /legal/terms,
@@ -32,6 +33,10 @@ export const REVALIDATE_CACHE = 'no-cache';
 
 /** Any spelling of it: `/VERIFY/C`, as the certificate's PDF letters it, `/Verify/c/`… */
 const CERTIFICATE_ADDRESS_RE = /^\/verify\/c\/?$/i;
+
+/** A LIVE RELEASE's boutique board (plan of 2026-10-04, choice 31): unlisted, its page never indexed nor followed. */
+export const BOARD_ADDRESS_RE = /^\/verify\/releases\/[^/?#]+\/board\/?$/i;
+export const NOINDEX = 'noindex, nofollow';
 
 export function cacheControlFor(path: string): string {
   return HASHED_ASSET_RE.test(basename(path)) ? IMMUTABLE_CACHE : REVALIDATE_CACHE;
@@ -70,10 +75,11 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
 
   const page = (app: 'verify' | 'admin' | 'legal') => {
     const root = join(dir, app);
-    return async (_request: FastifyRequest, reply: FastifyReply) => {
+    return async (request: FastifyRequest, reply: FastifyReply) => {
       // Checked per request: a build that lands after startup is picked up without a restart.
       if (!existsSync(join(root, 'index.html'))) return reply.callNotFound();
       reply.header('cache-control', REVALIDATE_CACHE);
+      if (app === 'verify' && BOARD_ADDRESS_RE.test(request.url.split('?', 1)[0]!)) reply.header('x-robots-tag', NOINDEX);
       return reply.sendFile('index.html', root, { cacheControl: false });
     };
   };

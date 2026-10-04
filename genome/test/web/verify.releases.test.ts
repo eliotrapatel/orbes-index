@@ -95,6 +95,11 @@ describe('the releases\' addresses (P-R03)', () => {
     expect(releasesRouteOf('/verify/releases/')).toEqual({ release: null });
     expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/`)).toEqual({ release: ID });
     expect(releasesRouteOf('/verify/releases/not-a-release')).toEqual({ release: null });
+    // A LIVE RELEASE's boutique board: its own route; an address that is none of a release is the list.
+    expect(releasesRouteOf(`/verify/releases/${ID}/board`)).toEqual({ release: ID, board: true });
+    expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/BOARD/`)).toEqual({ release: ID, board: true });
+    expect(releasesRouteOf('/verify/releases/not-a-release/board')).toEqual({ release: null });
+    expect(releasesRouteOf(`/verify/releases/${ID}/boards`)).toEqual({ release: null });
     expect(releasesRouteOf('/verify/lookbook')).toBeNull();
     expect(releasesRouteOf('/verify/releasesx')).toBeNull();
     expect(isReleaseId(ID)).toBe(true);

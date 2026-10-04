@@ -24,8 +24,13 @@ import {
   initialSize,
   isEndedSheet,
   lineFacts,
+  bannerModel,
+  interestLine,
   liveCards,
   liveReference,
+  measureClock,
+  nextChange,
+  revealCalendar,
   liveScreen,
   liveSheetModel,
   lockAngle,
@@ -64,6 +69,7 @@ function card(extra: Partial<LiveCard> = {}): LiveCard {
     phase: 'ANNOUNCED',
     revealed: { silhouette: true, name: true, photo: true },
     stages: { silhouetteAt: iso(T0 - 86_400_000), nameAt: iso(T0 - 43_200_000), photoAt: iso(T0 - 3_600_000) },
+    reveals: [],
     title: 'Monolithe — live',
     name: 'Monolithe',
     type: 'Ring',
@@ -80,6 +86,7 @@ function card(extra: Partial<LiveCard> = {}): LiveCard {
     quantityLine: '25 pieces',
     perAccount: 1,
     access: { minTier: 2, text: 'owners from PLATINE' },
+    interest: 0,
     ...extra,
   };
 }
@@ -423,12 +430,82 @@ describe('the release announced, and its card in THE RELEASES', () => {
       line: '€ 4 800 · 25 PIECES · ONE PER COLLECTOR',
       access: 'FOR OWNERS FROM PLATINE',
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
+      reveals: [],
+      interest: null,
     });
     expect(room0!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
     expect(live!.kind).toBe('LIVE RELEASE · LIVE NOW');
     expect(unnamed).toMatchObject({ title: 'TO BE REVEALED', picture: null });
     expect(liveCards([card({ perAccount: 2 })], 'Europe/Paris')[0]!.line).toBe('€ 4 800 · 25 PIECES · UP TO 2 PER COLLECTOR');
     expect(liveCards([card()], 'Asia/Tokyo')[0]!.when.local).toBe('MONDAY 12 OCTOBER · 02:00 ON THIS PHONE');
+  });
+});
+
+describe('the announcements: the release calendar, I\'LL BE THERE, the banner', () => {
+  const stages = (at: number[]) => (['SILHOUETTE', 'NAME', 'PHOTO'] as const).slice(3 - at.length).map((stage, i) => ({ stage, at: iso(at[i]!) }));
+
+  it('dates the reveals still to come in Paris, in order, those at the same minute said together; never a stage the server did not send', () => {
+    // Friday 9 October 18:00, Saturday 10 October 12:00 in Paris (16:00, 10:00 UTC).
+    const fri = Date.parse('2026-10-09T16:00:00.000Z');
+    const sat = Date.parse('2026-10-10T10:00:00.000Z');
+    expect(revealCalendar({ reveals: stages([fri, sat, sat]) })).toEqual([
+      { label: 'THE SILHOUETTE', when: 'FRIDAY 9 OCTOBER · 18:00 PARIS', at: iso(fri) },
+      { label: 'THE NAME AND THE PHOTOGRAPH', when: 'SATURDAY 10 OCTOBER · 12:00 PARIS', at: iso(sat) },
+    ]);
+    expect(revealCalendar({ reveals: stages([fri, fri + 20_000, sat]) }).map((d) => d.label)).toEqual(['THE SILHOUETTE AND THE NAME', 'THE PHOTOGRAPH']);
+    expect(revealCalendar({ reveals: stages([sat]) })).toEqual([{ label: 'THE PHOTOGRAPH', when: 'SATURDAY 10 OCTOBER · 12:00 PARIS', at: iso(sat) }]);
+    expect(revealCalendar({ reveals: [] })).toEqual([]);
+    expect(revealCalendar({ reveals: [{ stage: 'NAME', at: 'soon' }, { stage: 'SECRET' as never, at: iso(fri) }] })).toEqual([]);
+    expect(revealCalendar({ reveals: undefined as never })).toEqual([]);
+    const [c] = liveCards([card({ name: null, reveals: stages([fri, sat]), interest: 428 })], 'Europe/Paris');
+    expect(c).toMatchObject({ title: 'TO BE REVEALED', reveals: [{ label: 'THE NAME' }, { label: 'THE PHOTOGRAPH' }], interest: '428 COLLECTORS WILL BE THERE' });
+  });
+
+  it('counts I\'LL BE THERE in words, saying nothing before the first', () => {
+    expect(interestLine(0)).toBeNull();
+    expect(interestLine(1)).toBe('1 COLLECTOR WILL BE THERE');
+    expect(interestLine(428)).toBe('428 COLLECTORS WILL BE THERE');
+    expect(interestLine(Number.NaN)).toBeNull();
+  });
+
+  it('reads THE RELEASES again at the next moment that changes a card: a stage, the room, T0, the end', () => {
+    const c = card({ reveals: stages([T0 - 7_200_000, T0 - 3_600_000]) });
+    expect(nextChange([c], T0 - 10 * 3_600_000)).toBe(T0 - 7_200_000);
+    expect(nextChange([c], T0 - 7_200_000)).toBe(T0 - 3_600_000);
+    expect(nextChange([c], T0 - 3_600_000)).toBe(T0 - 300_000);
+    expect(nextChange([c], T0 - 300_000)).toBe(T0);
+    expect(nextChange([c], T0)).toBe(T0 + 3_600_000);
+    expect(nextChange([c], T0 + 3_600_000)).toBeNull();
+    expect(nextChange([c, card({ opensAt: iso(T0 - 600_000), roomOpensAt: iso(T0 - 900_000) })], T0 - 1_000_000)).toBe(T0 - 900_000);
+    expect(nextChange([], T0)).toBeNull();
+  });
+
+  it('says the banner OPENS IN to T0 on the server\'s clock, then THE ROOM IS OPEN, then LIVE NOW; hidden at the end; the name once revealed', () => {
+    const b = { id: ID, phase: 'ANNOUNCED' as const, name: null, nameAt: iso(T0 - 3_600_000), roomOpensAt: iso(T0 - 300_000), opensAt: iso(T0), closesAt: iso(T0 + 3_600_000) };
+    expect(bannerModel(b, T0 - 3 * 86_400_000 - 1)).toMatchObject({ phase: 'ANNOUNCED', lead: 'LIVE RELEASE', state: 'OPENS IN 3 DAYS', clock: null, href: `/verify/releases/${ID}` });
+    expect(bannerModel(b, T0 - 86_400_000)!.state).toBe('OPENS IN 1 DAY');
+    expect(bannerModel(b, T0 - (2 * 3600 + 14 * 60 + 9) * 1000)).toMatchObject({ state: 'OPENS IN', clock: '02:14:09' });
+    expect(bannerModel(b, T0 - 300_001)!.clock).toBe('00:05:01');
+    expect(bannerModel({ ...b, name: 'Monolithe' }, T0 - 300_000)).toMatchObject({ phase: 'ROOM', lead: 'LIVE RELEASE · MONOLITHE', state: 'THE ROOM IS OPEN', clock: null });
+    expect(bannerModel(b, T0)).toMatchObject({ phase: 'LIVE', state: 'LIVE NOW', clock: null });
+    expect(bannerModel(b, T0 + 3_600_000 - 1)!.phase).toBe('LIVE');
+    expect(bannerModel(b, T0 + 3_600_000)).toBeNull();
+    expect(bannerModel(null, T0)).toBeNull();
+    expect(bannerModel({ ...b, id: 'nope' }, T0)).toBeNull();
+    expect(bannerModel({ ...b, closesAt: 'later' }, T0)).toBeNull();
+  });
+
+  it('measures the server\'s clock by its round trips, null when none comes back', async () => {
+    let n = 0;
+    const read = async () => {
+      n++;
+      return iso(Date.now() + 5_000);
+    };
+    const m = await measureClock(read, 2);
+    expect(n).toBe(2);
+    expect(m!.offset).toBeGreaterThan(4_900);
+    expect(m!.offset).toBeLessThan(5_100);
+    expect(await measureClock(() => Promise.reject(new Error('offline')))).toBeNull();
   });
 });
 

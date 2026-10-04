@@ -21,6 +21,7 @@ import type {
   ClientServices,
   LiveAccess,
   LiveAccountEntry,
+  LiveBanner,
   LiveCard,
   LiveEndedSheet,
   LiveEntry,
@@ -161,6 +162,25 @@ export function clockOffset(samples: readonly ClockSample[]): { offset: number; 
     if (!best || rtt < best.rtt) best = { offset: Math.round(s.server - (s.sentAt + rtt / 2)), rtt };
   }
   return best;
+}
+
+/**
+ * The server's clock against this device's, measured by `samples` round trips to `read` (its time, ISO 8601): the
+ * offset of the shortest (clockOffset); null when none comes back. The banner, THE RELEASES and the boutique board use
+ * it (the release's page keeps its own three, with its READY CHECK).
+ */
+export async function measureClock(read: () => Promise<string>, samples = CLOCK_SAMPLES): Promise<{ offset: number; rtt: number } | null> {
+  const got: ClockSample[] = [];
+  for (let i = 0; i < samples; i++) {
+    try {
+      const sentAt = Date.now();
+      const server = Date.parse(await read());
+      got.push({ sentAt, receivedAt: Date.now(), server });
+    } catch {
+      break;
+    }
+  }
+  return clockOffset(got);
 }
 
 // ── Which screen ───────────────────────────────────────────────────────────
@@ -478,6 +498,39 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
   };
 }
 
+// ── The calendar of the reveals, and I'LL BE THERE ─────────────────────────
+
+/** A date of the calendar of the reveals: the stages it reveals (`THE NAME AND THE PHOTOGRAPH`), and when, in Paris. */
+export interface RevealDate {
+  label: string;
+  when: string;
+  at: string;
+}
+
+/**
+ * The reveals still to come, in the server's order (only stages that will show something), those said at the same minute
+ * said together; each time in Paris. Nothing the server did not send: never a stage, only its time.
+ */
+export function revealCalendar(c: Pick<LiveCard, 'reveals'>): RevealDate[] {
+  const out: RevealDate[] = [];
+  for (const r of Array.isArray(c.reveals) ? c.reveals : []) {
+    const label = r ? LIVE.stage[r.stage] : undefined;
+    const t = Date.parse(r?.at);
+    if (!label || !Number.isFinite(t)) continue;
+    const paris = zonedTime(t, PARIS)!;
+    const when = LIVE.paris(paris.day, paris.time);
+    const last = out[out.length - 1];
+    if (last && last.when === when) last.label = LIVE.together(last.label, label);
+    else out.push({ label, when, at: r.at });
+  }
+  return out;
+}
+
+/** I'LL BE THERE, counted: `428 COLLECTORS WILL BE THERE`; null before anyone has said so. */
+export function interestLine(n: number): string | null {
+  return Number.isInteger(n) && n > 0 ? LIVE.there.count(n) : null;
+}
+
 // ── THE RELEASES ───────────────────────────────────────────────────────────
 
 /** A LIVE RELEASE in THE RELEASES: its vault plate among the ivory ones of the draws. */
@@ -493,6 +546,10 @@ export interface LiveCardModel {
   line: string;
   access: string;
   picture: LivePicture | null;
+  /** The calendar of the reveals still to come. */
+  reveals: RevealDate[];
+  /** `428 COLLECTORS WILL BE THERE`, or null. */
+  interest: string | null;
 }
 
 export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCardModel[] {
@@ -507,7 +564,58 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
       line: [offerLine(c), LIVE.perAccount(c.perAccount)].join(' · '),
       access: LIVE.forWhom(c.access.text),
       picture: pictureOf(c),
+      reveals: revealCalendar(c),
+      interest: interestLine(c.interest),
     }));
+}
+
+/**
+ * When THE RELEASES should read its LIVE half again, at the server's time `now` (ms): the next of the moments that change
+ * a card (a stage, the room's opening, T0, the end); null when none is ahead.
+ */
+export function nextChange(cards: readonly Pick<LiveCard, 'reveals' | 'roomOpensAt' | 'opensAt' | 'closesAt'>[], now: number): number | null {
+  let next: number | null = null;
+  for (const c of cards) {
+    for (const at of [...(Array.isArray(c.reveals) ? c.reveals.map((r) => r.at) : []), c.roomOpensAt, c.opensAt, c.closesAt]) {
+      const t = Date.parse(at);
+      if (Number.isFinite(t) && t > now && (next === null || t < next)) next = t;
+    }
+  }
+  return next;
+}
+
+// ── The banner ─────────────────────────────────────────────────────────────
+
+/** The banner of /verify and MY PIECES: LIVE RELEASE · <name once revealed> · OPENS IN hh:mm:ss / THE ROOM IS OPEN / LIVE NOW. */
+export interface BannerModel {
+  id: string;
+  href: string;
+  phase: 'ANNOUNCED' | 'ROOM' | 'LIVE';
+  /** `LIVE RELEASE · MONOLITHE`, or `LIVE RELEASE` before the name. */
+  lead: string;
+  /** `OPENS IN`, `OPENS IN 3 DAYS`, `THE ROOM IS OPEN`, `LIVE NOW`. */
+  state: string;
+  /** Within a day of the opening: `02:14:09`; null otherwise. */
+  clock: string | null;
+}
+
+/** The banner at the server's time `now` (ms), its phase from the release's own times; null once it has ended (hidden). */
+export function bannerModel(b: LiveBanner | null, now: number): BannerModel | null {
+  if (!b || !isReleaseId(b.id)) return null;
+  const room = Date.parse(b.roomOpensAt);
+  const opens = Date.parse(b.opensAt);
+  const closes = Date.parse(b.closesAt);
+  if (![room, opens, closes].every(Number.isFinite) || now >= closes) return null;
+  const lead = b.name ? `${LIVE.kind} · ${upper(b.name)}` : LIVE.kind;
+  const base = { id: b.id, href: releasePath(b.id), lead };
+  if (now >= opens) return { ...base, phase: 'LIVE', state: LIVE.phase.LIVE, clock: null };
+  if (now >= room) return { ...base, phase: 'ROOM', state: LIVE.phase.ROOM, clock: null };
+  // OPENS IN counts to T0, as the release's page does; the room opens a few minutes before it.
+  const left = opens - now;
+  if (left >= DAY) return { ...base, phase: 'ANNOUNCED', state: LIVE.banner.days(Math.floor(left / DAY)), clock: null };
+  const total = Math.ceil(left / SECOND);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return { ...base, phase: 'ANNOUNCED', state: LIVE.opensIn, clock: `${two(Math.floor(total / 3600))}:${two(Math.floor((total % 3600) / 60))}:${two(total % 60)}` };
 }
 
 // ── MY PIECES ──────────────────────────────────────────────────────────────

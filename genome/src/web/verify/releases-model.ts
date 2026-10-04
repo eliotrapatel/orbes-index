@@ -43,13 +43,18 @@ export function isReleaseId(id: string | null | undefined): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
 }
 
-/** The route of a path under /verify/releases: the list, or a release by its id (anything else is the list). */
-export function releasesRouteOf(path: string): { release: string | null } | null {
+/**
+ * The route of a path under /verify/releases: the list, a release by its id, or a LIVE RELEASE's boutique board
+ * (`/verify/releases/<id>/board`, its secret in the fragment); anything else is the list.
+ */
+export function releasesRouteOf(path: string): { release: string | null; board?: true } | null {
   const p = path.replace(/\/+$/, '').toLowerCase();
   if (p === RELEASES_PATH) return { release: null };
   if (!p.startsWith(`${RELEASES_PATH}/`)) return null;
-  const id = p.slice(RELEASES_PATH.length + 1);
-  return { release: isReleaseId(id) ? id : null };
+  const rest = p.slice(RELEASES_PATH.length + 1);
+  const board = /^([^/]+)\/board$/.exec(rest);
+  if (board && isReleaseId(board[1])) return { release: board[1]!, board: true };
+  return { release: isReleaseId(rest) ? rest : null };
 }
 
 const STATES = new Set<DropState>(['UPCOMING', 'OPEN', 'CLOSED', 'DRAWN', 'CANCELLED']);

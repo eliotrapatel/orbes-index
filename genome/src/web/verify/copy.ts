@@ -861,6 +861,37 @@ export const LIVE = Object.freeze({
   perAccount: (n: number) => (n === 1 ? 'ONE PER COLLECTOR' : `UP TO ${n} PER COLLECTOR`),
   roomOpens: (minutes: number) => `THE ROOM OPENS ${minutes} ${minutes === 1 ? 'MINUTE' : 'MINUTES'} BEFORE`,
   calendar: 'ADD TO CALENDAR',
+  /** The calendar of the reveals: the stages still to come, each with its time (never what it shows). */
+  reveals: 'THE REVEALS',
+  stage: Object.freeze({ SILHOUETTE: 'THE SILHOUETTE', NAME: 'THE NAME', PHOTO: 'THE PHOTOGRAPH' }) as Readonly<Record<string, string>>,
+  /** Stages revealed at the same minute: `THE NAME AND THE PHOTOGRAPH`. */
+  together: (first: string, then: string) => `${first} AND ${then}`,
+  /** I'LL BE THERE: a collector who meets the rule says so with a size, until T0; the count is public. */
+  there: Object.freeze({
+    action: 'I’LL BE THERE',
+    lead: 'Say you will be there, with your size: the room preselects it when it opens.',
+    said: (size: string) => `YOU’LL BE THERE · SIZE ${size}`,
+    change: 'Another size changes it. You may withdraw until the opening.',
+    withdraw: 'WITHDRAW',
+    /** Said aloud once withdrawn. */
+    withdrawn: 'Withdrawn. You may say it again until the opening.',
+    signIn: 'Sign in to say you will be there, with your size.',
+    count: (n: number) => (n === 1 ? '1 COLLECTOR WILL BE THERE' : `${n} COLLECTORS WILL BE THERE`),
+  }),
+  /** The banner of /verify and MY PIECES (house style): LIVE RELEASE · <name> · OPENS IN … / THE ROOM IS OPEN / LIVE NOW. */
+  banner: Object.freeze({
+    days: (n: number) => (n === 1 ? 'OPENS IN 1 DAY' : `OPENS IN ${n} DAYS`),
+  }),
+  /** The boutique board: the countdown, the door, the pieces left overall, live. */
+  board: Object.freeze({
+    of: (quantity: number) => `OF ${quantity} LEFT`,
+    soldOut: 'SOLD OUT',
+    ended: 'THE RELEASE HAS ENDED',
+    live: 'LIVE',
+    reconnecting: 'RECONNECTING',
+    fullScreen: 'FULL SCREEN',
+    unavailable: Object.freeze({ title: 'THIS BOARD IS NOT AVAILABLE', text: 'Its link may have been replaced or withdrawn. ORBES gives the current one.' }),
+  }),
   /** How the places are drawn at the opening (the release's tier priority). */
   rule: (tierPriority: boolean) =>
     tierPriority
