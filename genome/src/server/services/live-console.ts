@@ -1,0 +1,1315 @@
+/**
+ * The console of the LIVE RELEASES (plan of 2026-10-04, The console: Clients › Club › Drops; routes/admin/live.ts). The
+ * release's rules and the live controls are services/live.ts's; what the public reads is live-room.ts's. Here:
+ *
+ *   create / edit   a LIVE RELEASE and every setting of it: its model, title and description; who may enter (a tier,
+ *                   and the owners of models or of a collection); the line's tier priority; T0 (`opens_at`), the end of
+ *                   the sales (`closes_at`), the room's opening, the turn and pay windows, the pieces per person, the
+ *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
+ *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
+ *                   photograph); the per-tier turn and pay windows. Everything changes until the announcement (a DRAFT,
+ *                   or published and announced later); after it, 409 LIVE_ANNOUNCED: only the stock rises, with ADD
+ *                   PIECES (live.ts addPieces). The silhouette's image is MediaService's (setLiveSilhouette).
+ *   publish         with, optionally, a post of the owners' circle linking the release (the plan's choice 9): a NOTE for
+ *                   the release's tier (TITANE at least), shown from the announcement, kept in step with the release's
+ *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows.
+ *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW).
+ *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
+ *                   the holds that ended, per size and overall, the interest), the latest host message and the line
+ *                   itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX): GET and the console's stream
+ *                   (http/live-stream.ts) read the same `board`. The routes mask the emails for an AUDITOR.
+ *   entries         every entry of the release, by status, by place then arrival.
+ *   Client Services the confirmed reservations with their sizes, add-ons and totals; CONCLUDED or CANCELLED with a note
+ *                   (a cancellation never returns the piece to the line: the plan's choice 26); a CSV.
+ *
+ * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
+ * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, `drop.live.resolve`
+ * (never the note), and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
+ * release's post.
+ */
+import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
+import { toHex } from '../../core/bytes.js';
+import { inTransaction, type Db } from '../db/connection.js';
+import type { AdminRole, DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
+import { LIVE_ENTRY_STATUSES, LIVE_RESOLUTIONS } from '../db/schema.js';
+import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
+import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
+import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
+import type { AuditRecordInput, AuditService } from './audit.js';
+import { cleanDescription, cleanTime, cleanTitle, DROP_QUANTITY_MAX, dropNotFound, newSealedSeed, PURCHASE_WINDOW_HOURS } from './drops.js';
+import {
+  announcedAt,
+  effectiveDeadline,
+  isAnnounced,
+  liveAccessRule,
+  livePhase,
+  liveRuleText,
+  liveStages,
+  roomOpensAt,
+  LIVE_ADDONS_MAX,
+  LIVE_OPEN_STATUSES,
+  LIVE_PAY_MINUTES,
+  LIVE_PER_ACCOUNT,
+  LIVE_ROOM_OPENS_MINUTES,
+  LIVE_SIZE_STOCK_MAX,
+  LIVE_TURN_SECONDS,
+  type AdminLiveEntry,
+  type LivePhase,
+} from './live.js';
+import { storyFingerprint } from './lookbook.js';
+import { mediaUrl } from './media.js';
+
+// ── Rules ──────────────────────────────────────────────────────────────────
+
+/** The currencies a release is priced in (the verification app writes each with its sign: € 4 800, £, $, CHF). */
+export const LIVE_CURRENCIES = Object.freeze(['EUR', 'GBP', 'USD', 'CHF'] as const);
+export type LiveCurrency = (typeof LIVE_CURRENCIES)[number];
+/** A price, a piece's or an add-on's, in minor units: 0 to 1 000 000.00. */
+export const LIVE_PRICE_MAX_MINOR = 100_000_000;
+/** The sizes of a release: 1 to 24, each a label of 1 to 12 characters (migration 0021). */
+export const LIVE_SIZES = Object.freeze({ min: 1, max: 24, label: 12 });
+/** The quantity as the announcement says it: 1 to 40 characters; « <the sum of the stock> PIECES » by default. */
+export const LIVE_QUANTITY_LINE_MAX = 40;
+/** An add-on: a label of 40 characters, a line of 120. */
+export const LIVE_ADDON_LIMITS = Object.freeze({ label: 40, line: 120 });
+/** The models a release's rule may name. */
+export const LIVE_ACCESS_MODELS_MAX = 20;
+/** The open entries the live board carries, by place (the rest: the entries' list, page by page). */
+export const LIVE_CONSOLE_LINE_MAX = 200;
+/** Client Services' note on a reservation it concludes or cancels. */
+export const LIVE_RESOLUTION_NOTE_MAX = 500;
+/** The post of the circle a publication may write: its title (no figure: the display face sets it). */
+export const LIVE_CIRCLE_TITLE = 'A LIVE RELEASE';
+
+const MINUTE_MS = 60_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+const PARIS = 'Europe/Paris';
+
+/** The reference of an entry for ORBES Client Services: `LR-` and the first eight figures of its id (as /verify says it). */
+export function liveReference(entryId: string): string {
+  return `LR-${entryId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+}
+
+/** The quantity line a release says by default: « 25 PIECES ». */
+export function defaultQuantityLine(quantity: number): string {
+  return `${quantity} ${quantity === 1 ? 'PIECE' : 'PIECES'}`;
+}
+
+/** A price in minor units, as a CSV holds it: `4800.00`. */
+export function majorUnits(minor: number): string {
+  return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')}`;
+}
+
+const SIGNS: Readonly<Record<string, string>> = Object.freeze({ EUR: '€', GBP: '£', USD: '$', CHF: 'CHF' });
+
+/** A price as the house writes it (verify/live-model.ts formatMoney): `€ 4 800`, `€ 4 800.50`. */
+function money(minor: number, currency: string): string {
+  const units = String(Math.floor(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const cents = minor % 100;
+  return `${SIGNS[currency] ?? currency} ${units}${cents ? `.${String(cents).padStart(2, '0')}` : ''}`;
+}
+
+// ── Errors ─────────────────────────────────────────────────────────────────
+
+const liveCancelled = () => conflict('DROP_CANCELLED', 'This release has been cancelled.');
+const liveAnnounced = () => conflict('LIVE_ANNOUNCED', 'This release is announced: its settings no longer change. Raise a size’s stock with ADD PIECES.');
+const alreadyPublished = () => conflict('DROP_ALREADY_PUBLISHED', 'This release is already published.');
+const roomOpen = () => conflict('LIVE_ROOM_OPEN', 'The room of this release is open: an ADMIN ends it with END NOW.');
+const roomPast = () => validationError('The room would already be open: set T0 later.');
+const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
+const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
+const notConfirmed = () => conflict('LIVE_NOT_CONFIRMED', 'Only a confirmed reservation is concluded or cancelled.');
+const alreadyResolved = () => conflict('LIVE_ALREADY_RESOLVED', 'This reservation has already been concluded or cancelled.');
+
+function assertStaff(actor: Actor, what: string): string {
+  if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
+  return actor.id.toLowerCase();
+}
+
+function knownId(id: unknown, missing: () => DomainError): string {
+  if (typeof id !== 'string' || !UUID_RE.test(id)) throw missing();
+  return id.toLowerCase();
+}
+
+// ── Input ──────────────────────────────────────────────────────────────────
+
+export interface LiveSizeInput {
+  /** A size of the release to keep (its id); none: a new size. */
+  id?: string | null;
+  label: string;
+  stock: number;
+}
+
+export interface LiveAddonInput {
+  id?: string | null;
+  label: string;
+  line?: string | null;
+  priceMinor: number;
+}
+
+export interface LiveTierWindowInput {
+  tier: number;
+  /** null: the release's. */
+  turnSeconds?: number | null;
+  payMinutes?: number | null;
+}
+
+/** Every setting of a LIVE RELEASE; those not given take their defaults (the plan's choices 15 and 16). */
+export interface LiveSettingsInput {
+  modelId: string;
+  title: string;
+  description?: string | null;
+  /** T0. */
+  opensAt: Date;
+  /** The end of the sales. */
+  closesAt: Date;
+  roomOpensMinutes?: number;
+  turnSeconds?: number;
+  payMinutes?: number;
+  perAccount?: number;
+  priceMinor: number;
+  currency?: string;
+  /** 0 any ORBES account, 1 TITANE (owners), 2 PLATINE, 3 PALLADIUM. */
+  minTier?: number;
+  tierPriority?: boolean;
+  accessModelIds?: string[];
+  accessCollectionId?: string | null;
+  sizes: LiveSizeInput[];
+  /** null or omitted at creation: « <the pieces> PIECES ». */
+  quantityLine?: string | null;
+  addons?: LiveAddonInput[];
+  /** null: at the publication. */
+  announceAt?: Date | null;
+  /** null: at the announcement. */
+  silhouetteAt?: Date | null;
+  nameAt?: Date | null;
+  photoAt?: Date | null;
+  tierWindows?: LiveTierWindowInput[];
+}
+
+/** A change of a LIVE RELEASE: any setting, until its announcement. A list given replaces the release's. */
+export type LiveSettingsChange = Partial<LiveSettingsInput>;
+
+interface Settings {
+  modelId: string;
+  title: string;
+  description: string | null;
+  opensAt: Date;
+  closesAt: Date;
+  roomOpensMinutes: number;
+  turnSeconds: number;
+  payMinutes: number;
+  perAccount: number;
+  priceMinor: number;
+  currency: string;
+  minTier: number;
+  tierPriority: boolean;
+  accessModelIds: string[];
+  accessCollectionId: string | null;
+  sizes: { id: string | null; label: string; stock: number }[];
+  quantityLine: string;
+  addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
+  announceAt: Date | null;
+  silhouetteAt: Date | null;
+  nameAt: Date | null;
+  photoAt: Date | null;
+  tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
+}
+
+function wholeIn(v: unknown, min: number, max: number, message: string): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw validationError(message);
+  return v;
+}
+
+function oneLine(v: unknown, max: number, what: string): string {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (s.length < 1 || s.length > max || CONTROL_CHARS.test(s)) throw validationError(`${what} is one line of 1 to ${max} characters.`);
+  return s;
+}
+
+function optionalTime(v: unknown, label: string): Date | null {
+  return v === null || v === undefined ? null : cleanTime(v, label);
+}
+
+const price = (v: unknown, what: string) => wholeIn(v, 0, LIVE_PRICE_MAX_MINOR, `${what} is 0 to ${majorUnits(LIVE_PRICE_MAX_MINOR)}, in cents.`);
+
+function cleanSizes(v: unknown): Settings['sizes'] {
+  if (!Array.isArray(v) || v.length < LIVE_SIZES.min || v.length > LIVE_SIZES.max) throw validationError(`A release has ${LIVE_SIZES.min} to ${LIVE_SIZES.max} sizes.`);
+  const seen = new Set<string>();
+  const ids = new Set<string>();
+  const out = v.map((s: LiveSizeInput) => {
+    const label = oneLine(s?.label, LIVE_SIZES.label, 'A size');
+    const stock = wholeIn(s?.stock, 0, LIVE_SIZE_STOCK_MAX, `A size holds 0 to ${LIVE_SIZE_STOCK_MAX} pieces.`);
+    const key = label.toUpperCase();
+    if (seen.has(key)) throw validationError(`The size ${label} is listed twice.`);
+    seen.add(key);
+    const id = s?.id === undefined || s?.id === null ? null : knownId(s.id, () => validationError('A size to keep is one of the release’s.'));
+    if (id && ids.has(id)) throw validationError('A size is listed twice.');
+    if (id) ids.add(id);
+    return { id, label, stock };
+  });
+  const total = out.reduce((n, s) => n + s.stock, 0);
+  if (total < 1 || total > DROP_QUANTITY_MAX) throw validationError(`A release offers 1 to ${DROP_QUANTITY_MAX} pieces in all.`);
+  return out;
+}
+
+function cleanAddons(v: unknown): Settings['addons'] {
+  if (!Array.isArray(v) || v.length > LIVE_ADDONS_MAX) throw validationError(`A release offers at most ${LIVE_ADDONS_MAX} add-ons.`);
+  const ids = new Set<string>();
+  return v.map((a: LiveAddonInput) => {
+    const id = a?.id === undefined || a?.id === null ? null : knownId(a.id, () => validationError('An add-on to keep is one of the release’s.'));
+    if (id && ids.has(id)) throw validationError('An add-on is listed twice.');
+    if (id) ids.add(id);
+    const line = a?.line === undefined || a?.line === null || (typeof a.line === 'string' && a.line.trim() === '') ? null : oneLine(a.line, LIVE_ADDON_LIMITS.line, 'An add-on’s line');
+    return { id, label: oneLine(a?.label, LIVE_ADDON_LIMITS.label, 'An add-on'), line, priceMinor: price(a?.priceMinor, 'An add-on’s price') };
+  });
+}
+
+function cleanModels(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length > LIVE_ACCESS_MODELS_MAX) throw validationError(`A release names at most ${LIVE_ACCESS_MODELS_MAX} models.`);
+  const out = v.map((m) => knownId(m, () => notFound('Model', 'MODEL_NOT_FOUND')));
+  return [...new Set(out)].sort();
+}
+
+function cleanWindows(v: unknown): Settings['tierWindows'] {
+  if (!Array.isArray(v) || v.length > 4) throw validationError('A release sets at most one override per tier.');
+  const tiers = new Set<number>();
+  return v
+    .map((w: LiveTierWindowInput) => {
+      const tier = wholeIn(w?.tier, 0, 3, 'An override is for a tier: 0 (no tier) to 3 (PALLADIUM).');
+      if (tiers.has(tier)) throw validationError('A tier has one override at most.');
+      tiers.add(tier);
+      const turnSeconds = w?.turnSeconds === undefined || w?.turnSeconds === null ? null : wholeIn(w.turnSeconds, LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, `A turn lasts ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds.`);
+      const payMinutes = w?.payMinutes === undefined || w?.payMinutes === null ? null : wholeIn(w.payMinutes, LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, `The time to pay is ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes.`);
+      if (turnSeconds === null && payMinutes === null) throw validationError('A tier’s override sets its turn, its time to pay, or both.');
+      return { tier, turnSeconds, payMinutes };
+    })
+    .sort((a, b) => a.tier - b.tier);
+}
+
+function cleanQuantityLine(v: unknown, quantity: number): string {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return defaultQuantityLine(quantity);
+  return oneLine(v, LIVE_QUANTITY_LINE_MAX, 'The quantity line');
+}
+
+/** The settings a change gives, over the release's (or the defaults of a new one), each cleaned. */
+function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings {
+  const pick = <K extends keyof LiveSettingsInput>(k: K): LiveSettingsInput[K] | undefined => (change[k] !== undefined ? change[k] : undefined);
+  const sizes = pick('sizes') !== undefined ? cleanSizes(change.sizes) : base ? base.sizes : cleanSizes(undefined);
+  const quantity = sizes.reduce((n, s) => n + s.stock, 0);
+  // A quantity line left at its default follows the stock.
+  const followsStock = base !== null && base.quantityLine === defaultQuantityLine(base.sizes.reduce((n, s) => n + s.stock, 0));
+  const quantityLine =
+    change.quantityLine !== undefined ? cleanQuantityLine(change.quantityLine, quantity) : base && !followsStock ? base.quantityLine : defaultQuantityLine(quantity);
+  const currency = change.currency !== undefined ? change.currency : (base?.currency ?? 'EUR');
+  if (!(LIVE_CURRENCIES as readonly string[]).includes(currency as string)) throw validationError(`A release is priced in ${LIVE_CURRENCIES.join(', ')}.`);
+  return {
+    modelId: change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : base ? base.modelId : knownId(undefined, () => notFound('Model', 'MODEL_NOT_FOUND')),
+    title: change.title !== undefined || !base ? cleanTitle(change.title) : base.title,
+    description: change.description !== undefined ? cleanDescription(change.description) : (base?.description ?? null),
+    opensAt: change.opensAt !== undefined || !base ? cleanTime(change.opensAt, 'T0') : base.opensAt,
+    closesAt: change.closesAt !== undefined || !base ? cleanTime(change.closesAt, 'The end') : base.closesAt,
+    roomOpensMinutes: wholeIn(change.roomOpensMinutes ?? base?.roomOpensMinutes ?? LIVE_ROOM_OPENS_MINUTES.default, LIVE_ROOM_OPENS_MINUTES.min, LIVE_ROOM_OPENS_MINUTES.max, `The room opens ${LIVE_ROOM_OPENS_MINUTES.min} to ${LIVE_ROOM_OPENS_MINUTES.max} minutes before T0.`),
+    turnSeconds: wholeIn(change.turnSeconds ?? base?.turnSeconds ?? LIVE_TURN_SECONDS.default, LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, `A turn lasts ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds.`),
+    payMinutes: wholeIn(change.payMinutes ?? base?.payMinutes ?? LIVE_PAY_MINUTES.default, LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, `The time to pay is ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes.`),
+    perAccount: wholeIn(change.perAccount ?? base?.perAccount ?? LIVE_PER_ACCOUNT.default, LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, `A person secures ${LIVE_PER_ACCOUNT.min} to ${LIVE_PER_ACCOUNT.max} pieces.`),
+    priceMinor: price(change.priceMinor !== undefined ? change.priceMinor : base?.priceMinor, 'The price'),
+    currency: currency as string,
+    minTier: wholeIn(change.minTier ?? base?.minTier ?? 0, 0, 3, 'The tier is 0 (every ORBES account) to 3 (PALLADIUM).'),
+    tierPriority: change.tierPriority !== undefined ? change.tierPriority === true : (base?.tierPriority ?? true),
+    accessModelIds: change.accessModelIds !== undefined ? cleanModels(change.accessModelIds) : (base?.accessModelIds ?? []),
+    accessCollectionId:
+      change.accessCollectionId !== undefined
+        ? change.accessCollectionId === null || change.accessCollectionId === ''
+          ? null
+          : knownId(change.accessCollectionId, () => notFound('Collection', 'COLLECTION_NOT_FOUND'))
+        : (base?.accessCollectionId ?? null),
+    sizes,
+    quantityLine,
+    addons: change.addons !== undefined ? cleanAddons(change.addons) : (base?.addons ?? []),
+    announceAt: change.announceAt !== undefined ? optionalTime(change.announceAt, 'The announcement') : (base?.announceAt ?? null),
+    silhouetteAt: change.silhouetteAt !== undefined ? optionalTime(change.silhouetteAt, 'The silhouette') : (base?.silhouetteAt ?? null),
+    nameAt: change.nameAt !== undefined ? optionalTime(change.nameAt, 'The name') : (base?.nameAt ?? null),
+    photoAt: change.photoAt !== undefined ? optionalTime(change.photoAt, 'The photograph') : (base?.photoAt ?? null),
+    tierWindows: change.tierWindows !== undefined ? cleanWindows(change.tierWindows) : (base?.tierWindows ?? []),
+  };
+}
+
+/**
+ * The times of a release that is not announced yet, at `now`: the end after T0, the room's opening still ahead, the
+ * announcement ahead (none: at the publication, `publishedAt` or now) and before the room, each stage after the one it
+ * follows and before the room, a NULL one read as the announcement (as `drops_live_stages` reads it: a stage set after
+ * an empty one is refused, the empty one being earlier).
+ */
+function checkTimes(s: Settings, now: Date, publishedAt: Date | null): void {
+  if (!(s.closesAt.getTime() > s.opensAt.getTime())) throw validationError('The release ends after T0.');
+  const room = s.opensAt.getTime() - s.roomOpensMinutes * MINUTE_MS;
+  if (room <= now.getTime()) throw roomPast();
+  if (s.announceAt && s.announceAt.getTime() <= now.getTime()) throw validationError('The announcement comes later than now; leave it empty to announce the release when it is published.');
+  if (s.announceAt && s.announceAt.getTime() > room) throw validationError('The announcement comes before the room opens.');
+  // A stage left empty is at the announcement, as the database reads it (drops_live_stages): never before the one it follows.
+  const base = (s.announceAt ?? publishedAt ?? now).getTime();
+  let after = base;
+  for (const [label, at] of [['The silhouette', s.silhouetteAt], ['The name', s.nameAt], ['The photograph', s.photoAt]] as const) {
+    const t = at ? at.getTime() : base;
+    if (t < after) throw validationError(`${label} is revealed after the announcement and the stages before it (a stage left empty: at the announcement).`);
+    if (t > room) throw validationError(`${label} is revealed before the room opens.`);
+    after = t;
+  }
+}
+
+/** The settings as the audit log records them: the description as its length and SHA-256, times in ISO 8601. */
+function auditSettings(s: Settings): Record<string, unknown> {
+  const t = (d: Date | null) => (d ? d.toISOString() : null);
+  return {
+    modelId: s.modelId,
+    title: s.title,
+    description: storyFingerprint(s.description),
+    opensAt: t(s.opensAt),
+    closesAt: t(s.closesAt),
+    roomOpensMinutes: s.roomOpensMinutes,
+    turnSeconds: s.turnSeconds,
+    payMinutes: s.payMinutes,
+    perAccount: s.perAccount,
+    priceMinor: s.priceMinor,
+    currency: s.currency,
+    minTier: s.minTier,
+    tierPriority: s.tierPriority,
+    accessModelIds: s.accessModelIds,
+    accessCollectionId: s.accessCollectionId,
+    sizes: s.sizes.map((x) => `${x.label}:${x.stock}`),
+    quantityLine: s.quantityLine,
+    addons: s.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
+    announceAt: t(s.announceAt),
+    silhouetteAt: t(s.silhouetteAt),
+    nameAt: t(s.nameAt),
+    photoAt: t(s.photoAt),
+    tierWindows: s.tierWindows,
+  };
+}
+
+// ── Views ──────────────────────────────────────────────────────────────────
+
+/** A LIVE RELEASE in the console's list. */
+export interface AdminLiveCard {
+  id: string;
+  title: string;
+  model: { id: string; name: string; type: string; active: boolean };
+  phase: LivePhase;
+  /** Ended, no turn or hold left. */
+  over: boolean;
+  announcedAt: Date | null;
+  roomOpensAt: Date;
+  opensAt: Date;
+  closesAt: Date;
+  quantity: number;
+  quantityLine: string;
+  priceMinor: number;
+  currency: string;
+  endedReason: LiveEndReason | null;
+  /** The entries by status. */
+  entries: Record<LiveEntryStatus, number>;
+  interest: number;
+}
+
+/** A LIVE RELEASE as the console reads and edits it: every setting, never its sealed seed. */
+export interface AdminLiveRelease extends AdminLiveCard {
+  description: string | null;
+  /** Its settings still change (not announced, not cancelled). */
+  editable: boolean;
+  roomOpensMinutes: number;
+  turnSeconds: number;
+  payMinutes: number;
+  perAccount: number;
+  minTier: number;
+  tierPriority: boolean;
+  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  sizes: { id: string; label: string; stock: number }[];
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
+  /** As set (null: at the publication; a NULL stage: at the announcement). */
+  announceAt: Date | null;
+  silhouetteAt: Date | null;
+  nameAt: Date | null;
+  photoAt: Date | null;
+  /** Once published: when each stage is revealed. */
+  stages: { silhouetteAt: Date; nameAt: Date; photoAt: Date } | null;
+  silhouette: { sha256: string; url: string } | null;
+  /** The boutique board's link: when it was issued (its secret is shown once, when issued). */
+  boardLink: { issuedAt: Date } | null;
+  /** The posts of the circle linking the release: shown from `publishedAt` (null: withdrawn). */
+  circlePosts: { id: string; publishedAt: Date | null }[];
+  publishedAt: Date | null;
+  cancelledAt: Date | null;
+  pausedAt: Date | null;
+  pausedMs: number;
+  endedAt: Date | null;
+  createdAt: Date;
+  createdBy: { id: string; email: string } | null;
+  /** SHA-256 of the sealed seed that orders the line within a tier (never revealed for a LIVE RELEASE). */
+  seedHash: string;
+}
+
+/** A size on the live board: its pieces, and its people by where they stand. */
+export interface AdminLiveBoardSize {
+  id: string;
+  label: string;
+  stock: number;
+  /** Pieces free now. */
+  left: number;
+  /** Pieces in a turn or held, which may return. */
+  held: number;
+  /** Pieces confirmed. */
+  sold: number;
+  waiting: number;
+  line: number;
+  turns: number;
+  secured: number;
+  confirmed: number;
+  missed: number;
+  /** Holds that ran out or were freed. */
+  expired: number;
+  interest: number;
+}
+
+/** The live board (GET /api/admin/live/:id/board and the console's stream): the counters and the line. */
+export interface AdminLiveBoard {
+  id: string;
+  phase: LivePhase;
+  paused: boolean;
+  pausedAt: Date | null;
+  over: boolean;
+  endedAt: Date | null;
+  endedReason: LiveEndReason | null;
+  roomOpensAt: Date;
+  opensAt: Date;
+  closesAt: Date;
+  quantity: number;
+  quantityLine: string;
+  /** The sizes summed, and the people who are out of the release: places given back, left, removed, ended by its end. */
+  totals: Omit<AdminLiveBoardSize, 'id' | 'label'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
+  sizes: AdminLiveBoardSize[];
+  message: { text: string; at: Date } | null;
+  /** The open entries (in their turn, holding, in the line, in the room), by place then arrival: the first LIVE_CONSOLE_LINE_MAX. */
+  line: AdminLiveEntry[];
+  /** Every open entry. */
+  lineTotal: number;
+}
+
+/** A confirmed reservation for ORBES Client Services; the routes mask the email for an AUDITOR. */
+export interface AdminLiveReservation {
+  id: string;
+  reference: string;
+  accountId: string;
+  /** As stored. */
+  email: string;
+  size: { id: string; label: string };
+  quantity: number;
+  currency: string;
+  /** Per piece. */
+  priceMinor: number;
+  addons: { id: string; label: string; priceMinor: number }[];
+  /** quantity × (price + the add-ons). */
+  totalMinor: number;
+  confirmedAt: Date;
+  resolution: LiveResolution | null;
+  note: string | null;
+  handledBy: { id: string; email: string } | null;
+  handledAt: Date | null;
+}
+
+const EMPTY_COUNTS = (): Record<LiveEntryStatus, number> => Object.fromEntries(LIVE_ENTRY_STATUSES.map((s) => [s, 0])) as Record<LiveEntryStatus, number>;
+
+type ReadRow = DropRow & { model_name: string; model_type: string; model_active: boolean };
+
+// ── Service ────────────────────────────────────────────────────────────────
+
+export interface LiveConsoleServiceDeps {
+  db: Db;
+  audit: AuditService;
+  /** The key sealing the drops' seeds (drops.ts deriveDropSeedKey). */
+  seedKey: Uint8Array;
+  /** PUBLIC_ORIGIN: the boutique board's link. */
+  publicOrigin: string;
+  clock?: Clock;
+}
+
+export class LiveConsoleService {
+  private readonly db: Db;
+  private readonly audit: AuditService;
+  private readonly seedKey: Uint8Array;
+  private readonly origin: string;
+  private readonly clock: Clock;
+
+  constructor(deps: LiveConsoleServiceDeps) {
+    if (!(deps.seedKey instanceof Uint8Array) || deps.seedKey.length !== 32) throw new RangeError('seedKey must be 32 bytes');
+    this.db = deps.db;
+    this.audit = deps.audit;
+    this.seedKey = deps.seedKey;
+    this.origin = deps.publicOrigin;
+    this.clock = deps.clock ?? systemClock;
+  }
+
+  /** The boutique board's address for a link's secret: the secret in the fragment, never sent to a server. */
+  boardUrl(dropId: string, token: string): string {
+    return `${this.origin}/verify/releases/${dropId}/board#${token}`;
+  }
+
+  // ── Reads ────────────────────────────────────────────────────────────────
+
+  /** Every LIVE RELEASE, the latest created first. */
+  async list(page: PageRequest): Promise<Page<AdminLiveCard>> {
+    const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).where('mode', '=', 'LIVE').executeTakeFirstOrThrow();
+    const rows = await this.reads(this.db).where('d.mode', '=', 'LIVE').orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
+    const now = this.clock();
+    const [counts, interest, open] = await Promise.all([this.counts(this.db, rows.map((r) => r.id)), this.interest(this.db, rows.map((r) => r.id)), this.openHolds(this.db, rows.map((r) => r.id))]);
+    return makePage(
+      rows.map((r) => this.card(r, now, counts.get(r.id), interest.get(r.id) ?? 0, open.has(r.id))),
+      Number(total.n),
+      page,
+    );
+  }
+
+  /** One LIVE RELEASE (404 DROP_NOT_FOUND for anything else). */
+  get(dropId: string): Promise<AdminLiveRelease> {
+    return this.release(this.db, knownId(dropId, dropNotFound));
+  }
+
+  /**
+   * The live board: the counters overall and per size, the latest host message and the open entries by place. Null
+   * when the id is no LIVE RELEASE (the console's stream then ends). Emails as stored: the routes mask them.
+   */
+  async board(dropId: string): Promise<AdminLiveBoard | null> {
+    if (typeof dropId !== 'string' || !UUID_RE.test(dropId)) return null;
+    const id = dropId.toLowerCase();
+    const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
+    if (!d) return null;
+    const now = this.clock();
+    const [sizes, counts, interest, message] = await Promise.all([
+      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
+      this.db
+        .selectFrom('live_entries')
+        .select((eb) => ['size_id', 'status', eb.fn.countAll<number>().as('n'), eb.fn.sum<number>('quantity').as('q')])
+        .where('drop_id', '=', id)
+        .groupBy(['size_id', 'status'])
+        .execute(),
+      this.db.selectFrom('live_interest').select((eb) => ['size_id', eb.fn.countAll<number>().as('n')]).where('drop_id', '=', id).groupBy('size_id').execute(),
+      this.db.selectFrom('live_messages').select(['text', 'created_at']).where('drop_id', '=', id).orderBy('created_at', 'desc').orderBy('id', 'desc').limit(1).executeTakeFirst(),
+    ]);
+    const people = (sizeId: string | null, statuses: readonly string[]) =>
+      counts.filter((c) => (sizeId === null || c.size_id === sizeId) && statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
+    const pieces = (sizeId: string, statuses: readonly string[]) => counts.filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
+    const boardSizes: AdminLiveBoardSize[] = sizes.map((s) => {
+      const held = pieces(s.id, ['TURN', 'SECURED']);
+      const sold = pieces(s.id, ['CONFIRMED']);
+      return {
+        id: s.id,
+        label: s.label,
+        stock: s.stock,
+        left: Math.max(0, s.stock - held - sold),
+        held,
+        sold,
+        waiting: people(s.id, ['WAITING']),
+        line: people(s.id, ['QUEUED']),
+        turns: people(s.id, ['TURN']),
+        secured: people(s.id, ['SECURED']),
+        confirmed: people(s.id, ['CONFIRMED']),
+        missed: people(s.id, ['MISSED']),
+        expired: people(s.id, ['EXPIRED']),
+        interest: Number(interest.find((i) => i.size_id === s.id)?.n ?? 0),
+      };
+    });
+    const sum = (k: keyof AdminLiveBoardSize) => boardSizes.reduce((n, s) => n + (s[k] as number), 0);
+    const holding = people(null, ['TURN', 'SECURED']);
+    const phase = livePhase(d, now);
+    const over = phase === 'ENDED' && holding === 0;
+    const [line, lineTotal] = await Promise.all([
+      this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now),
+      this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', 'in', [...LIVE_OPEN_STATUSES]).executeTakeFirstOrThrow(),
+    ]);
+    return {
+      id,
+      phase,
+      paused: d.paused_at !== null && !over,
+      pausedAt: d.paused_at,
+      over,
+      endedAt: d.ended_at,
+      endedReason: d.ended_reason,
+      roomOpensAt: roomOpensAt(d),
+      opensAt: d.opens_at,
+      closesAt: d.closes_at,
+      quantity: sizes.reduce((n, s) => n + s.stock, 0),
+      quantityLine: d.quantity_line ?? '',
+      totals: {
+        stock: sum('stock'),
+        left: sum('left'),
+        held: sum('held'),
+        sold: sum('sold'),
+        inRoom: people(null, LIVE_OPEN_STATUSES),
+        waiting: sum('waiting'),
+        line: sum('line'),
+        turns: sum('turns'),
+        secured: sum('secured'),
+        confirmed: sum('confirmed'),
+        missed: sum('missed'),
+        expired: sum('expired'),
+        released: people(null, ['RELEASED']),
+        departed: people(null, ['LEFT']),
+        removed: people(null, ['REMOVED']),
+        ended: people(null, ['ENDED']),
+        interest: sum('interest'),
+      },
+      sizes: boardSizes,
+      message: message ? { text: message.text, at: message.created_at } : null,
+      line,
+      lineTotal: Number(lineTotal.n),
+    };
+  }
+
+  /** The entries of a release: one status, the open ones (OPEN), or all; by place, then arrival. */
+  async entries(dropId: string, filter: { status?: LiveEntryStatus | 'OPEN' }, page: PageRequest): Promise<Page<AdminLiveEntry>> {
+    const id = knownId(dropId, dropNotFound);
+    const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
+    if (!d) throw dropNotFound();
+    const statuses = filter.status === 'OPEN' ? [...LIVE_OPEN_STATUSES] : filter.status ? [filter.status] : null;
+    let q = this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id);
+    if (statuses) q = q.where('status', 'in', statuses);
+    const total = await q.executeTakeFirstOrThrow();
+    const items = await this.adminEntries(this.db, d, { statuses }, page.pageSize, pageOffset(page), this.clock());
+    return makePage(items, Number(total.n), page);
+  }
+
+  /** The confirmed reservations of a release, the earliest confirmed first (Client Services). */
+  async reservations(dropId: string, page: PageRequest): Promise<Page<AdminLiveReservation>> {
+    const id = knownId(dropId, dropNotFound);
+    await this.liveRow(this.db, id);
+    const total = await this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
+    return makePage(await this.reservationRows(this.db, id, { limit: page.pageSize, offset: pageOffset(page) }), Number(total.n), page);
+  }
+
+  /**
+   * Every confirmed reservation of a release as a CSV (render/csv.ts: RFC 4180, every field quoted, a formula never run):
+   * the reference, the account (its email as `email` gives it: masked for an AUDITOR by the route), the size, the pieces,
+   * the price, the add-ons, the total, the confirmation and its outcome.
+   */
+  async reservationsCsv(dropId: string, email: (stored: string) => string): Promise<{ filename: string; contentType: string; body: string }> {
+    const id = knownId(dropId, dropNotFound);
+    await this.liveRow(this.db, id);
+    const rows = await this.reservationRows(this.db, id, {});
+    const header = ['reference', 'entry', 'account', 'size', 'pieces', 'currency', 'price', 'add-ons', 'total', 'confirmed at', 'resolution', 'note', 'handled by', 'handled at'];
+    const body = csvDocument([
+      header,
+      ...rows.map((r) => [
+        r.reference,
+        r.id,
+        email(r.email),
+        r.size.label,
+        String(r.quantity),
+        r.currency,
+        majorUnits(r.priceMinor),
+        r.addons.map((a) => `${a.label} (${majorUnits(a.priceMinor)})`).join('; '),
+        majorUnits(r.totalMinor),
+        r.confirmedAt.toISOString(),
+        r.resolution ?? '',
+        r.note ?? '',
+        r.handledBy?.email ?? '',
+        r.handledAt ? r.handledAt.toISOString() : '',
+      ]),
+    ]);
+    const day = this.clock().toISOString().slice(0, 10);
+    return { filename: `ORBES-live-${id.slice(0, 8).toUpperCase()}-reservations-${day}.csv`, contentType: CSV_CONTENT_TYPE, body };
+  }
+
+  /**
+   * Which of these console sessions (SessionInfo.id) still open the console as sessionGuard would let them in, and
+   * whether each reads the customers' emails in clear (OPERATOR, ADMIN) or masked (AUDITOR): one read for every console
+   * stream of the process, so a stream ends at the next pulse once its session has (signed out, revoked, the staff
+   * account disabled or under AUDITOR), and follows a change of role.
+   */
+  async consoleSessions(sessionIds: readonly string[]): Promise<Map<string, { inClear: boolean }>> {
+    const ids = [...new Set(sessionIds.filter((x) => /^[0-9a-f]{64}$/.test(x)))];
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .selectFrom('sessions as s')
+      .innerJoin('admin_users as a', 'a.id', 's.subject_id')
+      .select(['s.id_hash', 'a.role'])
+      .where('s.id_hash', 'in', ids.map((x) => new Uint8Array(Buffer.from(x, 'hex'))))
+      .where('s.subject_type', '=', 'admin')
+      .where('s.expires_at', '>', this.clock())
+      .where('a.disabled_at', 'is', null)
+      .where('a.password_change_required', '=', false)
+      .where('a.role', 'in', ['AUDITOR', 'OPERATOR', 'ADMIN'] satisfies AdminRole[])
+      .execute();
+    return new Map(rows.map((r) => [Buffer.from(r.id_hash).toString('hex'), { inClear: r.role !== 'AUDITOR' }]));
+  }
+
+  // ── Create, edit, publish, cancel ────────────────────────────────────────
+
+  /**
+   * A new LIVE RELEASE, a DRAFT: its seed drawn, sealed and committed now (the line's order within a tier), its settings
+   * checked (the room still ahead, the stages in order). OPERATOR; audited `drop.live.create` with the seed's SHA-256.
+   */
+  async create(input: LiveSettingsInput, actor: Actor): Promise<AdminLiveRelease> {
+    const admin = assertStaff(actor, 'create a release');
+    const s = settingsOf(null, input ?? ({} as LiveSettingsInput));
+    return inTransaction(this.db, async (tx) => {
+      const now = this.clock();
+      checkTimes(s, now, null);
+      const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', s.modelId).executeTakeFirst();
+      if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (!model.active) throw modelInactive();
+      await this.checkAccess(tx, s);
+      const id = randomUUID();
+      const { sealed, seedHash } = newSealedSeed(this.seedKey, id);
+      await tx
+        .insertInto('drops')
+        .values({
+          id,
+          mode: 'LIVE',
+          seed_enc: sealed,
+          seed_hash: seedHash,
+          purchase_window_hours: PURCHASE_WINDOW_HOURS.default,
+          early_access_hours: 0,
+          created_by: admin,
+          created_at: now,
+          ...this.columns(s),
+        })
+        .execute();
+      await this.writeLists(tx, id, s, null);
+      await this.audit.record({ actor, action: 'drop.live.create', targetType: 'drop', targetId: id, details: { ...auditSettings(s), seedHash: toHex(seedHash) } }, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled): any setting;
+   * a list given (sizes, add-ons, models, per-tier windows) replaces the release's. The same checks as a creation. A
+   * post of the circle the publication scheduled follows the new times and rule. Audited `drop.live.update` with each
+   * setting before and after; nothing changed, nothing written.
+   */
+  async update(dropId: string, change: LiveSettingsChange, actor: Actor): Promise<AdminLiveRelease> {
+    assertStaff(actor, 'change a release');
+    const id = knownId(dropId, dropNotFound);
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      const now = this.clock();
+      if (d.cancelled_at) throw liveCancelled();
+      if (isAnnounced(d, now)) throw liveAnnounced();
+      const before = await this.settings(tx, d);
+      const after = settingsOf(before, change ?? {});
+      checkTimes(after, now, d.published_at);
+      const a = auditSettings(before);
+      const b = auditSettings(after);
+      // A list written again with other ids (sizes, add-ons sent as new) changes, even saying the same.
+      const ids = (xs: readonly { id: string | null }[]) => JSON.stringify(xs.map((x) => x.id));
+      const changed = Object.keys(b).filter(
+        (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]) || (k === 'sizes' && ids(before.sizes) !== ids(after.sizes)) || (k === 'addons' && ids(before.addons) !== ids(after.addons)),
+      );
+      if (changed.length === 0) return this.release(tx, id);
+      if (after.modelId !== before.modelId) {
+        const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', after.modelId).executeTakeFirst();
+        if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+        if (!model.active) throw modelInactive();
+      }
+      await this.checkAccess(tx, after);
+      await tx.updateTable('drops').set(this.columns(after)).where('id', '=', id).execute();
+      await this.writeLists(tx, id, after, before);
+      const notes: AuditRecordInput[] = [
+        {
+          actor,
+          action: 'drop.live.update',
+          targetType: 'drop',
+          targetId: id,
+          details: { before: Object.fromEntries(changed.map((k) => [k, a[k]])), after: Object.fromEntries(changed.map((k) => [k, b[k]])) },
+        },
+      ];
+      if (d.published_at) await this.syncCirclePosts(tx, { ...d, ...this.columns(after) } as DropRow, now, actor, notes);
+      for (const n of notes) await this.audit.record(n, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * Publish a DRAFT: announced at `announce_at` (at once when NULL), its stages each at its time. Refused once published
+   * or cancelled, when the room would already be open, when a stage is no longer after the announcement, and for a model
+   * no longer offered. With `circlePost`, a post of the owners' circle linking the release (LIVE_CIRCLE_TITLE, its times
+   * in Paris, its quantity and price, its rule), for its tier (TITANE at least), shown from the announcement. Audited
+   * `drop.live.publish` (and `circle.post.create`).
+   */
+  async publish(dropId: string, opts: { circlePost?: boolean }, actor: Actor): Promise<AdminLiveRelease> {
+    const admin = assertStaff(actor, 'publish a release');
+    const id = knownId(dropId, dropNotFound);
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      const now = this.clock();
+      if (d.cancelled_at) throw liveCancelled();
+      if (d.published_at) throw alreadyPublished();
+      checkTimes(await this.settings(tx, d), now, null);
+      const model = await tx.selectFrom('models').select('active').where('id', '=', d.model_id).executeTakeFirstOrThrow();
+      if (!model.active) throw modelInactive();
+      await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
+      const published = { ...d, published_at: now };
+      const notes: AuditRecordInput[] = [];
+      let postId: string | null = null;
+      if (opts?.circlePost === true) {
+        const post = await this.circlePost(tx, published, now);
+        postId = (
+          await tx
+            .insertInto('circle_posts')
+            .values({ kind: 'NOTE', title: LIVE_CIRCLE_TITLE, body: post.body, min_tier: post.minTier, drop_id: id, published_at: post.at, created_by: admin, created_at: now })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+        ).id;
+        notes.push({
+          actor,
+          action: 'circle.post.create',
+          targetType: 'circle_post',
+          targetId: postId,
+          details: { kind: 'NOTE', title: LIVE_CIRCLE_TITLE, body: storyFingerprint(post.body), minTier: post.minTier, dropId: id, publishedAt: post.at.toISOString(), by: 'drop.live.publish' },
+        });
+      }
+      notes.unshift({
+        actor,
+        action: 'drop.live.publish',
+        targetType: 'drop',
+        targetId: id,
+        details: {
+          seedHash: toHex(d.seed_hash),
+          quantity: d.quantity,
+          quantityLine: d.quantity_line,
+          announcedAt: announcedAt(published)!.toISOString(),
+          roomOpensAt: roomOpensAt(d).toISOString(),
+          opensAt: d.opens_at.toISOString(),
+          closesAt: d.closes_at.toISOString(),
+          circlePostId: postId,
+        },
+      });
+      for (const n of notes) await this.audit.record(n, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * Cancel a LIVE RELEASE before its room opens (409 LIVE_ROOM_OPEN after; DROP_CANCELLED twice): its page answers 404
+   * from then on, and a post of the circle not shown yet is withdrawn. Audited `drop.live.cancel`.
+   */
+  async cancel(dropId: string, actor: Actor): Promise<AdminLiveRelease> {
+    assertStaff(actor, 'cancel a release');
+    const id = knownId(dropId, dropNotFound);
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      const now = this.clock();
+      if (d.cancelled_at) throw liveCancelled();
+      if (d.published_at && now.getTime() >= roomOpensAt(d).getTime()) throw roomOpen();
+      await tx.updateTable('drops').set({ cancelled_at: now }).where('id', '=', id).execute();
+      const withdrawn = await tx
+        .updateTable('circle_posts')
+        .set({ published_at: null })
+        .where('drop_id', '=', id)
+        .where('published_at', '>', now)
+        .returning(['id'])
+        .execute();
+      const interest = await tx.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow();
+      await this.audit.record({ actor, action: 'drop.live.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, announced: isAnnounced(d, now), interest: Number(interest.n) } }, tx);
+      for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * CONCLUDED or CANCELLED (ORBES Client Services, OPERATOR): a CONFIRMED reservation, once (409 LIVE_ALREADY_RESOLVED),
+   * with an optional note (at most LIVE_RESOLUTION_NOTE_MAX characters, kept with the entry, never in the audit log). A
+   * cancellation returns no piece to the line (the plan's choice 26). Audited `drop.live.resolve`.
+   */
+  async resolve(dropId: string, entryId: string, input: { resolution: LiveResolution; note?: string | null }, actor: Actor): Promise<AdminLiveReservation> {
+    const admin = assertStaff(actor, 'conclude a reservation');
+    const id = knownId(dropId, dropNotFound);
+    const eid = knownId(entryId, entryNotFound);
+    if (!(LIVE_RESOLUTIONS as readonly string[]).includes(input?.resolution)) throw validationError('A reservation is CONCLUDED or CANCELLED.');
+    const raw = input.note === null || input.note === undefined ? '' : String(input.note).replace(/\r\n?/g, '\n').trim();
+    const note = raw === '' ? null : raw;
+    if (note !== null && (note.length > LIVE_RESOLUTION_NOTE_MAX || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(note))) {
+      throw validationError(`A note has at most ${LIVE_RESOLUTION_NOTE_MAX} characters.`);
+    }
+    await inTransaction(this.db, async (tx) => {
+      await this.lock(tx, id);
+      const now = this.clock();
+      const e = await tx.selectFrom('live_entries').select(['id', 'status', 'resolution', 'confirmed_at']).where('id', '=', eid).where('drop_id', '=', id).forUpdate().executeTakeFirst();
+      if (!e) throw entryNotFound();
+      if (e.status !== 'CONFIRMED') throw notConfirmed();
+      if (e.resolution) throw alreadyResolved();
+      const at = e.confirmed_at && e.confirmed_at.getTime() > now.getTime() ? e.confirmed_at : now;
+      await tx.updateTable('live_entries').set({ resolution: input.resolution, resolution_note: note, handled_by: admin, handled_at: at }).where('id', '=', e.id).execute();
+      await this.audit.record({ actor, action: 'drop.live.resolve', targetType: 'drop', targetId: id, details: { entryId: e.id, resolution: input.resolution, ...(note !== null ? { noted: true } : {}) } }, tx);
+    });
+    const [r] = await this.reservationRows(this.db, id, { entryId: eid });
+    return r!;
+  }
+
+  // ── internals ────────────────────────────────────────────────────────────
+
+  private reads(db: Db) {
+    return db
+      .selectFrom('drops as d')
+      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .selectAll('d')
+      .select(['m.name as model_name', 'm.type as model_type', 'm.active as model_active']);
+  }
+
+  /** A LIVE RELEASE's row FOR UPDATE; 404 for anything else. */
+  private async lock(tx: Db, id: string): Promise<DropRow> {
+    const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').forUpdate().executeTakeFirst();
+    if (!d) throw dropNotFound();
+    return d;
+  }
+
+  private async liveRow(db: Db, id: string): Promise<DropRow> {
+    const d = await db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
+    if (!d) throw dropNotFound();
+    return d;
+  }
+
+  /** The columns of `drops` the settings hold. */
+  private columns(s: Settings) {
+    return {
+      model_id: s.modelId,
+      title: s.title,
+      description: s.description,
+      quantity: s.sizes.reduce((n, x) => n + x.stock, 0),
+      opens_at: s.opensAt,
+      closes_at: s.closesAt,
+      live_min_tier: s.minTier,
+      tier_priority: s.tierPriority,
+      room_opens_minutes: s.roomOpensMinutes,
+      turn_seconds: s.turnSeconds,
+      pay_minutes: s.payMinutes,
+      per_account: s.perAccount,
+      price_minor: s.priceMinor,
+      currency: s.currency,
+      quantity_line: s.quantityLine,
+      announce_at: s.announceAt,
+      silhouette_at: s.silhouetteAt,
+      name_at: s.nameAt,
+      photo_at: s.photoAt,
+      access_collection_id: s.accessCollectionId,
+    };
+  }
+
+  /** The models and the collection a rule names exist (404 otherwise). */
+  private async checkAccess(tx: Db, s: Settings): Promise<void> {
+    if (s.accessModelIds.length > 0) {
+      const found = await tx.selectFrom('models').select('id').where('id', 'in', s.accessModelIds).execute();
+      if (found.length !== s.accessModelIds.length) throw notFound('Model', 'MODEL_NOT_FOUND');
+    }
+    if (s.accessCollectionId && !(await tx.selectFrom('collections').select('id').where('id', '=', s.accessCollectionId).executeTakeFirst())) {
+      throw notFound('Collection', 'COLLECTION_NOT_FOUND');
+    }
+  }
+
+  /**
+   * The sizes, add-ons, models and per-tier windows, written again when they changed. Before the announcement nothing
+   * points to a size or an add-on yet (an interest, an entry): a list is replaced, the ids it keeps kept.
+   */
+  private async writeLists(tx: Db, id: string, s: Settings, before: Settings | null): Promise<void> {
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    if (!before || !same(before.sizes, s.sizes)) {
+      const known = new Set((before?.sizes ?? []).map((x) => x.id));
+      for (const x of s.sizes) if (x.id && !known.has(x.id)) throw validationError('A size to keep is one of the release’s.');
+      await tx.deleteFrom('drop_sizes').where('drop_id', '=', id).execute();
+      await tx
+        .insertInto('drop_sizes')
+        .values(s.sizes.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, position: i + 1, stock: x.stock })))
+        .execute();
+    }
+    if (!before || !same(before.addons, s.addons)) {
+      const known = new Set((before?.addons ?? []).map((x) => x.id));
+      for (const x of s.addons) if (x.id && !known.has(x.id)) throw validationError('An add-on to keep is one of the release’s.');
+      await tx.deleteFrom('live_addons').where('drop_id', '=', id).execute();
+      if (s.addons.length) {
+        await tx
+          .insertInto('live_addons')
+          .values(s.addons.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, line: x.line, price_minor: x.priceMinor, position: i + 1 })))
+          .execute();
+      }
+    }
+    if (!before || !same(before.accessModelIds, s.accessModelIds)) {
+      await tx.deleteFrom('live_access_models').where('drop_id', '=', id).execute();
+      if (s.accessModelIds.length) await tx.insertInto('live_access_models').values(s.accessModelIds.map((m) => ({ drop_id: id, model_id: m }))).execute();
+    }
+    if (!before || !same(before.tierWindows, s.tierWindows)) {
+      await tx.deleteFrom('live_tier_windows').where('drop_id', '=', id).execute();
+      if (s.tierWindows.length) {
+        await tx.insertInto('live_tier_windows').values(s.tierWindows.map((w) => ({ drop_id: id, tier: w.tier, turn_seconds: w.turnSeconds, pay_minutes: w.payMinutes }))).execute();
+      }
+    }
+  }
+
+  /** A release's settings as stored. */
+  private async settings(db: Db, d: DropRow): Promise<Settings> {
+    const [sizes, addons, models, windows] = await Promise.all([
+      db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute(),
+      db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', d.id).orderBy('position').execute(),
+      db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', d.id).orderBy('model_id').execute(),
+      db.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.id).orderBy('tier').execute(),
+    ]);
+    return {
+      modelId: d.model_id,
+      title: d.title,
+      description: d.description,
+      opensAt: d.opens_at,
+      closesAt: d.closes_at,
+      roomOpensMinutes: d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
+      turnSeconds: d.turn_seconds ?? LIVE_TURN_SECONDS.default,
+      payMinutes: d.pay_minutes ?? LIVE_PAY_MINUTES.default,
+      perAccount: d.per_account ?? LIVE_PER_ACCOUNT.default,
+      priceMinor: d.price_minor ?? 0,
+      currency: d.currency ?? 'EUR',
+      minTier: d.live_min_tier ?? 0,
+      tierPriority: d.tier_priority ?? true,
+      accessModelIds: models.map((m) => m.model_id),
+      accessCollectionId: d.access_collection_id,
+      sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
+      quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
+      addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
+      announceAt: d.announce_at,
+      silhouetteAt: d.silhouette_at,
+      nameAt: d.name_at,
+      photoAt: d.photo_at,
+      tierWindows: windows.map((w) => ({ tier: w.tier, turnSeconds: w.turn_seconds, payMinutes: w.pay_minutes })),
+    };
+  }
+
+  /**
+   * The release's post of the circle, as the publication writes it: shown from the announcement (now when it is
+   * already due), for the release's tier (TITANE at least: the circle is the owners'), its words from the times,
+   * quantity line, price and rule (a model of the rule that is the release's own says « this model »: the post never
+   * names the piece).
+   */
+  private async circlePost(db: Db, d: DropRow, now: Date): Promise<{ body: string; minTier: number; at: Date }> {
+    const rule = await liveAccessRule(db, d, now);
+    const room = roomOpensAt(d);
+    const f = new Intl.DateTimeFormat('en-GB', { timeZone: PARIS, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const parts = Object.fromEntries(f.formatToParts(room).map((p) => [p.type, p.value]));
+    const minutes = d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default;
+    const body = [
+      `The room opens on ${parts.weekday} ${parts.day} ${parts.month} at ${parts.hour}:${parts.minute}, Paris time, ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} before the release.`,
+      `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${money(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText({ ...rule, models: rule.models.map((m) => (m.id === d.model_id ? { ...m, name: 'this model' } : m)) })}.`,
+    ].join('\n\n');
+    const announced = announcedAt(d) ?? now;
+    return { body, minTier: Math.max(1, d.live_min_tier ?? 0), at: announced.getTime() > now.getTime() ? announced : now };
+  }
+
+  /** The posts the publication scheduled (linking the release, not shown yet), kept in step with its new settings. */
+  private async syncCirclePosts(tx: Db, d: DropRow, now: Date, actor: Actor, notes: AuditRecordInput[]): Promise<void> {
+    const scheduled = await tx.selectFrom('circle_posts').select(['id', 'body', 'min_tier', 'published_at']).where('drop_id', '=', d.id).where('published_at', '>', now).forUpdate().execute();
+    if (scheduled.length === 0) return;
+    const post = await this.circlePost(tx, d, now);
+    for (const p of scheduled) {
+      if (p.body === post.body && p.min_tier === post.minTier && p.published_at?.getTime() === post.at.getTime()) continue;
+      await tx.updateTable('circle_posts').set({ body: post.body, min_tier: post.minTier, published_at: post.at }).where('id', '=', p.id).execute();
+      notes.push({
+        actor,
+        action: 'circle.post.update',
+        targetType: 'circle_post',
+        targetId: p.id,
+        details: {
+          before: { body: storyFingerprint(p.body), minTier: p.min_tier, publishedAt: p.published_at?.toISOString() ?? null },
+          after: { body: storyFingerprint(post.body), minTier: post.minTier, publishedAt: post.at.toISOString() },
+          by: 'drop.live.update',
+        },
+      });
+    }
+  }
+
+  private async counts(db: Db, ids: readonly string[]): Promise<Map<string, Record<LiveEntryStatus, number>>> {
+    const out = new Map<string, Record<LiveEntryStatus, number>>();
+    if (ids.length === 0) return out;
+    const rows = await db.selectFrom('live_entries').select((eb) => ['drop_id', 'status', eb.fn.countAll<number>().as('n')]).where('drop_id', 'in', [...ids]).groupBy(['drop_id', 'status']).execute();
+    for (const r of rows) {
+      const c = out.get(r.drop_id) ?? EMPTY_COUNTS();
+      c[r.status] = Number(r.n);
+      out.set(r.drop_id, c);
+    }
+    return out;
+  }
+
+  private async interest(db: Db, ids: readonly string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const rows = await db.selectFrom('live_interest').select((eb) => ['drop_id', eb.fn.countAll<number>().as('n')]).where('drop_id', 'in', [...ids]).groupBy('drop_id').execute();
+    return new Map(rows.map((r) => [r.drop_id, Number(r.n)]));
+  }
+
+  /** The releases of `ids` with a turn or a hold still running. */
+  private async openHolds(db: Db, ids: readonly string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await db.selectFrom('live_entries').select('drop_id').distinct().where('drop_id', 'in', [...ids]).where('status', 'in', ['TURN', 'SECURED']).execute();
+    return new Set(rows.map((r) => r.drop_id));
+  }
+
+  private card(r: ReadRow, now: Date, counts: Record<LiveEntryStatus, number> | undefined, interest: number, holding: boolean): AdminLiveCard {
+    const phase = livePhase(r, now);
+    return {
+      id: r.id,
+      title: r.title,
+      model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active },
+      phase,
+      over: phase === 'ENDED' && !holding,
+      announcedAt: announcedAt(r),
+      roomOpensAt: roomOpensAt(r),
+      opensAt: r.opens_at,
+      closesAt: r.closes_at,
+      quantity: r.quantity,
+      quantityLine: r.quantity_line ?? defaultQuantityLine(r.quantity),
+      priceMinor: r.price_minor ?? 0,
+      currency: r.currency ?? 'EUR',
+      endedReason: r.ended_reason,
+      entries: counts ?? EMPTY_COUNTS(),
+      interest,
+    };
+  }
+
+  private async release(db: Db, id: string): Promise<AdminLiveRelease> {
+    const r = await this.reads(db).where('d.id', '=', id).where('d.mode', '=', 'LIVE').executeTakeFirst();
+    if (!r) throw dropNotFound();
+    const now = this.clock();
+    const [s, counts, interest, holding, models, collection, posts, creator] = await Promise.all([
+      this.settings(db, r),
+      this.counts(db, [id]),
+      this.interest(db, [id]),
+      this.openHolds(db, [id]),
+      db.selectFrom('live_access_models as a').innerJoin('models as m', 'm.id', 'a.model_id').select(['m.id', 'm.name']).where('a.drop_id', '=', id).orderBy('m.name').orderBy('m.id').execute(),
+      r.access_collection_id ? db.selectFrom('collections').select(['id', 'name']).where('id', '=', r.access_collection_id).executeTakeFirst() : undefined,
+      db.selectFrom('circle_posts').select(['id', 'published_at']).where('drop_id', '=', id).orderBy('created_at').orderBy('id').execute(),
+      r.created_by ? db.selectFrom('admin_users').select(['id', 'email']).where('id', '=', r.created_by).executeTakeFirst() : undefined,
+    ]);
+    const stages = liveStages(r, now);
+    const silhouette = r.silhouette_sha256 ? { sha256: r.silhouette_sha256, url: mediaUrl(r.silhouette_sha256)! } : null;
+    return {
+      ...this.card(r, now, counts.get(id), interest.get(id) ?? 0, holding.has(id)),
+      description: r.description,
+      editable: !r.cancelled_at && !isAnnounced(r, now),
+      roomOpensMinutes: s.roomOpensMinutes,
+      turnSeconds: s.turnSeconds,
+      payMinutes: s.payMinutes,
+      perAccount: s.perAccount,
+      minTier: s.minTier,
+      tierPriority: s.tierPriority,
+      access: {
+        models,
+        collection: collection ?? null,
+        text: liveRuleText({ minTier: Math.min(3, Math.max(0, s.minTier)) as 0 | 1 | 2 | 3, models, collection: collection ?? null }),
+      },
+      sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
+      addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
+      tierWindows: s.tierWindows,
+      announceAt: r.announce_at,
+      silhouetteAt: r.silhouette_at,
+      nameAt: r.name_at,
+      photoAt: r.photo_at,
+      stages: stages ? { silhouetteAt: stages.silhouetteAt, nameAt: stages.nameAt, photoAt: stages.photoAt } : null,
+      silhouette,
+      boardLink: r.board_token_issued_at ? { issuedAt: r.board_token_issued_at } : null,
+      circlePosts: posts.map((p) => ({ id: p.id, publishedAt: p.published_at })),
+      publishedAt: r.published_at,
+      cancelledAt: r.cancelled_at,
+      pausedAt: r.paused_at,
+      pausedMs: Number(r.paused_ms_total),
+      endedAt: r.ended_at,
+      createdAt: r.created_at,
+      createdBy: creator ?? null,
+      seedHash: toHex(r.seed_hash),
+    };
+  }
+
+  /** Entries as the console reads them, by place (the line), then arrival; deadlines as they stand now. */
+  private async adminEntries(db: Db, d: DropRow, filter: { statuses: readonly LiveEntryStatus[] | null }, limit: number, offset: number, now: Date): Promise<AdminLiveEntry[]> {
+    let q = db
+      .selectFrom('live_entries as e')
+      .innerJoin('accounts as a', 'a.id', 'e.account_id')
+      .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
+      .select([
+        'e.id', 'e.account_id', 'a.email', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
+        'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by',
+      ])
+      .where('e.drop_id', '=', d.id);
+    if (filter.statuses) q = q.where('e.status', 'in', [...filter.statuses]);
+    const rows = await q
+      .orderBy(sql`e.position IS NULL`)
+      .orderBy('e.position')
+      .orderBy('e.joined_at')
+      .orderBy('e.id')
+      .limit(limit)
+      .offset(offset)
+      .execute();
+    return rows.map((r) => ({
+      id: r.id,
+      accountId: r.account_id,
+      email: r.email,
+      status: r.status,
+      size: { id: r.size_id, label: r.label },
+      quantity: r.quantity,
+      tier: r.tier,
+      position: r.position,
+      joinedAt: r.joined_at,
+      turnAt: r.turn_at,
+      turnExpiresAt: r.status === 'TURN' && r.turn_expires_at ? effectiveDeadline(r.turn_expires_at, d, now) : r.turn_expires_at,
+      securedAt: r.secured_at,
+      holdExpiresAt: r.status === 'SECURED' && r.hold_expires_at ? effectiveDeadline(r.hold_expires_at, d, now) : r.hold_expires_at,
+      confirmedAt: r.confirmed_at,
+      endedAt: r.ended_at,
+      gestureMs: r.gesture_ms,
+      letIn: r.let_in_by !== null,
+    }));
+  }
+
+  private async reservationRows(db: Db, dropId: string, o: { limit?: number; offset?: number; entryId?: string }): Promise<AdminLiveReservation[]> {
+    let q = db
+      .selectFrom('live_entries as e')
+      .innerJoin('drops as d', 'd.id', 'e.drop_id')
+      .innerJoin('accounts as a', 'a.id', 'e.account_id')
+      .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
+      .leftJoin('admin_users as h', 'h.id', 'e.handled_by')
+      .select([
+        'e.id', 'e.account_id', 'a.email', 'e.size_id', 's.label', 'e.quantity', 'd.price_minor', 'd.currency', 'e.confirmed_at', 'e.resolution', 'e.resolution_note',
+        'e.handled_by', 'h.email as handled_email', 'e.handled_at',
+      ])
+      .where('e.drop_id', '=', dropId)
+      .where('e.status', '=', 'CONFIRMED');
+    if (o.entryId) q = q.where('e.id', '=', o.entryId);
+    q = q.orderBy('e.confirmed_at').orderBy('e.id');
+    if (o.limit !== undefined) q = q.limit(o.limit).offset(o.offset ?? 0);
+    const rows = await q.execute();
+    const addons = rows.length
+      ? await db
+          .selectFrom('live_entry_addons as x')
+          .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
+          .select(['x.entry_id', 'l.id', 'l.label', 'x.price_minor'])
+          .where('x.entry_id', 'in', rows.map((r) => r.id))
+          .orderBy('l.position')
+          .execute()
+      : [];
+    return rows.map((r) => {
+      const own = addons.filter((a) => a.entry_id === r.id).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor }));
+      const unit = (r.price_minor ?? 0) + own.reduce((n, a) => n + a.priceMinor, 0);
+      return {
+        id: r.id,
+        reference: liveReference(r.id),
+        accountId: r.account_id,
+        email: r.email,
+        size: { id: r.size_id, label: r.label },
+        quantity: r.quantity,
+        currency: r.currency ?? 'EUR',
+        priceMinor: r.price_minor ?? 0,
+        addons: own,
+        totalMinor: r.quantity * unit,
+        confirmedAt: r.confirmed_at!,
+        resolution: r.resolution,
+        note: r.resolution_note,
+        handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
+        handledAt: r.handled_at,
+      };
+    });
+  }
+}

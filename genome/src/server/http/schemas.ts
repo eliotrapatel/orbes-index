@@ -18,6 +18,8 @@ import {
   CLUB_TIER_NAMES,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
+  LIVE_ENTRY_STATUSES,
+  LIVE_RESOLUTIONS,
   LOOKBOOK_STATES,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
@@ -34,7 +36,16 @@ import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPT
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
-import { LIVE_ADDONS_MAX, LIVE_PER_ACCOUNT } from '../services/live.js';
+import { LIVE_ADD_PIECES, LIVE_ADDONS_MAX, LIVE_EXTEND_MINUTES, LIVE_MESSAGE_MAX, LIVE_PAY_MINUTES, LIVE_PER_ACCOUNT, LIVE_ROOM_OPENS_MINUTES, LIVE_SIZE_STOCK_MAX, LIVE_TURN_SECONDS } from '../services/live.js';
+import {
+  LIVE_ACCESS_MODELS_MAX,
+  LIVE_ADDON_LIMITS,
+  LIVE_CURRENCIES,
+  LIVE_PRICE_MAX_MINOR,
+  LIVE_QUANTITY_LINE_MAX,
+  LIVE_RESOLUTION_NOTE_MAX,
+  LIVE_SIZES,
+} from '../services/live-console.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
@@ -528,6 +539,97 @@ export const dropEntryNoteBody = optionalBody({
   note: z.preprocess((v) => (v === '' ? null : v), text(DROP_NOTE_MAX).nullable().optional()),
 });
 
+// ── Admin: the LIVE RELEASES (routes/admin/live.ts) ────────────────────────
+
+/** '' as the console's forms send an empty field: null. */
+const emptyToNull = (v: unknown) => (v === '' ? null : v);
+
+export const liveAdminParams = z.object({ id: uuid });
+
+export const liveAdminEntryParams = z.object({ id: uuid, entryId: uuid });
+
+const whole = (min: number, max: number, unit: string) =>
+  z.number().int(`Must be a whole number of ${unit}`).min(min, `At least ${min} ${unit}`).max(max, `At most ${max} ${unit}`);
+const livePrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(LIVE_PRICE_MAX_MINOR, `At most ${LIVE_PRICE_MAX_MINOR} cents`);
+const liveTime = z.preprocess(emptyToNull, isoDateTime.nullable().optional());
+/** The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists' ids). */
+const liveSettingsFields = {
+  modelId: uuid,
+  title: dropTitle,
+  description: z.preprocess(emptyToNull, text(DROP_DESCRIPTION_MAX).nullable().optional()),
+  opensAt: isoDateTime,
+  closesAt: isoDateTime,
+  roomOpensMinutes: whole(LIVE_ROOM_OPENS_MINUTES.min, LIVE_ROOM_OPENS_MINUTES.max, 'minutes').optional(),
+  turnSeconds: whole(LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, 'seconds').optional(),
+  payMinutes: whole(LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, 'minutes').optional(),
+  perAccount: whole(LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, 'pieces').optional(),
+  priceMinor: livePrice,
+  currency: z.enum(LIVE_CURRENCIES).optional(),
+  minTier: z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0 (every ORBES account)').max(3, 'At most 3 (PALLADIUM)').optional(),
+  tierPriority: z.boolean().optional(),
+  accessModelIds: z.array(uuid).max(LIVE_ACCESS_MODELS_MAX, `At most ${LIVE_ACCESS_MODELS_MAX} models`).optional(),
+  accessCollectionId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  sizes: z
+    .array(z.strictObject({ id: uuid.nullable().optional(), label: text(LIVE_SIZES.label), stock: whole(0, LIVE_SIZE_STOCK_MAX, 'pieces') }))
+    .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
+    .max(LIVE_SIZES.max, `At most ${LIVE_SIZES.max} sizes`),
+  quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
+  addons: z
+    .array(
+      z.strictObject({
+        id: uuid.nullable().optional(),
+        label: text(LIVE_ADDON_LIMITS.label),
+        line: z.preprocess(emptyToNull, text(LIVE_ADDON_LIMITS.line).nullable().optional()),
+        priceMinor: livePrice,
+      }),
+    )
+    .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`)
+    .optional(),
+  announceAt: liveTime,
+  silhouetteAt: liveTime,
+  nameAt: liveTime,
+  photoAt: liveTime,
+  tierWindows: z
+    .array(
+      z.strictObject({
+        tier: z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3'),
+        turnSeconds: whole(LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, 'seconds').nullable().optional(),
+        payMinutes: whole(LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, 'minutes').nullable().optional(),
+      }),
+    )
+    .max(4, 'At most one override per tier')
+    .optional(),
+};
+
+/** POST /api/admin/live: a LIVE RELEASE, a DRAFT, with its settings (the defaults for those left out). */
+export const createLiveBody = body(liveSettingsFields).refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'The release ends after T0', path: ['closesAt'] });
+
+/** PATCH /api/admin/live/:id: any setting until the announcement; a list given replaces the release's. At least one. */
+export const updateLiveBody = body(Object.fromEntries(Object.entries(liveSettingsFields).map(([k, v]) => [k, (v as z.ZodType).optional()])) as {
+  [K in keyof typeof liveSettingsFields]: z.ZodOptional<(typeof liveSettingsFields)[K]>;
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one setting of the release to change');
+
+/** POST /api/admin/live/:id/publish: with a post of the owners' circle linking the release, or not. */
+export const publishLiveBody = optionalBody({ circlePost: z.boolean().optional() });
+
+/** POST /api/admin/live/:id/extend: the end of the sales moved later by 1 to 240 minutes. */
+export const liveExtendBody = body({ minutes: whole(LIVE_EXTEND_MINUTES.min, LIVE_EXTEND_MINUTES.max, 'minutes') });
+
+/** POST /api/admin/live/:id/stock: ADD PIECES to a size. */
+export const liveStockBody = body({ sizeId: uuid, pieces: whole(LIVE_ADD_PIECES.min, LIVE_ADD_PIECES.max, 'pieces') });
+
+/** POST /api/admin/live/:id/messages: one line for the room. */
+export const liveMessageBody = body({ text: text(LIVE_MESSAGE_MAX).refine((s) => !/[\r\n]/.test(s), 'One line') });
+
+/** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
+export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });
+
+/** POST /api/admin/live/:id/entries/:entryId/resolve: CONCLUDED or CANCELLED, with an optional note (Client Services). */
+export const liveResolveBody = body({
+  resolution: z.enum(LIVE_RESOLUTIONS),
+  note: z.preprocess(emptyToNull, text(LIVE_RESOLUTION_NOTE_MAX).nullable().optional()),
+});
+
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
 export const circlePostParams = z.object({ id: uuid });
@@ -535,7 +637,6 @@ export const circlePostParams = z.object({ id: uuid });
 /** DELETE /api/admin/circle/posts/:id/photos/:sha256: a photograph of the post. */
 export const circlePhotoParams = z.object({ id: uuid, sha256: sha256Hex });
 
-const emptyToNull = (v: unknown) => (v === '' ? null : v);
 const circleTier = z.number().int('Must be a tier: 1, 2 or 3').min(1, 'At least 1 (TITANE)').max(3, 'At most 3 (PALLADIUM)');
 const circleCapacity = z.number().int('Must be a whole number of places').min(1, 'At least 1 place').max(CIRCLE_CAPACITY_MAX, `At most ${CIRCLE_CAPACITY_MAX} places`);
 const circlePollOptions = z

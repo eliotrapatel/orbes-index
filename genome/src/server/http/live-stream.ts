@@ -5,23 +5,29 @@
  *             an entry in it): `room` events, the room as LiveRoomService.frame builds it, and `you` events, the
  *             account's own entry (with its turn's secret while it is its turn), each sent when it changed;
  *   boards    POST /api/v1/live/:id/board/stream, by the board's secret link: `board` events (the countdown, the door, the
- *             pieces left overall), sent when they changed.
+ *             pieces left overall), sent when they changed;
+ *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
+ *             (`{ now, board }`), the live board as LiveConsoleService.board builds it (the counters, the line), the customers' emails in clear
+ *             for an OPERATOR or an ADMIN and masked for an AUDITOR (`consoleView`), sent when it changed.
  * Every event carries the server's time (`now`); a comment line keeps a quiet stream open every LIVE_HEARTBEAT_MS
  * (20 s), under the server's idle timeout and the proxies'.
  *
  * One pulse a second (LIVE_PULSE_MS) for each release that has a stream open on this process: its frame built once
- * (four reads) and the entries of all its viewers read at once (a few more), then fanned out from memory. The database
+ * (four reads) and the entries of all its viewers read at once (a few more), then fanned out from memory; its console
+ * board, when a console follows it, built once too. The database
  * work per second grows with the releases followed, never with the people following them; the state that a client
  * polls when its stream is lost (`room`) shares the same frame, at most a pulse old. A frame that no longer exists (the
  * release cancelled) closes its streams; a release that is over sends its last frame, then closes them, and a stream
  * asked for again answers 204, which an EventSource takes as the end. An entry REMOVED sends its last `you` event and
  * closes that stream. A stream is checked again at every pulse, not only when it opens: a viewer's session that has
- * ended (signed out, revoked, its account locked or disabled: one read for every viewer of the process) and a board
- * whose link has been replaced or revoked since it opened (the frame carries the link's hash) close their streams,
- * which then reconnect through the same checks as a new one.
+ * ended (signed out, revoked, its account locked or disabled: one read for every viewer of the process), a console's
+ * whose session has ended or whose role no longer reads the console (one read for every console; a role changed between
+ * AUDITOR and OPERATOR changes how its emails read from the next event) and a board whose link has been replaced or
+ * revoked since it opened (the frame carries the link's hash) close their streams, which then reconnect through the same
+ * checks as a new one. A console's stream ends with its release (cancelled, over) as a viewer's does.
  *
- * At most LIVE_STREAMS_PER_ACCOUNT (2) streams per account on a process (429 LIVE_STREAMS_LIMIT for a third: the page
- * then polls its state). A disconnection removes the stream at once; a client that does not read (more than
+ * At most LIVE_STREAMS_PER_ACCOUNT (2) streams per account, and per console user, on a process (429 LIVE_STREAMS_LIMIT
+ * for a third: the page then polls its state). A disconnection removes the stream at once; a client that does not read (more than
  * MAX_BUFFERED_BYTES waiting) is disconnected; the server's shutdown (app.ts, preClose) ends every stream. Streams
  * live in the process that serves them: with several instances, each builds the frames its own streams need.
  */
@@ -29,6 +35,7 @@ import type { ServerResponse } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DomainError } from '../errors.js';
 import type { LiveEntryView } from '../services/live.js';
+import type { AdminLiveBoard } from '../services/live-console.js';
 import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 
@@ -52,8 +59,18 @@ export interface LiveHubOptions {
   perAccount?: number;
 }
 
+/** What the console's streams read (services/live-console.ts LiveConsoleService). */
+export interface LiveConsoleSource {
+  board(dropId: string): Promise<AdminLiveBoard | null>;
+  consoleSessions(sessionIds: readonly string[]): Promise<Map<string, { inClear: boolean }>>;
+}
+
 export interface LiveHubDeps extends LiveHubOptions {
   room: LiveRoomService;
+  /** The console's live board; without it, no console stream opens. */
+  console?: LiveConsoleSource;
+  /** The live board as a console reads it: the emails in clear or masked (routes/admin/live.ts liveBoardJson). */
+  consoleView?: (board: AdminLiveBoard, inClear: boolean) => unknown;
   clock?: Clock;
   log?: Logger;
 }
@@ -82,7 +99,16 @@ interface BoardStream extends Stream {
   tokenHash: Uint8Array;
 }
 
-type AnyStream = ViewerStream | BoardStream;
+interface ConsoleStream extends Stream {
+  kind: 'console';
+  /** The console user, whose streams are counted as an account's (`admin:<id>`). */
+  adminId: string;
+  /** Its session (SessionInfo.id), checked at every pulse with the role it reads under. */
+  sessionId: string;
+  inClear: boolean;
+}
+
+type AnyStream = ViewerStream | BoardStream | ConsoleStream;
 
 /** The same link's hash (not a secret: both sides are the server's own hashes). */
 function sameHash(a: Uint8Array, b: Uint8Array | null): boolean {
@@ -91,6 +117,8 @@ function sameHash(a: Uint8Array, b: Uint8Array | null): boolean {
 
 export class LiveHub {
   private readonly room: LiveRoomService;
+  private readonly console: LiveConsoleSource | undefined;
+  private readonly consoleView: (board: AdminLiveBoard, inClear: boolean) => unknown;
   private readonly clock: Clock;
   private readonly log: Logger;
   private readonly pulseMs: number;
@@ -100,12 +128,15 @@ export class LiveHub {
   private readonly streams = new Map<string, Set<AnyStream>>();
   private readonly accounts = new Map<string, number>();
   private readonly frames = new Map<string, { at: number; frame: Promise<LiveFrame | null> }>();
+  private readonly boards = new Map<string, { at: number; board: Promise<AdminLiveBoard | null> }>();
   private timer: NodeJS.Timeout | undefined;
   private pulsing: Promise<void> | undefined;
   private stopped = false;
 
   constructor(deps: LiveHubDeps) {
     this.room = deps.room;
+    this.console = deps.console;
+    this.consoleView = deps.consoleView ?? ((board) => board);
     this.clock = deps.clock ?? systemClock;
     this.log = deps.log ?? noopLogger;
     this.pulseMs = deps.pulseMs ?? LIVE_PULSE_MS;
@@ -170,6 +201,33 @@ export class LiveHub {
   }
 
   /**
+   * Open a console's stream (the route has checked its session and role): the live board, its emails as `inClear`
+   * says, for as long as its session reads the console. 429 LIVE_STREAMS_LIMIT past the console user's streams; 204 for a
+   * release that is not published, cancelled or over (the page then reads the board once).
+   */
+  async openConsole(request: FastifyRequest, reply: FastifyReply, dropId: string, staff: { adminId: string; sessionId: string; inClear: boolean }): Promise<void> {
+    if (!this.console) throw new DomainError('NOT_FOUND', 404, 'Not found.');
+    const key = `admin:${staff.adminId}`;
+    const held = this.accounts.get(key) ?? 0;
+    if (held >= this.perAccount) throw liveStreamsLimit();
+    this.accounts.set(key, held + 1);
+    let registered = false;
+    try {
+      const board = await this.consoleBoard(dropId, false);
+      if (!board || board.phase === 'DRAFT' || board.phase === 'CANCELLED' || board.over) {
+        reply.code(204).send();
+        return;
+      }
+      const stream: ConsoleStream = { kind: 'console', dropId, adminId: staff.adminId, sessionId: staff.sessionId, inClear: staff.inClear, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
+      this.register(stream);
+      registered = true;
+      this.deliverConsole(stream, board, new Map());
+    } finally {
+      if (!registered) this.release(key);
+    }
+  }
+
+  /**
    * One pulse: the viewers whose session has ended closed; for each release followed, its frame built once and its
    * viewers' entries read at once, its boards whose link has changed closed, each other stream sent what changed for
    * it; a heartbeat to the quiet ones. One pulse at a time.
@@ -187,6 +245,7 @@ export class LiveHub {
     this.stopTimer();
     for (const set of [...this.streams.values()]) for (const s of [...set]) this.close(s);
     this.frames.clear();
+    this.boards.clear();
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -197,17 +256,28 @@ export class LiveHub {
       if (set.size === 0) continue;
       // The streams opened while the frame is built were checked against the database by their route, after it.
       const checked = new Set(set);
+      const consoles = [...set].filter((s): s is ConsoleStream => s.kind === 'console');
       try {
+        if (consoles.length > 0) {
+          const board = await this.consoleBoard(dropId, true);
+          const views = new Map<boolean, string>();
+          for (const s of consoles) {
+            if (!board || board.phase === 'CANCELLED') this.close(s);
+            else this.deliverConsole(s, board, views);
+          }
+          if (board?.over) for (const s of consoles) this.close(s);
+        }
+        if (consoles.length === set.size) continue;
         const frame = await this.frame(dropId, true);
         if (!frame) {
-          for (const s of [...set]) this.close(s);
+          for (const s of [...set]) if (s.kind !== 'console') this.close(s);
           continue;
         }
         for (const s of [...set]) if (s.kind === 'board' && checked.has(s) && !sameHash(s.tokenHash, frame.boardTokenHash)) this.close(s);
         const viewers = [...set].filter((s): s is ViewerStream => s.kind === 'viewer').map((s) => s.accountId);
         const views = await this.room.viewerEntries(dropId, [...new Set(viewers)]);
-        for (const s of [...set]) this.deliver(s, frame, views);
-        if (frame.room.over) for (const s of [...set]) this.close(s);
+        for (const s of [...set]) if (s.kind !== 'console') this.deliver(s, frame, views);
+        if (frame.room.over) for (const s of [...set]) if (s.kind !== 'console') this.close(s);
       } catch (e) {
         this.log.error({ dropId, err: { message: (e as Error)?.message } }, 'live stream: a release could not be read');
       }
@@ -218,16 +288,64 @@ export class LiveHub {
     }
   }
 
-  /** Close the viewer streams whose session has ended (one read for all of them). */
+  /**
+   * Close the viewer streams whose session has ended (one read for all of them), and the console streams whose session
+   * no longer reads the console (one read for all of them); a console's role read again says how its emails read.
+   */
   private async endSignedOut(): Promise<void> {
-    const viewers = [...this.streams.values()].flatMap((set) => [...set]).filter((s): s is ViewerStream => s.kind === 'viewer');
-    if (viewers.length === 0) return;
-    try {
-      const live = await this.room.liveSessions(viewers.map((s) => s.sessionId));
-      for (const s of viewers) if (!live.has(s.sessionId)) this.close(s);
-    } catch (e) {
-      this.log.error({ err: { message: (e as Error)?.message } }, 'live stream: the viewers\' sessions could not be read');
+    const all = [...this.streams.values()].flatMap((set) => [...set]);
+    const viewers = all.filter((s): s is ViewerStream => s.kind === 'viewer');
+    const consoles = all.filter((s): s is ConsoleStream => s.kind === 'console');
+    if (viewers.length > 0) {
+      try {
+        const live = await this.room.liveSessions(viewers.map((s) => s.sessionId));
+        for (const s of viewers) if (!live.has(s.sessionId)) this.close(s);
+      } catch (e) {
+        this.log.error({ err: { message: (e as Error)?.message } }, 'live stream: the viewers\' sessions could not be read');
+      }
     }
+    if (consoles.length > 0 && this.console) {
+      try {
+        const live = await this.console.consoleSessions(consoles.map((s) => s.sessionId));
+        for (const s of consoles) {
+          const session = live.get(s.sessionId);
+          if (!session) this.close(s);
+          else if (session.inClear !== s.inClear) {
+            s.inClear = session.inClear;
+            s.sent = undefined;
+          }
+        }
+      } catch (e) {
+        this.log.error({ err: { message: (e as Error)?.message } }, 'live stream: the consoles\' sessions could not be read');
+      }
+    }
+  }
+
+  /** A release's live board for the consoles: built again when `fresh` or older than the cache's time; one build at a time. */
+  private consoleBoard(dropId: string, fresh: boolean): Promise<AdminLiveBoard | null> {
+    const now = performance.now();
+    const cached = this.boards.get(dropId);
+    if (cached && !fresh && now - cached.at < this.cacheMs) return cached.board;
+    const board = this.console ? this.console.board(dropId) : Promise.resolve(null);
+    const entry = { at: now, board };
+    this.boards.set(dropId, entry);
+    board.catch(() => {
+      if (this.boards.get(dropId) === entry) this.boards.delete(dropId);
+    });
+    return board;
+  }
+
+  /** Send a console the live board when it changed for it (its JSON made once per pulse for each way of reading emails). */
+  private deliverConsole(s: ConsoleStream, board: AdminLiveBoard, views: Map<boolean, string>): void {
+    if (s.closed) return;
+    let json = views.get(s.inClear);
+    if (json === undefined) {
+      json = JSON.stringify(this.consoleView(board, s.inClear));
+      views.set(s.inClear, json);
+    }
+    if (json === s.sent) return;
+    s.sent = json;
+    this.write(s, `event: console\ndata: {"now":${JSON.stringify(this.clock())},"board":${json}}\n\n`);
   }
 
   /** The frame of a release: built again when `fresh` or older than the cache's time; one build at a time per release. */
@@ -276,7 +394,7 @@ export class LiveHub {
   }
 
   /** Send what changed for this stream since its last event. */
-  private deliver(s: AnyStream, frame: LiveFrame, views: ReadonlyMap<string, LiveEntryView>): void {
+  private deliver(s: ViewerStream | BoardStream, frame: LiveFrame, views: ReadonlyMap<string, LiveEntryView>): void {
     if (s.closed) return;
     const now = this.clock();
     const data = s.kind === 'viewer' ? frame.room : frame.board;
@@ -318,8 +436,10 @@ export class LiveHub {
     if (set && set.size === 0) {
       this.streams.delete(s.dropId);
       this.frames.delete(s.dropId);
+      this.boards.delete(s.dropId);
     }
     if (s.kind === 'viewer') this.release(s.accountId);
+    if (s.kind === 'console') this.release(`admin:${s.adminId}`);
     if (!s.res.writableEnded) s.res.end();
     if (this.streams.size === 0) this.stopTimer();
   }

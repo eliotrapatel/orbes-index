@@ -3099,6 +3099,96 @@ a.bar__label:hover {
   gap: 6px;
 }
 
+/* ── Club: the LIVE RELEASES ───────────────────────────────────────────── */
+
+/* The Drops tab holds two lists: the first sits under the page's head as a lone panel does. */
+.club__drops > .panel:first-child {
+  margin-top: 0;
+}
+
+/* The live board: its state, then its figures in two rows of four. */
+.live__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
+  margin: 6px 0 18px;
+}
+
+.live__updated,
+.live__note {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.live__updated {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.live__figures .kpi:nth-child(4n + 1) {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.live__figures .kpi:nth-child(n + 5) {
+  border-top: 1px solid var(--hairline);
+  padding-top: 18px;
+}
+
+.live__message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  margin-top: 18px;
+  padding: 14px 18px;
+  background: var(--ivory);
+}
+
+.live__message[hidden] {
+  display: none;
+}
+
+.live__message-label {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.live__message-text {
+  font-size: var(--fs-body);
+}
+
+.live__sizes {
+  margin-top: 22px;
+}
+
+/* A size's label is a value (52, 54, ONE SIZE): the reading face, its figures aligned. */
+.live__size {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.live__parts {
+  align-items: start;
+}
+
+.live__silhouette {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* The board's link, shown once: wraps anywhere rather than overflow the dialog. */
+.live__link {
+  margin: 14px 0;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
@@ -3121,6 +3211,7 @@ a.bar__label:hover {
 .panel__title,
 .panel__subtitle,
 .kpi__label,
+.live__message-label,
 .deflist__label,
 .table th,
 .empty__text,
@@ -3194,6 +3285,22 @@ a.bar__label:hover {
   .kpi:nth-child(3) {
     padding-left: 0;
     border-left: 0;
+  }
+  /* The live board's eight figures, two by two. */
+  .live__figures .kpi:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .live__figures .kpi:nth-child(even) {
+    padding-left: 28px;
+    border-left: 1px solid var(--hairline);
+  }
+  .live__figures .kpi:nth-child(n + 3) {
+    border-top: 1px solid var(--hairline);
+    padding-top: 18px;
+  }
+  .live__parts {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

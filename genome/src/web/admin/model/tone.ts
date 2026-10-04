@@ -55,6 +55,29 @@ const DROP: Record<string, Tone> = { DRAFT: 'outline', UPCOMING: 'outline', OPEN
  * force; an entry or the waiting list pending; a lapse or a withdrawal, historical.
  */
 const DROP_ENTRY: Record<string, Tone> = { ENTERED: 'outline', SELECTED: 'alert', WAITLISTED: 'outline', CONFIRMED: 'solid', LAPSED: 'muted', WITHDRAWN: 'muted' };
+/**
+ * A LIVE RELEASE: live, in force; a draft, scheduled, announced or its room open, pending; ended or cancelled, historical.
+ */
+const LIVE_PHASE: Record<string, Tone> = { DRAFT: 'outline', HIDDEN: 'outline', ANNOUNCED: 'outline', ROOM: 'solid', LIVE: 'solid', ENDED: 'muted', CANCELLED: 'muted' };
+/**
+ * An entry of a LIVE RELEASE: a hold waits for PAY, as an open case does; a turn and a confirmation in force; the room and
+ * the line pending; out of it, historical (a removal, needing attention).
+ */
+const LIVE_ENTRY: Record<string, Tone> = {
+  WAITING: 'outline',
+  QUEUED: 'outline',
+  TURN: 'solid',
+  SECURED: 'alert',
+  CONFIRMED: 'solid',
+  MISSED: 'muted',
+  EXPIRED: 'muted',
+  RELEASED: 'muted',
+  LEFT: 'muted',
+  REMOVED: 'alert',
+  ENDED: 'muted',
+};
+/** A reservation of a LIVE RELEASE: concluded, in force; cancelled, historical (none yet: waits for ORBES Client Services). */
+const LIVE_RESOLUTION: Record<string, Tone> = { CONCLUDED: 'solid', CANCELLED: 'muted' };
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
 /** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
@@ -92,7 +115,10 @@ export type ToneDomain =
   | 'dropEntry'
   | 'circle'
   | 'circleAnswer'
-  | 'shopRequest';
+  | 'shopRequest'
+  | 'livePhase'
+  | 'liveEntry'
+  | 'liveResolution';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -113,6 +139,9 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   circle: CIRCLE,
   circleAnswer: CIRCLE_ANSWER,
   shopRequest: SHOP_REQUEST,
+  livePhase: LIVE_PHASE,
+  liveEntry: LIVE_ENTRY,
+  liveResolution: LIVE_RESOLUTION,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

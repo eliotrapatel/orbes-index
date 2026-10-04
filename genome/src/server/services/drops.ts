@@ -308,14 +308,14 @@ export interface DropChange {
   earlyAccessHours?: number;
 }
 
-function cleanTitle(v: unknown): string {
+export function cleanTitle(v: unknown): string {
   const s = typeof v === 'string' ? v.trim() : '';
   if (s.length < 1 || s.length > DROP_TITLE_MAX || CONTROL_CHARS.test(s) || /\n/.test(s)) throw validationError(`A title is one line of 1 to ${DROP_TITLE_MAX} characters.`);
   return s;
 }
 
 /** Plain paragraphs, line breaks as \n; '' and null clear it. */
-function cleanDescription(v: unknown): string | null {
+export function cleanDescription(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   if (typeof v !== 'string') throw validationError('The description must be text.');
   const s = v.replace(/\r\n?/g, '\n').trim();
@@ -344,7 +344,7 @@ function cleanEarlyAccess(v: unknown): number {
   return v;
 }
 
-function cleanTime(v: unknown, label: string): Date {
+export function cleanTime(v: unknown, label: string): Date {
   const d = v instanceof Date ? v : new Date(Number.NaN);
   if (Number.isNaN(d.getTime())) throw validationError(`${label} must be a date and time.`);
   return d;
@@ -1405,4 +1405,16 @@ export class DropService {
     const r = await this.accountEntryRows(this.db).where('e.id', '=', entryId).where('e.account_id', '=', accountId).executeTakeFirstOrThrow();
     return accountEntryView(r, this.clock());
   }
+}
+
+/**
+ * A new drop's seed (DropService.create draws its own the same way; a LIVE RELEASE's console, services/live-console.ts,
+ * calls this one): 32 random bytes sealed for the drop `id` and committed by their SHA-256, the bytes zeroed once sealed.
+ */
+export function newSealedSeed(seedKey: Uint8Array, id: string): { sealed: string; seedHash: Uint8Array } {
+  const seed = new Uint8Array(randomBytes(DROP_SEED_BYTES));
+  const seedHash = sha256(seed);
+  const sealed = seal(seedKey, seed, seedAad(id));
+  seed.fill(0);
+  return { sealed, seedHash };
 }

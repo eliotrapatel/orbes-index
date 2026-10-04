@@ -168,6 +168,8 @@ export function effectiveDeadline(deadline: Date, d: Pick<DropRow, 'paused_at'>,
 
 /** Where a published LIVE RELEASE stands at `now`, from its row alone. */
 export type LivePhase = 'DRAFT' | 'CANCELLED' | 'HIDDEN' | 'ANNOUNCED' | 'ROOM' | 'LIVE' | 'ENDED';
+/** Every phase, in the order a release goes through them (the console mirrors it: web/admin/types.ts LIVE_PHASES). */
+export const LIVE_PHASES = Object.freeze(['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ROOM', 'LIVE', 'ENDED', 'CANCELLED'] as const satisfies readonly LivePhase[]);
 
 export function livePhase(d: Pick<DropRow, 'published_at' | 'cancelled_at' | 'announce_at' | 'opens_at' | 'closes_at' | 'room_opens_minutes' | 'ended_at'>, now: Date): LivePhase {
   if (d.cancelled_at) return 'CANCELLED';

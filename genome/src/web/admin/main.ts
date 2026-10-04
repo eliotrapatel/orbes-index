@@ -55,6 +55,7 @@ import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
+import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
@@ -141,6 +142,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   club: { view: clubView, title: 'Club', nav: 'club' },
   drop: { view: dropView, title: 'Drop', nav: 'club' },
+  liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },
   circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
@@ -405,6 +407,7 @@ function showLogin(notice?: string): void {
   resetProductViewState();
   resetCodesViewState();
   disposeSaleView();
+  disposeLiveView();
   setTitle('Sign in');
   mount(
     app,
@@ -487,8 +490,9 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
 }
 
 async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
-  // Whatever comes next, the camera of a sale screen being left stops now.
+  // Whatever comes next, the camera of a sale screen being left stops now, and so does a live board's stream.
   disposeSaleView();
+  disposeLiveView();
   const r = parseHash(location.hash);
   const s = session;
   if (!s) return showLogin(endedWhileHeld ? SESSION_ENDED : undefined);

@@ -13,8 +13,11 @@
  * Access (routes/club.ts): a signed-in account that holds a piece now, as the
  * club counts them (club.ts `tierOf`), read again at every request, so the
  * circle goes with the last piece (403 OWNERS_ONLY). A post reads from its
- * `min_tier` up only: below it, unpublished or unknown, it answers the same
- * 404 CIRCLE_POST_NOT_FOUND. The feed is paginated and carries no body (the
+ * `min_tier` up only, from its `published_at` on (the publication of a LIVE
+ * RELEASE schedules its post for the release's announcement): below its tier,
+ * unpublished, not shown yet or unknown, it answers the same 404
+ * CIRCLE_POST_NOT_FOUND. A LIVE RELEASE it links is named once its name is
+ * revealed, and linked only once announced (`linkedDrop`). The feed is paginated and carries no body (the
  * verify client refuses answers over 256 000 characters): a post does.
  *
  * An answer to an invitation (`circle_rsvps`, one per account, changed in
@@ -37,12 +40,13 @@
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { CIRCLE_POST_KINDS, CIRCLE_RSVP_ANSWERS, type CirclePostKind, type CirclePostRow, type CirclePostUpdate, type CircleRsvpAnswer, type LookbookState } from '../db/schema.js';
+import { CIRCLE_POST_KINDS, CIRCLE_RSVP_ANSWERS, type CirclePostKind, type CirclePostRow, type CirclePostUpdate, type CircleRsvpAnswer, type DropRow, type LookbookState } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, noopLogger, pageOffset, pageRequest, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
 import { clubMembersByTier, ownersOnly, tierOf, type ClubMembers } from './club.js';
 import { dropNotFound, dropState, type DropState } from './drops.js';
+import { isAnnounced, liveStages } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { readActingAccount } from './ownership.js';
@@ -440,7 +444,7 @@ export class CircleService {
     const now = this.clock();
     const { tier } = await tierOf(this.db, accountId, now);
     if (tier < 1) throw ownersOnly();
-    const shown = this.db.selectFrom('circle_posts as p').where('p.published_at', 'is not', null).where('p.min_tier', '<=', tier);
+    const shown = this.db.selectFrom('circle_posts as p').where('p.published_at', '<=', now).where('p.min_tier', '<=', tier);
     const total = await shown.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await shown.select([...CARD_COLUMNS]).orderBy('p.published_at', 'desc').orderBy('p.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const ids = rows.map((r) => r.id);
@@ -490,7 +494,7 @@ export class CircleService {
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < 1) throw ownersOnly();
       const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'event_at', 'capacity']).where('id', '=', id).forUpdate().executeTakeFirst();
-      if (!p || !p.published_at || p.min_tier > standing.tier) throw circlePostNotFound();
+      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier) throw circlePostNotFound();
       if (p.kind !== 'INVITATION') throw notInvitation();
       if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();
       const mine = await tx.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
@@ -528,7 +532,7 @@ export class CircleService {
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < 1) throw ownersOnly();
       const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'poll_options']).where('id', '=', id).forShare().executeTakeFirst();
-      if (!p || !p.published_at || p.min_tier > standing.tier) throw circlePostNotFound();
+      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier) throw circlePostNotFound();
       if (p.kind !== 'POLL' || !p.poll_options) throw notPoll();
       if (option >= p.poll_options.length) throw validationError('Choose one of the options of this poll.');
       const voted = await tx.selectFrom('circle_poll_votes').select('option_index').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
@@ -848,12 +852,12 @@ export class CircleService {
     const db = this.db;
     const now = this.clock();
     const p = await db.selectFrom('circle_posts').selectAll().where('id', '=', id).executeTakeFirst();
-    if (!p || !p.published_at || p.min_tier > tier) throw circlePostNotFound();
+    if (!p || !shownAt(p.published_at, now) || p.min_tier > tier) throw circlePostNotFound();
     const [images, mine, vote, drop, model] = await Promise.all([
       db.selectFrom('circle_post_images').select(['sha256', 'alt']).where('post_id', '=', id).orderBy('position').execute(),
       db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       db.selectFrom('circle_poll_votes').select('option_index').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
-      p.drop_id ? db.selectFrom('drops').select(['id', 'title', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at']).where('id', '=', p.drop_id).executeTakeFirst() : undefined,
+      p.drop_id ? db.selectFrom('drops').select([...LINKED_DROP_COLUMNS]).where('id', '=', p.drop_id).executeTakeFirst() : undefined,
       p.model_id ? db.selectFrom('models').select(['slug', 'name', 'type', 'lookbook', 'private_min_tier']).where('id', '=', p.model_id).executeTakeFirst() : undefined,
     ]);
     const photos = images.flatMap((i) => {
@@ -886,7 +890,7 @@ export class CircleService {
       kind: p.kind,
       title: p.title,
       minTier: p.min_tier,
-      publishedAt: p.published_at,
+      publishedAt: p.published_at!,
       cover: photos[0] ?? null,
       eventAt: p.event_at,
       eventPlace: p.event_place,
@@ -897,7 +901,7 @@ export class CircleService {
       invitation,
       poll,
       links: {
-        drop: drop && dropState(drop, now) !== 'DRAFT' ? { id: drop.id, title: drop.title } : null,
+        drop: drop ? linkedDrop(drop, now) : null,
         // A RESERVED model is linked only for a member whose tier reaches it in the private salon (P-X08): its sheet is 404 below.
         model: model && model.slug && (model.lookbook === 'PUBLIC' || (model.lookbook === 'RESERVED' && model.private_min_tier <= tier)) ? { slug: model.slug, name: model.name, type: model.type } : null,
         external: p.external_url && host ? { url: p.external_url, host } : null,
@@ -973,4 +977,29 @@ export class CircleService {
 function knownLink(id: string, missing: () => DomainError): string {
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw missing();
   return id.toLowerCase();
+}
+
+// ── A post as its readers see it ──────────────────────────────────────────
+
+/**
+ * A post is shown from its `published_at` on: the console publishes one at once, and the publication of a LIVE RELEASE
+ * (services/live-console.ts) schedules its own for the release's announcement; NULL, it is withdrawn.
+ */
+function shownAt(publishedAt: Date | null, now: Date): boolean {
+  return publishedAt !== null && publishedAt.getTime() <= now.getTime();
+}
+
+/** What a member's view of a post reads of the drop it links. */
+const LINKED_DROP_COLUMNS = [
+  'id', 'title', 'mode', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes',
+] as const;
+
+/**
+ * The drop a post links, as a member reads it: a draw once published; a LIVE RELEASE once announced and while not
+ * cancelled, its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too).
+ */
+function linkedDrop(d: Pick<DropRow, (typeof LINKED_DROP_COLUMNS)[number]>, now: Date): { id: string; title: string } | null {
+  if (d.mode !== 'LIVE') return dropState(d, now) !== 'DRAFT' ? { id: d.id, title: d.title } : null;
+  if (d.cancelled_at || !isAnnounced(d, now)) return null;
+  return { id: d.id, title: liveStages(d, now)?.name ? d.title : 'LIVE RELEASE' };
 }

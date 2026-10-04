@@ -1,0 +1,816 @@
+/**
+ * A LIVE RELEASE in the console, `#/club/live/:dropId`, reached from the Club page's Drops tab (no link of its own in
+ * the sidebar). Model in model/live.ts; routes in server/routes/admin/live.ts.
+ *
+ *  - The live board, once published: the release's state (paused, ending, over), its figures (in the room, in line,
+ *    turns, secured, confirmed, pieces left, missed turns, ended holds), the latest host message, each size (its stock,
+ *    the pieces left, held and sold, its people, its interest; ADD PIECES, with what the quantity line promised), and the
+ *    controls: PAUSE / RESUME, EXTEND, MESSAGE (OPERATOR), END NOW (ADMIN, a phrase to type). It follows the console's
+ *    stream (`console` events, http/live-stream.ts) and, should the stream be refused or lost, the board every 5 s; it
+ *    stops when the console moves elsewhere (`disposeLiveView`, main.ts).
+ *  - The entries: the line itself, live (its open entries by place: the account, its email masked for an AUDITOR, its
+ *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
+ *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
+ *  - Client Services: the confirmed reservations, their reference, size, add-ons and total; CONCLUDED or CANCELLED with
+ *    a note (OPERATOR); the CSV.
+ *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access,
+ *    its times, its turns and holds, its add-ons), the silhouette (a photograph) and the boutique board's link (issued,
+ *    shown once, revoked); PUBLISH (with or without a post of the circle) and CANCEL (before the room opens, a phrase to
+ *    type). Each request is audited by the server; then the page is read again.
+ */
+import { h, mount, type Child } from '../../shared/dom.js';
+import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
+import {
+  canResolve,
+  defaultQuantityLine,
+  formatMoney,
+  hasBoard,
+  LIVE_LIMITS,
+  LIVE_TIER_OPTIONS,
+  liveActions,
+  liveBoardFigures,
+  liveEntryActions,
+  liveEntryDeadline,
+  liveLead,
+  livePartChange,
+  livePartProblem,
+  livePartValues,
+  livePhrase,
+  liveStateLabel,
+  parseSizes,
+  priorityLine,
+  reservationAddons,
+  sizesLine,
+  tierLabel,
+  windowLine,
+  type LivePart,
+} from '../model/live.js';
+import { can } from '../model/permissions.js';
+import { toneOf } from '../model/tone.js';
+import { href } from '../router.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveRelease, type LiveReservation, type LiveResolution, type Model } from '../types.js';
+import { button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
+import { openDialog, type DialogField } from '../ui/dialog.js';
+import { saveDownload } from '../ui/download.js';
+import { photoDialog, photoThumb } from '../ui/photo.js';
+import { notify, notifyError } from '../ui/toast.js';
+import type { ViewContext } from './context.js';
+
+/** The board read again this often while the stream is refused or lost. */
+export const LIVE_POLL_MS = 5000;
+
+/** The open page's stream and timer, so main.ts stops them when the console moves elsewhere or signs out. */
+let current: LiveFollower | null = null;
+/** Bumped by every disposal: a page whose data arrive after one was never shown. */
+let screens = 0;
+
+/** Stop the live board's stream and timer, if a release's page is open. */
+export function disposeLiveView(): void {
+  screens++;
+  current?.stop();
+  current = null;
+}
+
+/**
+ * Follows the live board: the console's stream while it runs; the board every LIVE_POLL_MS once it is refused or lost
+ * (and once, at once, when it ends: the release over, its last board).
+ */
+class LiveFollower {
+  private source: EventSource | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
+
+  constructor(
+    private readonly ctx: ViewContext,
+    private readonly id: string,
+    private readonly apply: (board: LiveBoard, via: 'stream' | 'poll') => void,
+  ) {}
+
+  start(board: LiveBoard): void {
+    if (board.over) return;
+    if (typeof EventSource !== 'function') return this.poll(0);
+    const es = new EventSource(this.ctx.api.liveStreamUrl(this.id));
+    this.source = es;
+    es.addEventListener('console', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent<string>).data) as { board: LiveBoard };
+        this.apply(data.board, 'stream');
+      } catch {
+        // An event this page cannot read: the next one, or the board read again, says the same.
+      }
+    });
+    es.addEventListener('error', () => {
+      if (es.readyState !== EventSource.CLOSED || this.stopped) return;
+      this.source = null;
+      this.poll(0);
+    });
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.source?.close();
+    this.source = null;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  private poll(delay: number): void {
+    if (this.stopped) return;
+    this.timer = setTimeout(async () => {
+      if (this.stopped) return;
+      try {
+        const { board } = await this.ctx.api.liveBoard(this.id, { background: true });
+        if (this.stopped) return;
+        this.apply(board, 'poll');
+        if (board.over) return;
+      } catch {
+        // A failed read waits for the next one.
+      }
+      this.poll(LIVE_POLL_MS);
+    }, delay);
+  }
+}
+
+const tierOf = (t: number) => (t === 0 ? 'None' : tierLabel(t));
+
+export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
+  const asked = screens;
+  const id = ctx.route.params.dropId ?? '';
+  const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
+  const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
+  const reservationsPage = Math.max(1, Number(ctx.route.query.rpage) || 1);
+  const [r, models, collections] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections()]);
+  const published = hasBoard(r.phase);
+  const [boardRead, entries, reservations] = await Promise.all([
+    published ? ctx.api.liveBoard(id) : Promise.resolve(null),
+    published && status && status !== 'OPEN' ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
+    published ? ctx.api.liveReservations(id, reservationsPage, 50) : Promise.resolve(null),
+  ]);
+  // The console moved on while the release was read: this page is stale, and starts nothing.
+  if (asked !== screens) return h('div', { class: 'view view--live' });
+
+  const role = ctx.session.admin.role;
+  const acts = liveActions(r, role, ctx.now());
+  const eyebrow = `LIVE RELEASE · ${r.id.slice(0, 8).toUpperCase()}`;
+  const done = (msg: string) => (v: unknown) => {
+    if (!v) return;
+    notify(msg);
+    ctx.reload();
+  };
+
+  // ── The live board ───────────────────────────────────────────────────────
+  let board: LiveBoard | null = boardRead?.board ?? null;
+  const stateLine = h('p', { class: 'live__state', attrs: { 'aria-live': 'polite' }, data: { testid: 'live-board-state' } });
+  const figures = h('div', { class: ['kpis', 'live__figures'] });
+  const messageLine = h('p', { class: 'live__message', data: { testid: 'live-message' } });
+  const sizesBox = h('div', { class: 'live__sizes' });
+  const lineBox = h('div', { class: 'live__line' });
+
+  const addPieces = (size: { id: string; label: string; stock: number }) =>
+    void openDialog({
+      title: `Add pieces · ${size.label}`,
+      eyebrow,
+      body: [
+        h('p', { class: 'dialog__text' }, `The size holds ${formatCount(size.stock)} ${size.stock === 1 ? 'piece' : 'pieces'}. The pieces added go at once to whoever waits for them in the line.`),
+        h('p', { class: 'dialog__text', data: { testid: 'live-quantity-promise' } }, `The announcement says « ${r.quantityLine} ». Every addition is recorded in the audit log and reported: adding pieces after a fixed number was announced contradicts it.`),
+      ],
+      fields: [{ name: 'pieces', label: 'Pieces to add', required: true, maxlength: 4, hint: `${LIVE_LIMITS.addPieces.min} to ${formatCount(LIVE_LIMITS.addPieces.max)}.` }],
+      validate: (v) => {
+        const n = /^\s*\d{1,4}\s*$/.test(v.pieces) ? Number(v.pieces) : 0;
+        return n >= LIVE_LIMITS.addPieces.min && n <= LIVE_LIMITS.addPieces.max ? null : `Add ${LIVE_LIMITS.addPieces.min} to ${formatCount(LIVE_LIMITS.addPieces.max)} pieces.`;
+      },
+      confirmLabel: 'Add pieces',
+      submit: async (v) => {
+        await ctx.api.addLivePieces(r.id, size.id, Number(v.pieces));
+      },
+    }).then(done('Pieces added.'));
+
+  const entryAction = (e: LiveEntry, action: 'letIn' | 'free' | 'remove') =>
+    void openDialog({
+      title: action === 'letIn' ? 'Let in now' : action === 'free' ? 'Free the hold' : 'Remove from the release',
+      eyebrow: `${e.email} · ${e.position === null ? 'IN THE ROOM' : `PLACE ${e.position}`}`,
+      danger: action === 'remove',
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        action === 'letIn'
+          ? `This person takes their turn now, before those ahead of them in size ${e.size.label}, within its free pieces.`
+          : action === 'free'
+            ? 'The piece held returns: the next in line for its size gets a turn at once. Its add-ons are dropped.'
+            : 'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.',
+      ),
+      confirmLabel: action === 'letIn' ? 'Let in' : action === 'free' ? 'Free the hold' : 'Remove',
+      submit: async () => {
+        if (action === 'letIn') await ctx.api.letInLiveEntry(r.id, e.id);
+        else if (action === 'free') await ctx.api.freeLiveHold(r.id, e.id);
+        else await ctx.api.removeLiveEntry(r.id, e.id);
+      },
+    }).then((v) => {
+      if (!v) return;
+      notify(action === 'letIn' ? 'Let in: their turn has begun.' : action === 'free' ? 'Hold freed.' : 'Entry removed.');
+      void refreshBoard();
+    });
+
+  const entryColumns = (b: LiveBoard | null) => [
+    { label: 'Place', cell: (e: LiveEntry) => (e.position === null ? h('span', { class: 'soft' }, '—') : formatCount(e.position)), kind: ['num' as const] },
+    { label: 'Account', cell: (e: LiveEntry) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: e.accountId }), 'data-testid': 'live-entry-account' } }, e.email), kind: ['wide' as const] },
+    { label: 'Tier', cell: (e: LiveEntry) => tierOf(e.tier), kind: ['nowrap' as const] },
+    { label: 'Size', cell: (e: LiveEntry) => h('span', { class: 'live__size' }, e.size.label), kind: ['nowrap' as const] },
+    { label: 'Pieces', cell: (e: LiveEntry) => formatCount(e.quantity), kind: ['num' as const] },
+    {
+      label: 'Status',
+      cell: (e: LiveEntry) => {
+        const deadline = liveEntryDeadline(e);
+        return h(
+          'span',
+          { data: { testid: 'live-entry-status' } },
+          statusMark(humanize(e.status), toneOf('liveEntry', e.status)),
+          e.letIn ? h('span', { class: 'cell-sub' }, 'Let in by the console') : null,
+          deadline ? h('span', { class: 'cell-sub' }, deadline) : null,
+        );
+      },
+    },
+    { label: 'Hold', cell: (e: LiveEntry) => (e.gestureMs === null ? h('span', { class: 'soft' }, '—') : `${(e.gestureMs / 1000).toFixed(2)} s`), kind: ['num' as const] },
+    {
+      label: '',
+      cell: (e: LiveEntry) => {
+        const a = b ? liveEntryActions(e, b, role) : { letIn: false, free: false, remove: false };
+        return h(
+          'span',
+          { class: 'row-actions' },
+          a.letIn ? button('Let in', { kind: 'ghost', testId: 'live-let-in', onClick: () => entryAction(e, 'letIn') }) : null,
+          a.free ? button('Free', { kind: 'ghost', testId: 'live-free', onClick: () => entryAction(e, 'free') }) : null,
+          a.remove ? button('Remove', { kind: 'ghost', testId: 'live-remove', onClick: () => entryAction(e, 'remove') }) : null,
+        );
+      },
+      kind: ['actions' as const],
+    },
+  ];
+
+  let lastUpdate = '';
+  const render = (b: LiveBoard, via: 'stream' | 'poll' | 'read') => {
+    board = b;
+    lastUpdate = `${via === 'stream' ? 'LIVE' : 'READ'} · ${formatDateTime(ctx.now(), { seconds: true })}`;
+    mount(
+      stateLine,
+      statusMark(liveStateLabel({ phase: b.phase, endedReason: b.endedReason }), toneOf('livePhase', b.phase)),
+      b.paused ? statusMark('PAUSED', 'alert') : null,
+      b.phase === 'ENDED' && !b.over ? h('span', { class: 'live__note' }, 'Turns and holds finish at their deadlines') : null,
+      h('span', { class: 'live__updated', data: { testid: 'live-updated' } }, lastUpdate),
+    );
+    mount(figures, ...liveBoardFigures(b).map((f) => {
+      const el = kpi(f.label, f.value, f.note);
+      el.setAttribute('data-testid', f.testId);
+      return el;
+    }));
+    mount(messageLine, ...(b.message ? [h('span', { class: 'live__message-label' }, 'Host message'), h('span', { class: 'live__message-text' }, `« ${b.message.text} »`), h('span', { class: 'cell-sub' }, formatDateTime(b.message.at, { seconds: true }))] : []));
+    messageLine.hidden = !b.message;
+    mount(
+      sizesBox,
+      table(
+        [
+          { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
+          { label: 'Stock', cell: (s) => formatCount(s.stock), kind: ['num'] },
+          { label: 'Left', cell: (s) => formatCount(s.left), kind: ['num'] },
+          { label: 'Held', cell: (s) => formatCount(s.held), kind: ['num'] },
+          { label: 'Sold', cell: (s) => formatCount(s.sold), kind: ['num'] },
+          { label: 'Room', cell: (s) => formatCount(s.waiting), kind: ['num'] },
+          { label: 'Line', cell: (s) => formatCount(s.line), kind: ['num'] },
+          { label: 'Turns', cell: (s) => formatCount(s.turns), kind: ['num'] },
+          { label: 'Secured', cell: (s) => formatCount(s.secured), kind: ['num'] },
+          { label: 'Confirmed', cell: (s) => formatCount(s.confirmed), kind: ['num'] },
+          { label: 'Missed', cell: (s) => formatCount(s.missed), kind: ['num'] },
+          { label: 'Ended holds', cell: (s) => formatCount(s.expired), kind: ['num'] },
+          { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
+          {
+            label: '',
+            cell: (s) => (acts.addPieces && !b.endedAt ? button('Add pieces', { kind: 'ghost', testId: 'live-add-pieces', onClick: () => addPieces(s) }) : null),
+            kind: ['actions'],
+          },
+        ],
+        b.sizes,
+        { caption: 'Sizes' },
+      ),
+    );
+    if (!status) {
+      mount(
+        lineBox,
+        table(entryColumns(b), b.line, {
+          caption: 'The line',
+          empty: b.phase === 'HIDDEN' || b.phase === 'ANNOUNCED' ? 'Nobody yet: the room opens at the time below.' : 'Nobody in the room or the line.',
+        }),
+        b.lineTotal > b.line.length ? h('p', { class: 'footnote' }, `The first ${formatCount(b.line.length)} of ${formatCount(b.lineTotal)} open entries, by place. Choose a status to read every entry.`) : null,
+      );
+    }
+  };
+
+  async function refreshBoard(): Promise<void> {
+    try {
+      const { board: b } = await ctx.api.liveBoard(r.id);
+      render(b, 'read');
+    } catch (e) {
+      notifyError(e);
+    }
+  }
+
+  const control = async (btn: HTMLButtonElement, fn: () => Promise<unknown>, msg: string) => {
+    btn.disabled = true;
+    try {
+      await fn();
+      notify(msg);
+      ctx.reload();
+    } catch (e) {
+      notifyError(e);
+      btn.disabled = false;
+    }
+  };
+  const pause = button('Pause', { kind: 'secondary', testId: 'live-pause' });
+  pause.addEventListener('click', () => void control(pause, () => ctx.api.pauseLive(r.id), 'Paused: no new turn, the deadlines frozen.'));
+  const resume = button('Resume', { kind: 'primary', testId: 'live-resume' });
+  resume.addEventListener('click', () => void control(resume, () => ctx.api.resumeLive(r.id), 'Resumed: the turns and holds run again.'));
+  const extend = () =>
+    void openDialog({
+      title: 'Extend the release',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, `The sales end on ${formatDateTime(r.closesAt)}. The end moves later by the minutes below; the line keeps its turns until then.`),
+      fields: [{ name: 'minutes', label: 'Minutes', required: true, maxlength: 3, value: '15', hint: `${LIVE_LIMITS.extendMinutes.min} to ${LIVE_LIMITS.extendMinutes.max}.` }],
+      validate: (v) => {
+        const n = /^\s*\d{1,3}\s*$/.test(v.minutes) ? Number(v.minutes) : 0;
+        return n >= LIVE_LIMITS.extendMinutes.min && n <= LIVE_LIMITS.extendMinutes.max ? null : `Extend by ${LIVE_LIMITS.extendMinutes.min} to ${LIVE_LIMITS.extendMinutes.max} minutes.`;
+      },
+      confirmLabel: 'Extend',
+      submit: async (v) => {
+        await ctx.api.extendLive(r.id, Number(v.minutes));
+      },
+    }).then(done('Release extended.'));
+  const message = () =>
+    void openDialog({
+      title: 'Host message',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, 'One line, shown under the header of every screen of the room, the line and the turn, until the next one.'),
+      fields: [{ name: 'text', label: 'Message', required: true, maxlength: LIVE_LIMITS.message, hint: `At most ${LIVE_LIMITS.message} characters, in the house’s words.` }],
+      validate: (v) => (v.text.trim().length < 1 || v.text.trim().length > LIVE_LIMITS.message ? `A message is one line of 1 to ${LIVE_LIMITS.message} characters.` : null),
+      confirmLabel: 'Send to the room',
+      submit: async (v) => {
+        await ctx.api.messageLive(r.id, v.text.trim());
+      },
+    }).then((v) => {
+      if (!v) return;
+      notify('Message sent to the room.');
+      void refreshBoard();
+    });
+  const end = () =>
+    void openDialog({
+      title: 'End the release now',
+      eyebrow,
+      danger: true,
+      body: [
+        h('p', { class: 'dialog__text' }, 'No new turn. Everyone in the room, in the line and in a turn now reads that the release has ended. A piece already held may still be paid for until its time runs out.'),
+        h('p', { class: 'dialog__text' }, 'The release then leaves THE RELEASES. Once.'),
+      ],
+      phrase: livePhrase('end', r),
+      confirmLabel: 'End now',
+      submit: async () => {
+        await ctx.api.endLive(r.id);
+      },
+    }).then(done('Release ended.'));
+
+  const boardTools = [
+    acts.pause ? pause : null,
+    acts.resume ? resume : null,
+    acts.extend ? button('Extend', { kind: 'ghost', testId: 'live-extend', onClick: extend }) : null,
+    acts.message ? button('Message', { kind: 'ghost', testId: 'live-message-new', onClick: message }) : null,
+    acts.end ? button('End now', { kind: 'danger', testId: 'live-end', onClick: end }) : null,
+  ].filter((b): b is HTMLButtonElement => b !== null);
+
+  const boardSection = board
+    ? section('Live board', [stateLine, figures, messageLine, sizesBox], { id: 'live-board', tools: boardTools, note: `T0 ${formatDateTime(r.opensAt)} · end ${formatDateTime(r.closesAt)}` })
+    : null;
+
+  // ── The entries ──────────────────────────────────────────────────────────
+  const statusFilter = select('status', [{ value: '', label: 'The line, live' }, { value: 'OPEN', label: 'Open entries' }, ...LIVE_ENTRY_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], status ?? '');
+  statusFilter.addEventListener('change', () => ctx.setQuery({ status: statusFilter.value, page: undefined }));
+  let entriesSection: HTMLElement | null = null;
+  if (published) {
+    const body: Child[] = [filterBar(field('Entries', statusFilter))];
+    if (status === 'OPEN') {
+      const open = await ctx.api.liveEntries(r.id, { status: 'OPEN', page: entriesPage, pageSize: 50 });
+      body.push(table(entryColumns(board), open.items, { caption: 'Open entries', empty: 'No open entry.' }), pager(open, (p) => ctx.setQuery({ page: p })));
+    } else if (entries) {
+      body.push(table(entryColumns(board), entries.items, { caption: 'Entries', empty: 'No entry has this status.' }), pager(entries, (p) => ctx.setQuery({ page: p })));
+    } else body.push(lineBox);
+    entriesSection = section('Entries', body, { id: 'live-entries', note: board ? `${formatCount(board.lineTotal)} open · ${formatCount(Object.values(r.entries).reduce((n, c) => n + c, 0))} in all` : undefined });
+  }
+
+  // ── Client Services ──────────────────────────────────────────────────────
+  const resolve = (x: LiveReservation, to: LiveResolution) =>
+    void openDialog({
+      title: to === 'CONCLUDED' ? 'Reservation concluded' : 'Reservation cancelled',
+      eyebrow: `${x.reference} · ${x.email}`,
+      danger: to === 'CANCELLED',
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        to === 'CONCLUDED'
+          ? 'ORBES Client Services concluded the payment and the delivery with this collector: the reservation reads CONCLUDED.'
+          : 'The reservation is cancelled by ORBES Client Services: it reads CANCELLED. The piece does not return to the line (the release closed at its sell-out).',
+      ),
+      fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: LIVE_LIMITS.note, hint: 'For ORBES Client Services: kept with the reservation, never in the audit log. Optional.' }],
+      confirmLabel: to === 'CONCLUDED' ? 'Concluded' : 'Cancel the reservation',
+      submit: async (v) => {
+        await ctx.api.resolveLiveReservation(r.id, x.id, to, v.note.trim());
+      },
+    }).then(done(to === 'CONCLUDED' ? 'Reservation concluded.' : 'Reservation cancelled.'));
+  const csv = button('Download CSV', { kind: 'ghost', testId: 'live-csv' });
+  csv.addEventListener('click', async () => {
+    csv.disabled = true;
+    try {
+      saveDownload(await ctx.api.liveReservationsCsv(r.id));
+    } catch (e) {
+      notifyError(e);
+    } finally {
+      csv.disabled = false;
+    }
+  });
+  const servicesSection = reservations
+    ? section(
+        'Client Services',
+        [
+          table<LiveReservation>(
+            [
+              { label: 'Reference', cell: (x) => mono(x.reference), kind: ['nowrap'] },
+              { label: 'Account', cell: (x) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }) } }, x.email), kind: ['wide'] },
+              { label: 'Size', cell: (x) => h('span', { class: 'live__size' }, x.size.label), kind: ['nowrap'] },
+              { label: 'Pieces', cell: (x) => formatCount(x.quantity), kind: ['num'] },
+              { label: 'Add-ons', cell: (x) => reservationAddons(x) },
+              { label: 'Total', cell: (x) => formatMoney(x.totalMinor, x.currency), kind: ['num', 'nowrap'] },
+              { label: 'Confirmed', cell: (x) => formatDateTime(x.confirmedAt), kind: ['nowrap'] },
+              {
+                label: 'Outcome',
+                cell: (x) =>
+                  h(
+                    'span',
+                    { data: { testid: 'live-outcome' } },
+                    x.resolution ? statusMark(humanize(x.resolution), toneOf('liveResolution', x.resolution)) : statusMark('TO CONCLUDE', 'alert'),
+                    x.handledBy ? h('span', { class: 'cell-sub' }, `${x.handledBy.email} · ${formatDateTime(x.handledAt)}`) : null,
+                    x.note ? h('span', { class: 'cell-details' }, x.note) : null,
+                  ),
+              },
+              {
+                label: '',
+                cell: (x) =>
+                  canResolve(x, role)
+                    ? h(
+                        'span',
+                        { class: 'row-actions' },
+                        button('Concluded', { kind: 'ghost', testId: 'live-conclude', onClick: () => resolve(x, 'CONCLUDED') }),
+                        button('Cancel', { kind: 'ghost', testId: 'live-cancel-reservation', onClick: () => resolve(x, 'CANCELLED') }),
+                      )
+                    : null,
+                kind: ['actions'],
+              },
+            ],
+            reservations.items,
+            { caption: 'Confirmed reservations', empty: 'No confirmed reservation yet: each PAY pressed on /verify appears here, for ORBES Client Services to conclude.' },
+          ),
+          pager(reservations, (p) => ctx.setQuery({ rpage: p })),
+        ],
+        { id: 'live-services', note: `${formatCount(reservations.total)} confirmed`, tools: reservations.total > 0 ? [csv] : [] },
+      )
+    : null;
+
+  // ── The settings ─────────────────────────────────────────────────────────
+  const editPart = (part: LivePart, title: string, fields: DialogField[], extra: { body?: Child; live?: (v: Record<string, string>) => Child } = {}) =>
+    void openDialog({
+      title,
+      eyebrow,
+      body: extra.body ?? h('p', { class: 'dialog__text' }, r.publishedAt ? 'The release is published, announced later: its settings change until then.' : 'A draft: nothing of it is public yet.'),
+      fields,
+      validate: (v) => livePartProblem(r, part, v) ?? (Object.keys(livePartChange(r, part, v)).length === 0 ? 'Nothing has changed.' : null),
+      ...(extra.live ? { live: extra.live } : {}),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.updateLiveRelease(r.id, livePartChange(r, part, v));
+      },
+    }).then(done('Release saved.'));
+  const edit = (label: string, testId: string, open: () => void) => (acts.edit ? [button(label, { kind: 'ghost', testId, onClick: open })] : []);
+  const values = (part: LivePart) => livePartValues(r, part);
+  const modelOptions = (selected: string) =>
+    models.items.filter((m: Model) => m.active || m.id === selected).map((m: Model) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
+
+  const releasePart = () => {
+    const v = values('release');
+    editPart('release', 'The release', [
+      { name: 'modelId', label: 'Model', kind: 'select', required: true, options: modelOptions(v.modelId), value: v.modelId },
+      { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: v.title, hint: 'Revealed with the name’s stage.' },
+      { name: 'description', label: 'Description', kind: 'textarea', rows: 4, maxlength: LIVE_LIMITS.description, value: v.description, hint: 'Plain paragraphs. Revealed with the name’s stage. Optional.' },
+      { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: v.price, hint: 'In units: 4800, or 4800.50. Shown from the announcement.' },
+      { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: v.currency },
+      { name: 'perAccount', label: 'Pieces per person', required: true, maxlength: 1, value: v.perAccount, hint: `${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max}, chosen with the size.` },
+    ]);
+  };
+  const sizesPart = () => {
+    const v = values('sizes');
+    editPart(
+      'sizes',
+      'Sizes and stock',
+      [
+        { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 6, required: true, value: v.sizes, hint: `One size per line, its label then its stock: 52 = 3. A one-size release has one line (ONE SIZE = 25). Up to ${LIVE_LIMITS.sizes} sizes.` },
+        { name: 'quantityLine', label: 'Quantity line', maxlength: LIVE_LIMITS.quantityLine, value: v.quantityLine, hint: 'As the announcement says it, at most 40 characters (25 PIECES · NEVER MORE). Empty: the number of pieces, then PIECES.' },
+      ],
+      {
+        live: (x) => {
+          const p = parseSizes(x.sizes, r.sizes);
+          if ('problem' in p) return h('p', { class: 'dialog__text soft' }, p.problem);
+          const total = p.sizes.reduce((n, s) => n + s.stock, 0);
+          return h('p', { class: 'dialog__text', data: { testid: 'live-sizes-preview' } }, `${formatCount(total)} ${total === 1 ? 'piece' : 'pieces'} in all · announced as « ${(x.quantityLine ?? '').trim() || defaultQuantityLine(total)} »`);
+        },
+      },
+    );
+  };
+  const accessPart = () => {
+    const v = values('access');
+    editPart('access', 'Access', [
+      { name: 'minTier', label: 'Who may enter', kind: 'select', options: [...LIVE_TIER_OPTIONS], value: v.minTier },
+      { name: 'collectionId', label: 'Owners of a collection', kind: 'select', options: [{ value: '', label: 'Any collection' }, ...collections.items.map((c) => ({ value: c.id, label: humanize(c.name) }))], value: v.collectionId },
+      ...models.items.map((m: Model) => ({ name: `model:${m.id}`, label: `Owners of ${humanize(m.name)}`, kind: 'checkbox' as const, value: v[`model:${m.id}`] ?? '' })),
+      { name: 'tierPriority', label: 'Tier priority', kind: 'checkbox', value: v.tierPriority, hint: 'At the opening (T0), the line forms by tier first (PALLADIUM, PLATINE, TITANE, then the others), then at random. Unticked: at random for all.' },
+    ]);
+  };
+  const timesPart = () => {
+    const v = values('times');
+    editPart(
+      'times',
+      'Times (UTC)',
+      [
+        { name: 'announceAt', label: 'Announcement', kind: 'datetime', value: v.announceAt, hint: 'Empty: when the release is published.' },
+        { name: 'silhouetteAt', label: 'Silhouette revealed', kind: 'datetime', value: v.silhouetteAt, hint: 'Empty: at the announcement. Each stage comes after the one before it.' },
+        { name: 'nameAt', label: 'Name revealed', kind: 'datetime', value: v.nameAt, hint: 'Empty: at the announcement.' },
+        { name: 'photoAt', label: 'Photograph revealed', kind: 'datetime', value: v.photoAt, hint: 'Empty: at the announcement. Every stage before the room opens.' },
+        { name: 'roomOpensMinutes', label: 'Room opens (minutes before)', required: true, maxlength: 2, value: v.roomOpensMinutes, hint: `Before the opening (T0): ${LIVE_LIMITS.roomOpensMinutes.min} to ${LIVE_LIMITS.roomOpensMinutes.max}; ${LIVE_LIMITS.roomOpensMinutes.default} by default.` },
+        { name: 'opensAt', label: 'The opening', kind: 'datetime', required: true, value: v.opensAt, hint: 'T0: the door opens and the line forms.' },
+        { name: 'closesAt', label: 'End of the sales', kind: 'datetime', required: true, value: v.closesAt, hint: 'No new turn after it; the release also ends at its sell-out.' },
+      ],
+    );
+  };
+  const turnsPart = () => {
+    const v = values('turns');
+    editPart('turns', 'Turns and holds', [
+      { name: 'turnSeconds', label: 'Seconds to hold the seal', required: true, maxlength: 3, value: v.turnSeconds, hint: `Once it is one’s turn: ${LIVE_LIMITS.turnSeconds.min} to ${LIVE_LIMITS.turnSeconds.max}; ${LIVE_LIMITS.turnSeconds.default} by default.` },
+      { name: 'payMinutes', label: 'Minutes to press PAY', required: true, maxlength: 2, value: v.payMinutes, hint: `Once the seal is held: ${LIVE_LIMITS.payMinutes.min} to ${LIVE_LIMITS.payMinutes.max}; ${LIVE_LIMITS.payMinutes.default} by default.` },
+      ...[3, 2, 1, 0].flatMap((t) => [
+        { name: `turn:${t}`, label: `${tierLabel(t)} · seconds to hold`, maxlength: 3, value: v[`turn:${t}`], hint: 'Empty: the release’s.' },
+        { name: `pay:${t}`, label: `${tierLabel(t)} · minutes to pay`, maxlength: 2, value: v[`pay:${t}`], hint: 'Empty: the release’s.' },
+      ]),
+    ]);
+  };
+  const addonsPart = () => {
+    const v = values('addons');
+    editPart('addons', 'Add-ons', [
+      {
+        name: 'addons',
+        label: 'Add-ons',
+        kind: 'textarea',
+        rows: 6,
+        value: v.addons,
+        hint: `Offered with a piece held, at most ${LIVE_LIMITS.addons}: one per line, its label, its price, then a line (ENGRAVING | 150 | Your initials, by hand). Empty: none.`,
+      },
+    ]);
+  };
+
+  const t = (iso: string | null, empty: string) => (iso ? formatDateTime(iso) : empty);
+  const parts: HTMLElement[] = [
+    section(
+      'The release',
+      defList([
+        { label: 'Model', value: `${humanize(r.model.name)} · ${humanize(r.model.type)}`, note: r.model.active ? undefined : 'No longer offered for new pieces.' },
+        ...(r.description ? [{ label: 'Description', value: h('span', { class: 'cell-details' }, r.description) }] : []),
+        { label: 'Price', value: h('span', { data: { testid: 'live-price' } }, `${formatMoney(r.priceMinor, r.currency)} a piece`) },
+        { label: 'Per person', value: `${r.perAccount} ${r.perAccount === 1 ? 'piece' : 'pieces'}` },
+      ]),
+      { id: 'live-part-release', tools: edit('Edit', 'live-edit-release', releasePart) },
+    ),
+    section(
+      'Sizes',
+      defList([
+        { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
+        { label: 'Pieces', value: formatCount(r.quantity) },
+        { label: 'Quantity line', value: h('span', { data: { testid: 'live-quantity-line' } }, r.quantityLine), note: r.editable ? undefined : 'Announced: only ADD PIECES raises a stock now.' },
+      ]),
+      { id: 'live-part-sizes', tools: edit('Edit', 'live-edit-sizes', sizesPart) },
+    ),
+    section(
+      'Access',
+      defList([
+        { label: 'For', value: h('span', { data: { testid: 'live-access' } }, r.access.text) },
+        { label: 'Line at the opening', value: priorityLine(r.tierPriority) },
+      ]),
+      { id: 'live-part-access', tools: edit('Edit', 'live-edit-access', accessPart) },
+    ),
+    section(
+      'Times (UTC)',
+      defList([
+        { label: 'Announcement', value: t(r.announceAt, r.publishedAt ? formatDateTime(r.publishedAt) : 'At the publication') },
+        { label: 'Silhouette', value: r.stages ? formatDateTime(r.stages.silhouetteAt) : t(r.silhouetteAt, 'At the announcement') },
+        { label: 'Name', value: r.stages ? formatDateTime(r.stages.nameAt) : t(r.nameAt, 'At the announcement') },
+        { label: 'Photograph', value: r.stages ? formatDateTime(r.stages.photoAt) : t(r.photoAt, 'At the announcement') },
+        { label: 'Room opens', value: formatDateTime(r.roomOpensAt), note: `${r.roomOpensMinutes} ${r.roomOpensMinutes === 1 ? 'minute' : 'minutes'} before T0` },
+        { label: 'Opening', value: h('span', { data: { testid: 'live-t0' } }, formatDateTime(r.opensAt)), note: 'T0: the door opens, the line forms' },
+        { label: 'End of the sales', value: formatDateTime(r.closesAt) },
+      ]),
+      { id: 'live-part-times', tools: edit('Edit', 'live-edit-times', timesPart) },
+    ),
+    section(
+      'Turns and holds',
+      defList([
+        { label: 'Turn', value: `${r.turnSeconds} s to hold the seal` },
+        { label: 'Hold', value: `${r.payMinutes} min to press PAY` },
+        { label: 'Per tier', value: r.tierWindows.length ? h('span', { data: { testid: 'live-windows' } }, r.tierWindows.map(windowLine).join(' — ')) : 'The release’s for every tier' },
+      ]),
+      { id: 'live-part-turns', tools: edit('Edit', 'live-edit-turns', turnsPart) },
+    ),
+    section(
+      'Add-ons',
+      r.addons.length
+        ? defList(r.addons.map((a): DefRow => ({ label: a.label, value: formatMoney(a.priceMinor, r.currency), note: a.line ?? undefined })))
+        : h('p', { class: 'notice' }, 'None: PAY is the piece alone.'),
+      { id: 'live-part-addons', tools: edit('Edit', 'live-edit-addons', addonsPart) },
+    ),
+  ];
+
+  // The silhouette: its first staged reveal (without one, the seal stands in).
+  const silhouette = () =>
+    void photoDialog({
+      title: 'Silhouette',
+      eyebrow,
+      impact: 'The first staged reveal on the release’s page and on the boutique board, from the silhouette’s time. Without one, the seal stands in.',
+      current: r.silhouette?.url ?? null,
+      currentAlt: 'The silhouette',
+      save: async (photo) => {
+        await ctx.api.setLiveSilhouette(r.id, photo);
+      },
+      remove: async () => {
+        await ctx.api.removeLiveSilhouette(r.id);
+      },
+    }).then((v) => {
+      if (!v) return;
+      notify(v === 'saved' ? 'Silhouette saved.' : 'Silhouette removed.');
+      ctx.reload();
+    });
+  parts.push(
+    section('Silhouette', h('div', { class: 'live__silhouette', data: { testid: 'live-silhouette' } }, photoThumb(r.silhouette?.url ?? null, 'The silhouette', 'lg'), r.silhouette ? null : h('p', { class: 'notice' }, 'None: the seal stands in.')), {
+      id: 'live-part-silhouette',
+      tools: acts.edit ? [button(r.silhouette ? 'Change' : 'Add', { kind: 'ghost', testId: 'live-silhouette-edit', onClick: silhouette })] : [],
+    }),
+  );
+
+  // The boutique board's secret link: shown once, when issued.
+  const showLink = (url: string) =>
+    void openDialog({
+      title: 'The board’s link',
+      eyebrow,
+      body: [
+        h('p', { class: 'dialog__text' }, 'Open it on the boutique’s screen. It is shown this once: the server keeps only its fingerprint. Anyone holding it sees the board (the countdown, the door, the pieces left), never a person.'),
+        h('p', { class: 'live__link' }, mono(url, url)),
+        h('div', { class: 'row-actions' }, copyButton(url, 'Copy the link')),
+      ],
+      confirmLabel: 'Done',
+      cancelLabel: 'Close',
+    }).then(() => ctx.reload());
+  const issueLink = () =>
+    void openDialog({
+      title: r.boardLink ? 'Replace the board’s link' : 'Issue the board’s link',
+      eyebrow,
+      danger: r.boardLink !== null,
+      body: h('p', { class: 'dialog__text' }, r.boardLink ? 'A new link replaces the one issued: a screen open on the old one goes blank at once.' : 'A secret link for a screen in a boutique or at an event: the board of the release, full screen, without any personal data.'),
+      confirmLabel: r.boardLink ? 'Replace the link' : 'Issue the link',
+      submit: async () => {
+        const { url } = await ctx.api.issueLiveBoardLink(r.id);
+        setTimeout(() => showLink(url), 0);
+      },
+    });
+  const revokeLink = () =>
+    void openDialog({
+      title: 'Revoke the board’s link',
+      eyebrow,
+      danger: true,
+      body: h('p', { class: 'dialog__text' }, 'The board answers that the release is not known from now on; a screen open on it goes blank at once.'),
+      confirmLabel: 'Revoke',
+      submit: async () => {
+        await ctx.api.revokeLiveBoardLink(r.id);
+      },
+    }).then(done('Board link revoked.'));
+  parts.push(
+    section(
+      'Boutique board',
+      defList([{ label: 'Link', value: h('span', { data: { testid: 'live-board-link' } }, r.boardLink ? `Issued ${formatDateTime(r.boardLink.issuedAt)}` : 'None') }]),
+      {
+        id: 'live-part-board',
+        tools: acts.boardLink
+          ? [
+              button(r.boardLink ? 'Replace' : 'Issue link', { kind: 'ghost', testId: 'live-board-issue', onClick: issueLink }),
+              ...(r.boardLink ? [button('Revoke', { kind: 'ghost', testId: 'live-board-revoke', onClick: revokeLink })] : []),
+            ]
+          : [],
+      },
+    ),
+  );
+
+  // ── Publication ──────────────────────────────────────────────────────────
+  const publish = () =>
+    void openDialog({
+      title: 'Publish the release',
+      eyebrow,
+      body: [
+        h('p', { class: 'dialog__text' }, `It is announced ${r.announceAt ? `on ${formatDateTime(r.announceAt)}` : 'now'}, each stage at its time; the room opens on ${formatDateTime(r.roomOpensAt)}, T0 on ${formatDateTime(r.opensAt)}.`),
+        h('p', { class: 'dialog__text' }, 'Its settings still change until the announcement; then only its stock rises (ADD PIECES).'),
+      ],
+      fields: [
+        {
+          name: 'circlePost',
+          label: 'Post it in the circle',
+          kind: 'checkbox',
+          hint: `A note for the owners ${r.minTier >= 2 ? `from ${tierLabel(r.minTier)}` : 'of a piece'}, shown from the announcement: the room’s opening, the quantity line, the price and who may enter, never the piece’s name.`,
+        },
+      ],
+      confirmLabel: 'Publish',
+      submit: async (v) => {
+        await ctx.api.publishLiveRelease(r.id, v.circlePost === 'true');
+      },
+    }).then(done('Release published.'));
+  const cancel = () =>
+    void openDialog({
+      title: 'Cancel the release',
+      eyebrow,
+      danger: true,
+      body: h('p', { class: 'dialog__text' }, `${r.publishedAt ? 'Its page answers that the release is not known from now on, and a post of the circle not shown yet is withdrawn.' : 'The draft never shows.'} Nobody enters it.`),
+      phrase: livePhrase('cancel', r),
+      confirmLabel: 'Cancel release',
+      cancelLabel: 'Keep it',
+      submit: async () => {
+        await ctx.api.cancelLiveRelease(r.id);
+      },
+    }).then(done('Release cancelled.'));
+
+  const facts: DefRow[] = [
+    { label: 'State', value: h('span', { data: { testid: 'live-state' } }, statusMark(liveStateLabel(r), toneOf('livePhase', r.phase))) },
+    { label: 'Offer', value: `${r.quantityLine} · ${formatMoney(r.priceMinor, r.currency)} · ${sizesLine(r.sizes)}` },
+    { label: 'Published', value: r.publishedAt ? formatDateTime(r.publishedAt) : 'Not yet' },
+    ...(r.circlePosts.length
+      ? [{ label: 'Circle', value: h('span', { data: { testid: 'live-circle' } }, r.circlePosts.map((p) => (p.publishedAt ? `Post shown from ${formatDateTime(p.publishedAt)}` : 'Post withdrawn')).join(' · ')) }]
+      : []),
+    ...(r.cancelledAt ? [{ label: 'Cancelled', value: formatDateTime(r.cancelledAt) }] : []),
+    ...(r.endedAt ? [{ label: 'Ended', value: `${formatDateTime(r.endedAt)} · ${liveStateLabel(r)}` }] : []),
+    ...(Math.round(r.pausedMs / 1000) > 0 ? [{ label: 'Paused', value: `${formatCount(Math.round(r.pausedMs / 1000))} s in all` }] : []),
+    { label: 'Interest', value: `${formatCount(r.interest)} I’LL BE THERE` },
+    { label: 'Created', value: `${formatDateTime(r.createdAt)}${r.createdBy ? ` · ${r.createdBy.email}` : ''}` },
+    { label: 'Seed fingerprint', value: mono(r.seedHash, groupChars(r.seedHash, 8)), note: 'SHA-256 of the seed that orders the line within a tier at T0; never revealed.' },
+    ...(published ? [{ label: 'Page', value: h('a', { class: 'mono', attrs: { href: `/verify/releases/${r.id}`, target: '_blank', rel: 'noopener', 'data-testid': 'live-page' } }, `/verify/releases/${r.id}`) }] : []),
+  ];
+  const releaseSection = section('Publication', defList(facts), {
+    id: 'live-publication',
+    tools: [acts.publish ? button('Publish', { kind: 'primary', testId: 'live-publish', onClick: publish }) : null, acts.cancel ? button('Cancel', { kind: 'ghost', testId: 'live-cancel', onClick: cancel }) : null].filter(
+      (b): b is HTMLButtonElement => b !== null,
+    ),
+  });
+
+  const root = h(
+    'div',
+    { class: 'view view--live' },
+    pageHeader({
+      eyebrow: 'Clients · Club · Drops',
+      title: r.title,
+      identifier: /\d/.test(r.title),
+      lead: liveLead(r),
+      actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
+    }),
+    // Once published, the board leads; a draft opens on its publication.
+    ...(published ? [boardSection, entriesSection, servicesSection, releaseSection] : [releaseSection]),
+    h('div', { class: 'grid grid--2 live__parts' }, ...parts),
+  );
+
+  if (board) {
+    render(board, 'read');
+    disposeLiveView();
+    const follower: LiveFollower = new LiveFollower(ctx, r.id, (b, via) => {
+      if (current === follower) render(b, via);
+    });
+    current = follower;
+    follower.start(board);
+  }
+  return root;
+}
+
+/** The New live release dialog's fields: the essentials; every other setting by default, then edited on its page. */
+export function newLiveFields(models: readonly Model[], values: Record<string, string>): DialogField[] {
+  const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
+  return [
+    { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId },
+    { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: values.title, hint: 'Revealed with the name’s stage.' },
+    { name: 'opensAt', label: 'Opening (UTC)', kind: 'datetime', required: true, value: values.opensAt, hint: 'T0: the door opens and the line forms; the room opens 5 minutes before (changed on its page).' },
+    { name: 'closesAt', label: 'End of the sales (UTC)', kind: 'datetime', required: true, value: values.closesAt },
+    { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.' },
+    { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
+    { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3.' },
+  ];
+}

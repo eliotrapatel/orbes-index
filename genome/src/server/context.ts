@@ -33,6 +33,7 @@ import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
+import { LiveConsoleService } from './services/live-console.js';
 import { LiveEngine } from './services/live-engine.js';
 import { LiveRoomService } from './services/live-room.js';
 import { IssuanceService } from './services/issuance.js';
@@ -95,6 +96,8 @@ export interface AppServices {
   live: LiveService;
   /** What the LIVE RELEASES show: their announcements stage by stage, the room as its viewers read it, the boutique board, an account's own entries. */
   liveRoom: LiveRoomService;
+  /** The LIVE RELEASES in the console: created, edited until their announcement, published, cancelled; the live board; Client Services' reservations. */
+  liveConsole: LiveConsoleService;
 }
 
 export interface AppContext {
@@ -193,6 +196,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const turnKey = deriveLiveTurnKey(config);
     const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, clock });
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
+    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, clock });
 
     const services: AppServices = {
       issuance,
@@ -219,6 +223,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       circle,
       live,
       liveRoom,
+      liveConsole,
       ...overrides.services,
     };
 

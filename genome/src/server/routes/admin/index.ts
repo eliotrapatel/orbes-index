@@ -5,13 +5,14 @@
  * required everywhere except login; reads need AUDITOR, mutations OPERATOR
  * unless a route asks for ADMIN (keys, revocations, reinstatement,
  * categories, console users, a customer's recovery code, lock and export,
- * the draw of a drop, a model discontinued or reinstated); every mutation needs the CSRF token and a same-origin
+ * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
+ * ended now or an entry removed from it); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
  * photograph routes (media.ts: an image of at most 1 MiB, F-04; a photograph
  * of a model's lookbook gallery, P-R02; a photograph of a post of the circle,
- * P-X01). RETAIL (A-08, a seller's account)
+ * P-X01; the silhouette of a LIVE RELEASE). RETAIL (A-08, a seller's account)
  * reaches only the routes that declare it: the sale mode, the list of points
  * of sale and its own session, password and second factor.
  */
@@ -32,6 +33,7 @@ import { adminClubRoutes } from './club.js';
 import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminKeyRoutes } from './keys.js';
+import { adminLiveRoutes } from './live.js';
 import { adminMediaRoutes } from './media.js';
 import { adminOwnerRoutes } from './owners.js';
 import { adminProductRoutes } from './products.js';
@@ -62,6 +64,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
   await app.register(adminDropRoutes, deps);
+  await app.register(adminLiveRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);
   await app.register(adminReportRoutes, deps);

@@ -53,6 +53,16 @@ import type {
   DropEntry,
   DropEntryStatus,
   DropInput,
+  LiveBoard,
+  LiveCard,
+  LiveEntry,
+  LiveEntryStatus,
+  LiveRelease,
+  LiveReservation,
+  LiveResolution,
+  LiveSettings,
+  LiveSettingsChange,
+  LiveState,
   GenomeJson,
   IssueBatchItem,
   IssueBatchResponse,
@@ -660,6 +670,119 @@ export class AdminApi {
   }
 
   /** The Cases queue: customers' reports on scans that were not authentic. */
+  // ── The Club: the LIVE RELEASES ──────────────────────────────────────────
+
+  liveReleases(page = 1, pageSize = 50): Promise<Paged<LiveCard>> {
+    return this.get('/api/admin/live', { page, pageSize });
+  }
+
+  liveRelease(id: string): Promise<LiveRelease> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}`);
+  }
+
+  createLiveRelease(input: LiveSettings): Promise<LiveRelease> {
+    return this.post('/api/admin/live', input);
+  }
+
+  /** Any setting, until the announcement (409 LIVE_ANNOUNCED after). */
+  updateLiveRelease(id: string, change: LiveSettingsChange): Promise<LiveRelease> {
+    return this.patch(`/api/admin/live/${encodeURIComponent(id)}`, change);
+  }
+
+  publishLiveRelease(id: string, circlePost: boolean): Promise<LiveRelease> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/publish`, { circlePost });
+  }
+
+  cancelLiveRelease(id: string): Promise<LiveRelease> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** The silhouette, sent as the image itself (JPEG or WebP, at most 1 MiB). */
+  setLiveSilhouette(id: string, photo: Blob): Promise<LiveRelease> {
+    return this.request('POST', `/api/admin/live/${encodeURIComponent(id)}/silhouette`, { upload: { type: photo.type || 'image/jpeg', data: photo } });
+  }
+
+  removeLiveSilhouette(id: string): Promise<LiveRelease> {
+    return this.del(`/api/admin/live/${encodeURIComponent(id)}/silhouette`);
+  }
+
+  /** A new link for the boutique board: its address, with its secret, in this answer only. */
+  issueLiveBoardLink(id: string): Promise<{ url: string; issuedAt: string }> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/board-link`);
+  }
+
+  revokeLiveBoardLink(id: string): Promise<LiveRelease> {
+    return this.del(`/api/admin/live/${encodeURIComponent(id)}/board-link`);
+  }
+
+  /** The live board; `background` for a refresh made by a timer (a 401 then leaves the page to the admin's next action). */
+  liveBoard(id: string, opts: { background?: boolean } = {}): Promise<{ now: string; board: LiveBoard }> {
+    return this.request('GET', `/api/admin/live/${encodeURIComponent(id)}/board`, { background: opts.background === true });
+  }
+
+  /** The address of the board's stream (an EventSource reads it with the console's cookie). */
+  liveStreamUrl(id: string): string {
+    return `${this.base}/api/admin/live/${encodeURIComponent(id)}/stream`;
+  }
+
+  liveEntries(id: string, q: { status?: LiveEntryStatus | 'OPEN'; page?: number; pageSize?: number } = {}): Promise<Paged<LiveEntry>> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/entries`, q);
+  }
+
+  pauseLive(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/pause`);
+  }
+
+  resumeLive(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/resume`);
+  }
+
+  extendLive(id: string, minutes: number): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/extend`, { minutes });
+  }
+
+  /** ADD PIECES to a size. */
+  addLivePieces(id: string, sizeId: string, pieces: number): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/stock`, { sizeId, pieces });
+  }
+
+  messageLive(id: string, text: string): Promise<{ id: string; text: string; createdAt: string }> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/messages`, { text });
+  }
+
+  /** END NOW (ADMIN; the console asks for a typed phrase first). */
+  endLive(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/end`);
+  }
+
+  freeLiveHold(id: string, entryId: string): Promise<LiveEntry> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/free`);
+  }
+
+  letInLiveEntry(id: string, entryId: string): Promise<LiveEntry> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/let-in`);
+  }
+
+  /** REMOVE from the release (ADMIN). */
+  removeLiveEntry(id: string, entryId: string): Promise<LiveEntry> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/remove`);
+  }
+
+  liveReservations(id: string, page = 1, pageSize = 50): Promise<Paged<LiveReservation>> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/reservations`, { page, pageSize });
+  }
+
+  /** Every confirmed reservation as a CSV (the emails masked for an AUDITOR). */
+  async liveReservationsCsv(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/live/${encodeURIComponent(id)}/reservations.csv`, { raw: true });
+    return toDownload(res, 'orbes-live-reservations.csv');
+  }
+
+  /** CONCLUDED or CANCELLED, with an optional note (Client Services). */
+  resolveLiveReservation(id: string, entryId: string, resolution: LiveResolution, note: string): Promise<LiveReservation> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/resolve`, note ? { resolution, note } : { resolution });
+  }
+
   // ── The Club: drops (P-R03) ──────────────────────────────────────────────
 
   drops(page = 1, pageSize = 50): Promise<Paged<Drop>> {

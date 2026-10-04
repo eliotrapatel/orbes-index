@@ -7,8 +7,9 @@
  * withdrawn, their photographs; the words of its tiers' benefits, P-X04; the requests of its private salon closed,
  * P-X08), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
- * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, and a model
- * discontinued or reinstated (P-R06);
+ * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, a model
+ * discontinued or reinstated (P-R06), and a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
+ * publication, cancellation, silhouette, board link, live controls and Client Services' outcome: OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -113,6 +114,34 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
+  // The LIVE RELEASES (plan of 2026-10-04): read by an AUDITOR; created, edited, published, cancelled, their silhouette and
+  // board link, their live controls and Client Services' outcome by an OPERATOR; END NOW and REMOVE by an ADMIN.
+  { group: 'live', method: 'GET', url: '/api/admin/live', min: 'AUDITOR' },
+  { group: 'live', method: 'POST', url: '/api/admin/live', body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}`, min: 'AUDITOR' },
+  { group: 'live', method: 'PATCH', url: `/api/admin/live/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/silhouette`, ...PHOTO, min: 'OPERATOR' },
+  { group: 'live', method: 'DELETE', url: `/api/admin/live/${UUID}/silhouette`, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/board-link`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'DELETE', url: `/api/admin/live/${UUID}/board-link`, min: 'OPERATOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/board`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/stream`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/entries`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/entries?status=OPEN`, min: 'AUDITOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/pause`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/resume`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/extend`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/stock`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/messages`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/end`, body: INVALID, min: 'ADMIN' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/free`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/let-in`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/remove`, body: INVALID, min: 'ADMIN' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/reservations`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/reservations.csv`, min: 'AUDITOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/resolve`, body: INVALID, min: 'OPERATOR' },
   { group: 'circle', method: 'GET', url: '/api/admin/circle/posts', min: 'AUDITOR' },
   { group: 'circle', method: 'POST', url: '/api/admin/circle/posts', body: INVALID, min: 'OPERATOR' },
   { group: 'circle', method: 'GET', url: `/api/admin/circle/posts/${UUID}`, min: 'AUDITOR' },
@@ -214,6 +243,7 @@ describe('admin role enforcement', () => {
       'drops',
       'circle',
       'tiers',
+      'live',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

@@ -22,6 +22,8 @@ export const ROUTES = [
   /** The Club (P-R03): its tabs (Drops, Circle) by `?tab=`; a drop's page, a post's (P-X01), from its row, no link of their own in the sidebar. */
   { name: 'club', path: '/club' },
   { name: 'drop', path: '/club/drops/:dropId' },
+  /** A LIVE RELEASE's page: from its row of the Drops tab, no link of its own in the sidebar. */
+  { name: 'liveRelease', path: '/club/live/:dropId' },
   { name: 'circlePost', path: '/club/circle/:postId' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },

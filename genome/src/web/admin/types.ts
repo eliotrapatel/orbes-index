@@ -112,6 +112,14 @@ export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
 export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
 export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 
+/** Where a LIVE RELEASE stands (services/live.ts livePhase): HIDDEN is published, announced later. */
+export const LIVE_PHASES = ['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ROOM', 'LIVE', 'ENDED', 'CANCELLED'] as const;
+export type LivePhase = (typeof LIVE_PHASES)[number];
+
+/** The currencies a LIVE RELEASE is priced in (services/live-console.ts LIVE_CURRENCIES). */
+export const LIVE_CURRENCIES = ['EUR', 'GBP', 'USD', 'CHF'] as const;
+export type LiveCurrency = (typeof LIVE_CURRENCIES)[number];
+
 export const WARRANTY_STATUSES = ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const;
 export type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
@@ -974,6 +982,191 @@ export interface DrawOutcome {
   places: number;
   selected: number;
   waitlisted: number;
+}
+
+// ── The Club: the LIVE RELEASES ────────────────────────────────────────────
+
+/** A LIVE RELEASE in the console's list (GET /api/admin/live). */
+export interface LiveCard {
+  id: string;
+  title: string;
+  model: { id: string; name: string; type: string; active: boolean };
+  phase: LivePhase;
+  /** Ended, no turn or hold left. */
+  over: boolean;
+  announcedAt: Iso | null;
+  roomOpensAt: Iso;
+  /** T0. */
+  opensAt: Iso;
+  closesAt: Iso;
+  quantity: number;
+  quantityLine: string;
+  priceMinor: number;
+  currency: LiveCurrency;
+  endedReason: LiveEndReason | null;
+  entries: Record<LiveEntryStatus, number>;
+  interest: number;
+}
+
+/** A LIVE RELEASE as the console reads and edits it (GET /api/admin/live/:id): every setting, never its sealed seed. */
+export interface LiveRelease extends LiveCard {
+  description: string | null;
+  /** Its settings still change: neither announced nor cancelled. */
+  editable: boolean;
+  roomOpensMinutes: number;
+  turnSeconds: number;
+  payMinutes: number;
+  perAccount: number;
+  minTier: number;
+  tierPriority: boolean;
+  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  sizes: { id: string; label: string; stock: number }[];
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
+  /** As set: null, at the publication; a null stage, at the announcement. */
+  announceAt: Iso | null;
+  silhouetteAt: Iso | null;
+  nameAt: Iso | null;
+  photoAt: Iso | null;
+  /** Once published: when each stage is revealed. */
+  stages: { silhouetteAt: Iso; nameAt: Iso; photoAt: Iso } | null;
+  silhouette: { sha256: string; url: string } | null;
+  boardLink: { issuedAt: Iso } | null;
+  circlePosts: { id: string; publishedAt: Iso | null }[];
+  publishedAt: Iso | null;
+  cancelledAt: Iso | null;
+  pausedAt: Iso | null;
+  pausedMs: number;
+  endedAt: Iso | null;
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  seedHash: string;
+}
+
+/** POST /api/admin/live: every setting (the defaults for those left out); PATCH: any of them until the announcement. */
+export interface LiveSettings {
+  modelId: string;
+  title: string;
+  description?: string | null;
+  opensAt: Iso;
+  closesAt: Iso;
+  roomOpensMinutes?: number;
+  turnSeconds?: number;
+  payMinutes?: number;
+  perAccount?: number;
+  priceMinor: number;
+  currency?: LiveCurrency;
+  minTier?: number;
+  tierPriority?: boolean;
+  accessModelIds?: string[];
+  accessCollectionId?: string | null;
+  sizes: { id?: string | null; label: string; stock: number }[];
+  quantityLine?: string | null;
+  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  announceAt?: Iso | null;
+  silhouetteAt?: Iso | null;
+  nameAt?: Iso | null;
+  photoAt?: Iso | null;
+  tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
+}
+
+export type LiveSettingsChange = Partial<LiveSettings>;
+
+/** An entry of a LIVE RELEASE as the console reads it: the email masked for an AUDITOR; deadlines as they stand now. */
+export interface LiveEntry {
+  id: string;
+  accountId: string;
+  email: string;
+  status: LiveEntryStatus;
+  size: { id: string; label: string };
+  quantity: number;
+  tier: number;
+  position: number | null;
+  joinedAt: Iso;
+  turnAt: Iso | null;
+  turnExpiresAt: Iso | null;
+  securedAt: Iso | null;
+  holdExpiresAt: Iso | null;
+  confirmedAt: Iso | null;
+  endedAt: Iso | null;
+  /** From the press of the seal to the secure, in milliseconds. */
+  gestureMs: number | null;
+  letIn: boolean;
+}
+
+/** A size on the live board: its pieces and its people. */
+export interface LiveBoardSize {
+  id: string;
+  label: string;
+  stock: number;
+  left: number;
+  held: number;
+  sold: number;
+  waiting: number;
+  line: number;
+  turns: number;
+  secured: number;
+  confirmed: number;
+  missed: number;
+  expired: number;
+  interest: number;
+}
+
+/** The live board (GET /api/admin/live/:id/board, and the `console` events of its stream). */
+export interface LiveBoard {
+  id: string;
+  phase: LivePhase;
+  paused: boolean;
+  pausedAt: Iso | null;
+  over: boolean;
+  endedAt: Iso | null;
+  endedReason: LiveEndReason | null;
+  roomOpensAt: Iso;
+  opensAt: Iso;
+  closesAt: Iso;
+  quantity: number;
+  quantityLine: string;
+  totals: Omit<LiveBoardSize, 'id' | 'label'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
+  sizes: LiveBoardSize[];
+  message: { text: string; at: Iso } | null;
+  /** The open entries by place, then arrival (the first 200). */
+  line: LiveEntry[];
+  lineTotal: number;
+}
+
+/** The release's state after a live control (pause, resume, extend, add pieces, end). */
+export interface LiveState {
+  id: string;
+  roomOpensAt: Iso;
+  opensAt: Iso;
+  closesAt: Iso;
+  pausedAt: Iso | null;
+  pausedMs: number;
+  endedAt: Iso | null;
+  endedReason: LiveEndReason | null;
+  quantity: number;
+  quantityLine: string;
+  sizes: { id: string; label: string; stock: number }[];
+}
+
+/** A confirmed reservation for ORBES Client Services (GET /api/admin/live/:id/reservations): the email masked for an AUDITOR. */
+export interface LiveReservation {
+  id: string;
+  /** `LR-` and the first eight figures of the entry's id, as the client reads it. */
+  reference: string;
+  accountId: string;
+  email: string;
+  size: { id: string; label: string };
+  quantity: number;
+  currency: LiveCurrency;
+  priceMinor: number;
+  addons: { id: string; label: string; priceMinor: number }[];
+  totalMinor: number;
+  confirmedAt: Iso;
+  resolution: LiveResolution | null;
+  note: string | null;
+  handledBy: { id: string; email: string } | null;
+  handledAt: Iso | null;
 }
 
 // ── The Club: the circle (P-X01) ───────────────────────────────────────────

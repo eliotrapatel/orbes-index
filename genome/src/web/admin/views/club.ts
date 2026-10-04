@@ -6,23 +6,31 @@
  * (P-X04), the words of each tier's benefits (views/tiers.ts); Requests
  * (P-X08), what owners requested from THE PRIVATE SALON (views/requests.ts).
  *
- * Drops: every drop, the latest created first, with its state, its window of
- * entries (UTC), its pieces and its entries; New release (OPERATOR) creates a
- * DRAFT whose seed is drawn and committed at once. A drop's row opens its
- * page (`#/club/drops/:dropId`): its facts, publication, cancellation, the
- * draw (ADMIN) and its entries. An AUDITOR reads.
+ * Drops: the LIVE RELEASES first (the plan of 2026-10-04: an instant drop
+ * lived in real time), each with its state, T0, its pieces and price, its
+ * line and its confirmed reservations; New live release (OPERATOR) creates a
+ * DRAFT with its essentials, its seed drawn and committed at once, its other
+ * settings by default; its row opens its page (`#/club/live/:dropId`,
+ * views/live.ts). Then the draws: every drop, the latest created first, with
+ * its state, its window of entries (UTC), its pieces and its entries; New
+ * release (OPERATOR) creates a DRAFT whose seed is drawn and committed at
+ * once. A drop's row opens its page (`#/club/drops/:dropId`): its facts,
+ * publication, cancellation, the draw (ADMIN) and its entries. An AUDITOR
+ * reads.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
+import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValues } from '../model/live.js';
 import { CLUB_TABS, clubTab, DROP_LIMITS, dropFormValues, dropInput, dropProblem, placesTaken } from '../model/club.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import type { Drop, Model } from '../types.js';
+import type { Drop, LiveCard, Model } from '../types.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { circleTab } from './circle.js';
+import { newLiveFields } from './live.js';
 import { pageParam, type ViewContext } from './context.js';
 import { requestsTab } from './requests.js';
 import { tiersTab } from './tiers.js';
@@ -71,7 +79,7 @@ function clubTabs(current: string): HTMLElement {
 /** What each tab of the Club page is, said under its title. */
 const CLUB_LEADS = Object.freeze({
   drops:
-    'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces, reserved directly by PLATINE and PALLADIUM owners during its early access, then entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
+    'What the owners’ club of /verify offers. Drops: a model released in a limited number of pieces. A LIVE RELEASE is lived in real time: a room, a line at T0 by tier then at random, a turn to hold the seal, PAY. A draw is reserved directly by PLATINE and PALLADIUM owners during its early access, then entered by ORBES accounts and drawn by tier, then seniority, then the order of a seed committed when the release was published.',
   circle:
     'What the owners’ club of /verify offers. Circle: what ORBES publishes for the owners of a piece, by tier: notes, invitations they answer YES or NO, and polls whose results they read once they have voted.',
   tiers:
@@ -91,10 +99,61 @@ export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
   );
 }
 
-/** The Drops tab: every drop, and New release. */
+/** The Drops tab: the LIVE RELEASES and New live release; every drop of the draw, and New release. */
 async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
-  const [list, models] = await Promise.all([ctx.api.drops(pageParam(ctx), 50), ctx.api.models()]);
+  const [list, models, live] = await Promise.all([ctx.api.drops(pageParam(ctx), 50), ctx.api.models(), ctx.api.liveReleases(Number(ctx.route.query.lpage) || 1, 20)]);
   const canManage = can(ctx.session.admin.role, 'manageDrops');
+
+  let createdLive: string | null = null;
+  const newLive = () =>
+    void openDialog({
+      title: 'New live release',
+      eyebrow: 'Club · Drops',
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint: it orders the line within a tier at T0. Every other setting takes its default and is set on its page.',
+      ),
+      fields: newLiveFields(models.items, newLiveValues(ctx.now())),
+      validate: newLiveProblem,
+      confirmLabel: 'Create release',
+      submit: async (v) => {
+        createdLive = (await ctx.api.createLiveRelease(newLiveInput(v))).id;
+      },
+    }).then((r) => {
+      if (!r || !createdLive) return;
+      notify('Live release created as a draft.');
+      ctx.navigate(href('liveRelease', { dropId: createdLive }));
+    });
+
+  const liveSection = section(
+    'Live releases',
+    [
+      table<LiveCard>(
+        [
+          {
+            label: 'Release',
+            cell: (d) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('liveRelease', { dropId: d.id }), 'data-testid': 'live-link' } }, d.title), h('span', { class: 'cell-sub' }, `${humanize(d.model.name)} · ${humanize(d.model.type)}`)),
+            kind: ['wide'],
+          },
+          { label: 'State', cell: (d) => statusMark(liveStateLabel(d), toneOf('livePhase', d.phase)), kind: ['nowrap'] },
+          { label: 'Opening', cell: (d) => formatDateTime(d.opensAt), kind: ['nowrap'] },
+          { label: 'Pieces', cell: (d) => h('span', null, formatCount(d.quantity), h('span', { class: 'cell-sub' }, d.quantityLine)), kind: ['num'] },
+          { label: 'Price', cell: (d) => formatMoney(d.priceMinor, d.currency), kind: ['num', 'nowrap'] },
+          { label: 'In line', cell: (d) => formatCount((d.entries.WAITING ?? 0) + (d.entries.QUEUED ?? 0) + (d.entries.TURN ?? 0) + (d.entries.SECURED ?? 0)), kind: ['num'] },
+          { label: 'Confirmed', cell: (d) => formatCount(d.entries.CONFIRMED ?? 0), kind: ['num'] },
+        ],
+        live.items,
+        {
+          empty: 'No live release yet. A LIVE RELEASE is announced, then lived in real time: a room, a fair line at T0, a turn to hold the seal, PAY.',
+          caption: 'Live releases',
+          onRow: (d) => href('liveRelease', { dropId: d.id }),
+        },
+      ),
+      pager(live, (p) => ctx.setQuery({ lpage: p })),
+    ],
+    { id: 'live-releases', tools: canManage ? [button('New live release', { kind: 'primary', testId: 'live-new', onClick: newLive })] : [] },
+  );
 
   let created: string | null = null;
   const newDrop = () =>
@@ -118,7 +177,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       ctx.navigate(href('drop', { dropId: created }));
     });
 
-  return section(
+  const drawsSection = section(
     'Drops',
     [
       table<Drop>(
@@ -146,4 +205,5 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
     ],
     { id: 'drops', tools: canManage ? [button('New release', { kind: 'primary', testId: 'drop-new', onClick: newDrop })] : [] },
   );
+  return h('div', { class: 'club__drops' }, liveSection, drawsSection);
 }

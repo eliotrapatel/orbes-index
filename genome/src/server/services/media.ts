@@ -24,7 +24,10 @@
  * (`circle.post.photo.add`, `circle.post.photo.remove`,
  * `circle.post.photo.update`), under the post's row lock.
  *
- * An image no model, no gallery, no circle post and no piece uses any more is deleted once
+ * The silhouette of a LIVE RELEASE (`drops.silhouette_sha256`, migration 0021), its first staged reveal, goes the same
+ * way (`drop.live.silhouette.set`, `drop.live.silhouette.remove`), until the release's announcement.
+ *
+ * An image no model, no gallery, no circle post, no piece and no release uses any more is deleted once
  * the change has committed: a removed photograph stops being served. A concurrent
  * upload of the very same bytes keeps it: the upload locks the row (FOR KEY
  * SHARE) as soon as it has inserted it or found it there, so the delete
@@ -39,7 +42,7 @@ import { createHash } from 'node:crypto';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isForeignKeyViolation } from '../db/pg-errors.js';
 import type { MediaMimeType } from '../db/schema.js';
-import { conflict, notFound, validationError } from '../errors.js';
+import { conflict, DomainError, notFound, validationError } from '../errors.js';
 import { sanitizeImage, type CleanImage, type ImageMime } from '../media/image.js';
 import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -85,6 +88,9 @@ export const CIRCLE_PHOTOS_MAX = 4;
 
 const circlePostNotFound = () => notFound('Post of the circle', 'CIRCLE_POST_NOT_FOUND');
 const circlePhotoNotFound = () => notFound('Photograph of this post', 'CIRCLE_PHOTO_NOT_FOUND');
+/** As services/drops.ts says it (not imported: drops.ts reads this module). */
+const releaseNotFound = () => new DomainError('DROP_NOT_FOUND', 404, 'This release is not known to ORBES.');
+const releaseAnnounced = () => conflict('LIVE_ANNOUNCED', 'This release is announced: its settings no longer change. Raise a size’s stock with ADD PIECES.');
 
 /** An uploaded image as the HTTP layer received it: the declared type and the raw bytes. */
 export interface ImageUpload {
@@ -428,6 +434,57 @@ export class MediaService {
   }
 
   /**
+   * The silhouette of a LIVE RELEASE (POST /api/admin/live/:id/silhouette): its first staged reveal on /verify, from
+   * `silhouette_at` (without one, the seal stands in). Set until the release's announcement, like every setting of it
+   * (409 LIVE_ANNOUNCED after; DROP_CANCELLED once cancelled). Audited `drop.live.silhouette.set` with the image's facts
+   * and the one it replaced.
+   */
+  async setLiveSilhouette(dropId: string, upload: ImageUpload, actor: Actor): Promise<StoredImage> {
+    const image = sanitizeImage(upload?.bytes, upload?.mime);
+    const id = releaseKey(dropId);
+    const stored = describe(image);
+    const previous = await inTransaction(this.db, async (tx) => {
+      const row = await this.lockUnannouncedRelease(tx, id);
+      await this.store(tx, stored.sha256, image, actor);
+      if (row.silhouette_sha256 === stored.sha256) return null;
+      await tx.updateTable('drops').set({ silhouette_sha256: stored.sha256 }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'drop.live.silhouette.set', targetType: 'drop', targetId: id, details: { ...facts(stored), previous: row.silhouette_sha256 } }, tx);
+      return row.silhouette_sha256;
+    });
+    if (previous) await this.deleteIfUnused(previous);
+    return stored;
+  }
+
+  /** Remove a LIVE RELEASE's silhouette (DELETE /api/admin/live/:id/silhouette), until its announcement: the seal stands in. Audited `drop.live.silhouette.remove`. */
+  async removeLiveSilhouette(dropId: string, actor: Actor): Promise<void> {
+    const id = releaseKey(dropId);
+    const previous = await inTransaction(this.db, async (tx) => {
+      const row = await this.lockUnannouncedRelease(tx, id);
+      if (row.silhouette_sha256 === null) return null;
+      await tx.updateTable('drops').set({ silhouette_sha256: null }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'drop.live.silhouette.remove', targetType: 'drop', targetId: id, details: { previous: row.silhouette_sha256 } }, tx);
+      return row.silhouette_sha256;
+    });
+    if (previous) await this.deleteIfUnused(previous);
+  }
+
+  /** A LIVE RELEASE's row FOR UPDATE, neither cancelled nor announced (its announcement, or its publication without one). */
+  private async lockUnannouncedRelease(tx: Db, id: string): Promise<{ silhouette_sha256: string | null }> {
+    const row = await tx
+      .selectFrom('drops')
+      .select(['silhouette_sha256', 'cancelled_at', 'announce_at', 'published_at'])
+      .where('id', '=', id)
+      .where('mode', '=', 'LIVE')
+      .forUpdate()
+      .executeTakeFirst();
+    if (!row) throw releaseNotFound();
+    if (row.cancelled_at) throw conflict('DROP_CANCELLED', 'This release has been cancelled.');
+    const announced = row.announce_at ?? row.published_at;
+    if (announced && announced.getTime() <= this.clock().getTime()) throw releaseAnnounced();
+    return row;
+  }
+
+  /**
    * Store the image once: the same bytes uploaded again (for another model or piece) are the same row. The row is
    * then locked FOR KEY SHARE until this transaction ends: ON CONFLICT DO NOTHING takes no lock on a row that already
    * exists, so without it the change that removed the last use of these bytes could delete the row between this
@@ -485,6 +542,11 @@ function adminId(actor: Actor): string | null {
 function modelKey(modelId: string): string {
   if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
   return modelId.toLowerCase();
+}
+
+function releaseKey(dropId: string): string {
+  if (typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw releaseNotFound();
+  return dropId.toLowerCase();
 }
 
 function circlePostKey(postId: string): string {

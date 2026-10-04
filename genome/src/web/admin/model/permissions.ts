@@ -3,7 +3,8 @@
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
  * reinstatement, categories (created, activated, deactivated), console users,
  * points of sale, a customer's recovery code, lock and export, the draw
- * of a drop, and a model discontinued or reinstated). Every role
+ * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
+ * an entry removed from it). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -39,10 +40,18 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   editCatalog: 'OPERATOR',
   /** Set or remove a model's reference photograph or the photograph of a piece (F-04): shown on /verify. */
   photograph: 'OPERATOR',
-  /** The Club's drops (P-R03): create, edit, publish and cancel a drop; conclude an entry, offer the next place. */
+  /**
+   * The Club's drops (P-R03): create, edit, publish and cancel a drop; conclude an entry, offer the next place. And its
+   * LIVE RELEASES: their settings, silhouette, board link, publication and cancellation; the live controls (pause, resume,
+   * extend, add pieces, free a hold, let in, a host message); Client Services' outcome of a reservation.
+   */
   manageDrops: 'OPERATOR',
   /** The draw of a drop (P-R03), once, after its entries close: ADMIN, with a phrase to type. */
   drawDrop: 'ADMIN',
+  /** END NOW of a LIVE RELEASE: no new turn, the line ended; ADMIN, with a phrase to type. */
+  endLiveRelease: 'ADMIN',
+  /** Remove an entry from a LIVE RELEASE (its place, or the piece it holds, to the next in line): ADMIN. */
+  removeLiveEntry: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */

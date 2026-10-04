@@ -1233,12 +1233,12 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback, or repair forward | A failure of the last three steps (health, Caddy, the signing key, the smoke tests) in a release that applied **no** migration redeploys the previous image tag and waits for health, once the previous image is known to run on the schema. A release that **did** (its migrations committed together, then something failed) is kept: the previous image cannot run on the new schema, so no rollback is attempted, `ORBES_IMAGE_TAG` stays on the new tag with the stack started on it, and the way to repair forward is printed (below). A migration that fails applies nothing (one transaction): the previous image then comes back as usual. The outcome is appended to `.state/deploys.log`. |
 
-**The photograph uploads at the edge (F-04, lot 5; P-R02; P-X01).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on four routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery) and `POST /api/admin/circle/posts/:id/photos` (a photograph of a post of the owners' circle, [API §16.20](API.md#1620-the-circle-the-club-pages-posts-extension-of-the-contract)). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the order of a gallery or of a post's photographs (a `PATCH`) included, the 64 KB it had:
+**The photograph uploads at the edge (F-04, lot 5; P-R02; P-X01).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on five routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery) and `POST /api/admin/circle/posts/:id/photos` (a photograph of a post of the owners' circle, [API §16.20](API.md#1620-the-circle-the-club-pages-posts-extension-of-the-contract)) and, from deployment D, `POST /api/admin/live/:id/silhouette` (the silhouette of a LIVE RELEASE). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the order of a gallery or of a post's photographs (a `PATCH`) included, the 64 KB it had:
 
 ```caddyfile
 @photo_upload {
 	method POST
-	path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos)/?$
+	path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)/?$
 }
 request_body @photo_upload {
 	max_size 1200KB
@@ -1246,7 +1246,7 @@ request_body @photo_upload {
 @not_photo_upload {
 	not {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos)/?$
+		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)/?$
 	}
 }
 request_body @not_photo_upload {

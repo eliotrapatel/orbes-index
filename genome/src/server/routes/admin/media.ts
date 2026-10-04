@@ -1,14 +1,15 @@
 /**
  * Photographs (F-04): a model's reference photograph and the photograph of
  * one piece (API §13.4, §14.12); the gallery of a model's lookbook sheet
- * (P-R02, §13.4: add, remove, order and alternative texts); and the
+ * (P-R02, §13.4: add, remove, order and alternative texts); the
  * photographs of a post of the owners' circle (P-X01: the same four
- * gestures, at most four photographs). OPERATOR, like every other mutation
+ * gestures, at most four photographs); and the silhouette of a LIVE RELEASE,
+ * its first staged reveal (set or removed until its announcement). OPERATOR, like every other mutation
  * of the catalogue, of a product and of the circle; CSRF as for any unsafe
  * request.
  *
  * The only routes whose body is not JSON: the image itself, sent as
- * `image/jpeg` or `image/webp`, at most 1 MiB, on the four upload routes
+ * `image/jpeg` or `image/webp`, at most 1 MiB, on the five upload routes
  * (MEDIA_UPLOAD_ROUTES). The two parsers live in this plugin's encapsulation
  * context, so no other route of the API accepts an image, nor a body over
  * 16 KB; here, any other type is a 415 that says what to send (the order of a
@@ -21,7 +22,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { DomainError } from '../../errors.js';
-import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, parse, productParams } from '../../http/schemas.js';
+import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, liveAdminParams, parse, productParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES, type ImageMime } from '../../media/image.js';
 import type { ImageUpload } from '../../services/media.js';
@@ -36,6 +37,7 @@ export const MEDIA_UPLOAD_ROUTES = Object.freeze([
   '/api/admin/products/:productId/photo',
   '/api/admin/models/:id/gallery',
   '/api/admin/circle/posts/:id/photos',
+  '/api/admin/live/:id/silhouette',
 ] as const);
 
 /** A parsed image body: kept apart from a parsed JSON object, which these routes refuse. */
@@ -55,7 +57,7 @@ function imageOf(body: unknown): ImageUpload {
 }
 
 export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { media, catalog, circle } = ctx.services;
+  const { media, catalog, circle, liveConsole } = ctx.services;
 
   for (const mime of IMAGE_MIME_TYPES) {
     app.addContentTypeParser(mime, { parseAs: 'buffer', bodyLimit: MEDIA_BODY_LIMIT_BYTES }, (_request, body, done) => {
@@ -126,6 +128,21 @@ export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const b = parse(circlePhotoOrderBody, request.body);
     await media.arrangeCirclePostPhotos(id, b.images, adminActor(request));
     return circle.get(id);
+  });
+
+  // ── The silhouette of a LIVE RELEASE ────────────────────────────────────
+
+  app.post('/api/admin/live/:id/silhouette', { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    await media.setLiveSilhouette(id, imageOf(request.body), adminActor(request));
+    return liveConsole.get(id);
+  });
+
+  app.delete('/api/admin/live/:id/silhouette', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    parse(emptyBody, request.body);
+    await media.removeLiveSilhouette(id, adminActor(request));
+    return liveConsole.get(id);
   });
 
   // ── The photograph of one piece ──────────────────────────────────────────

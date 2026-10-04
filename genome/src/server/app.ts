@@ -30,6 +30,7 @@ import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin/index.js';
+import { liveBoardJson } from './routes/admin/live.js';
 import { clubRoutes } from './routes/club.js';
 import { liveRoutes } from './routes/live.js';
 import { ownershipRoutes } from './routes/ownership.js';
@@ -123,7 +124,7 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   // Shutdown gate: once close() starts, requests still arriving on open keep-alive connections get
   // a 503 SERVICE_UNAVAILABLE (and Connection: close) instead of running against a closing database.
   let closing = false;
-  const liveHub = new LiveHub({ room: ctx.services.liveRoom, clock: ctx.clock, log: ctx.log, ...opts.liveHub });
+  const liveHub = new LiveHub({ room: ctx.services.liveRoom, console: ctx.services.liveConsole, consoleView: liveBoardJson, clock: ctx.clock, log: ctx.log, ...opts.liveHub });
   app.decorate('liveHub', liveHub);
   app.addHook('preClose', async () => {
     closing = true;

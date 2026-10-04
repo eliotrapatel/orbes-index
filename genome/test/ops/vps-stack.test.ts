@@ -391,7 +391,7 @@ describe('deploy/vps/Caddyfile', () => {
     expect(upload, 'the @photo_upload matcher').not.toBeNull();
     const pattern = upload![1];
     expect(d).toContain(`@not_photo_upload {\n\t\tnot {\n\t\t\tmethod POST\n\t\t\tpath_regexp ${pattern}\n\t\t}\n\t}`);
-    // The pattern is RE2 and JavaScript alike here: it matches the app's four routes, with or without a trailing slash…
+    // The pattern is RE2 and JavaScript alike here: it matches the app's five routes, with or without a trailing slash…
     const re = new RegExp(pattern);
     const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
     expect([...MEDIA_UPLOAD_ROUTES]).toEqual([
@@ -399,6 +399,7 @@ describe('deploy/vps/Caddyfile', () => {
       '/api/admin/products/:productId/photo',
       '/api/admin/models/:id/gallery',
       '/api/admin/circle/posts/:id/photos',
+      '/api/admin/live/:id/silhouette',
     ]);
     for (const route of MEDIA_UPLOAD_ROUTES) {
       expect(re.test(sample(route)), route).toBe(true);
@@ -424,6 +425,12 @@ describe('deploy/vps/Caddyfile', () => {
       '/api/admin/circle/posts//photos',
       '/api/admin/circle/posts',
       '/api/v1/club/circle/73c68b47-012d-4569-a59a-fd2effa613c1',
+      // A LIVE RELEASE: its settings, its board and its silhouette's removal (a DELETE) keep 64 KB.
+      '/api/admin/live/73c68b47-012d-4569-a59a-fd2effa613c1',
+      '/api/admin/live/73c68b47-012d-4569-a59a-fd2effa613c1/board',
+      '/api/admin/live/73c68b47-012d-4569-a59a-fd2effa613c1/silhouettes',
+      '/api/admin/live//silhouette',
+      '/api/v1/live/73c68b47-012d-4569-a59a-fd2effa613c1/silhouette',
       '/api/v1/lookbook/monolithe-ring',
       '/api/admin/models//image',
       '/api/admin/x/models/1/image',
