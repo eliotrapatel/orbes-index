@@ -236,7 +236,7 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(sectionProblems('t', ['- **X**: the client service of ORBES, reachable at [À COMPLÉTER: email].'], ['- **X**: the client service of ORBES.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina. Phone:'])).not.toEqual([]);
-    // …so the words that still need it are never published without it (article 18 names no mediator).
+    // …so the words that still need it are never published without it (article 19 names no mediator).
     const mediator = ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name of the mediator].'];
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator.'])).not.toEqual([]);
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES.'])).toEqual([]);

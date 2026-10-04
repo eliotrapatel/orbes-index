@@ -370,10 +370,10 @@ docker compose exec app node --import tsx scripts/db.ts status
 Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les 21 lignes `applied`, de `0001_initial` à `0021_live_release`, aucune `PENDING`.
 
 ```bash
-docker compose logs --since 10m app | grep -c 'live engine: leading'
+docker compose logs app | grep -c 'live engine: leading'
 ```
 
-Sortie attendue : `1` : le moteur des LIVE RELEASES a démarré et tient son verrou. `0` : colle à Claude la sortie de `docker compose logs --since 10m app`.
+Sortie attendue : `1` : le moteur des LIVE RELEASES a démarré et tient son verrou. `0` : colle à Claude la sortie de `docker compose logs --tail 200 app`. Le déploiement recrée le conteneur `app` : ses journaux ne portent que sur cette version, quelle que soit l'heure de la commande.
 
 ```bash
 scripts/backup.sh --dry-run
@@ -467,12 +467,15 @@ Une **LIVE RELEASE d'essai**, du début à la fin, avant toute vraie sortie. Il 
 | T0 (choix 2, 21, 22) | Téléphones A et B | À l'heure | La serrure s'aligne et la porte s'ouvre à la même seconde sur les deux téléphones ; la pièce sous un balayage de lumière ; `DRAWING THE PLACES`, puis `YOUR PLACE` |
 | Le tour (choix 5, 8) | Le téléphone dont c'est le tour (le premier de la file en `52`) | `PRESS AND HOLD THE SEAL` : lâcher avant que l'anneau soit plein, puis tenir environ 1,5 s | Lâcher trop tôt remet l'anneau à zéro ; tenu, la révélation : les signes du GENOME, la lueur, l'accord, une vibration sur Android ; puis la pièce tenue, ses options et `PAY` avec son délai |
 | Le tableau en direct (choix 3, 29) | Console, la page de la sortie, pendant que la pièce est tenue | `Pause`, puis `Resume` ; `Message` : `Test` ; `Add pieces` : `1` en `54` | Les compteurs suivent les gestes des téléphones ; pendant la pause, `PAUSED` sur les téléphones et le délai de la pièce tenue arrêté ; `Test` sous l'en-tête des téléphones ; le stock de `54` passe à `2`, l'ajout est inscrit au journal (`Audit` : `drop.live.stock`) |
-| La seconde chance (choix 5) | Les deux téléphones | Sur celui qui tient la pièce, `RELEASE MY PLACE` (deux appuis) | Sur l'autre, `A PIECE HAS RETURNED` et son tour ; le premier lit `YOUR PLACE IS RELEASED` |
+| Prolonger (choix 3) | Console, la page de la sortie, la pièce toujours tenue | `Extend`, `Minutes` : `5`, puis `Extend` | `Release extended.` ; la fin des ventes recule de 5 minutes, dans la note de `Live board` (`end …`) et dans `Times (UTC)` (`End of the sales`) ; inscrit au journal (`Audit` : `drop.live.extend`) ; les téléphones n'affichent pas l'heure de fin, rien n'y change |
+| La seconde chance (choix 3, 5) | Les deux téléphones, puis la console | Sur celui qui tient la pièce, avant la fin de son délai, un seul appui sur `RELEASE MY PLACE` ; puis, dans la console, `Free` sur son entrée et `Free the hold` | Le premier appui affiche `TAP AGAIN TO RELEASE` et, sans second appui, le bouton revient à `RELEASE MY PLACE` ; après `Free the hold` : `Hold freed.` dans la console, le premier téléphone lit `YOUR HOLD HAS ENDED`, l'autre `A PIECE HAS RETURNED` et son tour ; inscrit au journal (`Audit` : `drop.live.free`) |
 | Les options et PAY (choix 4, 33, 34) | L'autre téléphone, après son tour tenu | Cocher `Engraving`, puis `PAY · € 2` | La page passe à l'ivoire : *Your piece is reserved in size 52…*, la référence `LR-…` et le contact d'ORBES Client Services ; l'entrée dans `MY PIECES` ; sur le premier téléphone, rien ne revient en `52` |
 | La fin (choix 10, 26, 32) | Console, un ADMIN | `End now`, taper la phrase demandée (`END <8 caractères>`) | Les téléphones disent la fin (`THE RELEASE HAS ENDED` ou `THIS RELEASE IS OVER`) ; `THE RELEASES` ne liste plus la sortie ; `MY PIECES` garde les entrées ; `curl -s https://verify.theorbes.com/api/v1/live` redonne `{"releases":[]}` |
 | ORBES Client Services (choix 4, 26) | Console | `Client Services` : la réservation d'essai → `Cancel the reservation`, avec la note `Test`, puis `Download CSV` | La réservation `CANCELLED` avec ta note ; le fichier CSV ; aucune pièce ne revient à la file |
 | L'intelligence (choix 29) | Console | Les panneaux de la page de la sortie terminée, puis le CSV du rapport | Le rapport (le temps de vente, les tours manqués, l'entonnoir, l'ajout de pièces), chaque panneau avec `How it is read` |
 | Le lien du tableau | Console, puis l'ordinateur | `Revoke the board’s link`, puis recharger le tableau | `THIS BOARD IS NOT AVAILABLE` |
+
+Trois gestes de la console restent hors de l'essai : `Let in` demande une troisième entrée dans la même taille, l'essai n'en a que deux ; `Remove` est réservé à un ADMIN et retire une entrée pour de bon ; la publication dans le cercle atteindrait de vrais membres. Le second appui de `RELEASE MY PLACE` (`YOUR PLACE IS RELEASED`) n'y est pas non plus : il rend la pièce par le même chemin du serveur que `Free the hold`, et chacune des deux entrées ne finit qu'une fois, l'une par `Free the hold`, l'autre par `PAY`. Les tests les couvrent : `genome/test/api/live-admin.test.ts` (`Let in`, `Remove`, la publication avec le cercle, chaque geste au journal), `genome/test/api/live.test.ts` (`RELEASE MY PLACE` et la seconde chance), `genome/test/api/admin-roles.test.ts` (le rôle exigé par chaque route de la console), `genome/test/web/admin.live.e2e.test.ts` et `genome/test/web/verify.live.e2e.test.ts` (les mêmes gestes, à l'écran).
 
 La commande du flux (sur ton Mac, après `read -rs ORBES_BOARD` ; remplace `<ID>` par l'identifiant de la sortie, dans l'adresse de sa page) :
 

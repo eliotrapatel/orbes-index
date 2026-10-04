@@ -95,14 +95,14 @@ const VERIFY_LABELS = [
   'Your ORBES account does not meet the rule of this release.', 'SIGN IN TO ENTER', 'READY CHECK', 'SYNCED TO ORBES', 'ENTER THE ROOM',
   'IN THE ROOM', 'SOUND ON', 'DRAWING THE PLACES', 'YOUR PLACE', 'PRESS AND HOLD THE SEAL', 'PAUSED', 'RELEASE MY PLACE', 'A PIECE HAS RETURNED',
   'YOUR PLACE IS RELEASED', 'Your piece is reserved in size', 'THE RELEASE HAS ENDED', 'THIS RELEASE IS OVER', 'THIS BOARD IS NOT AVAILABLE',
-  'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ', 'TO BE REVEALED',
+  'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ', 'TO BE REVEALED', 'TAP AGAIN TO RELEASE', 'YOUR HOLD HAS ENDED',
 ] as const;
 const CONSOLE_LABELS = [
   'Club', 'Drops', 'New live release', 'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Sizes', 'Access', 'Add-ons',
   'Publish the release', 'Boutique board', 'Issue the link', 'Copy the link', 'Pause', 'Resume', 'Message', 'Add pieces', 'End now',
   'Client Services', 'Cancel the reservation', 'Download CSV', 'How it is read', 'Revoke the board’s link',
   'Times (UTC)', 'Silhouette revealed', 'Name revealed', 'Photograph revealed', 'Silhouette', 'Choose a photograph', 'To be sent: ', 'Save photograph',
-  'Silhouette saved.',
+  'Silhouette saved.', 'Extend', 'Minutes', 'Release extended.', 'Free', 'Free the hold', 'Hold freed.', 'Let in', 'Remove',
 ] as const;
 
 function sources(dir: string): string {
@@ -141,6 +141,10 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
       expect(runbook, message).toContain(message);
       expect(readDoc(source), `${message}: not in ${source}`).toContain(message);
     }
+    // The engine's line is read from the whole log of the app's container, which this deployment recreates: a window
+    // (--since) would miss it when the post-checks run late.
+    expect(commands).toContain("docker compose logs app | grep -c 'live engine: leading'");
+    expect(commands.filter((c) => c.includes('docker compose logs') && c.includes('--since'))).toEqual([]);
   });
 
   it('keeps the rules of the shared host: the window, the Caddy change agreed first, the guarded launch, no restore, no prune', () => {
@@ -226,7 +230,7 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
   it('checks every feature once, live, with only labels the apps show', () => {
     const checks = section(runbook, '### 1.7');
     const features = [...checks.matchAll(/^\| ([^|]+) \| [^|]+ \| [^|]+ \| [^|]+ \|$/gm)].map((m) => m[1].trim()).filter((f) => f !== 'Élément' && !/^-+$/.test(f));
-    for (const f of ['L\'annonce', 'Les étapes', 'I\'LL BE THERE', 'ADD TO CALENDAR', 'La bannière', 'Le tableau de la boutique', 'Le flux, à travers Caddy', 'Pas éligible', 'Pas de spectateur', 'La salle', 'La dernière minute', 'T0', 'Le tour', 'Le tableau en direct', 'La seconde chance', 'Les options et PAY', 'La fin', 'ORBES Client Services', 'L\'intelligence', 'Le lien du tableau']) {
+    for (const f of ['L\'annonce', 'Les étapes', 'I\'LL BE THERE', 'ADD TO CALENDAR', 'La bannière', 'Le tableau de la boutique', 'Le flux, à travers Caddy', 'Pas éligible', 'Pas de spectateur', 'La salle', 'La dernière minute', 'T0', 'Le tour', 'Le tableau en direct', 'Prolonger', 'La seconde chance', 'Les options et PAY', 'La fin', 'ORBES Client Services', 'L\'intelligence', 'Le lien du tableau']) {
       expect(features.some((x) => x.startsWith(f)), f).toBe(true);
     }
     const verify = sources(join(REPO, 'genome/src/web/verify'));
@@ -247,6 +251,13 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(checks).toContain('`read -rs ORBES_BOARD`');
     expect(checks).toContain('`unset ORBES_BOARD`');
     expect(readDoc('genome/src/server/http/live-stream.ts')).toContain("'content-type': 'text/event-stream; charset=utf-8'");
+    // What the trial leaves out says why, and names the tests that cover it.
+    const left = checks.split('\n').find((l) => l.startsWith('Trois gestes de la console restent hors de l\'essai'));
+    expect(left).toBeDefined();
+    for (const why of ['`Let in` demande une troisième entrée', '`Remove` est réservé à un ADMIN', 'atteindrait de vrais membres', '`RELEASE MY PLACE` (`YOUR PLACE IS RELEASED`)']) expect(left, why).toContain(why);
+    const tests = [...left!.matchAll(/`(genome\/test\/[^`]+\.test\.ts)`/g)].map((m) => m[1]);
+    expect(tests).toEqual(['genome/test/api/live-admin.test.ts', 'genome/test/api/live.test.ts', 'genome/test/api/admin-roles.test.ts', 'genome/test/web/admin.live.e2e.test.ts', 'genome/test/web/verify.live.e2e.test.ts']);
+    for (const t of tests) expect(existsSync(join(REPO, t)), t).toBe(true);
   });
 
   it('gives one command per shell block, and runs the tools as they are', () => {
