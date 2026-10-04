@@ -287,6 +287,7 @@ const addonUnknown = () => new DomainError('LIVE_ADDON_UNKNOWN', 400, 'Choose am
 const liveNotStarted = () => conflict('LIVE_NOT_STARTED', 'This release has not opened yet.');
 const liveEnded = () => conflict('LIVE_ENDED', 'This release has ended.');
 const liveNotAnnounced = () => conflict('LIVE_NOT_ANNOUNCED', 'This release is not announced yet: change its sizes in the settings until the announcement.');
+const messageTooEarly = () => conflict('LIVE_NOT_ANNOUNCED', 'This release is not announced yet: a host message is written from its announcement.');
 const alreadyPaused = () => conflict('LIVE_ALREADY_PAUSED', 'This release is already paused.');
 const notPaused = () => conflict('LIVE_NOT_PAUSED', 'This release is not paused.');
 const noFreePiece = () => conflict('LIVE_NO_FREE_PIECE', 'No piece of this size is free for this entry.');
@@ -1297,13 +1298,18 @@ export class LiveService {
     });
   }
 
-  /** A host message: one line of 1 to LIVE_MESSAGE_MAX characters, the latest shown in the room. Audited `drop.live.message`. */
+  /**
+   * A host message: one line of 1 to LIVE_MESSAGE_MAX characters, the latest shown in the room; from the announcement
+   * (409 LIVE_NOT_ANNOUNCED before) to the end (409 LIVE_ENDED after). Audited `drop.live.message`.
+   */
   async message(dropId: string, text: string, actor: Actor): Promise<LiveMessageView> {
     const admin = assertStaff(actor, 'write to the room');
     const line = typeof text === 'string' ? text.trim() : '';
     if (line.length < 1 || line.length > LIVE_MESSAGE_MAX || CONTROL_CHARS.test(line)) throw validationError(`A message is one line of 1 to ${LIVE_MESSAGE_MAX} characters.`);
     let out: LiveMessageView | undefined;
     await this.control(dropId, async (tx, d, now) => {
+      if (!isAnnounced(d, now)) throw messageTooEarly();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       const row = await tx.insertInto('live_messages').values({ drop_id: d.id, text: line, created_by: admin, created_at: now }).returning(['id', 'text', 'created_at']).executeTakeFirstOrThrow();
       out = { id: row.id, text: row.text, createdAt: row.created_at };
       await this.audit.record({ actor, action: 'drop.live.message', targetType: 'drop', targetId: d.id, details: { messageId: row.id, text: line } }, tx);

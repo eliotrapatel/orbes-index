@@ -13,6 +13,9 @@
  *  3. An OPERATOR runs the controls but neither ends nor removes; a page left while its open entries are on their way
  *     starts no stream once they arrive, the page on screen keeping its own; an AUDITOR reads the board, the line and
  *     the reservations with the emails masked, without one action.
+ *  4. A release published to be announced later: its post of the circle added then withdrawn on its page; then, the page
+ *     never reloaded, its board's stream brings each state and the page is drawn again for it: ADD PIECES and the host
+ *     message once announced, no cancellation once the room opens, PAUSE at T0, no control left after the end.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -486,5 +489,74 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(await a.locator('[data-testid=live-new]').count()).toBe(0);
     expect(await csp(a)).toEqual([]);
     await a.context().close();
+  }, STEP_TIMEOUT);
+
+  it('draws the page again as the release moves on, without a reload: its post of the circle until the announcement, ADD PIECES once announced, PAUSE at T0, no control after the end', async () => {
+    const r = await ctx.services.liveConsole.create(
+      { modelId, title: 'THE THIRD RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] },
+      admin,
+    );
+    await ctx.services.liveConsole.publish(r.id, {}, admin);
+    const move = (set: { announce_at?: Date; opens_at?: Date; closes_at?: Date }) => ctx.db.updateTable('drops').set(set).where('id', '=', r.id).execute();
+    const p = await open(ADMIN);
+    await go(p, `#/club/live/${r.id}`, 'THE THIRD RING');
+    const state = () => p.locator('[data-testid=live-state]').textContent();
+    const lead = () => p.locator('.page-head__lead').textContent();
+    const count = (id: string) => p.locator(`[data-testid=${id}]`).count();
+    await expect.poll(state).toBe('SCHEDULED');
+
+    // Published, announced later: its post of the circle is added, then withdrawn, on its page.
+    expect(await count('live-circle')).toBe(0);
+    await p.click('[data-testid=live-circle-post]');
+    await expect.poll(() => p.locator('dialog').textContent()).toContain('shown from the announcement');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toMatch(/^Post shown from /);
+    expect(await count('live-circle-post')).toBe(0);
+    await p.click('[data-testid=live-circle-withdraw]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toBe('Post withdrawn');
+    expect(await ctx.db.selectFrom('circle_posts').select('published_at').where('drop_id', '=', r.id).execute()).toEqual([{ published_at: null }]);
+    for (const [id, n] of [['live-circle-post', 1], ['live-edit-sizes', 1], ['live-cancel', 1], ['live-add-pieces', 0], ['live-message-new', 0], ['live-pause', 0]] as const) {
+      expect(await count(id), id).toBe(n);
+    }
+
+    // From here the page is never reloaded (the mark survives): its board's stream brings each state, the page follows.
+    await p.evaluate(() => ((window as unknown as { __kept: boolean }).__kept = true));
+
+    // Announced: the settings and the post's choice go, ADD PIECES and the host message come.
+    await move({ announce_at: new Date(Date.now() - HOUR) });
+    await expect.poll(state, { timeout: 15_000 }).toBe('ANNOUNCED');
+    await expect.poll(() => count('live-add-pieces')).toBe(1);
+    expect(await lead()).toMatch(/^Announced on \/verify/);
+    for (const [id, n] of [['live-circle-post', 0], ['live-edit-sizes', 0], ['live-cancel', 1], ['live-message-new', 1], ['live-pause', 0], ['live-end', 1]] as const) {
+      expect(await count(id), id).toBe(n);
+    }
+
+    // The room open: no cancellation any more, no pause before T0.
+    await move({ opens_at: new Date(Date.now() + 2 * 60_000) });
+    await expect.poll(state, { timeout: 15_000 }).toBe('ROOM OPEN');
+    await expect.poll(() => count('live-cancel')).toBe(0);
+    expect(await count('live-pause')).toBe(0);
+
+    // T0: PAUSE comes with LIVE, the Publication's mark and the lead with it.
+    await move({ opens_at: new Date(Date.now() - 60_000) });
+    await ctx.services.live.advance(r.id);
+    await expect.poll(() => count('live-pause'), { timeout: 15_000 }).toBe(1);
+    expect(await state()).toBe('LIVE');
+    expect(await lead()).toMatch(/^Live: /);
+    await expect.poll(() => p.locator('[data-testid=live-board-state]').textContent()).toContain('LIVE');
+
+    // The end of the sales: no control is left.
+    await move({ closes_at: new Date(Date.now() - 1000) });
+    await ctx.services.live.advance(r.id);
+    await expect.poll(state, { timeout: 15_000 }).toBe('CLOSED');
+    for (const id of ['live-pause', 'live-resume', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces']) {
+      expect(await count(id), id).toBe(0);
+    }
+    expect(await lead()).toMatch(/^Over: /);
+    expect(await p.evaluate(() => (window as unknown as { __kept?: boolean }).__kept)).toBe(true);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
   }, STEP_TIMEOUT);
 });

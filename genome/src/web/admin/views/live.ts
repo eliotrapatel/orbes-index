@@ -7,7 +7,8 @@
  *    the pieces left, held and sold, its people, its interest; ADD PIECES, with what the quantity line promised), and the
  *    controls: PAUSE / RESUME, EXTEND, MESSAGE (OPERATOR), END NOW (ADMIN, a phrase to type). It follows the console's
  *    stream (`console` events, http/live-stream.ts) and, should the stream be refused or lost, the board every 5 s; it
- *    stops when the console moves elsewhere (`disposeLiveView`, main.ts).
+ *    stops when the console moves elsewhere (`disposeLiveView`, main.ts). A board in another state than the page was
+ *    drawn for (the announcement or T0 passed, a pause, the end) has the page read again, its controls with it.
  *  - The entries: the line itself, live (its open entries by place: the account, its email masked for an AUDITOR, its
  *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
@@ -15,8 +16,9 @@
  *    a note (OPERATOR); the CSV.
  *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access,
  *    its times, its turns and holds, its add-ons), the silhouette (a photograph) and the boutique board's link (issued,
- *    shown once, revoked); PUBLISH (with or without a post of the circle) and CANCEL (before the room opens, a phrase to
- *    type). Each request is audited by the server; then the page is read again.
+ *    shown once, revoked); PUBLISH (with or without a post of the circle, added or withdrawn until the announcement)
+ *    and CANCEL (before the room opens, a phrase to type). Each request is audited by the server; then the page is read
+ *    again.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
@@ -32,6 +34,7 @@ import {
   liveEntryActions,
   liveEntryDeadline,
   liveLead,
+  livePageKey,
   livePartChange,
   livePartProblem,
   livePartValues,
@@ -151,7 +154,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   if (asked !== screens) return h('div', { class: 'view view--live' });
 
   const role = ctx.session.admin.role;
-  const acts = liveActions(r, role, ctx.now());
+  const acts = liveActions(r, role);
   const eyebrow = `LIVE RELEASE · ${r.id.slice(0, 8).toUpperCase()}`;
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
@@ -166,6 +169,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const updated = h('span', { class: 'live__updated', data: { testid: 'live-updated' } });
   const stateLine = h('p', { class: 'live__state', data: { testid: 'live-board-state' } }, stateMarks, updated);
   let stateKey = '';
+  // The controls, the marks of the publication and the lead are drawn for the state the release was read in: once the
+  // board says another (T0 passed, a pause, the end, the last hold settled), the page is read again, its scroll kept.
+  const pageKey = livePageKey({ phase: r.phase, paused: r.pausedAt !== null && !r.over, ended: r.endedAt !== null, over: r.over });
+  let drawn = false;
+  let stale = false;
   const figures = h('div', { class: ['kpis', 'live__figures'] });
   const messageLine = h('p', { class: 'live__message', data: { testid: 'live-message' } });
   const sizesBox = h('div', { class: 'live__sizes' });
@@ -253,6 +261,14 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   ];
 
   const render = (b: LiveBoard, via: 'stream' | 'poll' | 'read') => {
+    if (stale) return;
+    if (drawn && livePageKey({ phase: b.phase, paused: b.paused, ended: b.endedAt !== null, over: b.over }) !== pageKey) {
+      stale = true;
+      disposeLiveView();
+      ctx.reload();
+      return;
+    }
+    drawn = true;
     board = b;
     const label = liveStateLabel({ phase: b.phase, endedReason: b.endedReason });
     const finishing = b.phase === 'ENDED' && !b.over;
@@ -727,6 +743,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   );
 
   // ── Publication ──────────────────────────────────────────────────────────
+  const circleNote = `A note for the owners ${r.minTier >= 2 ? `from ${tierLabel(r.minTier)}` : 'of a piece'}, shown from the announcement: the room’s opening, the quantity line, the price and who may enter, never the piece’s name.`;
   const publish = () =>
     void openDialog({
       title: 'Publish the release',
@@ -740,7 +757,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           name: 'circlePost',
           label: 'Post it in the circle',
           kind: 'checkbox',
-          hint: `A note for the owners ${r.minTier >= 2 ? `from ${tierLabel(r.minTier)}` : 'of a piece'}, shown from the announcement: the room’s opening, the quantity line, the price and who may enter, never the piece’s name.`,
+          hint: `${circleNote} ${r.announceAt ? 'Added or withdrawn on this page until the announcement.' : 'Announced at once: the choice is final.'}`,
         },
       ],
       confirmLabel: 'Publish',
@@ -748,6 +765,25 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         await ctx.api.publishLiveRelease(r.id, v.circlePost === 'true');
       },
     }).then(done('Release published.'));
+  // The release's post of the circle, once published: added or withdrawn until the announcement.
+  const scheduledPost = r.circlePosts.some((p) => p.publishedAt !== null && Date.parse(p.publishedAt) > ctx.now().getTime());
+  const circleToggle = () =>
+    void openDialog({
+      title: scheduledPost ? 'Withdraw the post' : 'Post it in the circle',
+      eyebrow,
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        scheduledPost
+          ? 'The post of the circle waiting for the announcement is withdrawn: the owners never read it. It can be posted again until the announcement.'
+          : `${circleNote} The announcement: ${r.announceAt ? formatDateTime(r.announceAt) : 'at the publication'}.`,
+      ),
+      confirmLabel: scheduledPost ? 'Withdraw' : 'Post it',
+      submit: async () => {
+        if (scheduledPost) await ctx.api.withdrawLiveCircle(r.id);
+        else await ctx.api.postLiveCircle(r.id);
+      },
+    }).then(done(scheduledPost ? 'Post withdrawn.' : 'Post scheduled for the announcement.'));
   const cancel = () =>
     void openDialog({
       title: 'Cancel the release',
@@ -779,9 +815,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   ];
   const releaseSection = section('Publication', defList(facts), {
     id: 'live-publication',
-    tools: [acts.publish ? button('Publish', { kind: 'primary', testId: 'live-publish', onClick: publish }) : null, acts.cancel ? button('Cancel', { kind: 'ghost', testId: 'live-cancel', onClick: cancel }) : null].filter(
-      (b): b is HTMLButtonElement => b !== null,
-    ),
+    tools: [
+      acts.publish ? button('Publish', { kind: 'primary', testId: 'live-publish', onClick: publish }) : null,
+      acts.circlePost ? button(scheduledPost ? 'Withdraw post' : 'Circle post', { kind: 'ghost', testId: scheduledPost ? 'live-circle-withdraw' : 'live-circle-post', onClick: circleToggle }) : null,
+      acts.cancel ? button('Cancel', { kind: 'ghost', testId: 'live-cancel', onClick: cancel }) : null,
+    ].filter((b): b is HTMLButtonElement => b !== null),
   });
 
   const root = h(

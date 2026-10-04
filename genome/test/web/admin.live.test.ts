@@ -42,6 +42,7 @@ import {
   liveBoardFigures,
   liveEntryActions,
   liveEntryDeadline,
+  livePageKey,
   livePartChange,
   livePartProblem,
   livePartValues,
@@ -309,22 +310,31 @@ describe('the console of the LIVE RELEASES', () => {
     expect(livePartProblem(r, 'release', { ...livePartValues(r, 'release'), perAccount: '6' })).toMatch(/1 to 5 pieces/);
   });
 
-  it('offers each role what it may do now: OPERATOR edits until the announcement and runs the controls, ADMIN ends', () => {
+  it('offers each role what it may do in the phase: OPERATOR edits until the announcement and runs the controls, ADMIN ends', () => {
     const draft = release();
-    expect(liveActions(draft, 'AUDITOR', NOW)).toEqual({ edit: false, publish: false, cancel: false, boardLink: false, pause: false, resume: false, extend: false, addPieces: false, message: false, end: false });
-    expect(liveActions(draft, 'OPERATOR', NOW)).toMatchObject({ edit: true, publish: true, cancel: true, boardLink: true, pause: false, extend: false, end: false });
-    // Published, not announced yet: the sizes change in the settings, not by ADD PIECES (the quantity line follows them).
+    expect(liveActions(draft, 'AUDITOR')).toEqual({ edit: false, publish: false, cancel: false, circlePost: false, boardLink: false, pause: false, resume: false, extend: false, addPieces: false, message: false, end: false });
+    expect(liveActions(draft, 'OPERATOR')).toMatchObject({ edit: true, publish: true, cancel: true, circlePost: false, boardLink: true, pause: false, extend: false, end: false });
+    // Published, not announced yet: the sizes change in the settings, not by ADD PIECES (the quantity line follows them);
+    // its post of the circle is added or withdrawn; no host message before the announcement.
     const hidden = release({ phase: 'HIDDEN', editable: true, publishedAt: '2026-11-01T09:00:00.000Z' });
-    expect(liveActions(hidden, 'OPERATOR', NOW)).toMatchObject({ edit: true, cancel: true, addPieces: false, extend: true, message: true });
+    expect(liveActions(hidden, 'OPERATOR')).toMatchObject({ edit: true, cancel: true, circlePost: true, addPieces: false, extend: true, message: false });
     const announced = release({ phase: 'ANNOUNCED', editable: false, publishedAt: '2026-11-01T09:00:00.000Z' });
-    expect(liveActions(announced, 'OPERATOR', NOW)).toMatchObject({ edit: false, publish: false, cancel: true, addPieces: true, extend: true, message: true, pause: false });
+    expect(liveActions(announced, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: true, circlePost: false, addPieces: true, extend: true, message: true, pause: false });
+    // The room open: no cancellation, no pause before T0.
+    expect(liveActions({ ...announced, phase: 'ROOM' }, 'OPERATOR')).toMatchObject({ cancel: false, pause: false, addPieces: true, message: true, extend: true });
+    // The phase is the server's: the page's clock plays no part (a board in another phase has the page read again).
     const live = release({ phase: 'LIVE', editable: false, publishedAt: '2026-11-01T09:00:00.000Z' });
+    expect(liveActions(live, 'OPERATOR')).toMatchObject({ cancel: false, pause: true, resume: false, extend: true, addPieces: true, message: true, end: false });
+    expect(liveActions(live, 'ADMIN')).toMatchObject({ end: true });
     const during = new Date('2026-11-10T18:10:00.000Z');
-    expect(liveActions(live, 'OPERATOR', during)).toMatchObject({ cancel: false, pause: true, resume: false, extend: true, addPieces: true, message: true, end: false });
-    expect(liveActions(live, 'ADMIN', during)).toMatchObject({ end: true });
-    expect(liveActions({ ...live, pausedAt: during.toISOString() }, 'OPERATOR', during)).toMatchObject({ pause: false, resume: true });
+    expect(liveActions({ ...live, pausedAt: during.toISOString() }, 'OPERATOR')).toMatchObject({ pause: false, resume: true });
     const ended = { ...live, phase: 'ENDED' as const, endedAt: during.toISOString() };
-    expect(liveActions(ended, 'ADMIN', during)).toMatchObject({ pause: false, extend: false, addPieces: false, message: false, end: false });
+    expect(liveActions(ended, 'ADMIN')).toMatchObject({ pause: false, extend: false, addPieces: false, message: false, end: false, cancel: false });
+    expect(liveActions({ ...hidden, phase: 'CANCELLED', editable: false }, 'ADMIN')).toMatchObject({ edit: false, cancel: false, circlePost: false, boardLink: false, extend: false, end: false });
+    // The page's state: another phase, a pause, the end or the last hold settled read it again.
+    const key = (o: Partial<{ phase: LiveBoard['phase']; paused: boolean; ended: boolean; over: boolean }> = {}) => livePageKey({ phase: 'ROOM', paused: false, ended: false, over: false, ...o });
+    expect(key()).toBe(key({}));
+    expect(new Set([key(), key({ phase: 'LIVE' }), key({ paused: true }), key({ phase: 'ENDED' }), key({ phase: 'ENDED', ended: true }), key({ phase: 'ENDED', ended: true, over: true })]).size).toBe(6);
     expect(can('OPERATOR', 'endLiveRelease')).toBe(false);
     expect(can('ADMIN', 'removeLiveEntry')).toBe(true);
     const board = { phase: 'LIVE' as const, paused: false, endedAt: null };

@@ -11,11 +11,13 @@
  *    the announcement only ADD PIECES raises the stock (409 LIVE_ANNOUNCED), and not before it (409 LIVE_NOT_ANNOUNCED); a
  *    published release keeps its announcement time;
  *  - publish, with a post of the circle shown from the announcement and kept in step until then, its link naming the
- *    release once its name is revealed; cancel before the room opens only, the scheduled post withdrawn;
+ *    release once its name is revealed; that post added or withdrawn after the publication until the announcement;
+ *    cancel before the room opens only, the scheduled post withdrawn;
  *  - the silhouette (an image body), the boutique board's link issued once and revoked;
  *  - the live board and the console's stream: the counters per size and overall, the line with the emails masked for an
  *    AUDITOR (in its stream too, which follows a change of role and ends with its session), the controls with their roles
  *    (OPERATOR: pause, resume, extend, add pieces, free a hold, let in, message; ADMIN: end now, remove), each audited;
+ *    a host message only from the announcement to the end;
  *  - Client Services: the confirmed reservations with their sizes, add-ons and totals, CONCLUDED or CANCELLED with a note
  *    kept out of the audit log, once; the CSV (masked for an AUDITOR, no formula run).
  */
@@ -366,6 +368,52 @@ describe('LIVE RELEASES: the console', () => {
     });
   });
 
+  describe('the post of the circle after the publication', () => {
+    it('adds and withdraws the release’s post of the circle once published, until its announcement, audited', async () => {
+      const r = await create({ inMinutes: 60, announceAt: iso(20 * MINUTE) });
+      const at = new Date(r.announceAt).toISOString();
+      const path = `/api/admin/live/${r.id}/circle-post`;
+      // A draft's post is chosen when it is published.
+      expect(errorOf(await op.post(path, {})).code).toBe('DROP_NOT_PUBLISHED');
+      await op.post(`/api/admin/live/${r.id}/publish`, {});
+      expect((await auditor.post(path, {})).statusCode).toBe(403);
+      expect((await auditor.request('DELETE', path)).statusCode).toBe(403);
+      expect(errorOf(await op.request('DELETE', path)).code).toBe('LIVE_NO_CIRCLE_POST');
+      expect(errorOf(await op.post(path, { circlePost: true })).code).toBe('VALIDATION_FAILED');
+
+      const added = await op.post(path, {});
+      expect(added.statusCode, added.body).toBe(200);
+      const { circlePosts } = safeJson(added) as Json;
+      expect(circlePosts).toEqual([{ id: expect.any(String), publishedAt: at }]);
+      const post = await h.ctx.db.selectFrom('circle_posts').selectAll().where('id', '=', circlePosts[0].id).executeTakeFirstOrThrow();
+      expect(post).toMatchObject({ kind: 'NOTE', title: LIVE_CIRCLE_TITLE, min_tier: 1, drop_id: r.id });
+      expect(post.body).toContain('Paris time, 5 minutes before the release.');
+      expect((await audits('circle.post.create', post.id))[0]!.details).toMatchObject({ dropId: r.id, minTier: 1, publishedAt: at });
+      expect(errorOf(await op.post(path, {})).code).toBe('LIVE_CIRCLE_POSTED');
+      // Kept in step with the release, as the publication's.
+      expect((await op.patch(`/api/admin/live/${r.id}`, { announceAt: iso(30 * MINUTE) })).statusCode).toBe(200);
+      expect((await h.ctx.db.selectFrom('circle_posts').select('published_at').where('id', '=', post.id).executeTakeFirstOrThrow()).published_at!.toISOString()).toBe(iso(30 * MINUTE));
+
+      const withdrawn = await op.request('DELETE', path);
+      expect(withdrawn.statusCode, withdrawn.body).toBe(200);
+      expect((safeJson(withdrawn) as Json).circlePosts).toEqual([{ id: post.id, publishedAt: null }]);
+      expect((await audits('circle.post.unpublish', post.id))[0]!.details).toMatchObject({ dropId: r.id });
+      expect(errorOf(await op.request('DELETE', path)).code).toBe('LIVE_NO_CIRCLE_POST');
+
+      // Posted again, then announced: the choice is fixed.
+      const again = safeJson(await op.post(path, {})) as Json;
+      expect(again.circlePosts.filter((p: Json) => p.publishedAt !== null)).toHaveLength(1);
+      h.clock.advance(30 * MINUTE);
+      expect(errorOf(await op.request('DELETE', path)).code).toBe('LIVE_ANNOUNCED');
+      expect(errorOf(await op.post(path, {})).code).toBe('LIVE_ANNOUNCED');
+
+      const cancelled = await create({ inMinutes: 60, announceAt: iso(20 * MINUTE) });
+      await op.post(`/api/admin/live/${cancelled.id}/publish`, {});
+      await op.post(`/api/admin/live/${cancelled.id}/cancel`, {});
+      expect(errorOf(await op.post(`/api/admin/live/${cancelled.id}/circle-post`, {})).code).toBe('DROP_CANCELLED');
+    });
+  });
+
   describe('the silhouette and the board link', () => {
     it('sets and removes the silhouette until the announcement (an image body, OPERATOR)', async () => {
       const r = await create({ inMinutes: 3 * 60, announceAt: iso(HOUR) });
@@ -498,6 +546,23 @@ describe('LIVE RELEASES: the console', () => {
       expect(all.items.every((e) => /^\w\*\*\*@example\.com$/.test(e.email))).toBe(true);
       expect((safeJson(await op.get(`/api/admin/live/${r.id}/entries?status=OPEN`)) as { items: Json[] }).items.every((e) => ['WAITING', 'QUEUED', 'TURN', 'SECURED'].includes(e.status))).toBe(true);
       expect(errorOf(await op.get(`/api/admin/live/${r.id}/entries?status=GONE`)).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('takes a host message from the announcement to the end of the sales only', async () => {
+      const r = await create({ inMinutes: 40, announceAt: iso(20 * MINUTE) });
+      const write = (text: string) => op.post(`/api/admin/live/${r.id}/messages`, { text });
+      expect(errorOf(await write('Soon.')).code).toBe('DROP_NOT_FOUND');
+      await op.post(`/api/admin/live/${r.id}/publish`, {});
+      const early = await write('Soon.');
+      expect(early.statusCode).toBe(409);
+      expect(errorOf(early)).toMatchObject({ code: 'LIVE_NOT_ANNOUNCED', message: expect.stringMatching(/from its announcement/) });
+      h.clock.advance(20 * MINUTE);
+      expect((await write('The room opens at seven.')).statusCode).toBe(201);
+      // The sales end 100 minutes after the creation.
+      h.clock.advance(80 * MINUTE);
+      expect(errorOf(await write('Too late.')).code).toBe('LIVE_ENDED');
+      expect((await audits('drop.live.message', r.id)).map((a) => (a.details as Json).text)).toEqual(['The room opens at seven.']);
+      expect(await h.ctx.db.selectFrom('live_messages').select('text').where('drop_id', '=', r.id).execute()).toEqual([{ text: 'The room opens at seven.' }]);
     });
 
     it('streams the board to a console, masked for an AUDITOR, following its role, ending with its session or the release', async () => {

@@ -12,7 +12,8 @@
  *                   PIECES (live.ts addPieces). The silhouette's image is MediaService's (setLiveSilhouette).
  *   publish         with, optionally, a post of the owners' circle linking the release (the plan's choice 9): a NOTE for
  *                   the release's tier (TITANE at least), shown from the announcement, kept in step with the release's
- *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows.
+ *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows; added or
+ *                   withdrawn after the publication until the announcement, as every setting (setCirclePost).
  *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW).
  *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
  *                   the holds that ended, per size and overall, the interest), the latest host message and the line
@@ -116,6 +117,9 @@ function money(minor: number, currency: string): string {
 const liveCancelled = () => conflict('DROP_CANCELLED', 'This release has been cancelled.');
 const liveAnnounced = () => conflict('LIVE_ANNOUNCED', 'This release is announced: its settings no longer change. Raise a size’s stock with ADD PIECES.');
 const alreadyPublished = () => conflict('DROP_ALREADY_PUBLISHED', 'This release is already published.');
+const notPublished = () => conflict('DROP_NOT_PUBLISHED', 'This release is not published: its post of the circle is chosen when it is published.');
+const circlePosted = () => conflict('LIVE_CIRCLE_POSTED', 'This release’s post of the circle already waits for its announcement.');
+const noCirclePost = () => conflict('LIVE_NO_CIRCLE_POST', 'This release has no post of the circle waiting for its announcement.');
 const roomOpen = () => conflict('LIVE_ROOM_OPEN', 'The room of this release is open: an ADMIN ends it with END NOW.');
 const roomPast = () => validationError('The room would already be open: set T0 later.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
@@ -889,6 +893,54 @@ export class LiveConsoleService {
         },
       });
       for (const n of notes) await this.audit.record(n, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * The release's post of the circle after its publication, until its announcement (409 LIVE_ANNOUNCED after,
+   * DROP_NOT_PUBLISHED for a draft, whose post is chosen when it is published; DROP_CANCELLED once cancelled): `on`, a
+   * post written as the publication writes it, shown from the announcement (409 LIVE_CIRCLE_POSTED when one waits for
+   * it already); off, the posts waiting for it withdrawn (409 LIVE_NO_CIRCLE_POST without one). Audited
+   * `circle.post.create` or `circle.post.unpublish`, with the release's id.
+   */
+  async setCirclePost(dropId: string, on: boolean, actor: Actor): Promise<AdminLiveRelease> {
+    const admin = assertStaff(actor, 'post a release in the circle');
+    const id = knownId(dropId, dropNotFound);
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      const now = this.clock();
+      if (d.cancelled_at) throw liveCancelled();
+      if (!d.published_at) throw notPublished();
+      if (isAnnounced(d, now)) throw liveAnnounced();
+      const waiting = await tx.selectFrom('circle_posts').select('id').where('drop_id', '=', id).where('published_at', '>', now).orderBy('created_at').orderBy('id').forUpdate().execute();
+      if (on) {
+        if (waiting.length > 0) throw circlePosted();
+        const post = await this.circlePost(tx, d, now);
+        const { id: postId } = await tx
+          .insertInto('circle_posts')
+          .values({ kind: 'NOTE', title: LIVE_CIRCLE_TITLE, body: post.body, min_tier: post.minTier, drop_id: id, published_at: post.at, created_by: admin, created_at: now })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await this.audit.record(
+          {
+            actor,
+            action: 'circle.post.create',
+            targetType: 'circle_post',
+            targetId: postId,
+            details: { kind: 'NOTE', title: LIVE_CIRCLE_TITLE, body: storyFingerprint(post.body), minTier: post.minTier, dropId: id, publishedAt: post.at.toISOString() },
+          },
+          tx,
+        );
+      } else {
+        if (waiting.length === 0) throw noCirclePost();
+        await tx
+          .updateTable('circle_posts')
+          .set({ published_at: null })
+          .where('id', 'in', waiting.map((p) => p.id))
+          .execute();
+        for (const p of waiting) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id } }, tx);
+      }
       return this.release(tx, id);
     });
   }

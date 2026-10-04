@@ -8,6 +8,8 @@
  *   GET    /api/admin/live/:id                               AUDITOR   one, every setting
  *   PATCH  /api/admin/live/:id                               OPERATOR  any setting, until its announcement (409 LIVE_ANNOUNCED)
  *   POST   /api/admin/live/:id/publish                       OPERATOR  announced at its time; `circlePost`: a post of the circle
+ *   POST   /api/admin/live/:id/circle-post                   OPERATOR  its post of the circle, published, until its announcement
+ *   DELETE /api/admin/live/:id/circle-post                   OPERATOR  that post withdrawn, until its announcement
  *   POST   /api/admin/live/:id/cancel                        OPERATOR  before its room opens
  *   POST   /api/admin/live/:id/board-link                    OPERATOR  the boutique board's secret link, shown once (replaces one)
  *   DELETE /api/admin/live/:id/board-link                    OPERATOR  revoked
@@ -99,6 +101,18 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id } = parse(liveAdminParams, request.params);
     const b = parse(publishLiveBody, request.body);
     return liveConsole.publish(id, { circlePost: b.circlePost === true }, adminActor(request));
+  });
+
+  app.post('/api/admin/live/:id/circle-post', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    parse(emptyBody, request.body);
+    return liveConsole.setCirclePost(id, true, adminActor(request));
+  });
+
+  app.delete('/api/admin/live/:id/circle-post', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    parse(emptyBody, request.body);
+    return liveConsole.setCirclePost(id, false, adminActor(request));
   });
 
   app.post('/api/admin/live/:id/cancel', async (request) => {

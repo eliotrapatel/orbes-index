@@ -433,6 +433,8 @@ export interface LiveActions {
   publish: boolean;
   /** Before the room opens. */
   cancel: boolean;
+  /** The release's post of the circle, added or withdrawn: published, until the announcement. */
+  circlePost: boolean;
   /** The boutique board's link: issue (or replace), revoke. */
   boardLink: boolean;
   pause: boolean;
@@ -440,30 +442,43 @@ export interface LiveActions {
   extend: boolean;
   /** ADD PIECES: announced, not ended (before the announcement, the sizes are changed in the settings). */
   addPieces: boolean;
+  /** A host message: announced, not ended (the room shows the latest). */
   message: boolean;
   /** ADMIN, a phrase to type. */
   end: boolean;
 }
 
-/** What `role` may do to the release at `now` (the server checks again; this hides only what would be refused). */
-export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt' | 'roomOpensAt' | 'closesAt' | 'endedAt' | 'opensAt'>, role: AdminRole | null | undefined, now: Date): LiveActions {
+/**
+ * What `role` may do to the release in its phase (the server checks again; this hides only what would be refused). The
+ * phase is the server's, on its clock: the page is read again when its board's stream brings another (`livePageKey`).
+ */
+export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt'>, role: AdminRole | null | undefined): LiveActions {
   const manage = can(role, 'manageDrops');
-  const t = now.getTime();
-  const published = r.publishedAt !== null && r.phase !== 'CANCELLED';
-  const running = published && r.endedAt === null && t < Date.parse(r.closesAt);
-  const live = running && t >= Date.parse(r.opensAt);
+  const published = r.publishedAt !== null && hasBoard(r.phase);
+  // Published and not ended: HIDDEN, ANNOUNCED, ROOM or LIVE.
+  const running = published && r.phase !== 'ENDED';
+  const announced = running && r.phase !== 'HIDDEN';
   return {
     edit: manage && r.editable,
     publish: manage && r.phase === 'DRAFT',
-    cancel: manage && (r.phase === 'DRAFT' || (published && t < Date.parse(r.roomOpensAt))),
+    cancel: manage && (r.phase === 'DRAFT' || r.phase === 'HIDDEN' || r.phase === 'ANNOUNCED'),
+    circlePost: manage && r.phase === 'HIDDEN' && r.editable,
     boardLink: manage && r.phase !== 'CANCELLED',
-    pause: manage && live && r.pausedAt === null,
+    pause: manage && r.phase === 'LIVE' && r.pausedAt === null,
     resume: manage && r.pausedAt !== null && published,
     extend: manage && running,
-    addPieces: manage && running && !r.editable,
-    message: manage && running,
+    addPieces: manage && announced,
+    message: manage && announced,
     end: can(role, 'endLiveRelease') && running,
   };
+}
+
+/**
+ * The state the page's controls, marks and lead were drawn for: its phase, paused, ended, over. A board that says
+ * another (T0 passed, a pause, the end, the last hold settled) has the page read again.
+ */
+export function livePageKey(x: { phase: LivePhase; paused: boolean; ended: boolean; over: boolean }): string {
+  return [x.phase, x.paused ? 'PAUSED' : '', x.ended ? 'ENDED' : '', x.over ? 'OVER' : ''].join('|');
 }
 
 /** What `role` may do to an entry now: let in a QUEUED one, free a hold (OPERATOR); remove an open one (ADMIN). */

@@ -693,6 +693,16 @@ export class AdminApi {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/publish`, { circlePost });
   }
 
+  /** The release's post of the circle, shown from its announcement: added once published, until then. */
+  postLiveCircle(id: string): Promise<LiveRelease> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/circle-post`);
+  }
+
+  /** The release's post of the circle, not shown yet, withdrawn. */
+  withdrawLiveCircle(id: string): Promise<LiveRelease> {
+    return this.del(`/api/admin/live/${encodeURIComponent(id)}/circle-post`);
+  }
+
   cancelLiveRelease(id: string): Promise<LiveRelease> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/cancel`);
   }
