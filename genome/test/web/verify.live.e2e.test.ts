@@ -11,7 +11,7 @@
  *  - The turn (B4), a piece returned: a pointer let go too early resets the seal; held, it secures the piece. The
  *    reveal (B5), even when the stream says SECURED before the secure's own answer: P-D01's motion on the seal's glyphs,
  *    the chord, the vibrations; the add-ons, PAY · total, 5:00.
- *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES.
+ *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES, and its order (plan LIVE RELEASE+).
  *  - A phone whose clock is wrong counts on the server's; the host message under the header.
  *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0, its one
  *    piece in another collector's turn, the size still offered then ENTER THE LINE, behind; the piece returned; a pause
@@ -365,6 +365,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(entry.locator('.pieces__entry-state'), 'LIVE RELEASE · CONFIRMED');
     await textOf(entry.locator('.pieces__entry-id'), `REFERENCE ${reference}`);
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE' }).getAttribute('href')).toBe(`/verify/releases/${r.id}`);
+    // …and its order (plan LIVE RELEASE+, choice 6): RESERVED, with its size and its add-on as sold.
+    const order = page.locator('.pieces__order', { hasText: 'LIVE RELEASE · MONOLITHE — LIVE' });
+    await visible(order);
+    await textOf(order.locator('.pieces__order-step[aria-current="step"]'), /^RESERVED \d{1,2} [A-Z]{3} \d{4}$/);
+    await textOf(order.locator('.pieces__order-rows .rows__row', { hasText: 'ENGRAVING' }), 'ENGRAVING € 150');
     expect(problems).toEqual([]);
   }, 240_000);
 

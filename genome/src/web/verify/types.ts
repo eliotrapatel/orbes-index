@@ -680,3 +680,42 @@ export interface LiveAccountEntry {
   };
   entry: LiveEntry;
 }
+
+/** The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon. */
+export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON';
+/** The server's order (ORDER_CHANNELS in db/schema.ts). */
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON'];
+
+/** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
+export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
+/** The server's order (ORDER_STATUSES in db/schema.ts). */
+export const ORDER_STATUSES: readonly OrderStatus[] = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'];
+
+/**
+ * One order of the account in MY PIECES (GET /api/v1/account/orders), one per piece: its steps and their times, the
+ * model, the size, the add-ons and the price as sold; once shipped, the carrier and the tracking number with its link.
+ */
+export interface AccountOrder {
+  id: string;
+  /** `OR-` and the first eight figures of its id: what ORBES Client Services finds it by. */
+  reference: string;
+  channel: OrderChannel;
+  /** The release it was sold in; null for the private salon. */
+  release: string | null;
+  model: string;
+  /** null while ORBES Client Services has not entered it; `{ label: null }`: one size. */
+  size: { label: string | null } | null;
+  /** null, with the currency, while ORBES Client Services has not entered it. */
+  priceMinor: number | null;
+  currency: string | null;
+  /** Each at its price per piece. */
+  addons: { label: string; priceMinor: number }[];
+  status: OrderStatus;
+  reservedAt: string;
+  paidAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+  returnedAt: string | null;
+  shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
+}

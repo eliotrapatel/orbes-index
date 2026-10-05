@@ -341,6 +341,41 @@ export const PIECES = Object.freeze({
 });
 
 /**
+ * MY PIECES' orders (plan LIVE RELEASE+, choice 6; GET /api/v1/account/orders): one order per piece, sold in a LIVE
+ * RELEASE, a draw or the private salon, step by step: RESERVED · PAID · SHIPPED · DELIVERED with their dates, or
+ * CANCELLED, or RETURNED; the model, the size, the add-ons and the price; once shipped, the carrier and the tracking
+ * number, with its link to the carrier's site in a new tab. ORBES Client Services moves each step (DELIVERED also comes
+ * when the piece is registered): nothing here changes an order.
+ */
+export const ORDERS = Object.freeze({
+  title: 'YOUR ORDERS',
+  loadFailed: 'Your orders could not be shown just now.',
+  /** Accessible name of an order's steps. */
+  stepsLabel: 'Steps of this order',
+  step: Object.freeze({ RESERVED: 'RESERVED', PAID: 'PAID', SHIPPED: 'SHIPPED', DELIVERED: 'DELIVERED', CANCELLED: 'CANCELLED', RETURNED: 'RETURNED' }),
+  /** What the order's step means now. */
+  sentence: Object.freeze({
+    RESERVED: 'Your piece is reserved. ORBES Client Services will contact you to settle payment and delivery.',
+    PAID: 'Your payment is received. ORBES is preparing your piece for shipping.',
+    SHIPPED: 'Your piece is on its way. Once it has arrived, scan its ORBES CODE to register it to your account.',
+    DELIVERED: 'Your piece has been delivered.',
+    CANCELLED: 'This order has been cancelled.',
+    RETURNED: 'This order has been returned to ORBES.',
+  }),
+  /** Where the piece was sold. */
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON' }),
+  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  oneSize: 'ONE SIZE',
+  /** A draw's or a salon's size or price, before ORBES Client Services enters it. */
+  toConfirm: 'TO BE CONFIRMED',
+  track: 'TRACK THE SHIPMENT',
+  /** Accessible name of TRACK THE SHIPMENT: the number, the carrier, and that the carrier's site opens apart. */
+  trackLabel: (trackingNumber: string, carrier: string) => `Track the shipment ${trackingNumber} on the site of ${carrier} (opens in a new tab)`,
+  /** The order's reference, for ORBES Client Services. */
+  reference: (reference: string) => `ORDER ${reference}`,
+});
+
+/**
  * The CARE tab of a piece in MY PIECES (P-M02): the care of its model (the result's CARE text), then ORBES Care, the
  * subscription that looks after the owner's pieces. SUBSCRIBE opens its page in a new tab once ORBES publishes one
  * (CARE_SUBSCRIBE_URL); until then, a plain sentence says subscriptions open soon, with nothing to press.

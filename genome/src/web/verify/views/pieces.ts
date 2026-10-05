@@ -41,6 +41,13 @@
  *                   link to its page in a new tab (CARE_SUBSCRIBE_URL), or
  *                   "Subscriptions open soon." while none is published
  *   ── next piece ──
+ *   YOUR ORDERS                              the account's orders (plan LIVE RELEASE+, choice 6), one per piece,
+ *     MONOLITHE                              the latest first: the model, where it was sold, what its step means;
+ *     LIVE RELEASE · MONOLITHE — LIVE        RESERVED · PAID · SHIPPED · DELIVERED with their dates (or CANCELLED,
+ *     ● RESERVED 5 OCT 2026 … ○ DELIVERED    or RETURNED), the current one marked; SIZE, PRICE, the add-ons, TOTAL;
+ *     SIZE · PRICE · ENGRAVING · TOTAL       once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT
+ *     CARRIER · TRACKING NUMBER              (the carrier's page, a new tab); ORDER OR-…, for ORBES Client Services.
+ *     TRACK THE SHIPMENT · ORDER OR-1A2B3C4D  Nothing when the account has none.
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
  *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
  *                                            TITANE up, YOUR TIER says it: its benefits or NEXT)
@@ -75,14 +82,15 @@ import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, ORBES_CARE, PHOTOS, PIECES, RELEASES } from '../copy.js';
+import { ACCOUNT_PASSWORD, ORBES_CARE, ORDERS, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import { myLiveEntries } from '../live-model.js';
+import { orderModels, type OrderModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
-import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import type { AccountOrder, CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
 import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
@@ -124,6 +132,8 @@ class PiecesPage {
   private readonly body = h('div', { class: 'pieces__body' });
   /** YOUR TIER (P-X04): the badge, the benefits and the way to the next tier, at the head of the page. */
   private readonly tierBlock = h('section', { class: 'pieces__tier', attrs: { 'aria-labelledby': 'pieces-tier', hidden: true } });
+  /** YOUR ORDERS (plan LIVE RELEASE+, choice 6): the account's orders, one per piece, step by step, under its pieces. */
+  private readonly ordersBlock = h('section', { class: 'pieces__orders', attrs: { 'aria-labelledby': 'pieces-orders', hidden: true } });
   /** EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM, recalled once the club's status is read. */
   private readonly early = h('section', { class: 'pieces__early', attrs: { 'aria-labelledby': 'pieces-early', hidden: true } });
   /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
@@ -142,6 +152,8 @@ class PiecesPage {
   private entries: ClubEntry[] | null = [];
   /** Its entries in the LIVE RELEASES (plan of 2026-10-04: they stay here after the release); null when unread. */
   private liveEntries: LiveAccountEntry[] | null = [];
+  /** Its orders (plan LIVE RELEASE+, choice 6), the latest first; null when they could not be read. */
+  private orders: AccountOrder[] | null = [];
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
   /** The club's status as read with the pieces (P-X04, the tier block); null until read, or when it could not be. */
@@ -168,6 +180,7 @@ class PiecesPage {
       ),
       this.tierBlock,
       this.body,
+      this.ordersBlock,
       this.early,
       this.releases,
       this.account,
@@ -227,6 +240,7 @@ class PiecesPage {
       this.load = { kind: 'idle' };
       this.cards = [];
       this.entries = [];
+      this.orders = [];
       this.tier = null;
       this.club = null;
       this.circle.hidden = true;
@@ -246,8 +260,9 @@ class PiecesPage {
     this.renderBody();
     try {
       // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so. The
-      // account's entries in the drops (P-R03) likewise: without them, the page says they could not be shown.
-      const [list, certificates, club, live] = await Promise.all([
+      // account's entries in the drops (P-R03) and its orders likewise: without them, the page says they could not be
+      // shown.
+      const [list, certificates, club, live, orders] = await Promise.all([
         this.deps.api.products(),
         this.deps.api.certificates().catch((e: unknown) => {
           this.deps.session.noteError(e);
@@ -258,6 +273,10 @@ class PiecesPage {
           return null;
         }),
         this.deps.api.liveMine().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+        this.deps.api.orders().catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
         }),
@@ -274,6 +293,7 @@ class PiecesPage {
       );
       this.entries = club ? club.entries : null;
       this.liveEntries = live;
+      this.orders = orders;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
       this.club = club;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
@@ -302,6 +322,7 @@ class PiecesPage {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
     this.renderTier();
+    this.renderOrders();
     this.renderEarly();
     this.renderReleases();
     if (!this.ready) {
@@ -383,6 +404,28 @@ class PiecesPage {
       m.note ? h('p', { class: 'ownership__meta micro soft pieces__tier-note', text: m.note }) : null,
     ];
     this.tierBlock.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
+  }
+
+  /**
+   * YOUR ORDERS (plan LIVE RELEASE+, choice 6): each order of the account, one per piece, the latest first, as
+   * orders-model.ts reads it. Shown once the pieces are read, signed in; nothing when the account has no order; said
+   * when they could not be read (the pieces still show).
+   */
+  private renderOrders(): void {
+    const signedIn = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready';
+    if (!signedIn || (this.orders !== null && this.orders.length === 0)) {
+      this.ordersBlock.hidden = true;
+      this.ordersBlock.replaceChildren();
+      return;
+    }
+    this.ordersBlock.hidden = false;
+    const heading = sectionLabel(ORDERS.title, 'pieces-orders');
+    if (this.orders === null) {
+      this.ordersBlock.replaceChildren(heading, h('p', { class: 'form__error', attrs: { role: 'alert' }, text: ORDERS.loadFailed }));
+      return;
+    }
+    const cards = orderModels(this.orders, -new Date().getTimezoneOffset());
+    this.ordersBlock.replaceChildren(heading, h('ul', { class: 'pieces__order-list' }, ...cards.map((m) => h('li', { class: 'pieces__order-item' }, orderCard(m)))));
   }
 
   /**
@@ -565,6 +608,56 @@ class PiecesPage {
       }
     })();
   }
+}
+
+// ── One order ──────────────────────────────────────────────────────────────
+
+/**
+ * One order of YOUR ORDERS: the model (its heading), where it was sold, what its step means; its steps, the current one
+ * marked for a screen reader (aria-current); its terms; once shipped, the carrier, the number and TRACK THE SHIPMENT,
+ * a text link to the carrier's page in a new tab (the page keeps one hairline button); its reference.
+ */
+function orderCard(m: OrderModel): HTMLElement {
+  const titleId = `${m.key}-title`;
+  const steps = h(
+    'ol',
+    { class: 'pieces__order-steps', attrs: { 'aria-label': ORDERS.stepsLabel } },
+    ...m.steps.map((s) =>
+      h(
+        'li',
+        { class: 'pieces__order-step', attrs: { 'aria-current': s.state === 'current' ? 'step' : undefined }, data: { state: s.state, step: s.status } },
+        h('span', { class: 'pieces__order-step-label', text: s.label }),
+        s.date ? h('span', { class: 'pieces__order-step-date', text: s.date }) : null,
+      ),
+    ),
+  );
+  const shipment = m.shipment
+    ? [
+        rows(m.shipment.rows, 'pieces__order-shipment'),
+        m.shipment.href
+          ? h(
+              'div',
+              { class: 'ownership__actions' },
+              h('a', {
+                class: 'textlink pieces__order-track',
+                attrs: { href: m.shipment.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': m.shipment.label },
+                text: ORDERS.track,
+              }),
+            )
+          : null,
+      ]
+    : [];
+  return h(
+    'article',
+    { class: 'pieces__order', attrs: { 'aria-labelledby': titleId }, data: { status: m.status } },
+    h('h4', { class: 'pieces__order-title', id: titleId }, ...withNumerals(m.title)),
+    h('p', { class: 'ownership__meta micro soft pieces__order-line' }, ...withNumerals(m.line)),
+    h('p', { class: 'prose pieces__order-sentence', text: m.sentence }),
+    steps,
+    rows(m.rows, 'pieces__order-rows'),
+    ...shipment,
+    h('p', { class: 'ownership__meta micro soft pieces__order-reference', text: m.reference }),
+  );
 }
 
 // ── One piece ──────────────────────────────────────────────────────────────

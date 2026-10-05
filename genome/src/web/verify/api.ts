@@ -19,6 +19,7 @@
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
+  AccountOrder,
   CertificateLookup,
   CertificateOffer,
   CircleAnswer,
@@ -500,6 +501,13 @@ export class ApiClient {
     const r = await this.request<{ products?: unknown }>('GET', '/api/v1/account/products');
     if (!Array.isArray(r?.products)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.products as OwnedPiece[];
+  }
+
+  /** MY PIECES' orders (plan LIVE RELEASE+, choice 6): the account's own, one per piece, the latest first (a 401 when signed out). */
+  async orders(): Promise<AccountOrder[]> {
+    const r = await this.request<{ orders?: unknown }>('GET', '/api/v1/account/orders');
+    if (!Array.isArray(r?.orders)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.orders as AccountOrder[];
   }
 
   /** The after-sales services of one of the owner's pieces, oldest first; staff notes stay internal. */

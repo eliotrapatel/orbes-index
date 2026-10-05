@@ -11,6 +11,8 @@ import {
   DROP_ENTRY_STATUSES as SERVER_ENTRY_STATUSES,
   LIVE_END_REASONS as SERVER_LIVE_END_REASONS,
   LIVE_ENTRY_STATUSES as SERVER_LIVE_ENTRY_STATUSES,
+  ORDER_CHANNELS as SERVER_ORDER_CHANNELS,
+  ORDER_STATUSES as SERVER_ORDER_STATUSES,
   REPORT_CHANNELS as SERVER_CHANNELS,
   VERIFICATION_STATES as SERVER_STATES,
 } from '../../src/server/db/schema.js';
@@ -42,6 +44,7 @@ import type {
 } from '../../src/server/services/ownership-certificates.js';
 import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
+import type { AccountOrder as ServerAccountOrder } from '../../src/server/services/orders.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import {
   CIRCLE_ANSWERS,
@@ -51,8 +54,11 @@ import {
   INCIDENT_TYPES,
   LIVE_END_REASONS,
   LIVE_ENTRY_STATUSES,
+  ORDER_CHANNELS,
+  ORDER_STATUSES,
   REPORT_CHANNELS,
   VERIFICATION_STATES,
+  type AccountOrder,
   type ClubEntry,
   type ClubStatus,
   type DrawEntriesPage,
@@ -123,6 +129,8 @@ export const liveEntryFits = (e: Json<ServerLiveEntry>): LiveEntry => e;
 export const liveAccessFits = (a: Json<ServerLiveAccess>): LiveAccess => a;
 export const liveInterestFits = (i: Json<ServerLiveInterest>): LiveInterest => i;
 export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry => e;
+// …and MY PIECES' orders (plan LIVE RELEASE+, choice 6): an order of GET /api/v1/account/orders.
+export const accountOrderFits = (o: Json<ServerAccountOrder>): AccountOrder => o;
 export const liveBannerFits = (b: Json<ServerLiveBanner>): LiveBanner => b;
 export const liveBoardFits = (b: Json<ServerLiveBoard>): LiveBoard => b;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
@@ -157,6 +165,11 @@ describe('verify wire types', () => {
     expect([...LIVE_END_REASONS]).toEqual([...SERVER_LIVE_END_REASONS]);
   });
 
+  it('know the same steps and channels of an order as the server (plan LIVE RELEASE+, choice 6)', () => {
+    expect([...ORDER_STATUSES]).toEqual([...SERVER_ORDER_STATUSES]);
+    expect([...ORDER_CHANNELS]).toEqual([...SERVER_ORDER_CHANNELS]);
+  });
+
   it('are structurally compatible (checked by tsc)', () => {
     expect(typeof outcomeFits).toBe('function');
     expect(typeof inputFits).toBe('function');
@@ -167,7 +180,7 @@ describe('verify wire types', () => {
     expect(typeof cardFits).toBe('function');
     expect(typeof sheetFits).toBe('function');
     for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
-    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits]) expect(typeof fits).toBe('function');
+    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits, accountOrderFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
   });
 });

@@ -40,6 +40,9 @@
  *                what they are), and exported to the account under the right of access (`accountOrders`); the
  *                console's routes give them masked to an AUDITOR (OrderView carries them as stored, as the emails).
  *                The engraving text likewise stays on the order and its piece to make.
+ *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
+ *                the size, the add-ons and the price, the carrier and the tracking link once shipped; nothing of the
+ *                house's side (the location, what it holds, the surprise, the value declared, the notes, who handled it).
  *   Shopify      an order keeps its future Shopify id (`shopify_order_id`); nothing calls Shopify in this lot.
  *
  * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
@@ -251,6 +254,39 @@ export interface ExportedOrder {
   trackingNumber: string | null;
   /** Each step with its time and the note Client Services added. */
   history: { status: OrderStatus; at: Date; note: string | null }[];
+}
+
+/** The orders MY PIECES reads, at most: the account's latest (GET /api/v1/account/orders). */
+export const ACCOUNT_ORDERS_LIMIT = 100;
+
+/**
+ * An order as its collector reads it in MY PIECES (choice 6; GET /api/v1/account/orders): its steps and their times,
+ * the model, the size, the add-ons and the price as sold, and once shipped the carrier and the tracking number with
+ * its link. Never where it is served from, what it holds, the surprise, the buyer's details nor the engraving's words
+ * (entered by Client Services), the value declared, the notes, nor who handled it.
+ */
+export interface AccountOrder {
+  id: string;
+  reference: string;
+  channel: OrderChannel;
+  /** The release it was sold in (a LIVE RELEASE, a draw); null for the private salon. */
+  release: string | null;
+  model: string;
+  /** null while ORBES Client Services has not entered it (a draw's, a salon's order); `{ label: null }`: one size. */
+  size: { label: string | null } | null;
+  /** null, with the currency, while ORBES Client Services has not entered it. */
+  priceMinor: number | null;
+  currency: string | null;
+  /** As sold, each at its price per piece. */
+  addons: { label: string; priceMinor: number }[];
+  status: OrderStatus;
+  reservedAt: Date;
+  paidAt: Date | null;
+  shippedAt: Date | null;
+  deliveredAt: Date | null;
+  cancelledAt: Date | null;
+  returnedAt: Date | null;
+  shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
 }
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -895,6 +931,69 @@ export class OrderService {
       shopifyOrderId: r.shopify_order_id,
       events: events.map((e) => ({ action: e.action, status: e.status, note: e.note, at: e.created_at, actor: { type: e.actor_type, id: e.actor_id } })),
     };
+  }
+
+  /**
+   * The account's own orders as MY PIECES shows them (AccountOrder), the latest first (ACCOUNT_ORDERS_LIMIT), the pieces
+   * of one sale in their order. Only the account's: the route passes its session's account, never an id it was sent.
+   */
+  async forAccount(accountId: string): Promise<AccountOrder[]> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    const rows = await this.db
+      .selectFrom('orders as o')
+      .innerJoin('models as m', 'm.id', 'o.model_id')
+      .leftJoin('drops as d', 'd.id', 'o.drop_id')
+      .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
+      .select([
+        'o.id',
+        'o.channel',
+        'o.sku_id',
+        'o.size_label',
+        'o.price_minor',
+        'o.currency',
+        'o.addons',
+        'o.status',
+        'o.reserved_at',
+        'o.paid_at',
+        'o.shipped_at',
+        'o.delivered_at',
+        'o.cancelled_at',
+        'o.returned_at',
+        'o.tracking_number',
+        'm.name as model_name',
+        'd.title as release_title',
+        'c.name as carrier_name',
+        'c.tracking_url',
+      ])
+      .where('o.account_id', '=', accountId.toLowerCase())
+      .orderBy('o.reserved_at', 'desc')
+      .orderBy('o.piece')
+      .orderBy('o.id')
+      .limit(ACCOUNT_ORDERS_LIMIT)
+      .execute();
+    return rows.map((r) => ({
+      id: r.id,
+      reference: orderReference(r.id),
+      channel: r.channel,
+      release: r.release_title ?? null,
+      model: r.model_name,
+      // A size is known once its SKU is (null: one size); before, ORBES Client Services has still to enter it.
+      size: r.sku_id === null ? null : { label: r.size_label },
+      priceMinor: r.price_minor,
+      currency: r.price_minor === null ? null : r.currency,
+      addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
+      status: r.status,
+      reservedAt: r.reserved_at,
+      paidAt: r.paid_at,
+      shippedAt: r.shipped_at,
+      deliveredAt: r.delivered_at,
+      cancelledAt: r.cancelled_at,
+      returnedAt: r.returned_at,
+      shipment:
+        r.carrier_name && r.tracking_url && r.tracking_number
+          ? { carrier: r.carrier_name, trackingNumber: r.tracking_number, trackingUrl: trackingLink(r.tracking_url, r.tracking_number) }
+          : null,
+    }));
   }
 
   /**

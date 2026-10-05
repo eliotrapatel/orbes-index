@@ -33,7 +33,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, ownership, recovery, warranty } = ctx.services;
+  const { auth, orders, ownership, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -97,6 +97,12 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/products', async (request) => {
     const { account } = requireAccount(request);
     return { products: await ownership.listForAccount(account.id) };
+  });
+
+  // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.
+  app.get('/api/v1/account/orders', async (request) => {
+    const { account } = requireAccount(request);
+    return { orders: await orders.forAccount(account.id) };
   });
 
   app.get('/api/v1/products/:productId/service-history', async (request) => {

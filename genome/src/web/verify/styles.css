@@ -2587,6 +2587,135 @@ h1[tabindex="-1"]:focus,
   margin-top: 8px;
 }
 
+/* MY PIECES: the account's orders (plan LIVE RELEASE+, choice 6), one per piece, under its pieces: the model, where it
+   was sold, its sentence; its steps on a hairline track, each reached with its dot filled and its date, the current one
+   ringed, those to come hollow; its terms and, once shipped, its shipment, as rows; its reference. */
+.pieces__orders {
+  margin-top: 72px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__orders[hidden] {
+  display: none;
+}
+
+.pieces__orders:not([hidden]) + .pieces__early,
+.pieces__orders:not([hidden]) + .pieces__early[hidden] + .pieces__releases {
+  margin-top: 44px;
+}
+
+.pieces__order-list {
+  list-style: none;
+}
+
+.pieces__order-item + .pieces__order-item {
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__order {
+  padding: 20px 0 16px;
+}
+
+.pieces__order-title {
+  font-size: var(--fs-line);
+  font-weight: 400;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.pieces__order-line {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.pieces__order-sentence {
+  margin-top: 8px;
+}
+
+.pieces__order-steps {
+  list-style: none;
+  margin-top: 16px;
+}
+
+.pieces__order-step {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  padding: 7px 0 7px 22px;
+}
+
+.pieces__order-step::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  box-sizing: border-box;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.pieces__order-step[data-state="current"]::before {
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px var(--ink);
+}
+
+.pieces__order-step[data-state="next"]::before {
+  border-color: var(--hairline-strong);
+  background: var(--paper);
+}
+
+/* The track: a hairline from the dot above to this one, fainter towards a step to come. */
+.pieces__order-step + .pieces__order-step::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: calc(-50% + 6px);
+  bottom: calc(50% + 6px);
+  width: 1px;
+  background: var(--hairline-strong);
+}
+
+.pieces__order-step[data-state="next"]::after {
+  background: var(--hairline);
+}
+
+.pieces__order-step-label {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.pieces__order-step[data-state="next"] .pieces__order-step-label {
+  color: var(--ink-soft);
+}
+
+.pieces__order-step-date {
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.pieces__order-rows {
+  margin-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__order .ownership__actions {
+  margin-top: 12px;
+}
+
+.pieces__order-reference {
+  margin-top: 10px;
+}
+
 /* ── The circle (P-X01) ────────────────────────────────────────────────── */
 
 /* THE CIRCLE and a post: the column of THE RELEASES (560 px at most, 32 px
@@ -4601,6 +4730,8 @@ body[data-screen="board"] .corners {
 .result__title,
 .pieces__title,
 .pieces__badge-name,
+.pieces__order-title,
+.pieces__order-step-label,
 .certificate__title,
 .certificate__state,
 .certificate__footnote,

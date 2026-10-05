@@ -202,6 +202,17 @@ describe('ApiClient', () => {
     await expect(api.products()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });
 
+  it('MY PIECES\' orders (plan LIVE RELEASE+, choice 6): reads the account\'s own with a GET, no CSRF header; a list that is not one is a bad response', async () => {
+    const order = { id: 'o1', reference: 'OR-1A2B3C4D', status: 'SHIPPED' };
+    const f = fakeFetch([() => json(200, { orders: [order] }), () => json(200, { orders: null }), () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } })]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.orders()).toEqual([order]);
+    expect(f.calls[0]).toMatchObject({ url: '/api/v1/account/orders', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    await expect(api.orders()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.orders()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
   it('RECEIVE THIS PIECE (F-03): sends the code with the piece scanned and the transfer token of that scan, with the CSRF token', async () => {
     const f = fakeFetch([
       () => json(200, SESSION('t1')),
