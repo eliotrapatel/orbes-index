@@ -12,7 +12,8 @@ The **state** column names the state as `genome/test/support/nocturne-states.ts`
 `genome/test/fixtures/nocturne-baseline.json`, which the content test checks against the new app (one test file per
 shard of states, `genome/test/web/nocturne.content-<shard>.e2e.test.ts`, run side by side; their structure in
 `nocturne.content.e2e.test.ts`). A value is shown when it reads within one block of the page's words, on word and figure
-boundaries (NO is not shown by *not*, 17 not by *2017* nor *17:00*). A state written *(not reached)* is not on the stage; the reason is given, and the content
+boundaries (NO is not shown by *not*, 17 not by *2017* nor *17:00*); a part the server writes (a GENOME's id, a code, an
+id, a reference, the seed, a link) is masked, and reads only as a text of its shape. A state written *(not reached)* is not on the stage; the reason is given, and the content
 test cannot guard it: each step that touches it checks it by hand against this list.
 
 Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result copy `genome/src/server/services/copy.ts`,
@@ -25,11 +26,13 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
 - **Phone.** 390 × 844 CSS px at scale 2, an iPhone's user agent, English, Paris time zone. Its camera is Chromium's
   fake camera playing a hand-held clip of the stage's piece to register; the track reports a torch and a zoom from 0.5×
   to 5×, like an iPhone's, so LIGHT and the zoom toggle show (the camera opens at 2×, the toggle offering 0.5×).
-- **The demo** (`genome/test/support/nocturne-demo.ts`), in eleven variants, each seeded on its own stage through the
+- **The demo** (`genome/test/support/nocturne-demo.ts`), in thirteen variants, each seeded on its own stage through the
   real services: `full` (the boards' story), `rules` (C27–C28), `draw-leads` (C42), `draw-soon` and `draw-early` (C42's
-  other states), `collection-leads` (C43), `room` (C21), `live` (the room's screens), `afterroom` (C26), `stress` (fidelity
-  rule 5) and `empty` (every empty state; an owner of one piece of a model kept out of the collection sees the empty
-  circle).
+  other states), `collection-leads` (C43), `room` (C21), `live` (the room's screens), `afterroom` (C26), `afterroom-ends`
+  (three after-rooms of the last two hours, ended with a guest still in their line: sold out, closed, ended by ORBES; and
+  a guest who never entered one), `draws` (a draw in every state an entry or a page shows, and r.castel, a collector with
+  an entry in each and an order PAID), `stress` (fidelity rule 5) and `empty` (every empty state; an owner of one piece
+  of a model kept out of the collection sees the empty circle).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - MONOLITHE in steel, blue and gold are three models until N1 links them as variants; THE COLLECTION shows three cards.
   - A draw has no price before migration 0024 (N1): the October draw shows none.
@@ -194,7 +197,9 @@ RELEASES, THE CIRCLE (an owner), the legal links.
 | `pieces-loading` | ONE MOMENT… | the pieces being read | C40 (1) |
 | `pieces-failed` | *Your pieces could not be shown just now.* *the reason*, TRY AGAIN | the pieces could not be read | C40 (2) |
 | `pieces-stress` | six pieces (a 14-character free-text field), four orders (€ 125 400, $ 6 400, a 27-character tracking number) | the stress demo | same pieces |
-| *(not reached)* | a place held (PLACE HELD, *held until …*, the contact), the waiting list (rank), LAPSED, WITHDRAWN; orders PAID and SHIPPED in MY PIECES of the `full` demo (seen in `pieces-stress`: SHIPPED); the password changed / recovered notices; a declaration confirmed (*now reported lost …*); a link withdrawn; a certificate link that could not be read; *A loss or a theft of this piece cannot be reported here* (a revoked piece) | each needs a write or a failure the stage does not make | C31 (2), C35, C39 |
+| `pieces-draws` | r.castel's MY PIECES: YOUR ORDERS with an order PAID (*Your payment is received. ORBES is preparing your piece for shipping.*); YOUR RELEASES with an entry in each state, each *state · status* and its sentence: ENTRIES OPEN · WITHDRAWN, ENTRIES CLOSED · ENTERED, CANCELLED · ENTERED, DRAWN · PLACE HELD (*held until …*, the contact), DRAWN · WAITING LIST (*rank n*), DRAWN · CONCLUDED, DRAWN · LAPSED | the `draws` demo | C24, C31 (2) |
+| `pieces-certificate-withdrawn` | *The link has been withdrawn: it no longer leads to the certificate.*, the open links left | WITHDRAW on a certificate link | C35 (4) |
+| *(not reached)* | SHIPPED in MY PIECES of the `full` demo (seen in `pieces-stress`); the password changed / recovered notices; a declaration confirmed (*now reported lost …*); a certificate link that could not be read; *A loss or a theft of this piece cannot be reported here* (a revoked piece) | each needs a failure the stage does not make, or a password changed (it ends every session of the demo's account) | C35, C39 |
 
 ## THE COLLECTION and a model (`/verify/lookbook`, `/verify/lookbook/<slug>`)
 
@@ -226,6 +231,19 @@ RELEASES, THE CIRCLE (an owner), the legal links.
 | `draw-early` | EARLY ACCESS, the line, RESERVED DIRECTLY *0 OF 12 PIECES*, the early access paragraph, RESERVE A PLACE, *As a PLATINE owner, you may reserve a place now …* | its early access, a PLATINE account | C42 (2) |
 | `draw-drawn` | THIS RELEASE IS OVER, YOU SECURED A PIECE, DRAWN *date*, YOUR ENTRY CONCLUDED, SEED *hex*, *Checked on this phone …*, THE ENTRIES (*rank · tier · years*, *id*, YOURS) | drawn | C29 |
 | `draw-not-found` | *This release is not known to ORBES.* | an address that leads nowhere | C40 (4) |
+| `draw-soon-platine` | *As a PLATINE owner, you may reserve a place directly from …, before entries open to everyone.* | before its early access, a PLATINE account | C42 (2) |
+| `draw-early-others` | EARLY ACCESS, *PLATINE and PALLADIUM owners are reserving their places now. Entries open to everyone on ….* | its early access, any other account | C42 (2) |
+| `draw-closed` | ENTRIES CLOSED, *Entries are closed. The draw follows.* | past its close, not drawn | same pieces (C19) |
+| `draw-closed-entered` | ENTRIES CLOSED, ENTERED, *You are entered in the draw, which follows the close of entries.*, WITHDRAW, YOUR ENTRY *id* | past its close, entered | same pieces (C19, C31) |
+| `draw-closed-withdrawn` | WITHDRAWN, *You withdrew from this draw.* | past its close, withdrawn while it was open | same pieces (C19) |
+| `draw-withdrawn` | WITHDRAWN, *You withdrew from the draw. You may enter again while entries are open.*, ENTER THE DRAW | open, withdrawn | same pieces (C19) |
+| `draw-cancelled`, `draw-cancelled-entered` | CANCELLED (and ENTERED), *This release has been cancelled: there will be no draw.* | cancelled | same pieces (C19) |
+| `draw-place-held` | THIS RELEASE IS OVER, YOU TOOK PART, PLACE HELD, *Your place is held until … — ORBES Client Services will contact you.*, the contact, YOUR ENTRY *id* | drawn, selected | same pieces (C29, C31) |
+| `draw-waiting-list`, `draw-waiting-list-no-piece` | WAITING LIST, *You are on the waiting list, rank n. …* | drawn, waitlisted (TITANE; an account without a piece) | same pieces (C29, C31) |
+| `draw-lapsed` | LAPSED, *The time to conclude has passed: the place held for you has lapsed.* | drawn, the place held not taken up in time | same pieces (C29, C31) |
+| `draw-full` | EARLY ACCESS · EVERY PIECE RESERVED, RESERVED DIRECTLY *1 OF 1 PIECE*, *Every piece of this release has been reserved. Entries open to everyone on …: the draw then ranks a waiting list …* | its early access, every piece reserved | C42 (2) |
+| `draw-place-reserved` | PLACE RESERVED, *You reserved a place directly. It is held until … — ORBES Client Services will contact you.*, the contact | a PLATINE account's direct reservation | C42 (2) |
+| `draw-open-full` | ENTRIES OPEN · EVERY PIECE RESERVED, *Every piece of this release has been reserved. You may still enter: …*, ENTER THE DRAW | open, every piece reserved | same pieces (C19) |
 | `live-announced` | LIVE RELEASE, *name*, *type · collection*, *price*, SEE THE MODEL, OPENS IN *dd : hh : mm* (DAYS · HOURS · MINUTES), *day · time* PARIS, FOR *rule*, *quantity · per collector*, THE ROOM OPENS *n* MINUTES BEFORE, *n* COLLECTORS WILL BE THERE, YOUR SIZE, *sizes*, its sentence, I'LL BE THERE, *description*, ADD TO CALENDAR, the drawing rule, THE RELEASES, SOUND ON | announced, signed in | C20, live-04 |
 | `live-announced-signed-out` | the same, I'LL BE THERE opening the sign-in, *Sign in to say you will be there, with your size.* | signed out | C28 (2) |
 | `live-there` | YOU'LL BE THERE · SIZE 17, the sizes, *Another size changes it …*, WITHDRAW | I'LL BE THERE said | C28 (1) |
@@ -268,8 +286,13 @@ live-22, plus-01 to plus-14.
 | `live-missed`, `live-expired`, `live-released`, `live-left`, `live-removed` | YOUR TURN HAS PASSED · YOUR HOLD HAS ENDED · YOUR PLACE IS RELEASED · YOU LEFT THE LINE · YOUR ENTRY IS REMOVED, each with its sentence and THE RELEASES (end pages: header, rail and ring from N7) | live-15 to live-19, C30 |
 | `after-room-door` | THE AFTER-ROOM, A SECOND DOOR, the door, its sentence, OPEN UNTIL *time*, ENTER THE AFTER-ROOM | C26, plus-07 |
 | `after-room-join` | THE AFTER-ROOM, *You keep your place from the line …*, YOUR SIZE, ENTER THE LINE | C26, plus-08 |
+| `room-checks-pending` | READY CHECK not ready: SIZE TO CHOOSE (no size said before), CONNECTION RECONNECTING (the room's stream lost: the page reads the room instead), CLOCK SYNCING (the clock of ORBES not answering) | same pieces |
+| `after-room-sold-out` | THE AFTER-ROOM, SOLD OUT, *Every piece of the after-room is reserved.*, THE RELEASES (an end page) | C30 |
+| `after-room-closed` | THE AFTER-ROOM, THE AFTER-ROOM IS CLOSED, *Its time has run out before your turn came.* | C30 |
+| `after-room-ended` | THE AFTER-ROOM, THE AFTER-ROOM HAS ENDED, *ORBES has ended the after-room before your piece was secured.* | C30 |
+| `after-room-over` | THE AFTER-ROOM, THE AFTER-ROOM IS CLOSED, *Your entry, if you had one, stays in MY PIECES.* (a guest who never entered it) | C30 |
 | `room-stress`, `live-far-stress` | a 140-character host message, a 24-character name, € 125 400, UP TO 3 PER COLLECTOR, a 9-day countdown in USD | same pieces |
-| *(not reached)* | the last minute (the lock turning) and T0 (the door opening, DRAWING THE PLACES); PAUSED; A PIECE HAS RETURNED; TAP AGAIN TO RELEASE / TO LEAVE; the ends SOLD OUT, THE RELEASE HAS CLOSED, THE RELEASE HAS ENDED (to one in the line), THIS RELEASE IS OVER (cancelled); the after-room's turn and CONFIRMED; RECONNECTING; the release could not be shown — time does not pass on the stage; the before-captures hold them (live-06, live-08, live-21, live-22, plus-09, plus-10) | live-06 to live-22, plus-09, plus-10 |
+| *(not reached)* | the last minute (the lock turning) and T0 (the door opening, DRAWING THE PLACES); PAUSED; A PIECE HAS RETURNED; TAP AGAIN TO RELEASE / TO LEAVE; the ends SOLD OUT, THE RELEASE HAS CLOSED, THE RELEASE HAS ENDED (to one in the line), THIS RELEASE IS OVER (cancelled); the after-room's turn and CONFIRMED; the release could not be shown — time does not pass on the stage; the before-captures hold them (live-06, live-08, live-21, live-22, plus-09, plus-10) | live-06 to live-22, plus-09, plus-10 |
 
 **Controls shown only in some states:** SEE THE MODEL (from the photograph's stage, when the model's sheet is public, until
 T0); THE ROOM OPENS *n* MINUTES BEFORE (before the room); ADD TO CALENDAR (announced); the add-ons (a release that has

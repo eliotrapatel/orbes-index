@@ -4,7 +4,7 @@
  * NOCTURNE, 5efd4c9) holds every text value each state of /verify and /legal showed on the NOCTURNE demo; the test reaches
  * each state again (test/support/nocturne-states.ts) and checks that each value is still shown there (shows: within one
  * block of words, on word boundaries, case-insensitive, whitespace folded, a value « A · B » shown whole or part by part,
- * the parts the server writes («id», «ref», «code»…) read as any word).
+ * the parts the server writes («id», «ref», «code»…) read as any text of their shape).
  *
  * The states are run in shards (CONTENT_SHARDS), one test file each (test/web/nocturne.content-<shard>.e2e.test.ts), so
  * vitest's forks run them side by side, each within its own time limit; test/web/nocturne.content.e2e.test.ts checks that
@@ -50,11 +50,11 @@ const named =
   (s: UiState) =>
     names.some((n) => s.id === n || s.id.startsWith(`${n}-`));
 const full = (s: UiState) => s.variant === 'full';
-const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom'];
+const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 
 /**
  * The shards of the content test, each a test file: the `full` demo by screen group (its states that write in one
- * shard of their own, in their order), the room's variants, and the other variants. Each holds about twenty states.
+ * shard of their own, in their order), the room's variants, the draws in every state, and the other variants. Each holds about twenty states.
  */
 export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
@@ -65,7 +65,8 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant),
+  draws: (s) => s.variant === 'draws',
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws',
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

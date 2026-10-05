@@ -6,7 +6,7 @@
  *
  *   cd genome && npx tsx scripts/parity.ts [C1,C9,…] [--out DIR] [--ref DIR]
  *       each board given (all 43 by default): the real screen of its state (BOARD_STATES) at 390 × 844 CSS px, scale 2,
- *       the whole page, its motion finished (as the boards were shot), into <out>/<C-id>.real.png, and
+ *       the whole page (the viewport grown to its height, so its fixed elements sit at its foot), its motion finished (as the boards were shot), into <out>/<C-id>.real.png, and
  *       <out>/<C-id>.pair.png: the board (<ref>/<C-id>-<name>.png) at the left, the real screen at the right, the same
  *       width, a label above each. C21 and C26, stand-in images of the room (fidelity rule 6), are set beside their
  *       state's before-capture instead (docs/assets/ui/nocturne-before/<live-xx|plus-xx>-*.png)
@@ -30,11 +30,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Browser } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 import { NOCTURNE_NOW, type DemoVariant, type NocturneDemo } from '../test/support/nocturne-demo.js';
 import { BASELINE_FILE, eachState, type Baseline, type BaselineState } from '../test/support/nocturne-stage.js';
-import { BOARD_STATES, maskVolatile, openState, overflows, stateById, UI_STATES, visibleTexts, type UiState } from '../test/support/nocturne-states.js';
-import type { UiStage } from '../test/support/ui-stage.js';
+import { BOARD_STATES, maskVolatile, openState, overflows, settle, stateById, UI_STATES, visibleTexts, type UiState } from '../test/support/nocturne-states.js';
+import { fullScreenshot, type UiStage } from '../test/support/ui-stage.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUT = process.env.ORBES_PARITY_OUT ?? '/private/tmp/claude-501/-Users-eliotrapatel-orbes-index/aae31500-d9d4-4f0f-8fd8-de1e75946007/scratchpad/parity';
@@ -60,10 +60,20 @@ const log = (line: string) => process.stdout.write(`${line}\n`);
 async function capture(browser: Browser, stage: UiStage, demo: NocturneDemo, state: UiState): Promise<Buffer> {
   const opened = await openState(browser, stage, demo, state);
   try {
-    return await opened.page.screenshot({ type: 'png', fullPage: !state.viewport, animations: 'disabled' });
+    return await shoot(opened.page, state);
   } finally {
     await opened.close();
   }
+}
+
+/**
+ * The state's picture: the viewport alone (`viewport`), or the whole page with the viewport grown to its height first
+ * (fullScreenshot), so the fixed elements (the corner brackets, the SCAN ring) sit at the page's foot as in the
+ * before-captures, the page settled again at that size; its motion finished, as the boards were shot.
+ */
+async function shoot(page: Page, state: UiState): Promise<Buffer> {
+  if (state.viewport) return page.screenshot({ type: 'png', animations: 'disabled' });
+  return fullScreenshot(page, { settle: (p) => settle(p), animations: 'disabled' });
 }
 
 /** The board `id`'s image in `refDir` (`C1-Now.png` for C1). */
@@ -189,7 +199,7 @@ async function captureStress(out: string): Promise<void> {
     async (state, { stage, demo, browser }) => {
       const opened = await openState(browser, stage, demo, state);
       try {
-        writeFileSync(join(dir, `${state.id}.png`), await opened.page.screenshot({ type: 'png', fullPage: true, animations: 'disabled' }));
+        writeFileSync(join(dir, `${state.id}.png`), await shoot(opened.page, state));
         const found = await overflows(opened.page);
         report.push(`${state.id}: ${found.length === 0 ? 'nothing overflows' : `\n  ${found.join('\n  ')}`}`);
         log(`  ${state.id}: ${found.length} overflow(s)`);

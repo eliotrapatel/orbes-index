@@ -118,6 +118,31 @@ export async function mobileContext(browser: Browser, opts: { reducedMotion?: 'r
   });
 }
 
+/**
+ * The whole page in one picture, its viewport grown to the document's height first, so that what the viewport places
+ * (a 100svh view, a sticky bar, the fixed corner brackets, a fixed ring) frames the whole composition, at the page's
+ * foot, rather than the first screen only (a `fullPage` screenshot keeps fixed elements where the first screen left
+ * them). `settle` waits for the page to rest at its new size (400 ms by default); the viewport is put back after.
+ */
+export async function fullScreenshot(
+  page: Page,
+  opts: { settle?: (page: Page) => Promise<void>; animations?: 'disabled' | 'allow' } = {},
+): Promise<Buffer> {
+  const size = page.viewportSize();
+  if (!size) throw new Error('page has no viewport');
+  const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+  const grown = height > size.height;
+  if (grown) {
+    await page.setViewportSize({ width: size.width, height });
+    await (opts.settle ? opts.settle(page) : sleep(400));
+  }
+  try {
+    return await page.screenshot({ type: 'png', ...(opts.animations ? { animations: opts.animations } : {}) });
+  } finally {
+    if (grown) await page.setViewportSize(size);
+  }
+}
+
 /** Hide the film grain overlay (CSSOM only: the page CSP forbids style attributes in markup). */
 export async function hideGrain(page: Page): Promise<void> {
   await page.evaluate(() => {

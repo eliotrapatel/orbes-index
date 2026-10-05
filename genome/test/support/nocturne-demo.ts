@@ -34,6 +34,12 @@
  *   room              a LIVE RELEASE whose room is open, three minutes before its opening (C21)
  *   live              a LIVE RELEASE live now, a collector at each step of the line and each end (the room's screens)
  *   afterroom         a LIVE RELEASE sold out a few minutes ago, its after-room open (C26)
+ *   afterroom-ends    three LIVE RELEASES of the last two hours whose after-rooms ended with a guest still in their
+ *                     line: sold out, closed at their time, ended by ORBES; and a guest who never entered one
+ *   draws             a draw in every state an entry or a page shows (lot E's direct reservations included): closed
+ *                     and not drawn, cancelled, drawn with a place held, a waiting list and a place lapsed, concluded
+ *                     with its order PAID, in its early access with every piece reserved, open with every piece
+ *                     reserved; a collector (r.castel) with an entry in each, and the October draw withdrawn
  *   stress            the extreme content of fidelity rule 5
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
  *                     (one piece of a model kept out of the collection) before an empty circle
@@ -65,10 +71,26 @@ export type DemoVariant =
   | 'room'
   | 'live'
   | 'afterroom'
+  | 'afterroom-ends'
+  | 'draws'
   | 'stress'
   | 'empty';
 
-export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze(['full', 'rules', 'draw-leads', 'draw-soon', 'draw-early', 'collection-leads', 'room', 'live', 'afterroom', 'stress', 'empty']);
+export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
+  'full',
+  'rules',
+  'draw-leads',
+  'draw-soon',
+  'draw-early',
+  'collection-leads',
+  'room',
+  'live',
+  'afterroom',
+  'afterroom-ends',
+  'draws',
+  'stress',
+  'empty',
+]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
 export const NOCTURNE_NOW = new Date('2026-10-05T16:49:00.000Z');
@@ -175,6 +197,8 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'room') await seedRoom(w);
     if (variant === 'live') await seedLive(w);
     if (variant === 'afterroom') await seedAfterRoom(w);
+    if (variant === 'afterroom-ends') await seedAfterRoomEnds(w);
+    if (variant === 'draws') await seedDraws(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -460,7 +484,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
 
   // ── Announced: the blue LIVE RELEASE, the release of 22 October, the October draw ──
   const announceLive = variant === 'full' || variant === 'rules' || variant === 'room' || variant === 'live' || variant === 'afterroom';
-  const announceDraw = variant !== 'collection-leads' && variant !== 'room' && variant !== 'live' && variant !== 'afterroom';
+  const announceDraw = variant !== 'collection-leads' && variant !== 'room' && variant !== 'live' && variant !== 'afterroom' && variant !== 'afterroom-ends';
   if (announceLive && (variant === 'full' || variant === 'rules')) {
     clock.set(at('2026-10-01T12:00:00Z'));
     const rules: Partial<LiveReleaseOptions> = {};
@@ -739,6 +763,186 @@ async function seedAfterRoom(w: World): Promise<void> {
   clock.set(new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE));
   await ctx.services.live.advance(r.id);
   await ctx.services.live.advance(r.afterRoom!.id);
+}
+
+/**
+ * Three LIVE RELEASES of one piece, each sold out with two guests left in its line, each with an after-room of one piece
+ * (opened a minute after the sell-out, for five minutes): the first guest takes its turn there, and the after-room ends
+ * with the second (the role named) still in its line: SOLD OUT (the first guest's piece confirmed), CLOSED (its five
+ * minutes over while the first guest holds the piece), ENDED (by ORBES). A fourth guest of the first release never
+ * entered its after-room (`arOver`). Every one of them is over by NOW.
+ */
+async function seedAfterRoomEnds(w: World): Promise<void> {
+  const { ctx, clock, demo } = w;
+  const live = ctx.services.live;
+  const scenario = async (key: string, minutesAgo: number, end: 'SOLD_OUT' | 'CLOSED' | 'ENDED', also?: string) => {
+    const t0 = new Date(NOCTURNE_NOW.getTime() - minutesAgo * MINUTE);
+    clock.set(new Date(t0.getTime() - DAY));
+    const r = await createLiveRelease(w.f, {
+      modelId: w.models.steel!,
+      opensAt: t0,
+      minTier: 1,
+      sizes: [{ label: '17', stock: 1 }],
+      quantityLine: '1 PIECE',
+      priceMinor: 505_000,
+      turnSeconds: 300,
+      payMinutes: 10,
+      afterRoom: { modelId: w.models.gold!, priceMinor: 505_000, sizes: [{ label: '17', stock: 1 }], delayMinutes: 1, lengthMinutes: 5 },
+    });
+    await titled(w, r.id, 'MONOLITHE IN STEEL', 'One piece of MONOLITHE in steel, released live.');
+    await titled(w, r.afterRoom!.id, 'MONOLITHE IN STEEL · THE AFTER-ROOM');
+    demo.releases[key] = r.id;
+    const lower = key.toLowerCase();
+    const buyer = await account(w, `${key}Buyer`, `${lower}.buyer@example.com`, 1, w.models.steel);
+    const first = await account(w, `${key}First`, `${lower}.first@example.com`, 1, w.models.steel);
+    const guest = await account(w, key, `${lower}@example.com`, 1, w.models.steel);
+    const other = also ? await account(w, also, `${also.toLowerCase()}@example.com`, 1, w.models.steel) : null;
+    const size = r.sizes[0]!.id;
+    const afterId = r.afterRoom!.id;
+    const afterSize = r.afterRoom!.sizes[0]!.id;
+    clock.set(new Date(t0.getTime() - MINUTE));
+    await live.enter(buyer.id, r.id, { sizeId: size }, buyer.actor);
+    clock.set(t0);
+    await live.advance(r.id);
+    for (const a of [first, guest, other]) {
+      if (!a) continue;
+      clock.advance(10_000);
+      await live.enter(a.id, r.id, { sizeId: size }, a.actor);
+      await live.advance(r.id);
+    }
+    const take = async (a: DemoAccount, id: string) => {
+      const token = (await live.entry(a.id, id))?.turn?.token;
+      if (!token) throw new Error(`no turn for ${a.email}`);
+      await live.press(a.id, id, token);
+      clock.advance(1_500);
+      await live.secure(a.id, id, token, a.actor);
+    };
+    // The release sells out; a minute later its after-room opens to the guests still in the line.
+    await take(buyer, r.id);
+    clock.advance(30_000);
+    await live.confirm(buyer.id, r.id, buyer.actor);
+    await live.advance(r.id);
+    clock.advance(61_000);
+    await live.advance(r.id);
+    await live.advance(afterId);
+    for (const a of [first, guest]) {
+      clock.advance(5_000);
+      await live.enter(a.id, afterId, { sizeId: afterSize }, a.actor);
+      await live.advance(afterId);
+    }
+    await take(first, afterId);
+    if (end === 'SOLD_OUT') {
+      clock.advance(30_000);
+      await live.confirm(first.id, afterId, first.actor);
+    } else if (end === 'CLOSED') {
+      clock.advance(6 * MINUTE);
+    } else {
+      clock.advance(30_000);
+      await live.end(afterId, w.admin);
+    }
+    await live.advance(afterId);
+    await live.advance(r.id);
+  };
+  await scenario('arSoldOut', 100, 'SOLD_OUT', 'arOver');
+  await scenario('arClosed', 70, 'CLOSED');
+  await scenario('arEnded', 40, 'ENDED');
+}
+
+/**
+ * A draw in every state an entry or a page shows (lot E's direct reservations, P-X02, included), each its own, and a
+ * collector, r.castel (TITANE: one piece since 14 September), with an entry in most: a place held (selected over an
+ * account without a piece, who is on the waiting list), the waiting list (behind a PLATINE account), a place lapsed, a
+ * purchase concluded whose order is PAID, a draw past its close not yet drawn (where the PLATINE account withdrew while
+ * it was open), a draw cancelled, and the October draw, entered then withdrawn. The PLATINE account reserved the only
+ * piece of a draw in its early access and of a draw now open.
+ */
+async function seedDraws(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const drops = ctx.services.drops;
+  const platine = demo.accounts.platine!;
+  const newcomer = demo.accounts.newcomer!;
+  clock.set(at('2026-09-15T09:00:00Z'));
+  const entrant = await account(w, 'entrant', 'r.castel@example.com', 1, w.models.gold);
+  const draw = async (key: string, o: { model: string; title: string; quantity?: number; created: string; opens: string; closes: string; window?: number; early?: number }) => {
+    clock.set(at(o.created));
+    const d = await drops.create(
+      {
+        modelId: w.models[o.model]!,
+        title: o.title,
+        quantity: o.quantity ?? 1,
+        opensAt: at(o.opens),
+        closesAt: at(o.closes),
+        purchaseWindowHours: o.window ?? 48,
+        earlyAccessHours: o.early ?? 0,
+      },
+      admin,
+    );
+    await drops.publish(d.id, admin);
+    demo.releases[key] = d.id;
+    return d.id;
+  };
+  const enter = async (id: string, when: string, ...who: DemoAccount[]) => {
+    clock.set(at(when));
+    for (const a of who) await drops.enter(a.id, id, a.actor);
+  };
+  const entryOf = async (id: string, a: DemoAccount) => (await ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', id).where('account_id', '=', a.id).executeTakeFirstOrThrow()).id;
+  const drawAt = async (id: string, when: string) => {
+    clock.set(at(when));
+    await drops.draw(id, admin);
+  };
+
+  // A place lapsed: drawn on 22 Sep, held until 24 Sep, lapsed on 25 Sep.
+  const lapsed = await draw('lapsed', { model: 'gold', title: 'MONOLITHE IN GOLD, THE EQUINOX DRAW', created: '2026-09-18T09:00:00Z', opens: '2026-09-20T10:00:00Z', closes: '2026-09-22T18:00:00Z' });
+  await enter(lapsed, '2026-09-21T10:00:00Z', entrant);
+  await drawAt(lapsed, '2026-09-22T18:01:00Z');
+  clock.set(at('2026-09-25T09:00:00Z'));
+  await drops.lapse(lapsed, await entryOf(lapsed, entrant), 'The place was not taken up.', admin);
+
+  // A purchase concluded on 24 Sep, its order PAID on 25 Sep.
+  const concluded = await draw('concluded', { model: 'blue', title: 'MONOLITHE IN BLUE, THE SEPTEMBER DRAW', created: '2026-09-18T09:30:00Z', opens: '2026-09-21T10:00:00Z', closes: '2026-09-23T18:00:00Z' });
+  await enter(concluded, '2026-09-22T10:00:00Z', entrant);
+  await drawAt(concluded, '2026-09-23T18:01:00Z');
+  clock.set(at('2026-09-24T09:00:00Z'));
+  const concludedEntry = await entryOf(concluded, entrant);
+  await drops.confirm(concluded, concludedEntry, 'Confirmed by phone.', admin);
+  const order = await orderOfEntry(w, concludedEntry);
+  clock.set(at('2026-09-24T09:10:00Z'));
+  await ctx.services.orders.setTerms(order, { sizeLabel: '17', priceMinor: 505_000, currency: 'EUR' }, admin);
+  await ctx.services.orders.setBuyer(order, { name: 'R. Castel', address: '3 place des Vosges\n75004 Paris\nFrance' }, admin);
+  clock.set(at('2026-09-25T10:00:00Z'));
+  await ctx.services.orders.transition(order, { to: 'PAID' }, admin);
+
+  // Drawn on 4 Oct: a place held until 7 Oct (over an account without a piece, on the waiting list), and the waiting
+  // list (behind the PLATINE account).
+  const selected = await draw('selected', { model: 'steel', title: 'MONOLITHE IN STEEL, THE LAST DRAW OF SEPTEMBER', created: '2026-09-26T09:00:00Z', opens: '2026-09-28T10:00:00Z', closes: '2026-10-04T18:00:00Z', window: 72 });
+  const waitlisted = await draw('waitlisted', { model: 'blue', title: 'MONOLITHE IN BLUE, THE FIRST DRAW OF OCTOBER', created: '2026-09-26T09:30:00Z', opens: '2026-09-28T10:00:00Z', closes: '2026-10-04T18:00:00Z', window: 72 });
+  await enter(selected, '2026-09-29T10:00:00Z', entrant, newcomer);
+  await enter(waitlisted, '2026-09-29T11:00:00Z', platine, entrant);
+
+  // Past its close this noon, not drawn yet: entered; the PLATINE account withdrew while it was open.
+  const closed = await draw('closed', { model: 'gold', title: 'MONOLITHE IN GOLD, THE WEEKEND DRAW', created: '2026-09-29T09:00:00Z', opens: '2026-10-01T10:00:00Z', closes: '2026-10-05T10:00:00Z' });
+  // Cancelled on 4 Oct, with an entry.
+  const cancelled = await draw('cancelled', { model: 'blue', title: 'MONOLITHE IN BLUE, THE ATELIER DRAW', created: '2026-09-29T09:30:00Z', opens: '2026-10-01T10:00:00Z', closes: '2026-10-10T18:00:00Z' });
+  // Every piece reserved by the PLATINE account: one in its early access (entries open on 7 Oct), one open since this morning.
+  const full = await draw('full', { model: 'gold', title: 'MONOLITHE IN GOLD, THE PRIVATE DRAW', created: '2026-10-01T09:00:00Z', opens: '2026-10-07T10:00:00Z', closes: '2026-10-11T18:00:00Z', early: 72 });
+  const openFull = await draw('openFull', { model: 'blue', title: 'MONOLITHE IN BLUE, THE CLUB DRAW', created: '2026-10-01T09:30:00Z', opens: '2026-10-05T10:00:00Z', closes: '2026-10-11T18:00:00Z', early: 48 });
+  await enter(closed, '2026-10-02T10:00:00Z', entrant, platine);
+  await enter(cancelled, '2026-10-02T10:30:00Z', entrant);
+  clock.set(at('2026-10-03T09:00:00Z'));
+  await drops.withdraw(platine.id, closed, platine.actor);
+  clock.set(at('2026-10-03T12:00:00Z'));
+  await drops.reserve(platine.id, openFull, platine.actor);
+  clock.set(at('2026-10-04T10:00:00Z'));
+  await drops.cancel(cancelled, admin);
+  clock.set(at('2026-10-04T12:00:00Z'));
+  await drops.reserve(platine.id, full, platine.actor);
+  await drawAt(selected, '2026-10-04T18:01:00Z');
+  await drawAt(waitlisted, '2026-10-04T18:02:00Z');
+
+  // The October draw (open since 10:00 UTC): entered, then withdrawn.
+  await enter(demo.releases.draw!, '2026-10-05T11:00:00Z', entrant);
+  clock.set(at('2026-10-05T12:00:00Z'));
+  await drops.withdraw(entrant.id, demo.releases.draw!, entrant.actor);
 }
 
 // ── The extreme content (fidelity rule 5) and the empty states ─────────────

@@ -485,6 +485,32 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'draw-early', title: 'A draw in its early access, for a PLATINE account: RESERVE A PLACE', refs: ['C42'], variant: 'draw-early', as: 'platine', path: release('draw'), ready: '.view--release section' },
   { id: 'draw-drawn', title: 'A draw drawn: THIS RELEASE IS OVER, the seed checked, the entries by rank', refs: ['C29'], variant: 'full', as: you, path: release('draw:MONOLITHE IN GOLD'), ready: '.view--release section' },
   { id: 'draw-not-found', title: 'A release’s address that leads nowhere', refs: ['C40'], variant: 'full', path: at('/verify/releases/00000000-0000-4000-8000-000000000000'), ready: '.view--release, .view--live' },
+  { id: 'draw-soon-platine', title: 'A draw before its early access, for a PLATINE account: from when it may reserve a place', refs: ['C42'], variant: 'draw-soon', as: 'platine', path: release('draw'), ready: '.view--release .release__status' },
+  { id: 'draw-early-others', title: 'A draw in its early access, for a TITANE account: PLATINE and PALLADIUM owners are reserving', refs: ['C42'], variant: 'draw-early', as: you, path: release('draw'), ready: '.view--release .release__status' },
+
+  // ── A draw in every state (the `draws` demo) ──
+  { id: 'draw-closed', title: 'A draw past its close, not drawn yet: ENTRIES CLOSED, the draw follows', refs: ['C19'], variant: 'draws', as: you, path: release('closed'), ready: '.view--release .release__status' },
+  { id: 'draw-closed-entered', title: 'A draw past its close, entered: the draw follows the close of entries, WITHDRAW', refs: ['C19', 'C31'], variant: 'draws', as: 'entrant', path: release('closed'), ready: '.view--release .release__status' },
+  { id: 'draw-closed-withdrawn', title: 'A draw past its close, withdrawn while it was open: WITHDRAWN', refs: ['C19', 'C31'], variant: 'draws', as: 'platine', path: release('closed'), ready: '.view--release .release__status' },
+  { id: 'draw-cancelled', title: 'A draw cancelled: CANCELLED, there will be no draw', refs: ['C19'], variant: 'draws', as: you, path: release('cancelled'), ready: '.view--release .release__status' },
+  { id: 'draw-cancelled-entered', title: 'A draw cancelled, entered: ENTERED, there will be no draw', refs: ['C19', 'C31'], variant: 'draws', as: 'entrant', path: release('cancelled'), ready: '.view--release .release__status' },
+  { id: 'draw-withdrawn', title: 'A draw open, the entry withdrawn: WITHDRAWN, ENTER THE DRAW again', refs: ['C19', 'C31'], variant: 'draws', as: 'entrant', path: release('draw'), ready: '.view--release .release__status' },
+  { id: 'draw-place-held', title: 'A draw drawn, the account selected: PLACE HELD until …, ORBES Client Services', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('selected'), ready: '.view--release .release__status' },
+  { id: 'draw-waiting-list', title: 'A draw drawn, the account on the WAITING LIST, its rank', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('waitlisted'), ready: '.view--release .release__status' },
+  { id: 'draw-waiting-list-no-piece', title: 'A draw drawn, an account without a piece on the WAITING LIST', refs: ['C29', 'C31'], variant: 'draws', as: 'newcomer', path: release('selected'), ready: '.view--release .release__status' },
+  { id: 'draw-lapsed', title: 'A draw drawn, the place held lapsed: LAPSED', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('lapsed'), ready: '.view--release .release__status' },
+  { id: 'draw-full', title: 'A draw in its early access, every piece reserved: EVERY PIECE RESERVED, the waiting list after', refs: ['C42'], variant: 'draws', as: you, path: release('full'), ready: '.view--release .release__status' },
+  { id: 'draw-place-reserved', title: 'A PLATINE account’s direct reservation: PLACE RESERVED, held until …, ORBES Client Services', refs: ['C42', 'C31'], variant: 'draws', as: 'platine', path: release('full'), ready: '.view--release .release__status' },
+  { id: 'draw-open-full', title: 'A draw open, every piece reserved: you may still enter, the waiting list', refs: ['C19'], variant: 'draws', as: you, path: release('openFull'), ready: '.view--release .release__status' },
+  {
+    id: 'pieces-draws',
+    title: 'MY PIECES of a collector with a draw in each state (PLACE HELD, WAITING LIST, LAPSED, CONCLUDED, ENTERED, WITHDRAWN, CANCELLED) and an order PAID',
+    refs: ['C24', 'C31'],
+    variant: 'draws',
+    as: 'entrant',
+    path: at('/verify/pieces'),
+    ready: '.view--pieces .pieces__releases',
+  },
   { id: 'live-announced', title: 'A LIVE RELEASE before the room, signed in: YOUR SIZE, I’LL BE THERE', refs: ['C20'], variant: 'full', as: you, path: release('blue'), act: (run) => run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .live__there' },
   { id: 'live-announced-signed-out', title: 'A LIVE RELEASE before the room, signed out: I’LL BE THERE opens the sign-in', refs: ['C28'], variant: 'full', path: release('blue'), ready: '.view--live' },
   { id: 'live-veiled', title: 'A LIVE RELEASE not yet revealed, for owners from PLATINE: not eligible', refs: ['C7', 'C28'], variant: 'full', as: you, path: release('veiled'), ready: '.view--live' },
@@ -527,6 +553,24 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live__join',
   },
+  {
+    id: 'room-checks-pending',
+    title: 'The room, its READY CHECK not ready: SIZE TO CHOOSE, CONNECTION RECONNECTING, CLOCK SYNCING',
+    refs: ['same pieces'],
+    variant: 'room',
+    as: 'crowd5',
+    path: release('room'),
+    // The clock of ORBES never answers, the room's stream never opens: the page follows the room by reading it.
+    routes: async (page) => {
+      await page.route('**/api/v1/live/clock', (r) => r.abort('internetdisconnected'));
+      await page.route('**/api/v1/live/*/stream', (r) => r.abort('internetdisconnected'));
+    },
+    ready: '.view--live .live-door',
+  },
+  { id: 'after-room-sold-out', title: 'The after-room sold out before your turn: SOLD OUT', refs: ['C30'], variant: 'afterroom-ends', as: 'arSoldOut', path: release('arSoldOut', '/after-room'), ready: '.view--live .live__edge' },
+  { id: 'after-room-closed', title: 'The after-room’s time over before your turn: THE AFTER-ROOM IS CLOSED', refs: ['C30'], variant: 'afterroom-ends', as: 'arClosed', path: release('arClosed', '/after-room'), ready: '.view--live .live__edge' },
+  { id: 'after-room-ended', title: 'The after-room ended by ORBES before your piece: THE AFTER-ROOM HAS ENDED', refs: ['C30'], variant: 'afterroom-ends', as: 'arEnded', path: release('arEnded', '/after-room'), ready: '.view--live .live__edge' },
+  { id: 'after-room-over', title: 'The after-room over, for a guest who never entered it: THE AFTER-ROOM IS CLOSED, your entry stays in MY PIECES', refs: ['C30'], variant: 'afterroom-ends', as: 'arOver', path: release('arSoldOut', '/after-room'), ready: '.view--live .live__edge' },
   { id: 'room-stress', title: 'A room open with the longest host message, a 24-character name, a price of € 125 400', refs: ['same pieces'], variant: 'stress', as: you, path: release('soon'), ready: '.view--live', stress: true },
   { id: 'live-far-stress', title: 'A LIVE RELEASE more than 9 days away, in USD', refs: ['same pieces'], variant: 'stress', as: you, path: release('far'), ready: '.view--live', stress: true },
 
@@ -621,6 +665,23 @@ export const UI_STATES: readonly UiState[] = [
       await run.page.locator('.certificate-link__value').first().waitFor({ timeout: 20_000 });
     },
     ready: '.certificate-link',
+  },
+  {
+    id: 'pieces-certificate-withdrawn',
+    title: 'MY PIECES: a certificate link withdrawn, The link has been withdrawn',
+    refs: ['C35'],
+    variant: 'full',
+    as: you,
+    path: at('/verify/pieces'),
+    mutates: true,
+    act: async (run) => {
+      await button(run, 'CREATE CERTIFICATE').click();
+      await button(run, 'CREATE LINK').click();
+      await run.page.locator('.certificate-link__value').first().waitFor({ timeout: 20_000 });
+      await run.page.locator('.piece__certificate-withdraw').first().click();
+      await run.page.getByText('The link has been withdrawn', { exact: false }).first().waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--pieces article.piece',
   },
   {
     id: 'model-salon-requested',
@@ -932,14 +993,15 @@ export function normalizeText(t: string): string {
 /**
  * The parts of a value that change from one run to the next (written by the server: references, ids, genomes, codes,
  * the stage's port) or with an edition of the legal pages (their version's date), replaced by a mark the content test
- * reads as any word (valuePattern).
+ * reads as any text of the same shape (MARK_SHAPES, valuePattern).
  */
 const VOLATILE: readonly [RegExp, string][] = [
   [/https?:\/\/127\.0\.0\.1:\d+\S*/g, '«link»'],
   [/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '«id»'],
   [/\b[0-9a-f]{64}\b/gi, '«hex»'],
   [/\b(?:[0-9a-f]{4} ){15}[0-9a-f]{4}\b/gi, '«hex»'],
-  [/\b[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/g, '«code»'],
+  // A code the server wrote (a claim, transfer or recovery code), never the field's placeholder XXXX-XXXX-XXXX.
+  [/\b(?!X{4}-X{4}-X{4}\b)[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/g, '«code»'],
   [/\bG\d-[0-9A-F]{4}-[0-9A-F]{4}\b/g, '«genome»'],
   [/\b(OR|LR|INV|CN)-(?=[0-9A-Z-]*\d)[0-9A-Z-]{4,}\b/g, '$1-«ref»'],
   [/\b(REF(?:ERENCE)?) [0-9A-F]{8}\b/g, '$1 «ref»'],
@@ -959,10 +1021,33 @@ export function maskVolatile(value: string): string {
 const STARTS = '(?<![\\p{L}\\p{N}]|\\p{N}[:.,])';
 const ENDS = '(?![\\p{L}\\p{N}]|[:.,]\\p{N})';
 
-/** A baseline value as a pattern over a block of the page's normalized words: its marks read as any word, on word boundaries. */
+/**
+ * What each mark of maskVolatile stands for, in the page's normalized (lower-case) words: a value made of a mark alone
+ * (the GENOME's id, a code, the seed) is shown only by a text of its shape, never by any word.
+ */
+const MARK_SHAPES: Readonly<Record<string, string>> = Object.freeze({
+  genome: 'g\\d-[0-9a-f]{4}-[0-9a-f]{4}',
+  code: '[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}',
+  hex: '(?:[0-9a-f]{64}|(?:[0-9a-f]{4} ){15}[0-9a-f]{4})',
+  id: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+  link: 'https?://\\S+',
+  ref: '[0-9a-z-]*\\d[0-9a-z-]*',
+  date: '\\d{1,2}(?:er)? \\S+ \\d{4}',
+});
+
+/** A baseline value as a pattern over a block of the page's normalized words: each mark read as a text of its shape, on word boundaries. */
 export function valuePattern(value: string): RegExp {
   const escape = (p: string) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const body = normalizeText(value).split(/«[a-z]+»/).map(escape).join('\\S+');
+  const body = normalizeText(value)
+    .split(/(«[a-z]+»)/)
+    .map((part) => {
+      const mark = /^«([a-z]+)»$/.exec(part)?.[1];
+      if (mark === undefined) return escape(part);
+      const shape = MARK_SHAPES[mark];
+      if (!shape) throw new Error(`no shape for the mark «${mark}»`);
+      return shape;
+    })
+    .join('');
   return new RegExp(STARTS + body + ENDS, 'u');
 }
 
@@ -984,7 +1069,10 @@ export function shows(texts: readonly string[], value: string): boolean {
 
 /**
  * What overflows on the page: the page scrolling sideways, an element with words or a control reaching past the
- * column's edges, words wider than their own box, and words cut (an ellipsis, a clipped box, a clamp).
+ * column's edges or past its parent's box (into the page's margin, past a plate's padding), any box whose content
+ * spills out of it (words or not: a row, a flex or grid item sized to its content), words wider than their own box,
+ * and words cut (an ellipsis, a clipped box, a clamp). A box that scrolls sideways on purpose holds what it scrolls,
+ * and a full-bleed photograph reaches past its column on purpose.
  */
 export async function overflows(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -1015,6 +1103,40 @@ export async function overflows(page: Page): Promise<string[]> {
       }
       const clamp = (cs as CSSStyleDeclaration & { webkitLineClamp?: string }).webkitLineClamp;
       if (hasText && clamp && clamp !== 'none' && el.scrollHeight > el.clientHeight + 1) out.push(`${name(el)} is clamped`);
+    }
+    // Any box, words or not, whose content spills out of it sideways (a descendant past its edge shows in its scrollWidth).
+    for (const el of document.body.querySelectorAll('*')) {
+      if (!(el instanceof HTMLElement) || !el.checkVisibility({ visibilityProperty: true })) continue;
+      const cs = getComputedStyle(el);
+      if (cs.overflowX !== 'visible' || cs.display === 'inline' || cs.display === 'contents') continue;
+      const hasText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0);
+      if (hasText) continue; // reported above as wider than its box
+      if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) out.push(`${name(el)} spills out of its box (${el.scrollWidth} px in ${el.clientWidth})`);
+    }
+    // Words or a control in the flow past their parent's box: into the page's margin, past a plate's padding.
+    const boxOf = (el: Element): HTMLElement | null => {
+      for (let p = el.parentElement; p; p = p.parentElement) if (getComputedStyle(p).display !== 'contents') return p;
+      return null;
+    };
+    for (const el of document.body.querySelectorAll('*')) {
+      if (!(el instanceof HTMLElement) || !el.checkVisibility({ visibilityProperty: true })) continue;
+      const hasText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0);
+      const control = /^(BUTTON|INPUT|TEXTAREA|SELECT|IMG|A)$/.test(el.tagName);
+      if (!hasText && !control) continue;
+      const cs = getComputedStyle(el);
+      if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+      const p = boxOf(el);
+      if (!p || p === document.body || p === doc) continue;
+      const pcs = getComputedStyle(p);
+      if (pcs.overflowX === 'auto' || pcs.overflowX === 'scroll') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1) continue;
+      // A full-bleed photograph spans the screen's width on purpose.
+      if (/^(IMG|PICTURE|VIDEO)$/.test(el.tagName) && r.left <= 1 && r.right >= width - 1) continue;
+      const b = p.getBoundingClientRect();
+      if (r.left < b.left - 1 || r.right > b.right + 1) {
+        out.push(`${name(el)} reaches past its parent ${name(p)} (${Math.round(r.left)} to ${Math.round(r.right)} in ${Math.round(b.left)} to ${Math.round(b.right)})`);
+      }
     }
     return out;
   });

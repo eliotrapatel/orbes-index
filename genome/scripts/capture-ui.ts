@@ -115,7 +115,7 @@ import { sessionCookieName } from '../src/server/services/sessions.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
-import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
+import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { buildWeb } from './build-web.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -225,15 +225,7 @@ class Shots {
    * frames the full composition rather than its first screen only.
    */
   async full(page: Page, name: string): Promise<void> {
-    const size = page.viewportSize();
-    if (!size) throw new Error('page has no viewport');
-    const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
-    if (height > size.height) {
-      await page.setViewportSize({ width: size.width, height });
-      await sleep(400);
-    }
-    this.save(name, await page.screenshot({ type: 'png' }));
-    if (height > size.height) await page.setViewportSize(size);
+    this.save(name, await fullScreenshot(page));
   }
 
   /**
