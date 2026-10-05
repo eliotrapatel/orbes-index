@@ -3,7 +3,8 @@
  * data each one shows): for each, the demo variant it lives in (test/support/nocturne-demo.ts), who looks at it (an
  * account's session, or a visitor), its address, what is done there to reach it, and the boards it is compared with.
  * Shared by the parity tool (scripts/parity.ts: the captures, the stress run, the content baseline) and the NOCTURNE
- * browser tests (test/web/nocturne.content.e2e.test.ts, test/web/nocturne.overflow.e2e.test.ts).
+ * browser tests (test/web/nocturne.content-<shard>.e2e.test.ts through nocturne.content.harness.ts,
+ * test/web/nocturne.overflow.e2e.test.ts).
  *
  * A state is reached by role and words (a button's name, a tab's), and by the app's own view roots where none says
  * enough, so a restyled app reaches the same state with the same definition; when a step of NOCTURNE changes how a state
@@ -255,7 +256,15 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'result-not-delivered', title: 'AUTHENTIC, a piece not delivered yet: registration opens once it has been', refs: ['C36'], variant: 'full', ...result('stock', (run) => tab(run, 'OWNERSHIP').click()) },
   { id: 'result-registered-signed-out', title: 'AUTHENTIC — REGISTERED, signed out: the resale guidance and RECEIVING THIS PIECE', refs: ['C13'], variant: 'full', ...result('yours', (run) => tab(run, 'OWNERSHIP').click()) },
   { id: 'result-registered-transfer-link', title: 'AUTHENTIC — REGISTERED: I HAVE A TRANSFER CODE', refs: ['C13'], variant: 'full', ...result('yours', (run) => link(run, 'I HAVE A TRANSFER CODE').or(button(run, 'I HAVE A TRANSFER CODE')).first().click()) },
-  { id: 'result-registered-other', title: 'AUTHENTIC — REGISTERED, signed in as another account, no transfer pending', refs: ['C37'], variant: 'full', as: 'newcomer', ...result('yours') },
+  {
+    id: 'result-registered-other',
+    title: 'AUTHENTIC — REGISTERED, signed in as another account, no transfer pending: OWNERSHIP',
+    refs: ['C37'],
+    variant: 'full',
+    as: 'newcomer',
+    ...result('yours', (run) => tab(run, 'OWNERSHIP').click()),
+    ready: '.view--result [role=tabpanel]:not([hidden]) :text("No transfer of this piece is pending")',
+  },
   { id: 'result-receiving', title: 'AUTHENTIC — REGISTERED, a transfer pending, signed in as its receiver: RECEIVING OPEN UNTIL', refs: ['C37'], variant: 'full', as: 'newcomer', ...result('passing') },
   { id: 'result-ownership-verified', title: 'AUTHENTIC — OWNERSHIP VERIFIED: the account’s own piece, OWNERSHIP: CREATE TRANSFER CODE', refs: ['C14'], variant: 'full', as: you, ...result('gold', (run) => tab(run, 'OWNERSHIP').click()) },
   { id: 'result-ownership-verified-product', title: 'AUTHENTIC — OWNERSHIP VERIFIED: the PRODUCT tab it opens on', refs: ['C14'], variant: 'full', as: you, ...result('gold') },
@@ -483,7 +492,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'live-rules', title: 'A LIVE RELEASE with its surprise and its access rules', refs: ['C27'], variant: 'rules', as: you, path: release('blue'), act: (run) => run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .live__there' },
   { id: 'live-rules-not-eligible', title: 'Not eligible by participation', refs: ['C28'], variant: 'rules', as: 'newcomer', path: release('blue'), ready: '.view--live' },
   { id: 'live-selected-not-eligible', title: 'Not eligible: a release for selected collectors', refs: ['C28'], variant: 'rules', as: you, path: release('selected'), ready: '.view--live' },
-  { id: 'live-past-secured', title: 'A past LIVE RELEASE’s final page: YOU SECURED A PIECE, CONFIRMED in ivory', refs: ['C29'], variant: 'full', as: you, path: release('morning'), ready: '.view--live .live__past' },
+  { id: 'live-past-secured', title: 'A past LIVE RELEASE’s final page: YOU SECURED A PIECE', refs: ['C29'], variant: 'full', as: you, path: release('morning'), ready: '.view--live .live__past' },
   { id: 'live-past-signed-out', title: 'A past LIVE RELEASE’s final page, signed out', refs: ['C29'], variant: 'full', path: release('morning'), ready: '.view--live .live__past' },
   { id: 'live-past-question', title: 'A past LIVE RELEASE, a collector whose turn passed: the question after', refs: ['C30', 'plus-11'], variant: 'full', as: 'guest', path: release('morning'), ready: '.view--live .question' },
   { id: 'live-past-gold', title: 'A past LIVE RELEASE nobody of the story took part in', refs: ['C25'], variant: 'full', as: you, path: release('live28'), ready: '.view--live .live__past' },
@@ -531,16 +540,31 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'post-poll-voted', title: 'A post: the poll, voted, its results', refs: ['C34'], variant: 'full', as: 'voter1', path: post('poll'), ready: '.view--circle-post section' },
   { id: 'post-note', title: 'A post: the note', refs: ['C22'], variant: 'full', as: you, path: post('note'), ready: '.view--circle-post' },
   { id: 'post-not-found', title: 'A post’s address that leads nowhere', refs: ['C40'], variant: 'full', as: you, path: at('/verify/circle/00000000-0000-4000-8000-000000000000'), ready: '.view--circle-post' },
-  { id: 'circle-stress', title: 'THE CIRCLE with eight posts, a long title, a long poll option', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/circle'), ready: '.view--circle article', stress: true },
+  { id: 'circle-stress', title: 'THE CIRCLE with eight posts, a long title', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/circle'), ready: '.view--circle article', stress: true },
   { id: 'post-stress', title: 'A note with the longest title', refs: ['same pieces'], variant: 'stress', as: you, path: post('long'), ready: '.view--circle-post', stress: true },
-  { id: 'circle-empty', title: 'THE CIRCLE with nothing published (an owner of the stress demo sees the feed; here the empty account)', refs: ['C40'], variant: 'empty', as: you, path: at('/verify/circle'), ready: '.view--circle p', stress: true },
+  { id: 'post-poll-stress', title: 'A poll with a long option (A FINISH IN BRUSHED BLACK RHODIUM), before a vote', refs: ['same pieces'], variant: 'stress', as: you, path: post('longPoll'), ready: '.view--circle-post section', stress: true },
+  {
+    id: 'circle-empty',
+    title: 'THE CIRCLE of an owner, nothing published',
+    refs: ['C40'],
+    variant: 'empty',
+    as: 'owner',
+    path: at('/verify/circle'),
+    ready: '.view--circle :text("Nothing has been published in the circle yet.")',
+    stress: true,
+  },
 
   // ── The legal pages ──
   { id: 'legal-privacy', title: 'The legal pages: PRIVACY', refs: ['C23'], variant: 'full', path: at('/legal/privacy'), ready: '.legal__section' },
   { id: 'legal-terms', title: 'The legal pages: TERMS', refs: ['C23'], variant: 'full', path: at('/legal/terms'), ready: '.legal__section' },
   { id: 'legal-notice', title: 'The legal pages: LEGAL', refs: ['C23'], variant: 'full', path: at('/legal/notice'), ready: '.legal__section' },
   { id: 'legal-faq', title: 'The legal pages: HELP', refs: ['C41'], variant: 'full', path: at('/legal/faq'), ready: '.legal__section' },
+  { id: 'legal-index', title: 'The legal pages: the index (/legal, and any other address under /legal)', refs: ['C23'], variant: 'full', path: at('/legal'), ready: '.legal-index' },
+  { id: 'legal-privacy-fr', title: 'The legal pages in French: CONFIDENTIALITÉ', refs: ['C23'], variant: 'full', path: at('/legal/privacy?lang=fr'), ready: '.legal__section' },
   { id: 'legal-terms-fr', title: 'The legal pages in French: CONDITIONS', refs: ['C23'], variant: 'full', path: at('/legal/terms?lang=fr'), ready: '.legal__section' },
+  { id: 'legal-notice-fr', title: 'The legal pages in French: MENTIONS LÉGALES', refs: ['C23'], variant: 'full', path: at('/legal/notice?lang=fr'), ready: '.legal__section' },
+  { id: 'legal-faq-fr', title: 'The legal pages in French: AIDE', refs: ['C41'], variant: 'full', path: at('/legal/faq?lang=fr'), ready: '.legal__section' },
+  { id: 'legal-index-fr', title: 'The legal pages in French: the index', refs: ['C23'], variant: 'full', path: at('/legal?lang=fr'), ready: '.legal-index' },
 
   // ── Kept as they are (plan NOCTURNE, choice 3 and the scope guard) ──
   { id: 'certificate', title: 'The shared ownership certificate (/verify/c#…), kept as it is', refs: ['kept (choice 3)', 'verify-13'], variant: 'full', path: (d) => `/verify/c#${d.links.certificate}`, ready: '.view--certificate .genome-svg' },
@@ -664,8 +688,13 @@ export const UI_STATES: readonly UiState[] = [
     path: release('room'),
     mutates: true,
     act: async (run) => {
+      // The room counts the account once its entry is in: the count, read before, has grown by one (it comes after YOU’RE READY).
+      const inRoom = () => run.page.evaluate(() => Number(/(\d+) IN THE ROOM/.exec(document.body.innerText)?.[1] ?? 0));
+      await run.page.getByText(/\d+ IN THE ROOM/).first().waitFor({ timeout: 20_000 });
+      const before = await inRoom();
       await button(run, 'ENTER THE ROOM').click();
       await run.page.getByText('YOU’RE READY').first().waitFor({ timeout: 20_000 });
+      await run.page.waitForFunction((n) => new RegExp(`(^|\\D)${n} IN THE ROOM`).test(document.body.innerText), before + 1, { timeout: 20_000 });
     },
     ready: '.view--live .live-door',
   },
@@ -807,6 +836,8 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
     holds.releaseAll();
     await context.close().catch(() => {});
   };
+  // Every step of a state fails within its time rather than waits for ever (a click on a control that never shows).
+  context.setDefaultTimeout(30_000);
   try {
     // The functions handed to the page are compiled by tsx or vitest, which may wrap a named function in __name().
     await context.addInitScript({ content: 'globalThis.__name = globalThis.__name || ((f) => f);' });
@@ -885,9 +916,9 @@ export async function visibleTexts(page: Page): Promise<string[]> {
   });
 }
 
-/** The page's own words, folded, lower case: what a baseline value is looked for in. */
-export async function pageText(page: Page): Promise<string> {
-  return normalizeText((await visibleTexts(page)).join('\n'));
+/** The page's blocks of words (visibleTexts), each folded, lower case: what a baseline value is looked for in. */
+export async function pageTexts(page: Page): Promise<string[]> {
+  return (await visibleTexts(page)).map(normalizeText);
 }
 
 export function normalizeText(t: string): string {
@@ -921,17 +952,32 @@ export function maskVolatile(value: string): string {
   return VOLATILE.reduce((v, [re, mark]) => v.replace(re, mark), value);
 }
 
-/** A baseline value as a pattern over the page's normalized text: its marks read as any word. */
+/**
+ * Where a value may start and end: not inside a word or a figure. Nothing of a letter or a digit next to it, and a
+ * figure is whole with its separators (17 is not shown by 2017, nor by 17:00, nor by 1.17).
+ */
+const STARTS = '(?<![\\p{L}\\p{N}]|\\p{N}[:.,])';
+const ENDS = '(?![\\p{L}\\p{N}]|[:.,]\\p{N})';
+
+/** A baseline value as a pattern over a block of the page's normalized words: its marks read as any word, on word boundaries. */
 export function valuePattern(value: string): RegExp {
-  const parts = normalizeText(value).split(/«[a-z]+»/);
-  return new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\S+'));
+  const escape = (p: string) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const body = normalizeText(value).split(/«[a-z]+»/).map(escape).join('\\S+');
+  return new RegExp(STARTS + body + ENDS, 'u');
 }
 
-/** Whether `value` (a baseline value) is shown in `text` (pageText): whole, or each of its parts joined by « · ». */
-export function shows(text: string, value: string): boolean {
-  if (valuePattern(value).test(text)) return true;
+/**
+ * Whether `value` (a baseline value) is shown in `texts` (pageTexts): whole within one block of words, or each of its
+ * parts joined by « · » within a block. A value never straddles two blocks, and never matches inside a word or a figure.
+ */
+export function shows(texts: readonly string[], value: string): boolean {
+  const shown = (v: string) => {
+    const re = valuePattern(v);
+    return texts.some((t) => re.test(t));
+  };
+  if (shown(value)) return true;
   const parts = value.split(' · ').filter((p) => p.trim().length > 0);
-  return parts.length > 1 && parts.every((p) => valuePattern(p).test(text));
+  return parts.length > 1 && parts.every(shown);
 }
 
 // ── Overflow (fidelity rule 5) ─────────────────────────────────────────────

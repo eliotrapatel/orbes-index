@@ -9,8 +9,10 @@ own).
 
 The **state** column names the state as `genome/test/support/nocturne-states.ts` defines it: the parity tool
 (`genome/scripts/parity.ts`) reaches it on the NOCTURNE demo, and its text values are recorded, state by state, in
-`genome/test/fixtures/nocturne-baseline.json`, which the content test (`genome/test/web/nocturne.content.e2e.test.ts`)
-checks against the new app. A state written *(not reached)* is not on the stage; the reason is given, and the content
+`genome/test/fixtures/nocturne-baseline.json`, which the content test checks against the new app (one test file per
+shard of states, `genome/test/web/nocturne.content-<shard>.e2e.test.ts`, run side by side; their structure in
+`nocturne.content.e2e.test.ts`). A value is shown when it reads within one block of the page's words, on word and figure
+boundaries (NO is not shown by *not*, 17 not by *2017* nor *17:00*). A state written *(not reached)* is not on the stage; the reason is given, and the content
 test cannot guard it: each step that touches it checks it by hand against this list.
 
 Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result copy `genome/src/server/services/copy.ts`,
@@ -26,7 +28,8 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
 - **The demo** (`genome/test/support/nocturne-demo.ts`), in eleven variants, each seeded on its own stage through the
   real services: `full` (the boards' story), `rules` (C27–C28), `draw-leads` (C42), `draw-soon` and `draw-early` (C42's
   other states), `collection-leads` (C43), `room` (C21), `live` (the room's screens), `afterroom` (C26), `stress` (fidelity
-  rule 5) and `empty` (every empty state).
+  rule 5) and `empty` (every empty state; an owner of one piece of a model kept out of the collection sees the empty
+  circle).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - MONOLITHE in steel, blue and gold are three models until N1 links them as variants; THE COLLECTION shows three cards.
   - A draw has no price before migration 0024 (N1): the October draw shows none.
@@ -56,7 +59,8 @@ The parity tool sets each board beside the state that holds its content today (`
 
 Today's landing is not yet NOW: the monogram over the wordmark ORBES and AUTHENTICATION, SCAN ORBES CODE, UPLOAD A PHOTO,
 MY PIECES (once the session is known), THE COLLECTION, THE RELEASES, and at the foot SOUND ON/OFF, PRIVACY · TERMS · LEGAL
-· HELP, IP GEOLOCATION BY DB-IP and © ORBES · GENOME CODE · PARIS; over it, the banner of the LIVE RELEASES.
+· HELP, IP GEOLOCATION BY DB-IP and © ORBES · PARIS (© ORBES · GENOME CODE · PARIS from 560 px wide); over it, the banner
+of the LIVE RELEASES.
 
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
@@ -120,7 +124,7 @@ WARRANTY · CARE · OWNERSHIP and the assurance note.
 | *(not reached)* staff scan | the staff-test sentence instead of the form | a browser signed in to the console | C36 (5) |
 | `result-registered-signed-out` | AUTHENTIC, REGISTERED, the resale guidance (*Buying this piece? …*), I HAVE A TRANSFER CODE; OWNERSHIP: REGISTERED TO ITS OWNER, RECEIVING THIS PIECE, the sign-in, *If this piece is already registered to you …* | a piece registered to someone, signed out | C13 |
 | `result-registered-transfer-link` | the same, RECEIVING THIS PIECE brought into view | I HAVE A TRANSFER CODE | C13 |
-| `result-registered-other` | *No transfer of this piece is pending …*, VERIFY AGAIN / *If this piece is registered to you …* | signed in, not the owner, no transfer pending | C37 (4) |
+| `result-registered-other` | AUTHENTIC, REGISTERED, the resale guidance, I HAVE A TRANSFER CODE; OWNERSHIP: REGISTERED TO ITS OWNER, *This piece is registered to an ORBES account.*, RECEIVING THIS PIECE, *No transfer of this piece is pending. Once its owner has created a transfer code …*, *If this piece is registered to you …*, VERIFY AGAIN, the account line | signed in, not the owner, no transfer pending | C37 (4) |
 | `result-receiving` | REGISTERED TO ITS OWNER, *A transfer of its ownership is in progress.*, RECEIVING THIS PIECE, RECEIVING OPEN UNTIL *time*, TRANSFER CODE (XXXX-XXXX-XXXX), RECEIVE THIS PIECE, the account line | a transfer pending, signed in | C37 (2) |
 | *(not reached)* received | REGISTERED TO YOU, *The ownership of … has been transferred …*, VIEW AS OWNER | a transfer code accepted (the owner's code is shown once and not kept by the demo) | C37 (3) |
 | `result-ownership-verified` | AUTHENTIC, OWNERSHIP VERIFIED; OWNERSHIP: REGISTERED TO YOU, TRANSFER OF OWNERSHIP, its sentence, CREATE TRANSFER CODE, the account line | the account's own piece | C14 |
@@ -230,10 +234,16 @@ RELEASES, THE CIRCLE (an owner), the legal links.
 | `live-rules` | A SURPRISE IN EVERY BOX, FOR OWNERS FROM PLATINE OR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES OR SELECTED COLLECTORS | the rules joined by OR, eligible | C27, plus-04 |
 | `live-rules-not-eligible` | the rule, *You have taken part in n releases.*, *Your ORBES account does not meet the rule …* | not eligible by participation | C28 (4), plus-05 |
 | `live-selected-not-eligible` | FOR SELECTED COLLECTORS, *This release is for selected collectors.* | a selection | C28 (5), plus-06 |
-| `live-past-secured` | LIVE RELEASE, *name*, SEE THE MODEL, THIS RELEASE IS OVER, *date · quantity*, YOU SECURED A PIECE, CONFIRMED in ivory (LIVE RELEASE · *name*, *Your piece is reserved in size 16 …*, RESERVED, SIZE, PIECES, ENGRAVING, TOTAL, REFERENCE *LR-…*, MY PIECES), *description*, THE RELEASES | ended, you secured a piece | C29, plus-03 |
+| `live-past-secured` | LIVE RELEASE, *picture*, *name*, *type · collection*, SEE THE MODEL, THIS RELEASE IS OVER, *date · quantity*, YOU SECURED A PIECE, *description*, THE RELEASES, SOUND ON (see the note below on C29's receipt) | ended, you secured a piece | C29, plus-03 |
 | `live-past-signed-out` | the same without a mark | signed out | C29 |
 | `live-past-question` | YOU TOOK PART, ONE QUESTION, WHAT WOULD YOU HAVE WANTED?, ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND, *One tap …* | took part without a piece, within 7 days | C30, plus-11 |
 | `live-past-gold` | a past LIVE RELEASE nobody of the story took part in | | C25 |
+
+**C29's receipt is a board element, not today's past page.** C29 draws, on a past LIVE RELEASE's final page, the account's
+CONFIRMED receipt in ivory (LIVE RELEASE · *name*, *Your piece is reserved in size 16 …*, RESERVED, SIZE, PIECES,
+ENGRAVING, TOTAL, REFERENCE *LR-…*, MY PIECES). Today's past page (`views/live.ts` pastScreen) shows none of it: only YOU
+SECURED A PIECE (or YOU TOOK PART), the question and the description. Its data exists in the room's CONFIRMED screen
+(`live-confirmed`, live-12): N7 builds the receipt from the account's live entry and its order.
 
 ## The room, the line and the vault (`/verify/releases/<id>`, compared with the before-captures)
 
@@ -274,14 +284,15 @@ SOUND ON/OFF at the room's foot (always, the preference shared with the landing)
 | `circle-platine` | the same with the poll (POLL · PLATINE AND PALLADIUM) | a PLATINE owner | C8 |
 | `circle-signed-out` | *The circle is reserved for the owners … Sign in …*, the sign-in | signed out | C40 |
 | `circle-no-piece` | *The circle is reserved … It opens once a piece is registered …* | no piece | C40 (4) |
-| `circle-empty` | *Nothing has been published in the circle yet.* | nothing published | C40 (3) |
+| `circle-empty` | ORBES, THE CIRCLE, its lead, EARLY ACCESS and its recall, *Nothing has been published in the circle yet.* | an owner, nothing published | C40 (3) |
 | `post-invitation` | *photographs*, INVITATION, *title*, *date*, *text*; THE INVITATION (WHEN in UTC then on this phone, WHERE, PLACES *n LEFT OF c*); YOUR ANSWER (*You will come …*, YES · NO); TO SEE (*release* SEE THE RELEASE, *model · type* SEE THE MODEL, OPEN THE LINK *host*); SCAN ORBES CODE, THE CIRCLE | | C22 |
 | `post-answered-no` | *You will not come …*, NO pressed | NO | C22 |
 | `post-poll` | POLL · PLATINE AND PALLADIUM, *title*, *date*, *text*, THE POLL, its lead, the options, VOTE (once one is chosen) | not voted | C34 (1) |
 | `post-poll-voted` | *Your vote is counted. The results so far:*, each option (*n VOTES · p%*, YOUR VOTE) | voted | C34 (2) |
 | `post-note` | NOTE, *title*, *date*, *photograph*, *text* | | C22 |
 | `post-not-found` | *This post is not in the circle.* | | C40 (4) |
-| `circle-stress`, `post-stress` | eight posts, a 71-character title, a long poll option | | same pieces |
+| `circle-stress`, `post-stress` | eight posts, a 71-character title | | same pieces |
+| `post-poll-stress` | a poll whose first option is A FINISH IN BRUSHED BLACK RHODIUM, before a vote | | same pieces |
 | *(not reached)* | answers closed (*The event has begun …*, no buttons); every place taken (*Every place is taken …*, YES disabled); NONE LEFT OF *c*; SHOW MORE's failure; the feed could not be shown | | C22 (2, 3) |
 
 ## Kept as they are (out of NOCTURNE's look)
@@ -291,19 +302,27 @@ SOUND ON/OFF at the room's foot (always, the preference shared with the landing)
 | `certificate` | ORBES, OWNERSHIP CERTIFICATE, VALID (or NO LONGER VALID, NOT FOUND), its lead, the GENOME plate, the product lines, THE RECORD (OWNERSHIP, SINCE, WARRANTY, LOSS OR THEFT), THIS CERTIFICATE (CHECKED, ISSUED, VALID UNTIL), its note, DOWNLOAD PDF, SCAN ORBES CODE, VERIFY ONLY AT THEORBES.COM/VERIFY | choice 3, verify-13 |
 | `board` | the boutique board: ORBES, LIVE, the door, LIVE RELEASE · *phase*, *name*, *quantity*, OPENS IN, *left OF quantity LEFT*, *day · time* PARIS, FULL SCREEN (THIS BOARD IS NOT AVAILABLE without its secret) | scope guard, live-07 |
 
-## The legal pages (`/legal/privacy`, `/legal/terms`, `/legal/notice`, `/legal/faq`)
+## The legal pages (`/legal`, `/legal/privacy`, `/legal/terms`, `/legal/notice`, `/legal/faq`)
 
 Each: ORBES, PRIVACY · TERMS · LEGAL · HELP (the current one marked), ENGLISH · FRANÇAIS, the title, VERSION OF *date*,
 the introduction, each section's heading (an anchor, its figures in the reading face) and text (paragraphs, lists,
 links, the contact of Client Services where the text names it), VERIFY A PIECE · IP GEOLOCATION BY DB-IP · © ORBES.
+The index (`/legal`, and any other address under /legal, put back to /legal): its title (*Legal information*), VERSION OF
+*date*, its lead, and each page's link (its title) with its summary. Every page is in English and in French (`?lang=fr`,
+else the browser's language): the language is a state of each.
 
-| State | Reference |
-|---|---|
-| `legal-privacy` | C23 (the same pieces) |
-| `legal-terms` | C23 |
-| `legal-notice` | C23 (the same pieces) |
-| `legal-faq` | C41, legal-01 |
-| `legal-terms-fr` | C23 (in French) |
+| State | What it shows | Reference |
+|---|---|---|
+| `legal-index` | the index | C23 (the same pieces) |
+| `legal-privacy` | PRIVACY | C23 (the same pieces) |
+| `legal-terms` | TERMS | C23 |
+| `legal-notice` | LEGAL | C23 (the same pieces) |
+| `legal-faq` | HELP | C41, legal-01 |
+| `legal-index-fr` | the index in French (*Informations légales*) | C23 (in French) |
+| `legal-privacy-fr` | CONFIDENTIALITÉ | C23 (in French) |
+| `legal-terms-fr` | CONDITIONS | C23 (in French) |
+| `legal-notice-fr` | MENTIONS LÉGALES | C23 (in French) |
+| `legal-faq-fr` | AIDE | C41 (in French) |
 
 ## Controls shown only on some devices or states (summary)
 
@@ -332,13 +351,17 @@ links, the contact of Client Services where the text names it), VERIFY A PIECE �
 | EARLY ACCESS (MY PIECES) | an account without a piece |
 | AFTER THE RELEASES | a question open for the account |
 | SOUND ON/OFF | the landing and the room's foot |
+| GENOME CODE in the landing's © line | a screen 560 px wide or more (© ORBES · PARIS on a phone) |
 
 ## Using it
 
 From `genome/`, with `ORBES_CHROMIUM` set:
 
 - `npx tsx scripts/parity.ts [C1,C9,…]` — each board's real screen and its pair (`<out>/<C-id>.real.png`,
-  `<out>/<C-id>.pair.png`).
+  `<out>/<C-id>.pair.png`); C21 and C26, stand-in images of the room, are paired with their state's before-capture.
+- `npx tsx scripts/parity.ts --live [<id,…>]` — each LIVE state beside its before-capture (`<out>/live/<state>.pair.png`;
+  by default every state whose reference is a live-xx or plus-xx capture).
 - `npx tsx scripts/parity.ts --states <id,…|variant|all>` — any state of this matrix.
 - `npx tsx scripts/parity.ts --stress` — the extreme cases and what overflows in each.
-- `npx tsx scripts/parity.ts --baseline` — the content baseline (recorded once, at N0).
+- `npx tsx scripts/parity.ts --baseline` — the content baseline (recorded once, at N0); `--baseline --states <id,…>`
+  records those states only (a state added, or one whose way there changed), every other entry's values kept.

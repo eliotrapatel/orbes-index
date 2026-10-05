@@ -115,7 +115,7 @@ import { sessionCookieName } from '../src/server/services/sessions.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
-import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, webpOf } from '../test/support/ui-stage.js';
+import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { buildWeb } from './build-web.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -285,12 +285,8 @@ function onPaper(png: Buffer, margin: number): Buffer {
   return PNG.sync.write(out);
 }
 
-function watchPage(page: Page, label: string): void {
-  page.on('pageerror', (e) => log(`  [${label}] page error: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error') log(`  [${label}] console: ${m.text()}`);
-  });
-}
+/** Log a page's errors under `label` (ui-stage.ts watchPage, into this script's log). */
+const watchPage = (page: Page, label: string): void => watchPageInto(page, label, log);
 
 // ── Verify app ─────────────────────────────────────────────────────────────
 

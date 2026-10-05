@@ -35,7 +35,8 @@
  *   live              a LIVE RELEASE live now, a collector at each step of the line and each end (the room's screens)
  *   afterroom         a LIVE RELEASE sold out a few minutes ago, its after-room open (C26)
  *   stress            the extreme content of fidelity rule 5
- *   empty             every empty state: no model, no release, an empty circle, an account without a piece
+ *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
+ *                     (one piece of a model kept out of the collection) before an empty circle
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -805,6 +806,7 @@ async function seedStress(w: World): Promise<void> {
     await ctx.services.circle.publish(post.id, admin);
     clock.advance(HOUR);
     if (i === 1) w.demo.posts.long = post.id;
+    if (i === 2) w.demo.posts.longPoll = post.id;
   }
   // A LIVE RELEASE in 42 minutes, its room open an hour before, a host message of the longest length (140 characters); another in 9 days and 3 hours.
   clock.set(at('2026-10-01T10:00:00Z'));
@@ -834,8 +836,17 @@ async function seedStress(w: World): Promise<void> {
   );
 }
 
-/** Every empty state: no model shown, no release, nothing in the circle, an account without a piece or an order. */
+/**
+ * Every empty state: no model shown, no release, nothing in the circle, an account without a piece or an order (you).
+ * The owner holds one piece of a model kept out of the collection (its lookbook HIDDEN): the circle opens to it, and
+ * nothing is published there.
+ */
 async function seedEmpty(w: World): Promise<void> {
+  const { ctx, admin } = w;
   w.clock.set(at('2026-09-01T09:00:00Z'));
+  w.collection = (await ctx.services.catalog.createCollection({ name: 'ORBITAL' }, admin)).id;
+  const hidden = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: null }, admin);
+  w.models.steel = hidden.id;
   await account(w, 'you', 'you@example.com');
+  await account(w, 'owner', 'm.okafor@example.com', 1, hidden.id);
 }
