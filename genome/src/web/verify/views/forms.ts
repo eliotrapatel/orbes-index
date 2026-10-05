@@ -19,12 +19,15 @@ export const MIN_PASSWORD = 12;
 /** A refusal the page itself states (an empty or short field), before any request. */
 export class FormError extends Error {}
 
-/** One sentence for a failed request: the network, the rate limit, an ended session, a 5xx, else the server's own words. */
+/**
+ * One sentence for a failed request: the network, the rate limit, an ended session, a 5xx, else the server's own words.
+ * A sign-in refused for a wrong email or password is a 401 too: it reads as the server wrote it, never as an ended session.
+ */
 export function messageOf(e: unknown): string {
   if (e instanceof ApiError) {
     if (e.isNetwork) return REQUEST_ERRORS.network;
     if (e.status === 429) return REQUEST_ERRORS.rateLimited;
-    if (e.status === 401) return 'Your session has ended. Please sign in again.';
+    if (e.status === 401) return e.code === 'INVALID_CREDENTIALS' ? e.message : 'Your session has ended. Please sign in again.';
     if (e.status >= 500) return 'This could not be completed just now. Please try again in a moment.';
     return e.message;
   }
