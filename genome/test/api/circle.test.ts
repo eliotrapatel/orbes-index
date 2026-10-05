@@ -276,7 +276,7 @@ describe('the owners\' circle (P-X01)', () => {
     const withdrawn = safeJson(await operator.post(`${posts(note.id)}/unpublish`)) as AdminPostJson;
     expect(withdrawn).toMatchObject({ published: false, publishedAt: null });
     expect(errorOf(await operator.post(`${posts(note.id)}/unpublish`)).code).toBe('CIRCLE_NOT_PUBLISHED');
-    expect((await audits('circle.post.publish', note.id)).map((e) => e.details)).toEqual([{ kind: 'NOTE', minTier: 3 }]);
+    expect((await audits('circle.post.publish', note.id)).map((e) => e.details)).toEqual([{ kind: 'NOTE', minTier: 3, segmentId: null }]);
     expect((await audits('circle.post.unpublish', note.id)).map((e) => e.details)).toEqual([{ publishedAt: published.publishedAt }]);
     expect((await auditor.post(`${posts(note.id)}/publish`)).statusCode).toBe(403);
 

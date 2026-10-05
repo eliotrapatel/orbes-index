@@ -115,8 +115,14 @@ export interface LiveCard {
   /** The quantity as the console wrote it (« 25 PIECES »). */
   quantityLine: string;
   perAccount: number;
-  /** Who may enter: the lowest tier (0 any ORBES account … 3 PALLADIUM), and the rule in words after « for » (« owners from PLATINE »). */
+  /**
+   * Who may enter: the lowest tier (0 any ORBES account … 3 PALLADIUM), and every rule in words after « for » (« owners
+   * from PLATINE », « collectors who have taken part in 3 releases », « selected collectors », joined by « or » when any
+   * one is enough: live.ts liveRuleText).
+   */
   access: { minTier: number; text: string };
+  /** A surprise in every box (plan LIVE RELEASE+, choice 3): the page says so, never what (its description is internal). */
+  surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (« 428 COLLECTORS WILL BE THERE »), public. */
   interest: number;
 }
@@ -262,6 +268,8 @@ export interface LiveAccountEntry {
 const streamRefused = () => new DomainError('LIVE_REMOVED', 403, 'Your entry in this release has been removed.');
 
 type ReadRow = DropRow & {
+  /** An after-room's: its parent's surprise, which it inherits; null for a release. */
+  parent_surprise: boolean | null;
   model_name: string;
   model_type: string;
   model_image: string | null;
@@ -474,7 +482,7 @@ export class LiveRoomService {
       this.db.selectFrom('live_entries').select('status').where('drop_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       accessOf(this.db, d, accountId, now),
     ]);
-    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now));
+    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now), access);
     if (purpose === 'stream' && entry?.status === 'REMOVED') throw streamRefused();
     return { dropId: id, access, entry: entry?.status ?? null };
   }
@@ -661,8 +669,17 @@ export class LiveRoomService {
       .selectFrom('drops as d')
       .innerJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
+      .leftJoin('drops as pd', 'pd.id', 'd.parent_drop_id')
       .selectAll('d')
-      .select(['m.name as model_name', 'm.type as model_type', 'm.image_sha256 as model_image', 'm.slug as model_slug', 'm.lookbook as model_lookbook', 'c.name as collection']);
+      .select([
+        'pd.surprise_enabled as parent_surprise',
+        'm.name as model_name',
+        'm.type as model_type',
+        'm.image_sha256 as model_image',
+        'm.slug as model_slug',
+        'm.lookbook as model_lookbook',
+        'c.name as collection',
+      ]);
   }
 
   /** The LIVE RELEASES announced and not ended at `now`, the next opening first; never an after-room. */
@@ -730,6 +747,8 @@ export class LiveRoomService {
       quantityLine: r.quantity_line ?? '',
       perAccount: r.per_account ?? LIVE_PER_ACCOUNT.default,
       access: { minTier: rule.minTier, text: liveRuleText(rule) },
+      // An after-room's boxes hold its release's surprise (services/after-room.ts).
+      surprise: (r.parent_drop_id ? r.parent_surprise : r.surprise_enabled) === true,
       interest,
     };
   }

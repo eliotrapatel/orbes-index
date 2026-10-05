@@ -3,7 +3,10 @@
  * release's rules and the live controls are services/live.ts's; what the public reads is live-room.ts's. Here:
  *
  *   create / edit   a LIVE RELEASE and every setting of it: its model, title and description; who may enter (a tier,
- *                   and the owners of models or of a collection); the line's tier priority; T0 (`opens_at`), the end of
+ *                   the owners of models or of a collection, the collectors who have taken part in a number of releases,
+ *                   the members of a segment, and whether every rule is needed or any one: plan LIVE RELEASE+, choices 4
+ *                   and 27); the surprise in every box (on or off, its description: internal, choice 3); the line's tier
+ *                   priority; T0 (`opens_at`), the end of
  *                   the sales (`closes_at`), the room's opening, the turn and pay windows, the pieces per person, the
  *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
  *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
@@ -47,8 +50,8 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { toHex } from '../../core/bytes.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AdminRole, DropRow, LiveEndReason, LiveEntryStatus } from '../db/schema.js';
-import { LIVE_ENTRY_STATUSES } from '../db/schema.js';
+import type { AccessCombine, AdminRole, DropRow, LiveEndReason, LiveEntryStatus } from '../db/schema.js';
+import { ACCESS_COMBINES, LIVE_ENTRY_STATUSES } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
@@ -64,13 +67,16 @@ import {
   liveStages,
   roomOpensAt,
   LIVE_ADDONS_MAX,
+  LIVE_MIN_PARTICIPATIONS,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
   LIVE_TURN_SECONDS,
   type AdminLiveEntry,
+  type LiveAccessRule,
   type LivePhase,
 } from './live.js';
 import { storyFingerprint } from './lookbook.js';
@@ -195,6 +201,15 @@ export interface LiveSettingsInput {
   tierPriority?: boolean;
   accessModelIds?: string[];
   accessCollectionId?: string | null;
+  /** The releases a collector has taken part in to enter, 1 to 100; null: no such rule. */
+  minParticipations?: number | null;
+  /** A segment whose members may enter; null: none. */
+  accessSegmentId?: string | null;
+  /** How the rules combine: AND (every one, the default) or OR (any one). */
+  accessCombine?: AccessCombine;
+  /** A surprise in every box (the release's page says so), its description internal (required while on). */
+  surpriseEnabled?: boolean;
+  surpriseText?: string | null;
   sizes: LiveSizeInput[];
   /** null or omitted at creation: « <the pieces> PIECES ». */
   quantityLine?: string | null;
@@ -241,6 +256,11 @@ interface Settings {
   tierPriority: boolean;
   accessModelIds: string[];
   accessCollectionId: string | null;
+  minParticipations: number | null;
+  accessSegmentId: string | null;
+  accessCombine: AccessCombine;
+  surpriseEnabled: boolean;
+  surpriseText: string | null;
   sizes: { id: string | null; label: string; stock: number }[];
   quantityLine: string;
   addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
@@ -333,6 +353,16 @@ function cleanWindows(v: unknown): Settings['tierWindows'] {
     .sort((a, b) => a.tier - b.tier);
 }
 
+/** The surprise's description: 1 to 500 characters (lines kept); '' and null: none. */
+function cleanSurpriseText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw validationError('The surprise’s description is text.');
+  const t = v.replace(/\r\n?/g, '\n').trim();
+  if (t === '') return null;
+  if (t.length > LIVE_SURPRISE_MAX || /[\u0000-\u0009\u000b-\u001f\u007f]/.test(t)) throw validationError(`The surprise’s description has 1 to ${LIVE_SURPRISE_MAX} characters.`);
+  return t;
+}
+
 function cleanQuantityLine(v: unknown, quantity: number): string {
   if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return defaultQuantityLine(quantity);
   return oneLine(v, LIVE_QUANTITY_LINE_MAX, 'The quantity line');
@@ -364,6 +394,19 @@ export function cleanAfterRoom(v: unknown, base: AfterRoomSettings | null): Afte
       `The after-room is open ${AFTER_ROOM_LENGTH_MINUTES.min} to ${AFTER_ROOM_LENGTH_MINUTES.max} minutes.`,
     ),
   };
+}
+
+function cleanCombine(v: unknown): AccessCombine {
+  if (!(ACCESS_COMBINES as readonly unknown[]).includes(v)) throw validationError('The rules combine with AND (every one) or OR (any one).');
+  return v as AccessCombine;
+}
+
+/** The surprise a change gives: on with its description (400 without one), or off (its description kept for later). */
+function cleanSurprise(change: LiveSettingsChange, base: Settings | null): Pick<Settings, 'surpriseEnabled' | 'surpriseText'> {
+  const surpriseEnabled = change.surpriseEnabled !== undefined ? change.surpriseEnabled === true : (base?.surpriseEnabled ?? false);
+  const surpriseText = change.surpriseText !== undefined ? cleanSurpriseText(change.surpriseText) : (base?.surpriseText ?? null);
+  if (surpriseEnabled && !surpriseText) throw validationError('A surprise in every box needs its description: what goes in the box (internal).');
+  return { surpriseEnabled, surpriseText };
 }
 
 /** The settings a change gives, over the release's (or the defaults of a new one), each cleaned. */
@@ -398,6 +441,20 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
           ? null
           : knownId(change.accessCollectionId, () => notFound('Collection', 'COLLECTION_NOT_FOUND'))
         : (base?.accessCollectionId ?? null),
+    minParticipations:
+      change.minParticipations !== undefined
+        ? change.minParticipations === null
+          ? null
+          : wholeIn(change.minParticipations, LIVE_MIN_PARTICIPATIONS.min, LIVE_MIN_PARTICIPATIONS.max, `A release counts ${LIVE_MIN_PARTICIPATIONS.min} to ${LIVE_MIN_PARTICIPATIONS.max} releases taken part in.`)
+        : (base?.minParticipations ?? null),
+    accessSegmentId:
+      change.accessSegmentId !== undefined
+        ? change.accessSegmentId === null || change.accessSegmentId === ''
+          ? null
+          : knownId(change.accessSegmentId, () => notFound('Segment', 'SEGMENT_NOT_FOUND'))
+        : (base?.accessSegmentId ?? null),
+    accessCombine: cleanCombine(change.accessCombine !== undefined ? change.accessCombine : (base?.accessCombine ?? 'AND')),
+    ...cleanSurprise(change, base),
     sizes,
     quantityLine,
     addons: change.addons !== undefined ? cleanAddons(change.addons) : (base?.addons ?? []),
@@ -454,6 +511,11 @@ function auditSettings(s: Settings): Record<string, unknown> {
     tierPriority: s.tierPriority,
     accessModelIds: s.accessModelIds,
     accessCollectionId: s.accessCollectionId,
+    minParticipations: s.minParticipations,
+    accessSegmentId: s.accessSegmentId,
+    accessCombine: s.accessCombine,
+    surpriseEnabled: s.surpriseEnabled,
+    surprise: storyFingerprint(s.surpriseText),
     sizes: s.sizes.map((x) => `${x.label}:${x.stock}`),
     quantityLine: s.quantityLine,
     addons: s.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
@@ -472,6 +534,18 @@ function auditSettings(s: Settings): Record<string, unknown> {
           lengthMinutes: s.afterRoom.lengthMinutes,
         }
       : null,
+  };
+}
+
+/** The rule of a release as its settings say it, every model and collection by its name (the console's own words). */
+function consoleRule(s: Settings, models: { id: string; name: string }[], collection: { id: string; name: string } | null): LiveAccessRule {
+  return {
+    minTier: Math.min(3, Math.max(0, s.minTier)) as 0 | 1 | 2 | 3,
+    models,
+    collection,
+    minParticipations: s.minParticipations,
+    segment: s.accessSegmentId !== null,
+    combine: s.accessCombine,
   };
 }
 
@@ -510,7 +584,20 @@ export interface AdminLiveRelease extends AdminLiveCard {
   perAccount: number;
   minTier: number;
   tierPriority: boolean;
-  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  /**
+   * Who may enter: the models and collection named, the releases taken part in (null: no such rule), the segment (its
+   * name: the console's only), how the rules combine, and every rule as the public reads it (`text`).
+   */
+  access: {
+    models: { id: string; name: string }[];
+    collection: { id: string; name: string } | null;
+    minParticipations: number | null;
+    segment: { id: string; name: string } | null;
+    combine: AccessCombine;
+    text: string;
+  };
+  /** A surprise in every box: on or off, and its description (internal: packing slips and work sheets). */
+  surprise: { enabled: boolean; text: string | null };
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -1098,6 +1185,11 @@ export class LiveConsoleService {
       name_at: s.nameAt,
       photo_at: s.photoAt,
       access_collection_id: s.accessCollectionId,
+      min_participations: s.minParticipations,
+      access_segment_id: s.accessSegmentId,
+      access_combine: s.accessCombine,
+      surprise_enabled: s.surpriseEnabled,
+      surprise_text: s.surpriseText,
     };
   }
 
@@ -1108,8 +1200,11 @@ export class LiveConsoleService {
     if (!model.active) throw modelInactive();
   }
 
-  /** The models and the collection a rule names exist (404 otherwise). */
+  /** The models, the collection and the segment a rule names exist (404 otherwise). */
   private async checkAccess(tx: Db, s: Settings): Promise<void> {
+    if (s.accessSegmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', s.accessSegmentId).executeTakeFirst())) {
+      throw notFound('Segment', 'SEGMENT_NOT_FOUND');
+    }
     if (s.accessModelIds.length > 0) {
       const found = await tx.selectFrom('models').select('id').where('id', 'in', s.accessModelIds).execute();
       if (found.length !== s.accessModelIds.length) throw notFound('Model', 'MODEL_NOT_FOUND');
@@ -1335,6 +1430,11 @@ export class LiveConsoleService {
       tierPriority: d.tier_priority ?? true,
       accessModelIds: models.map((m) => m.model_id),
       accessCollectionId: d.access_collection_id,
+      minParticipations: d.min_participations ?? null,
+      accessSegmentId: d.access_segment_id ?? null,
+      accessCombine: d.access_combine ?? 'AND',
+      surpriseEnabled: d.surprise_enabled === true,
+      surpriseText: d.surprise_text ?? null,
       sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
       quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
@@ -1440,13 +1540,14 @@ export class LiveConsoleService {
     const r = await this.reads(db).where('d.id', '=', id).where('d.mode', '=', 'LIVE').executeTakeFirst();
     if (!r) throw dropNotFound();
     const now = this.clock();
-    const [s, counts, interest, holding, models, collection, posts, creator, afterRoom, parent] = await Promise.all([
+    const [s, counts, interest, holding, models, collection, segment, posts, creator, afterRoom, parent] = await Promise.all([
       this.settings(db, r),
       this.counts(db, [id]),
       this.interest(db, [id]),
       this.openHolds(db, [id]),
       db.selectFrom('live_access_models as a').innerJoin('models as m', 'm.id', 'a.model_id').select(['m.id', 'm.name']).where('a.drop_id', '=', id).orderBy('m.name').orderBy('m.id').execute(),
       r.access_collection_id ? db.selectFrom('collections').select(['id', 'name']).where('id', '=', r.access_collection_id).executeTakeFirst() : undefined,
+      r.access_segment_id ? db.selectFrom('segments').select(['id', 'name']).where('id', '=', r.access_segment_id).executeTakeFirst() : undefined,
       db.selectFrom('circle_posts').select(['id', 'published_at']).where('drop_id', '=', id).orderBy('created_at').orderBy('id').execute(),
       r.created_by ? db.selectFrom('admin_users').select(['id', 'email']).where('id', '=', r.created_by).executeTakeFirst() : undefined,
       r.parent_drop_id ? Promise.resolve(null) : this.adminAfterRoom(db, r, now),
@@ -1468,8 +1569,12 @@ export class LiveConsoleService {
       access: {
         models,
         collection: collection ?? null,
-        text: liveRuleText({ minTier: Math.min(3, Math.max(0, s.minTier)) as 0 | 1 | 2 | 3, models, collection: collection ?? null }),
+        minParticipations: s.minParticipations,
+        segment: segment ?? null,
+        combine: s.accessCombine,
+        text: liveRuleText(consoleRule(s, models, collection ?? null)),
       },
+      surprise: { enabled: s.surpriseEnabled, text: s.surpriseText },
       sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
       addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
       tierWindows: s.tierWindows,

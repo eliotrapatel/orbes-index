@@ -61,6 +61,7 @@ import { loginView } from './views/login.js';
 import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
+import { segmentsView, segmentView } from './views/segments.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -117,6 +118,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { route: 'owners', label: 'Owners' },
       { route: 'club', label: 'Club' },
+      { route: 'segments', label: 'Segments' },
       { route: 'orders', label: 'Orders' },
       { route: 'invoices', label: 'Invoices' },
       { route: 'warranties', label: 'Warranties' },
@@ -167,6 +169,9 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   order: { view: orderView, title: 'Order', nav: 'orders' },
   packingSlip: { view: packingSlipView, title: 'Packing slip', nav: 'orders' },
   invoices: { view: invoicesView, title: 'Invoices', nav: 'invoices' },
+  segments: { view: segmentsView, title: 'Segments', nav: 'segments' },
+  segmentNew: { view: segmentView, title: 'New segment', nav: 'segments' },
+  segment: { view: segmentView, title: 'Segment', nav: 'segments' },
   atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
   workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
   document: { view: documentView, title: 'Document', nav: 'documents' },

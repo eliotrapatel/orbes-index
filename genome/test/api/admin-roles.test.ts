@@ -11,7 +11,8 @@
  * discontinued or reinstated (P-R06), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
  * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
- * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR);
+ * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR;
+ * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -189,6 +190,15 @@ const PROBES: Probe[] = [
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices?month=2026-11&kind=CREDIT_NOTE&q=INV-2026', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices.csv?month=2026-11', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: `/api/admin/invoices/${UUID}/pdf`, min: 'AUDITOR' },
+  // Step S6: the segments (choice 27).
+  { group: 'segments', method: 'GET', url: '/api/admin/segments', min: 'AUDITOR' },
+  { group: 'segments', method: 'GET', url: '/api/admin/segments/options', min: 'AUDITOR' },
+  { group: 'segments', method: 'POST', url: '/api/admin/segments/count', body: INVALID, min: 'OPERATOR' },
+  { group: 'segments', method: 'POST', url: '/api/admin/segments', body: INVALID, min: 'OPERATOR' },
+  { group: 'segments', method: 'GET', url: `/api/admin/segments/${UUID}`, min: 'AUDITOR' },
+  { group: 'segments', method: 'PATCH', url: `/api/admin/segments/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'segments', method: 'DELETE', url: `/api/admin/segments/${UUID}`, min: 'OPERATOR' },
+  { group: 'segments', method: 'GET', url: `/api/admin/segments/${UUID}/members.csv`, min: 'AUDITOR' },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -294,6 +304,7 @@ describe('admin role enforcement', () => {
       'live',
       'orders',
       'invoices',
+      'segments',
       'logistics',
       'atelier',
     ]) {

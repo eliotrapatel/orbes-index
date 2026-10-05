@@ -693,6 +693,11 @@ class LivePage {
     return h('p', { class: ['live__fact', extra] }, ...withNumerals(text));
   }
 
+  /** A SURPRISE IN EVERY BOX: a vault label between two hairlines, when the release has one (what it is stays unsaid). */
+  private surprise(label: string | null): HTMLParagraphElement | null {
+    return label ? h('p', { class: 'live__surprise', text: label }) : null;
+  }
+
   private note(text: string, extra = ''): HTMLParagraphElement {
     return h('p', { class: ['live__note', extra], text });
   }
@@ -818,6 +823,7 @@ class LivePage {
       this.fact(m.when.paris, 'live__when'),
       m.when.local ? this.fact(m.when.local, 'live__when live__when--local') : null,
       h('div', { class: 'live__facts' }, this.fact(m.access), this.fact(m.quantity), this.fact(m.roomOpens)),
+      this.surprise(m.surprise),
       reveals,
       there.el,
       description,
@@ -1079,6 +1085,7 @@ class LivePage {
       overline,
       this.title(m.name),
       this.fact(m.offer, 'live__offer'),
+      this.surprise(m.surprise),
       seeModel,
       door,
       h('div', { class: 'live__count-block' }, count, until, presence),

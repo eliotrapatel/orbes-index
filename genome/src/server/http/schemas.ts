@@ -11,6 +11,7 @@
  */
 import { z } from 'zod';
 import {
+  ACCESS_COMBINES,
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
   CIRCLE_POST_KINDS,
@@ -40,8 +41,21 @@ import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPT
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../services/after-room.js';
-import { LIVE_ADD_PIECES, LIVE_ADDONS_MAX, LIVE_EXTEND_MINUTES, LIVE_MESSAGE_MAX, LIVE_PAY_MINUTES, LIVE_PER_ACCOUNT, LIVE_ROOM_OPENS_MINUTES, LIVE_SIZE_STOCK_MAX, LIVE_TURN_SECONDS } from '../services/live.js';
+import {
+  LIVE_ADD_PIECES,
+  LIVE_ADDONS_MAX,
+  LIVE_EXTEND_MINUTES,
+  LIVE_MESSAGE_MAX,
+  LIVE_MIN_PARTICIPATIONS,
+  LIVE_PAY_MINUTES,
+  LIVE_PER_ACCOUNT,
+  LIVE_ROOM_OPENS_MINUTES,
+  LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
+  LIVE_TURN_SECONDS,
+} from '../services/live.js';
 import {
   LIVE_ACCESS_MODELS_MAX,
   LIVE_ADDON_LIMITS,
@@ -590,6 +604,13 @@ const liveSettingsFields = {
   tierPriority: z.boolean().optional(),
   accessModelIds: z.array(uuid).max(LIVE_ACCESS_MODELS_MAX, `At most ${LIVE_ACCESS_MODELS_MAX} models`).optional(),
   accessCollectionId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  /** Plan LIVE RELEASE+: the releases taken part in (choice 4), a segment (choice 27), how every rule combines. */
+  minParticipations: whole(LIVE_MIN_PARTICIPATIONS.min, LIVE_MIN_PARTICIPATIONS.max, 'releases').nullable().optional(),
+  accessSegmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  accessCombine: z.enum(ACCESS_COMBINES).optional(),
+  /** A surprise in every box (choice 3): on or off, its description (internal). */
+  surpriseEnabled: z.boolean().optional(),
+  surpriseText: z.preprocess(emptyToNull, z.string().trim().max(LIVE_SURPRISE_MAX, `At most ${LIVE_SURPRISE_MAX} characters`).nullable().optional()),
   sizes: liveSizes,
   quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
   addons: liveAddons.optional(),
@@ -669,6 +690,8 @@ const circleFields = {
   dropId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   modelId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   externalUrl: z.preprocess(emptyToNull, z.string().trim().max(CIRCLE_URL_MAX, `At most ${CIRCLE_URL_MAX} characters`).nullable().optional()),
+  /** Plan LIVE RELEASE+ (choice 27): the post shown to a segment's members only (among its tiers); null: to the tiers. */
+  segmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
 };
 
 /**
@@ -680,6 +703,45 @@ export const createCirclePostBody = body({ kind: z.enum(CIRCLE_POST_KINDS), ...c
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind (an unknown field, `kind` included, is 400); at least one. */
 export const updateCirclePostBody = body(circleFields).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the post to change');
+
+// ── Admin: the segments (plan LIVE RELEASE+, choice 27) ─────────────────────
+
+export const segmentParams = z.object({ id: uuid });
+
+const segmentCount = whole(SEGMENT_LIMITS.count.min, SEGMENT_LIMITS.count.max, 'releases or pieces');
+const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Name at least one').max(SEGMENT_LIMITS.items, `At most ${SEGMENT_LIMITS.items}`);
+const negated = { not: z.boolean().optional() };
+/** A criterion of a segment, by its kind (services/segments.ts holds the rest: the ids named exist, an answer is one of its release's). */
+const segmentRule = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('PARTICIPATIONS'), min: segmentCount, ...negated }),
+  z.strictObject({ kind: z.literal('TOOK_PART'), dropId: uuid, ...negated }),
+  z.strictObject({ kind: z.literal('SECURED'), min: segmentCount, ...negated }),
+  z.strictObject({ kind: z.literal('SECURED_IN'), dropId: uuid, ...negated }),
+  z.strictObject({ kind: z.literal('TIER'), tiers: segmentItems(z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3')), ...negated }),
+  z.strictObject({ kind: z.literal('OWNS_MODEL'), modelIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('OWNS_COLLECTION'), collectionIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('SIZE'), sizes: segmentItems(text(SEGMENT_LIMITS.sizeLabel)), ...negated }),
+  z.strictObject({ kind: z.literal('COUNTRY'), countries: segmentItems(z.string().trim().regex(/^[A-Za-z]{2}$/, 'Two letters')), ...negated }),
+  z.strictObject({ kind: z.literal('INTEREST'), dropId: uuid.nullable(), ...negated }),
+  z.strictObject({ kind: z.literal('ANSWER'), dropId: uuid, answer: z.number().int('Must be an answer: 1 to 6').min(1, 'At least 1').max(6, 'At most 6'), ...negated }),
+  z.strictObject({ kind: z.literal('ACTIVE'), days: whole(SEGMENT_LIMITS.days.min, SEGMENT_LIMITS.days.max, 'days'), ...negated }),
+]);
+const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
+/** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */
+const segmentCriteria = z.strictObject({
+  match: z.enum(SEGMENT_MATCHES),
+  rules: segmentRules(z.union([segmentRule, z.strictObject({ match: z.enum(SEGMENT_MATCHES), rules: segmentRules(segmentRule) })])),
+});
+const segmentName = text(SEGMENT_LIMITS.name).refine((s) => !/[\r\n]/.test(s), 'One line');
+
+/** POST /api/admin/segments: a segment, its name and its criteria. */
+export const createSegmentBody = body({ name: segmentName, criteria: segmentCriteria });
+
+/** PATCH /api/admin/segments/:id: its name, its criteria, or both. */
+export const updateSegmentBody = body({ name: segmentName.optional(), criteria: segmentCriteria.optional() }).refine((b) => b.name !== undefined || b.criteria !== undefined, 'Send the name, the criteria, or both');
+
+/** POST /api/admin/segments/count: the members criteria being built would have now. */
+export const segmentCountBody = body({ criteria: segmentCriteria });
 
 /** GET /api/admin/circle/posts/:id/answers: one answer, or every one. */
 export const circleAnswersQuery = z.object({ answer: queryOptional(z.enum(CIRCLE_RSVP_ANSWERS)) });

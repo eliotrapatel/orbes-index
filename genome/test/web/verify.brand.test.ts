@@ -335,7 +335,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__badge-name', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__badge-name', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).

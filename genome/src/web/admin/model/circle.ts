@@ -51,6 +51,11 @@ export function tierReach(minTier: number): string {
   return minTier >= 3 ? 'PALLADIUM' : minTier === 2 ? 'PLATINE and up' : 'TITANE and up';
 }
 
+/** Who reads a post: its tiers, and its segment when it names one (`TITANE and up · segment REGULARS`). */
+export function audienceLine(p: Pick<CirclePost, 'minTier' | 'segment'>): string {
+  return p.segment ? `${tierReach(p.minTier)} · segment ${p.segment.name}` : tierReach(p.minTier);
+}
+
 /** The page of a post on /verify (a member opens it there). */
 export function circleAddress(p: Pick<CirclePost, 'id'>): string {
   return `/verify/circle/${p.id}`;
@@ -70,6 +75,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
       dropId: p.drop?.id ?? '',
       modelId: p.model?.id ?? '',
       externalUrl: p.externalUrl ?? '',
+      segmentId: p.segment?.id ?? '',
     };
   }
   const event = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7, 19));
@@ -84,6 +90,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
     dropId: '',
     modelId: '',
     externalUrl: '',
+    segmentId: '',
   };
 }
 
@@ -152,6 +159,7 @@ export function circleInput(kind: CirclePostKind, v: Record<string, string>): Ci
     dropId: v.dropId ? v.dropId : null,
     modelId: v.modelId ? v.modelId : null,
     externalUrl: link === '' ? null : link,
+    ...(v.segmentId ? { segmentId: v.segmentId } : {}),
   };
   if (kind === 'INVITATION') {
     out.eventAt = utcInstant(v.eventAt);
@@ -178,6 +186,7 @@ export function circleChange(p: CirclePost, v: Record<string, string>): CirclePo
   if ((next.dropId ?? null) !== (p.drop?.id ?? null)) out.dropId = next.dropId ?? null;
   if ((next.modelId ?? null) !== (p.model?.id ?? null)) out.modelId = next.modelId ?? null;
   if ((next.externalUrl ?? null) !== p.externalUrl) out.externalUrl = next.externalUrl ?? null;
+  if ((next.segmentId ?? null) !== (p.segment?.id ?? null)) out.segmentId = next.segmentId ?? null;
   return out;
 }
 
@@ -210,7 +219,8 @@ export function circleActions(p: Pick<CirclePost, 'published'>, role: AdminRole 
 
 /** One line under the page's title: what the post is now, and for whom. */
 export function circleLead(p: CirclePost): string {
-  const reach = p.minTier >= 3 ? 'the PALLADIUM owners' : p.minTier === 2 ? 'the PLATINE and PALLADIUM owners' : 'every owner of an ORBES piece';
+  const tiers = p.minTier >= 3 ? 'the PALLADIUM owners' : p.minTier === 2 ? 'the PLATINE and PALLADIUM owners' : 'every owner of an ORBES piece';
+  const reach = p.segment ? `${tiers} who belong to the segment ${p.segment.name}` : tiers;
   if (!p.published) return `Not in the circle: nobody reads it on /verify. Once published, ${reach} read it.`;
   return `In the circle on /verify: ${reach} read it.`;
 }

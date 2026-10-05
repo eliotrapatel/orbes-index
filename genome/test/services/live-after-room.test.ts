@@ -292,7 +292,7 @@ describe('the after-room', () => {
       await rejects(f.live.enter(stranger.id, child, { sizeId: r.afterRoom!.sizes[0]!.id }, stranger.actor), 'DROP_NOT_FOUND', 404);
       await rejects(f.live.access(stranger.id, child), 'DROP_NOT_FOUND', 404);
       const sheet = await room.afterRoomSheet(guests[0]!.id, r.id);
-      expect(sheet).toMatchObject({ id: child, kind: 'LIVE', phase: 'LIVE', name: 'AFTERGLOW', priceMinor: 90_000, quantityLine: '1 PIECE', afterRoom: { parentId: r.id } });
+      expect(sheet).toMatchObject({ id: child, kind: 'LIVE', phase: 'LIVE', name: 'AFTERGLOW', priceMinor: 90_000, quantityLine: '1 PIECE', surprise: false, afterRoom: { parentId: r.id } });
       expect('sizes' in sheet && sheet.sizes).toEqual([{ id: r.afterRoom!.sizes[0]!.id, label: 'ONE SIZE', stock: 1 }]);
       expect('addons' in sheet && sheet.addons).toEqual([{ id: r.afterRoom!.addons[0]!.id, label: 'GIFT BOX', line: null, priceMinor: 5_000 }]);
       // On no public surface: the list, the banner, its page, its .ics, a board.
@@ -318,6 +318,10 @@ describe('the after-room', () => {
       const size = r.afterRoom!.sizes[0]!.id;
       // The third in line enters first, then the first: each at its own place, the size never changing.
       f.clock.set(new Date(opensAt.getTime() + 5 * SECOND));
+      // Its page says the surprise of the release it follows (A SURPRISE IN EVERY BOX), never what it is.
+      const sheet = await room.afterRoomSheet(third!.id, r.id);
+      expect(sheet).toMatchObject({ surprise: true });
+      expect(JSON.stringify(sheet)).not.toContain('silk');
       const late = await f.live.enter(third!.id, child, { sizeId: size }, third!.actor);
       expect(late).toMatchObject({ status: 'QUEUED', position: places.get(third!.id), size: { label: 'ONE SIZE' } });
       f.clock.advance(SECOND);

@@ -5,7 +5,7 @@
  *  - Where a release stands, said as the console says it (DRAFT, SCHEDULED, ANNOUNCED, ROOM OPEN, LIVE, SOLD OUT,
  *    CLOSED, ENDED, CANCELLED), its tone, and one line under the page's title.
  *  - The dialogs of its settings, one per part (the release, its sizes, its access, its times, its turns and holds, its
- *    add-ons, its after-room): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
+ *    add-ons, its after-room, its surprise): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
  *    sizes one per line `52 = 3`, the add-ons one per line `ENGRAVING | 150 | Your initials, by hand`), what the server
  *    would refuse before anything is sent, and the change to send (the lists with the ids they keep).
  *  - What each role may do now: edit until the announcement, publish, cancel before the room opens, the silhouette and
@@ -56,6 +56,9 @@ export const LIVE_LIMITS = Object.freeze({
   addPieces: Object.freeze({ min: 1, max: 1000 }),
   message: 140,
   accessModels: 20,
+  /** Plan LIVE RELEASE+: a rule of taking part, 1 to 100 releases (choice 4); a surprise's description (choice 3). */
+  minParticipations: Object.freeze({ min: 1, max: 100 }),
+  surprise: 500,
   /** The open entries the live board carries. */
   line: 200,
   /** The after-room (services/after-room.ts): it opens this long after the sell-out, open this long, in minutes. */
@@ -319,7 +322,7 @@ export function newLiveInput(v: Record<string, string>): LiveSettings {
 }
 
 /** The parts of a release's settings, each its own dialog. */
-export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom';
+export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom' | 'surprise';
 
 /** A part's values, as its dialog's form holds them. */
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
@@ -334,6 +337,9 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
         tierPriority: r.tierPriority ? 'true' : '',
         collectionId: r.access.collection?.id ?? '',
         ...Object.fromEntries(r.access.models.map((m) => [`model:${m.id}`, 'true'])),
+        minParticipations: r.access.minParticipations === null ? '' : String(r.access.minParticipations),
+        segmentId: r.access.segment?.id ?? '',
+        combine: r.access.combine,
       };
     case 'times':
       return {
@@ -373,6 +379,8 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
         length: String(a?.lengthMinutes ?? LIVE_LIMITS.afterRoomLength.default),
       };
     }
+    case 'surprise':
+      return { enabled: r.surprise.enabled ? 'true' : '', text: r.surprise.text ?? '' };
   }
 }
 
@@ -400,6 +408,9 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       if (inRange(v.minTier, { min: 0, max: 3 }) === null) return 'Choose who may enter.';
       const models = Object.keys(v).filter((k) => k.startsWith('model:') && v[k] === 'true');
       if (models.length > LIVE_LIMITS.accessModels) return `A release names at most ${LIVE_LIMITS.accessModels} models.`;
+      const n = LIVE_LIMITS.minParticipations;
+      if ((v.minParticipations ?? '').trim() !== '' && inRange(v.minParticipations, n) === null) return `Releases taken part in: ${n.min} to ${n.max}, or leave it empty.`;
+      if (v.combine !== undefined && v.combine !== 'AND' && v.combine !== 'OR') return 'Choose how the rules combine.';
       return null;
     }
     case 'times': {
@@ -441,6 +452,12 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       if (inRange(v.delay, d) === null) return `The after-room opens ${d.min} to ${d.max} minutes after the sell-out.`;
       const l = LIVE_LIMITS.afterRoomLength;
       if (inRange(v.length, l) === null) return `The after-room is open ${l.min} to ${l.max} minutes.`;
+      return null;
+    }
+    case 'surprise': {
+      const text = (v.text ?? '').trim();
+      if (v.enabled === 'true' && !text) return 'Say what goes in the box: the description is printed on the packing slips and work sheets.';
+      if (text.length > LIVE_LIMITS.surprise) return `The description has at most ${LIVE_LIMITS.surprise} characters.`;
       return null;
     }
   }
@@ -489,6 +506,11 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (JSON.stringify(models) !== JSON.stringify(r.access.models.map((m) => m.id).sort())) out.accessModelIds = models;
       const collection = v.collectionId || null;
       if (collection !== (r.access.collection?.id ?? null)) out.accessCollectionId = collection;
+      const taken = (v.minParticipations ?? '').trim() === '' ? null : Number(v.minParticipations);
+      if (v.minParticipations !== undefined && taken !== r.access.minParticipations) out.minParticipations = taken;
+      const segment = v.segmentId || null;
+      if (v.segmentId !== undefined && segment !== (r.access.segment?.id ?? null)) out.accessSegmentId = segment;
+      if (v.combine !== undefined && v.combine !== r.access.combine) out.accessCombine = v.combine === 'OR' ? 'OR' : 'AND';
       return out;
     }
     case 'times': {
@@ -544,7 +566,25 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (!now || shape(now) !== shape(next)) out.afterRoom = next;
       return out;
     }
+    case 'surprise': {
+      const enabled = v.enabled === 'true';
+      const text = (v.text ?? '').trim() || null;
+      if (enabled !== r.surprise.enabled) out.surpriseEnabled = enabled;
+      if (text !== r.surprise.text) out.surpriseText = text;
+      return out;
+    }
   }
+}
+
+/** The surprise as the release's page in the console says it: `In every box · A silk pouch`, or `None`. */
+export function surpriseLine(r: Pick<LiveRelease, 'surprise'>): string {
+  if (r.surprise.enabled) return `In every box · ${r.surprise.text ?? ''}`;
+  return r.surprise.text ? `None (kept: ${r.surprise.text})` : 'None';
+}
+
+/** How the rules of access combine, said: `Every rule (AND)`, `Any rule (OR)`. */
+export function combineLine(combine: LiveRelease['access']['combine']): string {
+  return combine === 'OR' ? 'Any one rule is enough (OR)' : 'Every rule is needed (AND)';
 }
 
 // ── What may be done now ───────────────────────────────────────────────────

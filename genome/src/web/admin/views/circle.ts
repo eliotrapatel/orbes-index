@@ -29,6 +29,7 @@ import { storyBlock } from '../../shared/lookbook.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import {
   answersLine,
+  audienceLine,
   circleActions,
   circleAddress,
   circleChange,
@@ -43,13 +44,12 @@ import {
   linkableDrops,
   linkableModels,
   pollResultLines,
-  tierReach,
 } from '../model/circle.js';
 import { galleryMoved, galleryWithAlt } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model } from '../types.js';
+import { CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model, type Segment } from '../types.js';
 import { barList, button, defList, emptyState, field, filterBar, linkButton, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
@@ -61,7 +61,7 @@ const stateOf = (p: Pick<CirclePost, 'published'>) => (p.published ? 'PUBLISHED'
 const stateMark = (p: Pick<CirclePost, 'published'>) => statusMark(p.published ? 'Published' : 'Not published', toneOf('circle', stateOf(p)));
 
 /** The fields of a post's dialog of `kind`: its words and tiers, the fields of its kind, its links. */
-export function circleFields(kind: CirclePostKind, values: Record<string, string>, drops: readonly Drop[], models: readonly Model[]): DialogField[] {
+export function circleFields(kind: CirclePostKind, values: Record<string, string>, drops: readonly Drop[], models: readonly Model[], segments: readonly Segment[]): DialogField[] {
   const out: DialogField[] = [
     { name: 'title', label: 'Title', required: true, maxlength: CIRCLE_LIMITS.title, value: values.title, hint: 'As the circle names it on /verify.' },
     {
@@ -74,6 +74,14 @@ export function circleFields(kind: CirclePostKind, values: Record<string, string
       hint: 'Plain paragraphs, a blank line between two; no Markdown: what you type is shown as it is. Optional.',
     },
     { name: 'minTier', label: 'Read by', kind: 'select', options: [...CIRCLE_TIER_OPTIONS], value: values.minTier, hint: 'An owner below these tiers does not see the post.' },
+    {
+      name: 'segmentId',
+      label: 'Segment',
+      kind: 'select',
+      options: [{ value: '', label: 'Every owner of these tiers' }, ...segments.map((x) => ({ value: x.id, label: x.name }))],
+      value: values.segmentId,
+      hint: 'Only its members among these owners read the post, read again at each visit; nobody sees its name.',
+    },
   ];
   if (kind === 'INVITATION') {
     out.push(
@@ -111,7 +119,7 @@ const KIND_LEADS: Readonly<Record<CirclePostKind, string>> = Object.freeze({
 
 /** The Circle tab of the Club page: every post, and the three ways to write one. */
 export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
-  const [list, drops, models] = await Promise.all([ctx.api.circlePosts(pageParam(ctx), 50), ctx.api.drops(1, 50), ctx.api.models()]);
+  const [list, drops, models, segments] = await Promise.all([ctx.api.circlePosts(pageParam(ctx), 50), ctx.api.drops(1, 50), ctx.api.models(), ctx.api.segments()]);
   const canManage = can(ctx.session.admin.role, 'manageCircle');
 
   let created: string | null = null;
@@ -120,7 +128,7 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
       title: `New ${CIRCLE_KIND_LABELS[kind].toLowerCase()}`,
       eyebrow: 'Club · Circle',
       body: [h('p', { class: 'dialog__text' }, KIND_LEADS[kind]), h('p', { class: 'dialog__text' }, 'Created unpublished: nobody reads it until it is published.')],
-      fields: circleFields(kind, circleFormValues(kind, null, ctx.now()), drops.items, models.items),
+      fields: circleFields(kind, circleFormValues(kind, null, ctx.now()), drops.items, models.items, segments),
       validate: (v) => circleProblem(kind, v),
       confirmLabel: `Create ${CIRCLE_KIND_LABELS[kind].toLowerCase()}`,
       submit: async (v) => {
@@ -142,7 +150,7 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
             cell: (p) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('circlePost', { postId: p.id }), 'data-testid': 'circle-link' } }, p.title), h('span', { class: 'cell-sub' }, CIRCLE_KIND_LABELS[p.kind])),
             kind: ['wide'],
           },
-          { label: 'Read by', cell: (p) => tierReach(p.minTier), kind: ['nowrap'] },
+          { label: 'Read by', cell: (p) => audienceLine(p), kind: ['nowrap'] },
           { label: 'State', cell: (p) => stateMark(p), kind: ['nowrap'] },
           { label: 'Published', cell: (p) => (p.publishedAt ? formatDateTime(p.publishedAt) : '—'), kind: ['nowrap'] },
           { label: 'Photos', cell: (p) => formatCount(p.photos.length), kind: ['num'] },
@@ -188,9 +196,10 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.postId ?? '';
   const answer = CIRCLE_RSVP_ANSWERS.find((a) => a === ctx.route.query.answer) as CircleRsvpAnswer | undefined;
   const p = await ctx.api.circlePost(id);
-  const [drops, models, answers] = await Promise.all([
+  const [drops, models, segments, answers] = await Promise.all([
     ctx.api.drops(1, 50),
     ctx.api.models(),
+    ctx.api.segments(),
     p.kind === 'INVITATION' ? ctx.api.circleAnswers(id, { ...(answer ? { answer } : {}), page: pageParam(ctx), pageSize: 50 }) : Promise.resolve(null),
   ]);
   const role = ctx.session.admin.role;
@@ -208,7 +217,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
       title: `Edit the ${CIRCLE_KIND_LABELS[p.kind].toLowerCase()}`,
       eyebrow,
       body: h('p', { class: 'dialog__text' }, p.published ? 'Published: a change shows in the circle at once. Its kind never changes.' : 'Not published: nobody reads it yet. Its kind never changes.'),
-      fields: circleFields(p.kind, circleFormValues(p.kind, p, ctx.now()), drops.items, models.items),
+      fields: circleFields(p.kind, circleFormValues(p.kind, p, ctx.now()), drops.items, models.items, segments),
       validate: (v) => circleProblem(p.kind, v) ?? (Object.keys(circleChange(p, v)).length === 0 ? 'Nothing has changed.' : null),
       confirmLabel: 'Save post',
       submit: async (v) => {
@@ -220,7 +229,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Publish the post',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, `It shows in the circle on /verify from now on, for ${tierReach(p.minTier)}.`),
+      body: h('p', { class: 'dialog__text' }, `It shows in the circle on /verify from now on, for ${audienceLine(p)}.`),
       confirmLabel: 'Publish',
       submit: async () => {
         await ctx.api.publishCirclePost(p.id);
@@ -242,7 +251,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const rows: { label: string; value: Child; note?: string }[] = [
     { label: 'State', value: h('span', { data: { testid: 'circle-state' } }, stateMark(p)) },
     { label: 'Kind', value: CIRCLE_KIND_LABELS[p.kind] },
-    { label: 'Read by', value: tierReach(p.minTier) },
+    { label: 'Read by', value: h('span', { data: { testid: 'circle-audience' } }, audienceLine(p)), note: p.segment ? 'Its members, read again at each visit' : undefined },
     { label: 'Published', value: p.publishedAt ? formatDateTime(p.publishedAt) : 'Not yet' },
     { label: 'Created', value: `${formatDateTime(p.createdAt)}${p.createdBy ? ` · ${p.createdBy.email}` : ''}` },
   ];

@@ -149,6 +149,63 @@ export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
+/** The criteria of a segment (services/segments.ts SEGMENT_CRITERIA), by the four groups of choice 27, in order. */
+export const SEGMENT_CRITERIA = {
+  RELEASES: ['PARTICIPATIONS', 'TOOK_PART', 'SECURED', 'SECURED_IN'],
+  CLUB: ['TIER', 'OWNS_MODEL', 'OWNS_COLLECTION'],
+  PROFILE: ['SIZE', 'COUNTRY'],
+  SIGNALS: ['INTEREST', 'ANSWER', 'ACTIVE'],
+} as const;
+export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
+export const SEGMENT_RULE_KINDS = [...SEGMENT_CRITERIA.RELEASES, ...SEGMENT_CRITERIA.CLUB, ...SEGMENT_CRITERIA.PROFILE, ...SEGMENT_CRITERIA.SIGNALS] as const;
+export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
+/** A group of a segment matches ALL of its rules, or ANY. */
+export const SEGMENT_MATCHES = ['ALL', 'ANY'] as const;
+export type SegmentMatch = (typeof SEGMENT_MATCHES)[number];
+
+/** A criterion of a segment; `not`: the collectors it does not match. */
+export type SegmentRule = { not?: boolean } & (
+  | { kind: 'PARTICIPATIONS'; min: number }
+  | { kind: 'TOOK_PART'; dropId: string }
+  | { kind: 'SECURED'; min: number }
+  | { kind: 'SECURED_IN'; dropId: string }
+  | { kind: 'TIER'; tiers: number[] }
+  | { kind: 'OWNS_MODEL'; modelIds: string[] }
+  | { kind: 'OWNS_COLLECTION'; collectionIds: string[] }
+  | { kind: 'SIZE'; sizes: string[] }
+  | { kind: 'COUNTRY'; countries: string[] }
+  | { kind: 'INTEREST'; dropId: string | null }
+  | { kind: 'ANSWER'; dropId: string; answer: number }
+  | { kind: 'ACTIVE'; days: number }
+);
+
+/** A segment's rule tree: ALL or ANY of its criteria and groups of criteria (one level down). */
+export interface SegmentGroup {
+  match: SegmentMatch;
+  rules: (SegmentRule | SegmentGroup)[];
+}
+
+/** A segment (GET /api/admin/segments, /:id): its rule tree, its members now and what uses it. */
+export interface Segment {
+  id: string;
+  name: string;
+  criteria: SegmentGroup;
+  count: number;
+  usedBy: { releases: { id: string; title: string }[]; posts: { id: string; title: string }[] };
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** What the builder names (GET /api/admin/segments/options). */
+export interface SegmentOptions {
+  releases: { id: string; title: string; mode: DropMode; opensAt: Iso; answers: string[] | null }[];
+  models: { id: string; name: string; type: string }[];
+  collections: { id: string; name: string }[];
+  sizes: string[];
+  countries: string[];
+}
+
 /** Where a LIVE RELEASE stands (services/live.ts livePhase): HIDDEN is published, announced later. */
 export const LIVE_PHASES = ['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ROOM', 'LIVE', 'ENDED', 'CANCELLED'] as const;
 export type LivePhase = (typeof LIVE_PHASES)[number];
@@ -1056,7 +1113,17 @@ export interface LiveRelease extends LiveCard {
   perAccount: number;
   minTier: number;
   tierPriority: boolean;
-  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  /** Who may enter: models, collection, releases taken part in, a segment, how they combine, and the rule as the public reads it. */
+  access: {
+    models: { id: string; name: string }[];
+    collection: { id: string; name: string } | null;
+    minParticipations: number | null;
+    segment: { id: string; name: string } | null;
+    combine: AccessCombine;
+    text: string;
+  };
+  /** A surprise in every box: on or off, its description (internal). */
+  surprise: { enabled: boolean; text: string | null };
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -1129,6 +1196,11 @@ export interface LiveSettings {
   tierPriority?: boolean;
   accessModelIds?: string[];
   accessCollectionId?: string | null;
+  minParticipations?: number | null;
+  accessSegmentId?: string | null;
+  accessCombine?: AccessCombine;
+  surpriseEnabled?: boolean;
+  surpriseText?: string | null;
   sizes: { id?: string | null; label: string; stock: number }[];
   quantityLine?: string | null;
   addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
@@ -1481,6 +1553,8 @@ export interface CirclePost {
   drop: { id: string; title: string; state: DropState } | null;
   model: { id: string; name: string; type: string; lookbook: LookbookState; slug: string | null } | null;
   externalUrl: string | null;
+  /** Read by this segment's members only (among its tiers); null: by its tiers. */
+  segment: { id: string; name: string } | null;
   published: boolean;
   publishedAt: Iso | null;
   createdAt: Iso;
@@ -1504,6 +1578,7 @@ export interface CirclePostInput {
   dropId?: string | null;
   modelId?: string | null;
   externalUrl?: string | null;
+  segmentId?: string | null;
 }
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */

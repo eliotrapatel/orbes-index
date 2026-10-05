@@ -910,8 +910,13 @@ export const LIVE = Object.freeze({
   /** A time of the release in Paris (`SUNDAY 11 OCTOBER · 19:00 PARIS`), then on this phone when its zone differs. */
   paris: (day: string, time: string) => `${day} · ${time} PARIS`,
   onThisPhone: (day: string, time: string) => `${day} · ${time} ON THIS PHONE`,
-  /** The rule of access as the page states it (after « FOR »: « owners from PLATINE »). */
+  /**
+   * The rules of access as the page states them, after « FOR »: « owners from PLATINE », « collectors who have taken part
+   * in 3 releases », « selected collectors » (a segment's name is never said), joined by « or » when any one is enough.
+   */
   forWhom: (rule: string) => `FOR ${rule.toUpperCase()}`,
+  /** A surprise in every box (plan LIVE RELEASE+, choice 3): a vault label on the release's page; what it is stays unsaid. */
+  surprise: 'A SURPRISE IN EVERY BOX',
   perAccount: (n: number) => (n === 1 ? 'ONE PER COLLECTOR' : `UP TO ${n} PER COLLECTOR`),
   roomOpens: (minutes: number) => `THE ROOM OPENS ${minutes} ${minutes === 1 ? 'MINUTE' : 'MINUTES'} BEFORE`,
   calendar: 'ADD TO CALENDAR',

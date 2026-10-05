@@ -431,7 +431,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a discontinued model\'s pieces verify as before, said DISCONTINUED with the year (P-R06)': 'discontinuedYear: reg.modelDiscontinuedAt.getUTCFullYear()',
   'SUBSCRIBE of ORBES Care only once its address is published (P-M02)': "field('CARE_SUBSCRIBE_URL', zHttpsLink, e.CARE_SUBSCRIBE_URL) ?? null",
   'no stage of a LIVE RELEASE before its time (choice 30)': 'photo: t >= photoAt,',
-  'access by tier, model or collection, read again at each step (choices 1, 35)': "if (tier < (d.live_min_tier ?? 0)) return { allowed: false, tier, missing: 'TIER' };",
+  'access by tier, model or collection, read again at each step (choices 1, 35)': "if ((d.live_min_tier ?? 0) > 0) rules.push({ rule: 'TIER', met: async () => tier >= (d.live_min_tier ?? 0) });",
   'the room opens before T0 (choice 16)': 'if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));',
   'the size never changes after T0 (choice 6)': 'throw sizeLocked();',
   'the line at T0 by tier, then the sealed seed (choices 2, 14)': 'const seed = openDropSeed(this.seedKey, d);',

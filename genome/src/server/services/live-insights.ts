@@ -10,7 +10,9 @@
  *                        unserved pieces at the turns' conversion; LIVE_INSIGHT_RULES.defaultDemandPerPerson without a
  *                        past release); the size mix, that quantity shared out (largest remainder) by the interest in
  *                        each size plus the eligible collectors whose latest piece of the model's type is in that size
- *                        (`products.variant`); the eligible collectors by tier.
+ *                        (`products.variant`); the eligible collectors by tier. Eligible: what the release's rules let
+ *                        in now; with a rule of taking part or of a segment, or rules combined by OR (plan LIVE
+ *                        RELEASE+), every rule read for every account as at the entry (live.ts accessAccounts).
  *   audience forecast    (`forecast`) the room at T0 as a range: from the interest (I'LL BE THERE) at the share of the
  *                        interest present at T0 in past releases (their lowest and highest; LIVE_INSIGHT_RULES.
  *                        defaultShowUp without one); before any interest, from the eligible accounts of each tier at
@@ -53,7 +55,7 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
-import { effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
+import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1436,20 +1438,37 @@ interface Rule {
   minTier: number;
   models: readonly string[];
   collectionId: string | null;
+  /**
+   * The accounts a release's rules let in now, read by live.ts accessAccounts when it has a rule of taking part or of a
+   * segment, or combines its rules by OR (plan LIVE RELEASE+); null: the tier and the pieces alone, read from `Holder`.
+   */
+  accounts: Set<string> | null;
 }
 
-/** The eligible accounts of a rule by tier (0 to 3): a tier from `minTier`, and a piece of a model or collection it names. */
+/** Whether a holder of pieces is let in by a rule. */
+function allowedBy(h: Holder, rule: Rule): boolean {
+  if (rule.accounts) return rule.accounts.has(h.accountId);
+  if (tierForPieces(h.pieces) < rule.minTier) return false;
+  if (rule.models.length === 0 && rule.collectionId === null) return true;
+  return rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId));
+}
+
+/**
+ * The eligible accounts of a rule by tier (0 to 3): a tier from `minTier`, and a piece of a model or collection it names;
+ * or, for a release whose rules go beyond them, the accounts they let in now, each at its tier.
+ */
 function eligibleOf(el: Eligibility, rule: Rule): number[] {
   const out = [0, 0, 0, 0];
-  const named = rule.models.length > 0 || rule.collectionId !== null;
+  let holders = 0;
   for (const h of el.holders) {
-    const tier = tierForPieces(h.pieces);
-    if (tier < rule.minTier) continue;
-    if (named && !(rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId)))) continue;
-    out[tier] += 1;
+    if (!allowedBy(h, rule)) continue;
+    out[tierForPieces(h.pieces)] += 1;
+    holders += 1;
   }
   // The accounts holding no piece the club counts: tier 0, never the owners of a named model or collection.
-  if (rule.minTier === 0 && !named) out[0] += Math.max(0, el.active - el.holders.length);
+  const named = rule.models.length > 0 || rule.collectionId !== null;
+  if (rule.accounts) out[0] += Math.max(0, rule.accounts.size - holders);
+  else if (rule.minTier === 0 && !named) out[0] += Math.max(0, el.active - el.holders.length);
   return out;
 }
 
@@ -1475,7 +1494,7 @@ export class LiveInsightsService {
     const { d, release, rule, modelType } = await this.release(dropId);
     const [el, past, interest] = await Promise.all([this.eligibility(), this.past(d, now), this.interest(d.id)]);
     const forecast = audienceForecast({ interest: interest.length, eligibleByTier: eligibleOf(el, rule), past: past.map((p) => p.audience(el)), inRoom: await this.inRoom(d, now) });
-    const eligible = new Set(el.holders.filter((h) => this.allowed(h, rule)).map((h) => h.accountId));
+    const eligible = new Set(el.holders.filter((h) => allowedBy(h, rule)).map((h) => h.accountId));
     const variants = await this.variants(modelType);
     const collectorsBySize = new Map<string, number>();
     for (const v of variants) if (eligible.has(v.accountId)) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
@@ -1638,16 +1657,11 @@ export class LiveInsightsService {
     return {
       d,
       release: insightRelease(d, sizes),
-      rule: { minTier: d.live_min_tier ?? 0, models: models.map((m) => m.model_id), collectionId: d.access_collection_id },
+      rule: { minTier: d.live_min_tier ?? 0, models: models.map((m) => m.model_id), collectionId: d.access_collection_id, accounts: await accessAccounts(this.db, d, this.clock()) },
       modelType: model.type,
     };
   }
 
-  private allowed(h: Holder, rule: Rule): boolean {
-    if (tierForPieces(h.pieces) < rule.minTier) return false;
-    if (rule.models.length === 0 && rule.collectionId === null) return true;
-    return rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId));
-  }
 
   private sizes(dropId: string): Promise<InsightSize[]> {
     return this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
@@ -1796,10 +1810,11 @@ export class LiveInsightsService {
       this.interestCounts(ids),
       ids.length ? this.db.selectFrom('live_access_models').select(['drop_id', 'model_id']).where('drop_id', 'in', ids).execute() : Promise.resolve([]),
     ]);
-    return rows.map((p) => {
+    const accounts = await Promise.all(rows.map((p) => accessAccounts(this.db, p, now)));
+    return rows.map((p, i) => {
       const own = entries.filter((e) => e.dropId === p.id);
       const summary = summarize(insightRelease(p, sizes.get(p.id) ?? []), own, interest.get(p.id) ?? 0);
-      const rule: Rule = { minTier: p.live_min_tier ?? 0, models: models.filter((m) => m.drop_id === p.id).map((m) => m.model_id), collectionId: p.access_collection_id };
+      const rule: Rule = { minTier: p.live_min_tier ?? 0, models: models.filter((m) => m.drop_id === p.id).map((m) => m.model_id), collectionId: p.access_collection_id, accounts: accounts[i]! };
       return {
         summary,
         entries: own,

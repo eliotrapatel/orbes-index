@@ -12,11 +12,13 @@ import {
   LIVE_ADDONS_MAX,
   LIVE_EXTEND_MINUTES,
   LIVE_MESSAGE_MAX,
+  LIVE_MIN_PARTICIPATIONS,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_PHASES as SERVER_LIVE_PHASES,
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
   LIVE_TURN_SECONDS,
 } from '../../src/server/services/live.js';
 import {
@@ -37,6 +39,7 @@ import {
   AFTER_ROOM_SKIPS,
   afterRoomStateLabel,
   afterRoomTiming,
+  combineLine,
   defaultQuantityLine,
   formatMoney,
   LIVE_LIMITS,
@@ -58,6 +61,7 @@ import {
   newLiveValues,
   parseAddons,
   parseMoney,
+  surpriseLine,
   parseSizes,
   priorityLine,
   sizesText,
@@ -97,7 +101,8 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     perAccount: 1,
     minTier: 0,
     tierPriority: true,
-    access: { models: [], collection: null, text: 'every ORBES account' },
+    access: { models: [], collection: null, minParticipations: null, segment: null, combine: 'AND', text: 'every ORBES account' },
+    surprise: { enabled: false, text: null },
     sizes: [
       { id: 's52', label: '52', stock: 3 },
       { id: 's54', label: '54', stock: 2 },
@@ -151,6 +156,8 @@ describe('the console of the LIVE RELEASES mirrors the server', () => {
       line: LIVE_CONSOLE_LINE_MAX,
       afterRoomDelay: { ...AFTER_ROOM_DELAY_MINUTES },
       afterRoomLength: { ...AFTER_ROOM_LENGTH_MINUTES },
+      minParticipations: { ...LIVE_MIN_PARTICIPATIONS },
+      surprise: LIVE_SURPRISE_MAX,
     });
     expect([...LIVE_PHASES]).toEqual([...SERVER_LIVE_PHASES]);
     expect([...LIVE_CURRENCIES]).toEqual([...SERVER_CURRENCIES]);
@@ -312,6 +319,30 @@ describe('the console of the LIVE RELEASES', () => {
       ],
     });
     expect(livePartProblem(r, 'release', { ...livePartValues(r, 'release'), perAccount: '6' })).toMatch(/1 to 5 pieces/);
+  });
+
+  it('sets the access beyond the tier (the releases taken part in, a segment, AND or OR) and the surprise, sending only what changed', () => {
+    const r = release();
+    const v = livePartValues(r, 'access');
+    expect(v).toMatchObject({ minParticipations: '', segmentId: '', combine: 'AND' });
+    expect(livePartChange(r, 'access', v)).toEqual({});
+    expect(livePartChange(r, 'access', { ...v, minParticipations: '3', segmentId: 'seg1', combine: 'OR' })).toEqual({ minParticipations: 3, accessSegmentId: 'seg1', accessCombine: 'OR' });
+    expect(livePartProblem(r, 'access', { ...v, minParticipations: '0' })).toBe('Releases taken part in: 1 to 100, or leave it empty.');
+    expect(livePartProblem(r, 'access', { ...v, minParticipations: '101' })).toMatch(/1 to 100/);
+    expect(livePartProblem(r, 'access', { ...v, combine: 'XOR' })).toBe('Choose how the rules combine.');
+    const set = release({ access: { models: [], collection: null, minParticipations: 3, segment: { id: 'seg1', name: 'Regulars' }, combine: 'OR', text: 'collectors who have taken part in 3 releases or selected collectors' } });
+    expect(livePartChange(set, 'access', { ...livePartValues(set, 'access'), minParticipations: '', segmentId: '' })).toEqual({ minParticipations: null, accessSegmentId: null });
+    expect([combineLine('AND'), combineLine('OR')]).toEqual(['Every rule is needed (AND)', 'Any one rule is enough (OR)']);
+    // The surprise: on with its description, off keeping it.
+    expect(livePartValues(r, 'surprise')).toEqual({ enabled: '', text: '' });
+    expect(livePartProblem(r, 'surprise', { enabled: 'true', text: ' ' })).toMatch(/^Say what goes in the box/);
+    expect(livePartProblem(r, 'surprise', { enabled: 'true', text: 'x'.repeat(501) })).toMatch(/at most 500 characters/);
+    expect(livePartChange(r, 'surprise', { enabled: 'true', text: ' A silk pouch. ' })).toEqual({ surpriseEnabled: true, surpriseText: 'A silk pouch.' });
+    const surprised = release({ surprise: { enabled: true, text: 'A silk pouch.' } });
+    expect(livePartChange(surprised, 'surprise', { enabled: '', text: 'A silk pouch.' })).toEqual({ surpriseEnabled: false });
+    expect(surpriseLine(surprised)).toBe('In every box · A silk pouch.');
+    expect(surpriseLine(release({ surprise: { enabled: false, text: 'A silk pouch.' } }))).toBe('None (kept: A silk pouch.)');
+    expect(surpriseLine(r)).toBe('None');
   });
 
   it('offers each role what it may do in the phase: OPERATOR edits until the announcement and runs the controls, ADMIN ends', () => {

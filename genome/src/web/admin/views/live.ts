@@ -19,8 +19,9 @@
  *    board: the release planner and the audience forecast before the announcement, the forecast and the demand radar
  *    until T0, the bot radar from the room's opening (REMOVE in one tap, ADMIN), the release report (and its CSV) and the
  *    collector insights once it has ended, and the release comparison.
- *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access,
- *    its times, its turns and holds, its add-ons, its after-room), the silhouette (a photograph) and the boutique board's
+ *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access —
+ *    a tier, owners of models or a collection, the releases taken part in, a segment, AND or OR: plan LIVE RELEASE+,
+ *    choices 4 and 27 —, its times, its turns and holds, its add-ons, its after-room, its surprise: choice 3), the silhouette (a photograph) and the boutique board's
  *    link (issued, shown once, revoked); PUBLISH (with or without a post of the circle, added or withdrawn until the
  *    announcement) and CANCEL (before the room opens, a phrase to type). Each request is audited by the server; then the
  *    page is read again.
@@ -37,6 +38,7 @@ import {
   AFTER_ROOM_SKIPS,
   afterRoomStateLabel,
   afterRoomTiming,
+  combineLine,
   defaultQuantityLine,
   formatMoney,
   hasBoard,
@@ -56,6 +58,7 @@ import {
   parseSizes,
   priorityLine,
   sizesLine,
+  surpriseLine,
   tierLabel,
   windowLine,
   type LivePart,
@@ -154,7 +157,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
-  const [r, models, collections] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections()]);
+  const [r, models, collections, segments] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segments()]);
   const published = hasBoard(r.phase);
   const [boardRead, entries, intelligence] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
@@ -526,8 +529,45 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       { name: 'minTier', label: 'Who may enter', kind: 'select', options: [...LIVE_TIER_OPTIONS], value: v.minTier },
       { name: 'collectionId', label: 'Owners of a collection', kind: 'select', options: [{ value: '', label: 'Any collection' }, ...collections.items.map((c) => ({ value: c.id, label: humanize(c.name) }))], value: v.collectionId },
       ...models.items.map((m: Model) => ({ name: `model:${m.id}`, label: `Owners of ${humanize(m.name)}`, kind: 'checkbox' as const, value: v[`model:${m.id}`] ?? '' })),
+      {
+        name: 'minParticipations',
+        label: 'Taken part in at least',
+        maxlength: 3,
+        value: v.minParticipations,
+        hint: `Releases, ${LIVE_LIMITS.minParticipations.min} to ${LIVE_LIMITS.minParticipations.max}: in the line of a LIVE RELEASE at T0 or after, or entered in a draw when it was drawn; this one never counts. The page says FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES. Empty: no such rule.`,
+      },
+      {
+        name: 'segmentId',
+        label: 'Segment',
+        kind: 'select',
+        options: [{ value: '', label: 'None' }, ...segments.map((x) => ({ value: x.id, label: x.name }))],
+        value: v.segmentId,
+        hint: 'Its members, read at each step. The page says FOR SELECTED COLLECTORS, never its name.',
+      },
+      {
+        name: 'combine',
+        label: 'The rules combine',
+        kind: 'select',
+        options: [
+          { value: 'AND', label: 'Every rule is needed (AND)' },
+          { value: 'OR', label: 'Any one rule is enough (OR)' },
+        ],
+        value: v.combine,
+        hint: 'One choice for all the rules above: the tier, the owners of models or a collection, the releases taken part in, the segment. With OR, the page joins them with OR.',
+      },
       { name: 'tierPriority', label: 'Tier priority', kind: 'checkbox', value: v.tierPriority, hint: 'At the opening (T0), the line forms by tier first (PALLADIUM, PLATINE, TITANE, then the others), then at random. Unticked: at random for all.' },
     ]);
+  };
+  const surprisePart = () => {
+    const v = values('surprise');
+    editPart(
+      'surprise',
+      'Surprise',
+      [
+        { name: 'enabled', label: 'A surprise in every box', kind: 'checkbox', value: v.enabled, hint: 'The same for every order of the release, its after-room’s too. The release page says A SURPRISE IN EVERY BOX, never what.' },
+        { name: 'text', label: 'What it is (internal)', kind: 'textarea', rows: 3, maxlength: LIVE_LIMITS.surprise, value: v.text, hint: 'Printed on each order’s packing slip and work sheet, never shown to collectors.' },
+      ],
+    );
   };
   const timesPart = () => {
     const v = values('times');
@@ -648,10 +688,24 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     section(
       'Access',
       defList([
-        { label: 'For', value: h('span', { data: { testid: 'live-access' } }, r.access.text) },
+        { label: 'For', value: h('span', { data: { testid: 'live-access' } }, r.access.text), note: 'As the release page says it' },
+        ...(r.access.minParticipations !== null
+          ? [{ label: 'Taken part', value: `At least ${r.access.minParticipations} ${r.access.minParticipations === 1 ? 'release' : 'releases'}` }]
+          : []),
+        ...(r.access.segment
+          ? [{ label: 'Segment', value: h('a', { class: 'idlink', attrs: { href: href('segment', { segmentId: r.access.segment.id }), 'data-testid': 'live-access-segment' } }, r.access.segment.name), note: 'Said FOR SELECTED COLLECTORS' }]
+          : []),
+        { label: 'Rules', value: h('span', { data: { testid: 'live-access-combine' } }, combineLine(r.access.combine)) },
         { label: 'Line at the opening', value: priorityLine(r.tierPriority) },
       ]),
       { id: 'live-part-access', tools: edit('Edit', 'live-edit-access', accessPart) },
+    ),
+    section(
+      'Surprise',
+      defList([
+        { label: 'Surprise', value: h('span', { data: { testid: 'live-surprise' } }, surpriseLine(r)), note: r.surprise.enabled ? 'Internal: the packing slips and work sheets; the page says A SURPRISE IN EVERY BOX' : undefined },
+      ]),
+      { id: 'live-part-surprise', tools: edit('Edit', 'live-edit-surprise', surprisePart) },
     ),
     section(
       'Times (UTC)',

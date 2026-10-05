@@ -39,9 +39,20 @@
  * a size straight into its line, at the place it was given (its order in the parent's line); then the turns, the hold,
  * the add-ons and PAY as above, with the parent's per-tier windows. It has no boutique board.
  *
- * Access (`accessOf`), read at INTEREST, ENTER and SECURE: an ACTIVE account whose tier (club.ts `tierOf`, the pieces
- * held now) reaches `live_min_tier`, and, when the release names models (`live_access_models`) or a collection
- * (`access_collection_id`), holding now a piece of one of them (a piece's own collection first, its model's otherwise).
+ * Access (`accessOf`), read at INTEREST, ENTER and SECURE, and when the room is read: an ACTIVE account against each
+ * rule the release has, combined as `access_combine` says (AND, the default: every rule; OR: any one of them):
+ *  - the tier: its tier (club.ts `tierOf`, the pieces held now) reaches `live_min_tier` (a rule from TITANE up);
+ *  - the pieces: when the release names models (`live_access_models`) or a collection (`access_collection_id`), it
+ *    holds now a piece of one of them (a piece's own collection first, its model's otherwise);
+ *  - taking part (plan LIVE RELEASE+, choice 4): it has taken part in at least `min_participations` releases
+ *    (services/participation.ts), the release itself never counted;
+ *  - a segment (choice 27, N5): it is a member of `access_segment_id` now (services/segments.ts).
+ * The public reads each rule in words (`liveRuleText`): « owners from PLATINE », « collectors who have taken part in 3
+ * releases », « selected collectors » (decision 32: a segment's name is never said), the rules joined by « or » with OR;
+ * with AND, one collector who meets them all (« selected owners from PLATINE who have taken part in 3 releases »). A
+ * refusal (403 LIVE_NOT_ELIGIBLE, `liveRefusal`) says the rule, and how many releases the account has taken part in
+ * when the release counts them; a collector who lacks only the segment reads « This release is for selected
+ * collectors. ».
  *
  * The engine (live-engine.ts) runs `advance` for each release in its live window every 250 ms: one transaction, the
  * release's row FOR UPDATE: the line at T0, the turns and holds run out (not while paused), the end, the turns. Every
@@ -64,13 +75,13 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIPv4 } from 'node:net';
 import { normalizeIP } from '@fastify/rate-limit';
-import { sql } from 'kysely';
+import { sql, type Expression, type SqlBool } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import type { DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
+import type { AccessCombine, DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type AfterRoomDoor } from './after-room.js';
@@ -79,6 +90,8 @@ import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier 
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { ordersForLiveEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
+import { participationCount, participations } from './participation.js';
+import { cleanCriteria, isSegmentMember, segmentCondition, type SegmentGroup } from './segments.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +112,18 @@ export const LIVE_MESSAGE_MAX = 140;
 export const LIVE_EXTEND_MINUTES = Object.freeze({ min: 1, max: 240 });
 /** ADD PIECES raises a size's stock by 1 to 1 000 at a time. */
 export const LIVE_ADD_PIECES = Object.freeze({ min: 1, max: 1000 });
+/** A rule of taking part (plan LIVE RELEASE+, choice 4): at least 1 to 100 releases (drops.min_participations). */
+export const LIVE_MIN_PARTICIPATIONS = Object.freeze({ min: 1, max: 100 });
+/** The surprise in every box (choice 3): its description, internal, 1 to 500 characters (drops.surprise_text). */
+export const LIVE_SURPRISE_MAX = 500;
+/**
+ * The question after a release (plan LIVE RELEASE+, choice 11) when the console does not rewrite it: its words and its
+ * answers, in order (release_answers.answer is an answer's position, from 1).
+ */
+export const LIVE_QUESTION_DEFAULT = Object.freeze({
+  text: 'WHAT WOULD YOU HAVE WANTED?',
+  answers: Object.freeze(['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND'] as const),
+});
 /** The boutique board's link: a secret of 32 random bytes (256 bits), base64url, kept only as its SHA-256. */
 export const LIVE_BOARD_TOKEN_BYTES = 32;
 /** The network's hash of an entry is erased this many days after the release's end (or its cancellation). */
@@ -307,8 +332,8 @@ const entryClosed = () => conflict('LIVE_ENTRY_CLOSED', 'This entry is no longer
 const noBoardLink = () => conflict('LIVE_NO_BOARD_LINK', 'This release has no board link.');
 const afterRoomBoard = () => conflict('LIVE_AFTER_ROOM', 'An after-room has no board: nobody but its guests ever sees it.');
 
-/** 403 LIVE_NOT_ELIGIBLE: the rule of the release, in words. */
-export const liveNotEligible = (rule: LiveAccessRule) => new DomainError('LIVE_NOT_ELIGIBLE', 403, `This release is for ${liveRuleText(rule)}.`);
+/** 403 LIVE_NOT_ELIGIBLE: the rule of the release in words, and the account's own standing against it (`liveRefusal`). */
+export const liveNotEligible = (rule: LiveAccessRule, access?: LiveAccess) => new DomainError('LIVE_NOT_ELIGIBLE', 403, liveRefusal(rule, access));
 const notEligible = liveNotEligible;
 
 function assertStaff(actor: Actor, what: string): string {
@@ -328,30 +353,76 @@ function knownId(id: string, missing: () => DomainError): string {
 
 // ── Access ─────────────────────────────────────────────────────────────────
 
-/** Who may enter a release: a tier, and the owners of its models or of its collection when it names any. */
+/**
+ * Who may enter a release: a tier, the owners of its models or of its collection when it names any, the collectors who
+ * have taken part in a number of releases, the members of a segment; and how those rules combine.
+ */
 export interface LiveAccessRule {
   minTier: ClubTier;
   models: { id: string; name: string }[];
   collection: { id: string; name: string } | null;
+  /** The releases taken part in, at least; null (or absent): no such rule. */
+  minParticipations?: number | null;
+  /** A segment's members (its name never said: decision 32); false (or absent): no such rule. */
+  segment?: boolean;
+  /** AND (or absent): every rule; OR: any one of them. */
+  combine?: AccessCombine;
 }
+
+/** A rule of a release, in the order they are read and said. */
+export type LiveAccessMissing = 'TIER' | 'PIECE' | 'PARTICIPATION' | 'SEGMENT';
 
 /** An account against the rule of a release, now. */
 export interface LiveAccess {
   allowed: boolean;
   /** The account's tier now (club.ts tierOf). */
   tier: ClubTier;
-  /** What it lacks: the tier, or a piece of the models or collection named; null when allowed. */
-  missing: 'TIER' | 'PIECE' | null;
+  /**
+   * What it lacks, null when allowed: with AND the first rule it does not meet (the tier, a piece of the models or
+   * collection named, the releases taken part in, the segment); with OR, every rule failed, the release's first.
+   */
+  missing: LiveAccessMissing | null;
+  /** The releases it has taken part in (the release itself not counted), when the release has that rule; else null. */
+  participations: number | null;
 }
 
-/** The rule in words, as an announcement says it after « FOR »: « owners from PLATINE », « owners of MONOLITHE ». */
+const releasesWord = (n: number) => `${n} ${n === 1 ? 'release' : 'releases'}`;
+
+/**
+ * The rule in words, as an announcement says it after « FOR »: « owners from PLATINE », « owners of MONOLITHE »,
+ * « collectors who have taken part in 3 releases », « selected collectors »; with OR, each rule said and joined by « or »
+ * (« owners from PLATINE or collectors who have taken part in 3 releases »); with AND, the one collector who meets them
+ * all (« selected owners from PLATINE who have taken part in 3 releases »). « every ORBES account » without any rule.
+ */
 export function liveRuleText(rule: LiveAccessRule): string {
   const collection = rule.collection && (rule.collection.name === LIVE_UNNAMED_COLLECTION ? LIVE_UNNAMED_COLLECTION : `the ${rule.collection.name} collection`);
   const names = [...rule.models.map((m) => m.name), ...(collection ? [collection] : [])];
   const of = names.length === 0 ? '' : ` of ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`}`;
-  if (rule.minTier >= 2) return `owners from ${tierName(rule.minTier)}${of}`;
-  if (rule.minTier === 1 || of) return `owners${of}`;
-  return 'every ORBES account';
+  const took = rule.minParticipations ? `who have taken part in ${releasesWord(rule.minParticipations)}` : null;
+  if (rule.combine === 'OR') {
+    const said = [
+      rule.minTier >= 2 ? `owners from ${tierName(rule.minTier)}` : rule.minTier === 1 ? 'owners' : null,
+      // TITANE is any owner: a piece of the models named adds nobody to it.
+      of && rule.minTier !== 1 ? `owners${of}` : null,
+      took ? `collectors ${took}` : null,
+      rule.segment ? 'selected collectors' : null,
+    ].filter((x): x is string => x !== null);
+    return said.length ? said.join(' or ') : 'every ORBES account';
+  }
+  const base = rule.minTier >= 2 ? `owners from ${tierName(rule.minTier)}${of}` : rule.minTier === 1 || of ? `owners${of}` : null;
+  if (!took && !rule.segment) return base ?? 'every ORBES account';
+  return [rule.segment ? 'selected' : null, base ?? 'collectors', took].filter((x): x is string => x !== null).join(' ');
+}
+
+/**
+ * What a refusal says (403 LIVE_NOT_ELIGIBLE, the not-eligible page): « This release is for <the rule>. », then, when the
+ * release counts the releases taken part in, « You have taken part in 1 release. »; a collector who meets every rule
+ * but the segment (AND) reads only « This release is for selected collectors. » (decision 32).
+ */
+export function liveRefusal(rule: LiveAccessRule, access?: Pick<LiveAccess, 'missing' | 'participations'>): string {
+  if (rule.combine !== 'OR' && access?.missing === 'SEGMENT') return 'This release is for selected collectors.';
+  const counted = rule.minParticipations && access && access.participations !== null ? ` You have taken part in ${releasesWord(access.participations)}.` : '';
+  return `This release is for ${liveRuleText(rule)}.${counted}`;
 }
 
 /** The model named in place of the release's own before its name's stage. */
@@ -367,7 +438,7 @@ export const LIVE_UNNAMED_COLLECTION = 'this model’s collection';
  */
 export async function liveAccessRule(
   db: Db,
-  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id'> & LiveStageRow,
+  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine'> & LiveStageRow,
   now: Date,
   unnamed = false,
 ): Promise<LiveAccessRule> {
@@ -388,37 +459,101 @@ export async function liveAccessRule(
     minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier,
     models: named ? models : models.map((m) => (m.id === d.model_id ? { id: m.id, name: LIVE_UNNAMED_MODEL } : m)),
     collection: collection && own?.collection_id === collection.id ? { id: collection.id, name: LIVE_UNNAMED_COLLECTION } : collection,
+    minParticipations: d.min_participations ?? null,
+    segment: d.access_segment_id !== null && d.access_segment_id !== undefined,
+    combine: d.access_combine ?? 'AND',
   };
 }
 
 /**
- * The account against the rule of the release at `now`: its tier reaches `live_min_tier`, and, when the release names
- * models or a collection, it holds now a piece the club counts (club.ts) of one of those models or of that collection
- * (the piece's own collection first, its model's otherwise, as product_overview reads it).
+ * The account against the rules of the release at `now` (see the file header), combined by `access_combine` (NULL: AND).
+ * Each rule is read only when the release has it: the tier when `live_min_tier` is set above 0; the pieces when it names
+ * models or a collection, a piece the club counts (club.ts) held now; taking part when `min_participations` is set,
+ * this release left out; the segment when `access_segment_id` is set, its members read now.
  */
-export async function accessOf(db: Db, d: Pick<DropRow, 'id' | 'live_min_tier' | 'access_collection_id'>, accountId: string, now: Date): Promise<LiveAccess> {
+export async function accessOf(
+  db: Db,
+  d: Pick<DropRow, 'id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine'>,
+  accountId: string,
+  now: Date,
+): Promise<LiveAccess> {
   const { tier } = await tierOf(db, accountId, now);
-  if (tier < (d.live_min_tier ?? 0)) return { allowed: false, tier, missing: 'TIER' };
   const models = await db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', d.id).execute();
-  if (models.length === 0 && !d.access_collection_id) return { allowed: true, tier, missing: null };
   const ids = models.map((m) => m.model_id);
-  const held = await db
-    .selectFrom('ownership as o')
-    .innerJoin('products as p', 'p.id', 'o.product_id')
-    .innerJoin('models as m', 'm.id', 'p.model_id')
-    .select('o.id')
-    .where('o.account_id', '=', accountId)
-    .where('o.ended_at', 'is', null)
-    .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
-    .where((eb) =>
-      eb.or([
-        ...(ids.length > 0 ? [eb('p.model_id', 'in', ids)] : []),
-        ...(d.access_collection_id ? [eb(eb.fn.coalesce('p.collection_id', 'm.collection_id'), '=', d.access_collection_id)] : []),
-      ]),
-    )
-    .limit(1)
-    .executeTakeFirst();
-  return held ? { allowed: true, tier, missing: null } : { allowed: false, tier, missing: 'PIECE' };
+  const counted = d.min_participations ? await participations(db, accountId, now, d.id) : null;
+  const rules: { rule: LiveAccessMissing; met: () => Promise<boolean> }[] = [];
+  if ((d.live_min_tier ?? 0) > 0) rules.push({ rule: 'TIER', met: async () => tier >= (d.live_min_tier ?? 0) });
+  if (ids.length > 0 || d.access_collection_id) {
+    rules.push({
+      rule: 'PIECE',
+      met: async () => {
+        const held = await db
+          .selectFrom('ownership as o')
+          .innerJoin('products as p', 'p.id', 'o.product_id')
+          .innerJoin('models as m', 'm.id', 'p.model_id')
+          .select('o.id')
+          .where('o.account_id', '=', accountId)
+          .where('o.ended_at', 'is', null)
+          .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+          .where((eb) =>
+            eb.or([
+              ...(ids.length > 0 ? [eb('p.model_id', 'in', ids)] : []),
+              ...(d.access_collection_id ? [eb(eb.fn.coalesce('p.collection_id', 'm.collection_id'), '=', d.access_collection_id)] : []),
+            ]),
+          )
+          .limit(1)
+          .executeTakeFirst();
+        return held !== undefined;
+      },
+    });
+  }
+  if (counted !== null) rules.push({ rule: 'PARTICIPATION', met: async () => counted >= (d.min_participations ?? 0) });
+  if (d.access_segment_id) rules.push({ rule: 'SEGMENT', met: () => isSegmentMember(db, d.access_segment_id!, accountId, now) });
+  if (rules.length === 0) return { allowed: true, tier, missing: null, participations: counted };
+  if (d.access_combine === 'OR') {
+    for (const r of rules) if (await r.met()) return { allowed: true, tier, missing: null, participations: counted };
+    return { allowed: false, tier, missing: rules[0]!.rule, participations: counted };
+  }
+  for (const r of rules) if (!(await r.met())) return { allowed: false, tier, missing: r.rule, participations: counted };
+  return { allowed: true, tier, missing: null, participations: counted };
+}
+
+/**
+ * Every ACTIVE account the rules of a release let in at `now`, as `accessOf` reads them one by one (the console's planner
+ * and forecast count them: live-insights.ts), in one query; null when the release names no rule beyond the tier and the
+ * pieces combined by AND, which the planner counts from the pieces held alone.
+ */
+export async function accessAccounts(
+  db: Db,
+  d: Pick<DropRow, 'id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine'>,
+  now: Date,
+): Promise<Set<string> | null> {
+  if (!d.min_participations && !d.access_segment_id && d.access_combine !== 'OR') return null;
+  const [models, segment] = await Promise.all([
+    db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', d.id).execute(),
+    d.access_segment_id ? db.selectFrom('segments').select('criteria').where('id', '=', d.access_segment_id).executeTakeFirst() : undefined,
+  ]);
+  const minTier = d.live_min_tier ?? 0;
+  const pieces: SegmentGroup['rules'] = [
+    ...(models.length ? [{ kind: 'OWNS_MODEL' as const, modelIds: models.map((m) => m.model_id) }] : []),
+    ...(d.access_collection_id ? [{ kind: 'OWNS_COLLECTION' as const, collectionIds: [d.access_collection_id] }] : []),
+  ];
+  const rows = await db
+    .selectFrom('accounts as a')
+    .select('a.id')
+    .where('a.status', '=', 'ACTIVE')
+    .where((eb) => {
+      const rules: Expression<SqlBool>[] = [];
+      if (minTier > 0) rules.push(segmentCondition(db, eb, { match: 'ALL', rules: [{ kind: 'TIER', tiers: [1, 2, 3].filter((t) => t >= minTier) }] }, now));
+      if (pieces.length) rules.push(segmentCondition(db, eb, { match: 'ANY', rules: pieces }, now));
+      if (d.min_participations) rules.push(sql<SqlBool>`(${participationCount(db, now, eb.ref('a.id'), d.id)}) >= ${d.min_participations}`);
+      // A segment gone (never: a used one is not deleted) lets nobody in.
+      if (d.access_segment_id) rules.push(segment ? segmentCondition(db, eb, cleanCriteria(segment.criteria), now) : sql<SqlBool>`false`);
+      if (rules.length === 0) return sql<SqlBool>`true`;
+      return d.access_combine === 'OR' ? eb.or(rules) : eb.and(rules);
+    })
+    .execute();
+  return new Set(rows.map((r) => r.id));
 }
 
 // ── Views ──────────────────────────────────────────────────────────────────
@@ -977,7 +1112,7 @@ export class LiveService {
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const existing = await tx.selectFrom('live_entries').select(['id', 'status', 'position']).where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (existing && !(existing.status === 'LEFT' && existing.position === null)) throw alreadyEntered();
       const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity);
@@ -1077,7 +1212,7 @@ export class LiveService {
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const { size } = await this.choice(tx, d, sizeId, 1);
       const before = await tx.selectFrom('live_interest').select('size_id').where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (before?.size_id === size.id) return;
@@ -1137,7 +1272,7 @@ export class LiveService {
       const gesture = e.press_started_at ? now.getTime() - e.press_started_at.getTime() : -1;
       if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();
       const access = await accessOf(tx, d, account, now);
-      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
+      if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const { payMinutes } = windowsFor(d, await this.tierWindows(tx, d), e.tier);
       await tx
         .updateTable('live_entries')

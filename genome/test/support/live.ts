@@ -165,6 +165,11 @@ export interface LiveReleaseOptions {
   windows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
   accessModels?: string[];
   accessCollectionId?: string | null;
+  /** Plan LIVE RELEASE+: the releases taken part in, a segment, how the rules combine; the surprise in every box. */
+  minParticipations?: number | null;
+  accessSegmentId?: string | null;
+  accessCombine?: 'AND' | 'OR' | null;
+  surprise?: string | null;
   announceAt?: Date | null;
   /** Published now unless false. */
   published?: boolean;
@@ -203,6 +208,11 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       quantity_line: o.quantityLine ?? `${quantity} PIECES`,
       announce_at: o.announceAt ?? null,
       access_collection_id: o.accessCollectionId ?? null,
+      min_participations: o.minParticipations ?? null,
+      access_segment_id: o.accessSegmentId ?? null,
+      access_combine: o.accessCombine ?? null,
+      surprise_enabled: o.surprise ? true : null,
+      surprise_text: o.surprise ?? null,
     })
     .where('id', '=', id)
     .execute();

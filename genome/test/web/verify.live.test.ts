@@ -88,6 +88,7 @@ function card(extra: Partial<LiveCard> = {}): LiveCard {
     quantityLine: '25 pieces',
     perAccount: 1,
     access: { minTier: 2, text: 'owners from PLATINE' },
+    surprise: false,
     interest: 0,
     ...extra,
   };
@@ -297,7 +298,7 @@ describe('which screen the page shows', () => {
 
 describe('the room', () => {
   it('checks the account, its access, its size, the connection and the clock before T0', () => {
-    const access = { allowed: true, tier: 2, missing: null };
+    const access = { allowed: true, tier: 2, missing: null, participations: null };
     expect(readyChecks({ access, size: '52', connection: 'live', synced: true })).toEqual([
       { label: 'SIGNED IN', value: '', ok: true },
       { label: 'ACCESS', value: 'PLATINE', ok: true },
@@ -305,7 +306,7 @@ describe('the room', () => {
       { label: 'CONNECTION', value: 'LIVE', ok: true },
       { label: 'CLOCK', value: 'SYNCED TO ORBES', ok: true },
     ]);
-    const pending = readyChecks({ access: { allowed: true, tier: 0, missing: null }, size: null, connection: 'reconnecting', synced: false });
+    const pending = readyChecks({ access: { allowed: true, tier: 0, missing: null, participations: null }, size: null, connection: 'reconnecting', synced: false });
     expect(pending.map((c) => [c.value, c.ok])).toEqual([['', true], ['GRANTED', true], ['TO CHOOSE', false], ['RECONNECTING', false], ['SYNCING', false]]);
   });
 
@@ -420,6 +421,16 @@ describe('the release announced, and its card in THE RELEASES', () => {
     });
     expect(liveSheetModel(sheet({ perAccount: 2, roomOpensMinutes: 1, tierPriority: false }), 'Europe/Paris')).toMatchObject({ quantity: '25 PIECES · UP TO 2 PER COLLECTOR', roomOpens: 'THE ROOM OPENS 1 MINUTE BEFORE', rule: LIVE.rule(false) });
     expect(LIVE.rule(false)).not.toContain('tier');
+  });
+
+  it('states the rules beyond the tier as the server words them, and A SURPRISE IN EVERY BOX, never what it is (plan LIVE RELEASE+)', () => {
+    expect(liveSheetModel(sheet(), 'Europe/Paris').surprise).toBeNull();
+    expect(liveSheetModel(sheet({ surprise: true }), 'Europe/Paris').surprise).toBe('A SURPRISE IN EVERY BOX');
+    expect(LIVE.surprise).toBe('A SURPRISE IN EVERY BOX');
+    const access = (text: string) => liveSheetModel(sheet({ access: { minTier: 0, text } }), 'Europe/Paris').access;
+    expect(access('collectors who have taken part in 3 releases')).toBe('FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
+    expect(access('selected collectors')).toBe('FOR SELECTED COLLECTORS');
+    expect(access('owners from PLATINE or collectors who have taken part in 3 releases')).toBe('FOR OWNERS FROM PLATINE OR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
   });
 
   it('shows each stage only once the server sends it: the silhouette, else the seal; no name before its time', () => {

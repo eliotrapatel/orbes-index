@@ -338,7 +338,7 @@ describe('LiveService', () => {
       const e = await rejects(f.live.enter(titane.id, r.id, { sizeId: r.sizes[0]!.id }, titane.actor), 'LIVE_NOT_ELIGIBLE', 403);
       expect(e.publicMessage).toBe('This release is for owners from PLATINE.');
       await rejects(f.live.setInterest(titane.id, r.id, r.sizes[0]!.id, titane.actor), 'LIVE_NOT_ELIGIBLE', 403);
-      expect((await f.live.access(titane.id, r.id)).access).toEqual({ allowed: false, tier: 1, missing: 'TIER' });
+      expect((await f.live.access(titane.id, r.id)).access).toEqual({ allowed: false, tier: 1, missing: 'TIER', participations: null });
       expect((await f.live.enter(platine.id, r.id, { sizeId: r.sizes[0]!.id }, platine.actor)).tier).toBe(2);
       await advance(r, T0);
       expect((await entry(r.id, platine.id)).status).toBe('TURN');
@@ -364,9 +364,9 @@ describe('LiveService', () => {
       const ownsOther = await accountOfTier(f, 3);
       f.clock.set(at(-MINUTE));
       const check = async (r: LiveRelease, a: { id: string }) => (await f.live.access(a.id, r.id)).access;
-      expect(await check(byModel, ownsOrbit)).toEqual({ allowed: true, tier: 1, missing: null });
-      expect(await check(byModel, ownsHalo)).toEqual({ allowed: false, tier: 1, missing: 'PIECE' });
-      expect(await check(byModel, ownsOther)).toEqual({ allowed: false, tier: 3, missing: 'PIECE' });
+      expect(await check(byModel, ownsOrbit)).toEqual({ allowed: true, tier: 1, missing: null, participations: null });
+      expect(await check(byModel, ownsHalo)).toEqual({ allowed: false, tier: 1, missing: 'PIECE', participations: null });
+      expect(await check(byModel, ownsOther)).toEqual({ allowed: false, tier: 3, missing: 'PIECE', participations: null });
       expect(await check(byCollection, ownsHalo)).toMatchObject({ allowed: true });
       expect(await check(byCollection, ownsTagged)).toMatchObject({ allowed: true });
       expect(await check(byCollection, ownsOrbit)).toMatchObject({ allowed: false, missing: 'PIECE' });
@@ -377,7 +377,7 @@ describe('LiveService', () => {
       const [piece] = await holdPieces(t.db, revoked.id, 1, orbit);
       await t.db.updateTable('products').set({ status: 'REVOKED' }).where('id', '=', piece!).execute();
       const d = await t.db.selectFrom('drops').selectAll().where('id', '=', byModel.id).executeTakeFirstOrThrow();
-      expect(await accessOf(t.db, d, revoked.id, at(-MINUTE))).toEqual({ allowed: false, tier: 0, missing: 'PIECE' });
+      expect(await accessOf(t.db, d, revoked.id, at(-MINUTE))).toEqual({ allowed: false, tier: 0, missing: 'PIECE', participations: null });
     });
   });
 

@@ -650,6 +650,7 @@ describe('the Club\'s circle (P-X01)', () => {
     drop: null,
     model: null,
     externalUrl: null,
+    segment: null,
     published: false,
     publishedAt: null,
     createdAt: '2026-10-04T10:00:00.000Z',

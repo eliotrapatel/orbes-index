@@ -56,6 +56,7 @@ import { SalonService } from './services/salon.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
 import { SaleService } from './services/sale.js';
+import { SegmentService } from './services/segments.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
@@ -120,6 +121,8 @@ export interface AppServices {
   fulfilment: FulfilmentService;
   /** The atelier (plan LIVE RELEASE+): the stock and its thresholds, the pieces to make, their work sheets, the pieces issued. */
   atelier: AtelierService;
+  /** The segments (plan LIVE RELEASE+, choice 27): saved groups of collectors, their members read live, their CSV. */
+  segments: SegmentService;
 }
 
 export interface AppContext {
@@ -225,6 +228,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const invoices = new InvoiceService({ db, clock });
     const fulfilment = new FulfilmentService({ db, audit, orders, clock });
     const atelier = new AtelierService({ db, audit, issuance, orders, clock });
+    const segments = new SegmentService({ db, audit, clock });
 
     const services: AppServices = {
       issuance,
@@ -258,6 +262,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       invoices,
       fulfilment,
       atelier,
+      segments,
       ...overrides.services,
     };
 

@@ -126,6 +126,9 @@ import type {
   StatusChange,
   TotpEnrollment,
   WarrantyRecord,
+  Segment,
+  SegmentGroup,
+  SegmentOptions,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -872,6 +875,45 @@ export class AdminApi {
   async invoicePdf(id: string): Promise<Download> {
     const res = await this.request<Response>('GET', `/api/admin/invoices/${encodeURIComponent(id)}/pdf`, { raw: true });
     return toDownload(res, 'ORBES-invoice.pdf');
+  }
+
+  // ── Segments (plan LIVE RELEASE+, choice 27) ─────────────────────────────
+
+  /** Every segment, by name, with its members now and what uses it. */
+  async segments(): Promise<Segment[]> {
+    return (await this.get<{ items: Segment[] }>('/api/admin/segments')).items;
+  }
+
+  segment(id: string): Promise<Segment> {
+    return this.get(`/api/admin/segments/${encodeURIComponent(id)}`);
+  }
+
+  /** What the builder names: the releases, models, collections, sizes and countries known. */
+  segmentOptions(): Promise<SegmentOptions> {
+    return this.get('/api/admin/segments/options');
+  }
+
+  /** The members criteria being built would have now (OPERATOR); a background read, as the builder asks it at each change. */
+  segmentCount(criteria: SegmentGroup): Promise<{ count: number }> {
+    return this.request('POST', '/api/admin/segments/count', { body: { criteria }, background: true });
+  }
+
+  createSegment(input: { name: string; criteria: SegmentGroup }): Promise<Segment> {
+    return this.post('/api/admin/segments', input);
+  }
+
+  updateSegment(id: string, change: { name?: string; criteria?: SegmentGroup }): Promise<Segment> {
+    return this.patch(`/api/admin/segments/${encodeURIComponent(id)}`, change);
+  }
+
+  deleteSegment(id: string): Promise<void> {
+    return this.del(`/api/admin/segments/${encodeURIComponent(id)}`);
+  }
+
+  /** A segment's members now, as a CSV (emails masked for an AUDITOR). */
+  async segmentCsv(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/segments/${encodeURIComponent(id)}/members.csv`, { raw: true });
+    return toDownload(res, 'orbes-segment.csv');
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

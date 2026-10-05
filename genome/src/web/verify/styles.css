@@ -3474,6 +3474,20 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink);
 }
 
+/* A SURPRISE IN EVERY BOX (plan LIVE RELEASE+, choice 3): a vault label held between two hairlines, in the ivory; what
+   the surprise is stays unsaid. */
+.live__surprise {
+  margin-top: 18px;
+  padding: 9px 0 10px;
+  border-top: 1px solid var(--hairline-strong);
+  border-bottom: 1px solid var(--hairline-strong);
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink);
+}
+
 .live__description {
   margin-top: 18px;
 }
@@ -4854,6 +4868,7 @@ body[data-screen="board"] .corners {
 .live__overline,
 .live__title,
 .live__fact,
+.live__surprise,
 .live__subtitle,
 .live__notice-label,
 .live__unit-label,

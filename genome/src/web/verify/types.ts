@@ -529,8 +529,10 @@ export interface LiveCard {
   /** The quantity as the console wrote it (« 25 PIECES »). */
   quantityLine: string;
   perAccount: number;
-  /** The lowest tier allowed (0 any account), and the rule in words after « for ». */
+  /** The lowest tier allowed (0 any account), and every rule in words after « for » (joined by « or » when any one is enough). */
   access: { minTier: number; text: string };
+  /** A surprise in every box: the page says so, never what. */
+  surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (public). */
   interest: number;
 }
@@ -662,11 +664,14 @@ export interface LiveEntry {
   afterRoom?: AfterRoomDoor | null;
 }
 
-/** The account against the release's rule now. */
+/** The account against the release's rules now. */
 export interface LiveAccess {
   allowed: boolean;
   tier: number;
-  missing: 'TIER' | 'PIECE' | null;
+  /** The rule it lacks (the first, or with OR the release's first), null when allowed. */
+  missing: 'TIER' | 'PIECE' | 'PARTICIPATION' | 'SEGMENT' | null;
+  /** The releases it has taken part in, when the release counts them; null otherwise. */
+  participations: number | null;
 }
 
 /** I'LL BE THERE, with a size. */

@@ -70,6 +70,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   printWorkSheets: 'OPERATOR',
   /** The settings of the orders: the delays of their alerts, the locations, the carriers and their tracking links. */
   manageLogistics: 'ADMIN',
+  /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
+  manageSegments: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
   discontinueModel: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */

@@ -480,8 +480,10 @@ export interface LiveSheetModel {
   /** `€ 5 050 · 25 PIECES`: the price and the quantity line, as the room and the release's card say them. */
   offer: string;
   when: { paris: string; local: string | null };
-  /** `FOR OWNERS FROM PLATINE` */
+  /** `FOR OWNERS FROM PLATINE`, `FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES`, `FOR SELECTED COLLECTORS` */
   access: string;
+  /** A SURPRISE IN EVERY BOX, when the release has one; null otherwise. */
+  surprise: string | null;
   /** `25 PIECES · ONE PER COLLECTOR` */
   quantity: string;
   roomOpens: string;
@@ -504,6 +506,7 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     offer: offerLine(s),
     when: releaseTime(s.opensAt, localZone),
     access: LIVE.forWhom(s.access.text),
+    surprise: s.surprise === true ? LIVE.surprise : null,
     quantity: [upper(s.quantityLine), LIVE.perAccount(s.perAccount)].filter((x) => x.length > 0).join(' · '),
     roomOpens: LIVE.roomOpens(s.roomOpensMinutes),
     rule: LIVE.rule(s.tierPriority),

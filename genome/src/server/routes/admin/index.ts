@@ -47,6 +47,7 @@ import { adminReportRoutes } from './reports.js';
 import { adminRetailerRoutes } from './retailers.js';
 import { adminRevocationRoutes } from './revocations.js';
 import { adminSaleRoutes } from './sale.js';
+import { adminSegmentRoutes } from './segments.js';
 
 export interface AdminRouteDeps extends RouteDeps {
   /** Admin sessions must have passed TOTP (except on the auth routes). */
@@ -74,6 +75,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminInvoiceRoutes, deps);
   await app.register(adminAtelierRoutes, deps);
   await app.register(adminLogisticsRoutes, deps);
+  await app.register(adminSegmentRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);
   await app.register(adminReportRoutes, deps);

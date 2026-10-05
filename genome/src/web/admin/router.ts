@@ -31,6 +31,10 @@ export const ROUTES = [
   { name: 'packingSlip', path: '/orders/:orderId/slip' },
   /** The invoices and credit notes (plan LIVE RELEASE+, M7): a month's, their PDFs and the accountant's CSV. */
   { name: 'invoices', path: '/invoices' },
+  /** The segments (plan LIVE RELEASE+, choice 27): the list; a new one and a segment's page, its builder, from it. */
+  { name: 'segments', path: '/segments' },
+  { name: 'segmentNew', path: '/segments/new' },
+  { name: 'segment', path: '/segments/:segmentId' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },
   { name: 'cases', path: '/cases' },
