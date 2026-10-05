@@ -91,24 +91,18 @@
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
-import { Resvg } from '@resvg/resvg-js';
 import { PNG } from 'pngjs';
 import { sql } from 'kysely';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
-import { encodeOrbesCode, ORBES_CODE_STYLES, renderOrbesCodeSvg } from '../src/core/code/encoder.js';
 import { toBase64Url } from '../src/core/bytes.js';
 import { frameCodeData } from '../src/core/payload.js';
-import { buildApp } from '../src/server/app.js';
-import { testConfig } from '../src/server/config.js';
-import { createContext, startLiveEngine, type AppContext } from '../src/server/context.js';
-import { closeDb, createDb, type Db } from '../src/server/db/connection.js';
+import { startLiveEngine, type AppContext } from '../src/server/context.js';
+import type { Db } from '../src/server/db/connection.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } from '../src/server/db/seed/demo.js';
-import { MemoryKeyProvider } from '../src/server/keys/memory-provider.js';
 import { AtelierService } from '../src/server/services/atelier.js';
 import { AuditService } from '../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../src/server/services/drops.js';
@@ -120,15 +114,12 @@ import { SalonService } from '../src/server/services/salon.js';
 import { sessionCookieName } from '../src/server/services/sessions.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
-import { cameraClipFrames } from '../test/e2e/support.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
-import { svgToGray } from '../test/support/raster.js';
-import { writeY4m } from '../test/support/y4m.js';
+import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, webpOf } from '../test/support/ui-stage.js';
 import { buildWeb } from './build-web.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUT = resolve(GENOME_DIR, '..', 'docs', 'assets', 'ui');
-const CHROMIUM_PATH = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 
 /** Demo pieces used by the captures (scenarios in src/server/db/seed/demo.ts). */
 const FIRST_REGISTRATION = DEMO_FIRST_REGISTRATION_PRODUCT_ID; // O26-J-00184, ACTIVATED, unregistered
@@ -146,10 +137,7 @@ const OWNER = { email: 'camille.martin@example.com', password: 'capture-ui-owner
 /** Staff for the Team page: a seller (RETAIL) who signs in to the sale mode, and an OPERATOR on its temporary password. */
 const SELLER = { email: 'boutique.paris@example.com', password: 'capture-ui-seller-password' };
 const OPERATOR_EMAIL = 'atelier@example.com';
-const MOBILE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1440, height: 900 } as const;
-const IPHONE_UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
@@ -167,28 +155,6 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: 'live' | 
 }
 
 const log = (line: string) => process.stdout.write(`${line}\n`);
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** A promise with its resolver, to hold a routed request until a capture is done. */
-function gate(): { promise: Promise<void>; open(): void } {
-  let open!: () => void;
-  const promise = new Promise<void>((r) => (open = r));
-  return { promise, open };
-}
-
-async function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const srv = createServer();
-    srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close(() => resolvePort(port));
-    });
-  });
-}
-
 // ── Server ─────────────────────────────────────────────────────────────────
 
 interface Stage {
@@ -199,9 +165,8 @@ interface Stage {
 }
 
 /**
- * Web build + demo dataset + server. The context clock follows the seed's
- * manual clock while seeding, then real time, so registration windows and
- * "VERIFIED …" stamps agree with the browser's clock.
+ * Web build + demo dataset + server (test/support/ui-stage.ts). The context clock follows the seed's manual clock while
+ * seeding, then real time, so registration windows and "VERIFIED …" stamps agree with the browser's clock.
  */
 async function startStage(workDir: string): Promise<Stage> {
   const webDir = join(workDir, 'web');
@@ -209,66 +174,22 @@ async function startStage(workDir: string): Promise<Stage> {
   await buildWeb({ outDir: webDir, mode: 'production' });
   log(`web build: ${Date.now() - t0} ms`);
 
-  const port = await freePort();
-  const origin = `http://127.0.0.1:${port}`;
-  const db = createDb('pglite:memory');
   const seedClock = createManualClock(DEMO_TIMELINE_START);
   let live = false;
   const clock = () => (live ? new Date() : seedClock.now());
-  const config = testConfig({ publicOrigin: origin, host: '127.0.0.1', port, bootstrapAdmin: ADMIN });
-  const ctx = await createContext(config, { db, clock, log: noopLogger, keyProvider: new MemoryKeyProvider({ env: 'test' }), migrate: true });
-  const t1 = Date.now();
-  const seeded = await seedDemo(ctx, { clock: seedClock, now: new Date(), log: noopLogger, accountPassword: OWNER.password });
-  live = true;
-  log(`demo dataset: ${seeded.products} products, ${seeded.scans} scans, ${seeded.anomalies.open} open anomalies (${Date.now() - t1} ms)`);
-
-  const app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
-  await app.listen({ port, host: '127.0.0.1' });
-  log(`server: ${origin}`);
-  return {
-    origin,
-    ctx,
-    db,
-    async close() {
-      await app.close();
-      await ctx.close();
-      await closeDb(db);
+  const stage = await startUiStage({
+    webDir,
+    clock,
+    config: { bootstrapAdmin: ADMIN },
+    seed: async (ctx) => {
+      const t1 = Date.now();
+      const seeded = await seedDemo(ctx, { clock: seedClock, now: new Date(), log: noopLogger, accountPassword: OWNER.password });
+      live = true;
+      log(`demo dataset: ${seeded.products} products, ${seeded.scans} scans, ${seeded.anomalies.open} open anomalies (${Date.now() - t1} ms)`);
     },
-  };
-}
-
-/** The framed data (79 bytes) and genome glyphs of a demo product's current code. */
-async function codeOf(db: Db, productId: string): Promise<{ data: Uint8Array; glyphs: number[] }> {
-  const row = await db
-    .selectFrom('codes as c')
-    .innerJoin('products as p', 'p.id', 'c.product_id')
-    .innerJoin('genomes as g', 'g.id', 'c.genome_id')
-    .select(['c.payload', 'c.signature', 'g.glyphs'])
-    .where('p.product_id', '=', productId)
-    .orderBy('c.issue', 'desc')
-    .executeTakeFirstOrThrow();
-  return { data: frameCodeData(row.payload, row.signature), glyphs: [...row.glyphs] };
-}
-
-/** The printed artifact (classic style, decor on) on a white card, as a photo of the card would show it. */
-function codePhoto(code: { data: Uint8Array; glyphs: readonly number[] }, widthPx = 900): Buffer {
-  const model = encodeOrbesCode({ data: code.data, genomeGlyphs: code.glyphs }, { decor: true });
-  const inner = renderOrbesCodeSvg(model, ORBES_CODE_STYLES.classic);
-  const margin = Math.round(widthPx * 0.18);
-  const total = widthPx + 2 * margin;
-  const href = `data:image/svg+xml;base64,${Buffer.from(inner).toString('base64')}`;
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${total}" height="${total}" viewBox="0 0 ${total} ${total}">` +
-    `<rect width="${total}" height="${total}" fill="#ffffff"/>` +
-    `<image x="${margin}" y="${margin}" width="${widthPx}" height="${widthPx}" xlink:href="${href}"/></svg>`;
-  return Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: total }, font: { loadSystemFonts: false }, logLevel: 'off' }).render().asPng());
-}
-
-/** Fake-camera clip: hand-held portrait video (camera simulator) of the code on a desk, looped by Chromium. */
-function cameraClip(code: { data: Uint8Array; glyphs: readonly number[] }, path: string): void {
-  const model = encodeOrbesCode({ data: code.data, genomeGlyphs: code.glyphs }, { decor: true });
-  const source = svgToGray(renderOrbesCodeSvg(model, ORBES_CODE_STYLES.classic), { widthPx: 800 });
-  writeY4m(path, cameraClipFrames(source, { n: 8, seed: 3 }), 15);
+  });
+  log(`server: ${stage.origin}`);
+  return stage;
 }
 
 // ── Screenshots ────────────────────────────────────────────────────────────
@@ -368,27 +289,6 @@ function watchPage(page: Page, label: string): void {
   page.on('pageerror', (e) => log(`  [${label}] page error: ${e.message}`));
   page.on('console', (m) => {
     if (m.type() === 'error') log(`  [${label}] console: ${m.text()}`);
-  });
-}
-
-async function mobileContext(browser: Browser): Promise<BrowserContext> {
-  return browser.newContext({
-    viewport: { ...MOBILE },
-    deviceScaleFactor: 2,
-    isMobile: true,
-    hasTouch: true,
-    userAgent: IPHONE_UA,
-    locale: 'en-GB',
-    timezoneId: 'Europe/Paris',
-    reducedMotion: 'no-preference',
-  });
-}
-
-/** Hide the film grain overlay (CSSOM only: the page CSP forbids style attributes in markup). */
-async function hideGrain(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const el = document.querySelector<HTMLElement>('.grain');
-    if (el) el.style.visibility = 'hidden';
   });
 }
 
@@ -822,28 +722,6 @@ function monolitheSvg(kind: 'photo' | 'silhouette'): string {
     `<path d="${nearArc(R, Ry, bot)}" fill="none" stroke="#000" stroke-opacity="0.55" stroke-width="2"/>` +
     `</svg>`
   );
-}
-
-/** An SVG drawn by Chromium into a canvas, saved as a WebP with its transparency (the media store takes JPEG or WebP). */
-async function webpOf(browser: Browser, svg: string): Promise<Uint8Array> {
-  const context = await browser.newContext();
-  try {
-    const page = await context.newPage();
-    const data = await page.evaluate(async (src) => {
-      const img = new Image();
-      img.src = src;
-      await img.decode();
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.getContext('2d')!.drawImage(img, 0, 0);
-      return canvas.toDataURL('image/webp', 0.9);
-    }, `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
-    if (!data.startsWith('data:image/webp;base64,')) throw new Error('Chromium could not encode a WebP');
-    return new Uint8Array(Buffer.from(data.slice('data:image/webp;base64,'.length), 'base64'));
-  } finally {
-    await context.close();
-  }
 }
 
 /**
