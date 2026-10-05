@@ -11,21 +11,35 @@
  * and this one, the phones, over real HTTP with Node's own http client (no dependency):
  *
  *   1. N accounts, a fifth of them owners (TITANE, PLATINE, PALLADIUM: the line's tier order and the club's standings
- *      read at T0 do real work), each signed in; a LIVE RELEASE of 25 pieces in three sizes with two add-ons, created
- *      and published through the console's service, its room opening a minute before T0;
+ *      read at T0 do real work), each signed in, each entered in a draw drawn before (so each has taken part in one
+ *      release); a segment of the collectors who took part in a release and were active in the last 30 days; a LIVE
+ *      RELEASE of 25 pieces in three sizes with two add-ons, created and published through the console's service, its
+ *      room opening a minute before T0, with every rule of LIVE RELEASE+ that its checks read (plan of 2026-10-04,
+ *      LIVE RELEASE+): taken part in a release AND a member of the segment (both read at each check: the stream, I'LL
+ *      BE THERE, ENTER, SECURE), a surprise in every box, the question after, and an after-room of 25 pieces opening a
+ *      minute after the sell-out for five minutes; and its stock at its location (STOCKED: one size wholly in stock,
+ *      one in part, one with none), so that PAY reserves a piece in stock under the SKU's lock, or makes a piece to
+ *      make that reserves an ORBES identity;
  *   2. N concurrent streams (GET /api/v1/live/:id/stream, one per account), plus the console's stream and a boutique
- *      board's (the owner watches, a boutique shows the door), opened over the seconds after the announcement;
+ *      board's (the owner watches, a boutique shows the door), opened over the seconds after the announcement; half of
+ *      the accounts say I'LL BE THERE over those seconds;
  *   3. a host message every second from the announcement to T0, so that every pulse sends every viewer a new room (the
  *      worst case of the fan-out, measured on every pulse);
  *   4. a burst of entries: the N accounts ENTER at random moments of the first --burst-seconds of the room (10 s: 100 a
  *      second for 1 000, thirty times the pace of a crowd spread over a five-minute room), each with a size;
  *   5. at T0 the door opens: the line formed, each turn taken on its phone as the stream brings it: PRESS, 1.5 s later
  *      SECURE, the add-ons for half of them, then PAY (seven in ten) or RELEASE MY PLACE (three in ten, the piece
- *      going to the next in line at once), until the release is SOLD OUT and every stream has ended.
+ *      going to the next in line at once), until the release is SOLD OUT and every stream has ended;
+ *   6. the after-room: the entries the sell-out ended read its second door in their last frame (each pulse reads the
+ *      doors of the room's ENDED entries); at its T0 its guests open it (GET /api/v1/live/:id/after-room) in a burst of
+ *      --burst-seconds, each opening its stream, then ENTERing with a size once it has read the after-room's page
+ *      (AFTER_ROOM_READING_MS); the turns run as in the main room until the after-room is SOLD OUT and every one of its
+ *      streams has ended.
  *
  * Measured, against the plan's targets for 1 000 in the room on the VPS profile (app container: 1.5 CPU, 768 MB):
  *
- *   action latency   each ENTER, PRESS, SECURE, add-ons, PAY and RELEASE, request sent → answer read      p95 < 200 ms
+ *   action latency   each I'LL BE THERE, ENTER, PRESS, SECURE, add-ons, PAY and RELEASE, in both rooms,
+ *                    request sent → answer read                                                      p95 < 200 ms
  *                    (the app's share of it on the VPS's CPU, below)
  *   fan-out          each pulse, its room in memory (the frame and the viewers' entries read: the events' `now`)
  *                    → the last viewer's room event read by its phone, over the pulses that reached at least
@@ -34,7 +48,8 @@
  *                    (GEOIP_RESIDENT_MIB; this run has none)                                   < 60 % of 768 MB
  *   CPU              the app's busiest five seconds                                            < one core
  *   and none of: an answer other than 200, a stream refused or dropped before the end, an error in the app's log, a
- *   release that did not sell out.
+ *   room that did not sell out, or orders other than the pieces confirmed (one per piece, those of STOCKED held in
+ *   stock and every other one a piece to make with its reserved identity).
  *
  * The VPS's CPU on this machine: a VPS vCPU is taken as --vps-factor times slower than the core the app runs on here
  * (DEFAULT_VPS_FACTOR), and what runs on the app's thread is multiplied by it before it is held against its target: the
@@ -121,6 +136,30 @@ const ADDONS = [
   { label: 'ENGRAVING', priceMinor: 25_000 },
   { label: 'GIFT BOX', priceMinor: 5_000 },
 ];
+/**
+ * The pieces made in advance at the release's location, by size (plan LIVE RELEASE+, choice 8): PAY holds one of them
+ * under its SKU's lock; the other pieces are made to order, each piece to make reserving an ORBES identity (choice 15).
+ * One size wholly in stock, one in part, one with none: 13 pieces held in stock, 12 to make.
+ */
+const STOCKED: Readonly<Record<string, number>> = Object.freeze({ '52': 9, '54': 4 });
+/** The after-room (plan LIVE RELEASE+, choice 2): a model of its own, 25 pieces in three sizes, an add-on, none in stock. */
+const AFTER_SIZES = [
+  { label: '52', stock: 9 },
+  { label: '54', stock: 8 },
+  { label: '56', stock: 8 },
+];
+const AFTER_ADDONS = [{ label: 'GIFT BOX', priceMinor: 5_000 }];
+/**
+ * What the after-room rightly answers a guest who arrives after its size, or the after-room itself, has sold out: its
+ * guests all see the door at the same second, and its turns begin with the first of them to enter, so the last of a
+ * crowd may find nothing left. Counted as late, not as failures.
+ */
+const AFTER_ROOM_LATE_CODES: readonly string[] = ['LIVE_SIZE_SOLD_OUT', 'LIVE_OVER'];
+/**
+ * A guest who opened the after-room reads its page before ENTER THE LINE: a model it had not seen, its price, its sizes
+ * to choose from (web/verify/views/live.ts, the after-room's join screen): from 2 to 8 seconds.
+ */
+const AFTER_ROOM_READING_MS = Object.freeze({ min: 2_000, max: 8_000 });
 /** The room opens this long before T0 (the console's minimum). */
 const ROOM_MINUTES = 1;
 /** Held this long before SECURE (the house's ring: 1.5 s; the server asks for 1.4 s). */
@@ -147,6 +186,8 @@ interface ReadyMessage {
   type: 'ready';
   port: number;
   dropId: string;
+  /** Its after-room's id (the phones read it from its door, and check it is this one). */
+  afterRoomId: string;
   sizes: { id: string; label: string }[];
   addons: string[];
   roomOpensAt: number;
@@ -197,6 +238,18 @@ interface ServerReport {
   /** The app's CPU in each second, in cores. */
   cpuBySecond: number[];
   messageErrors: number;
+  facts: ReleaseFacts;
+}
+
+/** What the two rooms left in the database, read once they are over (the orders of LIVE RELEASE+ and the after-room). */
+interface ReleaseFacts {
+  /** The orders of the release and of its after-room; by reservation: a piece held in stock, a piece to make, neither. */
+  orders: { main: number; afterRoom: number; stock: number; bench: number; other: number };
+  /** The pieces to make of those orders, and how many of them hold a reserved ORBES identity (products RESERVED). */
+  bench: { items: number; reserved: number };
+  afterRoom: { guests: number; reason: string | null; confirmed: number };
+  /** The rows of the event journal (services/journal.ts), written with every order and movement. */
+  journal: number;
 }
 
 // ── Options ────────────────────────────────────────────────────────────────
@@ -467,6 +520,8 @@ async function serve(): Promise<void> {
   const { createDbFromPGlite } = await import('../src/server/db/connection.js');
   const { createModel, holdPieces } = await import('../test/support/live.js');
   const { sessionCookieName } = await import('../src/server/services/sessions.js');
+  const { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } = await import('../src/server/services/after-room.js');
+  const { defaultLocationId } = await import('../src/server/services/stock.js');
 
   // As in production, but ORBES_ENV=development: no TLS, secrets or keys to provide; the production rate limits.
   const config = loadConfig({
@@ -502,6 +557,7 @@ async function serve(): Promise<void> {
   const db = ctx.db;
   await db.insertInto('categories').values({ id: 1, code: 'J', name: 'Jewelry' }).onConflict((oc) => oc.doNothing()).execute();
   const modelId = await createModel(db, 'MONOLITHE');
+  const afterModelId = await createModel(db, 'AFTERGLOW');
   const adminEmail = `load-${randomUUID()}@orbes.load`;
   const adminId = (await db.insertInto('admin_users').values({ email: adminEmail, email_normalized: adminEmail, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
   const admin = { type: 'admin' as const, id: adminId };
@@ -531,6 +587,26 @@ async function serve(): Promise<void> {
   }
   const consoleSession = await ctx.sessions.create({ subjectType: 'admin', subjectId: adminId, mfaPassed: true, userAgent: UA });
 
+  // A draw drawn before, every account entered (services/drops.ts, each entry its own transaction): each account has
+  // taken part in one release (services/participation.ts). Created ahead, then its times moved so that it is open now,
+  // then over, then drawn.
+  const hour = 3_600_000;
+  const draw = await ctx.services.drops.create(
+    { modelId, title: 'MONOLITHE · THE DRAW BEFORE', quantity: 25, opensAt: new Date(Date.now() + hour), closesAt: new Date(Date.now() + 2 * hour), earlyAccessHours: 0 },
+    admin,
+  );
+  await ctx.services.drops.publish(draw.id, admin);
+  await db.updateTable('drops').set({ opens_at: new Date(Date.now() - 2 * hour) }).where('id', '=', draw.id).execute();
+  for (const id of accountIds) await ctx.services.drops.enter(id, draw.id, { type: 'account', id });
+  await db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', draw.id).execute();
+  await ctx.services.drops.draw(draw.id, admin);
+  // The segment the release admits, read live at each check (services/segments.ts): taken part in a release, and active
+  // (a sign-in, a session in use or a scan) in the last 30 days.
+  const segment = await ctx.services.segments.create(
+    { name: 'LOAD · TOOK PART, ACTIVE', criteria: { match: 'ALL', rules: [{ kind: 'PARTICIPATIONS', min: 1 }, { kind: 'ACTIVE', days: 30 }] } },
+    admin,
+  );
+
   const publishedAt = Date.now();
   const roomOpensAt = publishedAt + setup.leadMs;
   const opensAt = roomOpensAt + ROOM_MINUTES * 60_000;
@@ -544,10 +620,33 @@ async function serve(): Promise<void> {
       priceMinor: 480_000,
       sizes: SIZES,
       addons: ADDONS,
+      // LIVE RELEASE+: both rules read at each check, joined by AND (the heavier: neither stops the other).
+      minParticipations: 1,
+      accessSegmentId: segment.id,
+      accessCombine: 'AND',
+      surpriseEnabled: true,
+      surpriseText: 'A polishing cloth in the house black.',
+      afterRoom: {
+        modelId: afterModelId,
+        priceMinor: 120_000,
+        sizes: AFTER_SIZES,
+        addons: AFTER_ADDONS,
+        delayMinutes: AFTER_ROOM_DELAY_MINUTES.min,
+        lengthMinutes: AFTER_ROOM_LENGTH_MINUTES.min,
+      },
     },
     admin,
   );
+  // The pieces made in advance, at the release's location (its default: the console named none).
+  const locationId = await defaultLocationId(db);
+  for (const s of await db.selectFrom('drop_sizes').select(['label', 'sku_id']).where('drop_id', '=', created.id).execute()) {
+    const n = STOCKED[s.label];
+    if (!n) continue;
+    if (!s.sku_id) throw new Error(`size ${s.label} has no SKU`);
+    await ctx.services.stock.adjust({ skuId: s.sku_id, locationId, delta: n, note: 'Load test: pieces made in advance.' }, admin);
+  }
   await ctx.services.liveConsole.publish(created.id, {}, admin);
+  const afterRoomId = (await db.selectFrom('drops').select('id').where('parent_drop_id', '=', created.id).executeTakeFirstOrThrow()).id;
   const { token: boardToken } = await ctx.services.live.issueBoardLink(created.id, admin);
   const release = await db.selectFrom('drop_sizes').select(['id', 'label']).where('drop_id', '=', created.id).orderBy('position').execute();
   const addons = await db.selectFrom('live_addons').select('id').where('drop_id', '=', created.id).orderBy('position').execute();
@@ -607,6 +706,37 @@ async function serve(): Promise<void> {
     ctx.services.live.message(created.id, `THE DOOR OPENS AT THE SAME SECOND FOR EVERYONE · ${++n}`, admin).catch(() => messageErrors++);
   }, 1000);
 
+  /** What the two rooms left in the database. */
+  const factsOf = async (): Promise<ReleaseFacts> => {
+    const ids = [created.id, afterRoomId];
+    const orders = await db.selectFrom('orders').select(['id', 'drop_id', 'reservation']).where('drop_id', 'in', ids).execute();
+    const bench = await db
+      .selectFrom('bench_items as b')
+      .innerJoin('orders as o', 'o.id', 'b.order_id')
+      .innerJoin('products as p', 'p.id', 'b.product_id')
+      .select('p.status')
+      .where('o.drop_id', 'in', ids)
+      .execute();
+    const child = await db.selectFrom('drops').select('ended_reason').where('id', '=', afterRoomId).executeTakeFirstOrThrow();
+    const count = async (q: Promise<{ n: number | string | bigint }>) => Number((await q).n);
+    return {
+      orders: {
+        main: orders.filter((o) => o.drop_id === created.id).length,
+        afterRoom: orders.filter((o) => o.drop_id === afterRoomId).length,
+        stock: orders.filter((o) => o.reservation === 'STOCK').length,
+        bench: orders.filter((o) => o.reservation === 'BENCH').length,
+        other: orders.filter((o) => o.reservation !== 'STOCK' && o.reservation !== 'BENCH').length,
+      },
+      bench: { items: bench.length, reserved: bench.filter((b) => b.status === 'RESERVED').length },
+      afterRoom: {
+        guests: await count(db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterRoomId).executeTakeFirstOrThrow()),
+        reason: child.ended_reason,
+        confirmed: await count(db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterRoomId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow()),
+      },
+      journal: await count(db.selectFrom('event_journal').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()),
+    };
+  };
+
   process.on('message', async (m: { type: string }) => {
     if (m.type === 'collect') {
       clearInterval(sampler);
@@ -614,6 +744,7 @@ async function serve(): Promise<void> {
       clearInterval(messages);
       loop.disable();
       const cpu = process.cpuUsage(cpuAtReady);
+      const facts = await factsOf();
       send({
         type: 'report',
         pulses,
@@ -625,6 +756,7 @@ async function serve(): Promise<void> {
         loopDelayMs: { p50: loop.percentile(50) / 1e6, p99: loop.percentile(99) / 1e6, max: loop.max / 1e6 },
         cpuBySecond,
         messageErrors,
+        facts,
       });
     } else if (m.type === 'stop') {
       await app.close();
@@ -639,6 +771,7 @@ async function serve(): Promise<void> {
     type: 'ready',
     port,
     dropId: created.id,
+    afterRoomId,
     sizes: release,
     addons: addons.map((a) => a.id),
     roomOpensAt,
@@ -656,13 +789,27 @@ async function serve(): Promise<void> {
 
 // ── The driver: the phones ─────────────────────────────────────────────────
 
-type ActionKind = 'enter' | 'press' | 'secure' | 'addons' | 'confirm' | 'release';
+type ActionKind = 'interest' | 'enter' | 'press' | 'secure' | 'addons' | 'confirm' | 'release';
+/** The release's room, or its after-room. */
+type RoomKey = 'main' | 'after';
+const ROOMS: readonly RoomKey[] = ['main', 'after'];
 
 interface ActionRecord {
+  room: RoomKey;
   kind: ActionKind;
   ms: number;
   status: number;
   code?: string;
+}
+
+/** A phone's stream of one room. */
+interface StreamState {
+  /** When it asked, and when its first room arrived. */
+  asked: number;
+  connectedMs: number | null;
+  status: number | null;
+  ended: boolean;
+  dropped: boolean;
 }
 
 interface Viewer {
@@ -671,21 +818,34 @@ interface Viewer {
   cookie: string;
   csrf: string;
   sizeId: string;
-  /** When its stream asked, and when its first room arrived. */
-  asked: number;
-  connectedMs: number | null;
-  streamStatus: number | null;
-  ended: boolean;
-  dropped: boolean;
-  /** Its place in the line has reached it. */
+  streams: Record<RoomKey, StreamState | null>;
+  /** Its place in the main line has reached it. */
   placed: boolean;
-  acting: boolean;
-  outcome: string | null;
+  acting: Record<RoomKey, boolean>;
+  outcome: Record<RoomKey, string | null>;
+  /** The after-room's T0, from the second door its last frame of the main room carried: a guest. */
+  door: number | null;
 }
 
 interface RoomEvent {
+  room: RoomKey;
   now: number;
   at: number;
+}
+
+/** A room's end, as its phones read it. */
+interface RoomOutcome {
+  reason: string | null;
+  confirmed: number;
+  released: number;
+  /** When a phone first read it, after the room's T0. */
+  endedMs: number | null;
+}
+
+interface FanOut {
+  /** The pulses that reached at least FULL_PULSE of the room's viewers. */
+  full: number;
+  received: Stats;
 }
 
 interface LevelResult {
@@ -697,13 +857,16 @@ interface LevelResult {
   actions: {
     all: Stats;
     byKind: Record<ActionKind, Stats>;
-    unexpected: { kind: ActionKind; status: number; code?: string }[];
+    /** The main room's actions (I'LL BE THERE included), and the after-room's (ENTER, PRESS, SECURE, add-ons, PAY, RELEASE): `all` is both. */
+    main: Stats;
+    afterRoom: Stats;
+    unexpected: { room: RoomKey; kind: ActionKind; status: number; code?: string }[];
     /** The app's share of an action: its event loop's p99 delay and its CPU per action (all of it over the run, divided by the actions: an upper bound). */
     appShareMs: number;
     /** The p95 on the VPS: the app's share taken --vps-factor times slower, the rest (the database's wait) as measured. */
     vpsP95Ms: number;
   };
-  fanOut: { pulses: number; full: number; received: Stats; serverPulse: Stats; serverPulseFull: Stats };
+  fanOut: { pulses: number; full: number; received: Stats; afterRoom: FanOut; serverPulse: Stats; serverPulseFull: Stats };
   turns: { given: number; delivery: Stats; lineDrawnMs: number | null; t0PassMs: number | null };
   engine: { passes: number; pass: Stats };
   memory: {
@@ -723,8 +886,19 @@ interface LevelResult {
   };
   cpu: { userMs: number; systemMs: number; wallMs: number; cores: number; busiest5s: number };
   loopDelayMs: { p50: number; p99: number; max: number };
-  /** The end's reason, and when a phone first read it, after T0. */
-  outcome: { reason: string | null; confirmed: number; released: number; endedMs: number | null };
+  /** The main room's end, after T0. */
+  outcome: RoomOutcome;
+  /** The after-room: its guests, their phones' doors read and streams, its end after its T0. */
+  afterRoom: {
+    guests: number;
+    doorRead: Stats;
+    streams: { opened: number; refused: number; dropped: number; connect: Stats };
+    /** Guests who came after the after-room, or their size, had sold out (AFTER_ROOM_LATE_CODES, a page ended or a stream's 204). */
+    late: number;
+    outcome: RoomOutcome;
+  };
+  /** What the rooms left in the database: the orders, the pieces to make, the after-room's guests, the journal. */
+  facts: ReleaseFacts;
   appErrors: number;
   messageErrors: number;
   verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pass: boolean };
@@ -797,14 +971,21 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const random = prng(o.seed + viewersWanted);
   const agent = new Agent({ keepAlive: true });
   const actions: ActionRecord[] = [];
+  /** Guests who came after the after-room, or their size, had sold out. */
+  const lateGuests = new Set<Viewer>();
+  /** The after-room's door read by each guest (GET …/after-room): a page read, reported beside the actions. */
+  const doorReads: { ms: number; status: number }[] = [];
   const rooms: RoomEvent[] = [];
   const deliveries: number[] = [];
   let given = 0;
   let firstPlaced: number | null = null;
   let placed = 0;
-  let lastRoom: { phase?: string; over?: boolean; endedReason?: string | null } = {};
-  /** When a phone first read the release's end. */
-  let endRead: number | null = null;
+  const last: Record<RoomKey, { phase?: string; over?: boolean; endedReason?: string | null }> = { main: {}, after: {} };
+  /** When a phone first read each room's end. */
+  const endRead: Record<RoomKey, number | null> = { main: null, after: null };
+  /** The after-room's id and sizes, as its door answers them. */
+  let afterRoom: { id: string; sizes: { id: string }[]; addons: string[] } | null = null;
+  const dropOf = (room: RoomKey) => (room === 'main' ? ready.dropId : afterRoom!.id);
 
   const viewers: Viewer[] = ready.viewers.map((s, i) => ({
     i,
@@ -813,30 +994,27 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     cookie: `${ready.cookie}=${s.token}`,
     csrf: s.csrf,
     sizeId: ready.sizes[Math.floor(random() * ready.sizes.length)]!.id,
-    asked: 0,
-    connectedMs: null,
-    streamStatus: null,
-    ended: false,
-    dropped: false,
+    streams: { main: null, after: null },
     placed: false,
-    acting: false,
-    outcome: null,
+    acting: { main: false, after: false },
+    outcome: { main: null, after: null },
+    door: null,
   }));
 
-  const call = (v: Viewer, kind: ActionKind, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> | null }> =>
+  /** One request of a phone, timed. */
+  const request = (v: Viewer, method: string, path: string, body: unknown): Promise<{ status: number; ms: number; json: Record<string, unknown> | null }> =>
     new Promise((resolveCall) => {
-      const payload = JSON.stringify(body);
+      const payload = body === undefined ? '' : JSON.stringify(body);
       const t = performance.now();
       const req = httpRequest(
         {
           host: '127.0.0.1',
           port: ready.port,
           method,
-          path: `/api/v1/live/${ready.dropId}${path}`,
+          path,
           agent,
           headers: {
-            'content-type': 'application/json',
-            'content-length': Buffer.byteLength(payload),
+            ...(body === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }),
             cookie: v.cookie,
             origin: ORIGIN,
             'x-csrf-token': v.csrf,
@@ -849,45 +1027,50 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
           res.setEncoding('utf8');
           res.on('data', (c: string) => (text += c));
           res.on('end', () => {
-            const ms = performance.now() - t;
             let json: Record<string, unknown> | null = null;
             try {
               json = JSON.parse(text) as Record<string, unknown>;
             } catch {
               json = null;
             }
-            const status = res.statusCode ?? 0;
-            const code = (json?.error as { code?: string } | undefined)?.code;
-            actions.push({ kind, ms, status, ...(code ? { code } : {}) });
-            resolveCall({ status, json });
+            resolveCall({ status: res.statusCode ?? 0, ms: performance.now() - t, json });
           });
         },
       );
-      req.on('error', () => {
-        actions.push({ kind, ms: performance.now() - t, status: 0, code: 'NETWORK' });
-        resolveCall({ status: 0, json: null });
-      });
+      req.on('error', () => resolveCall({ status: 0, ms: performance.now() - t, json: null }));
       req.end(payload);
     });
 
+  const call = async (v: Viewer, room: RoomKey, kind: ActionKind, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> | null }> => {
+    const r = await request(v, method, `/api/v1/live/${dropOf(room)}${path}`, body);
+    const code = r.status === 0 ? 'NETWORK' : (r.json?.error as { code?: string } | undefined)?.code;
+    actions.push({ room, kind, ms: r.ms, status: r.status, ...(code ? { code } : {}) });
+    if (room === 'after' && kind === 'enter' && r.status === 409 && code && AFTER_ROOM_LATE_CODES.includes(code)) lateGuests.add(v);
+    return r;
+  };
+
   /** A turn on its phone: PRESS, the hold, SECURE, the add-ons for half, then PAY (7 in 10) or RELEASE MY PLACE. */
-  const takeTurn = async (v: Viewer, token: string) => {
-    v.acting = true;
+  const takeTurn = async (v: Viewer, room: RoomKey, token: string) => {
+    v.acting[room] = true;
+    const addons = room === 'main' ? ready.addons : null;
     try {
-      if ((await call(v, 'press', 'POST', '/press', { token })).status !== 200) return;
+      if ((await call(v, room, 'press', 'POST', '/press', { token })).status !== 200) return;
       await sleep(HOLD_MS);
-      if ((await call(v, 'secure', 'POST', '/secure', { token })).status !== 200) return;
-      if (random() < 0.5) await call(v, 'addons', 'PUT', '/addons', { addonIds: [ready.addons[Math.floor(random() * ready.addons.length)]!] });
+      if ((await call(v, room, 'secure', 'POST', '/secure', { token })).status !== 200) return;
+      if (random() < 0.5) {
+        const ids = addons ?? afterRoom!.addons;
+        if (ids.length) await call(v, room, 'addons', 'PUT', '/addons', { addonIds: [ids[Math.floor(random() * ids.length)]!] });
+      }
       await sleep(random() * 1000);
       if (random() < 0.7) {
-        if ((await call(v, 'confirm', 'POST', '/confirm', {})).status === 200) v.outcome = 'CONFIRMED';
-      } else if ((await call(v, 'release', 'POST', '/release', {})).status === 200) v.outcome = 'RELEASED';
+        if ((await call(v, room, 'confirm', 'POST', '/confirm', {})).status === 200) v.outcome[room] = 'CONFIRMED';
+      } else if ((await call(v, room, 'release', 'POST', '/release', {})).status === 200) v.outcome[room] = 'RELEASED';
     } finally {
-      v.acting = false;
+      v.acting[room] = false;
     }
   };
 
-  const onEvent = (v: Viewer, block: string, at: number) => {
+  const onEvent = (v: Viewer, room: RoomKey, block: string, at: number) => {
     let name = 'message';
     let data = '';
     for (const line of block.split('\n')) {
@@ -896,39 +1079,47 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     }
     if (!data) return;
     const body = JSON.parse(data) as Record<string, unknown>;
+    const stream = v.streams[room]!;
     if (name === 'room') {
-      if (v.connectedMs === null) v.connectedMs = at - v.asked;
-      rooms.push({ now: Date.parse(body.now as string), at });
-      lastRoom = body as typeof lastRoom;
-      if (lastRoom.endedReason && endRead === null) endRead = at;
+      if (stream.connectedMs === null) stream.connectedMs = at - stream.asked;
+      rooms.push({ room, now: Date.parse(body.now as string), at });
+      last[room] = body as (typeof last)[RoomKey];
+      if (last[room].endedReason && endRead[room] === null) endRead[room] = at;
     } else if (name === 'you') {
-      const entry = body.entry as { status: string; position: number | null; turn: { at: string; token: string | null } | null } | null;
-      if (entry?.position != null && !v.placed) {
+      const entry = body.entry as {
+        status: string;
+        position: number | null;
+        turn: { at: string; token: string | null } | null;
+        afterRoom?: { opensAt: string } | null;
+      } | null;
+      if (room === 'main' && entry?.position != null && !v.placed) {
         v.placed = true;
         placed++;
         firstPlaced ??= at;
       }
-      if (entry?.status === 'TURN' && entry.turn?.token && !v.acting) {
+      if (room === 'main' && entry?.afterRoom) v.door = Date.parse(entry.afterRoom.opensAt);
+      if (entry?.status === 'TURN' && entry.turn?.token && !v.acting[room]) {
         given++;
         deliveries.push(at - Date.parse(entry.turn.at));
-        void takeTurn(v, entry.turn.token);
+        void takeTurn(v, room, entry.turn.token);
       }
     }
   };
 
-  const openStream = (v: Viewer) => {
-    v.asked = Date.now();
+  const openStream = (v: Viewer, room: RoomKey) => {
+    const stream: StreamState = { asked: Date.now(), connectedMs: null, status: null, ended: false, dropped: false };
+    v.streams[room] = stream;
     const req = httpRequest(
       {
         host: '127.0.0.1',
         port: ready.port,
         method: 'GET',
-        path: `/api/v1/live/${ready.dropId}/stream`,
+        path: `/api/v1/live/${dropOf(room)}/stream`,
         agent: false,
         headers: { accept: 'text/event-stream', cookie: v.cookie, 'x-forwarded-for': v.ip, 'user-agent': UA },
       },
       (res: IncomingMessage) => {
-        v.streamStatus = res.statusCode ?? 0;
+        stream.status = res.statusCode ?? 0;
         if (res.statusCode !== 200) {
           res.resume();
           return;
@@ -939,19 +1130,19 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
           const at = Date.now();
           buffer += chunk;
           for (let k = buffer.indexOf('\n\n'); k >= 0; k = buffer.indexOf('\n\n')) {
-            onEvent(v, buffer.slice(0, k), at);
+            onEvent(v, room, buffer.slice(0, k), at);
             buffer = buffer.slice(k + 2);
           }
         });
         res.on('close', () => {
-          v.ended = true;
-          if (!lastRoom.over) v.dropped = true;
+          stream.ended = true;
+          if (!last[room].over) stream.dropped = true;
         });
       },
     );
     req.on('error', () => {
-      v.ended = true;
-      v.dropped = true;
+      stream.ended = true;
+      stream.dropped = true;
     });
     req.end();
   };
@@ -970,23 +1161,53 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const boardBody = JSON.stringify({ token: ready.boardToken });
   openSide('POST', `/api/v1/live/${ready.dropId}/board/stream`, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(boardBody)), origin: ORIGIN, 'x-forwarded-for': '192.0.2.20' }, boardBody);
 
-  // The streams, spread over the time before the room opens (two seconds spare).
+  // The streams, spread over the time before the room opens (two seconds spare); half of the accounts say I'LL BE
+  // THERE over the same seconds.
   const spread = Math.max(1000, ready.roomOpensAt - Date.now() - 2000);
-  for (const v of viewers) setTimeout(() => openStream(v), (v.i / viewers.length) * spread);
+  for (const v of viewers) setTimeout(() => openStream(v, 'main'), (v.i / viewers.length) * spread);
+  const interest = viewers.filter(() => random() < 0.5).map((v) => sleep(random() * spread).then(() => call(v, 'main', 'interest', 'PUT', '/interest', { sizeId: v.sizeId })));
 
   // The burst of entries, in the first seconds of the room.
   await sleep(ready.roomOpensAt - Date.now() + 50);
-  const entries = viewers.map((v) =>
-    sleep(random() * o.burstSeconds * 1000).then(() => call(v, 'enter', 'POST', '/enter', { sizeId: v.sizeId })),
-  );
-  await Promise.all(entries);
+  const entries = viewers.map((v) => sleep(random() * o.burstSeconds * 1000).then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId })));
+  await Promise.all([...interest, ...entries]);
 
   // T0, then until the release is over and its streams have ended.
   await sleep(ready.opensAt - Date.now());
+  const roomDone = (room: RoomKey, among: Viewer[]) => last[room].over === true && among.every((v) => { const s = v.streams[room]; return !s || s.ended || s.status !== 200; });
   const deadline = ready.opensAt + SELL_OUT_LIMIT_MS;
-  while (Date.now() < deadline && !(lastRoom.over && viewers.every((v) => v.ended || v.streamStatus !== 200))) await sleep(200);
-  // The turns under way finish (none should be: the release is over).
-  while (viewers.some((v) => v.acting) && Date.now() < deadline + 10_000) await sleep(100);
+  while (Date.now() < deadline && !roomDone('main', viewers)) await sleep(200);
+  while (viewers.some((v) => v.acting.main) && Date.now() < deadline + 10_000) await sleep(100);
+
+  // The after-room: its guests read its door at its T0, in a burst, open its stream and ENTER with a size.
+  const guests = viewers.filter((v) => v.door !== null);
+  const afterOpensAt = guests.length ? Math.min(...guests.map((v) => v.door!)) : null;
+  let afterDeadline = deadline;
+  if (afterOpensAt !== null) {
+    await sleep(afterOpensAt - Date.now() + 50);
+    const visit = async (v: Viewer) => {
+      await sleep(random() * o.burstSeconds * 1000);
+      const door = await request(v, 'GET', `/api/v1/live/${ready.dropId}/after-room`, undefined);
+      doorReads.push({ ms: door.ms, status: door.status });
+      const sheet = door.json as { id?: string; phase?: string; sizes?: { id: string }[]; addons?: { id: string }[] } | null;
+      if (door.status !== 200 || sheet?.id !== ready.afterRoomId) return;
+      // Over already: the page shows its end (without sizes), and opens nothing.
+      if (sheet.phase === 'ENDED') {
+        lateGuests.add(v);
+        return;
+      }
+      if (!sheet.sizes?.length) return;
+      afterRoom ??= { id: sheet.id, sizes: sheet.sizes, addons: (sheet.addons ?? []).map((a) => a.id) };
+      openStream(v, 'after');
+      await sleep(AFTER_ROOM_READING_MS.min + random() * (AFTER_ROOM_READING_MS.max - AFTER_ROOM_READING_MS.min));
+      await call(v, 'after', 'enter', 'POST', '/enter', { sizeId: sheet.sizes[Math.floor(random() * sheet.sizes.length)]!.id });
+    };
+    await Promise.all(guests.map(visit));
+    afterDeadline = afterOpensAt + SELL_OUT_LIMIT_MS;
+    while (Date.now() < afterDeadline && !roomDone('after', guests)) await sleep(200);
+  }
+  // The turns under way finish (none should be: the rooms are over).
+  while (viewers.some((v) => v.acting.main || v.acting.after) && Date.now() < afterDeadline + 10_000) await sleep(100);
 
   child.send({ type: 'collect' });
   const report = await nextMessage<ServerReport>(child, 'report');
@@ -1007,22 +1228,29 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   agent.destroy();
 
   // ── The figures ──
-  const kinds: ActionKind[] = ['enter', 'press', 'secure', 'addons', 'confirm', 'release'];
+  const kinds: ActionKind[] = ['interest', 'enter', 'press', 'secure', 'addons', 'confirm', 'release'];
   const byKind = Object.fromEntries(kinds.map((k) => [k, stats(actions.filter((a) => a.kind === k).map((a) => a.ms))])) as Record<ActionKind, Stats>;
-  const unexpected = actions.filter((a) => a.status !== 200).map((a) => ({ kind: a.kind, status: a.status, ...(a.code ? { code: a.code } : {}) }));
+  const late = (a: ActionRecord) => a.room === 'after' && a.kind === 'enter' && a.status === 409 && a.code !== undefined && AFTER_ROOM_LATE_CODES.includes(a.code);
+  const unexpected = actions.filter((a) => a.status !== 200 && !late(a)).map((a) => ({ room: a.room, kind: a.kind, status: a.status, ...(a.code ? { code: a.code } : {}) }));
 
   // The fan-out: the room events of one pulse share its time (`now`, stamped once its room is in memory); from it to
-  // the last phone that read one, over the pulses that reached nearly every viewer.
+  // the last phone that read one, over the pulses that reached nearly every viewer of that room.
   const pulses = report.pulses;
-  const byPulse = new Map<number, { n: number; last: number }>();
-  for (const e of rooms) {
-    const r = byPulse.get(e.now) ?? { n: 0, last: 0 };
-    r.n++;
-    r.last = Math.max(r.last, e.at);
-    byPulse.set(e.now, r);
-  }
-  const viewerCount = viewers.filter((v) => v.streamStatus === 200).length;
-  const full = [...byPulse.entries()].filter(([, r]) => r.n >= FULL_PULSE * viewerCount);
+  const streamsOf = (room: RoomKey) => viewers.map((v) => v.streams[room]).filter((s): s is StreamState => s !== null);
+  const fullOf = (room: RoomKey) => {
+    const byPulse = new Map<number, { n: number; last: number }>();
+    for (const e of rooms) {
+      if (e.room !== room) continue;
+      const r = byPulse.get(e.now) ?? { n: 0, last: 0 };
+      r.n++;
+      r.last = Math.max(r.last, e.at);
+      byPulse.set(e.now, r);
+    }
+    const open = streamsOf(room).filter((s) => s.status === 200).length;
+    return open === 0 ? [] : [...byPulse.entries()].filter(([, r]) => r.n >= FULL_PULSE * open);
+  };
+  const full = ROOMS.flatMap((room) => fullOf(room));
+  const fullAfter = fullOf('after');
   const fanOut = full.map(([now, r]) => r.last - now);
   const fullPulses = pulses.filter((p) => full.some(([now]) => now >= p.start && now <= p.end));
 
@@ -1036,34 +1264,63 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
 
   const all = stats(actions.map((a) => a.ms));
   const fan = stats(fanOut);
-  const streams = {
-    opened: viewerCount,
-    refused: viewers.filter((v) => v.streamStatus !== null && v.streamStatus !== 200).length + viewers.filter((v) => v.streamStatus === null).length,
-    dropped: viewers.filter((v) => v.dropped).length,
-    connect: stats(viewers.filter((v) => v.connectedMs !== null).map((v) => v.connectedMs!)),
+  // A guest late to the after-room: its stream answered 204 (over), or it never opened one (its page ended).
+  for (const v of guests) if (v.streams.after?.status === 204) lateGuests.add(v);
+  const streamFigures = (room: RoomKey, among: Viewer[]) => {
+    const s = among.filter((v) => !(room === 'after' && lateGuests.has(v) && v.streams.after?.status !== 200)).map((v) => v.streams[room]);
+    return {
+      opened: s.filter((x) => x?.status === 200).length,
+      refused: s.filter((x) => !x || x.status !== 200).length,
+      dropped: s.filter((x) => x?.dropped).length,
+      connect: stats(s.filter((x): x is StreamState => x !== null && x.connectedMs !== null).map((x) => x.connectedMs!)),
+    };
   };
-  const outcome = {
-    reason: lastRoom.endedReason ?? null,
-    confirmed: viewers.filter((v) => v.outcome === 'CONFIRMED').length,
-    released: viewers.filter((v) => v.outcome === 'RELEASED').length,
-    endedMs: endRead === null ? null : endRead - ready.opensAt,
-  };
+  const streams = streamFigures('main', viewers);
+  const afterStreams = streamFigures('after', guests);
+  const outcomeOf = (room: RoomKey, t0: number | null): RoomOutcome => ({
+    reason: last[room].endedReason ?? null,
+    confirmed: viewers.filter((v) => v.outcome[room] === 'CONFIRMED').length,
+    released: viewers.filter((v) => v.outcome[room] === 'RELEASED').length,
+    endedMs: endRead[room] === null || t0 === null ? null : endRead[room]! - t0,
+  });
+  const outcome = outcomeOf('main', ready.opensAt);
+  const afterOutcome = outcomeOf('after', afterOpensAt);
   const quantity = SIZES.reduce((n, s) => n + s.stock, 0);
+  const afterQuantity = AFTER_SIZES.reduce((n, s) => n + s.stock, 0);
+  const stocked = SIZES.reduce((n, s) => n + Math.min(s.stock, STOCKED[s.label] ?? 0), 0);
+  const facts = report.facts;
   const clean =
     unexpected.length === 0 &&
+    doorReads.every((d) => d.status === 200) &&
     streams.refused === 0 &&
     streams.dropped === 0 &&
+    afterStreams.refused === 0 &&
+    afterStreams.dropped === 0 &&
     appErrors === 0 &&
     report.messageErrors === 0 &&
     outcome.reason === 'SOLD_OUT' &&
-    outcome.confirmed === quantity;
+    outcome.confirmed === quantity &&
+    // Every phone the sell-out ended read the second door, and only they.
+    guests.length === facts.afterRoom.guests &&
+    guests.length > 0 &&
+    afterOutcome.reason === 'SOLD_OUT' &&
+    afterOutcome.confirmed === afterQuantity &&
+    facts.afterRoom.confirmed === afterQuantity &&
+    // One order per piece confirmed; those of STOCKED held in stock, every other one a piece to make with its identity.
+    facts.orders.main === quantity &&
+    facts.orders.afterRoom === afterQuantity &&
+    facts.orders.stock === stocked &&
+    facts.orders.bench === quantity + afterQuantity - stocked &&
+    facts.orders.other === 0 &&
+    facts.bench.items === facts.orders.bench &&
+    facts.bench.reserved === facts.bench.items;
   // The busiest five seconds of the app's CPU.
   let busiest = 0;
   for (let i = 0; i + 5 <= report.cpuBySecond.length; i++) busiest = Math.max(busiest, report.cpuBySecond.slice(i, i + 5).reduce((a, b) => a + b, 0) / 5);
   const f = o.vpsFactor;
   // An action's time is the app's share (waiting for its thread, then its own work) and the database's wait. Only the
   // first runs on the app's core; the second is PGlite's one connection here, a stand-in already pessimistic.
-  const appShare = report.loopDelayMs.p99 + (report.cpuMs.user + report.cpuMs.system) / Math.max(1, actions.length);
+  const appShare = report.loopDelayMs.p99 + (report.cpuMs.user + report.cpuMs.system) / Math.max(1, actions.length + doorReads.length);
   const vpsP95 = all.p95 + (f - 1) * appShare;
   const verdict = {
     action: vpsP95 < LIVE_LOAD_TARGETS.actionP95Ms,
@@ -1081,11 +1338,12 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     calibrationMs: ready.calibrationMs,
     seedMs: ready.seedMs,
     streams,
-    actions: { all, byKind, unexpected, appShareMs: round(appShare), vpsP95Ms: round(vpsP95) },
+    actions: { all, byKind, main: stats(actions.filter((a) => a.room === 'main').map((a) => a.ms)), afterRoom: stats(actions.filter((a) => a.room === 'after').map((a) => a.ms)), unexpected, appShareMs: round(appShare), vpsP95Ms: round(vpsP95) },
     fanOut: {
       pulses: pulses.length,
       full: full.length,
       received: fan,
+      afterRoom: { full: fullAfter.length, received: stats(fullAfter.map(([now, r]) => r.last - now)) },
       serverPulse: stats(pulses.map((p) => p.ms)),
       serverPulseFull: stats(fullPulses.map((p) => p.ms)),
     },
@@ -1104,7 +1362,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       atPeak: { heapTotalMib: mib(top.heapTotal), heapUsedMib: mib(top.heapUsed), externalMib: mib(top.external), outsideHeapMib: mib(top.rss - top.heapTotal) },
       withGeoIpMib: Math.round(withGeoIp * 10) / 10,
       limitMib: Math.round(limitMib * 10) / 10,
-      perViewerKib: Math.round(((peakRss - ready.baseline.rss) / 1024 / Math.max(1, viewerCount)) * 10) / 10,
+      perViewerKib: Math.round(((peakRss - ready.baseline.rss) / 1024 / Math.max(1, streams.opened)) * 10) / 10,
       databasePeakMib: databasePeak === null ? null : mib(databasePeak),
     },
     cpu: {
@@ -1116,6 +1374,8 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     },
     loopDelayMs: { p50: Math.round(report.loopDelayMs.p50 * 10) / 10, p99: Math.round(report.loopDelayMs.p99 * 10) / 10, max: Math.round(report.loopDelayMs.max * 10) / 10 },
     outcome,
+    afterRoom: { guests: guests.length, doorRead: stats(doorReads.map((d) => d.ms)), streams: afterStreams, late: lateGuests.size, outcome: afterOutcome },
+    facts,
     appErrors,
     messageErrors: report.messageErrors,
     verdict,
@@ -1137,10 +1397,13 @@ function printLevel(r: LevelResult): void {
     '| Figure | Measured | Target, on the VPS |',
     '|---|---|---|',
     `| Actions, all (${r.actions.all.n}) | p50 ${ms(r.actions.all.p50)} · **p95 ${ms(r.actions.all.p95)}** (the app's share ${ms(r.actions.appShareMs)}, × ${f}: ${ms(r.actions.vpsP95Ms)}) · p99 ${ms(r.actions.all.p99)} · max ${ms(r.actions.all.max)} | p95 < ${LIVE_LOAD_TARGETS.actionP95Ms} ms: ${yes(r.verdict.action)} |`,
+    `| By room: the main room (${r.actions.main.n}) / the after-room (${r.actions.afterRoom.n}) | p50 ${ms(r.actions.main.p50)} / ${ms(r.actions.afterRoom.p50)} · p95 ${ms(r.actions.main.p95)} / ${ms(r.actions.afterRoom.p95)} · max ${ms(r.actions.main.max)} / ${ms(r.actions.afterRoom.max)} | |`,
+    `| I'LL BE THERE (${k.interest.n}) | p50 ${ms(k.interest.p50)} · p95 ${ms(k.interest.p95)} · max ${ms(k.interest.max)} | |`,
     `| ENTER (${k.enter.n}) | p50 ${ms(k.enter.p50)} · p95 ${ms(k.enter.p95)} · max ${ms(k.enter.max)} | |`,
     `| PRESS / SECURE (${k.press.n} / ${k.secure.n}) | p95 ${ms(k.press.p95)} / ${ms(k.secure.p95)} · max ${ms(k.press.max)} / ${ms(k.secure.max)} | |`,
     `| Add-ons / PAY / RELEASE (${k.addons.n} / ${k.confirm.n} / ${k.release.n}) | p95 ${ms(k.addons.p95)} / ${ms(k.confirm.p95)} / ${ms(k.release.p95)} | |`,
     `| Fan-out, the room in memory → the last phone (${r.fanOut.full} full pulses of ${r.fanOut.pulses}) | p50 ${ms(r.fanOut.received.p50)} · **p95 ${ms(r.fanOut.received.p95)}**${vps(r.fanOut.received.p95)} · max ${ms(r.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms: ${yes(r.verdict.fanOut)} |`,
+    `| The after-room's fan-out (${r.fanOut.afterRoom.full} full pulses) | p95 ${ms(r.fanOut.afterRoom.received.p95)}${vps(r.fanOut.afterRoom.received.p95)} · max ${ms(r.fanOut.afterRoom.received.max)} | |`,
     `| The pulse on the server, its reads included (all / full) | p50 ${ms(r.fanOut.serverPulse.p50)} · p95 ${ms(r.fanOut.serverPulse.p95)} / ${ms(r.fanOut.serverPulseFull.p95)} · max ${ms(r.fanOut.serverPulse.max)} | |`,
     `| Memory, the app's peak | ${r.memory.peakRssMib} MiB resident (${r.memory.idleMib} MiB started, ${r.memory.baselineMib} MiB before the streams; ${r.memory.perViewerKib} KiB per viewer; at the peak V8's heap ${r.memory.atPeak.heapTotalMib} MiB, ${r.memory.atPeak.heapUsedMib} in use, ${r.memory.atPeak.outsideHeapMib} MiB outside it)${r.memory.databasePeakMib === null ? '' : ` · PGlite's process ${r.memory.databasePeakMib} MiB`} | |`,
     `| Memory with the GeoIP database (+${GEOIP_RESIDENT_MIB} MiB) | **${r.memory.withGeoIpMib} MiB** | < ${r.memory.limitMib} MiB: ${yes(r.verdict.memory)} |`,
@@ -1151,6 +1414,8 @@ function printLevel(r: LevelResult): void {
     `| Event loop delay | p50 ${ms(r.loopDelayMs.p50)} · p99 ${ms(r.loopDelayMs.p99)} · max ${ms(r.loopDelayMs.max)} | |`,
     `| CPU, the app | busiest five seconds **${r.cpu.busiest5s} of a core** (× ${f}: ${round(r.cpu.busiest5s * f)}) · ${r.cpu.cores} over ${(r.cpu.wallMs / 1000).toFixed(0)} s (user ${r.cpu.userMs} ms, system ${r.cpu.systemMs} ms) | < ${LIVE_LOAD_TARGETS.cpuCores} core: ${yes(r.verdict.cpu)} |`,
     `| The end | ${r.outcome.reason ?? 'not over'} ${r.outcome.endedMs !== null ? `${(r.outcome.endedMs / 1000).toFixed(1)} s after T0` : ''} · ${r.outcome.confirmed} confirmed · ${r.outcome.released} released | every piece confirmed |`,
+    `| The after-room | ${r.afterRoom.guests} guests (${r.facts.afterRoom.guests} remembered) · door read p95 ${ms(r.afterRoom.doorRead.p95)} · ${r.afterRoom.streams.opened} streams, ${r.afterRoom.streams.refused} refused, ${r.afterRoom.streams.dropped} dropped · ${r.afterRoom.late} came after their size or the room sold out · ${r.afterRoom.outcome.reason ?? 'not over'} ${r.afterRoom.outcome.endedMs !== null ? `${(r.afterRoom.outcome.endedMs / 1000).toFixed(1)} s after its T0` : ''} · ${r.afterRoom.outcome.confirmed} confirmed · ${r.afterRoom.outcome.released} released | every piece confirmed |`,
+    `| The orders | ${r.facts.orders.main} + ${r.facts.orders.afterRoom} (after-room) · ${r.facts.orders.stock} held in stock · ${r.facts.orders.bench} to make, ${r.facts.bench.reserved} of ${r.facts.bench.items} with a reserved identity · ${r.facts.orders.other} other · ${r.facts.journal} journal rows | one per piece |`,
     `| Answers other than 200 · app errors | ${r.actions.unexpected.length} · ${r.appErrors} | none: ${yes(r.verdict.clean)} |`,
     '',
     `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} in the room.`,
@@ -1158,7 +1423,10 @@ function printLevel(r: LevelResult): void {
   ];
   if (r.actions.unexpected.length) {
     const groups = new Map<string, number>();
-    for (const u of r.actions.unexpected) groups.set(`${u.kind} ${u.status} ${u.code ?? ''}`.trim(), (groups.get(`${u.kind} ${u.status} ${u.code ?? ''}`.trim()) ?? 0) + 1);
+    for (const u of r.actions.unexpected) {
+      const g = `${u.room} ${u.kind} ${u.status} ${u.code ?? ''}`.trim();
+      groups.set(g, (groups.get(g) ?? 0) + 1);
+    }
     lines.push(`Answers other than 200: ${[...groups].map(([g, n]) => `${g} × ${n}`).join(', ')}`, '');
   }
   process.stdout.write(`${lines.join('\n')}\n`);
@@ -1166,7 +1434,7 @@ function printLevel(r: LevelResult): void {
 
 async function drive(o: Options): Promise<void> {
   process.stdout.write(
-    `LIVE RELEASES load test: levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${o.burstSeconds} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}\n`,
+    `LIVE RELEASES load test (LIVE RELEASE+: the rules, the stock, the after-room): levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${o.burstSeconds} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}\n`,
   );
   const results: LevelResult[] = [];
   for (const level of o.levels) {

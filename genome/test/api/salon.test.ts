@@ -195,7 +195,7 @@ describe('the private salon (P-X08)', () => {
     expect(other.statusCode, other.body).toBe(201);
   });
 
-  it('the console\'s Requests: OPEN first, emails masked for an AUDITOR; an OPERATOR closes one with a note, audited without it; then the account may request again', async () => {
+  it('the console\'s Requests: OPEN first, emails masked for an AUDITOR; an OPERATOR closes one with a note and its outcome, audited without the note, ACCEPTED creating its order; then the account may request again', async () => {
     const all = await adminRequests(auditor);
     expect(all.total).toBe(2);
     expect(all.items.map((r) => [r.model.name, r.status])).toEqual([
@@ -210,20 +210,38 @@ describe('the private salon (P-X08)', () => {
     expect(errorOf(await auditor.get('/api/admin/club/requests?status=PENDING')).code).toBe('VALIDATION_FAILED');
 
     const close = (c: Client, body: unknown, id = mine.id) => c.post(`/api/admin/club/requests/${id}/close`, body);
-    expect((await close(auditor, { note: 'Called.' })).statusCode).toBe(403);
+    expect((await close(auditor, { note: 'Called.', outcome: 'DECLINED' })).statusCode).toBe(403);
     // Without the CSRF header, refused even for an OPERATOR.
-    expect((await operator.post(`/api/admin/club/requests/${mine.id}/close`, { note: 'Called.' }, { noCsrf: true })).statusCode).toBe(403);
+    expect((await operator.post(`/api/admin/club/requests/${mine.id}/close`, { note: 'Called.', outcome: 'DECLINED' }, { noCsrf: true })).statusCode).toBe(403);
     expect((await close(operator, {})).statusCode).toBe(400);
-    expect((await close(operator, { note: '   ' })).statusCode).toBe(400);
-    expect(errorOf(await close(operator, { note: 'Called.' }, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6')).code).toBe('SHOP_REQUEST_NOT_FOUND');
+    expect((await close(operator, { note: '   ', outcome: 'DECLINED' })).statusCode).toBe(400);
+    // The outcome is said: ACCEPTED or DECLINED, nothing else.
+    expect((await close(operator, { note: 'Called.' })).statusCode).toBe(400);
+    expect((await close(operator, { note: 'Called.', outcome: 'MAYBE' })).statusCode).toBe(400);
+    expect(errorOf(await close(operator, { note: 'Called.', outcome: 'DECLINED' }, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6')).code).toBe('SHOP_REQUEST_NOT_FOUND');
+    expect(await h.ctx.db.selectFrom('orders').select('id').where('channel', '=', 'SALON').execute()).toEqual([]);
     h.clock.advance(60_000);
-    const closed = await close(operator, { note: 'Called the client: a fitting on Tuesday.' });
+    const closed = await close(operator, { note: 'Called the client: a fitting on Tuesday.', outcome: 'ACCEPTED' });
     expect(closed.statusCode, closed.body).toBe(200);
-    expect(safeJson(closed)).toMatchObject({ id: mine.id, status: 'CLOSED', handledBy: { email: expect.stringContaining('@') }, handledAt: h.clock.now().toISOString(), resolutionNote: 'Called the client: a fitting on Tuesday.' });
+    expect(safeJson(closed)).toMatchObject({
+      id: mine.id,
+      status: 'CLOSED',
+      outcome: 'ACCEPTED',
+      handledBy: { email: expect.stringContaining('@') },
+      handledAt: h.clock.now().toISOString(),
+      resolutionNote: 'Called the client: a fitting on Tuesday.',
+    });
+    // ACCEPTED: the sale is committed, its order created in the same transaction, RESERVED at the default location, its
+    // size and price for Client Services to enter (nothing held until its size is known).
+    const [order] = await h.ctx.db.selectFrom('orders as o').innerJoin('stock_locations as l', 'l.id', 'o.location_id').selectAll('o').select('l.name as location').where('o.shop_request_id', '=', mine.id).execute();
+    expect(order).toMatchObject({ channel: 'SALON', account_id: titane.id, model_id: solstice, status: 'RESERVED', drop_id: null, sku_id: null, price_minor: null, reservation: null, location: 'FRANCE WAREHOUSE' });
+    expect(order!.reserved_at.toISOString()).toBe(h.clock.now().toISOString());
     const [entry] = await audits('shop.request.close', mine.id);
-    expect(entry).toMatchObject({ actor_type: 'admin', target_type: 'shop_request', details: { modelId: solstice } });
+    expect(entry).toMatchObject({ actor_type: 'admin', target_type: 'shop_request', details: { modelId: solstice, outcome: 'ACCEPTED', orderId: order!.id } });
     expect(JSON.stringify(entry!.details)).not.toContain('fitting');
-    expect(errorOf(await close(operator, { note: 'Again.' })).code).toBe('SHOP_REQUEST_CLOSED');
+    expect((await audits('order.create', order!.id))[0]).toMatchObject({ actor_type: 'admin', details: { channel: 'SALON', shopRequestId: mine.id, to: 'RESERVED' } });
+    expect(errorOf(await close(operator, { note: 'Again.', outcome: 'ACCEPTED' })).code).toBe('SHOP_REQUEST_CLOSED');
+    expect(await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', mine.id).execute()).toHaveLength(1);
     expect((await adminRequests(auditor, '?status=CLOSED')).items.map((r) => r.id)).toEqual([mine.id]);
     expect((await adminRequests(auditor, '?status=OPEN')).items.map((r) => r.model.name)).toEqual(['ECLIPSE']);
     // Closed, the sheet offers the request again, and the account may make it.
@@ -232,26 +250,28 @@ describe('the private salon (P-X08)', () => {
     expect((await requestOf(titane.client, 'solstice')).statusCode).toBe(201);
   });
 
-  it('the lock of an account closes its open requests (by the lock\'s ADMIN, without a note); the right of access exports every request, never who closed it', async () => {
+  it('the lock of an account closes its open requests (by the lock\'s ADMIN, DECLINED, without a note); the right of access exports every request, never who closed it', async () => {
     h.clock.advance(60_000);
     const locked = await admin.post(`/api/admin/owners/${titane.id}/lock`);
     expect(locked.statusCode, locked.body).toBe(200);
     expect(safeJson(locked)).toMatchObject({ status: 'LOCKED', shopRequestsClosed: 1 });
-    const rows = await h.ctx.db.selectFrom('shop_requests').select(['id', 'status', 'handled_by', 'handled_at', 'resolution_note']).where('account_id', '=', titane.id).orderBy('created_at').orderBy('id').execute();
-    expect(rows.map((r) => r.status)).toEqual(['CLOSED', 'CLOSED']);
+    const rows = await h.ctx.db.selectFrom('shop_requests').select(['id', 'status', 'outcome', 'handled_by', 'handled_at', 'resolution_note']).where('account_id', '=', titane.id).orderBy('created_at').orderBy('id').execute();
+    expect(rows.map((r) => [r.status, r.outcome])).toEqual([['CLOSED', 'ACCEPTED'], ['CLOSED', 'DECLINED']]);
     const byLock = rows.find((r) => r.resolution_note === null)!;
     expect(byLock.handled_by).not.toBeNull();
-    expect((await audits('shop.request.close', byLock.id))[0]!.details).toEqual({ modelId: solstice, reason: 'account_locked' });
+    expect((await audits('shop.request.close', byLock.id))[0]!.details).toEqual({ modelId: solstice, outcome: 'DECLINED', reason: 'account_locked' });
+    // A declined request makes no order.
+    expect(await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', byLock.id).execute()).toEqual([]);
     expect((await audits('account.lock', titane.id))[0]!.details).toMatchObject({ shopRequestsClosed: 1 });
     // The other account's request stays open.
     expect((await adminRequests(auditor, '?status=OPEN')).items.map((r) => r.account.id)).toEqual([platine.id]);
 
     const exported = safeJson(await admin.get(`/api/admin/owners/${titane.id}/export`)) as { shopRequests: Record<string, unknown>[] };
     expect(exported.shopRequests).toEqual([
-      expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: 'A size 52, and a call after six.', status: 'CLOSED', resolutionNote: 'Called the client: a fitting on Tuesday.' }),
-      expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: null, status: 'CLOSED', resolutionNote: null }),
+      expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: 'A size 52, and a call after six.', status: 'CLOSED', outcome: 'ACCEPTED', resolutionNote: 'Called the client: a fitting on Tuesday.' }),
+      expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: null, status: 'CLOSED', outcome: 'DECLINED', resolutionNote: null }),
     ]);
-    for (const r of exported.shopRequests) expect(Object.keys(r).sort()).toEqual(['handledAt', 'model', 'modelId', 'note', 'requestId', 'requestedAt', 'resolutionNote', 'status']);
+    for (const r of exported.shopRequests) expect(Object.keys(r).sort()).toEqual(['handledAt', 'model', 'modelId', 'note', 'outcome', 'requestId', 'requestedAt', 'resolutionNote', 'status']);
     expect((await audits('account.export', titane.id))[0]!.details).toMatchObject({ shopRequests: 2 });
   });
 

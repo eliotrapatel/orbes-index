@@ -12,11 +12,13 @@ import {
   LIVE_ADDONS_MAX,
   LIVE_EXTEND_MINUTES,
   LIVE_MESSAGE_MAX,
+  LIVE_MIN_PARTICIPATIONS,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_PHASES as SERVER_LIVE_PHASES,
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
   LIVE_TURN_SECONDS,
 } from '../../src/server/services/live.js';
 import {
@@ -27,14 +29,17 @@ import {
   LIVE_CURRENCIES as SERVER_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
-  LIVE_RESOLUTION_NOTE_MAX,
   LIVE_SIZES,
   liveReference as serverReference,
 } from '../../src/server/services/live-console.js';
+import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
   addonsText,
-  canResolve,
+  AFTER_ROOM_SKIPS,
+  afterRoomStateLabel,
+  afterRoomTiming,
+  combineLine,
   defaultQuantityLine,
   formatMoney,
   LIVE_LIMITS,
@@ -42,6 +47,7 @@ import {
   liveBoardFigures,
   liveEntryActions,
   liveEntryDeadline,
+  liveLead,
   livePageKey,
   livePartChange,
   livePartProblem,
@@ -55,9 +61,9 @@ import {
   newLiveValues,
   parseAddons,
   parseMoney,
+  surpriseLine,
   parseSizes,
   priorityLine,
-  reservationAddons,
   sizesText,
   windowLine,
 } from '../../src/web/admin/model/live.js';
@@ -95,7 +101,26 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     perAccount: 1,
     minTier: 0,
     tierPriority: true,
-    access: { models: [], collection: null, text: 'every ORBES account' },
+    access: { models: [], collection: null, minParticipations: null, segment: null, combine: 'AND', text: 'every ORBES account' },
+    surprise: { enabled: false, text: null },
+    locationId: null,
+    location: { id: 'l1', name: 'FRANCE WAREHOUSE' },
+    question: {
+      text: 'WHAT WOULD YOU HAVE WANTED?',
+      answers: ['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND'],
+      custom: false,
+      enabled: true,
+      state: 'WAITING',
+      opensAt: null,
+      closesAt: null,
+      asked: { tookPart: 0, interest: 0 },
+      answered: 0,
+      tally: [
+        { answer: 1, label: 'ANOTHER SIZE', count: 0 },
+        { answer: 2, label: 'ANOTHER FINISH', count: 0 },
+        { answer: 3, label: 'ANOTHER PRICE BAND', count: 0 },
+      ],
+    },
     sizes: [
       { id: 's52', label: '52', stock: 3 },
       { id: 's54', label: '54', stock: 2 },
@@ -118,6 +143,8 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     createdAt: '2026-11-01T09:00:00.000Z',
     createdBy: null,
     seedHash: 'ab'.repeat(32),
+    afterRoom: null,
+    afterRoomOf: null,
     ...o,
   };
 }
@@ -143,9 +170,12 @@ describe('the console of the LIVE RELEASES mirrors the server', () => {
       extendMinutes: { ...LIVE_EXTEND_MINUTES },
       addPieces: { ...LIVE_ADD_PIECES },
       message: LIVE_MESSAGE_MAX,
-      note: LIVE_RESOLUTION_NOTE_MAX,
       accessModels: LIVE_ACCESS_MODELS_MAX,
       line: LIVE_CONSOLE_LINE_MAX,
+      afterRoomDelay: { ...AFTER_ROOM_DELAY_MINUTES },
+      afterRoomLength: { ...AFTER_ROOM_LENGTH_MINUTES },
+      minParticipations: { ...LIVE_MIN_PARTICIPATIONS },
+      surprise: LIVE_SURPRISE_MAX,
     });
     expect([...LIVE_PHASES]).toEqual([...SERVER_LIVE_PHASES]);
     expect([...LIVE_CURRENCIES]).toEqual([...SERVER_CURRENCIES]);
@@ -175,7 +205,6 @@ describe('the console of the LIVE RELEASES', () => {
     expect(LIVE_ENTRY_STATUSES.map((s) => toneOf('liveEntry', s))).toEqual(['outline', 'outline', 'solid', 'alert', 'solid', 'muted', 'muted', 'muted', 'muted', 'alert', 'muted']);
     // A hold waits for PAY as an open case waits for the staff.
     expect(toneOf('liveEntry', 'SECURED')).toBe(toneOf('case', 'OPEN'));
-    expect([toneOf('liveResolution', 'CONCLUDED'), toneOf('liveResolution', 'CANCELLED')]).toEqual(['solid', 'muted']);
   });
 
   it('reads and writes prices in units, as the house writes them', () => {
@@ -310,6 +339,30 @@ describe('the console of the LIVE RELEASES', () => {
     expect(livePartProblem(r, 'release', { ...livePartValues(r, 'release'), perAccount: '6' })).toMatch(/1 to 5 pieces/);
   });
 
+  it('sets the access beyond the tier (the releases taken part in, a segment, AND or OR) and the surprise, sending only what changed', () => {
+    const r = release();
+    const v = livePartValues(r, 'access');
+    expect(v).toMatchObject({ minParticipations: '', segmentId: '', combine: 'AND' });
+    expect(livePartChange(r, 'access', v)).toEqual({});
+    expect(livePartChange(r, 'access', { ...v, minParticipations: '3', segmentId: 'seg1', combine: 'OR' })).toEqual({ minParticipations: 3, accessSegmentId: 'seg1', accessCombine: 'OR' });
+    expect(livePartProblem(r, 'access', { ...v, minParticipations: '0' })).toBe('Releases taken part in: 1 to 100, or leave it empty.');
+    expect(livePartProblem(r, 'access', { ...v, minParticipations: '101' })).toMatch(/1 to 100/);
+    expect(livePartProblem(r, 'access', { ...v, combine: 'XOR' })).toBe('Choose how the rules combine.');
+    const set = release({ access: { models: [], collection: null, minParticipations: 3, segment: { id: 'seg1', name: 'Regulars' }, combine: 'OR', text: 'collectors who have taken part in 3 releases or selected collectors' } });
+    expect(livePartChange(set, 'access', { ...livePartValues(set, 'access'), minParticipations: '', segmentId: '' })).toEqual({ minParticipations: null, accessSegmentId: null });
+    expect([combineLine('AND'), combineLine('OR')]).toEqual(['Every rule is needed (AND)', 'Any one rule is enough (OR)']);
+    // The surprise: on with its description, off keeping it.
+    expect(livePartValues(r, 'surprise')).toEqual({ enabled: '', text: '' });
+    expect(livePartProblem(r, 'surprise', { enabled: 'true', text: ' ' })).toMatch(/^Say what goes in the box/);
+    expect(livePartProblem(r, 'surprise', { enabled: 'true', text: 'x'.repeat(501) })).toMatch(/at most 500 characters/);
+    expect(livePartChange(r, 'surprise', { enabled: 'true', text: ' A silk pouch. ' })).toEqual({ surpriseEnabled: true, surpriseText: 'A silk pouch.' });
+    const surprised = release({ surprise: { enabled: true, text: 'A silk pouch.' } });
+    expect(livePartChange(surprised, 'surprise', { enabled: '', text: 'A silk pouch.' })).toEqual({ surpriseEnabled: false });
+    expect(surpriseLine(surprised)).toBe('In every box · A silk pouch.');
+    expect(surpriseLine(release({ surprise: { enabled: false, text: 'A silk pouch.' } }))).toBe('None (kept: A silk pouch.)');
+    expect(surpriseLine(r)).toBe('None');
+  });
+
   it('offers each role what it may do in the phase: OPERATOR edits until the announcement and runs the controls, ADMIN ends', () => {
     const draft = release();
     expect(liveActions(draft, 'AUDITOR')).toEqual({ edit: false, publish: false, cancel: false, circlePost: false, boardLink: false, pause: false, resume: false, extend: false, addPieces: false, message: false, end: false });
@@ -344,12 +397,76 @@ describe('the console of the LIVE RELEASES', () => {
     expect(liveEntryActions({ status: 'CONFIRMED' }, board, 'ADMIN')).toEqual({ letIn: false, free: false, remove: false });
     expect(liveEntryActions({ status: 'SECURED' }, board, 'AUDITOR')).toEqual({ letIn: false, free: false, remove: false });
     expect([livePhrase('end', draft), livePhrase('cancel', draft)]).toEqual(['END 0F8E7D6C', 'CANCEL 0F8E7D6C']);
-    expect(canResolve({ resolution: null }, 'OPERATOR')).toBe(true);
-    expect(canResolve({ resolution: 'CONCLUDED' }, 'ADMIN')).toBe(false);
-    expect(canResolve({ resolution: null }, 'AUDITOR')).toBe(false);
   });
 
-  it('shows the board’s figures, a deadline, the windows, the line’s rule and a reservation’s add-ons', () => {
+  it('sets the after-room with the release: on or off, its model, price, sizes, add-ons, delay and length, its ids kept', () => {
+    const none = release();
+    expect(livePartValues(none, 'afterRoom')).toEqual({ enabled: '', modelId: '', price: '', sizes: 'ONE SIZE = 5', addons: '', delay: '10', length: '15' });
+    // Off and staying off: nothing to send, nothing to check.
+    expect(livePartProblem(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toBeNull();
+    expect(livePartChange(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toEqual({});
+    const on = { ...livePartValues(none, 'afterRoom'), enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2\n54 = 1', addons: 'GIFT BOX | 50' };
+    expect(livePartProblem(none, 'afterRoom', on)).toBeNull();
+    expect(livePartChange(none, 'afterRoom', on)).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], addons: [{ label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 10, lengthMinutes: 15 },
+    });
+    expect(livePartProblem(none, 'afterRoom', { ...on, modelId: '' })).toMatch(/model/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, price: 'x' })).toMatch(/price/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, sizes: '' })).toMatch(/^The after-room: list the sizes/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, addons: 'X | nope' })).toMatch(/^The after-room: line 1/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, delay: '0' })).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
+    expect(livePartProblem(none, 'afterRoom', { ...on, length: '121' })).toBe('The after-room is open 5 to 120 minutes.');
+    // Set: its values, its sizes and add-ons keeping their ids; the same again changes nothing; off removes it.
+    const afterRoom = {
+      id: 'c1',
+      model: { id: 'm2', name: 'AFTERGLOW', type: 'RING', active: true },
+      priceMinor: 90_000,
+      currency: 'EUR',
+      sizes: [{ id: 'z52', label: '52', stock: 2 }],
+      quantity: 2,
+      addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }],
+      delayMinutes: 5,
+      lengthMinutes: 20,
+      state: 'WAITING' as const,
+      phase: 'DRAFT' as const,
+      opensAt: null,
+      closesAt: null,
+      endedReason: null,
+      skipped: null,
+      guests: 0,
+      entries: Object.fromEntries(LIVE_ENTRY_STATUSES.map((x) => [x, 0])) as LiveRelease['entries'],
+    };
+    const set = release({ afterRoom });
+    const values = livePartValues(set, 'afterRoom');
+    expect(values).toEqual({ enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2', addons: 'GIFT BOX | 50', delay: '5', length: '20' });
+    expect(livePartChange(set, 'afterRoom', values)).toEqual({});
+    expect(livePartChange(set, 'afterRoom', { ...values, sizes: '52 = 3', length: '30' })).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 3 }], addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 5, lengthMinutes: 30 },
+    });
+    expect(livePartChange(set, 'afterRoom', { ...values, enabled: '' })).toEqual({ afterRoom: null });
+    // Where it stands, said.
+    expect(afterRoomTiming(afterRoom)).toBe('5 min after the sell-out, open 20 min');
+    expect(afterRoomStateLabel(afterRoom)).toBe('AFTER A SELL-OUT');
+    expect([afterRoomStateLabel({ state: 'OPENS', endedReason: null }), afterRoomStateLabel({ state: 'OPEN', endedReason: null }), afterRoomStateLabel({ state: 'NOT_OPENED', endedReason: null })]).toEqual(['OPENS SOON', 'OPEN', 'NOT OPENED']);
+    expect([afterRoomStateLabel({ state: 'OVER', endedReason: 'SOLD_OUT' }), afterRoomStateLabel({ state: 'OVER', endedReason: 'CLOSED' })]).toEqual(['SOLD OUT', 'CLOSED']);
+    expect(Object.keys(AFTER_ROOM_SKIPS).sort()).toEqual(['CANCELLED', 'NOT_SOLD_OUT', 'NO_GUESTS']);
+  });
+
+  it('gives an after-room\'s own page its live controls only, and its own lead', () => {
+    const child = release({ phase: 'DRAFT', editable: false, afterRoomOf: { id: ID, title: 'THE MONOLITHE RING' } });
+    expect(liveActions(child, 'ADMIN')).toMatchObject({ edit: false, publish: false, cancel: false, circlePost: false, boardLink: false });
+    const live = { ...child, phase: 'LIVE' as const, publishedAt: '2026-11-10T19:00:00.000Z' };
+    expect(liveActions(live, 'ADMIN')).toMatchObject({ edit: false, publish: false, cancel: false, boardLink: false, pause: true, extend: true, addPieces: true, message: true, end: true });
+    expect(liveLead(child)).toMatch(/^The after-room of the release above: it opens only if that release sells out/);
+    expect(liveLead(live)).toMatch(/^Open: its guests/);
+    expect(liveLead({ ...child, phase: 'CANCELLED' })).toMatch(/^Never opened/);
+    expect(liveLead({ ...child, phase: 'ENDED', over: true })).toMatch(/^Over/);
+    expect(liveLead(release())).toMatch(/^A draft/);
+    expect(['DRAFT', 'ANNOUNCED', 'ROOM', 'LIVE', 'CANCELLED'].map((phase) => liveStateLabel({ phase: phase as LiveRelease['phase'], endedReason: null }, true))).toEqual(['AFTER A SELL-OUT', 'OPENS SOON', 'OPENS SOON', 'LIVE', 'NOT OPENED']);
+    expect(liveStateLabel({ phase: 'ENDED', endedReason: 'SOLD_OUT' }, true)).toBe('SOLD OUT');
+  });
+
+  it('shows the board’s figures, a deadline, the windows and the line’s rule', () => {
     const b = {
       totals: { stock: 5, left: 1, held: 2, sold: 2, waiting: 0, line: 7, turns: 2, secured: 1, confirmed: 2, missed: 3, expired: 1, interest: 40, inRoom: 12, released: 1, departed: 0, removed: 0, ended: 0 },
       lineTotal: 10,
@@ -370,13 +487,11 @@ describe('the console of the LIVE RELEASES', () => {
     expect(windowLine({ tier: 3, turnSeconds: null, payMinutes: 10 })).toBe('PALLADIUM · 10 min to pay');
     expect(windowLine({ tier: 0, turnSeconds: 60, payMinutes: 2 })).toBe('NO TIER · 60 s to hold · 2 min to pay');
     expect(priorityLine(false)).toBe('At random for all');
-    expect(reservationAddons({ currency: 'EUR', addons: [{ id: 'a', label: 'ENGRAVING', priceMinor: 15_000 }] })).toBe('ENGRAVING € 150');
-    expect(reservationAddons({ currency: 'EUR', addons: [] })).toBe('None');
   });
 });
 
 describe('AdminApi: the LIVE RELEASES', () => {
-  it('reads, edits, controls and concludes them on their paths, a timer’s read never ending the session, the CSV saved', async () => {
+  it('reads, edits and controls them on their paths, a timer’s read never ending the session', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const answers: Response[] = [];
     const fetch: FetchLike = async (url, init = {}) => {
@@ -399,8 +514,6 @@ describe('AdminApi: the LIVE RELEASES', () => {
     await api.endLive(ID);
     await api.letInLiveEntry(ID, 'e1');
     await api.removeLiveEntry(ID, 'e1');
-    await api.resolveLiveReservation(ID, 'e1', 'CANCELLED', '');
-    await api.resolveLiveReservation(ID, 'e1', 'CONCLUDED', 'Paid.');
     await api.liveEntries(ID, { status: 'OPEN', page: 1, pageSize: 50 });
     await api.setLiveSilhouette(ID, new Blob([new Uint8Array([0xff, 0xd8])], { type: 'image/webp' }));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
@@ -417,8 +530,6 @@ describe('AdminApi: the LIVE RELEASES', () => {
       `POST /api/admin/live/${ID}/end`,
       `POST /api/admin/live/${ID}/entries/e1/let-in`,
       `POST /api/admin/live/${ID}/entries/e1/remove`,
-      `POST /api/admin/live/${ID}/entries/e1/resolve`,
-      `POST /api/admin/live/${ID}/entries/e1/resolve`,
       `GET /api/admin/live/${ID}/entries?status=OPEN&page=1&pageSize=50`,
       `POST /api/admin/live/${ID}/silhouette`,
     ]);
@@ -427,9 +538,7 @@ describe('AdminApi: the LIVE RELEASES', () => {
     expect(bodies[7]).toEqual({ minutes: 15 });
     expect(bodies[8]).toEqual({ sizeId: 's52', pieces: 2 });
     expect(bodies[9]).toEqual({ text: 'The vault opens.' });
-    expect(bodies[13]).toEqual({ resolution: 'CANCELLED' });
-    expect(bodies[14]).toEqual({ resolution: 'CONCLUDED', note: 'Paid.' });
-    expect((calls[16]!.init.headers as Record<string, string>)['content-type']).toBe('image/webp');
+    expect((calls[14]!.init.headers as Record<string, string>)['content-type']).toBe('image/webp');
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
     expect(api.liveStreamUrl(ID)).toBe(`/api/admin/live/${ID}/stream`);
 
@@ -437,10 +546,5 @@ describe('AdminApi: the LIVE RELEASES', () => {
     answers.push(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }), { status: 401, headers: { 'content-type': 'application/json' } }));
     await expect(api.liveBoard(ID, { background: true })).rejects.toMatchObject({ status: 401 });
     expect(unauthorized).toBe(0);
-
-    answers.push(new Response('"reference"\r\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8; header=present', 'content-disposition': 'attachment; filename="ORBES-live-0F8E7D6C-reservations-2026-11-10.csv"' } }));
-    const csv = await api.liveReservationsCsv(ID);
-    expect(csv.filename).toBe('ORBES-live-0F8E7D6C-reservations-2026-11-10.csv');
-    expect(await csv.blob.text()).toBe('"reference"\r\n');
   });
 });

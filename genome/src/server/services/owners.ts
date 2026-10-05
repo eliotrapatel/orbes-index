@@ -11,7 +11,16 @@
  *   sheet    GET  /api/admin/owners/:id (AUDITOR): the account, its tier in
  *            the club now (P-X04: services/club.ts `tierOf`), the pieces it
  *            owns and owned (`ownership`), its transfers in progress and its 20
- *            latest scans (`scan_events.account_id`).
+ *            latest scans (`scan_events.account_id`). The client sheet (plan
+ *            LIVE RELEASE+, N4) adds the releases it took part in with the
+ *            pieces it secured in each (services/participation.ts), its
+ *            answers to the questions after (services/question.ts), its
+ *            interest (I'LL BE THERE) and what became of it, the segments it
+ *            belongs to now (services/segments.ts, read live) and the notes
+ *            ORBES Client Services wrote on its orders, draw entries, requests
+ *            of the private salon and LIVE reservations; its orders and their
+ *            steps are the fulfilment's (services/fulfilment.ts `forAccount`,
+ *            joined by the route).
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
  *            transaction with every session of the account revoked, its
  *            pending transfers cancelled, its open links to ownership
@@ -31,7 +40,10 @@
  *            their tokens), its entries in the drops (P-R03), its answers to
  *            the circle's invitations and its votes in its polls (P-X01), its
  *            requests of the private salon (P-X08), its entries in the LIVE
- *            RELEASES with their add-ons and its interest in them, and every audit entry that names it, as target or as actor. Audited
+ *            RELEASES with their add-ons and its interest in them, its orders
+ *            with their steps, the buyer's name and address Client Services
+ *            entered and the engraving text (plan LIVE RELEASE+), and every
+ *            audit entry that names it, as target or as actor. Audited
  *            `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -58,6 +70,10 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
+import { participatedReleases, releasesTakenPart } from './participation.js';
+import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
+import { memberSegments } from './segments.js';
+import { accountOrders, orderReference, type ExportedOrder } from './orders.js';
 import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
@@ -176,6 +192,41 @@ export interface AccountScan {
   country: string | null;
 }
 
+/** A release a collector took part in (participation.ts), and the pieces it secured there (its after-room's included). */
+export interface ClientRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  title: string;
+  opensAt: Date;
+  /** Pieces secured: its LIVE entries CONFIRMED (their quantity), its draw entry CONFIRMED; 0: it took part. */
+  secured: number;
+}
+
+/** A collector's I'LL BE THERE for a LIVE RELEASE, and what became of it. */
+export interface ClientInterest {
+  dropId: string;
+  title: string;
+  size: string;
+  since: Date;
+  opensAt: Date;
+  /** UPCOMING before its T0; CAME when it had a place in the line; DID_NOT_COME otherwise; CANCELLED with the release. */
+  outcome: 'UPCOMING' | 'CAME' | 'DID_NOT_COME' | 'CANCELLED';
+}
+
+/** A note ORBES Client Services wrote about one of the collector's dealings, with what it is about and who wrote it. */
+export interface ClientNote {
+  at: Date;
+  /** An order's step (its reference), a draw's entry, a request of the private salon closed (its model), a LIVE reservation concluded. */
+  about: 'ORDER' | 'DRAW' | 'SALON' | 'LIVE';
+  /** What it concerns: the order's OR- reference, the release's title, the model's name. */
+  subject: string;
+  /** The order, for an ORDER note. */
+  orderId: string | null;
+  text: string;
+  /** The console user who wrote it, by email; null for a script. */
+  by: string | null;
+}
+
 export interface OwnerSheet {
   owner: OwnerSummary;
   /** P-X04: the account's tier in the club now (0 and null: none), the pieces it counts and the full years since its first ownership. */
@@ -186,6 +237,16 @@ export interface OwnerSheet {
   transfers: TransferInProgress[];
   /** The OWNER_SHEET_SCANS latest scans made while signed in to the account. */
   scans: AccountScan[];
+  /** N4: the releases it took part in, the latest first; `count` of them, `secured` the pieces secured in all. */
+  releases: { count: number; secured: number; items: ClientRelease[] };
+  /** N4: its answers to the questions after the LIVE RELEASES, the latest first. */
+  answers: ExportedReleaseAnswer[];
+  /** N4: its I'LL BE THERE, the latest release first. */
+  interest: ClientInterest[];
+  /** N4: the segments it belongs to now, by name. */
+  segments: { id: string; name: string }[];
+  /** N4: Client Services' notes on its orders, entries and requests, the latest first. */
+  notes: ClientNote[];
 }
 
 export interface LockOutcome {
@@ -283,6 +344,14 @@ export interface AccountExport {
   liveEntries: ExportedLiveEntry[];
   /** The account's interest in the LIVE RELEASES (I'LL BE THERE), oldest first: the release, the size, since when. */
   liveInterest: ExportedLiveInterest[];
+  /** The account's answers to the questions after the LIVE RELEASES (plan LIVE RELEASE+), oldest first: the release, the question, the answer, when. */
+  releaseAnswers: ExportedReleaseAnswer[];
+  /**
+   * The account's orders (plan LIVE RELEASE+), oldest first: the channel and release, the model, size, price and
+   * add-ons, the engraving text, the buyer's name and address ORBES Client Services entered, each step with its time and
+   * note, the carrier and the tracking number; never who handled it, nor where the piece is kept.
+   */
+  orders: ExportedOrder[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -371,7 +440,7 @@ export class OwnerService {
     const owner = found.items[0];
     if (!owner) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
     const now = this.clock();
-    const [standing, pieces, transfers, scans] = await Promise.all([
+    const [standing, pieces, transfers, scans, client] = await Promise.all([
       tierOf(this.db, owner.id, now),
       this.pieces(this.db, owner.id),
       this.db
@@ -392,8 +461,10 @@ export class OwnerService {
         .orderBy('s.id')
         .limit(OWNER_SHEET_SCANS)
         .execute(),
+      this.client(owner.id, now),
     ]);
     return {
+      ...client,
       owner,
       tier: { level: standing.tier, name: tierName(standing.tier), pieces: standing.pieces, seniority: standing.seniority },
       pieces,
@@ -408,6 +479,135 @@ export class OwnerService {
         country: s.country?.trim() ?? null,
       })),
     };
+  }
+
+  /** N4: what the client sheet adds to the account's (see the file header). */
+  private async client(accountId: string, now: Date): Promise<Pick<OwnerSheet, 'releases' | 'answers' | 'interest' | 'segments' | 'notes'>> {
+    const [took, answers, interest, segments, notes] = await Promise.all([
+      this.releases(accountId, now),
+      accountReleaseAnswers(this.db, accountId),
+      this.interest(accountId, now),
+      this.segmentsOf(accountId, now),
+      this.notes(accountId),
+    ]);
+    return { releases: took, answers: answers.reverse(), interest, segments, notes };
+  }
+
+  /** The releases taken part in, the latest first, with the pieces secured in each (an after-room's in its release). */
+  private async releases(accountId: string, now: Date): Promise<OwnerSheet['releases']> {
+    const took = await releasesTakenPart(this.db, accountId, now);
+    if (took.length === 0) return { count: 0, secured: 0, items: [] };
+    const ids = took.map((t) => t.id);
+    const [drops, live, draw] = await Promise.all([
+      this.db.selectFrom('drops').select(['id', 'mode', 'title', 'opens_at']).where('id', 'in', ids).execute(),
+      this.db
+        .selectFrom('live_entries as e')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .select([sql<string>`coalesce(d.parent_drop_id, d.id)`.as('release_id'), (eb) => eb.fn.sum<number>('e.quantity').as('n')])
+        .where('e.account_id', '=', accountId)
+        .where('e.status', '=', 'CONFIRMED')
+        .groupBy(sql`coalesce(d.parent_drop_id, d.id)`)
+        .execute(),
+      this.db
+        .selectFrom('drop_entries as e')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .select(['e.drop_id as release_id', (eb) => eb.fn.countAll<number>().as('n')])
+        .where('e.account_id', '=', accountId)
+        .where('e.status', '=', 'CONFIRMED')
+        .where('d.mode', '=', 'DRAW')
+        .groupBy('e.drop_id')
+        .execute(),
+    ]);
+    const securedIn = new Map<string, number>();
+    for (const r of [...live, ...draw]) securedIn.set(r.release_id, (securedIn.get(r.release_id) ?? 0) + Number(r.n));
+    const items = drops
+      .map((d): ClientRelease => ({ id: d.id, kind: d.mode === 'LIVE' ? 'LIVE' : 'DRAW', title: d.title, opensAt: d.opens_at, secured: securedIn.get(d.id) ?? 0 }))
+      .sort((a, b) => b.opensAt.getTime() - a.opensAt.getTime() || a.id.localeCompare(b.id));
+    return { count: items.length, secured: items.reduce((n, r) => n + r.secured, 0), items };
+  }
+
+  /** Its I'LL BE THERE, the latest release first, and whether it came. */
+  private async interest(accountId: string, now: Date): Promise<ClientInterest[]> {
+    const rows = await this.db
+      .selectFrom('live_interest as i')
+      .innerJoin('drops as d', 'd.id', 'i.drop_id')
+      .innerJoin('drop_sizes as s', 's.id', 'i.size_id')
+      .select(['i.drop_id', 'd.title', 'd.opens_at', 'd.cancelled_at', 's.label', 'i.created_at'])
+      .where('i.account_id', '=', accountId)
+      .orderBy('d.opens_at', 'desc')
+      .orderBy('i.drop_id')
+      .execute();
+    if (rows.length === 0) return [];
+    const came = await participatedReleases(this.db, accountId, now);
+    return rows.map((r) => ({
+      dropId: r.drop_id,
+      title: r.title,
+      size: r.label,
+      since: r.created_at,
+      opensAt: r.opens_at,
+      outcome: r.cancelled_at !== null ? 'CANCELLED' : r.opens_at.getTime() > now.getTime() ? 'UPCOMING' : came.has(r.drop_id) ? 'CAME' : 'DID_NOT_COME',
+    }));
+  }
+
+  /** The segments it belongs to now, by name (each read live, as a release's access rule reads it). */
+  private async segmentsOf(accountId: string, now: Date): Promise<{ id: string; name: string }[]> {
+    const all = await this.db.selectFrom('segments').select(['id', 'name']).orderBy('name').orderBy('id').execute();
+    if (all.length === 0) return [];
+    const member = await memberSegments(this.db, accountId, all.map((x) => x.id), now);
+    return all.filter((x) => member.has(x.id)).map((x) => ({ id: x.id, name: x.name }));
+  }
+
+  /** Client Services' notes on the account's orders, draw entries, requests of the private salon and LIVE reservations. */
+  private async notes(accountId: string): Promise<ClientNote[]> {
+    const [orders, draws, requests, live] = await Promise.all([
+      this.db
+        .selectFrom('order_events as e')
+        .innerJoin('orders as o', 'o.id', 'e.order_id')
+        .select(['e.order_id', 'e.note', 'e.created_at', 'e.actor_type', 'e.actor_id'])
+        .where('o.account_id', '=', accountId)
+        .where('e.note', 'is not', null)
+        .execute(),
+      this.db
+        .selectFrom('drop_entries as e')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .select(['d.title', 'e.note', 'e.handled_at', 'e.created_at', 'e.handled_by'])
+        .where('e.account_id', '=', accountId)
+        .where('e.note', 'is not', null)
+        .execute(),
+      this.db
+        .selectFrom('shop_requests as r')
+        .innerJoin('models as m', 'm.id', 'r.model_id')
+        .select(['m.name', 'r.resolution_note', 'r.handled_at', 'r.created_at', 'r.handled_by'])
+        .where('r.account_id', '=', accountId)
+        .where('r.resolution_note', 'is not', null)
+        .execute(),
+      this.db
+        .selectFrom('live_entries as e')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .select(['d.title', 'e.resolution_note', 'e.handled_at', 'e.joined_at', 'e.handled_by'])
+        .where('e.account_id', '=', accountId)
+        .where('e.resolution_note', 'is not', null)
+        .execute(),
+    ]);
+    const adminIds = [
+      ...new Set(
+        [
+          ...orders.filter((o) => o.actor_type === 'admin').map((o) => o.actor_id),
+          ...draws.map((d) => d.handled_by),
+          ...requests.map((r) => r.handled_by),
+          ...live.map((l) => l.handled_by),
+        ].filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)),
+      ),
+    ];
+    const admins = adminIds.length ? await this.db.selectFrom('admin_users').select(['id', 'email']).where('id', 'in', adminIds).execute() : [];
+    const by = (id: string | null | undefined) => (id ? (admins.find((a) => a.id === id)?.email ?? null) : null);
+    const notes: ClientNote[] = [
+      ...orders.map((o) => ({ at: o.created_at, about: 'ORDER' as const, subject: orderReference(o.order_id), orderId: o.order_id, text: o.note!, by: o.actor_type === 'admin' ? by(o.actor_id) : null })),
+      ...draws.map((d) => ({ at: d.handled_at ?? d.created_at, about: 'DRAW' as const, subject: d.title, orderId: null, text: d.note!, by: by(d.handled_by) })),
+      ...requests.map((r) => ({ at: r.handled_at ?? r.created_at, about: 'SALON' as const, subject: r.name, orderId: null, text: r.resolution_note!, by: by(r.handled_by) })),
+      ...live.map((l) => ({ at: l.handled_at ?? l.joined_at, about: 'LIVE' as const, subject: l.title, orderId: null, text: l.resolution_note!, by: by(l.handled_by) })),
+    ];
+    return notes.sort((a, b) => b.at.getTime() - a.at.getTime() || a.subject.localeCompare(b.subject));
   }
 
   // ── Lock ─────────────────────────────────────────────────────────────────
@@ -562,6 +762,8 @@ export class OwnerService {
       const circle = await accountCircleData(tx, a.id);
       const shopRequests = await accountShopRequests(tx, a.id);
       const live = await accountLiveData(tx, a.id);
+      const releaseAnswers = await accountReleaseAnswers(tx, a.id);
+      const orders = await accountOrders(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -640,6 +842,8 @@ export class OwnerService {
         shopRequests,
         liveEntries: live.entries,
         liveInterest: live.interest,
+        releaseAnswers,
+        orders,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -671,6 +875,8 @@ export class OwnerService {
             shopRequests: out.shopRequests.length,
             liveEntries: out.liveEntries.length,
             liveInterest: out.liveInterest.length,
+            releaseAnswers: out.releaseAnswers.length,
+            orders: out.orders.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

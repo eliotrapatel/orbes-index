@@ -49,11 +49,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { ProductStatus } from '../db/schema.js';
-import { DomainError, forbidden, unauthorized, validationError } from '../errors.js';
+import { DomainError, forbidden, notFound, unauthorized, validationError } from '../errors.js';
 import { renderOwnershipCertificatePdf, type RenderedCertificates } from '../render/certificate.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { CROCKFORD_ALPHABET, normalizeCrockford } from './claim-codes.js';
+import { ORDER_CERTIFICATE_STATUSES, orderReference } from './orders.js';
 import { CERTIFICATE_ENDING_STATUSES, lockForOwnerAction, notOwner, readActingAccount, type OwnershipService } from './ownership.js';
 import { utcDate, type WarrantySummary } from './warranty.js';
 
@@ -213,6 +214,9 @@ export const certificateNotFound = () =>
 const certificateNoLongerValid = () => new DomainError('CERTIFICATE_NO_LONGER_VALID', 409, 'This certificate is no longer valid. Ask the owner of the piece for a new one.');
 const certificateNotAllowed = (status: ProductStatus) =>
   new DomainError('CERTIFICATE_NOT_ALLOWED', 409, 'A certificate cannot be created for this piece at this time. ORBES Client Services can assist you.', { detail: `status ${status}` });
+const certificateNotAvailable = () =>
+  new DomainError('CERTIFICATE_NOT_AVAILABLE', 409, 'The ownership certificate of this order is not available: its piece is not registered to your account. ORBES Client Services can assist you.');
+const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
 const certificateLimit = () =>
   new DomainError('CERTIFICATE_LIMIT', 409, `This piece already has ${MAX_OPEN_CERTIFICATES} certificate links in use. Withdraw one before creating another.`);
 
@@ -553,6 +557,50 @@ export class OwnershipCertificateService {
       expiresAt: r.certificate.expiresAt,
       checkedAt: r.checkedAt,
       link: this.linkFor(canonicalCertificateToken(token)!),
+    });
+  }
+
+  /**
+   * The ownership certificate among an order's documents in MY PIECES (plan LIVE RELEASE+, M6): a new document, never
+   * the claim card, for the order's own account once the piece that fulfils it is registered to it, while the order is
+   * paid and neither cancelled nor returned (ORDER_CERTIFICATE_STATUSES), and while a certificate may be created for the
+   * piece (not LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED nor RETIRED). The page of a link's certificate with the
+   * record read now, naming the order instead of a live address. 404 ORDER_NOT_FOUND for another account's order or an
+   * unknown one; 409 CERTIFICATE_NOT_AVAILABLE otherwise. Not audited (a read).
+   */
+  async orderCertificatePdf(accountId: string, orderId: string): Promise<RenderedCertificates> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw orderNotFound();
+    const order = await this.db
+      .selectFrom('orders as o')
+      .leftJoin('products as p', 'p.id', 'o.product_id')
+      .leftJoin('models as m', 'm.id', 'p.model_id')
+      .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').onRef('w.account_id', '=', 'o.account_id').on('w.ended_at', 'is', null))
+      .select(['o.id', 'o.status as order_status', 'o.product_id', 'p.status', 'm.discontinued_at', 'w.id as ownership_id'])
+      .where('o.id', '=', orderId.toLowerCase())
+      .where('o.account_id', '=', accountId.toLowerCase())
+      .executeTakeFirst();
+    if (!order) throw orderNotFound();
+    if (!ORDER_CERTIFICATE_STATUSES.includes(order.order_status) || order.product_id === null || order.ownership_id === null || order.status === null || CERTIFICATE_ENDING_STATUSES.includes(order.status)) {
+      throw certificateNotAvailable();
+    }
+    const [owned] = await this.ownership.listForAccount(accountId.toLowerCase(), { productUuid: order.product_id });
+    if (!owned || owned.incident !== null) throw certificateNotAvailable();
+    return renderOwnershipCertificatePdf({
+      productId: owned.productId,
+      category: owned.category.name,
+      collection: owned.collection,
+      model: owned.model,
+      type: owned.type,
+      variant: owned.variant,
+      material: owned.material,
+      createdYear: owned.createdYear,
+      genome: owned.genome,
+      discontinuedYear: order.discontinued_at ? order.discontinued_at.getUTCFullYear() : null,
+      verified: owned.verified,
+      since: utcDate(owned.since),
+      warranty: owned.warranty,
+      checkedAt: this.clock(),
+      order: orderReference(order.id),
     });
   }
 }

@@ -75,7 +75,8 @@ body {
 
 .side__brand {
   display: block;
-  padding: 34px 32px 30px;
+  /* 28 and 24 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), with the foot's and the monogram's. */
+  padding: 28px 32px 24px;
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
 }
@@ -83,7 +84,7 @@ body {
 /* The monogram over the word, left-aligned with it (brand.css .monogram). */
 .side__monogram {
   width: 44px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 /* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
@@ -128,7 +129,8 @@ body {
 .side__link {
   position: relative;
   display: block;
-  padding: 4px 0;
+  /* 3 px: the sidebar of an ADMIN (Orders and Atelier included, plan LIVE RELEASE+) fits a 900 px screen with its foot. */
+  padding: 3px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;
@@ -181,7 +183,7 @@ body {
 }
 
 .side__foot {
-  padding: 20px 32px 22px;
+  padding: 16px 32px 18px;
   border-top: 1px solid var(--hairline);
 }
 
@@ -524,7 +526,7 @@ body {
 
 .bar {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 64px 48px;
+  grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 64px 48px;
   align-items: center;
   gap: 20px;
   min-height: 42px;
@@ -754,6 +756,16 @@ a.bar__label:hover {
 .table .col--actions {
   text-align: right;
   white-space: nowrap;
+}
+
+/* A row's actions that may not all fit (the Atelier's stock): to a second line rather than past the page's width. */
+.table .col--wrap {
+  white-space: normal;
+}
+
+.table .col--wrap .row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .table tbody tr {
@@ -3292,6 +3304,148 @@ a.bar__label:hover {
   align-items: start;
 }
 
+/* ── The release and the stock, the question after, the best time (plan LIVE RELEASE+, S8) ── */
+
+/* The feasibility check in the publish dialog, and the size mix in the New live release dialog: a hairline box. */
+.live__feasibility,
+.live__mix {
+  margin-top: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--hairline-strong);
+}
+
+.live__feasibility-title,
+.live__mix-title {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.live__feasibility-title + .dialog__text,
+.live__mix-title + .dialog__text {
+  margin-top: 8px;
+}
+
+.live__feasibility-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+}
+
+.live__feasibility-list li + li {
+  margin-top: 4px;
+}
+
+.live__mix .live__why {
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+/* The best time to open: the suggestion, the release's T0, then the 24 hours of the day as hairline columns. */
+.best__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-bottom: 18px;
+}
+
+/* The tiers wrap on a narrow screen rather than push the page sideways. */
+.best__filters .range {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+/* The country: a choice of its own width beside the tiers, never the panel's. */
+.best__filters .cinput {
+  width: auto;
+  min-width: 220px;
+  max-width: 100%;
+}
+
+/* A country's bar names it in full with its busiest hour (GB · UNITED KINGDOM · 16:00). */
+.panel--best {
+  --bar-label: 280px;
+}
+
+.best__headline {
+  font-size: var(--fs-lead);
+  letter-spacing: 0.02em;
+}
+
+.best__release {
+  margin-top: 6px;
+  font-size: var(--fs-line);
+  color: var(--ink-soft);
+}
+
+.best__hours {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 22px;
+}
+
+.best__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.best__track {
+  position: relative;
+  width: 100%;
+  height: 96px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.best__fill {
+  --f: 0;
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  bottom: 0;
+  height: 100%;
+  background: var(--metal);
+  transform: scaleY(var(--f));
+  transform-origin: center bottom;
+  transition: transform var(--t-slow) var(--ease);
+}
+
+.best__col--suggested .best__fill {
+  background: var(--ink);
+}
+
+.best__col--release .best__track {
+  outline: 1px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.best__hour {
+  font-size: var(--fs-hint);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.best__col--past .best__hour {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.best__col--suggested .best__hour {
+  color: var(--ink);
+}
+
+.best__legend {
+  margin: 10px 0 18px;
+  font-size: var(--fs-micro);
+  color: var(--ink-soft);
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
@@ -3316,6 +3470,8 @@ a.bar__label:hover {
 .kpi__label,
 .live__message-label,
 .live__why-title,
+.live__feasibility-title,
+.live__mix-title,
 .deflist__label,
 .table th,
 .empty__text,
@@ -3346,7 +3502,13 @@ a.bar__label:hover {
 .saleshell__link,
 .sale__status,
 .sale__title,
-.sale__label {
+.sale__label,
+.board__title,
+.ocard__channel,
+.osteps__label,
+.printdoc__title,
+.printdoc__label,
+.printdoc__heading {
   font-family: var(--font-display);
 }
 
@@ -3364,6 +3526,606 @@ a.bar__label:hover {
 .cbtn__figure,
 .range__figure {
   font-family: var(--font);
+}
+
+/* ── Orders, the atelier, the settings (plan LIVE RELEASE+) ──────────────── */
+
+.panel__text {
+  margin: 12px 0 4px;
+  max-width: 760px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.prewrap {
+  white-space: pre-line;
+}
+
+.breakall {
+  overflow-wrap: anywhere;
+}
+
+/* The board: its figures and delays, then six columns side by side (scrolled sideways when the console is narrow). */
+.board__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin: 18px 0 22px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.board__figures {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(168px, 1fr));
+  gap: 0;
+  overflow-x: auto;
+  border-top: 1px solid var(--ink);
+}
+
+.board__col {
+  min-width: 0;
+  padding: 0 14px 24px;
+  border-left: 1px solid var(--hairline);
+}
+
+.board__col:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.board__col--cancelled,
+.board__col--returned {
+  background: var(--ivory);
+  padding-left: 14px;
+}
+
+.board__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 16px 0 14px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.board__title {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.board__count {
+  font-size: var(--fs-line);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.board__late {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.board__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.board__empty,
+.board__more {
+  padding-top: 14px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* A card: a link to the order's page, hairline-framed; a late one carries an ink rule on its left. */
+.ocard {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 14px 14px 12px;
+  background: var(--white);
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.ocard:hover,
+.ocard:focus-visible {
+  border-color: var(--ink);
+}
+
+.ocard--late {
+  border-left: 3px solid var(--ink);
+  /* The rule takes its 2 extra pixels from the padding: a late card's text lines up with the others'. */
+  padding-left: 12px;
+}
+
+.ocard__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+}
+
+.ocard__ref,
+.ocard__channel {
+  white-space: nowrap;
+}
+
+.ocard__ref {
+  font-size: var(--fs-mono-sm);
+}
+
+.ocard__channel {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ocard__origin {
+  font-size: var(--fs-line);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* A release's name wraps in balanced lines, never its numeral alone (MONOLITHE — / LIVE II). */
+  text-wrap: balance;
+}
+
+.ocard__piece {
+  font-size: var(--fs-line);
+}
+
+.ocard__who,
+.ocard__line,
+.ocard__holds {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.ocard__time {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An order's steps: RESERVED → PAID → SHIPPED → DELIVERED, each with when it was reached. */
+.osteps {
+  list-style: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  margin: 18px 0 8px;
+  padding: 0;
+}
+
+.osteps__step {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px 0 0;
+  border-top: 1px solid var(--hairline-strong);
+  color: var(--ink-soft);
+}
+
+.osteps__step.is-reached {
+  border-top: 3px solid var(--ink);
+  color: var(--ink);
+}
+
+.osteps__step.is-current .osteps__label {
+  font-weight: 700;
+}
+
+.osteps__label {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.osteps__time {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The atelier: a group of pieces to make per release, model and size. */
+.bench {
+  margin-top: 26px;
+}
+
+.bench__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 20px;
+  padding-bottom: 6px;
+}
+
+.bench__title {
+  font-size: var(--fs-line);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.bench__counts {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.bench__head .cbtn {
+  margin-left: auto;
+}
+
+/* A stock row's actions: MAKE over the others, all at the row's right edge. */
+.stock__actions {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Every group of pieces to make on the same columns: the pieces line up from one release to the next. */
+.bench .table th:nth-child(1) {
+  width: 120px;
+}
+
+.bench .table th:nth-child(2) {
+  width: 130px;
+}
+
+.bench .table th:nth-child(3) {
+  width: 120px;
+}
+
+.bench .table th:nth-child(4) {
+  width: 170px;
+}
+
+.bench .table th:nth-child(6) {
+  width: 110px;
+}
+
+.bench .table th:nth-child(7) {
+  width: 120px;
+}
+
+.bench .table .col--wide {
+  width: auto;
+}
+
+.stock__suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stock__num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.claimcode {
+  margin: 18px 0;
+  font-size: var(--fs-lead);
+  letter-spacing: 0.2em;
+}
+
+/* Printable documents (the packing slip, the work sheets): black on white, one per page; the bar above is the screen's. */
+.printbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding-bottom: 22px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.printbar__text {
+  max-width: 640px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.printbar__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.printdoc {
+  width: 100%;
+  max-width: 180mm;
+  margin: 0 auto 32px;
+  padding: 18mm 16mm;
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+}
+
+.printdoc__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.printdoc__wordmark {
+  font-size: var(--fs-title);
+}
+
+.printdoc__title {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.printdoc__refs,
+.printdoc__list {
+  margin: 0;
+}
+
+.printdoc__row {
+  display: grid;
+  grid-template-columns: 34mm minmax(0, 1fr);
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.printdoc__label {
+  padding-top: 2px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.printdoc__value {
+  margin: 0;
+  font-size: var(--fs-body);
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+
+.printdoc__block {
+  margin-top: 26px;
+}
+
+.printdoc__heading {
+  padding-bottom: 8px;
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.printdoc__text {
+  margin-top: 8px;
+  font-size: var(--fs-body);
+  letter-spacing: 0.03em;
+  line-height: 1.6;
+}
+
+.printdoc__foot {
+  margin-top: 30px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline-strong);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* A work sheet: the piece's ORBES code at its print size, beside its reference. */
+.worksheet__identity {
+  display: flex;
+  align-items: center;
+  gap: 12mm;
+  padding: 10mm 0;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.worksheet__code {
+  margin: 0;
+  flex: none;
+}
+
+.worksheet__code svg {
+  display: block;
+  width: 30mm;
+  height: auto;
+}
+
+.worksheet__id {
+  margin-top: 6px;
+  font-size: var(--fs-title);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Segments page (plan LIVE RELEASE+, choice 27): the builder, a rule a line, a group within it set in by a hairline. */
+.segment__name {
+  max-width: 420px;
+  margin-bottom: 8px;
+}
+
+.segment__tree {
+  display: grid;
+  gap: 4px;
+}
+
+.segment__group {
+  display: grid;
+  gap: 2px;
+}
+
+.segment__group--inner {
+  margin: 6px 0 6px 24px;
+  padding: 4px 0 8px 20px;
+  border-left: 1px solid var(--hairline-strong);
+}
+
+.segment__group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.segment__group-head .cinput--select {
+  width: auto;
+  min-width: 150px;
+}
+
+.segment__rule {
+  display: grid;
+  grid-template-columns: 150px minmax(200px, 250px) minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.segment__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 38px;
+}
+
+.segment__value .cinput--select {
+  width: auto;
+  max-width: 100%;
+}
+
+.segment__number {
+  width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+.segment__value .cinput:not(.segment__number):not(.cinput--select):not(.cinput--multi) {
+  width: 200px;
+}
+
+.cinput--multi {
+  width: auto;
+  min-width: 220px;
+  height: auto;
+  padding: 4px 0;
+}
+
+.segment__unit {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.segment__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.segment__checks .ccheck {
+  margin: 0;
+}
+
+.segment__group-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.segment__problem {
+  margin-top: 14px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  color: var(--critical);
+}
+
+.segment__now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+}
+
+.segment__count {
+  font-size: var(--fs-display-sm);
+  font-weight: 300;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.segment__count-note {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.segment__words {
+  margin-top: 10px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+@media print {
+  .printbar,
+  .page-head__actions {
+    display: none !important;
+  }
+  .view--print .printdoc {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    break-after: page;
+  }
+  .view--print .printdoc:last-child {
+    break-after: auto;
+  }
+  .worksheet__code svg {
+    width: 30mm !important;
+  }
+  /* Black on white on paper, as the invoice: the soft labels of the screen's preview print in ink. */
+  .printdoc__label,
+  .printdoc__foot {
+    color: var(--ink);
+  }
 }
 
 /* ── Narrow screens ────────────────────────────────────────────────────── */
@@ -3411,6 +4173,9 @@ a.bar__label:hover {
 
 @media (max-width: 860px) {
   .console {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .segment__rule {
     grid-template-columns: minmax(0, 1fr);
   }
   .side {
@@ -3876,4 +4641,44 @@ a.bar__label:hover {
     color: var(--ink);
     border: 1px solid var(--hairline);
   }
+}
+
+/* ── The client sheet (plan LIVE RELEASE+, N4) ───────────────────────────── */
+
+/* An order's step and, when late, why: side by side, wrapping under each other in a narrow column. */
+.row-marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The steps an order reached, each with its date, in the reading face. */
+.client-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: var(--fs-micro);
+  color: var(--ink-soft);
+}
+
+.client-steps__step {
+  white-space: nowrap;
+}
+
+/* The segments the collector belongs to: one link per line. */
+.client-segments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+/* A note keeps its line breaks and wraps within its column. */
+.client-note {
+  display: block;
+  min-width: 220px;
+  white-space: pre-line;
+  overflow-wrap: break-word;
 }

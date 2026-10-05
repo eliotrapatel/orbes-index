@@ -6,7 +6,8 @@
  *   PATCH /api/admin/club/tiers/:tier          OPERATOR  a tier's benefits, one per line; null or '' restores the default
  *   GET   /api/admin/club/requests             AUDITOR   the requests of THE PRIVATE SALON, OPEN first, then the newest;
  *                                                        `?status=` OPEN or CLOSED
- *   POST  /api/admin/club/requests/:id/close   OPERATOR  CLOSED, with a note: what was done for the client
+ *   POST  /api/admin/club/requests/:id/close   OPERATOR  CLOSED, with a note (what was done for the client) and the
+ *                                                        outcome: ACCEPTED (its order is created) or DECLINED
  *
  * The thresholds (1, 3 and 5 pieces held now) are a constant of the code and never change here: a setting could
  * contradict the published rule of a draw. services/club.ts validates and audits the tiers (`club.tier.update`),
@@ -46,6 +47,6 @@ export const adminClubRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.post('/api/admin/club/requests/:id/close', async (request) => {
     const { id } = parse(shopRequestParams, request.params);
     const b = parse(closeShopRequestBody, request.body);
-    return requestJson(await salon.close(id, b.note, adminActor(request)), readsClientEmails(request));
+    return requestJson(await salon.close(id, { note: b.note, outcome: b.outcome }, adminActor(request)), readsClientEmails(request));
   });
 };

@@ -106,7 +106,6 @@ interface SheetJson {
   seedHash: string;
   seed: string | null;
   drawnAt: string | null;
-  entries: number | null;
   earlyAccessHours: number;
   earlyAccessOpensAt: string | null;
   earlyAccessOpen: boolean;
@@ -314,7 +313,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
 
     // The public page: the release, its model and the SHA-256 of its seed; never the seed before the draw.
     const s = await sheet(d.id);
-    expect(s).toMatchObject({ id: d.id, state: 'UPCOMING', title: 'MONOLITHE — release I', quantity: 3, description: 'Three pieces.', purchaseWindowHours: 24, seedHash: d.seedHash, seed: null, drawnAt: null, entries: null });
+    expect(s).toMatchObject({ id: d.id, state: 'UPCOMING', title: 'MONOLITHE — release I', quantity: 3, description: 'Three pieces.', purchaseWindowHours: 24, seedHash: d.seedHash, seed: null, drawnAt: null });
     expect(s.model).toEqual({ name: 'MONOLITHE', type: 'RING', collection: expect.any(String), imageUrl: null, lookbook: null });
     const listed = await h.client().get('/api/v1/drops');
     expect(listed.headers['cache-control']).toBe('public, max-age=60');
@@ -409,7 +408,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
 
     // The page: the seed, which hashes to the commitment published since the publication.
     const s = await sheet(d.id);
-    expect(s).toMatchObject({ state: 'DRAWN', entries: 5, drawnAt: h.clock.now().toISOString(), seedHash: d.seedHash });
+    expect(s).toMatchObject({ state: 'DRAWN', drawnAt: h.clock.now().toISOString(), seedHash: d.seedHash });
     expect(s.seed).toMatch(/^[0-9a-f]{64}$/);
     const seed = Buffer.from(s.seed!, 'hex');
     expect(createHash('sha256').update(seed).digest('hex')).toBe(d.seedHash);
@@ -456,7 +455,12 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     const confirmed = safeJson(await operator.post(`${adminUrl(d.id)}/entries/${first!.id}/confirm`, { note: 'Sold in the Paris boutique.' })) as AdminEntryJson;
     expect(confirmed).toMatchObject({ status: 'CONFIRMED', note: 'Sold in the Paris boutique.', handledAt: h.clock.now().toISOString() });
     expect(confirmed.handledBy?.email).toMatch(/^operator-/);
-    expect((await audits('drop.entry.confirm', d.id))[0]!.details).toEqual({ entryId: first!.id, rank: 1, noted: true });
+    // The sale committed, its order is created in the same transaction (plan LIVE RELEASE+): RESERVED at the drop's
+    // location (the default one), its size and price for Client Services to enter.
+    const [order] = await h.ctx.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', first!.id).execute();
+    expect(order).toMatchObject({ channel: 'DRAW', drop_id: d.id, account_id: first!.accountId, status: 'RESERVED', sku_id: null, price_minor: null, reservation: null });
+    expect((await audits('drop.entry.confirm', d.id))[0]!.details).toEqual({ entryId: first!.id, rank: 1, noted: true, orderId: order!.id });
+    expect((await audits('order.create', order!.id))[0]!.details).toMatchObject({ channel: 'DRAW', dropEntryId: first!.id, dropId: d.id, to: 'RESERVED' });
     const early = await operator.post(`${adminUrl(d.id)}/entries/${second!.id}/lapse`);
     expect([early.statusCode, errorOf(early).code]).toEqual([409, 'DROP_PLACE_HELD']);
     expect(errorOf(await operator.post(`${adminUrl(d.id)}/offer-next`)).code).toBe('DROP_FULL');
@@ -652,7 +656,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // The console and the public page count it (never drawn: no rank, no entry of the draw); the export lists it.
       expect((await adminEntries(operator, d.id)).items).toEqual([expect.objectContaining({ id: entry.id, accountId: platine.id, status: 'SELECTED', reserved: true, tier: 2, seniority: 0, rank: null })]);
       expect(safeJson(await auditor.get(adminUrl(d.id)))).toMatchObject({ reserved: 1, entries: { SELECTED: 1 } });
-      expect(await sheet(d.id)).toMatchObject({ reserved: 1, entries: null });
+      expect(await sheet(d.id)).toMatchObject({ reserved: 1 });
       const exported = safeJson(await admin.get(`/api/admin/owners/${platine.id}/export`)) as { dropEntries: Record<string, unknown>[] };
       expect(exported.dropEntries).toEqual([expect.objectContaining({ entryId: entry.id, dropId: d.id, status: 'SELECTED', tier: 2, rank: null })]);
       // The tier is the one of the request: PLATINE gives a piece away, and is TITANE now.
@@ -756,7 +760,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}/entries?pageSize=200`)) as { items: { id: string; rank: number }[]; total: number };
       expect([page.total, page.items.map((e) => e.rank)]).toEqual([3, [1, 2, 3]]);
       for (const reservation of [sold.id, kept.id]) expect(page.items.map((e) => e.id)).not.toContain(reservation);
-      expect(await sheet(d.id)).toMatchObject({ state: 'DRAWN', entries: 3, reserved: 2 });
+      expect(await sheet(d.id)).toMatchObject({ state: 'DRAWN', reserved: 0 });
       const mine = async (c: Client) => (await status(c)).entries.find((e) => e.dropId === d.id);
       expect(await mine(p1.client)).toMatchObject({ id: sold.id, status: 'CONFIRMED', reserved: true, rank: null });
       expect(await mine(p2.client)).toMatchObject({ id: kept.id, status: 'SELECTED', reserved: true, rank: null });

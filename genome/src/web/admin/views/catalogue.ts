@@ -20,10 +20,20 @@
  * (P-R06: Discontinue, on its row, after a typed phrase; inactive, said
  * DISCONTINUED with the year on /verify) and reinstates it (Reinstate, the
  * same way); a discontinued model's edit has no status.
+ *
+ * Shopify readiness (plan LIVE RELEASE+, N2): a model's base price and its
+ * care guide are set in its edit (the price of the Shopify product export,
+ * releases keeping their own; the care guide MY PIECES shows with each order
+ * of the model). SHOPIFY EXPORT (every role that reads) downloads the product
+ * CSV of the models priced in the store's currency; Shopify on a row (OPERATOR)
+ * takes back the ids the store gives the product and each size, which link
+ * both sides. Nothing is sent to Shopify.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
 import {
+  basePriceProblem,
+  CARE_GUIDE_MAX,
   carePreview,
   categoryImpact,
   collectionImpact,
@@ -39,14 +49,16 @@ import {
   type ModelForm,
 } from '../model/catalogue.js';
 import { can } from '../model/permissions.js';
+import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import type { Category, Collection, Model } from '../types.js';
+import { ORDER_CURRENCIES, type Category, type Collection, type Model } from '../types.js';
 import { button, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
+import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
-import { notify } from '../ui/toast.js';
+import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
@@ -170,9 +182,12 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'defaultMaterial', label: 'Default material', maxlength: 200, value: form.defaultMaterial, hint: 'Proposed by the generator; each piece keeps its own material.' },
         { name: 'careInstructions', label: 'Care instructions', kind: 'textarea', rows: 5, maxlength: 2000, value: form.careInstructions, hint: 'Empty: the client reads the general care text.' },
         ...(m.discontinuedAt ? [] : [{ name: 'status', label: 'Status', kind: 'select' as const, options: [...MODEL_STATUS_OPTIONS], value: form.status }]),
+        { name: 'basePrice', label: 'Base price', maxlength: 14, value: form.basePrice, hint: 'The price of the Shopify product export, in units: 4800, or 4800.50. Each release keeps its own. Empty: none.' },
+        { name: 'baseCurrency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: form.baseCurrency },
+        { name: 'careGuide', label: 'Care guide', kind: 'textarea', rows: 6, maxlength: CARE_GUIDE_MAX, value: form.careGuide, hint: 'MY PIECES shows it with each order of this model. Empty: its care instructions stand in.' },
       ],
       live: (v) => careBlock(v.careInstructions),
-      validate: (v) => (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 ? 'Nothing has changed.' : null),
+      validate: (v) => basePriceProblem(v as unknown as ModelForm) ?? (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 ? 'Nothing has changed.' : null),
       confirmLabel: 'Save model',
       submit: async (v) => {
         await ctx.api.updateModel(m.id, modelChange(m, v as unknown as ModelForm));
@@ -222,6 +237,50 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then((r) => done(r === 'removed' ? 'Photograph removed.' : 'Photograph saved.')(r));
 
+  // N2, OPERATOR: the ids Shopify gave the model's product and each of its sizes, pasted back.
+  const linkShopify = async (m: Model) => {
+    let product;
+    try {
+      product = await ctx.api.modelShopify(m.id);
+    } catch (e) {
+      notifyError(e);
+      return;
+    }
+    const p = product;
+    const values = shopifyValues(p);
+    void openDialog({
+      title: 'Shopify ids',
+      eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
+      body: [
+        h('p', { class: 'dialog__text' }, `Once the product export is imported, paste here the id Shopify gave the product (handle ${p.handle}) and each of its variants: the number at the end of its address in Shopify’s admin, or the address itself. They link both sides; nothing is sent to Shopify.`),
+      ],
+      fields: [
+        { name: 'productId', label: 'Product', maxlength: 300, value: values.productId, hint: 'Empty: the model is no longer linked, nor its sizes.' },
+        // The label in the display face carries no figure: the size and its SKU are said under the field.
+        ...p.variants.map((x, i) => ({ name: variantField(i), label: 'Variant', maxlength: 300, value: values[variantField(i)], hint: `${x.size === null ? 'One size' : `Size ${x.size}`} · SKU ${x.sku}` })),
+      ],
+      validate: (v) => shopifyLinkProblem(p, v),
+      confirmLabel: 'Save the ids',
+      submit: async (v) => {
+        await ctx.api.linkModelShopify(m.id, shopifyLinkInput(p, v));
+      },
+    }).then(done('Shopify ids saved.'));
+  };
+
+  // N2: the product CSV in Shopify's import format, in the store's currency.
+  const exportProducts = () =>
+    void openDialog({
+      title: 'Shopify product export',
+      eyebrow: 'Catalogue',
+      body: h('p', { class: 'dialog__text' }, 'A file in Shopify’s product import format: one product per model, its sizes as variants with their SKUs, its base price and its photographs. Nothing is sent to Shopify.'),
+      fields: [{ name: 'currency', label: 'The store’s currency', kind: 'select', options: [...SHOPIFY_CURRENCY_OPTIONS], value: models.items.find((x) => x.baseCurrency)?.baseCurrency ?? 'EUR' }],
+      live: (v) => h('p', { class: 'dialog__text', data: { testid: 'shopify-export-summary' } }, productExportSummary(models.items, v.currency)),
+      confirmLabel: 'Download',
+      submit: async (v) => {
+        saveDownload(await ctx.api.shopifyProductsCsv(v.currency));
+      },
+    }).then((r) => r && notify('Shopify product export downloaded.'));
+
   const categoryColumns: Column<Category>[] = [
     { label: 'Index', cell: (c) => mono(String(c.index).padStart(2, '0')), kind: ['num'] },
     { label: 'Letter', cell: (c) => mono(c.code), kind: ['nowrap'] },
@@ -250,6 +309,18 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, modelStatusMark(m)), kind: ['nowrap'] },
     { label: 'Lookbook', cell: (m) => h('span', { data: { testid: 'model-lookbook-state' } }, statusMark(m.lookbook, toneOf('lookbook', m.lookbook))), kind: ['nowrap'] },
     { label: 'Issued', cell: (m) => formatCount(m.products), kind: ['num'] },
+    // N2: the base price, and under it how far the model is linked to its Shopify product.
+    {
+      label: 'Price · Shopify',
+      cell: (m) =>
+        h(
+          'span',
+          null,
+          h('span', { class: [m.basePriceMinor === null ? 'soft' : null], data: { testid: 'model-base-price' } }, basePriceText(m)),
+          h('span', { class: 'cell-sub', data: { testid: 'model-shopify' } }, shopifyStatus(m)),
+        ),
+      kind: ['nowrap'],
+    },
   ];
   // Lookbook (P-R02) opens the model's page for every role that reads; Edit and Photo are the mutating roles';
   // Discontinue and Reinstate (P-R06) an ADMIN's.
@@ -262,6 +333,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'row-actions' },
         canEdit ? button('Edit', { kind: 'ghost', testId: 'edit-model', onClick: () => editModel(m) }) : null,
         canPhotograph ? button('Photo', { kind: 'ghost', testId: 'model-photo', onClick: () => modelPhoto(m) }) : null,
+        canEdit ? button('Shopify', { kind: 'ghost', testId: 'model-shopify-ids', onClick: () => void linkShopify(m) }) : null,
         canDiscontinue
           ? m.discontinuedAt
             ? button('Reinstate', { kind: 'ghost', testId: 'reinstate-model', onClick: () => reinstateModel(m) })
@@ -287,7 +359,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Registry',
       title: 'Catalogue',
-      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them. A model’s sheet in the lookbook is set on its Lookbook page.',
+      lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them. A model’s sheet in the lookbook is set on its Lookbook page; its base price and care guide in its edit, and its Shopify product through the export and the ids pasted back.',
     }),
     section('Categories', table(categoryColumns, cats.items, { empty: 'No category.', caption: 'Categories' }), {
       id: 'categories',
@@ -295,7 +367,10 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     }),
     section('Models', table(modelColumns, models.items, { empty: 'No model.', caption: 'Models' }), {
       id: 'models',
-      tools: can(role, 'createCatalog') && cats.items.length ? [button('New model', { kind: 'ghost', onClick: newModel })] : [],
+      tools: [
+        button('Shopify export', { kind: 'ghost', testId: 'shopify-products-export', onClick: exportProducts }),
+        ...(can(role, 'createCatalog') && cats.items.length ? [button('New model', { kind: 'ghost', onClick: newModel })] : []),
+      ],
     }),
     section('Collections', table(collectionColumns, cols.items, { empty: 'No collection.', caption: 'Collections' }), {
       id: 'collections',

@@ -6,7 +6,12 @@
  *                                                      ?email= one exact email, ?ref= the accounts behind
  *                                                      the REF printed under a result, with its scans
  *   GET  /api/admin/owners/:id                AUDITOR  the owner's sheet: its tier in the club (P-X04),
- *                                                      pieces, transfers in progress, 20 latest scans
+ *                                                      pieces, transfers in progress, 20 latest scans;
+ *                                                      the client sheet (plan LIVE RELEASE+, N4): its
+ *                                                      orders and their steps, the releases it took part
+ *                                                      in and the pieces it secured, its answers to the
+ *                                                      questions after, its interest, its segments and
+ *                                                      Client Services' notes
  *   POST /api/admin/owners/:id/recovery-code  ADMIN    a one-time recovery code, after an identity check
  *   POST /api/admin/owners/:id/lock           ADMIN    LOCKED: sessions end, pending transfers cancelled,
  *                                                      certificate links and open entries in the drops
@@ -49,7 +54,7 @@ function ownerJson(o: OwnerSummary, inClear: boolean) {
 }
 
 export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { recovery, owners } = ctx.services;
+  const { recovery, owners, fulfilment } = ctx.services;
   const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
   app.get('/api/admin/owners', async (request) => {
@@ -62,7 +67,9 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.get('/api/admin/owners/:id', async (request) => {
     const { id } = parse(ownerParams, request.params);
     const sheet = await owners.sheet(id);
-    return { ...sheet, owner: ownerJson(sheet.owner, readsClientEmails(request)) };
+    // N4: the orders are the fulfilment's, read once the account is known (an unknown one is 404 above).
+    const orders = await fulfilment.forAccount(sheet.owner.id);
+    return { ...sheet, owner: ownerJson(sheet.owner, readsClientEmails(request)), orders };
   });
 
   app.post('/api/admin/owners/:id/recovery-code', { config: ADMIN }, async (request, reply) => {

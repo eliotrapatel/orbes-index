@@ -11,15 +11,15 @@
  *  - The turn (B4), a piece returned: a pointer let go too early resets the seal; held, it secures the piece. The
  *    reveal (B5), even when the stream says SECURED before the secure's own answer: P-D01's motion on the seal's glyphs,
  *    the chord, the vibrations; the add-ons, PAY · total, 5:00.
- *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES.
+ *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES, and its order (plan LIVE RELEASE+).
  *  - A phone whose clock is wrong counts on the server's; the host message under the header.
  *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0, its one
  *    piece in another collector's turn, the size still offered then ENTER THE LINE, behind; the piece returned; a pause
  *    said under the header, the seal not offered and its time still; the seal held from the keyboard (the space bar); a
  *    pause on the piece held, its time to confirm still; RELEASE MY PLACE confirmed by a second tap.
  *  - Every edge page: not signed in, not eligible, turn passed, hold ended, place released, left the line, removed, sold
- *    out in your size, the release ended before your turn, the release over; the release's end said once the room says its
- *    reason, when the entry's end is read first.
+ *    out in your size, the release closed before your turn; past its end, its final state for one not in it (plan LIVE
+ *    RELEASE+, decision 30); the release's end said once the room says its reason, when the entry's end is read first.
  *  - A collector entered on another phone, back in the room: a tap there makes the ten ticks heard; untouched, silence.
  *  - The LIVE RELEASES refused (429, their own rate group): THE RELEASES still shows the draws and says the LIVE half is
  *    missing; a draw's address shows its draw; a LIVE one says its failure, TRY AGAIN reading it again.
@@ -363,8 +363,15 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const entry = page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE' });
     await visible(entry);
     await textOf(entry.locator('.pieces__entry-state'), 'LIVE RELEASE · CONFIRMED');
+    // Its payment and delivery are its order's steps, below (the vault's CONFIRMED screen said it at that moment).
+    await textOf(entry.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
     await textOf(entry.locator('.pieces__entry-id'), `REFERENCE ${reference}`);
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE' }).getAttribute('href')).toBe(`/verify/releases/${r.id}`);
+    // …and its order (plan LIVE RELEASE+, choice 6): RESERVED, with its size and its add-on as sold.
+    const order = page.locator('.pieces__order', { hasText: 'LIVE RELEASE · MONOLITHE — LIVE' });
+    await visible(order);
+    await textOf(order.locator('.pieces__order-step[aria-current="step"]'), /^RESERVED \d{1,2} [A-Z]{3} \d{4}$/);
+    await textOf(order.locator('.pieces__order-rows .rows__row', { hasText: 'ENGRAVING' }), 'ENGRAVING € 150');
     expect(problems).toEqual([]);
   }, 240_000);
 
@@ -479,9 +486,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(problems).toEqual([]);
   }, 60_000);
 
-  it('says every edge page plainly, each with one action: not signed in, not eligible, turn passed, hold ended, left, removed, sold out in your size, ended, over', async () => {
+  it('says every edge page plainly, each with one action: not signed in, not eligible, turn passed, hold ended, left, removed, sold out in your size, ended; past its end, its final state', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });
-    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 60 });
+    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 300 });
     await sleep(3_500);
     const [s50, s52] = r.sizes;
     const enter = async (dropId: string, sizeId: string, pieces = 1) => {
@@ -509,12 +516,15 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await expect.poll(async () => (await statusOf(r.id, buyer.id))?.status, POLL).toBe('TURN');
     const late = await enter(r.id, s52!.id);
     await secureAs(r.id, buyer, true);
-    // The release ended by ORBES before a turn came; a collector without an entry finds it over.
+    // The release closed at its time before a turn came, the first collector's turn still running to its deadline (the
+    // page whole, its phase ENDED): the one waiting reads that it has closed; a collector without an entry its final
+    // state (plan LIVE RELEASE+, decision 30).
     const first = await enter(ended.id, ended.sizes[0]!.id);
     await expect.poll(async () => (await statusOf(ended.id, first.id))?.status, POLL).toBe('TURN');
     const waiting = await enter(ended.id, ended.sizes[0]!.id);
-    await secureAs(ended.id, first, true);
-    expect((await statusOf(ended.id, waiting.id))?.status).toBe('ENDED');
+    await srv.ctx.db.updateTable('drops').set({ closes_at: new Date() }).where('id', '=', ended.id).execute();
+    await expect.poll(async () => (await statusOf(ended.id, waiting.id))?.status, POLL).toBe('ENDED');
+    expect((await statusOf(ended.id, first.id))?.status).toBe('TURN');
     const outsider = await account(0);
     const nobody = await account(1);
 
@@ -526,8 +536,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       { name: 'missed', token: missed.token, dropId: r.id, title: LIVE.edge.missed.title, text: LIVE.edge.missed.text, action: null, controls: ['THE RELEASES'] },
       { name: 'expired', token: expired.token, dropId: r.id, title: LIVE.edge.expired.title, text: LIVE.edge.expired.text, action: null, controls: ['THE RELEASES'] },
       { name: 'sold-out', token: late.token, dropId: r.id, title: LIVE.edge.soldOut.title('52'), text: LIVE.edge.soldOut.none, action: null, controls: [LIVE.edge.soldOut.leave] },
-      { name: 'ended', token: waiting.token, dropId: ended.id, title: LIVE.edge.ended.SOLD_OUT.title, text: LIVE.edge.ended.SOLD_OUT.text, action: null, controls: ['THE RELEASES'] },
-      { name: 'over', token: nobody.token, dropId: ended.id, title: LIVE.edge.over.title, text: LIVE.edge.over.text, action: null, controls: ['THE RELEASES'] },
+      { name: 'ended', token: waiting.token, dropId: ended.id, title: LIVE.edge.ended.CLOSED.title, text: LIVE.edge.ended.CLOSED.text, action: null, controls: ['THE RELEASES'] },
+      { name: 'past', token: nobody.token, dropId: ended.id, title: 'MONOLITHE', action: null, controls: ['THE RELEASES'] },
     ];
     for (const c of cases) {
       const { page, context, problems } = await phone(c.token);
@@ -537,7 +547,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault')), c.name).toBe(true);
       await keepsVault(page, c.action, c.controls);
       // One action: a hairline button (or the sign-in's form), never two.
-      expect(await page.locator('.live__edge .btn:visible').count(), c.name).toBe(1);
+      expect(await page.locator('.live__edge .btn:visible, .live__past .btn:visible').count(), c.name).toBe(1);
+      if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
       await page.screenshot({ path: join(OUT_DIR, `verify-live-edge-${c.name}.png`), fullPage: true });
       expect(problems, c.name).toEqual([]);
       await context.close();
@@ -557,8 +568,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       },
     );
     await page.goto(`${srv.origin}/verify/releases/${ended.id}`);
-    await textOf(page.locator('h1'), LIVE.edge.ended.SOLD_OUT.title);
-    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.SOLD_OUT.text);
+    await textOf(page.locator('h1'), LIVE.edge.ended.CLOSED.title);
+    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.CLOSED.text);
     expect(behind).toBeGreaterThan(0);
     expect(problems).toEqual([]);
     await context.close();

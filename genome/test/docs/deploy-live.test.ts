@@ -11,8 +11,8 @@
  *    only ever run to watch it refuse, no prune, the fast-forward to the final commit after its check;
  *  - the edge it describes is the Caddyfile's (the stream routes kept out of compression and flushed at once, the
  *    silhouette's upload), checked on the server as the only file of deploy/vps changed since B+C;
- *  - the legal pages' one version, dated the day of the deployment, after B+C's, its placeholder named;
- *  - the measured capacity it states is the console's (LIVE_ROOM_CAPACITY);
+ *  - the legal pages' one version, after B+C's, its placeholder named (2026-10-06, published with D on 2026-10-05);
+ *  - the capacity it states is the one measured for D (2026-10-04), which the load report keeps;
  *  - one real check per feature, each quoting only labels the verification app or the console shows;
  *  - one command per shell block, the console's shell commands as scripts/db.ts knows them, relative links that resolve.
  */
@@ -22,7 +22,6 @@ import { describe, expect, it } from 'vitest';
 import { DB_USAGE } from '../../scripts/db.js';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
-import { LIVE_ROOM_CAPACITY } from '../../src/server/services/live-insights.js';
 import { LIVE_PAY_MINUTES, LIVE_ROOM_OPENS_MINUTES, LIVE_TURN_SECONDS } from '../../src/server/services/live.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
@@ -41,9 +40,12 @@ const START_SUBJECT = "P-BC: the context test expects the salon service among cr
 const NAMES = Object.keys(MIGRATIONS);
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 const START_MIGRATIONS = NAMES.filter((n) => numberOf(n) <= 20);
-const DEPLOY_D = NAMES.filter((n) => numberOf(n) > 20);
+/** Deployment D applied 0021 alone; 0022 on belong to the next lot (LIVE RELEASE+). */
+const DEPLOY_D = NAMES.filter((n) => numberOf(n) === 21);
 /** The last version the legal pages published before D: B+C's (rule 7 of DEPLOY-POTENTIEL-2026-10.md). */
 const LAST_PUBLISHED_VERSION = '2026-10-05';
+/** D's one version of the legal pages, published with it on 2026-10-05: a date published never changes, the next one comes after it. */
+const D_LEGAL_VERSION = '2026-10-06';
 
 /** What the runbook expects from the scripts and the app, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -97,10 +99,13 @@ const VERIFY_LABELS = [
   'YOUR PLACE IS RELEASED', 'Your piece is reserved in size', 'THE RELEASE HAS ENDED', 'THIS RELEASE IS OVER', 'THIS BOARD IS NOT AVAILABLE',
   'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ', 'TO BE REVEALED', 'TAP AGAIN TO RELEASE', 'YOUR HOLD HAS ENDED',
 ] as const;
+/** Labels of deployment D's checks the console no longer shows (plan LIVE RELEASE+: the Client Services list retired). */
+const RETIRED_CONSOLE_LABELS = ['Cancel the reservation'] as const;
+
 const CONSOLE_LABELS = [
   'Club', 'Drops', 'New live release', 'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Sizes', 'Access', 'Add-ons',
   'Publish the release', 'Boutique board', 'Issue the link', 'Copy the link', 'Pause', 'Resume', 'Message', 'Add pieces', 'End now',
-  'Client Services', 'Cancel the reservation', 'Download CSV', 'How it is read', 'Revoke the board’s link',
+  'Client Services', 'Download CSV', 'How it is read', 'Revoke the board’s link',
   'Times (UTC)', 'Silhouette revealed', 'Name revealed', 'Photograph revealed', 'Silhouette', 'Choose a photograph', 'To be sent: ', 'Save photograph',
   'Silhouette saved.', 'Extend', 'Minutes', 'Release extended.', 'Free', 'Free the hold', 'Hold freed.', 'Let in', 'Remove',
 ] as const;
@@ -133,7 +138,8 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(runbook).toContain(`(previous: ${START_TAG}). This release applied the migration(s) ${DEPLOY_D.join(', ')}:`);
     expect(runbook).toContain(`deploy <TAG_D> OK (previous ${START_TAG}; migrations ${DEPLOY_D.join(', ')})`);
     expect(runbook).toContain(`orbes-genome:${START_TAG} cannot run on this schema any more`);
-    expect(runbook).toContain(`les ${NAMES.length} lignes \`applied\`, de \`${NAMES[0]}\` à \`${NAMES.at(-1)}\``);
+    const afterD = [...START_MIGRATIONS, ...DEPLOY_D];
+    expect(runbook).toContain(`les ${afterD.length} lignes \`applied\`, de \`${afterD[0]}\` à \`${afterD.at(-1)}\``);
   });
 
   it('expects from the scripts and the app only messages they print', () => {
@@ -202,26 +208,25 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(readDoc('genome/src/server/http/rate-limit.ts')).toContain('live: config.rateLimits.apiPerMinute * LIVE_NETWORK_RATE_FACTOR');
   });
 
-  it('dates the legal pages the day of the deployment, after B+C’s version, and names the placeholder until then', () => {
-    expect(LEGAL_VERSION > LAST_PUBLISHED_VERSION).toBe(true);
-    expect(LEGAL_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it('dated the legal pages after B+C’s version, its placeholder named, and published it with D', () => {
+    expect(D_LEGAL_VERSION > LAST_PUBLISHED_VERSION).toBe(true);
+    // Published with D, the version never changes: the later ones come after it (deployment E's runbook holds its own).
+    expect(LEGAL_VERSION >= D_LEGAL_VERSION).toBe(true);
     const rules = section(runbook, '## 0.');
     expect(rules).toContain(`A a publié \`2026-10-04\`, B+C \`${LAST_PUBLISHED_VERSION}\``);
-    expect(rules).toContain(`\`LEGAL_VERSION\` vaut provisoirement **\`${LEGAL_VERSION}\`**`);
+    expect(rules).toContain(`\`LEGAL_VERSION\` vaut provisoirement **\`${D_LEGAL_VERSION}\`**`);
     expect(rules).toContain('`PUBLISHED` (`genome/test/web/legal.content.test.ts`)');
-    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${LEGAL_VERSION}': '`);
-    // The drafts carry the same day as the pages.
-    expect(readDoc('docs/legal/terms.en.md')).toContain(`Version: ${dateInWords(LEGAL_VERSION, 'en')}.`);
-    expect(readDoc('docs/legal/terms.fr.md')).toContain(`Version : ${dateInWords(LEGAL_VERSION, 'fr')}.`);
+    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${D_LEGAL_VERSION}': '`);
+    expect(dateInWords(D_LEGAL_VERSION, 'en')).toBe('6 October 2026');
     expect(section(runbook, '### 1.3')).toContain("Sortie attendue : `export const LEGAL_VERSION = '<AAAA-MM-JJ>';`, le jour de `date -u`");
   });
 
-  it('states the measured capacity and the defaults as the code has them', () => {
-    expect(LIVE_ROOM_CAPACITY.inRoom).toBe(1000);
+  it('states the capacity measured for D and the defaults as the code has them', () => {
+    // The LIVE RELEASE alone, measured on 2026-10-04; LIVE RELEASE+ measured it again (deployment E's runbook states it).
     const capacity = '1 000';
     expect(section(runbook, '## 0.')).toContain(`**${capacity} personnes dans la salle**`);
     expect(runbook).toContain('(../reports/live-load.md)');
-    expect(readDoc('docs/reports/live-load.md')).toContain(`**Measured capacity: ${capacity} people in the room.**`);
+    expect(readDoc('docs/reports/live-load.md')).toContain(`**${capacity} people in the room** for the LIVE RELEASE alone`);
     expect(LIVE_ROOM_OPENS_MINUTES.default).toBe(5);
     expect(runbook).toContain(`À l'ouverture de la salle (${LIVE_ROOM_OPENS_MINUTES.default} minutes avant)`);
     expect([LIVE_TURN_SECONDS.default, LIVE_PAY_MINUTES.default]).toEqual([30, 5]);
@@ -242,6 +247,12 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     for (const label of CONSOLE_LABELS) {
       expect(admin, label).toContain(label);
       expect(checks, label).toContain(label);
+    }
+    // Deployment D's record keeps its check of the LIVE plan's Client Services list, which LIVE RELEASE+ retires into
+    // the Orders board: its label is the runbook's, no longer the console's.
+    for (const label of RETIRED_CONSOLE_LABELS) {
+      expect(checks, label).toContain(label);
+      expect(admin, label).not.toContain(label);
     }
     // The silhouette's check through the edge: a photograph over the 64 KB default, through the console's own upload.
     expect(checks).toContain('bien au-delà de 64 Ko');

@@ -12,13 +12,18 @@
  * - Every failure becomes an ApiError with the server's public `{ code,
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
- * - The ownership certificate's PDF (F-06) is the one answer that is not
- *   JSON: it comes back as a blob with its file name, for the page to save.
+ * - The ownership certificate's PDF (F-06) and an order's documents (an
+ *   invoice, a credit note, the order's ownership certificate: M6) are the
+ *   answers that are not JSON: each comes back as a blob with its file name,
+ *   for the page to save.
  * - A LIVE RELEASE's stream is no fetch: the page opens an EventSource on
  *   `liveStreamUrl` (same origin, the session cookie with it). The boutique
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
+  AccountOrder,
+  AccountQuestion,
+  OrderCareGuide,
   CertificateLookup,
   CertificateOffer,
   CircleAnswer,
@@ -48,6 +53,8 @@ import type {
   OwnedPiece,
   OwnerCertificate,
   OwnershipConfirmation,
+  Participation,
+  PastReleasesPage,
   RecoveryResult,
   ReportInput,
   ServiceRecord,
@@ -109,6 +116,25 @@ const MAX_RESPONSE_CHARS = 256 * 1024;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/** A question after as the server sent it, checked; null for none or for one this app could not read. */
+function questionOf(q: AccountQuestion | null): AccountQuestion | null {
+  if (!q) return null;
+  const ok =
+    typeof q.dropId === 'string' &&
+    typeof q.text === 'string' &&
+    Array.isArray(q.answers) &&
+    q.answers.length >= 2 &&
+    q.answers.every((a) => typeof a === 'string') &&
+    (q.answer === null || (Number.isInteger(q.answer) && q.answer >= 1 && q.answer <= q.answers.length)) &&
+    (q.asked === 'TOOK_PART' || q.asked === 'INTEREST') &&
+    typeof q.closesAt === 'string';
+  if (!ok) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  return q;
+}
+
+/** An order's documents saved as PDFs (GET /api/v1/account/orders/:id/<kind>.pdf). */
+export type OrderDocumentKind = 'invoice' | 'credit-note' | 'certificate';
 
 export class ApiClient {
   private csrfToken: string | undefined;
@@ -212,6 +238,48 @@ export class ApiClient {
     return r;
   }
 
+  /**
+   * THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, the newest first, LIVE RELEASES and
+   * draws together. Read afresh (the server lets a shared cache keep it a minute).
+   */
+  async pastReleases(page: number, pageSize: number): Promise<PastReleasesPage> {
+    const r = await this.request<PastReleasesPage>('GET', `/api/v1/releases/past?page=${page}&pageSize=${pageSize}`);
+    if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The releases the signed-in account took part in, each with whether it secured a piece there (401 signed out). */
+  async participation(): Promise<Participation> {
+    const r = await this.request<Participation>('GET', '/api/v1/account/participation');
+    if (!Array.isArray(r?.releases) || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * The question after a LIVE RELEASE for the signed-in account (plan LIVE RELEASE+, choice 11): null when it is not
+   * asked of it, or no longer open (401 signed out).
+   */
+  async question(id: string): Promise<AccountQuestion | null> {
+    const r = await this.request<{ question?: AccountQuestion | null }>('GET', `/api/v1/live/${encodeURIComponent(id)}/question`);
+    if (!r || !('question' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return questionOf(r.question ?? null);
+  }
+
+  /** One tap: the answer chosen (its position, from 1), changeable while the question is open. */
+  async answer(id: string, answer: number): Promise<AccountQuestion> {
+    const r = await this.request<{ question?: AccountQuestion | null }>('PUT', `/api/v1/live/${encodeURIComponent(id)}/answer`, { answer }, { csrf: true });
+    const q = questionOf(r?.question ?? null);
+    if (!q) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return q;
+  }
+
+  /** The questions MY PIECES asks: after the releases the account said I'LL BE THERE to and did not come to (401 signed out). */
+  async questions(): Promise<AccountQuestion[]> {
+    const r = await this.request<{ questions?: unknown }>('GET', '/api/v1/account/questions');
+    if (!Array.isArray(r?.questions)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.questions.map((q) => questionOf(q as AccountQuestion)).filter((q): q is AccountQuestion => q !== null);
+  }
+
   /** The signed-in account's tier and entries (the club; 401 signed out). */
   async clubStatus(): Promise<ClubStatus> {
     const r = await this.request<ClubStatus>('GET', '/api/v1/club/status');
@@ -255,6 +323,16 @@ export class ApiClient {
   /** A LIVE RELEASE's page, each stage from its time (404 DROP_NOT_FOUND for any other id, a draw's included). */
   liveRelease(id: string): Promise<LiveSheet | LiveEndedSheet> {
     return this.request<LiveSheet | LiveEndedSheet>('GET', `/api/v1/live/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * The after-room of release `parentId` (plan LIVE RELEASE+, choice 2), for one of its guests from its T0: its page,
+   * whose own id the room's routes then take (401 signed out; 404 for anyone else, before its T0, and without one).
+   */
+  async liveAfterRoom(parentId: string): Promise<LiveSheet | LiveEndedSheet> {
+    const r = await this.request<LiveSheet | LiveEndedSheet>('GET', `/api/v1/live/${encodeURIComponent(parentId)}/after-room`);
+    if (!r || typeof r.id !== 'string' || r.afterRoom?.parentId !== parentId) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
   }
 
   /** The server's time, for the page's clock sync (one of its three round trips). */
@@ -500,6 +578,30 @@ export class ApiClient {
     const r = await this.request<{ products?: unknown }>('GET', '/api/v1/account/products');
     if (!Array.isArray(r?.products)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.products as OwnedPiece[];
+  }
+
+  /** MY PIECES' orders (plan LIVE RELEASE+, choice 6): the account's own, one per piece, the latest first (a 401 when signed out). */
+  async orders(): Promise<AccountOrder[]> {
+    const r = await this.request<{ orders?: unknown }>('GET', '/api/v1/account/orders');
+    if (!Array.isArray(r?.orders)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.orders as AccountOrder[];
+  }
+
+  /** One of an order's documents as a PDF, to save (M6): its invoice, its credit note, or its ownership certificate. */
+  async orderDocument(orderId: string, document: OrderDocumentKind): Promise<DownloadedFile> {
+    const res = await this.send('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/${document}.pdf`, undefined, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${document}.pdf`) };
+  }
+
+  /** The care guide of an order's model (M6): its own words, or null for the house's general care text. */
+  async orderCareGuide(orderId: string): Promise<OrderCareGuide> {
+    const r = await this.request<{ careGuide?: OrderCareGuide }>('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/care-guide`);
+    if (!r?.careGuide || typeof r.careGuide.model !== 'string' || (r.careGuide.text !== null && typeof r.careGuide.text !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.careGuide;
   }
 
   /** The after-sales services of one of the owner's pieces, oldest first; staff notes stay internal. */

@@ -2,19 +2,20 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation, PG_ERROR, pgError } from '../../src/server/db/pg-errors.js';
 import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
 
 const EXPECTED_TABLES = [
-  'account_recovery_codes', 'accounts', 'admin_users', 'anomalies', 'audit_logs', 'authentication_events', 'categories',
-  'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
-  'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops', 'genomes', 'live_access_models', 'live_addons', 'live_entries',
-  'live_entry_addons', 'live_interest', 'live_messages', 'live_tier_windows', 'media_objects', 'model_images', 'models', 'ownership', 'ownership_certificates',
-  'ownership_transfers', 'product_status_history', 'products', 'retailers', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports',
-  'scan_tokens', 'service_records', 'sessions', 'shop_requests', 'warranties',
+  'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events', 'bench_items',
+  'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
+  'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops', 'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons',
+  'live_entries', 'live_entry_addons', 'live_interest', 'live_messages', 'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings',
+  'order_events', 'orders', 'ownership', 'ownership_certificates', 'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers',
+  'returns', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shop_requests',
+  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -156,6 +157,42 @@ describe('migrations', () => {
     expect(has(/INDEX live_messages_drop_idx ON public\.live_messages USING btree \(drop_id, created_at\)$/)).toBe(true);
     expect(has(/INDEX live_messages_created_by_idx ON public\.live_messages USING btree \(created_by\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX live_tier_windows_pkey ON public\.live_tier_windows USING btree \(drop_id, tier\)$/)).toBe(true);
+    // 0022: orders, stock and operations. A location by its name whatever the case, one default; a SKU per model and
+    // size; the pieces and sizes on sale by SKU; the ledger's balances; an order once per source, its board, its pieces
+    // reserved per SKU and location, one open order per piece; one open piece to make per order; a transfer's halves
+    // once each; one invoice per order; an entity's events in the journal; every foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX stock_locations_name_key ON public\.stock_locations USING btree \(lower\(name\)\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX stock_locations_one_default ON public\.stock_locations USING btree \(is_default\) WHERE is_default$/)).toBe(true);
+    expect(has(/UNIQUE INDEX skus_model_size_key ON public\.skus USING btree \(model_id, upper\(size_label\)\) NULLS NOT DISTINCT$/)).toBe(true);
+    expect(has(/INDEX products_sku_id_idx ON public\.products USING btree \(sku_id\)$/)).toBe(true);
+    expect(has(/INDEX drop_sizes_sku_id_idx ON public\.drop_sizes USING btree \(sku_id\)$/)).toBe(true);
+    expect(has(/INDEX drops_stock_location_id_idx ON public\.drops USING btree \(stock_location_id\)$/)).toBe(true);
+    expect(has(/INDEX stock_movements_balance_idx ON public\.stock_movements USING btree \(sku_id, location_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX stock_movements_transfer_key ON public\.stock_movements USING btree \(transfer_id, reason\) WHERE \(transfer_id IS NOT NULL\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX orders_live_entry_key ON public\.orders USING btree \(live_entry_id, piece\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX orders_drop_entry_key ON public\.orders USING btree \(drop_entry_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX orders_shop_request_key ON public\.orders USING btree \(shop_request_id\)$/)).toBe(true);
+    expect(has(/INDEX orders_board_idx ON public\.orders USING btree \(status, reserved_at\)$/)).toBe(true);
+    expect(has(/INDEX orders_stock_reservation_idx ON public\.orders USING btree \(sku_id, location_id\) WHERE \(reservation = 'STOCK'::text\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX orders_product_key ON public\.orders USING btree \(product_id\) WHERE \(status = ANY \(ARRAY\['RESERVED'::text, 'PAID'::text, 'SHIPPED'::text, 'DELIVERED'::text\]\)\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX bench_items_one_open ON public\.bench_items USING btree \(order_id\) WHERE \(status = ANY \(ARRAY\['TO_MAKE'::text, 'IN_PROGRESS'::text\]\)\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX invoices_one_per_order ON public\.invoices USING btree \(order_id\) WHERE \(kind = 'INVOICE'::text\)$/)).toBe(true);
+    expect(has(/INDEX event_journal_entity_idx ON public\.event_journal USING btree \(entity_type, entity_id, id\)$/)).toBe(true);
+    expect(has(/INDEX order_events_order_idx ON public\.order_events USING btree \(order_id, id\)$/)).toBe(true);
+    // 0023: releases and collectors. One after-room per release; a guest once, its place unique per after-room; one
+    // answer per account and release; a segment by its name whatever the case; the activity by hour, country and tier;
+    // every foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX drops_parent_drop_id_key ON public\.drops USING btree \(parent_drop_id\)$/)).toBe(true);
+    expect(has(/INDEX drops_access_segment_id_idx ON public\.drops USING btree \(access_segment_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX after_room_guests_pkey ON public\.after_room_guests USING btree \(drop_id, entry_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX after_room_guests_position_key ON public\.after_room_guests USING btree \(drop_id, "?position"?\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX after_room_guests_entry_key ON public\.after_room_guests USING btree \(entry_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX release_answers_pkey ON public\.release_answers USING btree \(drop_id, account_id\)$/)).toBe(true);
+    expect(has(/INDEX release_answers_account_idx ON public\.release_answers USING btree \(account_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX segments_name_key ON public\.segments USING btree \(lower\(name\)\)$/)).toBe(true);
+    expect(has(/INDEX segments_created_by_idx ON public\.segments USING btree \(created_by\)$/)).toBe(true);
+    expect(has(/INDEX circle_posts_segment_id_idx ON public\.circle_posts USING btree \(segment_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX activity_hourly_pkey ON public\.activity_hourly USING btree \(hour, country, tier\)$/)).toBe(true);
   });
 
   /**
@@ -1099,7 +1136,7 @@ describe('migrations', () => {
     expect((await sql<{ cancelled: boolean }>`SELECT cancelled_at IS NOT NULL AS cancelled FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].cancelled).toBe(true);
     const posts = (await sql<{ id: string; published_at: Date | null }>`SELECT id, published_at FROM circle_posts WHERE drop_id = ${live}`.execute(t.db)).rows;
     expect(new Map(posts.map((p) => [p.id, p.published_at?.toISOString() ?? null]))).toEqual(new Map([[shown, '2020-01-01T10:00:00.000Z'], [coming, null]]));
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0021_live_release']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0021_live_release'));
     expect(await snapshot()).toEqual(latest);
     // Up again, it is a DRAW (cancelled): the LIVE settings went with the down step.
     expect((await sql<{ mode: string }>`SELECT mode FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].mode).toBe('DRAW');
@@ -1276,6 +1313,558 @@ describe('migrations', () => {
     await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
   });
 
+  /** The tables 0022 adds, and what names an object of 0022 in a snapshot (the status CHECK of products: its RESERVED form). */
+  const TABLES_0022 = [
+    'bench_items', 'carriers', 'event_journal', 'invoices', 'order_alert_settings', 'order_events', 'orders', 'returns', 'sku_thresholds', 'skus', 'stock_locations',
+    'stock_movements',
+  ];
+  const statusCheck = (o: string) => o.startsWith('constraint products products_status_check ');
+  const of0022 = (o: string) =>
+    new RegExp(`\\b(${TABLES_0022.join('|')})\\b`).test(o) ||
+    /^table (products|drop_sizes) sku_id |^table drops stock_location_id |^table shop_requests outcome |^table models (base_price_minor|base_currency|care_guide) |^table accounts shopify_customer_id /.test(o) ||
+    /^constraint (accounts accounts_shopify_customer_(id_check|key)|products products_reserved|drop_sizes drop_sizes_sku_id_fkey|drops drops_stock_location_id_fkey|shop_requests shop_requests_outcome_(check|closed)|models models_(base_price|base_price_minor_check|base_currency_check|care_guide_check)) /.test(o) ||
+    (statusCheck(o) && o.includes("'RESERVED'")) ||
+    /^index CREATE INDEX (products_sku_id_idx|drop_sizes_sku_id_idx|drops_stock_location_id_idx) |^index CREATE UNIQUE INDEX accounts_shopify_customer_key /.test(o);
+
+  it('0022 adds the stock, the orders and the journal (twelve tables, the SKUs of pieces and sizes, RESERVED, the salon\'s outcome, a model\'s base price and care guide, a release\'s location), and nothing else; down retires the identities still RESERVED and restores 0021 exactly, and up again', async () => {
+    const latest = await snapshot();
+    // At 0022: an identity RESERVED for a piece to make, in its SKU, and a movement of the ledger.
+    await sql`INSERT INTO categories (id, code, name) VALUES (23, 'W', 'Stock test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (23, 'S', 'RING', 'STOCKDOWN') RETURNING id`.execute(t.db)).rows[0].id;
+    const sku = (await sql<{ id: string }>`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, '52', 'STOCKDOWN-52') RETURNING id`.execute(t.db)).rows[0].id;
+    const location = (await sql<{ id: string }>`INSERT INTO stock_locations (name, is_default) VALUES ('DOWN WAREHOUSE', true) RETURNING id`.execute(t.db)).rows[0].id;
+    const reserved = (await sql<{ id: string }>`
+      INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, variant, material, status, sku_id)
+      VALUES ('O26-W-00001', ${(26 << 25) | (23 << 20) | 1}, 2026, 23, 1, 'STOCKDOWN-52', ${model}, '52', '925 STERLING SILVER', 'RESERVED', ${sku}) RETURNING id`.execute(t.db)).rows[0].id;
+    await sql`INSERT INTO stock_movements (sku_id, location_id, delta, reason, actor_type) VALUES (${sku}, ${location}, 3, 'ADJUSTED', 'system')`.execute(t.db);
+    const { with: withStock, without: before } = await rollBackTo('0022_orders_stock');
+    const added = withStock.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0022(o))).toEqual([]);
+    expect(before.filter(of0022)).toEqual([]);
+    // Nothing else changed, but the status CHECK of products, which gains RESERVED.
+    expect(withStock.filter((o) => !of0022(o))).toEqual(before.filter((o) => !statusCheck(o)));
+    expect(before.filter(statusCheck)).toEqual([
+      "constraint products products_status_check CHECK ((status = ANY (ARRAY['ISSUED'::text, 'ACTIVATED'::text, 'REGISTERED'::text, 'OWNED'::text, 'TRANSFERRED'::text, 'SERVICED'::text, 'RESOLD'::text, 'RETIRED'::text, 'REVOKED'::text, 'COUNTERFEIT_FLAGGED'::text, 'LOST'::text, 'STOLEN'::text])))",
+    ]);
+    expect(withStock.filter(statusCheck)).toEqual([
+      "constraint products products_status_check CHECK ((status = ANY (ARRAY['RESERVED'::text, 'ISSUED'::text, 'ACTIVATED'::text, 'REGISTERED'::text, 'OWNED'::text, 'TRANSFERRED'::text, 'SERVICED'::text, 'RESOLD'::text, 'RETIRED'::text, 'REVOKED'::text, 'COUNTERFEIT_FLAGGED'::text, 'LOST'::text, 'STOLEN'::text])))",
+    ]);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('products')).toEqual(['sku_id']);
+    expect(columns('drop_sizes')).toEqual(['sku_id']);
+    expect(columns('drops')).toEqual(['stock_location_id']);
+    expect(columns('shop_requests')).toEqual(['outcome']);
+    expect(columns('models')).toEqual(['base_currency', 'base_price_minor', 'care_guide']);
+    expect(columns('accounts')).toEqual(['shopify_customer_id']);
+    expect(columns('stock_locations')).toEqual(['created_at', 'id', 'is_default', 'name', 'shopify_location_id']);
+    expect(columns('skus')).toEqual(['code', 'created_at', 'id', 'model_id', 'shopify_product_id', 'shopify_variant_id', 'size_label']);
+    expect(columns('stock_movements')).toEqual(['actor_id', 'actor_type', 'created_at', 'delta', 'id', 'location_id', 'note', 'order_id', 'product_id', 'reason', 'sku_id', 'transfer_id']);
+    expect(columns('sku_thresholds')).toEqual(['location_id', 'minimum', 'sku_id', 'updated_at', 'updated_by']);
+    expect(columns('carriers')).toEqual(['active', 'created_at', 'id', 'name', 'tracking_url']);
+    expect(columns('orders')).toEqual([
+      'account_id', 'addons', 'buyer_address', 'buyer_name', 'cancelled_at', 'carrier_id', 'channel', 'currency', 'declared_value_minor', 'delivered_at', 'drop_entry_id',
+      'drop_id', 'engraving_text', 'id', 'live_entry_id', 'location_id', 'model_id', 'paid_at', 'piece', 'price_minor', 'product_id', 'reservation', 'reserved_at',
+      'returned_at', 'shipped_at', 'shop_request_id', 'shopify_order_id', 'size_label', 'sku_id', 'status', 'surprise', 'tracking_number',
+    ]);
+    expect(columns('order_events')).toEqual(['action', 'actor_id', 'actor_type', 'created_at', 'details', 'id', 'note', 'order_id', 'status']);
+    expect(columns('bench_items')).toEqual([
+      'cancelled_at', 'created_at', 'done_at', 'drop_id', 'engraving_text', 'id', 'location_id', 'order_id', 'product_id', 'sku_id', 'started_at', 'status', 'surprise',
+    ]);
+    expect(columns('returns')).toEqual(['created_at', 'created_by', 'id', 'location_id', 'note', 'order_id', 'outcome', 'ownership_id']);
+    expect(columns('invoices')).toEqual([
+      'buyer', 'credits_invoice_id', 'currency', 'id', 'issued_at', 'issuer', 'kind', 'lines', 'order_id', 'sequence', 'subtotal_minor', 'total_minor', 'vat_minor',
+      'vat_rate_bp', 'year',
+    ]);
+    expect(columns('event_journal')).toEqual(['consumed_by', 'created_at', 'entity_id', 'entity_type', 'id', 'payload', 'type']);
+    expect(columns('order_alert_settings')).toEqual(['id', 'ready_days', 'reserved_days', 'shipped_days', 'unregistered_days', 'updated_at', 'updated_by']);
+    expect(added.filter((o) => o.startsWith('table order_alert_settings ')).map((o) => o.split(' ').slice(2).join(' '))).toEqual(
+      expect.arrayContaining(['reserved_days smallint NO 2', 'ready_days smallint NO 3', 'shipped_days smallint NO 10', 'unregistered_days smallint NO 30']),
+    );
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger bench_items bench_items_immutable_identity',
+      'trigger carriers carriers_immutable_identity',
+      'trigger event_journal event_journal_immutable',
+      'trigger event_journal event_journal_no_delete',
+      'trigger invoices invoices_immutable',
+      'trigger order_events order_events_append_only',
+      'trigger orders orders_immutable_identity',
+      'trigger returns returns_immutable',
+      'trigger skus skus_immutable_identity',
+      'trigger stock_locations stock_locations_immutable_identity',
+      'trigger stock_movements stock_movements_append_only',
+    ]);
+    for (const c of [
+      /^constraint products products_sku_fkey FOREIGN KEY \(model_id, sku_id\) REFERENCES skus\(model_id, id\) ON DELETE RESTRICT$/,
+      /^constraint products products_reserved CHECK \(\(\(status <> 'RESERVED'::text\) OR \(claim_secret_hash IS NULL\)\)\)$/,
+      /^constraint drop_sizes drop_sizes_sku_id_fkey FOREIGN KEY \(sku_id\) REFERENCES skus\(id\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_stock_location_id_fkey FOREIGN KEY \(stock_location_id\) REFERENCES stock_locations\(id\) ON DELETE RESTRICT$/,
+      /^constraint shop_requests shop_requests_outcome_check CHECK \(\(outcome = ANY \(ARRAY\['ACCEPTED'::text, 'DECLINED'::text\]\)\)\)$/,
+      /^constraint accounts accounts_shopify_customer_id_check CHECK \(\(shopify_customer_id ~ '\^\[1-9\]\[0-9\]\{0,19\}\$'::text\)\)$/,
+      /^constraint accounts accounts_shopify_customer_key UNIQUE \(shopify_customer_id\)$/,
+      /^constraint orders orders_sku_fkey FOREIGN KEY \(model_id, sku_id\) REFERENCES skus\(model_id, id\) ON DELETE RESTRICT$/,
+      /^constraint orders orders_status_check CHECK \(\(status = ANY \(ARRAY\['RESERVED'::text, 'PAID'::text, 'SHIPPED'::text, 'DELIVERED'::text, 'CANCELLED'::text, 'RETURNED'::text\]\)\)\)$/,
+      /^constraint orders orders_channel_check CHECK \(\(channel = ANY \(ARRAY\['LIVE'::text, 'DRAW'::text, 'SALON'::text\]\)\)\)$/,
+      /^constraint orders orders_live_entry_id_fkey FOREIGN KEY \(live_entry_id\) REFERENCES live_entries\(id\) ON DELETE RESTRICT$/,
+      /^constraint orders orders_drop_entry_id_fkey FOREIGN KEY \(drop_entry_id\) REFERENCES drop_entries\(id\) ON DELETE RESTRICT$/,
+      /^constraint orders orders_shop_request_id_fkey FOREIGN KEY \(shop_request_id\) REFERENCES shop_requests\(id\) ON DELETE RESTRICT$/,
+      /^constraint stock_movements stock_movements_reason_check CHECK \(\(reason = ANY \(ARRAY\['PRODUCED'::text, 'ADJUSTED'::text, 'TRANSFER_OUT'::text, 'TRANSFER_IN'::text, 'SHIPPED'::text, 'RETURNED'::text\]\)\)\)$/,
+      /^constraint bench_items bench_items_status_check CHECK \(\(status = ANY \(ARRAY\['TO_MAKE'::text, 'IN_PROGRESS'::text, 'DONE'::text, 'CANCELLED'::text\]\)\)\)$/,
+      /^constraint invoices invoices_kind_check CHECK \(\(kind = ANY \(ARRAY\['INVOICE'::text, 'CREDIT_NOTE'::text\]\)\)\)$/,
+      /^constraint invoices invoices_credits_invoice_id_fkey FOREIGN KEY \(credits_invoice_id\) REFERENCES invoices\(id\) ON DELETE RESTRICT$/,
+      /^constraint returns returns_outcome_check CHECK \(\(outcome = ANY \(ARRAY\['RESTOCKED'::text, 'ARCHIVED'::text\]\)\)\)$/,
+      /^constraint returns returns_ownership_id_fkey FOREIGN KEY \(ownership_id\) REFERENCES ownership\(id\) ON DELETE RESTRICT$/,
+      /^constraint returns returns_ownership_key UNIQUE \(ownership_id\)$/,
+      /^constraint order_alert_settings order_alert_settings_id_check CHECK \(\(id = 1\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    for (const status of ['reserved', 'paid', 'shipped', 'delivered', 'cancelled', 'returned']) {
+      expect(added.some((o) => o.startsWith(`constraint orders orders_status_${status} CHECK `)), status).toBe(true);
+    }
+    // Down: the identity still RESERVED is retired (the previous image has no RESERVED), its history started there.
+    expect((await sql<{ status: string }>`SELECT status FROM products WHERE id = ${reserved}`.execute(t.db)).rows[0].status).toBe('RETIRED');
+    expect((await sql<{ from_status: string | null; to_status: string; actor_type: string; reason: string }>`
+      SELECT from_status, to_status, actor_type, reason FROM product_status_history WHERE product_id = ${reserved}`.execute(t.db)).rows).toEqual([
+      { from_status: null, to_status: 'RETIRED', actor_type: 'system', reason: 'Reserved identity retired: migration 0022 rolled back' },
+    ]);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0022_orders_stock', '0023_releases_collectors']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0022: locations, SKUs and Shopify customers unique, one default; a RESERVED identity unclaimable and never in the history; each order\'s source, price, holding, steps and shipment consistent, its identity fixed; the ledger, the events, the returns, the invoices and the journal append-only (the journal\'s readers aside); one settings row', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (22, 'V', 'Orders test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const modelOf = async (prefix: string) => (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (22, 'O', 'RING', ${prefix}) RETURNING id`.execute(t.db)).rows[0].id;
+    const model = await modelOf('ORDCHK');
+    const other = await modelOf('ORDCHK2');
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('orders@example.com', 'orders@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('orders@orbes.test', 'orders@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const run = (q: string) => sql.raw(q).execute(t.db);
+
+    // Locations: a trimmed name, unique whatever the case; one default at most; a Shopify id in decimal, unique.
+    const location = (name: string, extra = '') =>
+      sql.raw<{ id: string }>(`INSERT INTO stock_locations (name${extra ? ', is_default, shopify_location_id' : ''}) VALUES ('${name}'${extra}) RETURNING id`).execute(t.db);
+    for (const bad of [' PARIS', '', 'x'.repeat(61)]) await expect(location(bad), bad).rejects.toSatisfy((e) => isCheckViolation(e));
+    const paris = (await location('PARIS STOCK', `, true, '7012345'`)).rows[0].id;
+    await expect(location('paris stock')).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_locations_name_key'));
+    await expect(location('LONDON STOCK', `, true, NULL`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_locations_one_default'));
+    await expect(location('LONDON STOCK', `, false, '7012345'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_locations_shopify_key'));
+    await expect(location('LONDON STOCK', `, false, 'gid://shopify/Location/1'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    const london = (await location('LONDON STOCK')).rows[0].id;
+    await run(`UPDATE stock_locations SET name = 'LONDON VAULT' WHERE id = '${london}'`);
+    await expect(run(`UPDATE stock_locations SET created_at = now() + interval '1 day' WHERE id = '${london}'`)).rejects.toSatisfy(isGuardViolation);
+
+    // SKUs: one per model and size whatever its case, one size (NULL) once too; a code of the SKU grammar, unique; its model and size fixed.
+    const skuOf = (modelId: string, size: string | null, code: string) =>
+      sql<{ id: string }>`INSERT INTO skus (model_id, size_label, code) VALUES (${modelId}, ${size}, ${code}) RETURNING id`.execute(t.db);
+    const s52 = (await skuOf(model, '52', 'ORDCHK-52')).rows[0].id;
+    const one = (await skuOf(model, null, 'ORDCHK')).rows[0].id;
+    await expect(skuOf(model, '52', 'ORDCHK-52B')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
+    const small = (await skuOf(model, 'Small', 'ORDCHK-S')).rows[0].id;
+    await expect(skuOf(model, 'SMALL', 'ORDCHK-S2')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
+    await run(`DELETE FROM skus WHERE id = '${small}'`);
+    await expect(skuOf(model, null, 'ORDCHK-ONE')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
+    await expect(skuOf(model, '54', 'ORDCHK-52')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_code_key'));
+    for (const [size, code] of [[' 54', 'ORDCHK-54'], ['54', '-ORDCHK-54'], ['54', 'ORDCHK<54>']] as const) {
+      await expect(skuOf(model, size, code), `${size} ${code}`).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const otherSku = (await skuOf(other, '52', 'ORDCHK2-52')).rows[0].id;
+    await expect(run(`UPDATE skus SET size_label = '54' WHERE id = '${s52}'`)).rejects.toSatisfy(isGuardViolation);
+    await run(`UPDATE skus SET shopify_product_id = '8001', shopify_variant_id = '9001' WHERE id = '${s52}'`);
+    await expect(run(`UPDATE skus SET shopify_variant_id = '9001' WHERE id = '${one}'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_shopify_variant_key'));
+
+    // An account's Shopify customer: decimal, one account each.
+    const customer = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('customer@example.com', 'customer@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    await run(`UPDATE accounts SET shopify_customer_id = '6001' WHERE id = '${account}'`);
+    await expect(run(`UPDATE accounts SET shopify_customer_id = '6001' WHERE id = '${customer}'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'accounts_shopify_customer_key'));
+    await expect(run(`UPDATE accounts SET shopify_customer_id = 'gid://shopify/Customer/1' WHERE id = '${customer}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+
+    // A piece of its model's SKU only; RESERVED never claimable, never written in the history.
+    let serial = 0;
+    const piece = (sets: Record<string, unknown>) => {
+      serial++;
+      const cols = {
+        product_id: `O26-V-${String(serial).padStart(5, '0')}`, packed_identity: (26 << 25) | (22 << 20) | serial, year: 2026, category_id: 22, serial, sku: 'ORDCHK-52',
+        model_id: model, variant: '52', material: '925 STERLING SILVER', ...sets,
+      };
+      return sql<{ id: string }>`INSERT INTO products (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id`.execute(t.db);
+    };
+    await expect(piece({ sku_id: otherSku })).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'products_sku_fkey'));
+    await expect(piece({ status: 'RESERVED', claim_secret_hash: 'scrypt$x' })).rejects.toSatisfy((e) => isCheckViolation(e, 'products_reserved'));
+    const reservedPiece = (await piece({ status: 'RESERVED', sku_id: s52 })).rows[0].id;
+    const issuedPiece = (await piece({ sku_id: s52 })).rows[0].id;
+    await expect(sql`INSERT INTO product_status_history (product_id, from_status, to_status, actor_type) VALUES (${reservedPiece}, NULL, 'RESERVED', 'system')`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+
+    // Carriers: an https link with {tracking}, a name unique whatever the case.
+    const carrier = (name: string, url: string) => sql<{ id: string }>`INSERT INTO carriers (name, tracking_url) VALUES (${name}, ${url}) RETURNING id`.execute(t.db);
+    for (const url of ['http://track.example/{tracking}', 'https://track.example/', 'https://track example/{tracking}']) {
+      await expect(carrier('Courier', url), url).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const courier = (await carrier('Courier', 'https://track.example/{tracking}')).rows[0].id;
+    await expect(carrier('COURIER', 'https://track.example/{tracking}')).rejects.toSatisfy((e) => isUniqueViolation(e, 'carriers_name_key'));
+
+    // Orders: a request of the salon closed as ACCEPTED is the source of one; its outcome only once closed.
+    const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id) VALUES (${account}, ${model}) RETURNING id`.execute(t.db)).rows[0].id;
+    await expect(run(`UPDATE shop_requests SET outcome = 'ACCEPTED' WHERE id = '${request}'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'shop_requests_outcome_closed'));
+    await expect(run(`UPDATE shop_requests SET status = 'CLOSED', handled_at = now(), outcome = 'MAYBE' WHERE id = '${request}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await run(`UPDATE shop_requests SET status = 'CLOSED', handled_at = now(), handled_by = '${admin}', outcome = 'ACCEPTED' WHERE id = '${request}'`);
+    const order = (sets: Record<string, unknown>) => {
+      const cols = { channel: 'SALON', shop_request_id: request, account_id: account, model_id: model, location_id: paris, ...sets };
+      return sql<{ id: string; status: string; piece: number; addons: unknown }>`
+        INSERT INTO orders (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id, status, piece, addons`.execute(t.db);
+    };
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    for (const [sets, constraint] of [
+      [{ channel: 'LIVE' }, 'orders_source'],
+      [{ piece: 2 }, 'orders_source'],
+      [{ price_minor: 480000 }, 'orders_price'],
+      [{ reservation: 'STOCK' }, 'orders_reservation'],
+      [{ sku_id: s52, reservation: 'STOCK', status: 'CANCELLED', reserved_at: hourAgo, cancelled_at: new Date() }, 'orders_reservation'],
+      [{ status: 'PAID' }, 'orders_status_paid'],
+      [{ status: 'SHIPPED', reserved_at: hourAgo, paid_at: new Date() }, 'orders_status_shipped'],
+      [{ status: 'CANCELLED' }, 'orders_status_cancelled'],
+      [{ status: 'RETURNED' }, 'orders_status_returned'],
+      [{ status: 'DELIVERED' }, 'orders_status_delivered'],
+      [{ carrier_id: courier }, 'orders_shipment'],
+      [{ declared_value_minor: 100 }, 'orders_shipment'],
+      [{ paid_at: new Date(Date.now() - 86_400_000), status: 'PAID' }, 'orders_times'],
+    ] as const) {
+      await expect(order(sets as Record<string, unknown>), JSON.stringify(sets)).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    await expect(order({ sku_id: otherSku })).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'orders_sku_fkey'));
+    for (const sets of [{ currency: 'eur', price_minor: 1 }, { addons: '{}' }, { tracking_number: 'x' }, { status: 'LOST' }, { engraving_text: 'x'.repeat(121) }, { piece: 6 }]) {
+      await expect(order(sets), JSON.stringify(sets)).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    const o1 = (await order({ sku_id: s52, size_label: '52', price_minor: 480000, currency: 'EUR', reservation: 'STOCK', product_id: issuedPiece })).rows[0];
+    expect([o1.status, o1.piece, o1.addons]).toEqual(['RESERVED', 1, []]);
+    await expect(order({})).rejects.toSatisfy((e) => isUniqueViolation(e, 'orders_shop_request_key'));
+    const set = (sets: string, id = o1.id) => run(`UPDATE orders SET ${sets} WHERE id = '${id}'`);
+    // Step by step, each status with its columns: PAID, then SHIPPED with its carrier and number, then DELIVERED.
+    await expect(set(`status = 'SHIPPED', shipped_at = now(), carrier_id = '${courier}', tracking_number = '6A12345678901'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await set(`status = 'PAID', paid_at = reserved_at + interval '1 hour'`);
+    await expect(set(`status = 'SHIPPED', shipped_at = paid_at + interval '1 day', reservation = NULL`)).rejects.toSatisfy((e) => isCheckViolation(e, 'orders_shipment'));
+    await expect(set(`status = 'SHIPPED', shipped_at = paid_at + interval '1 day', carrier_id = '${courier}', tracking_number = '6A12345678901'`)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'orders_reservation'),
+    );
+    await expect(set(`status = 'SHIPPED', shipped_at = paid_at - interval '1 second', reservation = NULL, carrier_id = '${courier}', tracking_number = '6A12345678901'`)).rejects.toSatisfy(
+      (e) => isCheckViolation(e, 'orders_times'),
+    );
+    await set(`status = 'SHIPPED', shipped_at = paid_at + interval '1 day', reservation = NULL, carrier_id = '${courier}', tracking_number = '6A12345678901', declared_value_minor = 480000`);
+    await expect(set(`status = 'CANCELLED', cancelled_at = now() + interval '2 days'`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await set(`status = 'DELIVERED', delivered_at = shipped_at + interval '3 days'`);
+    await set(`status = 'RETURNED', returned_at = delivered_at + interval '1 day'`);
+    // Its identity never changes; one open order per piece (a returned one frees it).
+    for (const sets of [`channel = 'DRAW'`, `account_id = '${account}', model_id = '${other}'`, `reserved_at = now()`, `piece = 2`]) {
+      await expect(set(sets), sets).rejects.toSatisfy((e) => isGuardViolation(e) || isCheckViolation(e));
+    }
+    const request2 = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
+    const o2 = (await order({ shop_request_id: request2, sku_id: s52, product_id: issuedPiece })).rows[0];
+    const request3 = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
+    await expect(order({ shop_request_id: request3, product_id: issuedPiece })).rejects.toSatisfy((e) => isUniqueViolation(e, 'orders_product_key'));
+
+    // Its history: an order's action, the status after it; append-only.
+    const event = (action: string, status = 'RESERVED') =>
+      sql<{ id: number }>`INSERT INTO order_events (order_id, action, status, actor_type) VALUES (${o2.id}, ${action}, ${status}, 'admin') RETURNING id`.execute(t.db);
+    for (const action of ['pay', 'order.', 'Order.Pay', 'stock.move']) await expect(event(action), action).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(event('order.pay', 'LOST')).rejects.toSatisfy((e) => isCheckViolation(e));
+    const ev = (await event('order.create')).rows[0].id;
+    await expect(run(`UPDATE order_events SET note = 'x' WHERE id = ${ev}`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`DELETE FROM order_events WHERE id = ${ev}`)).rejects.toSatisfy(isGuardViolation);
+
+    // A piece to make: its reserved identity once, one open per order, each status with its time; its identity fixed.
+    const bench = (sets: Record<string, unknown>) => {
+      const cols = { order_id: o2.id, sku_id: s52, location_id: paris, product_id: reservedPiece, ...sets };
+      return sql<{ id: string }>`INSERT INTO bench_items (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id`.execute(t.db);
+    };
+    for (const [sets, constraint] of [
+      [{ status: 'IN_PROGRESS' }, 'bench_items_status_in_progress'],
+      [{ status: 'DONE' }, 'bench_items_status_done'],
+      [{ status: 'CANCELLED' }, 'bench_items_status_cancelled'],
+      [{ started_at: new Date(Date.now() + 3_600_000) }, 'bench_items_status_to_make'],
+    ] as const) {
+      await expect(bench(sets as Record<string, unknown>), JSON.stringify(sets)).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    const b1 = (await bench({})).rows[0].id;
+    await expect(bench({ product_id: issuedPiece })).rejects.toSatisfy((e) => isUniqueViolation(e, 'bench_items_one_open'));
+    await expect(bench({ order_id: null })).rejects.toSatisfy((e) => isUniqueViolation(e, 'bench_items_product_key'));
+    await expect(run(`UPDATE bench_items SET status = 'IN_PROGRESS', started_at = created_at - interval '1 second' WHERE id = '${b1}'`)).rejects.toSatisfy((e) => isCheckViolation(e, 'bench_items_times'));
+    await run(`UPDATE bench_items SET status = 'IN_PROGRESS', started_at = created_at, location_id = '${london}' WHERE id = '${b1}'`);
+    await expect(run(`UPDATE bench_items SET sku_id = '${one}' WHERE id = '${b1}'`)).rejects.toSatisfy(isGuardViolation);
+    await run(`UPDATE bench_items SET status = 'CANCELLED', cancelled_at = started_at WHERE id = '${b1}'`);
+    // Cancelled, another piece to make may follow for the order (with another identity).
+    await bench({ product_id: (await piece({ status: 'RESERVED', sku_id: s52 })).rows[0].id });
+
+    // The ledger: the sign of each reason, a transfer's halves paired once each, an order's shipment or return, a piece one at a time; append-only.
+    const move = (sets: Record<string, unknown>) => {
+      const cols = { sku_id: s52, location_id: paris, actor_type: 'admin', actor_id: admin, ...sets };
+      return sql<{ id: number }>`INSERT INTO stock_movements (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id`.execute(t.db);
+    };
+    const transfer = '6f1c1c56-5a5e-4c4b-9a41-0f5b9d8a1c11';
+    for (const [sets, constraint] of [
+      [{ delta: 0, reason: 'ADJUSTED' }, undefined],
+      [{ delta: 10_001, reason: 'ADJUSTED' }, undefined],
+      [{ delta: -1, reason: 'TRANSFER_IN', transfer_id: transfer }, 'stock_movements_sign'],
+      [{ delta: 1, reason: 'TRANSFER_OUT', transfer_id: transfer }, 'stock_movements_sign'],
+      [{ delta: 1, reason: 'PRODUCED' }, 'stock_movements_order'],
+      [{ delta: 1, reason: 'TRANSFER_IN' }, 'stock_movements_transfer'],
+      [{ delta: 1, reason: 'ADJUSTED', transfer_id: transfer }, 'stock_movements_transfer'],
+      [{ delta: -1, reason: 'SHIPPED' }, 'stock_movements_order'],
+      [{ delta: -2, reason: 'SHIPPED', order_id: o2.id }, 'stock_movements_order'],
+      [{ delta: 1, reason: 'ADJUSTED', order_id: o2.id }, 'stock_movements_order'],
+      [{ delta: 2, reason: 'ADJUSTED', product_id: issuedPiece }, 'stock_movements_piece'],
+      [{ delta: 1, reason: 'ADJUSTED', actor_type: 'robot' }, undefined],
+    ] as const) {
+      await expect(move(sets as Record<string, unknown>), JSON.stringify(sets)).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    await move({ delta: -2, reason: 'TRANSFER_OUT', transfer_id: transfer });
+    await move({ delta: 2, reason: 'TRANSFER_IN', transfer_id: transfer, location_id: london });
+    await expect(move({ delta: 2, reason: 'TRANSFER_IN', transfer_id: transfer, location_id: london })).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_movements_transfer_key'));
+    const produced = (await move({ delta: 1, reason: 'PRODUCED', product_id: issuedPiece })).rows[0].id;
+    await move({ delta: -1, reason: 'SHIPPED', order_id: o2.id, product_id: issuedPiece });
+    await expect(run(`UPDATE stock_movements SET delta = 2 WHERE id = ${produced}`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`DELETE FROM stock_movements WHERE id = ${produced}`)).rejects.toSatisfy(isGuardViolation);
+
+    // Thresholds: 1 to 10 000, one per SKU and location.
+    const threshold = (minimum: number) => sql`INSERT INTO sku_thresholds (sku_id, location_id, minimum, updated_by) VALUES (${s52}, ${paris}, ${minimum}, ${admin})`.execute(t.db);
+    for (const m of [0, 10_001]) await expect(threshold(m)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await threshold(3);
+    await expect(threshold(4)).rejects.toSatisfy((e) => isUniqueViolation(e));
+
+    // Returns: back to stock at a location, or archived without one, with a note; once per order; never changed.
+    const ret = (outcome: string, locationId: string | null, orderId = o1.id, note: string | null = 'Returned unworn.') =>
+      sql<{ id: string }>`INSERT INTO returns (order_id, outcome, location_id, note, created_by) VALUES (${orderId}, ${outcome}, ${locationId}, ${note}, ${admin}) RETURNING id`.execute(t.db);
+    await expect(ret('ARCHIVED', null, o1.id, null)).rejects.toSatisfy((e) => pgError(e)?.code === PG_ERROR.NOT_NULL_VIOLATION);
+    await expect(ret('ARCHIVED', null, o1.id, ' ')).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(ret('RESTOCKED', null)).rejects.toSatisfy((e) => isCheckViolation(e, 'returns_location'));
+    await expect(ret('ARCHIVED', paris)).rejects.toSatisfy((e) => isCheckViolation(e, 'returns_location'));
+    await expect(ret('LOST', null)).rejects.toSatisfy((e) => isCheckViolation(e));
+    const r1 = (await ret('RESTOCKED', paris)).rows[0].id;
+    await expect(ret('ARCHIVED', null)).rejects.toSatisfy((e) => isUniqueViolation(e, 'returns_order_key'));
+    await expect(run(`UPDATE returns SET note = 'x' WHERE id = '${r1}'`)).rejects.toSatisfy(isGuardViolation);
+
+    // Invoices: numbered per kind and year; one invoice per order; a credit note credits one invoice, once; the total is
+    // the subtotal plus the VAT (none: both NULL); never changed.
+    const invoice = (sets: Record<string, unknown>) => {
+      const cols = {
+        kind: 'INVOICE', year: 2026, sequence: 1, order_id: o1.id, issuer: '{"name":"CONGLOMERAT LLC"}', buyer: '{"name":"A buyer"}', lines: '[{"label":"MONOLITHE","amountMinor":480000}]',
+        currency: 'EUR', subtotal_minor: 480000, total_minor: 480000, ...sets,
+      };
+      return sql<{ id: string }>`INSERT INTO invoices (${sql.join(Object.keys(cols).map((k) => sql.id(k)))}) VALUES (${sql.join(Object.values(cols))}) RETURNING id`.execute(t.db);
+    };
+    for (const [sets, constraint] of [
+      [{ total_minor: 1 }, 'invoices_total'],
+      [{ vat_rate_bp: 2000 }, 'invoices_vat'],
+      [{ kind: 'CREDIT_NOTE' }, 'invoices_credit'],
+      [{ lines: '[]' }, undefined],
+      [{ issuer: '[]' }, undefined],
+    ] as const) {
+      await expect(invoice(sets as Record<string, unknown>), JSON.stringify(sets)).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    const inv = (await invoice({})).rows[0].id;
+    await expect(invoice({ sequence: 2 })).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_one_per_order'));
+    await expect(invoice({ order_id: o2.id })).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_number_key'));
+    await invoice({ order_id: o2.id, sequence: 2, vat_rate_bp: 2000, vat_minor: 96000, total_minor: 576000 });
+    await invoice({ kind: 'CREDIT_NOTE', credits_invoice_id: inv });
+    await expect(invoice({ kind: 'CREDIT_NOTE', sequence: 2, credits_invoice_id: inv })).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_credits_key'));
+    await expect(run(`UPDATE invoices SET total_minor = 0, subtotal_minor = 0 WHERE id = '${inv}'`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`DELETE FROM invoices WHERE id = '${inv}'`)).rejects.toSatisfy(isGuardViolation);
+
+    // The journal: a dotted type, an object; only its readers change; never deleted.
+    const journal = (type: string, payload = '{}') => sql<{ id: number }>`INSERT INTO event_journal (type, entity_type, entity_id, payload) VALUES (${type}, 'order', ${o1.id}, ${payload}) RETURNING id`.execute(t.db);
+    for (const [type, payload] of [['order', '{}'], ['Order.Pay', '{}'], ['order.pay', '[]']] as const) await expect(journal(type, payload)).rejects.toSatisfy((e) => isCheckViolation(e));
+    const j = (await journal('order.pay', '{"status":"PAID"}')).rows[0].id;
+    await run(`UPDATE event_journal SET consumed_by = array_append(consumed_by, 'shopify') WHERE id = ${j}`);
+    for (const sets of [`payload = '{}'`, `type = 'order.ship'`, `entity_id = 'x'`, `created_at = now() + interval '1 day'`]) {
+      await expect(run(`UPDATE event_journal SET ${sets} WHERE id = ${j}`), sets).rejects.toSatisfy(isGuardViolation);
+    }
+    await expect(run(`DELETE FROM event_journal WHERE id = ${j}`)).rejects.toSatisfy(isGuardViolation);
+
+    // The delays of the order alerts: one row, its defaults 2, 3, 10 and 30 days, each within its bounds.
+    const settings = (await sql<Record<string, number>>`INSERT INTO order_alert_settings DEFAULT VALUES RETURNING reserved_days, ready_days, shipped_days, unregistered_days`.execute(t.db)).rows[0];
+    expect(settings).toEqual({ reserved_days: 2, ready_days: 3, shipped_days: 10, unregistered_days: 30 });
+    await expect(sql`INSERT INTO order_alert_settings (id) VALUES (2)`.execute(t.db)).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(sql`INSERT INTO order_alert_settings DEFAULT VALUES`.execute(t.db)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    for (const sets of ['reserved_days = 0', 'shipped_days = 91', 'unregistered_days = 366']) await expect(run(`UPDATE order_alert_settings SET ${sets}`), sets).rejects.toSatisfy((e) => isCheckViolation(e));
+
+    // A model's base price with its currency (both or neither), its care guide 1 to 8 000 characters; a release's location.
+    const setModel = (sets: string) => run(`UPDATE models SET ${sets} WHERE id = '${model}'`);
+    for (const sets of [`base_price_minor = 480000`, `base_currency = 'EUR'`, `base_price_minor = -1, base_currency = 'EUR'`, `base_price_minor = 1, base_currency = 'eur'`, `care_guide = ' '`]) {
+      await expect(setModel(sets), sets).rejects.toSatisfy((e) => isCheckViolation(e));
+    }
+    await setModel(`base_price_minor = 480000, base_currency = 'EUR', care_guide = 'Wipe with a soft cloth.'`);
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    await expect(
+      sql`INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash, stock_location_id)
+          VALUES (${model}, 'Draw', 1, '2026-12-01T10:00:00Z', '2026-12-02T10:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash}, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6')`.execute(t.db),
+    ).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drops_stock_location_id_fkey'));
+
+    // What the stock and the orders hold keeps their locations, SKUs, carriers, pieces, accounts and console users.
+    for (const q of [
+      `DELETE FROM stock_locations WHERE id = '${paris}'`,
+      `DELETE FROM skus WHERE id = '${s52}'`,
+      `DELETE FROM carriers WHERE id = '${courier}'`,
+      `DELETE FROM products WHERE id = '${issuedPiece}'`,
+      `DELETE FROM accounts WHERE id = '${account}'`,
+      `DELETE FROM admin_users WHERE id = '${admin}'`,
+    ]) {
+      await expect(run(q), q).rejects.toSatisfy((e) => isForeignKeyViolation(e) || isGuardViolation(e));
+    }
+  });
+
+  /** The tables 0023 adds, the columns it adds to drops and circle_posts, and what names an object of 0023 in a snapshot. */
+  const TABLES_0023 = ['activity_hourly', 'after_room_guests', 'release_answers', 'segments'];
+  const DROPS_0023 = [
+    'access_combine', 'access_segment_id', 'after_room_delay_minutes', 'after_room_length_minutes', 'min_participations', 'parent_drop_id', 'question_answers',
+    'question_enabled', 'question_text', 'surprise_enabled', 'surprise_text',
+  ];
+  const of0023 = (o: string) =>
+    new RegExp(`\\b(${TABLES_0023.join('|')})\\b`).test(o) ||
+    DROPS_0023.some((c) => o.startsWith(`table drops ${c} `) || o.startsWith(`constraint drops drops_${c}_`)) ||
+    /^constraint drops drops_(draw_plus|after_room|surprise|question) /.test(o) ||
+    /^index CREATE (UNIQUE )?INDEX drops_(parent_drop_id_key|access_segment_id_idx) /.test(o) ||
+    /^table circle_posts segment_id |^constraint circle_posts circle_posts_segment_id_fkey |^index CREATE INDEX circle_posts_segment_id_idx /.test(o);
+
+  /** A LIVE drop, its settings given, as 0021 to 0023 hold it (`extra`: more columns and their values, SQL). */
+  const liveDrop = async (model: string, extra: Record<string, string> = {}) => {
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    const columns = Object.keys(extra);
+    return (
+      await sql<{ id: string }>`
+        INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash, early_access_hours,
+                           mode, live_min_tier, tier_priority, room_opens_minutes, turn_seconds, pay_minutes, per_account, price_minor, currency, quantity_line
+                           ${sql.raw(columns.map((c) => `, ${c}`).join(''))})
+        VALUES (${model}, 'Live', 1, '2026-12-01T10:00:00Z', '2026-12-01T11:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash}, 0,
+                'LIVE', 0, true, 5, 30, 5, 1, 505000, 'EUR', '1 PIECE' ${sql.raw(columns.map((c) => `, ${extra[c]}`).join(''))}) RETURNING id`.execute(t.db)
+    ).rows[0].id;
+  };
+  /** What an after-room's row carries beyond a LIVE drop's settings. */
+  const AFTER_ROOM = (parent: string) => ({ parent_drop_id: `'${parent}'`, after_room_delay_minutes: '10', after_room_length_minutes: '15', surprise_enabled: 'false', question_enabled: 'false' });
+
+  it('0023 adds the after-room, the surprise, the access and question settings, the guests, the answers, the segments and the activity by hour, and nothing else; down cancels the after-rooms not ended and restores 0022 exactly, and up again', async () => {
+    const latest = await snapshot();
+    await sql`INSERT INTO categories (id, code, name) VALUES (19, 'S', 'Collectors test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (19, 'C', 'RING', 'COLLDOWN') RETURNING id`.execute(t.db)).rows[0].id;
+    // A release with its after-room opened (published, not ended), another whose after-room has ended: the previous image
+    // would show the first as a release of its own, so the down step cancels it; the second stays as it ended.
+    const parent = await liveDrop(model, { published_at: 'now()' });
+    const open = await liveDrop(model, { ...AFTER_ROOM(parent), published_at: 'now()' });
+    const otherParent = await liveDrop(model, { published_at: 'now()' });
+    const ended = await liveDrop(model, { ...AFTER_ROOM(otherParent), published_at: 'now()', ended_at: 'now()', ended_reason: `'SOLD_OUT'` });
+    const { with: withIt, without: before } = await rollBackTo('0023_releases_collectors');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0023(o))).toEqual([]);
+    expect(before.filter(of0023)).toEqual([]);
+    expect(withIt.filter((o) => !of0023(o))).toEqual(before);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('drops')).toEqual(DROPS_0023);
+    expect(columns('circle_posts')).toEqual(['segment_id']);
+    expect(columns('after_room_guests')).toEqual(['drop_id', 'entry_id', 'position', 'remembered_at']);
+    expect(columns('release_answers')).toEqual(['account_id', 'answer', 'answered_at', 'drop_id']);
+    expect(columns('segments')).toEqual(['created_at', 'created_by', 'criteria', 'id', 'name', 'updated_at']);
+    expect(columns('activity_hourly')).toEqual(['country', 'hour', 'scans', 'sign_ins', 'tier']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger after_room_guests after_room_guests_immutable',
+      'trigger release_answers release_answers_immutable_identity',
+      'trigger segments segments_immutable_identity',
+    ]);
+    for (const c of [
+      /^constraint drops drops_parent_drop_id_fkey FOREIGN KEY \(parent_drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_access_segment_id_fkey FOREIGN KEY \(access_segment_id\) REFERENCES segments\(id\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_access_combine_check CHECK \(\(access_combine = ANY \(ARRAY\['AND'::text, 'OR'::text\]\)\)\)$/,
+      /^constraint circle_posts circle_posts_segment_id_fkey FOREIGN KEY \(segment_id\) REFERENCES segments\(id\) ON DELETE RESTRICT$/,
+      /^constraint after_room_guests after_room_guests_entry_id_fkey FOREIGN KEY \(entry_id\) REFERENCES live_entries\(id\) ON DELETE RESTRICT$/,
+      /^constraint release_answers release_answers_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    for (const name of ['draw_plus', 'after_room', 'surprise', 'question']) expect(added.some((o) => o.startsWith(`constraint drops drops_${name} CHECK `)), name).toBe(true);
+    // Down: the after-room not ended cancelled; the one that ended, and the releases, as they were.
+    const state = async (id: string) => (await sql<{ cancelled_at: Date | null; ended_at: Date | null }>`SELECT cancelled_at, ended_at FROM drops WHERE id = ${id}`.execute(t.db)).rows[0];
+    expect((await state(open)).cancelled_at).not.toBeNull();
+    expect(await state(ended)).toMatchObject({ cancelled_at: null, ended_at: expect.any(Date) });
+    for (const id of [parent, otherParent]) expect((await state(id)).cancelled_at).toBeNull();
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0023_releases_collectors']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0023: the after-room a LIVE child without rules, reveals, board or question of its own, one per release, never its own parent; LIVE-only settings; a surprise with its words, a question with its answers; guests once and never changed; one answer per account and release; segments named once; the activity by whole hour', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (18, 'R', 'Collectors checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (18, 'K', 'RING', 'COLLCHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('collectors@example.com', 'collectors@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('collectors@orbes.test', 'collectors@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e));
+
+    // A DRAW carries none of it.
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    const draw = (await sql<{ id: string }>`
+      INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash)
+      VALUES (${model}, 'Draw', 1, '2026-12-01T10:00:00Z', '2026-12-02T10:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash}) RETURNING id`.execute(t.db)).rows[0].id;
+    const parent = await liveDrop(model);
+    for (const sets of [`surprise_enabled = false`, `min_participations = 3`, `access_combine = 'OR'`, `question_enabled = true`, `parent_drop_id = '${parent}', after_room_delay_minutes = 10, after_room_length_minutes = 15`]) {
+      await check(run(`UPDATE drops SET ${sets} WHERE id = '${draw}'`), `a draw: ${sets}`);
+    }
+    // A LIVE release: each setting within its bounds; a surprise enabled with its words; a question's text and answers together.
+    const setParent = (sets: string) => run(`UPDATE drops SET ${sets} WHERE id = '${parent}'`);
+    for (const sets of [
+      `surprise_enabled = true`, `surprise_text = ' '`, `surprise_text = '${'x'.repeat(501)}'`, `min_participations = 0`, `min_participations = 101`, `access_combine = 'XOR'`,
+      `question_text = 'WHAT WOULD YOU HAVE WANTED?'`, `question_answers = ARRAY['ONE','TWO']`, `question_text = 'Q', question_answers = ARRAY['ONLY']`,
+      `question_text = 'Q', question_answers = ARRAY['A','B','C','D','E','F','G']`, `question_text = 'Q', question_answers = ARRAY['A', NULL]`, `question_text = '${'x'.repeat(121)}', question_answers = ARRAY['A','B']`,
+    ]) {
+      await check(setParent(sets), sets);
+    }
+    await setParent(`surprise_enabled = true, surprise_text = 'A silk pouch.', min_participations = 3, access_combine = 'OR', question_enabled = true, question_text = 'WHAT WOULD YOU HAVE WANTED?', question_answers = ARRAY['ANOTHER SIZE','ANOTHER FINISH','ANOTHER PRICE BAND']`);
+    // Its after-room: delay 1 to 60, length 5 to 120, both exactly with a parent; no rule, reveal, board, surprise or question of its own.
+    const child = await liveDrop(model, AFTER_ROOM(parent));
+    await expect(liveDrop(model, AFTER_ROOM(parent))).rejects.toSatisfy((e) => isUniqueViolation(e, 'drops_parent_drop_id_key'));
+    const setChild = (sets: string) => run(`UPDATE drops SET ${sets} WHERE id = '${child}'`);
+    for (const sets of [
+      `after_room_delay_minutes = 0`, `after_room_delay_minutes = 61`, `after_room_length_minutes = 4`, `after_room_length_minutes = 121`, `after_room_delay_minutes = NULL`,
+      `parent_drop_id = NULL`, `parent_drop_id = '${child}'`, `live_min_tier = 1`, `access_collection_id = (SELECT id FROM collections LIMIT 1)`, `announce_at = '2026-11-01T10:00:00Z'`,
+      `name_at = '2026-11-01T10:00:00Z'`, `board_token_hash = '\\x${'00'.repeat(32)}', board_token_issued_at = now()`, `surprise_enabled = true, surprise_text = 'x'`,
+      `surprise_enabled = NULL`, `min_participations = 1`, `access_combine = 'AND'`, `question_enabled = true`, `question_enabled = NULL`,
+    ]) {
+      if (sets.includes('collections') && (await sql`SELECT 1 FROM collections LIMIT 1`.execute(t.db)).rows.length === 0) continue;
+      await check(setChild(sets), `an after-room: ${sets}`);
+    }
+    await expect(run(`UPDATE drops SET parent_drop_id = '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' WHERE id = '${child}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drops_parent_drop_id_fkey'));
+
+    // Its guests: entries of the release, once each, a place 1 or more unique per after-room; never changed.
+    const size = (await sql<{ id: string }>`INSERT INTO drop_sizes (drop_id, label, position, stock) VALUES (${parent}, '52', 1, 1) RETURNING id`.execute(t.db)).rows[0].id;
+    const entry = (await sql<{ id: string }>`INSERT INTO live_entries (drop_id, account_id, size_id, quantity, tier) VALUES (${parent}, ${account}, ${size}, 1, 0) RETURNING id`.execute(t.db)).rows[0].id;
+    const guest = (position: number, entryId = entry) => sql`INSERT INTO after_room_guests (drop_id, entry_id, position, remembered_at) VALUES (${child}, ${entryId}, ${position}, now())`.execute(t.db);
+    await check(guest(0), 'place 0');
+    await guest(1);
+    await expect(guest(2)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await expect(run(`UPDATE after_room_guests SET position = 2 WHERE entry_id = '${entry}'`)).rejects.toSatisfy(isGuardViolation);
+
+    // An answer: one per account and release, the position of an answer 1 to 6; its release and account never change.
+    const answer = (n: number) => sql`INSERT INTO release_answers (drop_id, account_id, answer) VALUES (${parent}, ${account}, ${n})`.execute(t.db);
+    for (const n of [0, 7]) await check(answer(n), `answer ${n}`);
+    await answer(2);
+    await expect(answer(3)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    await run(`UPDATE release_answers SET answer = 3, answered_at = now() WHERE drop_id = '${parent}'`);
+    await expect(run(`UPDATE release_answers SET drop_id = '${draw}' WHERE drop_id = '${parent}'`)).rejects.toSatisfy(isGuardViolation);
+
+    // A segment: a trimmed name of 1 to 60, unique whatever the case; its criteria an object; its identity fixed.
+    const segment = (name: string, criteria = '{}') => sql.raw<{ id: string }>(`INSERT INTO segments (name, criteria, created_by) VALUES ('${name}', '${criteria}', '${admin}') RETURNING id`).execute(t.db);
+    for (const bad of [' REGULARS', '', 'x'.repeat(61)]) await check(segment(bad), bad);
+    await check(segment('LISTS', '[]'), 'criteria a list');
+    const regulars = (await segment('REGULARS', '{"all":[]}')).rows[0].id;
+    await expect(segment('regulars')).rejects.toSatisfy((e) => isUniqueViolation(e, 'segments_name_key'));
+    await expect(run(`UPDATE segments SET created_by = NULL WHERE id = '${regulars}'`)).rejects.toSatisfy(isGuardViolation);
+    await setParent(`access_segment_id = '${regulars}'`);
+    await run(`INSERT INTO circle_posts (kind, title, segment_id) VALUES ('NOTE', 'For some', '${regulars}')`);
+    await expect(run(`DELETE FROM segments WHERE id = '${regulars}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+
+    // The activity: whole UTC hours, a country (ZZ unknown), a tier, counts of 0 or more; one row per hour, country and tier.
+    const activity = (hour: string, country = 'FR', tier = 0, signIns = 0) => sql`INSERT INTO activity_hourly (hour, country, tier, sign_ins) VALUES (${hour}::timestamptz, ${country}, ${tier}, ${signIns})`.execute(t.db);
+    for (const [hour, country, tier, n] of [['2026-11-01T10:30:00Z', 'FR', 0, 0], ['2026-11-01T10:00:00Z', 'fr', 0, 0], ['2026-11-01T10:00:00Z', 'FR', 4, 0], ['2026-11-01T10:00:00Z', 'FR', 0, -1]] as const) {
+      await check(activity(hour, country, tier, n), `${hour} ${country} ${tier} ${n}`);
+    }
+    await activity('2026-11-01T10:00:00Z', 'ZZ', 2, 3);
+    await expect(activity('2026-11-01T10:00:00Z', 'ZZ', 2)).rejects.toSatisfy((e) => isUniqueViolation(e));
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -1324,6 +1913,9 @@ describe('migrations', () => {
       '0020_private_salon',
       // Deployment D: the LIVE RELEASE (plan of 2026-10-04).
       '0021_live_release',
+      // LIVE RELEASE+ (plan of 2026-10-04): orders, stock and operations; releases and collectors.
+      '0022_orders_stock',
+      '0023_releases_collectors',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

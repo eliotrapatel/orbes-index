@@ -5,18 +5,41 @@
  *  - Where a release stands, said as the console says it (DRAFT, SCHEDULED, ANNOUNCED, ROOM OPEN, LIVE, SOLD OUT,
  *    CLOSED, ENDED, CANCELLED), its tone, and one line under the page's title.
  *  - The dialogs of its settings, one per part (the release, its sizes, its access, its times, its turns and holds, its
- *    add-ons): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
+ *    add-ons, its after-room, its surprise): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
  *    sizes one per line `52 = 3`, the add-ons one per line `ENGRAVING | 150 | Your initials, by hand`), what the server
  *    would refuse before anything is sent, and the change to send (the lists with the ids they keep).
  *  - What each role may do now: edit until the announcement, publish, cancel before the room opens, the silhouette and
  *    the board link (OPERATOR); the live controls (OPERATOR: pause, resume, extend, add pieces, free a hold, let in, a
- *    host message; ADMIN: end now with a typed phrase, remove from the line); Client Services' outcome (OPERATOR).
- *  - The live board's figures, and a reservation's reference, add-ons and total.
+ *    host message; ADMIN: end now with a typed phrase, remove from the line). Client Services follows each confirmed
+ *    reservation on the Orders board (plan LIVE RELEASE+: model/orders.ts).
+ *  - The live board's figures, and a reservation's reference.
+ *  - The after-room (plan LIVE RELEASE+, choice 2): where it stands and why it never opened, said; its own page has the
+ *    live board and controls, never a setting, a publication, a cancellation or a board link of its own.
+ *  - Plan LIVE RELEASE+, step S8: the question after (choice 11), its words one answer per line and its answers
+ *    counted; the release's stock location (choice 16, in the sizes' part); the size mix proposed at creation (choice
+ *    13) written as the sizes' lines; the feasibility check before publishing (choice 12) said per size.
  */
-import { formatCount, formatDateTime } from '../format.js';
+import { formatCount, formatDateTime, percent } from '../format.js';
 import { can } from './permissions.js';
 import { localUtc, tierName, utcInstant } from './club.js';
-import { LIVE_CURRENCIES, type AdminRole, type LiveBoard, type LiveCard, type LiveCurrency, type LiveEntry, type LivePhase, type LiveRelease, type LiveReservation, type LiveSettings, type LiveSettingsChange } from '../types.js';
+import {
+  LIVE_CURRENCIES,
+  type AdminRole,
+  type AfterRoomSkip,
+  type LiveFeasibility,
+  type LiveQuestion,
+  type LiveSizeMix,
+  type LiveAfterRoom,
+  type LiveAfterRoomSettings,
+  type LiveBoard,
+  type LiveCard,
+  type LiveCurrency,
+  type LiveEntry,
+  type LivePhase,
+  type LiveRelease,
+  type LiveSettings,
+  type LiveSettingsChange,
+} from '../types.js';
 
 /** The bounds of services/live.ts and services/live-console.ts (test/web/admin.model.test.ts compares them). */
 export const LIVE_LIMITS = Object.freeze({
@@ -38,22 +61,38 @@ export const LIVE_LIMITS = Object.freeze({
   extendMinutes: Object.freeze({ min: 1, max: 240 }),
   addPieces: Object.freeze({ min: 1, max: 1000 }),
   message: 140,
-  note: 500,
   accessModels: 20,
+  /** Plan LIVE RELEASE+: a rule of taking part, 1 to 100 releases (choice 4); a surprise's description (choice 3). */
+  minParticipations: Object.freeze({ min: 1, max: 100 }),
+  surprise: 500,
   /** The open entries the live board carries. */
   line: 200,
+  /** The after-room (services/after-room.ts): it opens this long after the sell-out, open this long, in minutes. */
+  afterRoomDelay: Object.freeze({ min: 1, max: 60, default: 10 }),
+  afterRoomLength: Object.freeze({ min: 5, max: 120, default: 15 }),
+  /** The question after (services/question.ts LIVE_QUESTION_LIMITS): its words, its 2 to 6 answers of one line each. */
+  question: Object.freeze({ text: 120, answer: 40, minAnswers: 2, maxAnswers: 6 }),
+});
+
+/** The question after when the console does not rewrite it (services/live.ts LIVE_QUESTION_DEFAULT). */
+export const LIVE_QUESTION_DEFAULT = Object.freeze({
+  text: 'WHAT WOULD YOU HAVE WANTED?',
+  answers: Object.freeze(['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND']),
 });
 
 // ── Where a release stands ─────────────────────────────────────────────────
 
-/** A release's state as the console says it: its phase, an ended one by its reason. */
-export function liveStateLabel(r: Pick<LiveCard, 'phase' | 'endedReason'>): string {
+/** A release's state as the console says it: its phase, an ended one by its reason (an after-room's, its own words). */
+export function liveStateLabel(r: Pick<LiveCard, 'phase' | 'endedReason'>, afterRoom = false): string {
+  // An after-room is never announced: a DRAFT waits for its release's sell-out, then it opens at its time, or never.
+  if (afterRoom && r.phase !== 'ENDED' && r.phase !== 'LIVE') return r.phase === 'DRAFT' ? 'AFTER A SELL-OUT' : r.phase === 'CANCELLED' ? 'NOT OPENED' : 'OPENS SOON';
   if (r.phase === 'ENDED') return r.endedReason === 'SOLD_OUT' ? 'SOLD OUT' : r.endedReason === 'ENDED' ? 'ENDED' : 'CLOSED';
   return { DRAFT: 'DRAFT', HIDDEN: 'SCHEDULED', ANNOUNCED: 'ANNOUNCED', ROOM: 'ROOM OPEN', LIVE: 'LIVE', CANCELLED: 'CANCELLED' }[r.phase];
 }
 
 /** One line under the page's title: what the release's phase asks of the staff now. */
-export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'>): string {
+export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'> & { afterRoomOf?: LiveRelease['afterRoomOf'] }): string {
+  if (r.afterRoomOf) return afterRoomLead(r);
   switch (r.phase) {
     case 'DRAFT':
       return 'A draft: nothing of it is public. Set every part of it, then publish it: it is announced at its time, each stage revealed at its own.';
@@ -67,11 +106,57 @@ export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'>)
       return 'Live: the line takes its turns, size by size, while pieces are free. The board below follows it second by second.';
     case 'ENDED':
       return r.over
-        ? 'Over: the release has left THE RELEASES. ORBES Client Services concludes each confirmed reservation below.'
+        ? 'Over: the release has left THE RELEASES. ORBES Client Services follows each confirmed reservation on the Orders board.'
         : 'Ending: no new turn; the turns and holds still running finish at their deadlines.';
     default:
       return 'Cancelled before its room opened: its page answers that it is not known.';
   }
+}
+
+/** The after-room's own page: what it is now. Its settings are its release's. */
+function afterRoomLead(r: Pick<LiveRelease, 'phase' | 'over'>): string {
+  switch (r.phase) {
+    case 'DRAFT':
+      return 'The after-room of the release above: it opens only if that release sells out, for those still in its line, in their order. It is set with that release.';
+    case 'CANCELLED':
+      return 'Never opened: the release did not sell out with anyone left in its line, or was cancelled.';
+    case 'LIVE':
+      return 'Open: its guests enter with their size and take their turns in the order of the release’s line. Nobody else sees it.';
+    case 'ENDED':
+      return r.over
+        ? 'Over: each confirmed reservation is an order, on the Orders board.'
+        : 'Ending: no new turn; the turns and holds still running finish at their deadlines.';
+    default:
+      return 'Opened by the release’s sell-out for those still in its line: they see its door at its opening, below. Nobody else sees it.';
+  }
+}
+
+/** Where an after-room stands, as the release's page says it. */
+export function afterRoomStateLabel(a: Pick<LiveAfterRoom, 'state' | 'endedReason'>): string {
+  switch (a.state) {
+    case 'WAITING':
+      return 'AFTER A SELL-OUT';
+    case 'OPENS':
+      return 'OPENS SOON';
+    case 'OPEN':
+      return 'OPEN';
+    case 'OVER':
+      return a.endedReason === 'SOLD_OUT' ? 'SOLD OUT' : a.endedReason === 'ENDED' ? 'ENDED' : 'CLOSED';
+    default:
+      return 'NOT OPENED';
+  }
+}
+
+/** Why an after-room never opened, in words. */
+export const AFTER_ROOM_SKIPS: Readonly<Record<AfterRoomSkip, string>> = Object.freeze({
+  NO_GUESTS: 'Nobody was left in the line at the sell-out.',
+  NOT_SOLD_OUT: 'The release ended without selling out.',
+  CANCELLED: 'The release was cancelled.',
+});
+
+/** When an after-room opens and for how long: `10 min after the sell-out, open 15 min`. */
+export function afterRoomTiming(a: Pick<LiveAfterRoom, 'delayMinutes' | 'lengthMinutes'>): string {
+  return `${a.delayMinutes} min after the sell-out, open ${a.lengthMinutes} min`;
 }
 
 // ── Money and lines ────────────────────────────────────────────────────────
@@ -212,6 +297,7 @@ export function newLiveValues(now: Date): Record<string, string> {
     closesAt: localUtc(new Date(opens.getTime() + 3_600_000).toISOString()),
     price: '',
     currency: 'EUR',
+    locationId: '',
     sizes: 'ONE SIZE = 25',
   };
 }
@@ -247,11 +333,24 @@ export function newLiveInput(v: Record<string, string>): LiveSettings {
     priceMinor: parseMoney(v.price)!,
     currency: v.currency as LiveCurrency,
     sizes: sizes.sizes,
+    ...(v.locationId ? { stockLocationId: v.locationId } : {}),
   };
 }
 
+/** A size mix proposed (plan LIVE RELEASE+, choice 13) as the sizes' lines of a dialog: `52 = 4`, one per line; null with none. */
+export function sizeMixText(mix: Pick<LiveSizeMix, 'sizes'>): string | null {
+  return mix.sizes.length ? mix.sizes.map((s) => `${s.label} = ${s.stock}`).join('\n') : null;
+}
+
+/** The size mix in one line: `52 = 4 (in stock 4), 54 = 5 (in stock 1, 4 to make)`. */
+export function sizeMixLine(mix: Pick<LiveSizeMix, 'sizes'>): string {
+  return mix.sizes
+    .map((s) => `${s.label} = ${formatCount(s.stock)} (${[s.fromStock ? `${formatCount(s.fromStock)} in stock` : null, s.fromDemand ? `${formatCount(s.fromDemand)} to make` : null].filter(Boolean).join(', ')})`)
+    .join(' · ');
+}
+
 /** The parts of a release's settings, each its own dialog. */
-export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons';
+export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom' | 'surprise' | 'question';
 
 /** A part's values, as its dialog's form holds them. */
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
@@ -259,13 +358,16 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
     case 'release':
       return { modelId: r.model.id, title: r.title, description: r.description ?? '', price: moneyField(r.priceMinor), currency: r.currency, perAccount: String(r.perAccount) };
     case 'sizes':
-      return { sizes: sizesText(r.sizes), quantityLine: r.quantityLine === defaultQuantityLine(r.quantity) ? '' : r.quantityLine };
+      return { sizes: sizesText(r.sizes), quantityLine: r.quantityLine === defaultQuantityLine(r.quantity) ? '' : r.quantityLine, locationId: r.locationId ?? '' };
     case 'access':
       return {
         minTier: String(r.minTier),
         tierPriority: r.tierPriority ? 'true' : '',
         collectionId: r.access.collection?.id ?? '',
         ...Object.fromEntries(r.access.models.map((m) => [`model:${m.id}`, 'true'])),
+        minParticipations: r.access.minParticipations === null ? '' : String(r.access.minParticipations),
+        segmentId: r.access.segment?.id ?? '',
+        combine: r.access.combine,
       };
     case 'times':
       return {
@@ -293,7 +395,41 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
       };
     case 'addons':
       return { addons: addonsText(r.addons) };
+    case 'afterRoom': {
+      const a = r.afterRoom;
+      return {
+        enabled: a ? 'true' : '',
+        modelId: a?.model.id ?? '',
+        price: a ? moneyField(a.priceMinor) : '',
+        sizes: a ? sizesText(a.sizes) : 'ONE SIZE = 5',
+        addons: a ? addonsText(a.addons) : '',
+        delay: String(a?.delayMinutes ?? LIVE_LIMITS.afterRoomDelay.default),
+        length: String(a?.lengthMinutes ?? LIVE_LIMITS.afterRoomLength.default),
+      };
+    }
+    case 'surprise':
+      return { enabled: r.surprise.enabled ? 'true' : '', text: r.surprise.text ?? '' };
+    case 'question': {
+      const q = r.question;
+      return { enabled: q?.enabled === false ? '' : 'true', text: q?.text ?? LIVE_QUESTION_DEFAULT.text, answers: (q?.answers ?? LIVE_QUESTION_DEFAULT.answers).join('\n') };
+    }
   }
+}
+
+/** The answers typed one per line, trimmed, the empty lines left out. */
+export function questionAnswers(text: string | undefined): string[] {
+  return (text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\s+/g, ' '))
+    .filter((l) => l.length > 0);
+}
+
+/** The question's words a dialog holds, as the server stores them: null and null for the default question. */
+function questionWords(v: Record<string, string>): { text: string | null; answers: string[] | null } {
+  const text = (v.text ?? '').trim().replace(/\s+/g, ' ');
+  const answers = questionAnswers(v.answers);
+  const isDefault = text === LIVE_QUESTION_DEFAULT.text && answers.length === LIVE_QUESTION_DEFAULT.answers.length && answers.every((a, i) => a === LIVE_QUESTION_DEFAULT.answers[i]);
+  return isDefault || (text === '' && answers.length === 0) ? { text: null, answers: null } : { text, answers };
 }
 
 /** What the server would refuse in a part's dialog, said before anything is sent; null when it may be sent. */
@@ -320,6 +456,9 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       if (inRange(v.minTier, { min: 0, max: 3 }) === null) return 'Choose who may enter.';
       const models = Object.keys(v).filter((k) => k.startsWith('model:') && v[k] === 'true');
       if (models.length > LIVE_LIMITS.accessModels) return `A release names at most ${LIVE_LIMITS.accessModels} models.`;
+      const n = LIVE_LIMITS.minParticipations;
+      if ((v.minParticipations ?? '').trim() !== '' && inRange(v.minParticipations, n) === null) return `Releases taken part in: ${n.min} to ${n.max}, or leave it empty.`;
+      if (v.combine !== undefined && v.combine !== 'AND' && v.combine !== 'OR') return 'Choose how the rules combine.';
       return null;
     }
     case 'times': {
@@ -347,6 +486,43 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
     case 'addons': {
       const addons = parseAddons(v.addons, r.addons);
       return 'problem' in addons ? addons.problem : null;
+    }
+    case 'afterRoom': {
+      if (v.enabled !== 'true') return null;
+      if (!v.modelId) return 'Choose the after-room’s model.';
+      const price = parseMoney(v.price);
+      if (price === null || price > LIVE_LIMITS.priceMaxMinor) return 'The after-room’s price of a piece, in units (4800, or 4800.50).';
+      const sizes = parseSizes(v.sizes, r.afterRoom?.sizes ?? []);
+      if ('problem' in sizes) return `The after-room: ${sizes.problem.charAt(0).toLowerCase()}${sizes.problem.slice(1)}`;
+      const addons = parseAddons(v.addons, r.afterRoom?.addons ?? []);
+      if ('problem' in addons) return `The after-room: ${addons.problem.charAt(0).toLowerCase()}${addons.problem.slice(1)}`;
+      const d = LIVE_LIMITS.afterRoomDelay;
+      if (inRange(v.delay, d) === null) return `The after-room opens ${d.min} to ${d.max} minutes after the sell-out.`;
+      const l = LIVE_LIMITS.afterRoomLength;
+      if (inRange(v.length, l) === null) return `The after-room is open ${l.min} to ${l.max} minutes.`;
+      return null;
+    }
+    case 'surprise': {
+      const text = (v.text ?? '').trim();
+      if (v.enabled === 'true' && !text) return 'Say what goes in the box: the description is printed on the packing slips and work sheets.';
+      if (text.length > LIVE_LIMITS.surprise) return `The description has at most ${LIVE_LIMITS.surprise} characters.`;
+      return null;
+    }
+    case 'question': {
+      const q = LIVE_LIMITS.question;
+      const text = (v.text ?? '').trim();
+      const answers = questionAnswers(v.answers);
+      if (text === '' && answers.length === 0) return null;
+      if (text === '' || text.length > q.text || /[\r\n]/.test(text)) return `The question is one line of 1 to ${q.text} characters (empty with no answer: the default question).`;
+      if (answers.length < q.minAnswers || answers.length > q.maxAnswers) return `The question has ${q.minAnswers} to ${q.maxAnswers} answers, one per line.`;
+      const long = answers.find((a) => a.length > q.answer);
+      if (long) return `An answer has at most ${q.answer} characters: ${long}.`;
+      const seen = new Set<string>();
+      for (const a of answers) {
+        if (seen.has(a.toUpperCase())) return `The answer ${a} is listed twice.`;
+        seen.add(a.toUpperCase());
+      }
+      return null;
     }
   }
 }
@@ -380,6 +556,8 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       const now = r.quantityLine === defaultQuantityLine(r.quantity) ? null : r.quantityLine;
       const next = typed === '' || typed === defaultQuantityLine(quantity) ? null : typed;
       if (next !== now) out.quantityLine = next;
+      const location = v.locationId || null;
+      if (v.locationId !== undefined && location !== r.locationId) out.stockLocationId = location;
       return out;
     }
     case 'access': {
@@ -394,6 +572,11 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (JSON.stringify(models) !== JSON.stringify(r.access.models.map((m) => m.id).sort())) out.accessModelIds = models;
       const collection = v.collectionId || null;
       if (collection !== (r.access.collection?.id ?? null)) out.accessCollectionId = collection;
+      const taken = (v.minParticipations ?? '').trim() === '' ? null : Number(v.minParticipations);
+      if (v.minParticipations !== undefined && taken !== r.access.minParticipations) out.minParticipations = taken;
+      const segment = v.segmentId || null;
+      if (v.segmentId !== undefined && segment !== (r.access.segment?.id ?? null)) out.accessSegmentId = segment;
+      if (v.combine !== undefined && v.combine !== r.access.combine) out.accessCombine = v.combine === 'OR' ? 'OR' : 'AND';
       return out;
     }
     case 'times': {
@@ -422,7 +605,103 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (JSON.stringify(addons.map((a) => [a.id ?? null, a.label, a.line, a.priceMinor])) !== JSON.stringify(r.addons.map((a) => [a.id, a.label, a.line, a.priceMinor]))) out.addons = addons;
       return out;
     }
+    case 'afterRoom': {
+      const a = r.afterRoom;
+      if (v.enabled !== 'true') {
+        if (a) out.afterRoom = null;
+        return out;
+      }
+      const next: LiveAfterRoomSettings = {
+        modelId: v.modelId,
+        priceMinor: parseMoney(v.price)!,
+        sizes: (parseSizes(v.sizes, a?.sizes ?? []) as { sizes: { id?: string; label: string; stock: number }[] }).sizes,
+        addons: (parseAddons(v.addons, a?.addons ?? []) as { addons: { id?: string; label: string; line: string | null; priceMinor: number }[] }).addons,
+        delayMinutes: Number(v.delay),
+        lengthMinutes: Number(v.length),
+      };
+      const shape = (x: LiveAfterRoomSettings) =>
+        JSON.stringify([
+          x.modelId,
+          x.priceMinor,
+          x.sizes.map((s) => [s.id ?? null, s.label, s.stock]),
+          (x.addons ?? []).map((y) => [y.id ?? null, y.label, y.line ?? null, y.priceMinor]),
+          x.delayMinutes,
+          x.lengthMinutes,
+        ]);
+      const now: LiveAfterRoomSettings | null = a ? { modelId: a.model.id, priceMinor: a.priceMinor, sizes: a.sizes, addons: a.addons, delayMinutes: a.delayMinutes, lengthMinutes: a.lengthMinutes } : null;
+      if (!now || shape(now) !== shape(next)) out.afterRoom = next;
+      return out;
+    }
+    case 'surprise': {
+      const enabled = v.enabled === 'true';
+      const text = (v.text ?? '').trim() || null;
+      if (enabled !== r.surprise.enabled) out.surpriseEnabled = enabled;
+      if (text !== r.surprise.text) out.surpriseText = text;
+      return out;
+    }
+    case 'question': {
+      const q = r.question;
+      const enabled = v.enabled === 'true';
+      if (enabled !== (q?.enabled ?? true)) out.questionEnabled = enabled;
+      const next = questionWords(v);
+      const now = q?.custom ? { text: q.text, answers: q.answers } : { text: null, answers: null };
+      if (JSON.stringify(next) !== JSON.stringify(now)) {
+        out.questionText = next.text;
+        out.questionAnswers = next.answers;
+      }
+      return out;
+    }
   }
+}
+
+/** The question after as the release's page says it: off, or its words and answers, the default one said so. */
+export function questionLine(q: Pick<LiveQuestion, 'enabled' | 'text' | 'answers' | 'custom'>): string {
+  if (!q.enabled) return 'Not asked';
+  return `${q.text} · ${q.answers.join(' · ')}${q.custom ? '' : ' (the default question)'}`;
+}
+
+/** Where the question stands, said: asked after the end for seven days, open until, closed. */
+export function questionStateLine(q: Pick<LiveQuestion, 'state' | 'opensAt' | 'closesAt'>): string {
+  switch (q.state) {
+    case 'OFF':
+      return 'Not asked';
+    case 'WAITING':
+      return 'Asked at the release’s end, for 7 days';
+    case 'OPEN':
+      return `Open until ${formatDateTime(q.closesAt!)}`;
+    case 'CLOSED':
+      return `Closed on ${formatDateTime(q.closesAt!)}`;
+  }
+}
+
+/** Each answer counted, as the hairline bars show them: its words, its count, its share of the answers. */
+export function questionTallyRows(q: Pick<LiveQuestion, 'tally' | 'answered'>): { key: string; label: string; value: number; fraction: number; share: string; tone: 'solid' }[] {
+  const top = Math.max(0, ...q.tally.map((t) => t.count));
+  return q.tally.map((t) => ({
+    key: String(t.answer),
+    label: t.label,
+    value: t.count,
+    fraction: top > 0 ? t.count / top : 0,
+    share: percent(t.count, q.answered),
+    tone: 'solid' as const,
+  }));
+}
+
+/** The feasibility check in one line: everything covered, or how many pieces would be made to order, and where. */
+export function feasibilityLine(f: Pick<LiveFeasibility, 'short' | 'location'>): string {
+  const where = f.location?.name ?? 'no location';
+  return f.short === 0 ? `Every piece on sale is covered at ${where}.` : `${formatCount(f.short)} ${f.short === 1 ? 'piece' : 'pieces'} on sale would be made to order once sold (${where}).`;
+}
+
+/** The surprise as the release's page in the console says it: `In every box · A silk pouch`, or `None`. */
+export function surpriseLine(r: Pick<LiveRelease, 'surprise'>): string {
+  if (r.surprise.enabled) return `In every box · ${r.surprise.text ?? ''}`;
+  return r.surprise.text ? `None (kept: ${r.surprise.text})` : 'None';
+}
+
+/** How the rules of access combine, said: `Every rule (AND)`, `Any rule (OR)`. */
+export function combineLine(combine: LiveRelease['access']['combine']): string {
+  return combine === 'OR' ? 'Any one rule is enough (OR)' : 'Every rule is needed (AND)';
 }
 
 // ── What may be done now ───────────────────────────────────────────────────
@@ -452,18 +731,20 @@ export interface LiveActions {
  * What `role` may do to the release in its phase (the server checks again; this hides only what would be refused). The
  * phase is the server's, on its clock: the page is read again when its board's stream brings another (`livePageKey`).
  */
-export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt'>, role: AdminRole | null | undefined): LiveActions {
+export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt'> & { afterRoomOf?: LiveRelease['afterRoomOf'] }, role: AdminRole | null | undefined): LiveActions {
   const manage = can(role, 'manageDrops');
+  // An after-room is set, published and cancelled with its release; it has no board link: its live controls only.
+  const own = !r.afterRoomOf;
   const published = r.publishedAt !== null && hasBoard(r.phase);
   // Published and not ended: HIDDEN, ANNOUNCED, ROOM or LIVE.
   const running = published && r.phase !== 'ENDED';
   const announced = running && r.phase !== 'HIDDEN';
   return {
-    edit: manage && r.editable,
-    publish: manage && r.phase === 'DRAFT',
-    cancel: manage && (r.phase === 'DRAFT' || r.phase === 'HIDDEN' || r.phase === 'ANNOUNCED'),
-    circlePost: manage && r.phase === 'HIDDEN' && r.editable,
-    boardLink: manage && r.phase !== 'CANCELLED',
+    edit: manage && r.editable && own,
+    publish: manage && r.phase === 'DRAFT' && own,
+    cancel: manage && (r.phase === 'DRAFT' || r.phase === 'HIDDEN' || r.phase === 'ANNOUNCED') && own,
+    circlePost: manage && r.phase === 'HIDDEN' && r.editable && own,
+    boardLink: manage && r.phase !== 'CANCELLED' && own,
     pause: manage && r.phase === 'LIVE' && r.pausedAt === null,
     resume: manage && r.pausedAt !== null && published,
     extend: manage && running,
@@ -521,19 +802,19 @@ export function liveEntryDeadline(e: Pick<LiveEntry, 'status' | 'turnExpiresAt' 
   return null;
 }
 
-// ── Client Services ────────────────────────────────────────────────────────
-
-/** A reservation's add-ons: `ENGRAVING € 150 · GIFT BOX € 0`, or none. */
-export function reservationAddons(r: Pick<LiveReservation, 'addons' | 'currency'>): string {
-  return r.addons.length ? r.addons.map((a) => `${a.label} ${formatMoney(a.priceMinor, r.currency)}`).join(' · ') : 'None';
-}
-
-/** Whether `role` may conclude or cancel the reservation now: OPERATOR, while it has no outcome. */
-export function canResolve(r: Pick<LiveReservation, 'resolution'>, role: AdminRole | null | undefined): boolean {
-  return r.resolution === null && can(role, 'manageDrops');
-}
-
-/** The phases where the release has been published and lives (the board, the line, Client Services). */
+/** The phases where the release has been published and lives (the board, the line, its orders). */
 export function hasBoard(phase: LivePhase): boolean {
   return phase !== 'DRAFT' && phase !== 'CANCELLED';
+}
+
+/**
+ * A release's stock location to choose: the default first (empty, following the default should it change), then every
+ * other location by its name; the default by its name too only when the release names it already, and the location it
+ * names kept when the locations could not be read (`named`: its name), so that saving never moves it unasked.
+ */
+export function locationOptions(locations: readonly { id: string; name: string; isDefault: boolean }[], selected: string, named?: string): { value: string; label: string }[] {
+  const byDefault = locations.find((l) => l.isDefault);
+  const options = [{ value: '', label: `The default (${byDefault?.name ?? 'none yet'})` }, ...locations.filter((l) => !l.isDefault || l.id === selected).map((l) => ({ value: l.id, label: l.name }))];
+  if (selected && !options.some((o) => o.value === selected)) options.push({ value: selected, label: named ?? 'The location set' });
+  return options;
 }

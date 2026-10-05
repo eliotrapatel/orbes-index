@@ -110,6 +110,10 @@ import {
 } from '../../src/web/admin/model/generator.js';
 import { formatCount } from '../../src/web/admin/format.js';
 import {
+  BASE_PRICE_MAX_MINOR,
+  basePriceProblem,
+  CARE_GUIDE_MAX,
+  careGuideText,
   carePreview,
   categoryImpact,
   collectionImpact,
@@ -170,7 +174,12 @@ import {
   normalizeBenefits,
   type ClubTierSheet as ServerClubTierSheet,
 } from '../../src/server/services/club.js';
-import type { ModelRecord as ServerModelRecord } from '../../src/server/services/catalog.js';
+import {
+  BASE_PRICE_MAX_MINOR as SERVER_BASE_PRICE_MAX,
+  CARE_GUIDE_MAX as SERVER_CARE_GUIDE_MAX,
+  normalizeCareGuide,
+  type ModelRecord as ServerModelRecord,
+} from '../../src/server/services/catalog.js';
 import type { LockOutcome as ServerLockOutcome, OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
 import type { AdminShopRequest as ServerShopRequest } from '../../src/server/services/salon.js';
 import {
@@ -258,6 +267,15 @@ describe('admin enums mirror the server', () => {
       'LIVE_END_REASONS',
       'LIVE_ENTRY_STATUSES',
       'LIVE_RESOLUTIONS',
+      'SHOP_REQUEST_OUTCOMES',
+      'ORDER_CHANNELS',
+      'ORDER_STATUSES',
+      'ORDER_RESERVATIONS',
+      'STOCK_MOVEMENT_REASONS',
+      'BENCH_ITEM_STATUSES',
+      'RETURN_OUTCOMES',
+      'INVOICE_KINDS',
+      'ACCESS_COMBINES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -621,6 +639,7 @@ describe('the Club\'s requests of the private salon (P-X08)', () => {
       handledBy: null,
       handledAt: null,
       resolutionNote: null,
+      outcome: null,
     });
     expect(r.status).toBe('OPEN');
   });
@@ -640,6 +659,7 @@ describe('the Club\'s circle (P-X01)', () => {
     drop: null,
     model: null,
     externalUrl: null,
+    segment: null,
     published: false,
     publishedAt: null,
     createdAt: '2026-10-04T10:00:00.000Z',
@@ -879,7 +899,7 @@ const dashboard: DashboardData = {
   generatedAt: '2026-10-01T12:00:00.000Z',
   products: {
     total: 30,
-    byStatus: { ISSUED: 10, ACTIVATED: 0, REGISTERED: 0, OWNED: 20, TRANSFERRED: 0, SERVICED: 0, RESOLD: 0, RETIRED: 0, REVOKED: 0, COUNTERFEIT_FLAGGED: 0, LOST: 0, STOLEN: 0 },
+    byStatus: { RESERVED: 0, ISSUED: 10, ACTIVATED: 0, REGISTERED: 0, OWNED: 20, TRANSFERRED: 0, SERVICED: 0, RESOLD: 0, RETIRED: 0, REVOKED: 0, COUNTERFEIT_FLAGGED: 0, LOST: 0, STOLEN: 0 },
   },
   scans: { last24h: 1520, last7d: 9001 },
   anomalies: { open: 3, openBySeverity: { LOW: 0, MEDIUM: 1, HIGH: 1, CRITICAL: 1 } },
@@ -1713,12 +1733,25 @@ describe('catalogue edits (A-10)', () => {
     careInstructions: 'Polish with a soft dry cloth.',
     active: true,
     products: 184,
+    basePriceMinor: null,
+    baseCurrency: null,
+    careGuide: null,
+    shopify: { productId: null, variants: 1, linked: 0 },
     createdAt: '2026-10-01T08:00:00.000Z',
-  } as Model;
+  } as unknown as Model;
 
   it('sends only what differs, trimmed; never the category nor the SKU prefix', () => {
     const f = modelForm(model);
-    expect(f).toEqual({ name: 'MONOLITHE', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Polish with a soft dry cloth.', collectionId: 'c1', status: 'active' });
+    expect(f).toEqual({
+      name: 'MONOLITHE',
+      defaultMaterial: '925 STERLING SILVER',
+      careInstructions: 'Polish with a soft dry cloth.',
+      collectionId: 'c1',
+      status: 'active',
+      basePrice: '',
+      baseCurrency: 'EUR',
+      careGuide: '',
+    });
     expect(modelChange(model, f)).toEqual({});
     expect(modelChange(model, { ...f, name: ' MONOLITHE ', careInstructions: ' Polish with a soft dry cloth.\n' })).toEqual({});
     expect(modelChange(model, { ...f, name: 'MONOLITHE II', defaultMaterial: '  ', careInstructions: 'Wipe it.', collectionId: '', status: 'inactive' })).toEqual({
@@ -1780,6 +1813,29 @@ describe('catalogue edits (A-10)', () => {
     const f = modelForm(discontinued);
     expect(modelChange(discontinued, { ...f, status: undefined as unknown as string })).toEqual({});
     expect(modelChange(discontinued, { ...f, status: 'active', name: 'MONOLITHE II' })).toEqual({ name: 'MONOLITHE II' });
+  });
+
+  it('sends the base price with its currency, or clears both, and the care guide as the server keeps it (plan LIVE RELEASE+, N2 and M6)', () => {
+    const f = modelForm(model);
+    expect(modelChange(model, { ...f, basePrice: '4 800.50', baseCurrency: 'CHF' })).toEqual({ basePriceMinor: 480_050, baseCurrency: 'CHF' });
+    expect(modelChange(model, { ...f, basePrice: '4800', baseCurrency: '' })).toEqual({ basePriceMinor: 480_000, baseCurrency: 'EUR' });
+    const priced = { ...model, basePriceMinor: 480_050, baseCurrency: 'EUR', careGuide: 'Wipe it.\n\nKeep it in its box.' } as Model;
+    const g = modelForm(priced);
+    expect([g.basePrice, g.baseCurrency, g.careGuide]).toEqual(['4800.50', 'EUR', 'Wipe it.\n\nKeep it in its box.']);
+    expect(modelChange(priced, g)).toEqual({});
+    // The currency alone changes: both are sent; emptied, both are cleared.
+    expect(modelChange(priced, { ...g, baseCurrency: 'USD' })).toEqual({ basePriceMinor: 480_050, baseCurrency: 'USD' });
+    expect(modelChange(priced, { ...g, basePrice: ' ' })).toEqual({ basePriceMinor: null, baseCurrency: null });
+    // Not a price: nothing sent for it, and said before.
+    expect(modelChange(priced, { ...g, basePrice: 'about 4800' })).toEqual({});
+    for (const bad of ['about 4800', '0', '0.00', '10000000.01', '4800.505']) expect(basePriceProblem({ basePrice: bad }), bad).toBe('The base price is an amount in units: 4800, or 4800.50.');
+    for (const ok of ['', '4800', '4 800,5', '1000000']) expect(basePriceProblem({ basePrice: ok }), ok).toBeNull();
+    // The care guide as the server keeps it: lines without trailing spaces, one blank line at most.
+    const typed = '  Wipe it.   \r\n\r\n\r\n\r\nKeep it in its box.  ';
+    expect(careGuideText(typed)).toBe(normalizeCareGuide(typed));
+    expect(modelChange(priced, { ...g, careGuide: typed })).toEqual({});
+    expect(modelChange(priced, { ...g, careGuide: '' })).toEqual({ careGuide: '' });
+    expect([CARE_GUIDE_MAX, BASE_PRICE_MAX_MINOR]).toEqual([SERVER_CARE_GUIDE_MAX, SERVER_BASE_PRICE_MAX]);
   });
 
   it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {

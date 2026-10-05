@@ -9,6 +9,11 @@
  * console says how many before anything is saved. Its category and SKU
  * prefix never change (the server refuses them).
  *
+ * The base price and the care guide (plan LIVE RELEASE+, N2 and M6): the
+ * price the Shopify product export gives the model (each release keeps its
+ * own), typed in units with its currency, both sent or both cleared; the care
+ * guide MY PIECES shows with each order of the model. Neither reads on /verify.
+ *
  * DISCONTINUED (P-R06): an ADMIN discontinues a model (inactive for good,
  * said DISCONTINUED with the year on the results of its pieces, its lookbook
  * sheet and their ownership certificates) and may reinstate it, each after a
@@ -17,7 +22,13 @@
  */
 import { DEFAULT_CARE } from '../../shared/care.js';
 import { formatCount } from '../format.js';
-import type { Model, ModelChange } from '../types.js';
+import type { Model, ModelChange, OrderCurrency } from '../types.js';
+import { moneyField, parseMoney } from './live.js';
+
+/** A care guide, at most (services/catalog.ts CARE_GUIDE_MAX). */
+export const CARE_GUIDE_MAX = 8000;
+/** A base price, at most, in cents (services/catalog.ts BASE_PRICE_MAX_MINOR). */
+export const BASE_PRICE_MAX_MINOR = 100_000_000;
 
 /** The edit dialog's values (every control of a native form reads as a string). */
 export interface ModelForm {
@@ -27,6 +38,11 @@ export interface ModelForm {
   collectionId: string;
   /** `active` or `inactive`. */
   status: string;
+  /** N2: the base price in units (`4800`, `4800.50`); '' clears it. */
+  basePrice: string;
+  baseCurrency: string;
+  /** M6: the care guide; '' clears it. */
+  careGuide: string;
 }
 
 export const MODEL_STATUS_OPTIONS: readonly { value: 'active' | 'inactive'; label: string }[] = Object.freeze([
@@ -79,7 +95,30 @@ export function modelForm(m: Model): ModelForm {
     careInstructions: m.careInstructions ?? '',
     collectionId: m.collection?.id ?? '',
     status: m.active ? 'active' : 'inactive',
+    basePrice: m.basePriceMinor === null ? '' : moneyField(m.basePriceMinor),
+    baseCurrency: m.baseCurrency ?? 'EUR',
+    careGuide: m.careGuide ?? '',
   };
+}
+
+/** A care guide as the server keeps it: line breaks as \n, each line without trailing spaces, one blank line at most. */
+export function careGuideText(text: string | undefined): string {
+  return (text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .trim()
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+/** What the server would refuse in the base price, or null. */
+export function basePriceProblem(f: Pick<ModelForm, 'basePrice'>): string | null {
+  const price = (f.basePrice ?? '').trim();
+  if (price === '') return null;
+  const minor = parseMoney(price);
+  if (minor === null || minor < 1 || minor > BASE_PRICE_MAX_MINOR) return 'The base price is an amount in units: 4800, or 4800.50.';
+  return null;
 }
 
 /**
@@ -98,6 +137,17 @@ export function modelChange(m: Model, f: ModelForm): ModelChange {
   // A discontinued model has no status to edit (P-R06): only Reinstate offers it again.
   const active = f.status !== 'inactive';
   if (!m.discontinuedAt && active !== m.active) out.active = active;
+  // N2: the price and its currency go together; '' clears both.
+  const price = (f.basePrice ?? '').trim();
+  const minor = price === '' ? null : parseMoney(price);
+  const currency = minor === null ? null : ((f.baseCurrency || 'EUR') as OrderCurrency);
+  if ((price === '' || minor !== null) && (minor !== m.basePriceMinor || currency !== m.baseCurrency)) {
+    out.basePriceMinor = minor;
+    out.baseCurrency = currency;
+  }
+  // M6: the care guide as the server keeps it (services/catalog.ts normalizeCareGuide).
+  const guide = careGuideText(f.careGuide);
+  if (guide !== (m.careGuide ?? '')) out.careGuide = guide;
   return out;
 }
 

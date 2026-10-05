@@ -26,7 +26,22 @@
  *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, ORBES Client
  *               Services
  *   edge pages  not signed in (the sign-in), not eligible, turn passed, hold ended, place released, left, removed,
- *               the release ended, over: a vault page with one action each
+ *               the release ended, gone: a vault page with one action each
+ *   past        plan LIVE RELEASE+ (decision 30): ended, the page in its final state, as THE RELEASES' PAST opens it:
+ *               LIVE RELEASE · the piece on its plate · its name and line · SEE THE MODEL · THIS RELEASE IS OVER · its
+ *               opening date and quantity line as announced · signed in, YOU TOOK PART or YOU SECURED A PIECE · its
+ *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
+ *               after-room keeps the second door until it closes). For a week after the end, to an account that took
+ *               part without a piece, ONE QUESTION, the question after (plan LIVE RELEASE+, choice 11; views/question.ts),
+ *               here and on the page of an entry ended by the release's end with no second door (CLOSED, or SOLD OUT
+ *               without an after-room): it opens at the release's final end (its after-room's, when one opened), never
+ *               before; on the final page, read again each minute while it may still open (an after-room running)
+ *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
+ *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
+ *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
+ *               event), the page's pulse shows it then. The after-room's own page is this page with its sheet
+ *               (`afterRoom`, read through the release it follows): THE AFTER-ROOM over its screens, your place from
+ *               the line, then the turn, the hold, the add-ons and PAY as in the main room
  *
  * Real time: the stream (EventSource, `room` and `you` events) while it is open; its state polled every 2 s while it
  * is not (LIVE_POLL_MS), the stream tried again later. Every countdown counts on the server's clock, synced by three
@@ -38,7 +53,7 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE } from '../copy.js';
+import { LIVE, RELEASES } from '../copy.js';
 import {
   addonChoices,
   aheadLine,
@@ -56,6 +71,7 @@ import {
   liveReference,
   liveScreen,
   liveSheetModel,
+  livePastModel,
   lockAngle,
   placeAnnouncement,
   PRESS_GAP_MS,
@@ -73,13 +89,15 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { sealSvg, turnRings } from '../live-seal.js';
+import { participationModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
+import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
 import { releaseContactModel, upper } from '../view-model.js';
 import { contactBlock, legalLinks, lookbookLink, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
+import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
 
 /** The state read while the stream is lost. */
@@ -96,6 +114,13 @@ const DOOR_DELAY_MS = 420;
 const ARMED_MS = 4000;
 /** A sync that failed is tried again after this long. */
 const SYNC_RETRY_MS = 10_000;
+/**
+ * The question after not asked yet on a final page to an account that took part without a piece: read again this
+ * often while the page stays open, for as long as a sold-out release's after-room may run (its delay, up to 60 minutes,
+ * then its length, up to 120), since the question waits for its end.
+ */
+const QUESTION_AGAIN_MS = 60_000;
+const QUESTION_WAIT_MS = 3 * 3_600_000;
 /** The outer ring of the seal button (r 128) and the hold's ring (r 116), as the mockup draws them. */
 const TURN_RING = 2 * Math.PI * 128;
 const HOLD_RING = 2 * Math.PI * 116;
@@ -125,6 +150,8 @@ export interface LiveDeps {
   onScan(): void;
   /** SEE THE MODEL: the model's sheet in the lookbook (`/verify/lookbook/<slug>`), from the photograph's stage. */
   onModel(slug: string): void;
+  /** ENTER THE AFTER-ROOM: the after-room of release `parentId` (the second door). */
+  onAfterRoom(parentId: string): void;
   clientServices(): Promise<ClientServices>;
   /** This phone's time zone (Intl), the second clock of the release's times. */
   localZone: string;
@@ -216,6 +243,17 @@ class LivePage {
   private frozenHold: number | null = null;
   /** How many of the stage times and the room's opening had passed at the last pulse. */
   private stagesDue: number | null = null;
+  /** Over: the account's part in the release (YOU TOOK PART, YOU SECURED A PIECE), read once signed in; null for none. */
+  private part: string | null = null;
+  private partRead: 'idle' | 'reading' | 'done' = 'idle';
+  private partGen = 0;
+  /** Ended: the question after (plan LIVE RELEASE+, choice 11), read once signed in; null when it is not asked of the account here. */
+  private question: AccountQuestion | null = null;
+  private questionRead: 'idle' | 'reading' | 'done' = 'idle';
+  private questionGen = 0;
+  /** The question after read again (QUESTION_AGAIN_MS), and since when it is (Date.now()). */
+  private questionTimer: ReturnType<typeof setTimeout> | null = null;
+  private questionSince: number | null = null;
   private disposed = false;
 
   constructor(private readonly deps: LiveDeps) {
@@ -249,7 +287,7 @@ class LivePage {
     this.endHold(true);
     this.closeStream();
     this.stopPolling();
-    for (const t of [this.retryTimer, this.syncTimer]) if (t) clearTimeout(t);
+    for (const t of [this.retryTimer, this.syncTimer, this.questionTimer]) if (t) clearTimeout(t);
     if (this.pulseTimer) clearInterval(this.pulseTimer);
     this.screen?.dispose?.();
   }
@@ -310,6 +348,15 @@ class LivePage {
       this.viewer = 'signed-out';
       this.entry = null;
       this.access = null;
+      this.partGen++;
+      this.part = null;
+      this.partRead = 'idle';
+      this.questionGen++;
+      this.question = null;
+      this.questionRead = 'idle';
+      if (this.questionTimer) clearTimeout(this.questionTimer);
+      this.questionTimer = null;
+      this.questionSince = null;
       this.closeStream();
       this.stopPolling();
     }
@@ -370,6 +417,11 @@ class LivePage {
     this.setRoom(state.room);
     this.setEntry(state.entry);
     this.settle();
+  }
+
+  /** The release is an after-room: its page is read through the release it follows. */
+  private afterRoomOf(): string | null {
+    return this.sheet?.afterRoom?.parentId ?? null;
   }
 
   /**
@@ -527,7 +579,8 @@ class LivePage {
   private async refreshSheet(): Promise<void> {
     if (!this.sheet) return;
     try {
-      const sheet = await this.deps.api.liveRelease(this.sheet.id);
+      const parent = this.afterRoomOf();
+      const sheet = parent ? await this.deps.api.liveAfterRoom(parent) : await this.deps.api.liveRelease(this.sheet.id);
       if (this.disposed) return;
       this.sheet = sheet;
       if (this.screen && this.screen.kind !== 'turn') this.rebuild();
@@ -583,6 +636,7 @@ class LivePage {
     if (previous !== undefined && hadFocus) (screen.focus ?? screen.el.querySelector<HTMLElement>('h1'))?.focus({ preventScroll: kind !== 'turn' });
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
+    if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
   }
 
   private say(text: string, urgent = false): void {
@@ -642,12 +696,21 @@ class LivePage {
         return this.securedScreen(revealing);
       case 'confirmed':
         return this.confirmedScreen();
+      case 'afterRoom':
+        return this.afterRoomScreen();
+      case 'past':
+        return this.pastScreen();
       default:
         return this.edgeScreen(kind);
     }
   }
 
   // ── Parts ────────────────────────────────────────────────────────────────
+
+  /** Over the screens of a release that is live: LIVE NOW, or THE AFTER-ROOM. */
+  private liveLine(): string {
+    return this.afterRoomOf() ? LIVE.afterRoom.kind : LIVE.phase.LIVE;
+  }
 
   private live(): LiveSheet | null {
     return this.sheet && !isEndedSheet(this.sheet) ? this.sheet : null;
@@ -669,6 +732,11 @@ class LivePage {
   /** A line of tracked capitals in the display face, its figures in the reading face. */
   private fact(text: string, extra = ''): HTMLParagraphElement {
     return h('p', { class: ['live__fact', extra] }, ...withNumerals(text));
+  }
+
+  /** A SURPRISE IN EVERY BOX: a vault label between two hairlines, when the release has one (what it is stays unsaid). */
+  private surprise(label: string | null): HTMLParagraphElement | null {
+    return label ? h('p', { class: 'live__surprise', text: label }) : null;
   }
 
   private note(text: string, extra = ''): HTMLParagraphElement {
@@ -796,6 +864,7 @@ class LivePage {
       this.fact(m.when.paris, 'live__when'),
       m.when.local ? this.fact(m.when.local, 'live__when live__when--local') : null,
       h('div', { class: 'live__facts' }, this.fact(m.access), this.fact(m.quantity), this.fact(m.roomOpens)),
+      this.surprise(m.surprise),
       reveals,
       there.el,
       description,
@@ -963,7 +1032,8 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__edge' },
-      this.overline(this.name()),
+      // In an after-room, its edge pages say so: the release itself had sold out before.
+      this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name()),
       this.title(s ? LIVE.forWhom(s.access.text) : LIVE.kind),
       this.note([this.refusal, LIVE.edge.notEligible.text].filter(Boolean).join(' ')),
       this.action(LIVE.back, () => this.deps.onReleases()),
@@ -1057,6 +1127,7 @@ class LivePage {
       overline,
       this.title(m.name),
       this.fact(m.offer, 'live__offer'),
+      this.surprise(m.surprise),
       seeModel,
       door,
       h('div', { class: 'live__count-block' }, count, until, presence),
@@ -1144,12 +1215,15 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__join' },
-      this.overline(LIVE.phase.LIVE),
+      this.overline(this.liveLine()),
       this.title(m.name),
+      // The price and the quantity, as the room says them: an after-room's guest reads its piece here first (choice 2).
+      this.fact(m.offer, 'live__offer'),
+      this.surprise(m.surprise),
       this.piece(m.picture, 'live__plate--join', true),
       presence,
       left,
-      this.note(LIVE.joinLine, 'live__join-line'),
+      this.note(this.afterRoomOf() ? LIVE.afterRoom.joinLine : LIVE.joinLine, 'live__join-line'),
       picker.el,
       errorLine,
       enter,
@@ -1235,7 +1309,7 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__line' },
-      this.overline(LIVE.phase.LIVE),
+      this.overline(this.liveLine()),
       this.title(this.name()),
       h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace }),
       place,
@@ -1598,7 +1672,7 @@ class LivePage {
       { class: 'live__confirmed' },
       h('div', { class: 'live__mark' }, toneMark('authentic')),
       this.title(LIVE.confirmed),
-      this.fact(LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
+      this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
       h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
       bracket(h('div', { class: 'live__receipt-plate' }, rows)),
       contact ? h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }) : null,
@@ -1608,18 +1682,174 @@ class LivePage {
     return { kind: 'confirmed', el, update: () => undefined };
   }
 
+  /**
+   * The second door (plan LIVE RELEASE+, choice 2), in the same vault: still in the line when the last piece was secured,
+   * the after-room's delay later; its one action ENTER THE AFTER-ROOM. Until it closes (then the page says how the release
+   * ended).
+   */
+  private afterRoomScreen(): Screen {
+    const door = h(
+      'div',
+      { class: 'live-door live-door--after', attrs: { 'aria-hidden': 'true' } },
+      h('div', { class: 'live-door__leaf live-door__leaf--left' }),
+      h('div', { class: 'live-door__leaf live-door__leaf--right' }),
+      h('div', { class: 'live-door__lock' }, sealSvg('live-door__seal')),
+    );
+    const until = this.fact('', 'live__until live__after-until');
+    const enter = h('button', { class: 'btn live__primary live__after-enter', attrs: { type: 'button' }, on: { click: () => this.deps.onAfterRoom(this.sheet!.id) }, text: LIVE.afterRoom.enter });
+    const el = h(
+      'section',
+      { class: 'live__after' },
+      this.overline(LIVE.afterRoom.kind),
+      this.title(LIVE.afterRoom.title),
+      door,
+      this.note(LIVE.afterRoom.text, 'live__after-text'),
+      until,
+      enter,
+    );
+    return {
+      kind: 'afterRoom',
+      el,
+      update: () => {
+        const door = this.entry?.afterRoom;
+        const closes = door ? zonedTime(door.closesAt, this.deps.localZone) : null;
+        setFact(until, closes ? LIVE.afterRoom.openUntil(closes.time) : '');
+      },
+    };
+  }
+
+  /**
+   * Over (plan LIVE RELEASE+, decision 30): the release in its final state, as THE RELEASES' PAST opens it. What was
+   * announced (each part from its stage), THIS RELEASE IS OVER, and signed in the account's part in it; never an end
+   * figure. Its one action: THE RELEASES.
+   */
+  private pastScreen(): Screen {
+    const m = livePastModel(this.sheet!, this.deps.localZone);
+    const part = this.fact('', 'live__past-part');
+    part.hidden = true;
+    const ask = this.questionBlock();
+    const el = h(
+      'section',
+      { class: 'live__past' },
+      this.overline(LIVE.kind),
+      this.piece(m.picture, 'live__plate--past'),
+      this.title(m.name),
+      m.line ? this.fact(m.line, 'live__kindline') : null,
+      this.seeModel(m.lookbook),
+      this.hairline(),
+      this.fact(RELEASES.over, 'live__past-status'),
+      this.fact(m.facts, 'live__past-facts'),
+      part,
+      ask.el,
+      storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' }),
+      this.action(LIVE.back, () => this.deps.onReleases()),
+    );
+    return {
+      kind: 'past',
+      el,
+      back: true,
+      update: () => {
+        if (this.partRead === 'idle' && this.deps.session.state.status === 'signed-in') void this.readPart();
+        setFact(part, this.part ?? '');
+        part.hidden = this.part === null;
+        this.askQuestion(ask, true);
+      },
+    };
+  }
+
+  /** ONE QUESTION, in the vault: the question after, shown once read, kept when answered. */
+  private questionBlock(): QuestionBlock {
+    return new QuestionBlock({
+      api: this.deps.api,
+      session: this.deps.session,
+      localZone: this.deps.localZone,
+      tone: 'vault',
+      onAnswered: (q) => {
+        this.question = q;
+      },
+    });
+  }
+
+  /**
+   * The question after on a page of the release's end: read once signed in (never on an after-room's page), then shown.
+   * `again` (the final page): not asked yet of an account that took part without a piece, read again while it may still
+   * open there (a sold-out release's after-room still running).
+   */
+  private askQuestion(block: QuestionBlock, again = false): void {
+    if (this.questionRead === 'idle' && this.deps.session.state.status === 'signed-in' && !this.afterRoomOf()) void this.readQuestion();
+    else if (again) this.askAgain();
+    block.show(this.question);
+  }
+
+  /** Read the question after again in QUESTION_AGAIN_MS, while it is not asked of an account that took part without a piece, for QUESTION_WAIT_MS at most. */
+  private askAgain(): void {
+    if (this.questionTimer || this.questionRead !== 'done' || this.question || this.part !== RELEASES.past.tookPart || this.disposed) return;
+    this.questionSince ??= Date.now();
+    if (Date.now() - this.questionSince >= QUESTION_WAIT_MS) return;
+    this.questionTimer = setTimeout(() => {
+      this.questionTimer = null;
+      if (this.disposed || this.questionRead !== 'done' || this.question) return;
+      this.questionRead = 'idle';
+      this.screen?.update();
+    }, QUESTION_AGAIN_MS);
+  }
+
+  /** The question after for the account (asked here only of one that took part without a piece); unsaid should it not be read. */
+  private async readQuestion(): Promise<void> {
+    const id = this.sheet?.id;
+    if (!id) return;
+    const gen = ++this.questionGen;
+    this.questionRead = 'reading';
+    let question: AccountQuestion | null = null;
+    try {
+      const q = await this.deps.api.question(id);
+      question = q?.asked === 'TOOK_PART' ? q : null;
+    } catch (e) {
+      if (gen !== this.questionGen || this.disposed) return;
+      this.deps.session.noteError(e);
+    }
+    if (gen !== this.questionGen || this.disposed) return;
+    this.question = question;
+    this.questionRead = 'done';
+    this.screen?.update();
+  }
+
+  /** The account's part in this release, from the releases it took part in; left unsaid should it not be read. */
+  private async readPart(): Promise<void> {
+    const id = this.sheet?.id;
+    if (!id) return;
+    const gen = ++this.partGen;
+    this.partRead = 'reading';
+    let part: string | null = null;
+    try {
+      part = participationModel(await this.deps.api.participation()).marks.get(id) ?? null;
+    } catch (e) {
+      if (gen !== this.partGen || this.disposed) return;
+      this.deps.session.noteError(e);
+    }
+    if (gen !== this.partGen || this.disposed) return;
+    this.part = part;
+    this.partRead = 'done';
+    this.screen?.update();
+  }
+
   /** An edge page: its title, its sentence, its one action. */
   private edgeScreen(kind: LiveScreenKind): Screen {
     const copy = this.edgeCopy(kind);
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
     const title = this.title(copy.title);
     const note = this.note(copy.text);
+    // Ended by the release's end with no second door (CLOSED, or SOLD OUT without an after-room): its final end, the
+    // question after open (plan LIVE RELEASE+, choice 11). A guest of an after-room is asked on the final page once it ends.
+    const ask = kind === 'ended' && !this.entry?.afterRoom ? this.questionBlock() : null;
     const el = h(
       'section',
       { class: 'live__edge' },
-      this.overline(this.name()),
+      // In an after-room, its edge pages say so: the release itself had sold out before.
+      this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name()),
       title,
       note,
+      ask?.el ?? null,
       contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
@@ -1627,6 +1857,7 @@ class LivePage {
       const now = this.edgeCopy(kind);
       if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
+      if (ask) this.askQuestion(ask);
     };
     return { kind, el, back: contact === null, update };
   }
@@ -1645,9 +1876,9 @@ class LivePage {
       case 'removed':
         return e.removed;
       case 'ended':
-        return e.ended[this.room?.endedReason ?? 'ENDED'];
+        return (this.afterRoomOf() ? LIVE.afterRoom.ended : e.ended)[this.room?.endedReason ?? 'ENDED'];
       default:
-        return e.over;
+        return this.afterRoomOf() ? LIVE.afterRoom.over : e.over;
     }
   }
 }

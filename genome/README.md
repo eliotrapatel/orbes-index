@@ -47,7 +47,15 @@ genome/
                          P-R06, migration 0019: POST /api/admin/models/:id/discontinue and …/reinstate),
                          the LIVE RELEASES (live.ts: LiveService, the rules and the actions; live-engine.ts:
                          the ticker under an advisory lock; live-room.ts: what the public and a viewer read;
-                         live-console.ts: the console; live-insights.ts: the intelligence)
+                         live-console.ts: the console; live-insights.ts: the intelligence); LIVE RELEASE+
+                         (migrations 0022, 0023): the orders of every channel (orders.ts: OrderService, the steps,
+                         the return; fulfilment.ts: the Orders board, its late marks, the packing slip), the stock
+                         and its ledger (stock.ts), the atelier and its work sheets (atelier.ts), the invoices
+                         (invoices.ts), the event journal (journal.ts), the after-room (after-room.ts), taking
+                         part (participation.ts), the segments (segments.ts), THE RELEASES' PAST
+                         (past-releases.ts), the question after (question.ts), the best time to open
+                         (activity.ts), the feasibility check and the size mix (release-stock.ts), and the
+                         Shopify exports (shopify.ts: files only)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
@@ -56,9 +64,14 @@ genome/
                          answers and votes), admin/ (drops.ts, circle.ts and club.ts for the Club page, its
                          Requests tab included; catalog.ts, Discontinue and Reinstate a model; media.ts for every
                          photograph, a circle post's and a LIVE RELEASE's silhouette included; analytics.ts, its
-                         circle panel too; live.ts, the LIVE RELEASES' console), live.ts (the LIVE RELEASES: the
-                         public pages, the boutique board, the account's room, line and turn)
-    http/ geo/ render/   (http/live-stream.ts: the LIVE RELEASES' streams, LiveHub)
+                         circle panel too; live.ts, the LIVE RELEASES' console; orders.ts, atelier.ts,
+                         invoices.ts, segments.ts, shopify.ts, logistics.ts (the Settings' locations and carriers), LIVE
+                         RELEASE+), live.ts (the LIVE RELEASES: the public pages, the boutique board, the
+                         account's room, line and turn, the after-room, the question after), account.ts (MY
+                         PIECES' orders and their documents, the participation, the questions), public.ts
+                         (THE RELEASES' PAST)
+    http/ geo/ render/   (http/live-stream.ts: the LIVE RELEASES' streams, LiveHub; render/invoice.ts: the
+                         invoices' and credit notes' PDFs)
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
                          (/verify/pieces, its tabs OWNERSHIP · WARRANTY · SERVICE · CARE), an ownership
@@ -71,12 +84,17 @@ genome/
                          the scan as a ritual (the seal signal: capture.ts, scanner.ts); a LIVE RELEASE's vault
                          (/verify/releases/<id>: live-model.ts, live-seal.ts, views/live.ts), its banner
                          (views/live-banner.ts) and its boutique board (/verify/releases/<id>/board#secret:
-                         board-model.ts, views/board.ts)
+                         board-model.ts, views/board.ts); THE RELEASES' LIVE and PAST tabs (views/tabs.ts),
+                         the after-room (/verify/releases/<id>/after-room), the question after
+                         (views/question.ts), YOUR ORDERS and their documents in MY PIECES (orders-model.ts)
     admin/               admin console: catalogue (Discontinue, Reinstate), generator, keys, anomalies, analytics
                          (and its panel The Circle), audit, the Club (Drops, Circle with a post's page
                          #/club/circle/:postId, Tiers, Requests; a LIVE RELEASE's page #/club/live/:dropId, its live
                          board, controls and intelligence); a model's Lookbook page (its Private salon);
-                         the sale mode (decoder worker of verify/)
+                         the sale mode (decoder worker of verify/); LIVE RELEASE+: Orders (#/orders, an
+                         order's page, its packing slip), Atelier (#/atelier, the work sheets), Invoices,
+                         Segments, Settings (locations, carriers, the orders' alerts), the client sheet,
+                         the Catalogue's base price, care guide and Shopify exports
     legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share;
                          prefs.ts, the preferences kept on the device (the sound, orbes.sound)

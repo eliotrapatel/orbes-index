@@ -49,9 +49,28 @@
  *     (1440 × 900); the engine runs on the stage, the releases and accounts
  *     made as test/support/live.ts makes them, MONOLITHE's photograph and a
  *     silhouette drawn here (monolitheSvg)
+ *   LIVE RELEASE+ (plan of 2026-10-04, its Method: the screens; last: its
+ *     releases, orders and pieces would change every other capture), in the
+ *     order of its flow (capturePlus), plus-01 to plus-30: THE RELEASES on
+ *     LIVE, then on PAST with the collector's part and count · a past release
+ *     in its final state · a release announced with its rules in words and A
+ *     SURPRISE IN EVERY BOX · not eligible, the releases taken part in
+ *     counted · FOR SELECTED COLLECTORS · the after-room's second door, its
+ *     page, its turn (the seal held half way), CONFIRMED · the question after
+ *     · YOUR ORDERS at each step (RESERVED, SHIPPED with its tracking, DELIVERED,
+ *     PAID) · an order's documents, its care guide open · AFTER THE RELEASES;
+ *     then the console (1440 × 900): Orders (two late), an order, Atelier,
+ *     Invoices, Segments, a segment, Settings, the client sheet, the
+ *     Catalogue's Shopify export, a draft release's parts (the after-room,
+ *     the access, the surprise, the question after), its best time to open,
+ *     PUBLISH with the feasibility check's warnings; then the four printed
+ *     documents: the work sheet and the packing slip as the console prints
+ *     them, the invoice and the ownership certificate of an order as their
+ *     PDFs read (Quick Look on macOS, pdftoppm elsewhere)
  *
  *   --only live   the LIVE RELEASE's captures alone (live-*.png), the others
  *                 left as they are
+ *   --only plus   LIVE RELEASE+'s alone (plus-*.png)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -70,7 +89,8 @@
  * frame black: from a Mac, keep docs/assets/ui/verify-03-locked.png from a
  * Linux run (write the set elsewhere with --out and copy the rest).
  */
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -89,11 +109,19 @@ import { createContext, startLiveEngine, type AppContext } from '../src/server/c
 import { closeDb, createDb, type Db } from '../src/server/db/connection.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } from '../src/server/db/seed/demo.js';
 import { MemoryKeyProvider } from '../src/server/keys/memory-provider.js';
+import { AtelierService } from '../src/server/services/atelier.js';
+import { AuditService } from '../src/server/services/audit.js';
+import { deriveDropSeedKey, DropService } from '../src/server/services/drops.js';
+import { deriveLiveTurnKey, LiveService } from '../src/server/services/live.js';
+import { LiveConsoleService } from '../src/server/services/live-console.js';
 import type { LiveEngine } from '../src/server/services/live-engine.js';
+import { OrderService, orderReference } from '../src/server/services/orders.js';
+import { SalonService } from '../src/server/services/salon.js';
 import { sessionCookieName } from '../src/server/services/sessions.js';
-import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor } from '../src/server/types.js';
+import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
+import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { cameraClipFrames } from '../test/e2e/support.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
+import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { svgToGray } from '../test/support/raster.js';
 import { writeY4m } from '../test/support/y4m.js';
 import { buildWeb } from './build-web.js';
@@ -125,15 +153,15 @@ const IPHONE_UA =
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { out: string; raw: boolean; only: 'live' | null } {
+function parseArgs(argv: string[]): { out: string; raw: boolean; only: 'live' | 'plus' | null } {
   let out = DEFAULT_OUT;
   let raw = false;
-  let only: 'live' | null = null;
+  let only: 'live' | 'plus' | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && argv[i + 1] === 'live') only = argv[++i] as 'live';
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus')) only = argv[++i] as 'live' | 'plus';
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus)`);
   }
   return { out, raw, only };
 }
@@ -254,6 +282,11 @@ class Shots {
     mkdirSync(outDir, { recursive: true });
   }
 
+  /** A picture made elsewhere (a PDF's page), saved as the others. */
+  png(name: string, png: Buffer): void {
+    this.save(name, png);
+  }
+
   private save(name: string, png: Buffer): void {
     const path = join(this.outDir, `${name}.png`);
     writeFileSync(path, this.raw ? png : quantizePng(png));
@@ -283,6 +316,24 @@ class Shots {
   }
 
   /**
+   * One element alone, its own box, on white paper `margin` pixels wide all round (a printed sheet and its page's
+   * margin), taken with the viewport grown to the document height so no sticky bar of the page crosses it.
+   */
+  async element(page: Page, selector: string, name: string, margin = 0): Promise<void> {
+    const size = page.viewportSize();
+    if (!size) throw new Error('page has no viewport');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+    if (height > size.height) {
+      await page.setViewportSize({ width: size.width, height });
+      await sleep(400);
+    }
+    const shot = await page.locator(selector).first().screenshot({ type: 'png' });
+    if (height > size.height) await page.setViewportSize(size);
+    this.save(name, margin > 0 ? onPaper(shot, margin) : shot);
+  }
+
+  /**
    * A full-width band around one block (the page gutters frame it as on
    * screen), taken with the viewport grown to the document height so no
    * fixed element (corner brackets) falls inside the band.
@@ -302,6 +353,15 @@ class Shots {
     this.save(name, await page.screenshot({ type: 'png', clip: { x: 0, y, width: size.width, height: Math.ceil(box.y + box.height + padY) - y } }));
     if (height > size.height) await page.setViewportSize(size);
   }
+}
+
+/** A PNG set on white paper, `margin` pixels all round. */
+function onPaper(png: Buffer, margin: number): Buffer {
+  const src = PNG.sync.read(png);
+  const out = new PNG({ width: src.width + 2 * margin, height: src.height + 2 * margin });
+  out.data.fill(255);
+  PNG.bitblt(src, out, 0, 0, src.width, src.height, margin, margin);
+  return PNG.sync.write(out);
 }
 
 function watchPage(page: Page, label: string): void {
@@ -814,6 +874,30 @@ async function resumeMotion(page: Page, selector: string): Promise<void> {
 }
 
 /**
+ * The LIVE suites' fixture (test/support/live.ts) on the stage: the console's bootstrap ADMIN, the keys as the context
+ * derives them, the releases made on the demo's MONOLITHE; the stage's own services, or services on a clock of their
+ * own (`clock`) over the same database, for what happened days ago. No model is added: the Catalogue keeps the demo's.
+ */
+async function stageFixture(stage: Stage, clock?: ManualClock): Promise<LiveFixture> {
+  const { ctx, db } = stage;
+  const adminId = (await db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+  const modelId = (await db.selectFrom('models').select('id').where('sku_prefix', '=', 'MNL-RG').executeTakeFirstOrThrow()).id;
+  const seedKey = deriveDropSeedKey(ctx.config);
+  const turnKey = deriveLiveTurnKey(ctx.config);
+  const base = { db, seedKey, turnKey, admin: { type: 'admin' as const, id: adminId }, modelId };
+  if (!clock) return { ...base, clock: createManualClock(new Date()), audit: ctx.audit, drops: ctx.services.drops, live: ctx.services.live, liveConsole: ctx.services.liveConsole };
+  const audit = new AuditService({ db, clock: clock.now });
+  return {
+    ...base,
+    clock,
+    audit,
+    drops: new DropService({ db, audit, seedKey, clock: clock.now }),
+    live: new LiveService({ db, audit, seedKey, turnKey, clock: clock.now }),
+    liveConsole: new LiveConsoleService({ db, audit, seedKey, publicOrigin: ctx.config.publicOrigin, clock: clock.now }),
+  };
+}
+
+/**
  * Every state of the vault (plan of 2026-10-04, Quality bar 7), on the phone of verify, with the live engine running:
  * the releases and accounts are made as the LIVE suites make them (test/support/live.ts), on the demo's MONOLITHE, its
  * photograph and a release's silhouette drawn by monolitheSvg. Run last: its pieces, entries and the model's photograph
@@ -822,7 +906,7 @@ async function resumeMotion(page: Page, selector: string): Promise<void> {
 async function captureLive(stage: Stage, shots: Shots): Promise<void> {
   const { ctx, db, origin } = stage;
   const engine: LiveEngine = startLiveEngine(ctx, { connection: 'shared' });
-  const f: LiveFixture = await liveFixtureOn(ctx, createManualClock(new Date()));
+  const f: LiveFixture = await stageFixture(stage);
   const monolithe = (await db.selectFrom('models').select('id').where('sku_prefix', '=', 'MNL-RG').executeTakeFirstOrThrow()).id;
   let n = 0;
   /** An ORBES account holding `pieces` pieces of MONOLITHE (its tier: 1 TITANE, 3 PLATINE, 5 PALLADIUM), signed in. */
@@ -1056,7 +1140,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
 
     // The edge pages, each with its one action.
     const edge = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });
-    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 60 });
+    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], quantityLine: '1 PIECE', turnSeconds: 300 });
     await sleep(3_500);
     const [e50, e52] = edge.sizes;
     const enter = async (dropId: string, sizeId: string, pieces = 1) => {
@@ -1085,11 +1169,12 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await untilStatus(edge.id, buyer.id, 'TURN');
     const late = await enter(edge.id, e52!.id);
     await secureAs(edge.id, buyer, true);
-    // Sold out before a turn came; a collector without an entry finds it over.
+    // Closed at its time before a turn came, the first collector's turn still running (the page whole): the one waiting
+    // reads that it has closed; a collector without an entry its final state (plan LIVE RELEASE+, decision 30).
     const first = await enter(ended.id, ended.sizes[0]!.id);
     await untilStatus(ended.id, first.id, 'TURN');
     const waiting = await enter(ended.id, ended.sizes[0]!.id);
-    await secureAs(ended.id, first, true);
+    await ctx.db.updateTable('drops').set({ closes_at: new Date() }).where('id', '=', ended.id).execute();
     await untilStatus(ended.id, waiting.id, 'ENDED');
     const outsider = await account(0);
     const nobody = await account(1);
@@ -1108,7 +1193,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     for (const [name, token, dropId] of pages) {
       const { context: c, page: p } = await phone(token, name);
       await p.goto(`${origin}/verify/releases/${dropId}`);
-      await p.waitForSelector('.live__edge h1');
+      await p.waitForSelector('.live__edge h1, .live__past h1');
       await settle(p);
       await shots.full(p, name);
       await c.close();
@@ -1126,6 +1211,537 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
   } finally {
     await browser.close();
     await engine.stop();
+  }
+}
+
+// ── LIVE RELEASE+ ──────────────────────────────────────────────────────────
+
+/**
+ * A PDF's first page as a PNG, drawn by the system's own reader (the file the server sent, as a reader shows it):
+ * Quick Look on macOS, Poppler's pdftoppm elsewhere, both at A4's 1 684 pixels high (144 dpi).
+ */
+function pdfFirstPage(pdf: Uint8Array | string, workDir: string, name: string): Buffer {
+  const file = join(workDir, `${name}.pdf`);
+  writeFileSync(file, pdf);
+  if (process.platform === 'darwin') {
+    execFileSync('qlmanage', ['-t', '-s', '1684', '-o', workDir, file], { stdio: 'ignore' });
+    return readFileSync(`${file}.png`);
+  }
+  execFileSync('pdftoppm', ['-png', '-r', '144', '-singlefile', file, join(workDir, name)], { stdio: 'ignore' });
+  return readFileSync(join(workDir, `${name}.png`));
+}
+
+/**
+ * Every new state of LIVE RELEASE+ (plan of 2026-10-04, its Method: the screens; the LIVE RELEASE's Quality bar 7), in
+ * the order of its flow: the collector's screens on the phone of verify (the ivory of THE RELEASES, the vault, then MY
+ * PIECES), the console's new pages (1 440 × 900), then the four printed documents, black on white.
+ *
+ * One collector, Hélène Morel (PLATINE, three pieces of MONOLITHE), lived through the releases of the last days on
+ * services of their own clock over the stage's database (test/support/live.ts liveFixture, as test/web/verify.orders.e2e
+ * does), ORBES Client Services and the atelier following her orders on that clock too: the draw (her place confirmed,
+ * then paid: PAID, its piece being made), LIVE I (her piece secured, paid, made at the atelier, shipped by Colissimo and
+ * registered by her today: DELIVERED), a request of the private salon accepted (an ORBITE paid, made and shipped by
+ * Chronopost: SHIPPED), LIVE II (in the line at the sell-out: the question after on its final page), LIVE III (I'LL BE
+ * THERE, never came: the question in MY PIECES). Today, with the live engine running: LIVE IV sells out and its
+ * after-room opens its second door a minute later, where she secures an ORBITE (RESERVED); LIVE V is announced for the
+ * selected collectors or those who have taken part in three releases, with a surprise in every box; a release for the
+ * selected collectors alone has its room open; LIVE VI is a draft with every part of LIVE RELEASE+ set, its stock at a
+ * location that holds none of its sizes (the feasibility check's warnings). Run last: its releases, orders and pieces
+ * would change the other captures.
+ */
+async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise<void> {
+  const { ctx, db, origin } = stage;
+  const DAY = 86_400_000;
+  const HOUR = 3_600_000;
+  const MINUTE = 60_000;
+  const modelOf = async (prefix: string) => (await db.selectFrom('models').select('id').where('sku_prefix', '=', prefix).executeTakeFirstOrThrow()).id;
+  const monolithe = await modelOf('MNL-RG');
+  const orbite = await modelOf('ORB-SG');
+  /** `hour`:00 in Paris, `days` from today (summer or winter time read from the zone itself). */
+  const parisAt = (days: number, hour: number): Date => {
+    const day = new Date(Date.now() + days * DAY).toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
+    const asUtc = new Date(`${day}T${String(hour).padStart(2, '0')}:00:00Z`);
+    const offset = Date.parse(asUtc.toLocaleString('en-US', { timeZone: 'Europe/Paris' })) - Date.parse(asUtc.toLocaleString('en-US', { timeZone: 'UTC' }));
+    return new Date(asUtc.getTime() - offset);
+  };
+  let engine: LiveEngine | null = null;
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    await ctx.services.media.setModelImage(monolithe, { mime: 'image/webp', bytes: await webpOf(browser, monolitheSvg('photo')) }, SYSTEM_ACTOR);
+
+    // ── The collectors ──
+    const account = async (email: string, pieces: number) => {
+      const { account: a, session } = await ctx.services.auth.registerAccount({ email, password: 'capture-ui-plus-password' }, {});
+      if (pieces > 0) await holdPieces(db, a.id, pieces, monolithe);
+      return { id: a.id, token: session.token, actor: { type: 'account' as const, id: a.id } };
+    };
+    const me = await account('helene.morel@example.com', 3);
+    const rival = await account('a.lindqvist@example.com', 5);
+    const payer = await account('m.okafor@example.com', 1);
+    const canceller = await account('j.serrano@example.com', 1);
+    const newcomer = await account('t.nguyen@example.com', 0);
+    type Who = typeof me;
+
+    // ── The last days, on services of their own clock: the releases, ORBES Client Services and the atelier ──
+    const past = await stageFixture(stage, createManualClock(new Date(Date.now() - 9 * DAY)));
+    const admin = past.admin;
+    /** The past's clock at `hour`:`minute` in Paris, `days` ago: ORBES Client Services and the atelier at work in the day, the releases at 19:00. */
+    const on = (days: number, hour: number, minute = 0) => past.clock.set(new Date(parisAt(-days, hour).getTime() + minute * MINUTE));
+    const orders = new OrderService({ db, audit: past.audit, clock: past.clock.now });
+    const atelier = new AtelierService({ db, audit: past.audit, issuance: ctx.services.issuance, orders, clock: past.clock.now });
+    const salon = new SalonService({ db, audit: past.audit, lookbook: ctx.services.lookbook, club: ctx.services.club, clock: past.clock.now });
+    const carrier = async (name: string) => (await db.selectFrom('carriers').select('id').where('name', '=', name).executeTakeFirstOrThrow()).id;
+    const benchOf = async (orderId: string) => (await db.selectFrom('bench_items').select('id').where('order_id', '=', orderId).executeTakeFirstOrThrow()).id;
+    const titled = async (id: string, title: string) => {
+      await db.updateTable('drops').set({ title }).where('id', '=', id).execute();
+    };
+    /** The turn of `who` in a release of the past: the seal pressed, held 1.5 s, secured, the add-ons, PAY. */
+    const buy = async (dropId: string, who: Who, addonIds: string[] = []) => {
+      const token = (await past.live.entry(who.id, dropId))!.turn!.token!;
+      await past.live.press(who.id, dropId, token);
+      past.clock.advance(1_500);
+      await past.live.secure(who.id, dropId, token, who.actor);
+      if (addonIds.length) await past.live.setAddons(who.id, dropId, addonIds, who.actor);
+      past.clock.advance(2_000);
+      await past.live.confirm(who.id, dropId, who.actor);
+      past.clock.advance(1_000);
+    };
+
+    // The draw, nine days ago: the four collectors entered, drawn; two places, held by tier (the PALLADIUM, then
+    // Hélène). ORBES Client Services confirms hers: its order, its size and price entered, MONOLITHE in size 54.
+    on(9, 12);
+    const drawOpens = new Date(past.clock.now().getTime() + HOUR);
+    const draw = await past.drops.create({ modelId: monolithe, title: 'MONOLITHE — THE DRAW', quantity: 2, opensAt: drawOpens, closesAt: new Date(drawOpens.getTime() + DAY), earlyAccessHours: 0 }, admin);
+    await past.drops.publish(draw.id, admin);
+    past.clock.set(new Date(drawOpens.getTime() + MINUTE));
+    for (const who of [me, rival, payer, canceller]) await past.drops.enter(who.id, draw.id, who.actor);
+    past.clock.set(new Date(drawOpens.getTime() + DAY + MINUTE));
+    await past.drops.draw(draw.id, admin);
+    on(8, 15);
+    const myEntry = await db.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', draw.id).where('account_id', '=', me.id).executeTakeFirstOrThrow();
+    if (myEntry.status !== 'SELECTED') throw new Error(`the draw left Hélène ${myEntry.status}`);
+    await past.drops.confirm(draw.id, myEntry.id, 'Size 54, confirmed by phone.', admin);
+    const drawn = (await db.selectFrom('orders').select('id').where('drop_entry_id', '=', myEntry.id).executeTakeFirstOrThrow()).id;
+    on(8, 15, 10);
+    await orders.setTerms(drawn, { sizeLabel: '54', priceMinor: 480_000, currency: 'EUR' }, admin);
+    await orders.setBuyer(drawn, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+
+    // LIVE I, six days ago: four pieces, two of size 54 made in advance at FRANCE WAREHOUSE; ENGRAVING, a surprise.
+    const france = await defaultLocationId(db);
+    const sku54 = await ensureSku(db, monolithe, '54');
+    await ctx.services.stock.adjust({ skuId: sku54, locationId: france, delta: 2, note: 'Two pieces of size 54 finished ahead of LIVE I.' }, admin);
+    on(6, 18);
+    const live1 = await createLiveRelease(past, {
+      modelId: monolithe,
+      opensAt: new Date(past.clock.now().getTime() + HOUR),
+      priceMinor: 505_000,
+      quantityLine: '4 PIECES',
+      sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 2 }],
+      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      surprise: 'A polishing cloth in the house black, folded under the ring.',
+    });
+    await titled(live1.id, 'MONOLITHE — LIVE I');
+    const [l52, l54] = live1.sizes;
+    past.clock.advance(HOUR - MINUTE);
+    for (const [who, size] of [[me, l52], [rival, l52], [payer, l54], [canceller, l54]] as const) await past.live.enter(who.id, live1.id, { sizeId: size!.id }, who.actor);
+    past.clock.advance(MINUTE);
+    await past.live.advance(live1.id);
+    const engraving = [live1.addons[0]!.id];
+    for (const [who, addons] of [[rival, engraving], [me, engraving], [payer, []], [canceller, []]] as const) await buy(live1.id, who, [...addons]);
+    const orderOf = async (who: Who, dropId: string) =>
+      (await db.selectFrom('orders').select('id').where('account_id', '=', who.id).where('drop_id', '=', dropId).executeTakeFirstOrThrow()).id;
+    const mine = await orderOf(me, live1.id);
+    const rivals = await orderOf(rival, live1.id);
+    const paid = await orderOf(payer, live1.id);
+    const cancelled = await orderOf(canceller, live1.id);
+    // The engraving the rival asked ORBES Client Services for.
+    on(5, 10);
+    await orders.setTerms(rivals, { engravingText: 'A. & L.' }, admin);
+
+    // Five days ago, Hélène asks THE PRIVATE SALON for an ORBITE; ORBES Client Services accepts that day: size 54, € 1 900.
+    on(5, 11, 30);
+    const request = (await db.insertInto('shop_requests').values({ account_id: me.id, model_id: orbite, created_at: past.clock.now() }).returning('id').executeTakeFirstOrThrow()).id;
+    on(5, 15);
+    await salon.close(request, { note: 'An ORBITE in size 54, for her birthday.', outcome: 'ACCEPTED' }, admin);
+    const salonOrder = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request).executeTakeFirstOrThrow()).id;
+    on(5, 15, 10);
+    await orders.setTerms(salonOrder, { sizeLabel: '54', priceMinor: 190_000, currency: 'EUR' }, admin);
+    await orders.setBuyer(salonOrder, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+
+    // Four days ago: LIVE I's pieces paid (one cancelled the next morning), Hélène's engraved, her pieces at the bench.
+    on(4, 10);
+    await orders.setBuyer(mine, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+    await orders.setTerms(mine, { engravingText: 'H. M.' }, admin);
+    on(4, 11);
+    await orders.transition(mine, { to: 'PAID' }, admin);
+    on(4, 14);
+    const myBench = await benchOf(mine);
+    await atelier.start(myBench, admin);
+    on(4, 16);
+    await orders.transition(salonOrder, { to: 'PAID' }, admin);
+    on(4, 17);
+    await orders.transition(cancelled, { to: 'PAID' }, admin);
+    on(3, 10);
+    await orders.transition(cancelled, { to: 'CANCELLED', note: 'The client changed her mind before shipping; refunded in full.' }, admin);
+    on(3, 11);
+    const salonBench = await benchOf(salonOrder);
+    await atelier.start(salonBench, admin);
+
+    // LIVE II, three days ago: one piece; Hélène joins the line behind the newcomer, who secures it: SOLD OUT.
+    on(3, 18);
+    const live2 = await createLiveRelease(past, { modelId: monolithe, opensAt: new Date(past.clock.now().getTime() + HOUR), priceMinor: 505_000, quantityLine: '1 PIECE', sizes: [{ label: '52', stock: 1 }] });
+    await titled(live2.id, 'MONOLITHE — LIVE II');
+    past.clock.advance(HOUR - MINUTE);
+    await past.live.enter(newcomer.id, live2.id, { sizeId: live2.sizes[0]!.id }, newcomer.actor);
+    past.clock.advance(MINUTE);
+    await past.live.advance(live2.id);
+    await past.live.enter(me.id, live2.id, { sizeId: live2.sizes[0]!.id }, me.actor);
+    await buy(live2.id, newcomer);
+
+    // Two days ago: Hélène's LIVE I piece made and shipped by Colissimo; the draw's piece and Michael's paid.
+    on(2, 11);
+    const done = await atelier.done(myBench, { productionBatch: 'B-2026-10-LIVE-I' }, admin);
+    on(2, 15);
+    await orders.transition(mine, { to: 'SHIPPED', carrierId: await carrier('Colissimo'), trackingNumber: '6A12345678901', declaredValueMinor: 520_000 }, admin);
+    on(2, 16);
+    await orders.transition(drawn, { to: 'PAID' }, admin);
+    on(2, 16, 30);
+    await orders.setBuyer(paid, { name: 'Michael Okafor', address: '22 Kensington Church Street\nLondon W8 4EP\nUnited Kingdom' }, admin);
+    await orders.transition(paid, { to: 'PAID' }, admin);
+    on(2, 17);
+    await atelier.start(await benchOf(drawn), admin);
+    // Yesterday: the ORBITE finished and shipped by Chronopost; the rival's engraved piece begun, still to be paid.
+    on(1, 10);
+    await atelier.done(salonBench, { productionBatch: 'B-2026-10-SALON' }, admin);
+    on(1, 11);
+    await orders.transition(salonOrder, { to: 'SHIPPED', carrierId: await carrier('Chronopost'), trackingNumber: 'XY482915637FR', declaredValueMinor: 190_000 }, admin);
+    on(1, 12);
+    const rivalBench = await benchOf(rivals);
+    await atelier.start(rivalBench, admin);
+
+    // LIVE III, yesterday: Hélène said I'LL BE THERE and never came; it closed with a piece left.
+    on(1, 18);
+    const live3 = await createLiveRelease(past, {
+      modelId: monolithe,
+      opensAt: new Date(past.clock.now().getTime() + HOUR),
+      closesAt: new Date(past.clock.now().getTime() + 2 * HOUR),
+      priceMinor: 505_000,
+      quantityLine: '2 PIECES',
+      sizes: [{ label: '52', stock: 2 }],
+    });
+    await titled(live3.id, 'MONOLITHE — LIVE III');
+    await past.live.setInterest(me.id, live3.id, live3.sizes[0]!.id, me.actor);
+    past.clock.advance(HOUR - MINUTE);
+    await past.live.enter(payer.id, live3.id, { sizeId: live3.sizes[0]!.id }, payer.actor);
+    past.clock.advance(MINUTE);
+    await past.live.advance(live3.id);
+    await buy(live3.id, payer);
+    past.clock.advance(HOUR);
+    await past.live.advance(live3.id);
+
+    // ── Today: Hélène receives LIVE I's piece and registers it with its claim code (its warranty started at the sale): DELIVERED ──
+    const piece = (await db.selectFrom('products').select('id').where('product_id', '=', done.productId).executeTakeFirstOrThrow()).id;
+    await ctx.services.warranty.activate(piece, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(done.codeId)).data }, {});
+    await ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: done.claimCode! }, me.actor);
+    // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE: the atelier suggests what to make.
+    await ctx.services.atelier.setThreshold({ skuId: sku54, locationId: france, minimum: 3 }, admin);
+    // The Catalogue: MONOLITHE's base price (N2) and its care guide (M6).
+    await ctx.services.catalog.updateModel(
+      monolithe,
+      { basePriceMinor: 505_000, baseCurrency: 'EUR', careGuide: 'Wipe the band with a soft, dry cloth after wearing.\nKeep it in its box, away from perfume and from other pieces.' },
+      admin,
+    );
+
+    // ── The segments, a release announced for them, one with its room open, one in draft ──
+    const selected = await ctx.services.segments.create(
+      { name: 'Owners from PLATINE, active this month', criteria: { match: 'ALL', rules: [{ kind: 'TIER', tiers: [2, 3] }, { kind: 'ACTIVE', days: 30 }] } },
+      admin,
+    );
+    await ctx.services.segments.create(
+      { name: 'Wanted another size at LIVE II', criteria: { match: 'ANY', rules: [{ kind: 'ANSWER', dropId: live2.id, answer: 1 }, { kind: 'SIZE', sizes: ['54'] }] } },
+      admin,
+    );
+    const today = await stageFixture(stage);
+    const live5 = await createLiveRelease(today, {
+      modelId: monolithe,
+      opensAt: parisAt(3, 19),
+      priceMinor: 505_000,
+      quantityLine: '25 PIECES',
+      sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
+      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      minParticipations: 3,
+      accessSegmentId: selected.id,
+      accessCombine: 'OR',
+      surprise: 'A silk pouch, hand-stitched in the atelier.',
+    });
+    await titled(live5.id, 'MONOLITHE — LIVE V');
+    const circle = await createLiveRelease(today, {
+      modelId: monolithe,
+      // On the half hour, 10 to 40 minutes from now: its room, open an hour before, is open.
+      opensAt: new Date(Math.ceil((Date.now() + 10 * MINUTE) / (30 * MINUTE)) * 30 * MINUTE),
+      roomOpensMinutes: 60,
+      priceMinor: 505_000,
+      quantityLine: '12 PIECES',
+      sizes: [{ label: '52', stock: 6 }, { label: '54', stock: 6 }],
+      accessSegmentId: selected.id,
+    });
+    await titled(circle.id, 'MONOLITHE — FOR THE CIRCLE');
+    const logistics = (await db.selectFrom('stock_locations').select('id').where('name', '=', 'LOGISTICS WAREHOUSE').executeTakeFirstOrThrow()).id;
+    const live6 = await createLiveRelease(today, {
+      modelId: monolithe,
+      opensAt: parisAt(10, 19),
+      announceAt: parisAt(3, 12),
+      published: false,
+      priceMinor: 505_000,
+      quantityLine: '25 PIECES',
+      sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
+      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      minParticipations: 2,
+      accessSegmentId: selected.id,
+      accessCombine: 'OR',
+      surprise: 'A silk pouch, hand-stitched in the atelier.',
+      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 4 }, { label: '54', stock: 4 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand in the atelier', priceMinor: 9_000 }] },
+    });
+    await titled(live6.id, 'MONOLITHE — LIVE VI');
+    // Its sizes on sale linked to their SKUs, as the console writes a release; LOGISTICS WAREHOUSE holds all of its
+    // size 50 and part of its 52: the feasibility check warns for the rest.
+    await linkDropSizes(db, live6.id, monolithe);
+    await linkDropSizes(db, live6.afterRoom!.id, orbite);
+    await ctx.services.stock.adjust({ skuId: await ensureSku(db, monolithe, '50'), locationId: logistics, delta: 8, note: 'Eight pieces of size 50 received from the atelier.' }, admin);
+    await ctx.services.stock.adjust({ skuId: await ensureSku(db, monolithe, '52'), locationId: logistics, delta: 6, note: 'Six pieces of size 52 received from the atelier.' }, admin);
+    await ctx.services.liveConsole.update(
+      live6.id,
+      { stockLocationId: logistics, questionText: 'WHICH SIZE WOULD YOU HAVE CHOSEN?', questionAnswers: ['50', '52', '54', 'ANOTHER SIZE'] },
+      admin,
+    );
+
+    // ── The phone and the console ──
+    const phone = async (token: string, label: string) => {
+      const context = await mobileContext(browser);
+      await context.addCookies([{ name: sessionCookieName(ctx.config, 'account'), value: token, url: origin }]);
+      const page = await context.newPage();
+      watchPage(page, label);
+      return { context, page };
+    };
+    const settle = async (page: Page, ms = 1_200) => {
+      await page.mouse.move(0, 0);
+      await page.evaluate(() => document.fonts.ready);
+      await hideGrain(page);
+      await sleep(ms);
+    };
+
+    // ── LIVE IV and its after-room, lived now, the engine running (from here: the releases of the past are over) ──
+    engine = startLiveEngine(ctx, { connection: 'shared' });
+    const live4 = await createLiveRelease(today, {
+      modelId: monolithe,
+      opensAt: new Date(Date.now() + HOUR),
+      priceMinor: 505_000,
+      quantityLine: '1 PIECE',
+      sizes: [{ label: '52', stock: 1 }],
+      surprise: 'A polishing cloth in the house black, folded under the ring.',
+      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 2 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand in the atelier', priceMinor: 9_000 }], delayMinutes: 1, lengthMinutes: 15 },
+    });
+    await titled(live4.id, 'MONOLITHE — LIVE IV');
+    await titled(live4.afterRoom!.id, 'MONOLITHE — LIVE IV · THE AFTER-ROOM');
+    const t0 = Date.now() + 2_000;
+    await db.updateTable('drops').set({ opens_at: new Date(t0), closes_at: new Date(t0 + HOUR) }).where('id', '=', live4.id).execute();
+    for (const who of [rival, me]) await ctx.services.live.enter(who.id, live4.id, { sizeId: live4.sizes[0]!.id }, who.actor);
+    const statusIn = async (dropId: string, who: Who) => (await db.selectFrom('live_entries').select('status').where('drop_id', '=', dropId).where('account_id', '=', who.id).executeTakeFirst())?.status ?? null;
+    await until('the rival’s turn', async () => (await statusIn(live4.id, rival)) === 'TURN');
+    const { context: vault, page } = await phone(me.token, 'plus-after-room');
+    await page.goto(`${origin}/verify/releases/${live4.id}`);
+    await untilText(page, '.live__place-figure', '2');
+    const token = (await ctx.services.liveRoom.viewerEntries(live4.id, [rival.id])).get(rival.id)!.turn!.token!;
+    await ctx.services.live.press(rival.id, live4.id, token);
+    await sleep(1_500);
+    await ctx.services.live.secure(rival.id, live4.id, token, rival.actor);
+    await ctx.services.live.confirm(rival.id, live4.id, rival.actor);
+    await untilText(page, '.live__edge > h1', 'SOLD OUT');
+    // A minute later, in the same vault: the second door.
+    await page.locator('.live__after').waitFor({ state: 'visible', timeout: 90_000 });
+    await settle(page, 1_600);
+    await shots.full(page, 'plus-07-after-room-door');
+    await page.getByRole('button', { name: 'ENTER THE AFTER-ROOM' }).click();
+    await untilText(page, '.live__join > .live__overline', 'THE AFTER-ROOM');
+    await page.locator('.live__join .live__size', { hasText: /^52$/ }).click();
+    await settle(page);
+    await shots.full(page, 'plus-08-after-room-join');
+    await page.getByRole('button', { name: 'ENTER THE LINE' }).click();
+    // Her turn, first in the after-room as she was next in the line: at half its time, the seal held half way.
+    await untilText(page, '.live__turn > .live__overline', 'YOUR TURN');
+    await settle(page, 300);
+    const turnPage = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+    await page.setViewportSize({ width: MOBILE.width, height: Math.max(MOBILE.height, turnPage) });
+    await untilText(page, '.live__turn-left', '00:15', 30_000);
+    const seal = (await page.locator('.live-hold').boundingBox())!;
+    await page.mouse.move(seal.x + seal.width / 2, seal.y + seal.height / 2);
+    await page.mouse.down();
+    await sleep(700);
+    await shots.viewport(page, 'plus-09-after-room-turn');
+    await sleep(1_400);
+    await page.mouse.up();
+    await page.setViewportSize({ ...MOBILE });
+    await untilText(page, '.live__secured > .live__overline', 'SECURED');
+    await sleep(2_600);
+    await page.getByRole('button', { name: /GIFT BOX/ }).click();
+    await page.locator('.live__pay').click();
+    await untilText(page, 'h1', 'CONFIRMED');
+    await settle(page, 1_600);
+    await shots.full(page, 'plus-10-after-room-confirmed');
+    await vault.close();
+
+    // ── THE RELEASES: LIVE, then PAST, and a past release ──
+    {
+      const { context, page: p } = await phone(me.token, 'plus-releases');
+      await p.goto(`${origin}/verify/releases`);
+      await p.locator('#releases-panel-live article.live-card').first().waitFor({ state: 'visible', timeout: 30_000 });
+      await settle(p);
+      await shots.full(p, 'plus-01-releases-live');
+      await p.getByRole('tab', { name: 'PAST', exact: true }).click();
+      await p.locator('.releases__taken').waitFor({ state: 'visible', timeout: 30_000 });
+      await p.locator('#releases-panel-past article.release-card').first().waitFor({ state: 'visible' });
+      await settle(p);
+      await shots.full(p, 'plus-02-releases-past');
+      await p.locator('#releases-panel-past article.release-card').filter({ has: p.locator(`#past-${live1.id}-title`) }).getByRole('link', { name: 'SEE THE RELEASE' }).click();
+      await p.locator('.live__past-part').waitFor({ state: 'visible', timeout: 30_000 });
+      await settle(p);
+      await shots.full(p, 'plus-03-past-release');
+      await context.close();
+    }
+
+    // ── The release announced, its rules in words; who may not enter ──
+    const shot = async (who: Who, path: string, ready: string, name: string) => {
+      const { context, page: p } = await phone(who.token, name);
+      await p.goto(`${origin}${path}`);
+      await p.locator(ready).first().waitFor({ state: 'visible', timeout: 30_000 });
+      await settle(p);
+      await shots.full(p, name);
+      await context.close();
+    };
+    {
+      // Hélène chooses her size: I'LL BE THERE is hers to press.
+      const { context, page: p } = await phone(me.token, 'plus-04-announced-rules');
+      await p.goto(`${origin}/verify/releases/${live5.id}`);
+      await p.locator('.live__there').locator('button.live__size', { hasText: /^52$/ }).click();
+      await settle(p);
+      await shots.full(p, 'plus-04-announced-rules');
+      await context.close();
+    }
+    await shot(newcomer, `/verify/releases/${live5.id}`, '.live__there-rule', 'plus-05-not-eligible-count');
+    await shot(newcomer, `/verify/releases/${circle.id}`, '.live__edge h1', 'plus-06-not-eligible-selected');
+
+    // ── The question after, MY PIECES: the orders at each step, an order's documents, the question there ──
+    await shot(me, `/verify/releases/${live2.id}`, '.live__past .question .question__answer', 'plus-11-question-after');
+    {
+      const { context, page: p } = await phone(me.token, 'plus-pieces');
+      await p.goto(`${origin}/verify/pieces`);
+      const section = p.locator('section.pieces__orders');
+      await section.locator('article.pieces__order').nth(3).waitFor({ state: 'visible', timeout: 30_000 });
+      await settle(p);
+      await shots.region(p, 'section.pieces__orders', 'plus-12-your-orders');
+      const delivered = section.locator('article.pieces__order[data-status="DELIVERED"]');
+      await delivered.getByRole('button', { name: /CARE GUIDE/i }).click();
+      await delivered.locator('.pieces__order-care-text').waitFor({ state: 'visible' });
+      await settle(p, 600);
+      await shots.region(p, 'article.pieces__order[data-status="DELIVERED"] .pieces__order-documents', 'plus-13-order-documents');
+      const questions = p.locator('section.pieces__questions');
+      await questions.locator('.question__answer').first().waitFor({ state: 'visible' });
+      await shots.region(p, 'section.pieces__questions', 'plus-14-after-the-releases');
+      await context.close();
+    }
+    // Hélène answers LIVE II's question: ANOTHER SIZE (the second segment's criterion).
+    await ctx.services.questions.answer(me.id, live2.id, 1, me.actor);
+
+    // ── The console ──
+    /** The console, signed in as the bootstrap ADMIN, in a context of its own. */
+    const signIn = async (context: BrowserContext, label: string) => {
+      const p = await context.newPage();
+      watchPage(p, label);
+      await p.goto(`${origin}/admin`);
+      await p.waitForSelector('[data-testid=login-form]');
+      await p.fill('input[name=email]', ADMIN.email);
+      await p.fill('input[name=password]', ADMIN.password);
+      await p.click('[data-testid=login-submit]');
+      await p.waitForSelector('.view--dashboard');
+      return p;
+    };
+    const desk = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+    const console_ = await signIn(desk, 'plus-console');
+    /** A page of the console at rest: its heading read, its data in, the toasts gone, the pointer away. */
+    const go = async (hash: string, heading: string | RegExp, ready: string) => {
+      await console_.evaluate((h) => (location.hash = h), hash);
+      await untilText(console_, 'h1.page-head__title', heading, 20_000);
+      await console_.locator(ready).first().waitFor({ state: 'visible', timeout: 20_000 });
+      await console_.evaluate(async () => {
+        document.querySelectorAll('.toast').forEach((x) => x.remove());
+        await document.fonts.ready;
+      });
+      await console_.mouse.move(0, 0);
+      await sleep(900);
+    };
+    await go('#/orders', 'Orders', '[data-testid=order-card]');
+    await shots.full(console_, 'plus-15-console-orders');
+    await go(`#/orders/${mine}`, orderReference(mine), '#order-history');
+    await shots.full(console_, 'plus-16-console-order');
+    await go('#/atelier', 'Atelier', '[data-testid=bench-group]');
+    await shots.full(console_, 'plus-17-console-atelier');
+    await go('#/invoices', 'Invoices', '[data-testid=invoice-pdf]');
+    await shots.full(console_, 'plus-18-console-invoices');
+    await go('#/segments', 'Segments', '[data-testid=segment-row-count]');
+    await shots.full(console_, 'plus-19-console-segments');
+    await go(`#/segments/${selected.id}`, selected.name, '[data-testid=segment-tree]');
+    await untilText(console_, '[data-testid=segment-count]', /\d/, 20_000);
+    await shots.full(console_, 'plus-20-console-segment');
+    await go('#/settings', 'Settings', '[data-testid=location-add]');
+    await shots.full(console_, 'plus-21-console-settings');
+    await go(`#/owners/${me.id}`, 'helene.morel@example.com', '#orders tbody tr');
+    await shots.full(console_, 'plus-22-console-client');
+    await go('#/catalogue', 'Catalogue', '[data-testid=shopify-products-export]');
+    await console_.click('[data-testid=shopify-products-export]');
+    await console_.locator('[data-testid=shopify-export-summary]').waitFor({ state: 'visible' });
+    await console_.mouse.move(0, 0);
+    await sleep(600);
+    await shots.viewport(console_, 'plus-23-console-catalogue-export');
+    await console_.keyboard.press('Escape');
+    // LIVE VI, a draft: its parts (the after-room, the access, the surprise, the question after), the best time to
+    // open, then PUBLISH and the feasibility check's warnings.
+    await go(`#/club/live/${live6.id}`, 'MONOLITHE — LIVE VI', '#live-part-after-room');
+    await console_.locator('#live-best-time [data-testid=best-time-suggested]').waitFor({ state: 'visible', timeout: 20_000 });
+    // Each part alone, on the console's white page, 40 pixels of it round the part.
+    await shots.element(console_, '.live__parts', 'plus-24-console-release-settings', 40);
+    await shots.element(console_, '#live-best-time', 'plus-25-console-best-time', 40);
+    await console_.click('[data-testid=live-publish]');
+    await console_.locator('dialog [data-testid=live-feasibility-line]').waitFor({ state: 'visible', timeout: 20_000 });
+    await console_.mouse.move(0, 0);
+    await sleep(600);
+    await shots.viewport(console_, 'plus-26-console-feasibility');
+    await console_.keyboard.press('Escape');
+
+    await desk.close();
+
+    // ── The printed documents, black on white: the console's print pages as printed (A4 at 96 dpi, drawn at 2×) ──
+    const paper = await browser.newContext({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 2, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+    const print = await signIn(paper, 'plus-print');
+    await print.emulateMedia({ media: 'print' });
+    for (const [hash, testid, name] of [
+      [`#/atelier/sheets?id=${rivalBench}`, 'work-sheet', 'plus-27-work-sheet'],
+      [`#/orders/${mine}/slip`, 'packing-slip', 'plus-28-packing-slip'],
+    ] as const) {
+      await print.evaluate((h) => (location.hash = h), hash);
+      await print.locator(`[data-testid=${testid}]`).waitFor({ state: 'visible', timeout: 20_000 });
+      await print.evaluate(() => document.fonts.ready);
+      await sleep(600);
+      // 15 mm of the page's margin round the sheet (2 pixels a CSS pixel, 96 of them an inch).
+      await shots.element(print, `[data-testid=${testid}]`, name, Math.round((15 / 25.4) * 96 * 2));
+    }
+    await paper.close();
+    const invoice = (await db.selectFrom('invoices').select('id').where('order_id', '=', mine).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).id;
+    shots.png('plus-29-invoice', pdfFirstPage((await ctx.services.invoices.pdf(invoice)).body, workDir, 'invoice'));
+    shots.png('plus-30-certificate', pdfFirstPage((await ctx.services.ownershipCertificates.orderCertificatePdf(me.id, mine)).body, workDir, 'certificate'));
+  } finally {
+    await browser.close();
+    await engine?.stop();
   }
 }
 
@@ -1288,8 +1904,14 @@ async function main(): Promise<void> {
       log('legal:');
       await captureLegal(stage, shots);
     }
-    log('the LIVE RELEASE:');
-    await captureLive(stage, shots);
+    if (only !== 'plus') {
+      log('the LIVE RELEASE:');
+      await captureLive(stage, shots);
+    }
+    if (only !== 'live') {
+      log('LIVE RELEASE+:');
+      await capturePlus(stage, shots, workDir);
+    }
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);

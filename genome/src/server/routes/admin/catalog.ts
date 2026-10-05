@@ -6,7 +6,8 @@
  * issuance, and a collection's name; never a model's category nor its SKU
  * prefix (A-10). A model's lookbook (P-R02: its place, address, story and
  * specifications) and its place in the private salon (P-X08: its price and
- * tier) change through the same edit; one model is read alone by
+ * tier), and its base price and care guide (plan LIVE RELEASE+, N2 and M6: the
+ * Shopify product export's price, MY PIECES' care guide) change through the same edit; one model is read alone by
  * the console's Lookbook page (its gallery is routes/admin/media.ts's). An
  * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
  * …/reinstate, no body; the console asks for a typed phrase first). The
@@ -124,6 +125,8 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         ...(b.specs !== undefined ? { specs: b.specs } : {}),
         ...(b.priceLabel !== undefined ? { priceLabel: b.priceLabel } : {}),
         ...(b.privateMinTier !== undefined ? { privateMinTier: b.privateMinTier } : {}),
+        ...(b.basePriceMinor !== undefined ? { basePriceMinor: b.basePriceMinor, baseCurrency: b.baseCurrency } : {}),
+        ...(b.careGuide !== undefined ? { careGuide: b.careGuide } : {}),
       },
       adminActor(request),
     );

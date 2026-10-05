@@ -366,9 +366,7 @@ export interface DropSheet extends DropCard {
   seedHash: string;
   /** The 32-byte seed in hexadecimal, once drawn; null before. */
   seed: string | null;
-  /** The entries that took part in the draw, once drawn; null before. */
-  entries: number | null;
-  /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full. */
+  /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full (0 once drawn). */
   reserved: number;
 }
 
@@ -378,6 +376,55 @@ export interface DrawEntry {
   tier: number;
   seniority: number;
   rank: number;
+}
+
+/** A release of THE RELEASES' PAST (GET /api/v1/releases/past, plan LIVE RELEASE+ choice 5): what was announced, no end figure. */
+export interface PastRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  /** The release's title; a LIVE RELEASE's null when it ended before its name's stage. */
+  title: string | null;
+  model: { name: string | null; type: string | null; collection: string | null };
+  /** `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+  /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
+  opensAt: string;
+  /** The quantity as announced (« 25 PIECES »). */
+  quantityLine: string;
+}
+
+/** A page of GET /api/v1/releases/past, the newest first. */
+export interface PastReleasesPage {
+  items: PastRelease[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** The releases the signed-in account took part in (GET /api/v1/account/participation). */
+export interface Participation {
+  /** « You have taken part in N releases ». */
+  count: number;
+  /** Each release once, an after-room's under the release it follows; `secured`: a piece secured there. */
+  releases: { id: string; secured: boolean }[];
+}
+
+/**
+ * The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11; GET /api/v1/live/:id/question, GET
+ * /api/v1/account/questions, PUT /api/v1/live/:id/answer): asked for 7 days from the release's end, on its end page to
+ * those who took part without a piece (TOOK_PART), in MY PIECES to those who said I'LL BE THERE and did not come
+ * (INTEREST); `answer` the position of the answer chosen, from 1, or null.
+ */
+export interface AccountQuestion {
+  dropId: string;
+  /** The model's name once revealed: how MY PIECES names the release; null when it ended before its name. */
+  name: string | null;
+  opensAt: string;
+  text: string;
+  answers: string[];
+  answer: number | null;
+  closesAt: string;
+  asked: 'TOOK_PART' | 'INTEREST';
 }
 
 /** A page of GET /api/v1/drops/:id/entries, by rank. */
@@ -529,8 +576,10 @@ export interface LiveCard {
   /** The quantity as the console wrote it (« 25 PIECES »). */
   quantityLine: string;
   perAccount: number;
-  /** The lowest tier allowed (0 any account), and the rule in words after « for ». */
+  /** The lowest tier allowed (0 any account), and every rule in words after « for » (joined by « or » when any one is enough). */
   access: { minTier: number; text: string };
+  /** A surprise in every box: the page says so, never what. */
+  surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (public). */
   interest: number;
 }
@@ -548,13 +597,45 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   turnSeconds: number;
   payMinutes: number;
   tierPriority: boolean;
+  /** An after-room's page (GET /api/v1/live/:id/after-room): the release it follows; absent on a release's own. */
+  afterRoom?: AfterRoomOf;
 }
 
-/** A LIVE RELEASE's page once it has ended: only that it has. */
+/**
+ * A LIVE RELEASE's page once it is over, in its final state (plan LIVE RELEASE+, decision 30): what was announced, each
+ * part from its stage, its opening and its quantity line; never an end figure.
+ */
 export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+  title: string | null;
+  name: string | null;
+  type: string | null;
+  collection: string | null;
+  description: string | null;
+  silhouetteUrl: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
+  /** T0. */
+  opensAt: string;
+  /** The quantity line as announced (« 25 PIECES »). */
+  quantityLine: string;
+  afterRoom?: AfterRoomOf;
+}
+
+/** The release an after-room follows (plan LIVE RELEASE+, choice 2): its page is read through that release's. */
+export interface AfterRoomOf {
+  parentId: string;
+}
+
+/**
+ * The second door (an entry's `afterRoom`): on an entry the release's sell-out ENDED while in its line, from the sell-out
+ * until the after-room ends, when the door appears and when it closes; the entry's own, nobody else's.
+ */
+export interface AfterRoomDoor {
+  opensAt: string;
+  closesAt: string;
 }
 
 /** The banner of /verify and MY PIECES (GET /api/v1/live/next): the release live now, else the room open, else the next. */
@@ -641,13 +722,18 @@ export interface LiveEntry {
   currency: string;
   priceMinor: number;
   totalMinor: number;
+  /** ENDED by the sell-out while in the line: the after-room's door; null otherwise. */
+  afterRoom?: AfterRoomDoor | null;
 }
 
-/** The account against the release's rule now. */
+/** The account against the release's rules now. */
 export interface LiveAccess {
   allowed: boolean;
   tier: number;
-  missing: 'TIER' | 'PIECE' | null;
+  /** The rule it lacks (the first, or with OR the release's first), null when allowed. */
+  missing: 'TIER' | 'PIECE' | 'PARTICIPATION' | 'SEGMENT' | null;
+  /** The releases it has taken part in, when the release counts them; null otherwise. */
+  participations: number | null;
 }
 
 /** I'LL BE THERE, with a size. */
@@ -677,6 +763,67 @@ export interface LiveAccountEntry {
     imageUrl: string | null;
     opensAt: string;
     closesAt: string;
+    /** An after-room's: the release it follows; null otherwise. */
+    afterRoomOf: string | null;
   };
   entry: LiveEntry;
+}
+
+/** The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon. */
+export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON';
+/** The server's order (ORDER_CHANNELS in db/schema.ts). */
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON'];
+
+/** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
+export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
+/** The server's order (ORDER_STATUSES in db/schema.ts). */
+export const ORDER_STATUSES: readonly OrderStatus[] = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'];
+
+/**
+ * One order of the account in MY PIECES (GET /api/v1/account/orders), one per piece: its steps and their times, the
+ * model, the size, the add-ons and the price as sold; once shipped, the carrier and the tracking number with its link.
+ */
+export interface AccountOrder {
+  id: string;
+  /** `OR-` and the first eight figures of its id: what ORBES Client Services finds it by. */
+  reference: string;
+  channel: OrderChannel;
+  /** The release it was sold in; null for the private salon. */
+  release: string | null;
+  model: string;
+  /** null while ORBES Client Services has not entered it; `{ label: null }`: one size. */
+  size: { label: string | null } | null;
+  /** null, with the currency, while ORBES Client Services has not entered it. */
+  priceMinor: number | null;
+  currency: string | null;
+  /** Each at its price per piece. */
+  addons: { label: string; priceMinor: number }[];
+  status: OrderStatus;
+  reservedAt: string;
+  paidAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+  returnedAt: string | null;
+  shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
+  /** Its documents (M6), each read by its own route. Absent from a server before them: none. */
+  documents?: AccountOrderDocuments;
+}
+
+/** The documents of an order (plan LIVE RELEASE+, M6). */
+export interface AccountOrderDocuments {
+  /** Its invoice (PDF), once paid. */
+  invoice: { number: string; issuedAt: string } | null;
+  /** The credit note that cancels it (PDF), once cancelled after it was paid, or returned. */
+  creditNote: { number: string; issuedAt: string } | null;
+  /** The model's care guide: for an order neither cancelled nor returned. */
+  careGuide: boolean;
+  /** Its ownership certificate (PDF), once its piece is registered to this account. */
+  certificate: boolean;
+}
+
+/** GET /api/v1/account/orders/:id/care-guide: the model's own words, or null for the house's general care text. */
+export interface OrderCareGuide {
+  model: string;
+  text: string | null;
 }

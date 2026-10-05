@@ -33,6 +33,13 @@
  * tier it is shown to (`privateMinTier`, 1 TITANE by default, 2 PLATINE,
  * 3 PALLADIUM) change through the same edit, audited `model.update`.
  *
+ * THE SHOPIFY EXPORT AND MY PIECES (plan LIVE RELEASE+, N2 and M6, migration 0022): a model's base price
+ * (`basePriceMinor` with its `baseCurrency`, both or neither: the price the Shopify product export gives it; each
+ * release keeps its own) and its care guide (`careGuide`, plain text of at most CARE_GUIDE_MAX characters: MY PIECES
+ * shows it with each order of the model, before its care instructions) change through the same edit, audited
+ * `model.update` (the care guide as its length and SHA-256, like a story). `shopify` says how far the model is linked
+ * to its Shopify product (services/shopify.ts: the ids pasted back).
+ *
  * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
  * (`discontinueModel`, audited `model.discontinue`) and may open it again
  * (`reinstateModel`, `model.reinstate`). Discontinuing sets
@@ -53,8 +60,14 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
-import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, storyFingerprint } from './lookbook.js';
+import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, plainText, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
+
+/** A model's care guide, at most (models.care_guide, migration 0022). */
+export const CARE_GUIDE_MAX = 8000;
+/** A model's base price, at most, in minor units (models.base_price_minor's CHECK; an order's amount's bound). */
+export const BASE_PRICE_MAX_MINOR = ORDER_AMOUNT_MAX_MINOR;
 
 export interface CatalogServiceDeps {
   db: Db;
@@ -109,6 +122,16 @@ export interface ModelRecord {
   privateMinTier: number;
   /** The gallery of its sheet (MediaService), in its order, the cover aside. */
   gallery: GalleryImageRecord[];
+  /** N2: its base price in minor units, with its currency (both or neither): the Shopify product export's price. */
+  basePriceMinor: number | null;
+  baseCurrency: string | null;
+  /** M6: its care guide, shown in MY PIECES with each order of the model; null: its care instructions stand in. */
+  careGuide: string | null;
+  /**
+   * N2: its Shopify product, once its ids are pasted back: the product id (null: not linked), how many sizes the
+   * export gives it as variants (its SKUs, at least one) and how many of them have their variant id.
+   */
+  shopify: { productId: string | null; variants: number; linked: number };
   createdAt: Date;
 }
 
@@ -137,6 +160,11 @@ export interface UpdateModelInput {
   /** THE PRIVATE SALON (P-X08). */
   priceLabel?: string | null;
   privateMinTier?: number;
+  /** N2: the base price and its currency, given together; null for both clears it. */
+  basePriceMinor?: number | null;
+  baseCurrency?: string | null;
+  /** M6: the care guide. */
+  careGuide?: string | null;
 }
 
 /** The fields of a model a change may touch, in their API spelling. */
@@ -152,6 +180,9 @@ export const MODEL_EDITABLE_FIELDS = Object.freeze([
   'specs',
   'priceLabel',
   'privateMinTier',
+  'basePriceMinor',
+  'baseCurrency',
+  'careGuide',
 ] as const);
 
 /** Refused by `updateModel` (and by the PATCH body): a model's identity, written in the pieces already issued. */
@@ -183,6 +214,29 @@ function optionalText(v: unknown, label: string, max: number): string | null {
   if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) return null;
   if (typeof v !== 'string' || v.trim().length > max) throw validationError(`${label} must be at most ${max} characters.`);
   return v.trim();
+}
+
+/** A care guide (M6): plain text, line breaks kept, 1 to CARE_GUIDE_MAX characters; '' and null clear it. */
+export function normalizeCareGuide(v: unknown): string | null {
+  const s = plainText(v, 'The care guide', CARE_GUIDE_MAX);
+  if (s === null) return null;
+  return s
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * A base price (N2) as a change gives it: both the amount (whole minor units, 1 to BASE_PRICE_MAX_MINOR) and its
+ * currency (one of the house's), or null for both. One without the other is refused.
+ */
+export function normalizeBasePrice(minor: unknown, currency: unknown): { minor: number; currency: string } | null {
+  if (minor === null && (currency === null || currency === undefined || currency === '')) return null;
+  if (minor === undefined || currency === undefined || currency === null || currency === '') throw validationError('A base price is given with its currency, or both are cleared.');
+  if (typeof minor !== 'number' || !Number.isInteger(minor) || minor < 1 || minor > BASE_PRICE_MAX_MINOR) throw validationError('The base price is 0.01 to 1 000 000.00.');
+  if (typeof currency !== 'string' || !(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`The base price is in ${ORDER_CURRENCIES.join(', ')}.`);
+  return { minor, currency };
 }
 
 export class CatalogService {
@@ -381,6 +435,12 @@ export class CatalogService {
     if (input.specs !== undefined) after.specs = normalizeSpecs(input.specs);
     if (input.priceLabel !== undefined) after.priceLabel = normalizePriceLabel(input.priceLabel);
     if (input.privateMinTier !== undefined) after.privateMinTier = normalizeMinTier(input.privateMinTier);
+    if (input.basePriceMinor !== undefined || input.baseCurrency !== undefined) {
+      const price = normalizeBasePrice(input.basePriceMinor, input.baseCurrency);
+      after.basePriceMinor = price?.minor ?? null;
+      after.baseCurrency = price?.currency ?? null;
+    }
+    if (input.careGuide !== undefined) after.careGuide = normalizeCareGuide(input.careGuide);
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
     const id = modelId.toLowerCase();
 
@@ -400,6 +460,9 @@ export class CatalogService {
             'specs',
             'price_label',
             'private_min_tier',
+            'base_price_minor',
+            'base_currency',
+            'care_guide',
             'published_at',
             'discontinued_at',
           ])
@@ -419,6 +482,9 @@ export class CatalogService {
           specs: row.specs,
           priceLabel: row.price_label,
           privateMinTier: row.private_min_tier,
+          basePriceMinor: row.base_price_minor,
+          baseCurrency: row.base_currency,
+          careGuide: row.care_guide,
         };
         const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
         if (changed.length === 0) return;
@@ -449,6 +515,9 @@ export class CatalogService {
           specs?: string | null;
           price_label?: string | null;
           private_min_tier?: number;
+          base_price_minor?: number | null;
+          base_currency?: string | null;
+          care_guide?: string | null;
           published_at?: Date;
         } = {};
         for (const k of changed) {
@@ -462,13 +531,16 @@ export class CatalogService {
           else if (k === 'story') set.story = after.story;
           else if (k === 'specs') set.specs = after.specs;
           else if (k === 'priceLabel') set.price_label = after.priceLabel;
+          else if (k === 'basePriceMinor') set.base_price_minor = after.basePriceMinor;
+          else if (k === 'baseCurrency') set.base_currency = after.baseCurrency;
+          else if (k === 'careGuide') set.care_guide = after.careGuide;
           else set.private_min_tier = after.privateMinTier;
         }
         if (publishedAt) set.published_at = publishedAt;
         await tx.updateTable('models').set(set).where('id', '=', id).execute();
         const issued = await tx.selectFrom('products').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', id).executeTakeFirstOrThrow();
-        // The audit log is permanent: a story is recorded as its length and SHA-256, never in words.
-        const audited = (k: keyof ModelChange, v: ModelChange[keyof ModelChange]) => (k === 'story' ? storyFingerprint((v as string | null | undefined) ?? null) : v);
+        // The audit log is permanent: a story and a care guide are recorded as their length and SHA-256, never in words.
+        const audited = (k: keyof ModelChange, v: ModelChange[keyof ModelChange]) => (k === 'story' || k === 'careGuide' ? storyFingerprint((v as string | null | undefined) ?? null) : v);
         await this.audit.record(
           {
             actor,
@@ -571,6 +643,9 @@ export class CatalogService {
         'm.discontinued_at',
         'm.price_label',
         'm.private_min_tier',
+        'm.base_price_minor',
+        'm.base_currency',
+        'm.care_guide',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -578,6 +653,12 @@ export class CatalogService {
         'col.id as collection_id',
         'col.name as collection_name',
         'issued.n as products',
+      ])
+      // N2: the model's Shopify product (one id on all its SKUs, services/shopify.ts) and how many sizes have their variant.
+      .select((eb) => [
+        eb.selectFrom('skus as k').select((k) => k.fn.max('k.shopify_product_id').as('p')).whereRef('k.model_id', '=', 'm.id').as('shopify_product_id'),
+        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').as('sku_count'),
+        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.shopify_variant_id', 'is not', null).as('variants_linked'),
       ]);
   }
 
@@ -627,6 +708,9 @@ interface ModelChange {
   specs?: string | null;
   priceLabel?: string | null;
   privateMinTier?: number;
+  basePriceMinor?: number | null;
+  baseCurrency?: string | null;
+  careGuide?: string | null;
 }
 
 /** 409 MODEL_DISCONTINUED: an edit that would offer a discontinued model again (P-R06). */
@@ -683,6 +767,12 @@ type ModelQueryRow = {
   discontinued_at: Date | null;
   price_label: string | null;
   private_min_tier: number;
+  base_price_minor: number | null;
+  base_currency: string | null;
+  care_guide: string | null;
+  shopify_product_id: string | null;
+  sku_count: number | string | null;
+  variants_linked: number | string | null;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -714,6 +804,10 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRe
     priceLabel: r.price_label,
     privateMinTier: r.private_min_tier,
     gallery,
+    basePriceMinor: r.base_price_minor,
+    baseCurrency: r.base_currency,
+    careGuide: r.care_guide,
+    shopify: { productId: r.shopify_product_id, variants: Math.max(1, Number(r.sku_count ?? 0)), linked: Number(r.variants_linked ?? 0) },
     createdAt: r.created_at,
   };
 }

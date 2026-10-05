@@ -12,24 +12,37 @@
  *  - The entries: the line itself, live (its open entries by place: the account, its email masked for an AUDITOR, its
  *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
- *  - Client Services: the confirmed reservations, their reference, size, add-ons and total; CONCLUDED or CANCELLED with
- *    a note (OPERATOR); the CSV.
+ *  - Client Services: each confirmed reservation is an order per piece, followed on the Orders board (plan LIVE
+ *    RELEASE+, views/orders.ts), which replaces the LIVE plan's list: a link narrowed to the release.
  *  - The intelligence (views/live-intelligence.ts), each reading with how it is read: the live alerts and the live
  *    sell-out forecast on the live board (its stream keeps them current); the readings of the release's stage under the
  *    board: the release planner and the audience forecast before the announcement, the forecast and the demand radar
  *    until T0, the bot radar from the room's opening (REMOVE in one tap, ADMIN), the release report (and its CSV) and the
  *    collector insights once it has ended, and the release comparison.
- *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access,
- *    its times, its turns and holds, its add-ons), the silhouette (a photograph) and the boutique board's link (issued,
- *    shown once, revoked); PUBLISH (with or without a post of the circle, added or withdrawn until the announcement)
- *    and CANCEL (before the room opens, a phrase to type). Each request is audited by the server; then the page is read
- *    again.
+ *  - The settings, part by part, each edited in its dialog until the announcement (the release, its sizes, its access —
+ *    a tier, owners of models or a collection, the releases taken part in, a segment, AND or OR: plan LIVE RELEASE+,
+ *    choices 4 and 27 —, its times, its turns and holds, its add-ons, its after-room, its surprise: choice 3), the silhouette (a photograph) and the boutique board's
+ *    link (issued, shown once, revoked); PUBLISH (with or without a post of the circle, added or withdrawn until the
+ *    announcement) and CANCEL (before the room opens, a phrase to type). Each request is audited by the server; then the
+ *    page is read again.
+ *  - Plan LIVE RELEASE+, step S8: the question after (choice 11: on by default, its words and 2 to 6 answers; once the
+ *    release has ended, who is asked where, how many answered, each answer counted); the release's stock location
+ *    (choice 16, with its sizes); the best time to open (choice 10, views/best-time.ts) while its settings change; PUBLISH
+ *    first reads the feasibility check (choice 12) and shows its warning per size, never refusing.
+ *  - The after-room (plan LIVE RELEASE+, choice 2): on the release's page, its settings (on or off, its model, price,
+ *    sizes and stock, add-ons, delay and length) and, once the sell-out has opened it, when its door opened and closes,
+ *    its guests and its entries, with a link to its own page: the same live board, entries, controls and Orders link,
+ *    its readings (the bot radar, then its report and collectors), never a setting, a publication, a cancellation, a
+ *    silhouette or a board link of its own.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
 import { LIVE_ALERT_LABELS } from '../model/live-intelligence.js';
 import {
-  canResolve,
+  AFTER_ROOM_SKIPS,
+  afterRoomStateLabel,
+  afterRoomTiming,
+  combineLine,
   defaultQuantityLine,
   formatMoney,
   hasBoard,
@@ -46,10 +59,15 @@ import {
   livePartValues,
   livePhrase,
   liveStateLabel,
+  feasibilityLine,
+  locationOptions,
   parseSizes,
   priorityLine,
-  reservationAddons,
+  questionLine,
+  questionStateLine,
+  questionTallyRows,
   sizesLine,
+  surpriseLine,
   tierLabel,
   windowLine,
   type LivePart,
@@ -57,13 +75,14 @@ import {
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveRelease, type LiveReservation, type LiveResolution, type Model } from '../types.js';
-import { button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model } from '../types.js';
+import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { bestTimePanel } from './best-time.js';
 import { loadLiveIntelligence, liveIntelligenceSections, liveSignals, sizeSellOut } from './live-intelligence.js';
 
 /** The board read again this often while the stream is refused or lost. */
@@ -148,14 +167,15 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
-  const reservationsPage = Math.max(1, Number(ctx.route.query.rpage) || 1);
-  const [r, models, collections] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections()]);
+  const [r, models, collections, segments, locations] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segmentNames(), ctx.api.locations().catch(() => ({ items: [] }))]);
   const published = hasBoard(r.phase);
-  const [boardRead, entries, reservations, intelligence] = await Promise.all([
+  // The best time to open while T0 may still move (its settings change); the after-room has none of its own.
+  const timing = r.editable && !r.afterRoomOf;
+  const [boardRead, entries, intelligence, bestTime] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
     published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
-    published ? ctx.api.liveReservations(id, reservationsPage, 50) : Promise.resolve(null),
     loadLiveIntelligence(ctx.api, r),
+    timing ? ctx.api.liveBestTime(id).catch(() => 'failed' as const) : Promise.resolve(null),
   ]);
   // The console moved on while the release was read: this page is stale, and starts nothing. Every read is above this
   // line, so the follower below starts only for the page on screen.
@@ -163,7 +183,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   const role = ctx.session.admin.role;
   const acts = liveActions(r, role);
-  const eyebrow = `LIVE RELEASE · ${r.id.slice(0, 8).toUpperCase()}`;
+  // An after-room's own page: the release it follows sets it.
+  const parent = r.afterRoomOf;
+  const eyebrow = `${parent ? 'AFTER-ROOM' : 'LIVE RELEASE'} · ${r.id.slice(0, 8).toUpperCase()}`;
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
     notify(msg);
@@ -284,7 +306,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     }
     drawn = true;
     board = b;
-    const label = liveStateLabel({ phase: b.phase, endedReason: b.endedReason });
+    const label = liveStateLabel({ phase: b.phase, endedReason: b.endedReason }, parent !== null);
     const finishing = b.phase === 'ENDED' && !b.over;
     const key = JSON.stringify([label, b.phase, b.paused, finishing]);
     if (key !== stateKey) {
@@ -345,7 +367,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         lineBox,
         table(entryColumns(b), b.line, {
           caption: 'The line',
-          empty: b.phase === 'HIDDEN' || b.phase === 'ANNOUNCED' ? 'Nobody yet: the room opens at the time below.' : 'Nobody in the room or the line.',
+          empty: parent && b.phase !== 'LIVE' && b.phase !== 'ENDED' ? 'Nobody yet: its guests enter from its opening.' : b.phase === 'HIDDEN' || b.phase === 'ANNOUNCED' ? 'Nobody yet: the room opens at the time below.' : 'Nobody in the room or the line.',
         }),
         b.lineTotal > b.line.length ? h('p', { class: 'footnote' }, `The first ${formatCount(b.line.length)} of ${formatCount(b.lineTotal)} open entries, by place. Choose a status to read every entry.`) : null,
       );
@@ -414,7 +436,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       danger: true,
       body: [
         h('p', { class: 'dialog__text' }, 'No new turn. Everyone in the room, in the line and in a turn now reads that the release has ended. A piece already held may still be paid for until its time runs out.'),
-        h('p', { class: 'dialog__text' }, 'The release then leaves THE RELEASES. Once.'),
+        h('p', { class: 'dialog__text' }, 'The release then moves to PAST in THE RELEASES, as announced. Once.'),
       ],
       phrase: livePhrase('end', r),
       confirmLabel: 'End now',
@@ -451,82 +473,19 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     entriesSection = section('Entries', body, { id: 'live-entries', note: board ? `${formatCount(board.lineTotal)} open · ${formatCount(Object.values(r.entries).reduce((n, c) => n + c, 0))} in all` : undefined });
   }
 
-  // ── Client Services ──────────────────────────────────────────────────────
-  const resolve = (x: LiveReservation, to: LiveResolution) =>
-    void openDialog({
-      title: to === 'CONCLUDED' ? 'Reservation concluded' : 'Reservation cancelled',
-      eyebrow: `${x.reference} · ${x.email}`,
-      danger: to === 'CANCELLED',
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        to === 'CONCLUDED'
-          ? 'ORBES Client Services concluded the payment and the delivery with this collector: the reservation reads CONCLUDED.'
-          : 'The reservation is cancelled by ORBES Client Services: it reads CANCELLED. The piece does not return to the line (the release closed at its sell-out).',
-      ),
-      fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: LIVE_LIMITS.note, hint: 'For ORBES Client Services: kept with the reservation, never in the audit log. Optional.' }],
-      confirmLabel: to === 'CONCLUDED' ? 'Concluded' : 'Cancel the reservation',
-      submit: async (v) => {
-        await ctx.api.resolveLiveReservation(r.id, x.id, to, v.note.trim());
-      },
-    }).then(done(to === 'CONCLUDED' ? 'Reservation concluded.' : 'Reservation cancelled.'));
-  const csv = button('Download CSV', { kind: 'ghost', testId: 'live-csv' });
-  csv.addEventListener('click', async () => {
-    csv.disabled = true;
-    try {
-      saveDownload(await ctx.api.liveReservationsCsv(r.id));
-    } catch (e) {
-      notifyError(e);
-    } finally {
-      csv.disabled = false;
-    }
-  });
-  const servicesSection = reservations
-    ? section(
-        'Client Services',
-        [
-          table<LiveReservation>(
-            [
-              { label: 'Reference', cell: (x) => mono(x.reference), kind: ['nowrap'] },
-              { label: 'Account', cell: (x) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }) } }, x.email), kind: ['wide'] },
-              { label: 'Size', cell: (x) => h('span', { class: 'live__size' }, x.size.label), kind: ['nowrap'] },
-              { label: 'Pieces', cell: (x) => formatCount(x.quantity), kind: ['num'] },
-              { label: 'Add-ons', cell: (x) => reservationAddons(x) },
-              { label: 'Total', cell: (x) => formatMoney(x.totalMinor, x.currency), kind: ['num', 'nowrap'] },
-              { label: 'Confirmed', cell: (x) => formatDateTime(x.confirmedAt), kind: ['nowrap'] },
-              {
-                label: 'Outcome',
-                cell: (x) =>
-                  h(
-                    'span',
-                    { data: { testid: 'live-outcome' } },
-                    x.resolution ? statusMark(humanize(x.resolution), toneOf('liveResolution', x.resolution)) : statusMark('TO CONCLUDE', 'alert'),
-                    x.handledBy ? h('span', { class: 'cell-sub' }, `${x.handledBy.email} · ${formatDateTime(x.handledAt)}`) : null,
-                    x.note ? h('span', { class: 'cell-details' }, x.note) : null,
-                  ),
-              },
-              {
-                label: '',
-                cell: (x) =>
-                  canResolve(x, role)
-                    ? h(
-                        'span',
-                        { class: 'row-actions' },
-                        button('Concluded', { kind: 'ghost', testId: 'live-conclude', onClick: () => resolve(x, 'CONCLUDED') }),
-                        button('Cancel', { kind: 'ghost', testId: 'live-cancel-reservation', onClick: () => resolve(x, 'CANCELLED') }),
-                      )
-                    : null,
-                kind: ['actions'],
-              },
-            ],
-            reservations.items,
-            { caption: 'Confirmed reservations', empty: 'No confirmed reservation yet: each PAY pressed on /verify appears here, for ORBES Client Services to conclude.' },
-          ),
-          pager(reservations, (p) => ctx.setQuery({ rpage: p })),
-        ],
-        { id: 'live-services', note: `${formatCount(reservations.total)} confirmed`, tools: reservations.total > 0 ? [csv] : [] },
-      )
-    : null;
+  // ── Client Services: the orders ──────────────────────────────────────────
+  const confirmed = r.entries.CONFIRMED ?? 0;
+  const servicesSection = section(
+    'Client Services',
+    h(
+      'p',
+      { class: 'panel__text', data: { testid: 'live-orders' } },
+      confirmed > 0
+        ? `${formatCount(confirmed)} confirmed ${confirmed === 1 ? 'reservation' : 'reservations'}: each piece is an order, followed step by step on the Orders board, from payment to delivery.`
+        : 'Each confirmed reservation becomes an order per piece, followed step by step on the Orders board, from payment to delivery.',
+    ),
+    { id: 'live-services', tools: [linkButton('Orders of this release', href('orders', {}, { dropId: r.id }), 'ghost')] },
+  );
 
   // ── The settings ─────────────────────────────────────────────────────────
   const editPart = (part: LivePart, title: string, fields: DialogField[], extra: { body?: Child; live?: (v: Record<string, string>) => Child } = {}) =>
@@ -566,6 +525,14 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       [
         { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 6, required: true, value: v.sizes, hint: `One size per line, its label then its stock: 52 = 3. A one-size release has one line (ONE SIZE = 25). Up to ${LIVE_LIMITS.sizes} sizes.` },
         { name: 'quantityLine', label: 'Quantity line', maxlength: LIVE_LIMITS.quantityLine, value: v.quantityLine, hint: 'As the announcement says it, at most 40 characters (25 PIECES · NEVER MORE). Empty: the number of pieces, then PIECES.' },
+        {
+          name: 'locationId',
+          label: 'Stock location',
+          kind: 'select',
+          options: locationOptions(locations.items, v.locationId, r.locationId ? r.location?.name : undefined),
+          value: v.locationId,
+          hint: 'Where its orders hold a piece in stock, or have one made: the feasibility check reads its stock there. ORBES Client Services may move an order elsewhere.',
+        },
       ],
       {
         live: (x) => {
@@ -583,8 +550,64 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       { name: 'minTier', label: 'Who may enter', kind: 'select', options: [...LIVE_TIER_OPTIONS], value: v.minTier },
       { name: 'collectionId', label: 'Owners of a collection', kind: 'select', options: [{ value: '', label: 'Any collection' }, ...collections.items.map((c) => ({ value: c.id, label: humanize(c.name) }))], value: v.collectionId },
       ...models.items.map((m: Model) => ({ name: `model:${m.id}`, label: `Owners of ${humanize(m.name)}`, kind: 'checkbox' as const, value: v[`model:${m.id}`] ?? '' })),
+      {
+        name: 'minParticipations',
+        label: 'Taken part in at least',
+        maxlength: 3,
+        value: v.minParticipations,
+        hint: `Releases, ${LIVE_LIMITS.minParticipations.min} to ${LIVE_LIMITS.minParticipations.max}: in the line of a LIVE RELEASE at T0 or after, or entered in a draw when it was drawn; this one never counts. The page says FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES. Empty: no such rule.`,
+      },
+      {
+        name: 'segmentId',
+        label: 'Segment',
+        kind: 'select',
+        options: [{ value: '', label: 'None' }, ...segments.map((x) => ({ value: x.id, label: x.name }))],
+        value: v.segmentId,
+        hint: 'Its members, read at each step. The page says FOR SELECTED COLLECTORS, never its name.',
+      },
+      {
+        name: 'combine',
+        label: 'The rules combine',
+        kind: 'select',
+        options: [
+          { value: 'AND', label: 'Every rule is needed (AND)' },
+          { value: 'OR', label: 'Any one rule is enough (OR)' },
+        ],
+        value: v.combine,
+        hint: 'One choice for all the rules above: the tier, the owners of models or a collection, the releases taken part in, the segment. With OR, the page joins them with OR.',
+      },
       { name: 'tierPriority', label: 'Tier priority', kind: 'checkbox', value: v.tierPriority, hint: 'At the opening (T0), the line forms by tier first (PALLADIUM, PLATINE, TITANE, then the others), then at random. Unticked: at random for all.' },
     ]);
+  };
+  const surprisePart = () => {
+    const v = values('surprise');
+    editPart(
+      'surprise',
+      'Surprise',
+      [
+        { name: 'enabled', label: 'A surprise in every box', kind: 'checkbox', value: v.enabled, hint: 'The same for every order of the release, its after-room’s too. The release page says A SURPRISE IN EVERY BOX, never what.' },
+        { name: 'text', label: 'What it is (internal)', kind: 'textarea', rows: 3, maxlength: LIVE_LIMITS.surprise, value: v.text, hint: 'Printed on each order’s packing slip and work sheet, never shown to collectors.' },
+      ],
+    );
+  };
+  const questionPart = () => {
+    const v = values('question');
+    editPart(
+      'question',
+      'Question after',
+      [
+        { name: 'enabled', label: 'Ask the question after', kind: 'checkbox', value: v.enabled, hint: 'For 7 days from the end: on the release’s end page to those who took part without a piece, in MY PIECES to those who said I’LL BE THERE and did not come. One tap, changeable.' },
+        { name: 'text', label: 'Question', maxlength: LIVE_LIMITS.question.text, value: v.text, hint: `One line, at most ${LIVE_LIMITS.question.text} characters. The default: WHAT WOULD YOU HAVE WANTED?` },
+        {
+          name: 'answers',
+          label: 'Answers',
+          kind: 'textarea',
+          rows: 6,
+          value: v.answers,
+          hint: `${LIVE_LIMITS.question.minAnswers} to ${LIVE_LIMITS.question.maxAnswers}, one per line, each at most ${LIVE_LIMITS.question.answer} characters. Empty with an empty question: the default question and its answers.`,
+        },
+      ],
+    );
   };
   const timesPart = () => {
     const v = values('times');
@@ -627,7 +650,84 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     ]);
   };
 
+  const afterRoomPart = () => {
+    const v = values('afterRoom');
+    editPart(
+      'afterRoom',
+      'After-room',
+      [
+        { name: 'enabled', label: 'An after-room after a sell-out', kind: 'checkbox', value: v.enabled, hint: 'Opens only if the release sells out, for those still in its line then, in their order. Unticked: none.' },
+        { name: 'modelId', label: 'Model', kind: 'select', options: [{ value: '', label: 'Choose a model' }, ...modelOptions(v.modelId)], value: v.modelId },
+        { name: 'price', label: 'Price of a piece', maxlength: 12, value: v.price, hint: `In units, in the release’s currency (${r.currency}).` },
+        { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, value: v.sizes, hint: 'Its own stock, one size per line: 52 = 3.' },
+        { name: 'addons', label: 'Add-ons', kind: 'textarea', rows: 3, value: v.addons, hint: 'One per line: ENGRAVING | 150 | its line. Empty: none.' },
+        { name: 'delay', label: 'Opens (minutes after the sell-out)', maxlength: 2, value: v.delay, hint: `${LIVE_LIMITS.afterRoomDelay.min} to ${LIVE_LIMITS.afterRoomDelay.max}; ${LIVE_LIMITS.afterRoomDelay.default} by default.` },
+        { name: 'length', label: 'Open (minutes)', maxlength: 3, value: v.length, hint: `${LIVE_LIMITS.afterRoomLength.min} to ${LIVE_LIMITS.afterRoomLength.max}; ${LIVE_LIMITS.afterRoomLength.default} by default. It also closes at its own sell-out.` },
+      ],
+      {
+        body: h(
+          'p',
+          { class: 'dialog__text' },
+          'A second door, announced nowhere: only those still in the line when the last piece is secured see it, in the same vault, and keep their place. The turn and pay windows, the pieces per person and the surprise are the release’s; it asks no question after.',
+        ),
+      },
+    );
+  };
+
   const t = (iso: string | null, empty: string) => (iso ? formatDateTime(iso) : empty);
+  const a = r.afterRoom;
+  const opened = a !== null && a.state !== 'WAITING' && a.state !== 'NOT_OPENED';
+  const afterRoomSection = section(
+    'After-room',
+    a
+      ? defList([
+          {
+            label: 'State',
+            value: h('span', { data: { testid: 'live-after-room-state' } }, statusMark(afterRoomStateLabel(a), toneOf('livePhase', a.phase))),
+            note: a.skipped ? AFTER_ROOM_SKIPS[a.skipped] : undefined,
+          },
+          { label: 'Model', value: `${humanize(a.model.name)} · ${humanize(a.model.type)}`, note: a.model.active ? undefined : 'No longer offered for new pieces.' },
+          { label: 'Price', value: `${formatMoney(a.priceMinor, a.currency)} a piece` },
+          { label: 'Sizes', value: h('span', { data: { testid: 'live-after-room-sizes' } }, sizesLine(a.sizes)) },
+          { label: 'Add-ons', value: a.addons.length ? a.addons.map((x) => `${x.label} ${formatMoney(x.priceMinor, a.currency)}`).join(' · ') : 'None' },
+          { label: 'Timing', value: h('span', { data: { testid: 'live-after-room-timing' } }, afterRoomTiming(a)) },
+          ...(a.opensAt && a.closesAt ? [{ label: 'Door', value: `${formatDateTime(a.opensAt)} to ${formatDateTime(a.closesAt)}`, note: 'Its guests see it from its opening' }] : []),
+          ...(opened
+            ? [{ label: 'Guests', value: h('span', { data: { testid: 'live-after-room-guests' } }, formatCount(a.guests)), note: `${formatCount(a.entries.CONFIRMED ?? 0)} CONFIRMED` }]
+            : []),
+        ])
+      : h('p', { class: 'notice' }, 'None: the release closes at its sell-out.'),
+    {
+      id: 'live-part-after-room',
+      tools: [
+        ...edit('Edit', 'live-edit-after-room', afterRoomPart),
+        ...(a && opened ? [linkButton('Its live board', href('liveRelease', { dropId: a.id }), 'ghost')] : []),
+      ],
+    },
+  );
+  // The question after: its words; once the release has ended, who is asked where, how many answered, each answer.
+  const questionSection = (q: NonNullable<LiveRelease['question']>) =>
+    section(
+      'Question after',
+      [
+        defList([
+          { label: 'Question', value: h('span', { data: { testid: 'live-question' } }, questionLine(q)) },
+          { label: 'When', value: h('span', { data: { testid: 'live-question-state' } }, questionStateLine(q)) },
+          ...(q.state === 'OPEN' || q.state === 'CLOSED'
+            ? [
+                {
+                  label: 'Asked',
+                  value: h('span', { data: { testid: 'live-question-asked' } }, `${formatCount(q.asked.tookPart + q.asked.interest)}`),
+                  note: `${formatCount(q.asked.tookPart)} on the end page (took part, no piece) · ${formatCount(q.asked.interest)} in MY PIECES (I’LL BE THERE, did not come)`,
+                },
+                { label: 'Answered', value: h('span', { data: { testid: 'live-question-answered' } }, formatCount(q.answered)) },
+              ]
+            : []),
+        ]),
+        ...(q.state === 'OPEN' || q.state === 'CLOSED' ? [h('div', { data: { testid: 'live-question-tally' } }, barList(questionTallyRows(q)))] : []),
+      ],
+      { id: 'live-part-question', tools: edit('Edit', 'live-edit-question', questionPart) },
+    );
   const parts: HTMLElement[] = [
     section(
       'The release',
@@ -645,17 +745,33 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
         { label: 'Pieces', value: formatCount(r.quantity) },
         { label: 'Quantity line', value: h('span', { data: { testid: 'live-quantity-line' } }, r.quantityLine), note: r.editable ? undefined : 'Announced: only ADD PIECES raises a stock now.' },
+        { label: 'Stock location', value: h('span', { data: { testid: 'live-location' } }, r.location?.name ?? 'None yet'), note: r.locationId ? undefined : 'The default location' },
       ]),
       { id: 'live-part-sizes', tools: edit('Edit', 'live-edit-sizes', sizesPart) },
     ),
     section(
       'Access',
       defList([
-        { label: 'For', value: h('span', { data: { testid: 'live-access' } }, r.access.text) },
+        { label: 'For', value: h('span', { data: { testid: 'live-access' } }, r.access.text), note: 'As the release page says it' },
+        ...(r.access.minParticipations !== null
+          ? [{ label: 'Taken part', value: `At least ${r.access.minParticipations} ${r.access.minParticipations === 1 ? 'release' : 'releases'}` }]
+          : []),
+        ...(r.access.segment
+          ? [{ label: 'Segment', value: h('a', { class: 'idlink', attrs: { href: href('segment', { segmentId: r.access.segment.id }), 'data-testid': 'live-access-segment' } }, r.access.segment.name), note: 'Said FOR SELECTED COLLECTORS' }]
+          : []),
+        { label: 'Rules', value: h('span', { data: { testid: 'live-access-combine' } }, combineLine(r.access.combine)) },
         { label: 'Line at the opening', value: priorityLine(r.tierPriority) },
       ]),
       { id: 'live-part-access', tools: edit('Edit', 'live-edit-access', accessPart) },
     ),
+    section(
+      'Surprise',
+      defList([
+        { label: 'Surprise', value: h('span', { data: { testid: 'live-surprise' } }, surpriseLine(r)), note: r.surprise.enabled ? 'Internal: the packing slips and work sheets; the page says A SURPRISE IN EVERY BOX' : undefined },
+      ]),
+      { id: 'live-part-surprise', tools: edit('Edit', 'live-edit-surprise', surprisePart) },
+    ),
+    ...(r.question ? [questionSection(r.question)] : []),
     section(
       'Times (UTC)',
       defList([
@@ -685,6 +801,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         : h('p', { class: 'notice' }, 'None: PAY is the piece alone.'),
       { id: 'live-part-addons', tools: edit('Edit', 'live-edit-addons', addonsPart) },
     ),
+    afterRoomSection,
   ];
 
   // The silhouette: its first staged reveal (without one, the seal stands in).
@@ -767,13 +884,16 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   // ── Publication ──────────────────────────────────────────────────────────
   const circleNote = `A note for the owners ${r.minTier >= 2 ? `from ${tierLabel(r.minTier)}` : 'of a piece'}, shown from the announcement: the room’s opening, the quantity line, the price and who may enter, never the piece’s name.`;
-  const publish = () =>
+  // PUBLISH reads the feasibility check first and shows it: a warning per size, never a refusal (plan LIVE RELEASE+, K5).
+  const publish = async () => {
+    const check: LiveFeasibility | 'failed' = await ctx.api.liveFeasibility(r.id).catch(() => 'failed' as const);
     void openDialog({
       title: 'Publish the release',
       eyebrow,
       body: [
         h('p', { class: 'dialog__text' }, `It is announced ${r.announceAt ? `on ${formatDateTime(r.announceAt)}` : 'now'}, each stage at its time; the room opens on ${formatDateTime(r.roomOpensAt)}, T0 on ${formatDateTime(r.opensAt)}.`),
         h('p', { class: 'dialog__text' }, 'Its settings still change until the announcement; then only its stock rises (ADD PIECES).'),
+        feasibilityBlock(check),
       ],
       fields: [
         {
@@ -788,6 +908,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         await ctx.api.publishLiveRelease(r.id, v.circlePost === 'true');
       },
     }).then(done('Release published.'));
+  };
   // The release's post of the circle, once published: added or withdrawn until the announcement.
   const scheduledPost = r.circlePosts.some((p) => p.publishedAt !== null && Date.parse(p.publishedAt) > ctx.now().getTime());
   const circleToggle = () =>
@@ -822,30 +943,56 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     }).then(done('Release cancelled.'));
 
   const facts: DefRow[] = [
-    { label: 'State', value: h('span', { data: { testid: 'live-state' } }, statusMark(liveStateLabel(r), toneOf('livePhase', r.phase))) },
+    { label: 'State', value: h('span', { data: { testid: 'live-state' } }, statusMark(liveStateLabel(r, parent !== null), toneOf('livePhase', r.phase))) },
     { label: 'Offer', value: `${r.quantityLine} · ${formatMoney(r.priceMinor, r.currency)} · ${sizesLine(r.sizes)}` },
-    { label: 'Published', value: r.publishedAt ? formatDateTime(r.publishedAt) : 'Not yet' },
+    { label: parent ? 'Opened by the sell-out' : 'Published', value: r.publishedAt ? formatDateTime(r.publishedAt) : 'Not yet' },
     ...(r.circlePosts.length
       ? [{ label: 'Circle', value: h('span', { data: { testid: 'live-circle' } }, r.circlePosts.map((p) => (p.publishedAt ? `Post shown from ${formatDateTime(p.publishedAt)}` : 'Post withdrawn')).join(' · ')) }]
       : []),
     ...(r.cancelledAt ? [{ label: 'Cancelled', value: formatDateTime(r.cancelledAt) }] : []),
-    ...(r.endedAt ? [{ label: 'Ended', value: `${formatDateTime(r.endedAt)} · ${liveStateLabel(r)}` }] : []),
+    ...(r.endedAt ? [{ label: 'Ended', value: `${formatDateTime(r.endedAt)} · ${liveStateLabel(r, parent !== null)}` }] : []),
     ...(Math.round(r.pausedMs / 1000) > 0 ? [{ label: 'Paused', value: `${formatCount(Math.round(r.pausedMs / 1000))} s in all` }] : []),
-    { label: 'Interest', value: `${formatCount(r.interest)} I’LL BE THERE` },
     { label: 'Created', value: `${formatDateTime(r.createdAt)}${r.createdBy ? ` · ${r.createdBy.email}` : ''}` },
-    { label: 'Seed fingerprint', value: mono(r.seedHash, groupChars(r.seedHash, 8)), note: 'SHA-256 of the seed that orders the line within a tier at T0; never revealed.' },
-    ...(published ? [{ label: 'Page', value: h('a', { class: 'mono', attrs: { href: `/verify/releases/${r.id}`, target: '_blank', rel: 'noopener', 'data-testid': 'live-page' } }, `/verify/releases/${r.id}`) }] : []),
+    // An after-room has no interest, no seed of its own that orders anything (its line is its release's order), and no
+    // public page: its guests read it through its release's.
+    ...(parent
+      ? []
+      : [
+          { label: 'Interest', value: `${formatCount(r.interest)} I’LL BE THERE` },
+          { label: 'Seed fingerprint', value: mono(r.seedHash, groupChars(r.seedHash, 8)), note: 'SHA-256 of the seed that orders the line within a tier at T0; never revealed.' },
+          ...(published ? [{ label: 'Page', value: h('a', { class: 'mono', attrs: { href: `/verify/releases/${r.id}`, target: '_blank', rel: 'noopener', 'data-testid': 'live-page' } }, `/verify/releases/${r.id}`) }] : []),
+        ]),
   ];
   const releaseSection = section('Publication', defList(facts), {
     id: 'live-publication',
     tools: [
-      acts.publish ? button('Publish', { kind: 'primary', testId: 'live-publish', onClick: publish }) : null,
+      acts.publish ? button('Publish', { kind: 'primary', testId: 'live-publish', onClick: () => void publish() }) : null,
       acts.circlePost ? button(scheduledPost ? 'Withdraw post' : 'Circle post', { kind: 'ghost', testId: scheduledPost ? 'live-circle-withdraw' : 'live-circle-post', onClick: circleToggle }) : null,
       acts.cancel ? button('Cancel', { kind: 'ghost', testId: 'live-cancel', onClick: cancel }) : null,
     ].filter((b): b is HTMLButtonElement => b !== null),
   });
 
+  // An after-room's own page: what it offers, read only (its release sets it), what it takes from its release.
+  const ownParts = parent
+    ? [
+        section(
+          'The after-room',
+          defList([
+            { label: 'Of the release', value: h('a', { class: 'idlink', attrs: { href: href('liveRelease', { dropId: parent.id }), 'data-testid': 'live-after-room-of' } }, parent.title) },
+            { label: 'Model', value: `${humanize(r.model.name)} · ${humanize(r.model.type)}` },
+            { label: 'Price', value: h('span', { data: { testid: 'live-price' } }, `${formatMoney(r.priceMinor, r.currency)} a piece`) },
+            { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
+            { label: 'Add-ons', value: r.addons.length ? r.addons.map((x) => `${x.label} ${formatMoney(x.priceMinor, r.currency)}`).join(' · ') : 'None' },
+            { label: 'Door', value: r.publishedAt ? `${formatDateTime(r.opensAt)} to ${formatDateTime(r.closesAt)}` : 'Opens only after the release’s sell-out' },
+            { label: 'From the release', value: `${r.turnSeconds} s to hold the seal · ${r.payMinutes} min to press PAY · ${r.perAccount} ${r.perAccount === 1 ? 'piece' : 'pieces'} per person`, note: 'Its per-tier windows and its surprise too; no question after.' },
+          ]),
+          { id: 'live-part-after-room-own' },
+        ),
+      ]
+    : parts;
+
   const readings = liveIntelligenceSections(ctx, r, intelligence, board);
+  const best = bestTime ? [bestTimePanel(bestTime, { id: 'live-best-time' })] : [];
   const root = h(
     'div',
     { class: 'view view--live' },
@@ -854,12 +1001,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       title: r.title,
       identifier: /\d/.test(r.title),
       lead: liveLead(r),
-      actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
+      actions: [...(parent ? [linkButton('The release', href('liveRelease', { dropId: parent.id }), 'ghost')] : []), linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
     // Once published, the board leads, the intelligence of the release's stage after its people; a draft opens on its
     // publication, then its planner and forecast.
-    ...(published ? [boardSection, entriesSection, servicesSection, ...readings, releaseSection] : [releaseSection, ...readings]),
-    h('div', { class: 'grid grid--2 live__parts' }, ...parts),
+    ...(published ? [boardSection, entriesSection, servicesSection, ...readings, ...best, releaseSection] : [releaseSection, ...readings, ...best]),
+    h('div', { class: 'grid grid--2 live__parts' }, ...ownParts),
   );
 
   if (board) {
@@ -874,8 +1021,24 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   return root;
 }
 
-/** The New live release dialog's fields: the essentials; every other setting by default, then edited on its page. */
-export function newLiveFields(models: readonly Model[], values: Record<string, string>): DialogField[] {
+/** The feasibility check in the publish dialog: each size not covered, said; everything covered, said; unread, said. */
+function feasibilityBlock(check: LiveFeasibility | 'failed'): HTMLElement {
+  if (check === 'failed') return h('p', { class: 'dialog__text soft', data: { testid: 'live-feasibility' } }, 'The stock could not be checked just now: the release can be published all the same.');
+  return h(
+    'div',
+    { class: 'live__feasibility', data: { testid: 'live-feasibility' } },
+    h('p', { class: 'live__feasibility-title' }, 'Stock'),
+    h('p', { class: 'dialog__text', data: { testid: 'live-feasibility-line' } }, feasibilityLine(check)),
+    check.warnings.length ? h('ul', { class: 'live__feasibility-list' }, ...check.warnings.map((w) => h('li', { data: { testid: 'live-feasibility-warning' } }, w))) : null,
+    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: what the stock does not cover is made to order once sold, at the atelier.') : null,
+  );
+}
+
+/**
+ * The New live release dialog's fields: the essentials, the stock location (its default preselected) whose stock the
+ * sizes are proposed from; every other setting by default, then edited on its page.
+ */
+export function newLiveFields(models: readonly Model[], values: Record<string, string>, locations: readonly { id: string; name: string; isDefault: boolean }[] = []): DialogField[] {
   const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
   return [
     { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId },
@@ -884,6 +1047,14 @@ export function newLiveFields(models: readonly Model[], values: Record<string, s
     { name: 'closesAt', label: 'End of the sales (UTC)', kind: 'datetime', required: true, value: values.closesAt },
     { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.' },
     { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
-    { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3.' },
+    {
+      name: 'locationId',
+      label: 'Stock location',
+      kind: 'select',
+      options: locationOptions(locations, values.locationId ?? ''),
+      value: values.locationId ?? '',
+      hint: 'Where its orders hold a piece in stock or have one made; the sizes are proposed from its stock.',
+    },
+    { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3. Proposed from the stock, then the planner, once the model is chosen: yours to change.' },
   ];
 }

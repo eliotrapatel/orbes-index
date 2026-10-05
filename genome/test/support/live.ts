@@ -1,7 +1,9 @@
 /**
  * Fixtures of the LIVE RELEASES' tests (services/live.ts): accounts, the pieces they hold (their tier in the club),
  * models and collections, and a LIVE release made as the console makes one: a drop with its sealed seed
- * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, published.
+ * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, its after-room as the
+ * console writes one (LiveConsoleService), published; the stock locations of the first boot, where a confirmed entry's
+ * orders go.
  */
 import { randomUUID } from 'node:crypto';
 import { packIdentity } from '../../src/core/identity.js';
@@ -10,7 +12,9 @@ import type { Db } from '../../src/server/db/connection.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../../src/server/services/live.js';
-import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
+import { LiveConsoleService, type AfterRoomInput } from '../../src/server/services/live-console.js';
+import { ensureStockSetup } from '../../src/server/services/stock.js';
+import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 
 export interface LiveFixture {
   db: Db;
@@ -18,6 +22,8 @@ export interface LiveFixture {
   audit: AuditService;
   drops: DropService;
   live: LiveService;
+  /** The console's service: an after-room is written as the console writes it. */
+  liveConsole: LiveConsoleService;
   seedKey: Uint8Array;
   turnKey: Uint8Array;
   /** A console user (ADMIN). */
@@ -37,11 +43,14 @@ export async function liveFixture(db: Db, start: string): Promise<LiveFixture> {
   const audit = new AuditService({ db, clock: clock.now });
   const drops = new DropService({ db, audit, seedKey, clock: clock.now });
   const live = new LiveService({ db, audit, seedKey, turnKey, clock: clock.now });
+  const liveConsole = new LiveConsoleService({ db, audit, seedKey, publicOrigin: config.publicOrigin, clock: clock.now });
   await db.insertInto('categories').values({ id: CATEGORY, code: 'J', name: 'Jewelry' }).onConflict((oc) => oc.doNothing()).execute();
   const email = `live-admin-${randomUUID()}@orbes.test`;
   const adminId = (await db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
   const modelId = await createModel(db, 'MONOLITHE');
-  return { db, clock, audit, drops, live, seedKey, turnKey, admin: { type: 'admin', id: adminId }, modelId };
+  // The locations of the first boot (createContext's OrderService.prepare): a confirmed entry's orders go there.
+  await ensureStockSetup(db, audit, SYSTEM_ACTOR, clock.now());
+  return { db, clock, audit, drops, live, liveConsole, seedKey, turnKey, admin: { type: 'admin', id: adminId }, modelId };
 }
 
 /**
@@ -49,7 +58,7 @@ export async function liveFixture(db: Db, start: string): Promise<LiveFixture> {
  * keys), its console user and model created as `liveFixture` creates them.
  */
 export async function liveFixtureOn(
-  ctx: { db: Db; config: AppConfig; audit: AuditService; services: { drops: DropService; live: LiveService } },
+  ctx: { db: Db; config: AppConfig; audit: AuditService; services: { drops: DropService; live: LiveService; liveConsole: LiveConsoleService } },
   clock: ManualClock,
 ): Promise<LiveFixture> {
   const db = ctx.db;
@@ -63,6 +72,7 @@ export async function liveFixtureOn(
     audit: ctx.audit,
     drops: ctx.services.drops,
     live: ctx.services.live,
+    liveConsole: ctx.services.liveConsole,
     seedKey: deriveDropSeedKey(ctx.config),
     turnKey: deriveLiveTurnKey(ctx.config),
     admin: { type: 'admin', id: adminId },
@@ -155,16 +165,25 @@ export interface LiveReleaseOptions {
   windows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
   accessModels?: string[];
   accessCollectionId?: string | null;
+  /** Plan LIVE RELEASE+: the releases taken part in, a segment, how the rules combine; the surprise in every box. */
+  minParticipations?: number | null;
+  accessSegmentId?: string | null;
+  accessCombine?: 'AND' | 'OR' | null;
+  surprise?: string | null;
   announceAt?: Date | null;
   /** Published now unless false. */
   published?: boolean;
   modelId?: string;
+  /** Its after-room, written by the console before the publication (the room still ahead). */
+  afterRoom?: AfterRoomInput;
 }
 
 export interface LiveRelease {
   id: string;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; priceMinor: number }[];
+  /** Its after-room, when it has one. */
+  afterRoom: { id: string; sizes: { id: string; label: string; stock: number }[]; addons: { id: string; label: string; priceMinor: number }[] } | null;
 }
 
 /** A LIVE release, published at the fixture's clock unless asked otherwise. */
@@ -189,6 +208,11 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       quantity_line: o.quantityLine ?? `${quantity} PIECES`,
       announce_at: o.announceAt ?? null,
       access_collection_id: o.accessCollectionId ?? null,
+      min_participations: o.minParticipations ?? null,
+      access_segment_id: o.accessSegmentId ?? null,
+      access_combine: o.accessCombine ?? null,
+      surprise_enabled: o.surprise ? true : null,
+      surprise_text: o.surprise ?? null,
     })
     .where('id', '=', id)
     .execute();
@@ -211,12 +235,24 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       .execute();
   }
   if (o.accessModels?.length) await f.db.insertInto('live_access_models').values(o.accessModels.map((m) => ({ drop_id: id, model_id: m }))).execute();
+  if (o.afterRoom) await f.liveConsole.update(id, { afterRoom: o.afterRoom }, f.admin);
   if (o.published !== false) await f.db.updateTable('drops').set({ published_at: f.clock.now() }).where('id', '=', id).execute();
+  const child = o.afterRoom ? await f.db.selectFrom('drops').select('id').where('parent_drop_id', '=', id).executeTakeFirstOrThrow() : null;
   return {
     id,
     sizes: sizeRows.sort((a, b) => a.position - b.position).map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
     addons: addonRows.sort((a, b) => a.position - b.position).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
+    afterRoom: child ? { id: child.id, ...(await offerOf(f.db, child.id)) } : null,
   };
+}
+
+/** A release's sizes and add-ons, in order. */
+export async function offerOf(db: Db, dropId: string) {
+  const [sizes, addons] = await Promise.all([
+    db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute(),
+    db.selectFrom('live_addons').select(['id', 'label', 'price_minor']).where('drop_id', '=', dropId).orderBy('position').execute(),
+  ]);
+  return { sizes, addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })) };
 }
 
 /** Every entry of a release, by place then arrival. */

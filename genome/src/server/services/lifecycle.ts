@@ -11,7 +11,8 @@
  * separately, so it cannot drift from the audit trail.
  *
  * Every change (a) locks the product row, (b) updates products.status,
- * (c) appends product_status_history, (d) writes a hash-chained audit entry,
+ * (c) appends product_status_history, (d) writes its entry of the event
+ * journal (services/journal.ts), (e) writes a hash-chained audit entry,
  * all in one transaction. Moving to REVOKED also opens a `revocations` row;
  * reinstatement lifts it.
  *
@@ -28,6 +29,7 @@ import {
 import { DomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type ActorType, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
+import { productPayload, writeJournal } from './journal.js';
 
 // ── The state machine (data) ───────────────────────────────────────────────
 
@@ -36,8 +38,13 @@ const S = <T extends ProductStatus[]>(...s: T): readonly ProductStatus[] => Obje
 /** Statuses a product can come back to after a LOST/STOLEN or counterfeit episode. */
 const NON_INCIDENT = S('ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD');
 
-/** Contract §2.6, row for row. REVOKED leaves only through `reinstate()`; RETIRED is terminal. */
+/**
+ * Contract §2.6, row for row. REVOKED leaves only through `reinstate()`; RETIRED is terminal. RESERVED (migration 0022:
+ * an identity reserved for a piece to make) leaves through no transition: the atelier issues it, or its order's
+ * cancellation retires it (issuance.ts retireReservedIdentity), and its history starts there.
+ */
 export const TRANSITIONS: Readonly<Record<ProductStatus, readonly ProductStatus[]>> = Object.freeze({
+  RESERVED: S(),
   // ISSUED → SERVICED: pre-sale inspection / quality control; the return move goes back to ISSUED.
   ISSUED: S('ACTIVATED', 'SERVICED', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
   ACTIVATED: S('REGISTERED', 'OWNED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'),
@@ -460,6 +467,8 @@ export class LifecycleService {
         .where('lifted_at', 'is', null)
         .execute();
     }
+    // The event journal (plan LIVE RELEASE+, N1): every change of a piece's status, in its transaction.
+    await writeJournal(tx, [{ type: opts.action, entityType: 'product', entityId: product.id, payload: productPayload({ ...product, status: to }, at) }], at);
 
     await this.audit.record(
       {

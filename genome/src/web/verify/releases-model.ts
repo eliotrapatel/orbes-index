@@ -13,6 +13,9 @@
  *  - The account's entry: one sentence for what it means now (a place held
  *    until a time, the waiting list's rank, …), and whether ENTER THE DRAW
  *    or WITHDRAW is offered.
+ *  - THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): each release ended as it was announced (its photograph, its
+ *    name, its opening date, its quantity line; never an end figure), and, signed in, the account's part in it (YOU
+ *    TOOK PART, YOU SECURED A PIECE) and in how many releases; a drawn release's page says THIS RELEASE IS OVER.
  *  - The early access (P-X02): the line under a release's state
  *    (PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …), its facts (when it
  *    opens, the places reserved directly), and, for an account PLATINE or
@@ -24,8 +27,8 @@
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
-import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry } from './types.js';
-import { formatDateTime, formatDateTimeLong, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
+import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
+import { formatDate, formatDateTime, formatDateTimeLong, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
 
 /** The list of the releases, and the page of one under it. */
 export const RELEASES_PATH = '/verify/releases';
@@ -38,22 +41,28 @@ export function releasePath(id: string): string {
   return `${RELEASES_PATH}/${id}`;
 }
 
+/** The after-room of a LIVE RELEASE (plan LIVE RELEASE+, choice 2): read through the release it follows, by its guests only. */
+export function afterRoomPath(parentId: string): string {
+  return `${RELEASES_PATH}/${parentId}/after-room`;
+}
+
 /** Whether `id` is the id of a release (a lower-case uuid). */
 export function isReleaseId(id: string | null | undefined): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
 }
 
 /**
- * The route of a path under /verify/releases: the list, a release by its id, or a LIVE RELEASE's boutique board
- * (`/verify/releases/<id>/board`, its secret in the fragment); anything else is the list.
+ * The route of a path under /verify/releases: the list, a release by its id, a LIVE RELEASE's boutique board
+ * (`/verify/releases/<id>/board`, its secret in the fragment) or its after-room (`/verify/releases/<id>/after-room`, the
+ * release it follows); anything else is the list.
  */
-export function releasesRouteOf(path: string): { release: string | null; board?: true } | null {
+export function releasesRouteOf(path: string): { release: string | null; board?: true; afterRoom?: true } | null {
   const p = path.replace(/\/+$/, '').toLowerCase();
   if (p === RELEASES_PATH) return { release: null };
   if (!p.startsWith(`${RELEASES_PATH}/`)) return null;
   const rest = p.slice(RELEASES_PATH.length + 1);
-  const board = /^([^/]+)\/board$/.exec(rest);
-  if (board && isReleaseId(board[1])) return { release: board[1]!, board: true };
+  const sub = /^([^/]+)\/(board|after-room)$/.exec(rest);
+  if (sub && isReleaseId(sub[1])) return sub[2] === 'board' ? { release: sub[1]!, board: true } : { release: sub[1]!, afterRoom: true };
   return { release: isReleaseId(rest) ? rest : null };
 }
 
@@ -171,8 +180,6 @@ export interface ReleaseSheetModel {
   seed: string | null;
   seedHex: string | null;
   seedHashHex: string;
-  /** Once drawn: how many entries took part. */
-  entries: number | null;
   drawn: boolean;
 }
 
@@ -196,8 +203,9 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     { label: RELEASES.rows.closes, value: closes.utc, local: closes.local },
     { label: RELEASES.rows.held, value: RELEASES.hours(Number(s.purchaseWindowHours) || 0) },
   );
-  // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces.
-  if (early && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
+  // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces; once
+  // drawn, the release is over and says no end figure (plan LIVE RELEASE+, choice 5).
+  if (early && state !== 'DRAWN' && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
   if (s.drawnAt) {
     const drawn = twoClocks(s.drawnAt, offsetMinutes);
     rows.push({ label: RELEASES.rows.drawn, value: drawn.utc, local: drawn.local });
@@ -210,7 +218,8 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     id: s.id,
     title: upper(s.title),
     state,
-    stateLabel: [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
+    // Drawn, the release is over (plan LIVE RELEASE+, decision 30): its page says so, neutral.
+    stateLabel: state === 'DRAWN' ? RELEASES.over : [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
     earlyAccess: early,
     access: earlyAt && opens.utc ? RELEASES.access(earlyAt.utc, opens.utc) : null,
     earlyNote: early ? RELEASES.earlyNote : null,
@@ -226,7 +235,6 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     seedHashHex,
     seed: seedHex ? groupHex(seedHex) : null,
     seedHex,
-    entries: state === 'DRAWN' && typeof s.entries === 'number' ? s.entries : null,
     drawn: state === 'DRAWN',
   };
 }
@@ -346,6 +354,8 @@ export interface MyEntryModel {
   id: string;
   dropId: string;
   href: string;
+  /** An after-room's entry: the release it follows (its page is read through it). */
+  afterRoomOf?: string;
   title: string;
   stateLabel: string;
   entry: EntryModel;
@@ -366,4 +376,120 @@ export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: 
         entry: entryModel({ id: e.dropId, title: upper(e.title), state, opensAt: e.opensAt }, e, opts),
       };
     });
+}
+
+// ── THE RELEASES' PAST (plan LIVE RELEASE+, choice 5) ──────────────────────
+
+/** The releases PAST reads at a time (SHOW MORE reads the next ones). */
+export const PAST_PAGE_SIZE = 12;
+
+/** A release of PAST: what was announced, never an end figure; the account's part in it is set by `pastMark`. */
+export interface PastCardModel {
+  id: string;
+  href: string;
+  /** LIVE RELEASE or DRAW. */
+  kind: string;
+  /** A LIVE RELEASE's model, as its card and page name it; a draw's title, as its card does. */
+  title: string;
+  /** A LIVE RELEASE's type and collection; a draw's model and type. */
+  model: string;
+  /** `11 OCT 2026 · 25 PIECES`: the opening date on this phone's calendar, the quantity as announced. */
+  line: string;
+  image: ReleasePhoto | null;
+}
+
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** `11 OCT 2026`: the date of `iso` on the calendar of `timeZone` (UTC when the zone is unknown); '' when unreadable. */
+export function zonedDate(iso: string, timeZone: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  let f = dayFormatters.get(timeZone);
+  if (!f) {
+    try {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' });
+    } catch {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric' });
+    }
+    dayFormatters.set(timeZone, f);
+  }
+  const parts = Object.fromEntries(f.formatToParts(new Date(t)).map((p) => [p.type, p.value]));
+  return formatDate(`${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`);
+}
+
+/** The releases of a page of PAST, in the server's order; one without an id of its own is left out. */
+export function pastCards(items: readonly PastRelease[], localZone: string): PastCardModel[] {
+  const out: PastCardModel[] = [];
+  for (const c of items) {
+    if (!isReleaseId(c?.id) || (c.kind !== 'LIVE' && c.kind !== 'DRAW')) continue;
+    const m = c.model ?? { name: null, type: null, collection: null };
+    const live = c.kind === 'LIVE';
+    // A LIVE RELEASE is named by its model, from its name's stage (one ended before it: LIVE RELEASE); a draw by its title.
+    const title = live ? (m.name ? upper(m.name) : RELEASES.past.kind.LIVE) : upper(c.title ?? '');
+    const model = live ? [upper(m.type), upper(m.collection)].filter((x) => x.length > 0).join(' · ') : modelLine({ name: m.name ?? '', type: m.type ?? '' });
+    out.push({
+      id: c.id,
+      href: releasePath(c.id),
+      kind: RELEASES.past.kind[c.kind],
+      title,
+      model,
+      line: RELEASES.past.line(zonedDate(c.opensAt, localZone), upper(c.quantityLine)),
+      image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: RELEASES.photosLabel(title) } : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * PAST read a page at a time (SHOW MORE). The next page is counted, never worked out from the releases shown: a release
+ * that ends between two pages moves the others down (one already shown comes again, and is shown once) and one
+ * unreadable is left out, so fewer releases may be shown than the pages read. SHOW MORE stays while a page is left on
+ * the server, and so reaches the last release.
+ */
+export class PastPages {
+  /** The releases shown, each once, in the order read. */
+  readonly cards: PastCardModel[] = [];
+  private read = 0;
+  private total = 0;
+
+  /** The page to ask for next: the first before any is read. */
+  get next(): number {
+    return this.read + 1;
+  }
+
+  /** Whether SHOW MORE has a page left to read. */
+  get more(): boolean {
+    return this.cards.length > 0 && this.read * PAST_PAGE_SIZE < this.total;
+  }
+
+  /** Page `page` read, `total` releases ended on the server: its releases not shown yet, added in order and returned. */
+  add(page: number, cards: readonly PastCardModel[], total: number): PastCardModel[] {
+    const known = new Set(this.cards.map((c) => c.id));
+    const fresh: PastCardModel[] = [];
+    for (const c of cards) {
+      if (known.has(c.id)) continue;
+      known.add(c.id);
+      fresh.push(c);
+    }
+    this.cards.push(...fresh);
+    this.read = Math.max(this.read, page);
+    this.total = Number.isInteger(total) && total > 0 ? total : 0;
+    return fresh;
+  }
+}
+
+/** The account's part in the releases: how many, and for each, YOU SECURED A PIECE or YOU TOOK PART. */
+export interface ParticipationModel {
+  /** « You have taken part in N releases. » */
+  taken: string;
+  marks: ReadonlyMap<string, string>;
+}
+
+export function participationModel(p: Participation): ParticipationModel {
+  const marks = new Map<string, string>();
+  for (const r of Array.isArray(p?.releases) ? p.releases : []) {
+    if (isReleaseId(r?.id)) marks.set(r.id, r.secured === true ? RELEASES.past.secured : RELEASES.past.tookPart);
+  }
+  const count = Number.isInteger(p?.count) && p.count >= 0 ? p.count : marks.size;
+  return { taken: RELEASES.past.taken(count), marks };
 }

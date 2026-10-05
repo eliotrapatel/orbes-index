@@ -20,6 +20,7 @@ import {
   clockOffset,
   clockText,
   countdown,
+  doorOpen,
   formatMoney,
   heldEntry,
   initialSize,
@@ -34,6 +35,7 @@ import {
   revealCalendar,
   liveScreen,
   liveSheetModel,
+  livePastModel,
   lockAngle,
   LOCK_MS,
   mediaSrc,
@@ -51,7 +53,7 @@ import {
   type LiveScreenInput,
 } from '../../src/web/verify/live-model.js';
 import { SEAL_RINGS, SPECIMEN_GLYPHS, specimenData } from '../../src/web/verify/live-seal.js';
-import type { LiveAccountEntry, LiveCard, LiveEntry, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
+import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
 
 const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
 const ENTRY = '01edcb93-7b6d-4e5f-8a9b-0c1d2e3f4a5b';
@@ -87,6 +89,7 @@ function card(extra: Partial<LiveCard> = {}): LiveCard {
     quantityLine: '25 pieces',
     perAccount: 1,
     access: { minTier: 2, text: 'owners from PLATINE' },
+    surprise: false,
     interest: 0,
     ...extra,
   };
@@ -160,6 +163,26 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     currency: 'EUR',
     priceMinor: 480_000,
     totalMinor: 480_000,
+    ...extra,
+  };
+}
+
+/** A release over, in its final state (plan LIVE RELEASE+, decision 30): what was announced, never an end figure. */
+function over(extra: Partial<LiveEndedSheet> = {}): LiveEndedSheet {
+  return {
+    id: ID,
+    kind: 'LIVE',
+    phase: 'ENDED',
+    title: 'Monolithe — live',
+    name: 'Monolithe',
+    type: 'Ring',
+    collection: 'Orbit',
+    description: ' A ring cut from one block of silver. ',
+    silhouetteUrl: media(2),
+    imageUrl: media(1),
+    lookbook: 'monolithe',
+    opensAt: iso(T0),
+    quantityLine: '25 pieces',
     ...extra,
   };
 }
@@ -238,11 +261,14 @@ describe('which screen the page shows', () => {
     expect(screen({})).toBe('room');
     // After T0 an account not in the line chooses its size and joins behind.
     expect(screen({ now: T0 + 1_000 })).toBe('join');
-    // Ended (sold out, closed, ended by ORBES), or past its close: over.
-    expect(screen({ room: room({ phase: 'ENDED' }), now: T0 + 1_000 })).toBe('over');
-    expect(screen({ room: null, now: T0 + 3_600_000 })).toBe('over');
-    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, viewer: 'signed-out' })).toBe('over');
-    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, viewer: 'unknown' })).toBe('loading');
+    // Ended (sold out, closed, ended by ORBES), or past its close: its final state (plan LIVE RELEASE+, decision 30),
+    // for whoever reads it; an after-room's, that it is closed.
+    expect(screen({ room: room({ phase: 'ENDED' }), now: T0 + 1_000 })).toBe('past');
+    expect(screen({ room: null, now: T0 + 3_600_000 })).toBe('past');
+    for (const viewer of ['signed-out', 'not-eligible', 'ready'] as const) expect(screen({ sheet: over(), viewer })).toBe('past');
+    expect(screen({ sheet: over(), viewer: 'unknown' })).toBe('loading');
+    expect(screen({ sheet: sheet({ afterRoom: { parentId: ID } }), room: null, now: T0 + 3_600_000 })).toBe('over');
+    expect(screen({ sheet: over({ afterRoom: { parentId: ID } }), viewer: 'signed-out' })).toBe('over');
   });
 
   it('follows the account\'s entry: the room, the line, the turn, the piece held, confirmed, and every edge page', () => {
@@ -258,8 +284,10 @@ describe('which screen the page shows', () => {
     expect(screen({ entry: entry({ status: 'LEFT' }) })).toBe('room');
     expect(heldEntry(entry({ status: 'LEFT' }))).toBeNull();
     expect(screen({ entry: entry({ status: 'LEFT', position: 9 }), now: T0 + 5_000 })).toBe('left');
-    // A participant keeps its outcome after the end, and only a ready account's entry counts.
-    expect(screen({ sheet: { id: ID, kind: 'LIVE', phase: 'ENDED' }, entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
+    // Over, the page opens in its final state, whatever became of the entry (its part said there, never how it ended); an
+    // after-room's guest keeps its outcome. Only a ready account's entry counts.
+    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 'ENDED'] as const) expect(screen({ sheet: over(), entry: entry({ status, position: 3 }) }), status).toBe('past');
+    expect(screen({ sheet: over({ afterRoom: { parentId: ID } }), entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
     expect(screen({ viewer: 'signed-out', entry: entry({ status: 'CONFIRMED' }) })).toBe('signin');
   });
 
@@ -274,11 +302,61 @@ describe('which screen the page shows', () => {
     expect(phaseAt(sheet(), room({ opensAt: iso(T0 + 60_000) }), T0 + 1_000)).toBe('ROOM');
     expect(isEndedSheet(sheet())).toBe(false);
   });
+
+  it('shows the second door to a guest of the after-room from its T0 until it closes, read from its own entry; nothing of it otherwise', () => {
+    const now = T0 + 20 * 60_000;
+    const door = (opensIn: number, closesIn = 10 * 60_000) => ({ opensAt: iso(now + opensIn), closesAt: iso(now + closesIn) });
+    const ended = (afterRoom: ReturnType<typeof door> | null) => entry({ status: 'ENDED', position: 3, afterRoom });
+    expect(screen({ entry: ended(door(-60_000)), now })).toBe('afterRoom');
+    expect(screen({ entry: ended(door(0)), now })).toBe('afterRoom');
+    // Before its T0, after its close, or without one: how the release ended.
+    expect(screen({ entry: ended(door(1_000)), now })).toBe('ended');
+    expect(screen({ entry: ended(door(-60_000, 0)), now })).toBe('ended');
+    expect(screen({ entry: ended(null), now })).toBe('ended');
+    expect(screen({ entry: entry({ status: 'ENDED', position: 3 }), now })).toBe('ended');
+    // The release over: its guest keeps the second door until it closes, then reads the release's final state.
+    expect(screen({ sheet: over(), entry: ended(door(1_000)), now })).toBe('ended');
+    expect(screen({ sheet: over(), entry: ended(door(-60_000)), now })).toBe('afterRoom');
+    expect(screen({ sheet: over(), entry: ended(door(-60_000, 0)), now })).toBe('past');
+    expect(screen({ sheet: over(), entry: ended(null), now })).toBe('past');
+    // Only an entry the sell-out ENDED is a guest's: every other keeps its own page.
+    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED'] as const) expect(screen({ entry: entry({ status, position: 2, afterRoom: door(-60_000) }), now })).not.toBe('afterRoom');
+    expect(doorOpen(door(-1), now)).toBe(true);
+    expect(doorOpen({ opensAt: 'x', closesAt: 'nonsense' }, now)).toBe(false);
+    expect(doorOpen(undefined, now)).toBe(false);
+  });
+
+  it('opens a release over in its final state: what was announced, its date and quantity line as announced, never an end figure', () => {
+    const m = livePastModel(over(), 'Europe/Paris');
+    expect(m).toEqual({
+      name: 'MONOLITHE',
+      line: 'RING · ORBIT',
+      facts: '11 OCT 2026 · 25 PIECES',
+      picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
+      lookbook: 'monolithe',
+      description: 'A ring cut from one block of silver.',
+    });
+    // The date on this phone's calendar: T0 at 17:00 UTC is the 12th in Tokyo.
+    expect(livePastModel(over(), 'Asia/Tokyo').facts).toBe('12 OCT 2026 · 25 PIECES');
+    // Ended before its name or its photograph was revealed: named nowhere, the seal on its plate.
+    expect(livePastModel(over({ title: null, name: null, type: null, collection: null, description: null, imageUrl: null, silhouetteUrl: null, lookbook: null }), 'UTC')).toEqual({
+      name: 'LIVE RELEASE',
+      line: null,
+      facts: '11 OCT 2026 · 25 PIECES',
+      picture: null,
+      lookbook: null,
+      description: null,
+    });
+    // A whole page, ENDED while a hold runs to its deadline, reads the same for those not in it: no size, no stock.
+    expect(livePastModel(sheet({ phase: 'ENDED', lookbook: 'monolithe' }), 'Europe/Paris')).toMatchObject({ name: 'MONOLITHE', facts: '11 OCT 2026 · 25 PIECES' });
+    expect(JSON.stringify(livePastModel(sheet({ phase: 'ENDED' }), 'UTC'))).not.toMatch(/48|52|56|4 800|stock/);
+    expect(isEndedSheet(over())).toBe(true);
+  });
 });
 
 describe('the room', () => {
   it('checks the account, its access, its size, the connection and the clock before T0', () => {
-    const access = { allowed: true, tier: 2, missing: null };
+    const access = { allowed: true, tier: 2, missing: null, participations: null };
     expect(readyChecks({ access, size: '52', connection: 'live', synced: true })).toEqual([
       { label: 'SIGNED IN', value: '', ok: true },
       { label: 'ACCESS', value: 'PLATINE', ok: true },
@@ -286,7 +364,7 @@ describe('the room', () => {
       { label: 'CONNECTION', value: 'LIVE', ok: true },
       { label: 'CLOCK', value: 'SYNCED TO ORBES', ok: true },
     ]);
-    const pending = readyChecks({ access: { allowed: true, tier: 0, missing: null }, size: null, connection: 'reconnecting', synced: false });
+    const pending = readyChecks({ access: { allowed: true, tier: 0, missing: null, participations: null }, size: null, connection: 'reconnecting', synced: false });
     expect(pending.map((c) => [c.value, c.ok])).toEqual([['', true], ['GRANTED', true], ['TO CHOOSE', false], ['RECONNECTING', false], ['SYNCING', false]]);
   });
 
@@ -367,6 +445,32 @@ describe('the line, the turn and the piece held', () => {
     expect(LIVE.ahead(3, '52')).toBe('3 AHEAD OF YOU IN SIZE 52');
   });
 
+  it('ends an after-room\'s entry in the after-room\'s words, never the release\'s', () => {
+    expect(LIVE.afterRoom.ended).toEqual({
+      SOLD_OUT: { title: 'SOLD OUT', text: 'Every piece of the after-room is reserved.' },
+      CLOSED: { title: 'THE AFTER-ROOM IS CLOSED', text: 'Its time has run out before your turn came.' },
+      ENDED: { title: 'THE AFTER-ROOM HAS ENDED', text: 'ORBES has ended the after-room before your piece was secured.' },
+    });
+    for (const c of Object.values(LIVE.afterRoom.ended)) expect(`${c.title} ${c.text}`.toLowerCase()).not.toContain('release');
+    // The view: overlined THE AFTER-ROOM, its ended words, in an after-room.
+    const view = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts'), 'utf8');
+    expect(view).toContain('this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name())');
+    expect(view).toContain('(this.afterRoomOf() ? LIVE.afterRoom.ended : e.ended)[this.room?.endedReason ?? \'ENDED\']');
+  });
+
+  it('says a one-size release ONE SIZE, never SIZE ONE SIZE', () => {
+    const one = { id: S52, label: 'ONE SIZE' };
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0, size: one }))).toBe('Your place: 2. You are next in ONE SIZE.');
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 5, ahead: 3, size: one }))).toBe('Your place: 5. 3 ahead of you in ONE SIZE.');
+    expect([LIVE.ahead(0, 'ONE SIZE'), LIVE.ahead(2, 'One size'), LIVE.inSize(4, 'ONE SIZE')]).toEqual(['YOU ARE NEXT IN ONE SIZE', '2 AHEAD OF YOU IN ONE SIZE', '4 IN ONE SIZE']);
+    expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment and delivery.');
+    expect(LIVE.securedInPieces('ONE SIZE', 2)).toBe('You secured 2 pieces in ONE SIZE. Their steps follow in YOUR ORDERS.');
+    expect([LIVE.edge.soldOut.title('ONE SIZE'), LIVE.edge.soldOut.title('52')]).toEqual(['SOLD OUT', 'SOLD OUT IN SIZE 52']);
+    expect([LIVE.size('ONE SIZE'), LIVE.size('52'), LIVE.there.said('ONE SIZE'), LIVE.soldOutSize('ONE SIZE')]).toEqual(['ONE SIZE', 'SIZE 52', 'YOU’LL BE THERE · ONE SIZE', 'One size, no piece left']);
+    const r = room({ phase: 'LIVE', quantity: 3, left: 2, held: 0, sizes: [{ id: S52, label: 'ONE SIZE', stock: 3, left: 2, held: 0 }] });
+    expect(lineFacts(r, S52, 'ONE SIZE').left).toBe('2 OF 3 LEFT · 2 IN ONE SIZE');
+  });
+
   it('measures a window at the server\'s time: what is left, and its share', () => {
     expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 6_000)).toEqual({ remainingMs: 24_000, fraction: 0.8 });
     expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 40_000)).toEqual({ remainingMs: 0, fraction: 0 });
@@ -401,6 +505,16 @@ describe('the release announced, and its card in THE RELEASES', () => {
     });
     expect(liveSheetModel(sheet({ perAccount: 2, roomOpensMinutes: 1, tierPriority: false }), 'Europe/Paris')).toMatchObject({ quantity: '25 PIECES · UP TO 2 PER COLLECTOR', roomOpens: 'THE ROOM OPENS 1 MINUTE BEFORE', rule: LIVE.rule(false) });
     expect(LIVE.rule(false)).not.toContain('tier');
+  });
+
+  it('states the rules beyond the tier as the server words them, and A SURPRISE IN EVERY BOX, never what it is (plan LIVE RELEASE+)', () => {
+    expect(liveSheetModel(sheet(), 'Europe/Paris').surprise).toBeNull();
+    expect(liveSheetModel(sheet({ surprise: true }), 'Europe/Paris').surprise).toBe('A SURPRISE IN EVERY BOX');
+    expect(LIVE.surprise).toBe('A SURPRISE IN EVERY BOX');
+    const access = (text: string) => liveSheetModel(sheet({ access: { minTier: 0, text } }), 'Europe/Paris').access;
+    expect(access('collectors who have taken part in 3 releases')).toBe('FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
+    expect(access('selected collectors')).toBe('FOR SELECTED COLLECTORS');
+    expect(access('owners from PLATINE or collectors who have taken part in 3 releases')).toBe('FOR OWNERS FROM PLATINE OR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
   });
 
   it('shows each stage only once the server sends it: the silhouette, else the seal; no name before its time', () => {
@@ -547,7 +661,7 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 
 describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
   it('lists each with its release, its status in words, its reference once held, ORBES Client Services once confirmed', () => {
-    const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000) };
+    const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
     const list: LiveAccountEntry[] = [
       { release, entry: entry({ status: 'CONFIRMED' }) },
       { release: { ...release, id: ID.replace('8a1d', '8a1e'), title: null, name: null }, entry: entry({ id: ID, status: 'MISSED' }) },
@@ -555,10 +669,24 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
     const contacts = { email: 'clientservices@theorbes.com' };
     const [confirmed, missed] = myLiveEntries(list, { clientServices: contacts });
     expect(confirmed).toMatchObject({ dropId: ID, href: `/verify/releases/${ID}`, title: 'MONOLITHE — LIVE', stateLabel: 'LIVE RELEASE' });
-    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: LIVE.reservedIn('52', 1), reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
+    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.', reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
     expect(confirmed!.entry.contact?.mailto).toContain('LR-01EDCB93');
+    // Its payment and delivery are its order's steps, in YOUR ORDERS (the vault's CONFIRMED screen keeps LIVE.reservedIn).
+    expect(confirmed!.entry.sentence).not.toContain('settle payment');
+    // A past fact, true once the order is paid, shipped, delivered, cancelled or returned: never "is reserved".
+    expect(confirmed!.entry.sentence).not.toContain('reserved');
+    expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }], {})[0]!.entry.sentence).toBe('You secured 2 pieces in size 52. Their steps follow in YOUR ORDERS.');
     expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
     expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);
+  });
+
+  it('opens an after-room\'s entry through the release it follows, said as THE AFTER-ROOM', () => {
+    const child = ID.replace('8a1d', '8a1f');
+    const release = { id: child, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Night · THE AFTER-ROOM', name: 'Afterglow', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 900_000), afterRoomOf: ID };
+    const [m] = myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED' }) }], {});
+    expect(m).toMatchObject({ dropId: child, afterRoomOf: ID, href: `/verify/releases/${ID}/after-room`, title: 'NIGHT · THE AFTER-ROOM', stateLabel: 'THE AFTER-ROOM' });
+    // A malformed one is the release's own.
+    expect(myLiveEntries([{ release: { ...release, afterRoomOf: 'x' }, entry: entry() }], {})[0]).toMatchObject({ href: `/verify/releases/${child}`, stateLabel: 'LIVE RELEASE' });
   });
 });
 

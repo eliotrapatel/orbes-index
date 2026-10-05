@@ -603,7 +603,11 @@ export class VerificationService {
 
     // Step 4: revoked-key trust. A revoked key only vouches for codes whose registry record (product,
     // issue) was created before its cut-off; anything else it signed, registered or not, is refused.
-    const reg = await this.lookup(packedOf(payload), payload.issue);
+    // An identity RESERVED for a piece to make (migration 0022) is not issued yet: from here on it is an unknown code,
+    // word for word, naming no piece; ORBES signed it, so it raises no finding (step 6).
+    const found = await this.lookup(packedOf(payload), payload.issue);
+    const reserved = found?.status === 'RESERVED';
+    const reg = reserved ? undefined : found;
     const keyTrusted = reg?.code ? isKeyTrustedAt(key, reg.code.createdAt) : key.status !== 'REVOKED';
     if (!keyTrusted) {
       w.reg = reg;
@@ -620,6 +624,7 @@ export class VerificationService {
 
     // Step 6: registry.
     if (!reg) {
+      if (reserved) return end(w, 'UNKNOWN', 'PRODUCT_NOT_REGISTERED');
       w.serviceFinding = {
         type: 'VALID_SIGNATURE_UNREGISTERED',
         details: { packedIdentity: packedOf(payload), keyId: payload.keyId, issue: payload.issue, reason: 'PRODUCT_NOT_REGISTERED' },

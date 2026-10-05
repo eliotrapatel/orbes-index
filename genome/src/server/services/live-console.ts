@@ -3,7 +3,10 @@
  * release's rules and the live controls are services/live.ts's; what the public reads is live-room.ts's. Here:
  *
  *   create / edit   a LIVE RELEASE and every setting of it: its model, title and description; who may enter (a tier,
- *                   and the owners of models or of a collection); the line's tier priority; T0 (`opens_at`), the end of
+ *                   the owners of models or of a collection, the collectors who have taken part in a number of releases,
+ *                   the members of a segment, and whether every rule is needed or any one: plan LIVE RELEASE+, choices 4
+ *                   and 27); the surprise in every box (on or off, its description: internal, choice 3); the line's tier
+ *                   priority; T0 (`opens_at`), the end of
  *                   the sales (`closes_at`), the room's opening, the turn and pay windows, the pieces per person, the
  *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
  *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
@@ -14,7 +17,17 @@
  *                   the release's tier (TITANE at least), shown from the announcement, kept in step with the release's
  *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows; added or
  *                   withdrawn after the publication until the announcement, as every setting (setCirclePost).
- *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW).
+ *   after-room      optional (plan LIVE RELEASE+, choice 2; services/after-room.ts): a second door the release's sell-out
+ *                   opens for those still in its line, set with the release's settings (`afterRoom`: its model, price,
+ *                   sizes and stock, add-ons, delay and length; null: none) and kept until the announcement as they are.
+ *                   It is a child LIVE RELEASE written here, a DRAFT until the sell-out: its title the release's
+ *                   « · THE AFTER-ROOM », its turn and pay windows, pieces per person and currency the release's (written
+ *                   again with every save), its sizes linked to their SKUs; turned off, removed (nothing points to it before
+ *                   the announcement). It is never listed on its own: the release's page shows it, and its own page
+ *                   (`afterRoomOf`) has the live board and controls, never settings, a publication, a cancellation or a
+ *                   board link of its own (409 LIVE_AFTER_ROOM).
+ *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW); its after-room
+ *                   with it.
  *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
  *                   the holds that ended, per size and overall, the interest), the latest host message and the line
  *                   itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX), and from T0 until the release is
@@ -22,22 +35,24 @@
  *                   the console's stream (http/live-stream.ts) read the same `board`. The routes mask the emails for an
  *                   AUDITOR.
  *   entries         every entry of the release, by status, by place then arrival.
- *   Client Services the confirmed reservations with their sizes, add-ons and totals; CONCLUDED or CANCELLED with a note
- *                   (a cancellation never returns the piece to the line: the plan's choice 26); a CSV.
+ *
+ * Client Services follows each confirmed reservation through its orders (plan LIVE RELEASE+: the console's Orders
+ * board, services/fulfilment.ts, replaces the LIVE plan's list and its CONCLUDED / CANCELLED resolution).
+ *
+ * The sizes of a release are linked to their SKUs (the release's model in each size, services/stock.ts) whenever they
+ * or the model change.
  *
  * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
- * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, `drop.live.resolve`
- * (never the note), and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
+ * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
  * release's post.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { toHex } from '../../core/bytes.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AdminRole, DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
-import { LIVE_ENTRY_STATUSES, LIVE_RESOLUTIONS } from '../db/schema.js';
+import type { AccessCombine, AdminRole, DropRow, LiveEndReason, LiveEntryStatus } from '../db/schema.js';
+import { ACCESS_COMBINES, LIVE_ENTRY_STATUSES } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
-import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { LiveAlert, LiveSellOut, LiveSignals } from './live-insights.js';
@@ -52,17 +67,24 @@ import {
   liveStages,
   roomOpensAt,
   LIVE_ADDONS_MAX,
+  LIVE_MIN_PARTICIPATIONS,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
   LIVE_TURN_SECONDS,
   type AdminLiveEntry,
+  type LiveAccessRule,
   type LivePhase,
 } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { knownLocation, linkDropSizes } from './stock.js';
+import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
+import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilitySize } from './release-stock.js';
+import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -81,8 +103,6 @@ export const LIVE_ADDON_LIMITS = Object.freeze({ label: 40, line: 120 });
 export const LIVE_ACCESS_MODELS_MAX = 20;
 /** The open entries the live board carries, by place (the rest: the entries' list, page by page). */
 export const LIVE_CONSOLE_LINE_MAX = 200;
-/** Client Services' note on a reservation it concludes or cancels. */
-export const LIVE_RESOLUTION_NOTE_MAX = 500;
 /** The post of the circle a publication may write: its title (no figure: the display face sets it). */
 export const LIVE_CIRCLE_TITLE = 'A LIVE RELEASE';
 
@@ -127,8 +147,8 @@ const roomOpen = () => conflict('LIVE_ROOM_OPEN', 'The room of this release is o
 const roomPast = () => validationError('The room would already be open: set T0 later.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
-const notConfirmed = () => conflict('LIVE_NOT_CONFIRMED', 'Only a confirmed reservation is concluded or cancelled.');
-const alreadyResolved = () => conflict('LIVE_ALREADY_RESOLVED', 'This reservation has already been concluded or cancelled.');
+const afterRoomModelInactive = () => conflict('MODEL_INACTIVE', 'The after-room’s model is no longer offered for new products: choose another in its settings.');
+const afterRoomOwn = () => conflict('LIVE_AFTER_ROOM', 'This is the after-room of a release: it is set, published and cancelled with that release.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -183,6 +203,15 @@ export interface LiveSettingsInput {
   tierPriority?: boolean;
   accessModelIds?: string[];
   accessCollectionId?: string | null;
+  /** The releases a collector has taken part in to enter, 1 to 100; null: no such rule. */
+  minParticipations?: number | null;
+  /** A segment whose members may enter; null: none. */
+  accessSegmentId?: string | null;
+  /** How the rules combine: AND (every one, the default) or OR (any one). */
+  accessCombine?: AccessCombine;
+  /** A surprise in every box (the release's page says so), its description internal (required while on). */
+  surpriseEnabled?: boolean;
+  surpriseText?: string | null;
   sizes: LiveSizeInput[];
   /** null or omitted at creation: « <the pieces> PIECES ». */
   quantityLine?: string | null;
@@ -194,6 +223,26 @@ export interface LiveSettingsInput {
   nameAt?: Date | null;
   photoAt?: Date | null;
   tierWindows?: LiveTierWindowInput[];
+  /** The after-room (null or omitted at creation: none). */
+  afterRoom?: AfterRoomInput | null;
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16); null: the default location. */
+  stockLocationId?: string | null;
+  /** The question after (choice 11): on by default; its words (both, or neither for the default question). */
+  questionEnabled?: boolean;
+  questionText?: string | null;
+  questionAnswers?: string[] | null;
+}
+
+/** An after-room's own settings; the rest is the release's (services/after-room.ts). */
+export interface AfterRoomInput {
+  modelId: string;
+  priceMinor: number;
+  sizes: LiveSizeInput[];
+  addons?: LiveAddonInput[];
+  /** After the sell-out: 1 to 60 minutes, 10 by default. */
+  delayMinutes?: number;
+  /** Open: 5 to 120 minutes, 15 by default. */
+  lengthMinutes?: number;
 }
 
 /** A change of a LIVE RELEASE: any setting, until its announcement. A list given replaces the release's. */
@@ -215,6 +264,11 @@ interface Settings {
   tierPriority: boolean;
   accessModelIds: string[];
   accessCollectionId: string | null;
+  minParticipations: number | null;
+  accessSegmentId: string | null;
+  accessCombine: AccessCombine;
+  surpriseEnabled: boolean;
+  surpriseText: string | null;
   sizes: { id: string | null; label: string; stock: number }[];
   quantityLine: string;
   addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
@@ -223,6 +277,21 @@ interface Settings {
   nameAt: Date | null;
   photoAt: Date | null;
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
+  afterRoom: AfterRoomSettings | null;
+  stockLocationId: string | null;
+  questionEnabled: boolean;
+  questionText: string | null;
+  questionAnswers: string[] | null;
+}
+
+/** An after-room's settings, cleaned. */
+export interface AfterRoomSettings {
+  modelId: string;
+  priceMinor: number;
+  sizes: { id: string | null; label: string; stock: number }[];
+  addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
+  delayMinutes: number;
+  lengthMinutes: number;
 }
 
 function wholeIn(v: unknown, min: number, max: number, message: string): number {
@@ -296,9 +365,73 @@ function cleanWindows(v: unknown): Settings['tierWindows'] {
     .sort((a, b) => a.tier - b.tier);
 }
 
+/** The surprise's description: 1 to 500 characters (lines kept); '' and null: none. */
+function cleanSurpriseText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw validationError('The surprise’s description is text.');
+  const t = v.replace(/\r\n?/g, '\n').trim();
+  if (t === '') return null;
+  if (t.length > LIVE_SURPRISE_MAX || /[\u0000-\u0009\u000b-\u001f\u007f]/.test(t)) throw validationError(`The surprise’s description has 1 to ${LIVE_SURPRISE_MAX} characters.`);
+  return t;
+}
+
 function cleanQuantityLine(v: unknown, quantity: number): string {
   if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return defaultQuantityLine(quantity);
   return oneLine(v, LIVE_QUANTITY_LINE_MAX, 'The quantity line');
+}
+
+/**
+ * An after-room's settings cleaned (null: none), as a release's own are: its model, its price, 1 to 24 sizes and their
+ * stock, at most 6 add-ons; its delay and length within their bounds, those of `base` (or the defaults) when omitted.
+ */
+export function cleanAfterRoom(v: unknown, base: AfterRoomSettings | null): AfterRoomSettings | null {
+  if (v === null) return null;
+  if (typeof v !== 'object' || v === undefined) throw validationError('An after-room has its model, its price and its sizes.');
+  const a = v as Partial<AfterRoomInput>;
+  return {
+    modelId: knownId(a.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')),
+    priceMinor: price(a.priceMinor, 'The after-room’s price'),
+    sizes: cleanSizes(a.sizes),
+    addons: a.addons === undefined ? (base?.addons ?? []) : cleanAddons(a.addons),
+    delayMinutes: wholeIn(
+      a.delayMinutes ?? base?.delayMinutes ?? AFTER_ROOM_DELAY_MINUTES.default,
+      AFTER_ROOM_DELAY_MINUTES.min,
+      AFTER_ROOM_DELAY_MINUTES.max,
+      `The after-room opens ${AFTER_ROOM_DELAY_MINUTES.min} to ${AFTER_ROOM_DELAY_MINUTES.max} minutes after the sell-out.`,
+    ),
+    lengthMinutes: wholeIn(
+      a.lengthMinutes ?? base?.lengthMinutes ?? AFTER_ROOM_LENGTH_MINUTES.default,
+      AFTER_ROOM_LENGTH_MINUTES.min,
+      AFTER_ROOM_LENGTH_MINUTES.max,
+      `The after-room is open ${AFTER_ROOM_LENGTH_MINUTES.min} to ${AFTER_ROOM_LENGTH_MINUTES.max} minutes.`,
+    ),
+  };
+}
+
+function cleanCombine(v: unknown): AccessCombine {
+  if (!(ACCESS_COMBINES as readonly unknown[]).includes(v)) throw validationError('The rules combine with AND (every one) or OR (any one).');
+  return v as AccessCombine;
+}
+
+/** The surprise a change gives: on with its description (400 without one), or off (its description kept for later). */
+function cleanSurprise(change: LiveSettingsChange, base: Settings | null): Pick<Settings, 'surpriseEnabled' | 'surpriseText'> {
+  const surpriseEnabled = change.surpriseEnabled !== undefined ? change.surpriseEnabled === true : (base?.surpriseEnabled ?? false);
+  const surpriseText = change.surpriseText !== undefined ? cleanSurpriseText(change.surpriseText) : (base?.surpriseText ?? null);
+  if (surpriseEnabled && !surpriseText) throw validationError('A surprise in every box needs its description: what goes in the box (internal).');
+  return { surpriseEnabled, surpriseText };
+}
+
+/** The question after a change gives: on or off (on by default), its words (both or neither: the default question), kept when it is turned off. */
+function cleanQuestion(change: LiveSettingsChange, base: Settings | null): Pick<Settings, 'questionEnabled' | 'questionText' | 'questionAnswers'> {
+  const questionEnabled = change.questionEnabled !== undefined ? change.questionEnabled === true : (base?.questionEnabled ?? true);
+  if (change.questionText === undefined && change.questionAnswers === undefined) {
+    return { questionEnabled, questionText: base?.questionText ?? null, questionAnswers: base?.questionAnswers ?? null };
+  }
+  const words = cleanQuestionWords(
+    change.questionText !== undefined ? change.questionText : (base?.questionText ?? null),
+    change.questionAnswers !== undefined ? change.questionAnswers : (base?.questionAnswers ?? null),
+  );
+  return { questionEnabled, questionText: words.text, questionAnswers: words.answers };
 }
 
 /** The settings a change gives, over the release's (or the defaults of a new one), each cleaned. */
@@ -333,6 +466,20 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
           ? null
           : knownId(change.accessCollectionId, () => notFound('Collection', 'COLLECTION_NOT_FOUND'))
         : (base?.accessCollectionId ?? null),
+    minParticipations:
+      change.minParticipations !== undefined
+        ? change.minParticipations === null
+          ? null
+          : wholeIn(change.minParticipations, LIVE_MIN_PARTICIPATIONS.min, LIVE_MIN_PARTICIPATIONS.max, `A release counts ${LIVE_MIN_PARTICIPATIONS.min} to ${LIVE_MIN_PARTICIPATIONS.max} releases taken part in.`)
+        : (base?.minParticipations ?? null),
+    accessSegmentId:
+      change.accessSegmentId !== undefined
+        ? change.accessSegmentId === null || change.accessSegmentId === ''
+          ? null
+          : knownId(change.accessSegmentId, () => notFound('Segment', 'SEGMENT_NOT_FOUND'))
+        : (base?.accessSegmentId ?? null),
+    accessCombine: cleanCombine(change.accessCombine !== undefined ? change.accessCombine : (base?.accessCombine ?? 'AND')),
+    ...cleanSurprise(change, base),
     sizes,
     quantityLine,
     addons: change.addons !== undefined ? cleanAddons(change.addons) : (base?.addons ?? []),
@@ -341,6 +488,14 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     nameAt: change.nameAt !== undefined ? optionalTime(change.nameAt, 'The name') : (base?.nameAt ?? null),
     photoAt: change.photoAt !== undefined ? optionalTime(change.photoAt, 'The photograph') : (base?.photoAt ?? null),
     tierWindows: change.tierWindows !== undefined ? cleanWindows(change.tierWindows) : (base?.tierWindows ?? []),
+    afterRoom: change.afterRoom !== undefined ? cleanAfterRoom(change.afterRoom, base?.afterRoom ?? null) : (base?.afterRoom ?? null),
+    stockLocationId:
+      change.stockLocationId !== undefined
+        ? change.stockLocationId === null || change.stockLocationId === ''
+          ? null
+          : knownId(change.stockLocationId, () => notFound('Location', 'STOCK_LOCATION_NOT_FOUND'))
+        : (base?.stockLocationId ?? null),
+    ...cleanQuestion(change, base),
   };
 }
 
@@ -388,6 +543,11 @@ function auditSettings(s: Settings): Record<string, unknown> {
     tierPriority: s.tierPriority,
     accessModelIds: s.accessModelIds,
     accessCollectionId: s.accessCollectionId,
+    minParticipations: s.minParticipations,
+    accessSegmentId: s.accessSegmentId,
+    accessCombine: s.accessCombine,
+    surpriseEnabled: s.surpriseEnabled,
+    surprise: storyFingerprint(s.surpriseText),
     sizes: s.sizes.map((x) => `${x.label}:${x.stock}`),
     quantityLine: s.quantityLine,
     addons: s.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
@@ -396,6 +556,31 @@ function auditSettings(s: Settings): Record<string, unknown> {
     nameAt: t(s.nameAt),
     photoAt: t(s.photoAt),
     tierWindows: s.tierWindows,
+    afterRoom: s.afterRoom
+      ? {
+          modelId: s.afterRoom.modelId,
+          priceMinor: s.afterRoom.priceMinor,
+          sizes: s.afterRoom.sizes.map((x) => `${x.label}:${x.stock}`),
+          addons: s.afterRoom.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
+          delayMinutes: s.afterRoom.delayMinutes,
+          lengthMinutes: s.afterRoom.lengthMinutes,
+        }
+      : null,
+    stockLocationId: s.stockLocationId,
+    questionEnabled: s.questionEnabled,
+    question: s.questionText ? { text: s.questionText, answers: s.questionAnswers } : null,
+  };
+}
+
+/** The rule of a release as its settings say it, every model and collection by its name (the console's own words). */
+function consoleRule(s: Settings, models: { id: string; name: string }[], collection: { id: string; name: string } | null): LiveAccessRule {
+  return {
+    minTier: Math.min(3, Math.max(0, s.minTier)) as 0 | 1 | 2 | 3,
+    models,
+    collection,
+    minParticipations: s.minParticipations,
+    segment: s.accessSegmentId !== null,
+    combine: s.accessCombine,
   };
 }
 
@@ -434,7 +619,29 @@ export interface AdminLiveRelease extends AdminLiveCard {
   perAccount: number;
   minTier: number;
   tierPriority: boolean;
-  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  /**
+   * Who may enter: the models and collection named, the releases taken part in (null: no such rule), the segment (its
+   * name: the console's only), how the rules combine, and every rule as the public reads it (`text`).
+   */
+  access: {
+    models: { id: string; name: string }[];
+    collection: { id: string; name: string } | null;
+    minParticipations: number | null;
+    segment: { id: string; name: string } | null;
+    combine: AccessCombine;
+    text: string;
+  };
+  /** A surprise in every box: on or off, and its description (internal: packing slips and work sheets). */
+  surprise: { enabled: boolean; text: string | null };
+  /**
+   * Where its orders hold or make their pieces: the location set (`locationId`, null: none, the default one) and the one
+   * it means now (an after-room's: its release's).
+   */
+  locationId: string | null;
+  /** Null only before the stock's first setup (no location yet). */
+  location: { id: string; name: string } | null;
+  /** The question after (plan LIVE RELEASE+, choice 11), its answers counted; null for an after-room, which asks none. */
+  question: AdminQuestion | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -459,6 +666,40 @@ export interface AdminLiveRelease extends AdminLiveCard {
   createdBy: { id: string; email: string } | null;
   /** SHA-256 of the sealed seed that orders the line within a tier (never revealed for a LIVE RELEASE). */
   seedHash: string;
+  /** Its after-room, set or opened; null without one (and for an after-room). */
+  afterRoom: AdminAfterRoom | null;
+  /** An after-room's own page: the release it follows; null for a release. */
+  afterRoomOf: { id: string; title: string } | null;
+}
+
+/**
+ * Where an after-room stands: WAITING for the release's sell-out (a DRAFT), OPENS (the sell-out passed, its T0 ahead),
+ * OPEN, OVER (ended, no turn or hold left), NOT_OPENED (cancelled: `skipped` says why).
+ */
+export type AfterRoomState = 'WAITING' | 'OPENS' | 'OPEN' | 'OVER' | 'NOT_OPENED';
+
+/** A release's after-room in the console: its settings, and once opened its times, guests and entries. */
+export interface AdminAfterRoom {
+  id: string;
+  model: { id: string; name: string; type: string; active: boolean };
+  priceMinor: number;
+  currency: string;
+  sizes: { id: string; label: string; stock: number }[];
+  quantity: number;
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  delayMinutes: number;
+  lengthMinutes: number;
+  state: AfterRoomState;
+  phase: LivePhase;
+  /** Once the sell-out opened it: its T0 (the door appears) and its close. */
+  opensAt: Date | null;
+  closesAt: Date | null;
+  endedReason: LiveEndReason | null;
+  /** Why it never opened (NOT_OPENED), else null. */
+  skipped: AfterRoomSkip | null;
+  /** The entries remembered at the sell-out. */
+  guests: number;
+  entries: Record<LiveEntryStatus, number>;
 }
 
 /** A size on the live board: its pieces, and its people by where they stand. */
@@ -511,28 +752,6 @@ export interface AdminLiveBoard {
   sellOut: LiveSellOut | null;
 }
 
-/** A confirmed reservation for ORBES Client Services; the routes mask the email for an AUDITOR. */
-export interface AdminLiveReservation {
-  id: string;
-  reference: string;
-  accountId: string;
-  /** As stored. */
-  email: string;
-  size: { id: string; label: string };
-  quantity: number;
-  currency: string;
-  /** Per piece. */
-  priceMinor: number;
-  addons: { id: string; label: string; priceMinor: number }[];
-  /** quantity × (price + the add-ons). */
-  totalMinor: number;
-  confirmedAt: Date;
-  resolution: LiveResolution | null;
-  note: string | null;
-  handledBy: { id: string; email: string } | null;
-  handledAt: Date | null;
-}
-
 const EMPTY_COUNTS = (): Record<LiveEntryStatus, number> => Object.fromEntries(LIVE_ENTRY_STATUSES.map((s) => [s, 0])) as Record<LiveEntryStatus, number>;
 
 type ReadRow = DropRow & { model_name: string; model_type: string; model_active: boolean };
@@ -548,6 +767,8 @@ export interface LiveConsoleServiceDeps {
   publicOrigin: string;
   /** The live board's alerts and sell-out forecast (LiveInsightsService.signals); without it, none. */
   insights?: { signals(d: DropRow, now: Date): Promise<LiveSignals> };
+  /** The question after's answers (services/question.ts); one of its own when none is given. */
+  questions?: QuestionService;
   clock?: Clock;
 }
 
@@ -557,6 +778,7 @@ export class LiveConsoleService {
   private readonly seedKey: Uint8Array;
   private readonly origin: string;
   private readonly insights: LiveConsoleServiceDeps['insights'];
+  private readonly questions: QuestionService;
   private readonly clock: Clock;
 
   constructor(deps: LiveConsoleServiceDeps) {
@@ -567,6 +789,7 @@ export class LiveConsoleService {
     this.origin = deps.publicOrigin;
     this.insights = deps.insights;
     this.clock = deps.clock ?? systemClock;
+    this.questions = deps.questions ?? new QuestionService({ db: deps.db, audit: deps.audit, clock: this.clock });
   }
 
   /** The boutique board's address for a link's secret: the secret in the fragment, never sent to a server. */
@@ -576,10 +799,10 @@ export class LiveConsoleService {
 
   // ── Reads ────────────────────────────────────────────────────────────────
 
-  /** Every LIVE RELEASE, the latest created first. */
+  /** Every LIVE RELEASE, the latest created first (an after-room is on its release's page, not listed on its own). */
   async list(page: PageRequest): Promise<Page<AdminLiveCard>> {
-    const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).where('mode', '=', 'LIVE').executeTakeFirstOrThrow();
-    const rows = await this.reads(this.db).where('d.mode', '=', 'LIVE').orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
+    const total = await this.db.selectFrom('drops').select((eb) => eb.fn.countAll<number>().as('n')).where('mode', '=', 'LIVE').where('parent_drop_id', 'is', null).executeTakeFirstOrThrow();
+    const rows = await this.reads(this.db).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const now = this.clock();
     const [counts, interest, open] = await Promise.all([this.counts(this.db, rows.map((r) => r.id)), this.interest(this.db, rows.map((r) => r.id)), this.openHolds(this.db, rows.map((r) => r.id))]);
     return makePage(
@@ -592,6 +815,19 @@ export class LiveConsoleService {
   /** One LIVE RELEASE (404 DROP_NOT_FOUND for anything else). */
   get(dropId: string): Promise<AdminLiveRelease> {
     return this.release(this.db, knownId(dropId, dropNotFound));
+  }
+
+  /**
+   * The feasibility check (plan LIVE RELEASE+, choice 12, K5; services/release-stock.ts): per size, the pieces on sale
+   * against the stock available at the release's location and the pieces being made for the stock there, its
+   * after-room's sizes after its own; what remains is made to order once sold. A warning, never a refusal: the console
+   * shows it before PUBLISH, and the publication records it. Read before the publication (a release published already
+   * holds pieces for its own orders).
+   */
+  async feasibility(dropId: string): Promise<Feasibility> {
+    const d = await this.liveRow(this.db, knownId(dropId, dropNotFound));
+    if (d.parent_drop_id) throw afterRoomOwn();
+    return this.checkFeasibility(this.db, d);
   }
 
   /**
@@ -703,47 +939,6 @@ export class LiveConsoleService {
     return makePage(items, Number(total.n), page);
   }
 
-  /** The confirmed reservations of a release, the earliest confirmed first (Client Services). */
-  async reservations(dropId: string, page: PageRequest): Promise<Page<AdminLiveReservation>> {
-    const id = knownId(dropId, dropNotFound);
-    await this.liveRow(this.db, id);
-    const total = await this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
-    return makePage(await this.reservationRows(this.db, id, { limit: page.pageSize, offset: pageOffset(page) }), Number(total.n), page);
-  }
-
-  /**
-   * Every confirmed reservation of a release as a CSV (render/csv.ts: RFC 4180, every field quoted, a formula never run):
-   * the reference, the account (its email as `email` gives it: masked for an AUDITOR by the route), the size, the pieces,
-   * the price, the add-ons, the total, the confirmation and its outcome.
-   */
-  async reservationsCsv(dropId: string, email: (stored: string) => string): Promise<{ filename: string; contentType: string; body: string }> {
-    const id = knownId(dropId, dropNotFound);
-    await this.liveRow(this.db, id);
-    const rows = await this.reservationRows(this.db, id, {});
-    const header = ['reference', 'entry', 'account', 'size', 'pieces', 'currency', 'price', 'add-ons', 'total', 'confirmed at', 'resolution', 'note', 'handled by', 'handled at'];
-    const body = csvDocument([
-      header,
-      ...rows.map((r) => [
-        r.reference,
-        r.id,
-        email(r.email),
-        r.size.label,
-        String(r.quantity),
-        r.currency,
-        majorUnits(r.priceMinor),
-        r.addons.map((a) => `${a.label} (${majorUnits(a.priceMinor)})`).join('; '),
-        majorUnits(r.totalMinor),
-        r.confirmedAt.toISOString(),
-        r.resolution ?? '',
-        r.note ?? '',
-        r.handledBy?.email ?? '',
-        r.handledAt ? r.handledAt.toISOString() : '',
-      ]),
-    ]);
-    const day = this.clock().toISOString().slice(0, 10);
-    return { filename: `ORBES-live-${id.slice(0, 8).toUpperCase()}-reservations-${day}.csv`, contentType: CSV_CONTENT_TYPE, body };
-  }
-
   /**
    * Which of these console sessions (SessionInfo.id) still open the console as sessionGuard would let them in, and
    * whether each reads the customers' emails in clear (OPERATOR, ADMIN) or masked (AUDITOR): one read for every console
@@ -779,10 +974,9 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       checkTimes(s, now, null);
-      const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', s.modelId).executeTakeFirst();
-      if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
-      if (!model.active) throw modelInactive();
+      await this.checkModel(tx, s.modelId);
       await this.checkAccess(tx, s);
+      if (s.afterRoom) await this.checkModel(tx, s.afterRoom.modelId);
       const id = randomUUID();
       const { sealed, seedHash } = newSealedSeed(this.seedKey, id);
       await tx
@@ -800,6 +994,7 @@ export class LiveConsoleService {
         })
         .execute();
       await this.writeLists(tx, id, s, null);
+      if (s.afterRoom) await this.saveAfterRoom(tx, { id, ...this.columns(s) }, s.afterRoom, admin, now);
       await this.audit.record({ actor, action: 'drop.live.create', targetType: 'drop', targetId: id, details: { ...auditSettings(s), seedHash: toHex(seedHash) } }, tx);
       return this.release(tx, id);
     });
@@ -812,11 +1007,12 @@ export class LiveConsoleService {
    * setting before and after; nothing changed, nothing written.
    */
   async update(dropId: string, change: LiveSettingsChange, actor: Actor): Promise<AdminLiveRelease> {
-    assertStaff(actor, 'change a release');
+    const admin = assertStaff(actor, 'change a release');
     const id = knownId(dropId, dropNotFound);
     return inTransaction(this.db, async (tx) => {
       const d = await this.lock(tx, id);
       const now = this.clock();
+      if (d.parent_drop_id) throw afterRoomOwn();
       if (d.cancelled_at) throw liveCancelled();
       if (isAnnounced(d, now)) throw liveAnnounced();
       const before = await this.settings(tx, d);
@@ -826,18 +1022,22 @@ export class LiveConsoleService {
       const b = auditSettings(after);
       // A list written again with other ids (sizes, add-ons sent as new) changes, even saying the same.
       const ids = (xs: readonly { id: string | null }[]) => JSON.stringify(xs.map((x) => x.id));
+      const listIds = (x: Settings['afterRoom']) => (x ? `${ids(x.sizes)}${ids(x.addons)}` : '');
       const changed = Object.keys(b).filter(
-        (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]) || (k === 'sizes' && ids(before.sizes) !== ids(after.sizes)) || (k === 'addons' && ids(before.addons) !== ids(after.addons)),
+        (k) =>
+          JSON.stringify(a[k]) !== JSON.stringify(b[k]) ||
+          (k === 'sizes' && ids(before.sizes) !== ids(after.sizes)) ||
+          (k === 'addons' && ids(before.addons) !== ids(after.addons)) ||
+          (k === 'afterRoom' && listIds(before.afterRoom) !== listIds(after.afterRoom)),
       );
       if (changed.length === 0) return this.release(tx, id);
-      if (after.modelId !== before.modelId) {
-        const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', after.modelId).executeTakeFirst();
-        if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
-        if (!model.active) throw modelInactive();
-      }
+      if (after.modelId !== before.modelId) await this.checkModel(tx, after.modelId);
+      if (after.afterRoom && after.afterRoom.modelId !== before.afterRoom?.modelId) await this.checkModel(tx, after.afterRoom.modelId);
       await this.checkAccess(tx, after);
       await tx.updateTable('drops').set(this.columns(after)).where('id', '=', id).execute();
       await this.writeLists(tx, id, after, before);
+      // The after-room follows: its own settings, and what it takes from the release (written again whatever changed).
+      await this.saveAfterRoom(tx, { id, ...this.columns(after) }, after.afterRoom, admin, now);
       const notes: AuditRecordInput[] = [
         {
           actor,
@@ -857,8 +1057,8 @@ export class LiveConsoleService {
    * Publish a DRAFT: announced at `announce_at` (at once when NULL), its stages each at its time. Refused once published
    * or cancelled, when the room would already be open, when a stage is no longer after the announcement, and for a model
    * no longer offered. With `circlePost`, a post of the owners' circle linking the release (LIVE_CIRCLE_TITLE, its times
-   * in Paris, its quantity and price, its rule), for its tier (TITANE at least), shown from the announcement. Audited
-   * `drop.live.publish` (and `circle.post.create`).
+   * in Paris, its quantity and price, its rule), for its tier (TITANE at least; every owner when OR opens it beyond the
+   * tier), shown from the announcement. Audited `drop.live.publish` (and `circle.post.create`).
    */
   async publish(dropId: string, opts: { circlePost?: boolean }, actor: Actor): Promise<AdminLiveRelease> {
     const admin = assertStaff(actor, 'publish a release');
@@ -866,11 +1066,19 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const d = await this.lock(tx, id);
       const now = this.clock();
+      if (d.parent_drop_id) throw afterRoomOwn();
       if (d.cancelled_at) throw liveCancelled();
       if (d.published_at) throw alreadyPublished();
-      checkTimes(await this.settings(tx, d), now, null);
+      const settings = await this.settings(tx, d);
+      checkTimes(settings, now, null);
       const model = await tx.selectFrom('models').select('active').where('id', '=', d.model_id).executeTakeFirstOrThrow();
       if (!model.active) throw modelInactive();
+      if (settings.afterRoom) {
+        const own = await tx.selectFrom('models').select('active').where('id', '=', settings.afterRoom.modelId).executeTakeFirstOrThrow();
+        if (!own.active) throw afterRoomModelInactive();
+      }
+      // The feasibility check, as the console showed it: recorded, never blocking (K5).
+      const feasible = await this.checkFeasibility(tx, d);
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const published = { ...d, published_at: now };
       const notes: AuditRecordInput[] = [];
@@ -906,6 +1114,11 @@ export class LiveConsoleService {
           opensAt: d.opens_at.toISOString(),
           closesAt: d.closes_at.toISOString(),
           circlePostId: postId,
+          locationId: feasible.location?.id ?? null,
+          toMakeToOrder: feasible.short,
+          shortSizes: [...feasible.sizes.map((l) => ({ l, after: false })), ...(feasible.afterRoom ?? []).map((l) => ({ l, after: true }))]
+            .filter((x) => x.l.short > 0)
+            .map((x) => `${x.after ? 'AFTER-ROOM ' : ''}${x.l.label}:${x.l.short}`),
         },
       });
       for (const n of notes) await this.audit.record(n, tx);
@@ -926,6 +1139,7 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const d = await this.lock(tx, id);
       const now = this.clock();
+      if (d.parent_drop_id) throw afterRoomOwn();
       if (d.cancelled_at) throw liveCancelled();
       if (!d.published_at) throw notPublished();
       if (isAnnounced(d, now)) throw liveAnnounced();
@@ -963,7 +1177,8 @@ export class LiveConsoleService {
 
   /**
    * Cancel a LIVE RELEASE before its room opens (409 LIVE_ROOM_OPEN after; DROP_CANCELLED twice): its page answers 404
-   * from then on, and a post of the circle not shown yet is withdrawn. Audited `drop.live.cancel`.
+   * from then on, a post of the circle not shown yet is withdrawn, and its after-room never opens. Audited
+   * `drop.live.cancel` (and `drop.live.after_room.skip`).
    */
   async cancel(dropId: string, actor: Actor): Promise<AdminLiveRelease> {
     assertStaff(actor, 'cancel a release');
@@ -971,9 +1186,12 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const d = await this.lock(tx, id);
       const now = this.clock();
+      if (d.parent_drop_id) throw afterRoomOwn();
       if (d.cancelled_at) throw liveCancelled();
       if (d.published_at && now.getTime() >= roomOpensAt(d).getTime()) throw roomOpen();
       await tx.updateTable('drops').set({ cancelled_at: now }).where('id', '=', id).execute();
+      const afterRoom: AuditRecordInput[] = [];
+      await cancelAfterRoom(tx, id, now, actor, afterRoom);
       const withdrawn = await tx
         .updateTable('circle_posts')
         .set({ published_at: null })
@@ -984,38 +1202,9 @@ export class LiveConsoleService {
       const interest = await tx.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow();
       await this.audit.record({ actor, action: 'drop.live.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, announced: isAnnounced(d, now), interest: Number(interest.n) } }, tx);
       for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
+      for (const n of afterRoom) await this.audit.record(n, tx);
       return this.release(tx, id);
     });
-  }
-
-  /**
-   * CONCLUDED or CANCELLED (ORBES Client Services, OPERATOR): a CONFIRMED reservation, once (409 LIVE_ALREADY_RESOLVED),
-   * with an optional note (at most LIVE_RESOLUTION_NOTE_MAX characters, kept with the entry, never in the audit log). A
-   * cancellation returns no piece to the line (the plan's choice 26). Audited `drop.live.resolve`.
-   */
-  async resolve(dropId: string, entryId: string, input: { resolution: LiveResolution; note?: string | null }, actor: Actor): Promise<AdminLiveReservation> {
-    const admin = assertStaff(actor, 'conclude a reservation');
-    const id = knownId(dropId, dropNotFound);
-    const eid = knownId(entryId, entryNotFound);
-    if (!(LIVE_RESOLUTIONS as readonly string[]).includes(input?.resolution)) throw validationError('A reservation is CONCLUDED or CANCELLED.');
-    const raw = input.note === null || input.note === undefined ? '' : String(input.note).replace(/\r\n?/g, '\n').trim();
-    const note = raw === '' ? null : raw;
-    if (note !== null && (note.length > LIVE_RESOLUTION_NOTE_MAX || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(note))) {
-      throw validationError(`A note has at most ${LIVE_RESOLUTION_NOTE_MAX} characters.`);
-    }
-    await inTransaction(this.db, async (tx) => {
-      await this.lock(tx, id);
-      const now = this.clock();
-      const e = await tx.selectFrom('live_entries').select(['id', 'status', 'resolution', 'confirmed_at']).where('id', '=', eid).where('drop_id', '=', id).forUpdate().executeTakeFirst();
-      if (!e) throw entryNotFound();
-      if (e.status !== 'CONFIRMED') throw notConfirmed();
-      if (e.resolution) throw alreadyResolved();
-      const at = e.confirmed_at && e.confirmed_at.getTime() > now.getTime() ? e.confirmed_at : now;
-      await tx.updateTable('live_entries').set({ resolution: input.resolution, resolution_note: note, handled_by: admin, handled_at: at }).where('id', '=', e.id).execute();
-      await this.audit.record({ actor, action: 'drop.live.resolve', targetType: 'drop', targetId: id, details: { entryId: e.id, resolution: input.resolution, ...(note !== null ? { noted: true } : {}) } }, tx);
-    });
-    const [r] = await this.reservationRows(this.db, id, { entryId: eid });
-    return r!;
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -1064,11 +1253,34 @@ export class LiveConsoleService {
       name_at: s.nameAt,
       photo_at: s.photoAt,
       access_collection_id: s.accessCollectionId,
+      min_participations: s.minParticipations,
+      access_segment_id: s.accessSegmentId,
+      access_combine: s.accessCombine,
+      surprise_enabled: s.surpriseEnabled,
+      surprise_text: s.surpriseText,
+      stock_location_id: s.stockLocationId,
+      question_enabled: s.questionEnabled,
+      question_text: s.questionText,
+      question_answers: s.questionAnswers,
     };
   }
 
-  /** The models and the collection a rule names exist (404 otherwise). */
+  /** A model a release (or its after-room) offers: known (404 MODEL_NOT_FOUND) and still offered (409 MODEL_INACTIVE). */
+  private async checkModel(tx: Db, modelId: string): Promise<void> {
+    const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
+    if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+    if (!model.active) throw modelInactive();
+  }
+
+  /**
+   * The models, the collection and the segment a rule names exist (404 otherwise). The segment is read FOR KEY SHARE: a
+   * deletion under way waits for this transaction and then finds it in use (409 SEGMENT_IN_USE), or this one waits for
+   * the deletion and finds it gone (404), never a foreign key refused.
+   */
   private async checkAccess(tx: Db, s: Settings): Promise<void> {
+    if (s.accessSegmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', s.accessSegmentId).forKeyShare().executeTakeFirst())) {
+      throw notFound('Segment', 'SEGMENT_NOT_FOUND');
+    }
     if (s.accessModelIds.length > 0) {
       const found = await tx.selectFrom('models').select('id').where('id', 'in', s.accessModelIds).execute();
       if (found.length !== s.accessModelIds.length) throw notFound('Model', 'MODEL_NOT_FOUND');
@@ -1076,6 +1288,8 @@ export class LiveConsoleService {
     if (s.accessCollectionId && !(await tx.selectFrom('collections').select('id').where('id', '=', s.accessCollectionId).executeTakeFirst())) {
       throw notFound('Collection', 'COLLECTION_NOT_FOUND');
     }
+    // A location is never deleted: known once, known for good.
+    if (s.stockLocationId) await knownLocation(tx, s.stockLocationId);
   }
 
   /**
@@ -1083,6 +1297,26 @@ export class LiveConsoleService {
    * points to a size or an add-on yet (an interest, an entry): a list is replaced, the ids it keeps kept.
    */
   private async writeLists(tx: Db, id: string, s: Settings, before: Settings | null): Promise<void> {
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    await this.writeOffer(tx, id, s, before);
+    if (!before || !same(before.accessModelIds, s.accessModelIds)) {
+      await tx.deleteFrom('live_access_models').where('drop_id', '=', id).execute();
+      if (s.accessModelIds.length) await tx.insertInto('live_access_models').values(s.accessModelIds.map((m) => ({ drop_id: id, model_id: m }))).execute();
+    }
+    if (!before || !same(before.tierWindows, s.tierWindows)) {
+      await tx.deleteFrom('live_tier_windows').where('drop_id', '=', id).execute();
+      if (s.tierWindows.length) {
+        await tx.insertInto('live_tier_windows').values(s.tierWindows.map((w) => ({ drop_id: id, tier: w.tier, turn_seconds: w.turnSeconds, pay_minutes: w.payMinutes }))).execute();
+      }
+    }
+  }
+
+  /**
+   * A release's (or an after-room's) sizes and add-ons, written again when they changed: a list is replaced, the ids it
+   * keeps kept (an id it names must be one of the release's: 400). Each size on sale is its model's SKU in that size
+   * (migration 0022): linked again when the sizes or the model change.
+   */
+  private async writeOffer(tx: Db, id: string, s: Pick<Settings, 'modelId' | 'sizes' | 'addons'>, before: Pick<Settings, 'modelId' | 'sizes' | 'addons'> | null): Promise<void> {
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     if (!before || !same(before.sizes, s.sizes)) {
       const known = new Set((before?.sizes ?? []).map((x) => x.id));
@@ -1093,6 +1327,7 @@ export class LiveConsoleService {
         .values(s.sizes.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, position: i + 1, stock: x.stock })))
         .execute();
     }
+    if (!before || !same(before.sizes, s.sizes) || before.modelId !== s.modelId) await linkDropSizes(tx, id, s.modelId);
     if (!before || !same(before.addons, s.addons)) {
       const known = new Set((before?.addons ?? []).map((x) => x.id));
       for (const x of s.addons) if (x.id && !known.has(x.id)) throw validationError('An add-on to keep is one of the release’s.');
@@ -1104,16 +1339,149 @@ export class LiveConsoleService {
           .execute();
       }
     }
-    if (!before || !same(before.accessModelIds, s.accessModelIds)) {
-      await tx.deleteFrom('live_access_models').where('drop_id', '=', id).execute();
-      if (s.accessModelIds.length) await tx.insertInto('live_access_models').values(s.accessModelIds.map((m) => ({ drop_id: id, model_id: m }))).execute();
-    }
-    if (!before || !same(before.tierWindows, s.tierWindows)) {
-      await tx.deleteFrom('live_tier_windows').where('drop_id', '=', id).execute();
-      if (s.tierWindows.length) {
-        await tx.insertInto('live_tier_windows').values(s.tierWindows.map((w) => ({ drop_id: id, tier: w.tier, turn_seconds: w.turnSeconds, pay_minutes: w.payMinutes }))).execute();
+  }
+
+  /** A release's (or an after-room's) sizes and add-ons as stored. */
+  private async offer(db: Db, id: string): Promise<Pick<Settings, 'sizes' | 'addons'>> {
+    const [sizes, addons] = await Promise.all([
+      db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
+      db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
+    ]);
+    return {
+      sizes: sizes.map((x) => ({ id: x.id, label: x.label, stock: x.stock })),
+      addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
+    };
+  }
+
+  /**
+   * The release's after-room as its settings say, before its announcement (the release's row FOR UPDATE, then the
+   * after-room's): none, removed when there is one (nothing points to an after-room before its release's sell-out); else
+   * created, a DRAFT with its own sealed seed, or changed: its own settings, and what it takes from the release written
+   * again (its title, turn and pay windows, pieces per person, currency; its times the latest it could open, from the
+   * release's close: the sell-out sets them). services/after-room.ts says the rest.
+   */
+  private async saveAfterRoom(
+    tx: Db,
+    parent: Pick<DropRow, 'id' | 'title' | 'closes_at' | 'turn_seconds' | 'pay_minutes' | 'per_account' | 'currency'>,
+    a: AfterRoomSettings | null,
+    createdBy: string | null,
+    now: Date,
+  ): Promise<void> {
+    const child = await tx.selectFrom('drops').select(['id', 'model_id']).where('parent_drop_id', '=', parent.id).forUpdate().executeTakeFirst();
+    if (!a) {
+      if (child) {
+        await tx.deleteFrom('live_addons').where('drop_id', '=', child.id).execute();
+        await tx.deleteFrom('drop_sizes').where('drop_id', '=', child.id).execute();
+        await tx.deleteFrom('drops').where('id', '=', child.id).execute();
       }
+      return;
     }
+    const quantity = a.sizes.reduce((n, x) => n + x.stock, 0);
+    const times = afterRoomTimes(parent.closes_at, a.delayMinutes, a.lengthMinutes);
+    const columns = {
+      model_id: a.modelId,
+      title: afterRoomTitle(parent.title),
+      description: null,
+      quantity,
+      opens_at: times.opensAt,
+      closes_at: times.closesAt,
+      live_min_tier: 0,
+      // Its line is the release's order, never drawn.
+      tier_priority: false,
+      room_opens_minutes: LIVE_ROOM_OPENS_MINUTES.min,
+      turn_seconds: parent.turn_seconds,
+      pay_minutes: parent.pay_minutes,
+      per_account: parent.per_account,
+      price_minor: a.priceMinor,
+      currency: parent.currency,
+      quantity_line: defaultQuantityLine(quantity),
+      after_room_delay_minutes: a.delayMinutes,
+      after_room_length_minutes: a.lengthMinutes,
+      surprise_enabled: false,
+      question_enabled: false,
+    };
+    let id: string;
+    if (child) {
+      id = child.id;
+      await tx.updateTable('drops').set(columns).where('id', '=', id).execute();
+    } else {
+      id = randomUUID();
+      const { sealed, seedHash } = newSealedSeed(this.seedKey, id);
+      await tx
+        .insertInto('drops')
+        .values({
+          id,
+          mode: 'LIVE',
+          parent_drop_id: parent.id,
+          seed_enc: sealed,
+          seed_hash: seedHash,
+          purchase_window_hours: PURCHASE_WINDOW_HOURS.default,
+          early_access_hours: 0,
+          created_by: createdBy,
+          created_at: now,
+          ...columns,
+        })
+        .execute();
+    }
+    await this.writeOffer(tx, id, a, child ? { modelId: child.model_id, ...(await this.offer(tx, id)) } : null);
+  }
+
+  /** A release's after-room settings as stored; null without one. */
+  private async afterRoomSettings(db: Db, parentId: string): Promise<AfterRoomSettings | null> {
+    const c = await db
+      .selectFrom('drops')
+      .select(['id', 'model_id', 'price_minor', 'after_room_delay_minutes', 'after_room_length_minutes'])
+      .where('parent_drop_id', '=', parentId)
+      .executeTakeFirst();
+    if (!c) return null;
+    return {
+      modelId: c.model_id,
+      priceMinor: c.price_minor ?? 0,
+      ...(await this.offer(db, c.id)),
+      delayMinutes: c.after_room_delay_minutes ?? AFTER_ROOM_DELAY_MINUTES.default,
+      lengthMinutes: c.after_room_length_minutes ?? AFTER_ROOM_LENGTH_MINUTES.default,
+    };
+  }
+
+  /** A release's after-room as the console reads it: its settings, where it stands, its guests and entries; null without one. */
+  private async adminAfterRoom(db: Db, parent: DropRow, now: Date): Promise<AdminAfterRoom | null> {
+    const c = await this.reads(db).where('d.parent_drop_id', '=', parent.id).executeTakeFirst();
+    if (!c) return null;
+    const [offer, counts, guests, holding] = await Promise.all([
+      this.offer(db, c.id),
+      this.counts(db, [c.id]),
+      db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', c.id).executeTakeFirstOrThrow(),
+      this.openHolds(db, [c.id]),
+    ]);
+    const opened = c.published_at !== null && c.cancelled_at === null;
+    const state: AfterRoomState = c.cancelled_at
+      ? 'NOT_OPENED'
+      : !c.published_at
+        ? 'WAITING'
+        : c.ended_at !== null && !holding.has(c.id)
+          ? 'OVER'
+          : now.getTime() < c.opens_at.getTime()
+            ? 'OPENS'
+            : 'OPEN';
+    return {
+      id: c.id,
+      model: { id: c.model_id, name: c.model_name, type: c.model_type, active: c.model_active },
+      priceMinor: c.price_minor ?? 0,
+      currency: c.currency ?? 'EUR',
+      sizes: offer.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
+      quantity: c.quantity,
+      addons: offer.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
+      delayMinutes: c.after_room_delay_minutes ?? AFTER_ROOM_DELAY_MINUTES.default,
+      lengthMinutes: c.after_room_length_minutes ?? AFTER_ROOM_LENGTH_MINUTES.default,
+      state,
+      phase: livePhase(c, now),
+      opensAt: opened ? c.opens_at : null,
+      closesAt: opened ? c.closes_at : null,
+      endedReason: c.ended_reason,
+      skipped: c.cancelled_at ? (parent.cancelled_at ? 'CANCELLED' : parent.ended_reason === 'SOLD_OUT' ? 'NO_GUESTS' : 'NOT_SOLD_OUT') : null,
+      guests: Number(guests.n),
+      entries: counts.get(c.id) ?? EMPTY_COUNTS(),
+    };
   }
 
   /** A release's settings as stored. */
@@ -1140,6 +1508,11 @@ export class LiveConsoleService {
       tierPriority: d.tier_priority ?? true,
       accessModelIds: models.map((m) => m.model_id),
       accessCollectionId: d.access_collection_id,
+      minParticipations: d.min_participations ?? null,
+      accessSegmentId: d.access_segment_id ?? null,
+      accessCombine: d.access_combine ?? 'AND',
+      surpriseEnabled: d.surprise_enabled === true,
+      surpriseText: d.surprise_text ?? null,
       sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
       quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
@@ -1148,12 +1521,18 @@ export class LiveConsoleService {
       nameAt: d.name_at,
       photoAt: d.photo_at,
       tierWindows: windows.map((w) => ({ tier: w.tier, turnSeconds: w.turn_seconds, payMinutes: w.pay_minutes })),
+      afterRoom: await this.afterRoomSettings(db, d.id),
+      stockLocationId: d.stock_location_id ?? null,
+      questionEnabled: d.question_enabled !== false,
+      questionText: d.question_text ?? null,
+      questionAnswers: d.question_answers ?? null,
     };
   }
 
   /**
    * The release's post of the circle, as the publication writes it: shown from the announcement (now when it is
-   * already due), for the release's tier (TITANE at least: the circle is the owners'), its words from the times,
+   * already due), for the release's tier (TITANE at least: the circle is the owners'), or for every owner when the rules
+   * combine by OR and the tier is not the only one (the tier then no longer limits who may enter), its words from the times,
    * quantity line, price and rule (a model of the rule that is the release's own says « this model », its collection
    * « this model’s collection »: the post never names the piece).
    */
@@ -1168,7 +1547,9 @@ export class LiveConsoleService {
       `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${liveMoney(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText(rule)}.`,
     ].join('\n\n');
     const announced = announcedAt(d) ?? now;
-    return { body, minTier: Math.max(1, d.live_min_tier ?? 0), at: announced.getTime() > now.getTime() ? announced : now };
+    const widened = d.access_combine === 'OR' && (rule.models.length > 0 || rule.collection !== null || !!rule.minParticipations || rule.segment);
+    const minTier = widened ? 1 : Math.max(1, d.live_min_tier ?? 0);
+    return { body, minTier, at: announced.getTime() > now.getTime() ? announced : now };
   }
 
   /** The posts the publication scheduled (linking the release, not shown yet), kept in step with its new settings. */
@@ -1240,26 +1621,60 @@ export class LiveConsoleService {
     };
   }
 
+  /** Where a release's orders hold or make their pieces: the location it names (an after-room: its release's), else the default; null before any location exists. */
+  private async locationOf(db: Db, d: Pick<DropRow, 'stock_location_id' | 'parent_drop_id'>): Promise<{ id: string; name: string } | null> {
+    const set = d.parent_drop_id
+      ? ((await db.selectFrom('drops').select('stock_location_id').where('id', '=', d.parent_drop_id).executeTakeFirst())?.stock_location_id ?? null)
+      : d.stock_location_id;
+    const row = await db
+      .selectFrom('stock_locations')
+      .select(['id', 'name'])
+      .$if(set !== null, (q) => q.where('id', '=', set!))
+      .$if(set === null, (q) => q.where('is_default', '=', true))
+      .executeTakeFirst();
+    return row ?? null;
+  }
+
+  /** A release's (or an after-room's) sizes as the feasibility check reads them: each with its SKU and its pieces on sale. */
+  private async sizesOnSale(db: Db, dropId: string): Promise<FeasibilitySize[]> {
+    const rows = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'sku_id']).where('drop_id', '=', dropId).orderBy('position').execute();
+    return rows.map((r) => ({ sizeId: r.id, label: r.label, skuId: r.sku_id, onSale: r.stock }));
+  }
+
+  private async checkFeasibility(db: Db, d: DropRow): Promise<Feasibility> {
+    const location = await this.locationOf(db, d);
+    const child = d.parent_drop_id ? undefined : await db.selectFrom('drops').select('id').where('parent_drop_id', '=', d.id).where('cancelled_at', 'is', null).executeTakeFirst();
+    const [sizes, afterRoom] = await Promise.all([this.sizesOnSale(db, d.id), child ? this.sizesOnSale(db, child.id) : Promise.resolve(null)]);
+    const skus = [...sizes, ...(afterRoom ?? [])].map((x) => x.skuId).filter((x): x is string => x !== null);
+    return feasibilityCheck({ location, sizes, afterRoom, supply: location ? await stockSupply(db, skus, location.id) : new Map() });
+  }
+
   private async release(db: Db, id: string): Promise<AdminLiveRelease> {
     const r = await this.reads(db).where('d.id', '=', id).where('d.mode', '=', 'LIVE').executeTakeFirst();
     if (!r) throw dropNotFound();
     const now = this.clock();
-    const [s, counts, interest, holding, models, collection, posts, creator] = await Promise.all([
+    const [s, counts, interest, holding, models, collection, segment, posts, creator, afterRoom, parent, location, question] = await Promise.all([
       this.settings(db, r),
       this.counts(db, [id]),
       this.interest(db, [id]),
       this.openHolds(db, [id]),
       db.selectFrom('live_access_models as a').innerJoin('models as m', 'm.id', 'a.model_id').select(['m.id', 'm.name']).where('a.drop_id', '=', id).orderBy('m.name').orderBy('m.id').execute(),
       r.access_collection_id ? db.selectFrom('collections').select(['id', 'name']).where('id', '=', r.access_collection_id).executeTakeFirst() : undefined,
+      r.access_segment_id ? db.selectFrom('segments').select(['id', 'name']).where('id', '=', r.access_segment_id).executeTakeFirst() : undefined,
       db.selectFrom('circle_posts').select(['id', 'published_at']).where('drop_id', '=', id).orderBy('created_at').orderBy('id').execute(),
       r.created_by ? db.selectFrom('admin_users').select(['id', 'email']).where('id', '=', r.created_by).executeTakeFirst() : undefined,
+      r.parent_drop_id ? Promise.resolve(null) : this.adminAfterRoom(db, r, now),
+      r.parent_drop_id ? db.selectFrom('drops').select(['id', 'title']).where('id', '=', r.parent_drop_id).executeTakeFirst() : undefined,
+      this.locationOf(db, r),
+      r.parent_drop_id ? Promise.resolve(null) : this.questions.tally(r, db),
     ]);
     const stages = liveStages(r, now);
     const silhouette = r.silhouette_sha256 ? { sha256: r.silhouette_sha256, url: mediaUrl(r.silhouette_sha256)! } : null;
     return {
       ...this.card(r, now, counts.get(id), interest.get(id) ?? 0, holding.has(id)),
       description: r.description,
-      editable: !r.cancelled_at && !isAnnounced(r, now),
+      // An after-room is set with its release, never on its own.
+      editable: !r.cancelled_at && !isAnnounced(r, now) && !r.parent_drop_id,
       roomOpensMinutes: s.roomOpensMinutes,
       turnSeconds: s.turnSeconds,
       payMinutes: s.payMinutes,
@@ -1269,8 +1684,15 @@ export class LiveConsoleService {
       access: {
         models,
         collection: collection ?? null,
-        text: liveRuleText({ minTier: Math.min(3, Math.max(0, s.minTier)) as 0 | 1 | 2 | 3, models, collection: collection ?? null }),
+        minParticipations: s.minParticipations,
+        segment: segment ?? null,
+        combine: s.accessCombine,
+        text: liveRuleText(consoleRule(s, models, collection ?? null)),
       },
+      surprise: { enabled: s.surpriseEnabled, text: s.surpriseText },
+      locationId: s.stockLocationId,
+      location,
+      question,
       sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
       addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
       tierWindows: s.tierWindows,
@@ -1290,6 +1712,8 @@ export class LiveConsoleService {
       createdAt: r.created_at,
       createdBy: creator ?? null,
       seedHash: toHex(r.seed_hash),
+      afterRoom,
+      afterRoomOf: parent ?? null,
     };
   }
 
@@ -1332,54 +1756,5 @@ export class LiveConsoleService {
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
     }));
-  }
-
-  private async reservationRows(db: Db, dropId: string, o: { limit?: number; offset?: number; entryId?: string }): Promise<AdminLiveReservation[]> {
-    let q = db
-      .selectFrom('live_entries as e')
-      .innerJoin('drops as d', 'd.id', 'e.drop_id')
-      .innerJoin('accounts as a', 'a.id', 'e.account_id')
-      .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
-      .leftJoin('admin_users as h', 'h.id', 'e.handled_by')
-      .select([
-        'e.id', 'e.account_id', 'a.email', 'e.size_id', 's.label', 'e.quantity', 'd.price_minor', 'd.currency', 'e.confirmed_at', 'e.resolution', 'e.resolution_note',
-        'e.handled_by', 'h.email as handled_email', 'e.handled_at',
-      ])
-      .where('e.drop_id', '=', dropId)
-      .where('e.status', '=', 'CONFIRMED');
-    if (o.entryId) q = q.where('e.id', '=', o.entryId);
-    q = q.orderBy('e.confirmed_at').orderBy('e.id');
-    if (o.limit !== undefined) q = q.limit(o.limit).offset(o.offset ?? 0);
-    const rows = await q.execute();
-    const addons = rows.length
-      ? await db
-          .selectFrom('live_entry_addons as x')
-          .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
-          .select(['x.entry_id', 'l.id', 'l.label', 'x.price_minor'])
-          .where('x.entry_id', 'in', rows.map((r) => r.id))
-          .orderBy('l.position')
-          .execute()
-      : [];
-    return rows.map((r) => {
-      const own = addons.filter((a) => a.entry_id === r.id).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor }));
-      const unit = (r.price_minor ?? 0) + own.reduce((n, a) => n + a.priceMinor, 0);
-      return {
-        id: r.id,
-        reference: liveReference(r.id),
-        accountId: r.account_id,
-        email: r.email,
-        size: { id: r.size_id, label: r.label },
-        quantity: r.quantity,
-        currency: r.currency ?? 'EUR',
-        priceMinor: r.price_minor ?? 0,
-        addons: own,
-        totalMinor: r.quantity * unit,
-        confirmedAt: r.confirmed_at!,
-        resolution: r.resolution,
-        note: r.resolution_note,
-        handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
-        handledAt: r.handled_at,
-      };
-    });
   }
 }

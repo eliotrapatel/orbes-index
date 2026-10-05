@@ -61,7 +61,8 @@
  * rank: anyone can check the order from the seed.
  *
  * After the draw, the console (OPERATOR, under the drop's lock): CONFIRMED
- * (the sale concluded by ORBES Client Services), LAPSED (only once
+ * (the sale concluded by ORBES Client Services, its order created in the same
+ * transaction: services/orders.ts orderForDrawEntry), LAPSED (only once
  * `respond_by` has passed: 409 before), and OFFER NEXT (the first of the
  * waiting list by rank, only while SELECTED and CONFIRMED stay under
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
@@ -94,6 +95,7 @@ import type { AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -399,11 +401,10 @@ export interface DropSheet extends DropCard {
   seedHash: string;
   /** The 32-byte seed in hexadecimal, once drawn (never before). */
   seed: string | null;
-  /** The entries that took part in the draw (each has a rank), once drawn; null before. */
-  entries: number | null;
   /**
    * P-X02: the places reserved directly during the early access that are held or sold (SELECTED, CONFIRMED): before
-   * the draw, `quantity` less this is what remains; at `quantity`, the drop is full.
+   * the draw, `quantity` less this is what remains; at `quantity`, the drop is full. 0 once drawn: the release is over,
+   * and its page says no end figure (plan LIVE RELEASE+, choice 5 and decision 30), nor how many took part.
    */
   reserved: number;
 }
@@ -695,12 +696,18 @@ export class DropService {
 
   // ── Public ───────────────────────────────────────────────────────────────
 
-  /** The published drops, the latest opening first (DROP_LIST_LIMIT): a DRAFT never, a cancelled one as CANCELLED. */
+  /**
+   * The published drops still to come or under way (THE RELEASES' LIVE tab: UPCOMING, OPEN, CLOSED), the latest opening
+   * first (DROP_LIST_LIMIT): never a DRAFT, nor a cancelled one; once drawn, a drop is in THE RELEASES' PAST
+   * (services/past-releases.ts), its page unchanged.
+   */
   async listPublic(): Promise<DropCard[]> {
     const now = this.clock();
     const rows = await this.reads(this.db)
       .where('d.published_at', 'is not', null)
       .where('d.mode', '=', 'DRAW')
+      .where('d.drawn_at', 'is', null)
+      .where('d.cancelled_at', 'is', null)
       .orderBy('d.opens_at', 'desc')
       .orderBy('d.id')
       .limit(DROP_LIST_LIMIT)
@@ -714,19 +721,8 @@ export class DropService {
     const now = this.clock();
     const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
     if (!r) throw dropNotFound();
-    const drawn = r.drawn_at
-      ? Number(
-          (
-            await this.db
-              .selectFrom('drop_entries')
-              .select((eb) => eb.fn.countAll<number>().as('n'))
-              .where('drop_id', '=', id)
-              .where('rank', 'is not', null)
-              .executeTakeFirstOrThrow()
-          ).n,
-        )
-      : null;
-    const reserved = (await this.tallies(this.db, [id])).get(id)?.reserved ?? 0;
+    // Drawn, the release is over: no end figure (plan LIVE RELEASE+, choice 5), the places reserved directly no longer counted.
+    const reserved = r.drawn_at ? 0 : ((await this.tallies(this.db, [id])).get(id)?.reserved ?? 0);
     return {
       ...this.card(r, now),
       description: r.description,
@@ -736,7 +732,6 @@ export class DropService {
       drawnAt: r.drawn_at,
       seedHash: toHex(r.seed_hash),
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
-      entries: drawn,
       reserved,
     };
   }
@@ -1177,7 +1172,11 @@ export class DropService {
     );
   }
 
-  /** CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held; never on a cancelled release (409 DROP_CANCELLED). OPERATOR; audited `drop.entry.confirm`. */
+  /**
+   * CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held; never on a cancelled release
+   * (409 DROP_CANCELLED). Its order is created in the same transaction, RESERVED at the drop's location, its size and
+   * price to be entered (services/orders.ts orderForDrawEntry). OPERATOR; audited `drop.entry.confirm` and `order.create`.
+   */
   confirm(dropId: string, entryId: string, note: string | null, actor: Actor): Promise<AdminDropEntry> {
     return this.conclude(dropId, entryId, 'CONFIRMED', note, actor);
   }
@@ -1238,16 +1237,18 @@ export class DropService {
       if (e.status !== 'SELECTED') throw entryNotSelected();
       if (to === 'LAPSED' && e.respond_by && now.getTime() < e.respond_by.getTime()) throw placeHeld(e.respond_by);
       await tx.updateTable('drop_entries').set({ status: to, handled_by: actor.id!, handled_at: now, note: text }).where('id', '=', e.id).execute();
+      const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, notes: [] };
       await this.audit.record(
         {
           actor,
           action: to === 'CONFIRMED' ? 'drop.entry.confirm' : 'drop.entry.lapse',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: e.id, rank: e.rank, ...(text !== null ? { noted: true } : {}) },
+          details: { entryId: e.id, rank: e.rank, ...(text !== null ? { noted: true } : {}), ...(order.order ? { orderId: order.order.id } : {}) },
         },
         tx,
       );
+      for (const n of order.notes) await this.audit.record(n, tx);
     });
     return this.adminEntry(id, entry);
   }

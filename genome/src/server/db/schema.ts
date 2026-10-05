@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0021) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0023) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -21,11 +21,19 @@ import type { ActorType } from '../types.js';
 
 // ── Enumerations ───────────────────────────────────────────────────────────
 
+/**
+ * RESERVED (migration 0022, L6): an ORBES identity reserved for a piece to make, printed on the atelier's work sheet but
+ * not issued; /verify answers it as an unknown code. Never written in product_status_history (PRODUCT_HISTORY_STATUSES):
+ * its lifecycle starts when the atelier issues it, or when its order is cancelled (RETIRED).
+ */
 export const PRODUCT_STATUSES = [
-  'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
+  'RESERVED', 'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
   'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN',
 ] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
+
+/** The statuses product_status_history records (its CHECKs, those of migration 0001): every status but RESERVED. */
+export const PRODUCT_HISTORY_STATUSES = PRODUCT_STATUSES.filter((s): s is Exclude<ProductStatus, 'RESERVED'> => s !== 'RESERVED');
 
 export const OWNERSHIP_STATES = ['UNREGISTERED', 'REGISTERED', 'OWNED', 'TRANSFER_PENDING'] as const;
 export type OwnershipState = (typeof OWNERSHIP_STATES)[number];
@@ -166,6 +174,57 @@ export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
 export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
 export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 
+/**
+ * How a request of the private salon was closed (shop_requests.outcome, migration 0022): ACCEPTED (the sale concluded:
+ * an order follows) or DECLINED. NULL for a request closed before 0022.
+ */
+export const SHOP_REQUEST_OUTCOMES = ['ACCEPTED', 'DECLINED'] as const;
+export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
+
+/**
+ * The channel an order comes from (orders.channel, migration 0022): an entry of a LIVE RELEASE CONFIRMED, an entry of a
+ * draw confirmed by Client Services, a request of the private salon closed as ACCEPTED.
+ */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
+/**
+ * The steps of an order (orders.status, migration 0022): RESERVED → PAID → SHIPPED → DELIVERED; CANCELLED from RESERVED
+ * or PAID; RETURNED from SHIPPED or DELIVERED (services/orders.ts ORDER_TRANSITIONS).
+ */
+export const ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** What an order RESERVED or PAID holds at its location (orders.reservation, migration 0022): a piece in stock, or a piece to make. */
+export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
+export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
+
+/**
+ * Why the stock of a SKU moved at a location (stock_movements.reason, migration 0022): a piece finished by the atelier
+ * (+1), a count corrected (±), the two halves of a transfer, an order shipped (−1) or returned to stock (+1).
+ */
+export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED'] as const;
+export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
+
+/** A piece to make at the atelier (bench_items.status, migration 0022): TO_MAKE → IN_PROGRESS → DONE, or CANCELLED. */
+export const BENCH_ITEM_STATUSES = ['TO_MAKE', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
+export type BenchItemStatus = (typeof BENCH_ITEM_STATUSES)[number];
+
+/** Where a returned order's piece goes (returns.outcome, migration 0022): back to stock at a location, or to the archive. */
+export const RETURN_OUTCOMES = ['RESTOCKED', 'ARCHIVED'] as const;
+export type ReturnOutcome = (typeof RETURN_OUTCOMES)[number];
+
+/** An invoice, or the credit note that follows one (invoices.kind, migration 0022). */
+export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+
+/**
+ * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
+ * one of them (OR). NULL on a LIVE drop: AND.
+ */
+export const ACCESS_COMBINES = ['AND', 'OR'] as const;
+export type AccessCombine = (typeof ACCESS_COMBINES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -251,6 +310,11 @@ export interface ModelsTable {
   price_label: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0020: the lowest tier a RESERVED model is shown to, 1 TITANE (default), 2 PLATINE, 3 PALLADIUM. */
   private_min_tier: WithDefault<number>;
+  /** Migration 0022 (N2): the model's base price in minor units, with `base_currency` (both or neither); releases keep their own. */
+  base_price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  base_currency: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0022 (M6): the model's care guide, 1..8 000 characters. */
+  care_guide: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
 }
 
@@ -288,6 +352,8 @@ export interface ProductsTable {
   claim_secret_hash: string | null;
   /** Migration 0012: the photograph of this piece (media_objects.sha256), taken at issuance and shown on its authentic results. */
   photo_sha256: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0022: its SKU (skus.id, of its model); NULL until linked. */
+  sku_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -363,6 +429,8 @@ export interface AccountsTable {
   failed_logins_since: TimestampNullable;
   /** After an assisted recovery, new transfers out of the account are paused until then (migration 0005). */
   transfers_frozen_until: TimestampNullable;
+  /** The Shopify customer it will be, matched by email once the store exists (migration 0022, N3; decimal, unique). */
+  shopify_customer_id: string | null;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -669,6 +737,29 @@ export interface DropsTable {
   /** SHA-256 of the boutique board's link secret, 32 bytes, unique; with the time it was issued. */
   board_token_hash: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
   board_token_issued_at: TimestampNullable;
+  /** Migration 0022: the release's default location (stock_locations.id); NULL: the default location. */
+  stock_location_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0023, LIVE only (NULL for a DRAW). An after-room (A3): the release it follows, one per release; a DRAFT
+   * until the parent's sell-out, then published for the guests remembered at it, or cancelled.
+   */
+  parent_drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** An after-room's: opens 1..60 minutes after the parent's sell-out (10 by default), open 5..120 minutes (15). */
+  after_room_delay_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  after_room_length_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  /** A4: one surprise in every box, its description internal (1..500 characters, required once enabled); false for an after-room. */
+  surprise_enabled: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  surprise_text: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A5: the releases (1..100) a collector has taken part in to enter. */
+  min_participations: ColumnType<number | null, number | null | undefined, number | null>;
+  /** N5: the segment whose members may enter (segments.id). */
+  access_segment_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** How every access rule of the release combines; NULL: AND. */
+  access_combine: ColumnType<AccessCombine | null, AccessCombine | null | undefined, AccessCombine | null>;
+  /** G4: the question after; its text (1..120 characters) and answers (2..6) both or neither (neither: the default); false for an after-room. */
+  question_enabled: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  question_text: ColumnType<string | null, string | null | undefined, string | null>;
+  question_answers: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
 }
 
 /**
@@ -720,6 +811,8 @@ export interface CirclePostsTable {
   published_at: TimestampNullable;
   created_by: string | null;           // admin_users.id; null when a script created it
   created_at: TimestampDefault;
+  /** Migration 0023 (N5): shown to a segment's members only (segments.id); null: to the tier. */
+  segment_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
@@ -782,6 +875,8 @@ export interface ShopRequestsTable {
   handled_by: string | null;           // admin_users.id
   handled_at: TimestampNullable;
   resolution_note: string | null;      // ≤ 2 000 characters, the console's
+  /** Migration 0022: ACCEPTED (an order follows) or DECLINED, set when CLOSED; NULL for one closed before. */
+  outcome: ColumnType<ShopRequestOutcome | null, ShopRequestOutcome | null | undefined, ShopRequestOutcome | null>;
 }
 
 /**
@@ -794,6 +889,8 @@ export interface DropSizesTable {
   label: string;
   position: number;                    // smallint 1..24
   stock: number;                       // integer 0..10 000
+  /** Migration 0022: the SKU on sale (skus.id, the release's model in this size); NULL until linked. */
+  sku_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -885,6 +982,261 @@ export interface LiveTierWindowsTable {
   tier: number;                        // smallint 0..3
   turn_seconds: number | null;         // 10..300
   pay_minutes: number | null;          // 1..60
+}
+
+/**
+ * A place where pieces are kept (migration 0022, L8): FRANCE WAREHOUSE and LOGISTICS WAREHOUSE from the first boot, more
+ * added by the console. `is_default`: draws and the private salon's orders go there when nothing else names a location
+ * (one at most). id and created_at never change.
+ */
+export interface StockLocationsTable {
+  id: Generated<string>;
+  name: string;                        // 1..60 characters, unique whatever the case
+  is_default: WithDefault<boolean>;
+  /** The Shopify location it will be (decimal), unique. */
+  shopify_location_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+}
+
+/**
+ * A model in one size (migration 0022): one per model and size label (NULL: one size), its code and its future Shopify
+ * ids. No stock column: the stock is the ledger's (stock_movements). id, model_id, size_label and created_at never change.
+ */
+export interface SkusTable {
+  id: Generated<string>;
+  model_id: string;
+  size_label: string | null;           // 1..100 characters
+  code: string;                        // the model's SKU prefix and the size (issuance.ts deriveSku), unique
+  shopify_product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  shopify_variant_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+}
+
+/**
+ * The stock ledger (migration 0022): a delta of a SKU at a location and why, append-only. The balance of a (SKU,
+ * location) is the sum of its deltas (services/stock.ts).
+ */
+export interface StockMovementsTable {
+  id: Generated<number>;               // bigint identity: the ledger's order
+  sku_id: string;
+  location_id: string;
+  delta: number;                       // ±1..10 000, never 0
+  reason: StockMovementReason;
+  order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The two halves of a transfer share it. */
+  transfer_id: ColumnType<string | null, string | null | undefined, string | null>;
+  note: ColumnType<string | null, string | null | undefined, string | null>;
+  actor_type: ActorType;
+  actor_id: string | null;
+  created_at: TimestampDefault;
+}
+
+/** A minimum of a SKU at a location (migration 0022, L2): below it, the atelier is told what to make. */
+export interface SkuThresholdsTable {
+  sku_id: string;
+  location_id: string;
+  minimum: number;                     // 1..10 000
+  updated_by: string | null;           // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/** A carrier (migration 0022, M1): its tracking link, https with `{tracking}` where the number goes. id and created_at never change. */
+export interface CarriersTable {
+  id: Generated<string>;
+  name: string;                        // 1..60 characters, unique whatever the case
+  tracking_url: string;
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+}
+
+/** An add-on of an order, as it was sold (orders.addons). */
+export interface OrderAddonSnapshot {
+  [key: string]: JsonValue;
+  /** live_addons.id of the release's add-on. */
+  id: string;
+  label: string;
+  /** Per piece, in the order's currency. */
+  priceMinor: number;
+}
+
+/**
+ * An order (migration 0022, E5): one per piece sold, from its channel's source, step by step; each status with the
+ * columns it requires (the CHECKs of the migration). Its identity (id, channel, source, release, account, model,
+ * reserved_at) never changes. The buyer's name and address are personal data: never in the audit log nor the journal.
+ */
+export interface OrdersTable {
+  id: Generated<string>;
+  channel: OrderChannel;
+  live_entry_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The piece of a LIVE entry, 1..its quantity; 1 for the other channels. */
+  piece: WithDefault<number>;
+  drop_entry_id: ColumnType<string | null, string | null | undefined, string | null>;
+  shop_request_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The release of a LIVE or DRAW order; NULL for the private salon. */
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  account_id: string;
+  model_id: string;
+  size_label: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A SKU of the model; NULL while a draw's or a salon's size is not entered. */
+  sku_id: ColumnType<string | null, string | null | undefined, string | null>;
+  price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  addons: Jsonb<OrderAddonSnapshot[], true>;
+  surprise: ColumnType<string | null, string | null | undefined, string | null>;
+  engraving_text: ColumnType<string | null, string | null | undefined, string | null>;
+  buyer_name: ColumnType<string | null, string | null | undefined, string | null>;
+  buyer_address: ColumnType<string | null, string | null | undefined, string | null>;
+  status: WithDefault<OrderStatus>;
+  reserved_at: TimestampDefault;
+  paid_at: TimestampNullable;
+  shipped_at: TimestampNullable;
+  delivered_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  returned_at: TimestampNullable;
+  location_id: string;
+  /** What it holds at its location while RESERVED or PAID; NULL otherwise. */
+  reservation: ColumnType<OrderReservation | null, OrderReservation | null | undefined, OrderReservation | null>;
+  carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  tracking_number: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The value insured, in the order's currency. */
+  declared_value_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  /** The piece that fulfils it. */
+  product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  shopify_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/** An order's history (migration 0022), append-only: each change as its audit action, the status after it, a note, who. */
+export interface OrderEventsTable {
+  id: Generated<number>;               // bigint identity
+  order_id: string;
+  action: string;                      // order.create, order.pay…
+  status: OrderStatus;
+  note: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 500 characters
+  details: Jsonb<JsonObject, true>;
+  actor_type: ActorType;
+  actor_id: string | null;
+  created_at: TimestampDefault;
+}
+
+/**
+ * A piece to make at the atelier (migration 0022, G1), for an order or for the stock, with its ORBES identity reserved
+ * at creation (L6). id, order_id, sku_id, drop_id, product_id and created_at never change.
+ */
+export interface BenchItemsTable {
+  id: Generated<string>;
+  order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  sku_id: string;
+  /** Where the finished piece goes; it moves with its order. */
+  location_id: string;
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Its reserved identity (products.id, RESERVED until issued). */
+  product_id: string;
+  status: WithDefault<BenchItemStatus>;
+  engraving_text: ColumnType<string | null, string | null | undefined, string | null>;
+  surprise: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+  started_at: TimestampNullable;
+  done_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+}
+
+/** An order returned (migration 0022, M5): back to stock at a location, or to the archive. Never changed. */
+export interface ReturnsTable {
+  id: Generated<string>;
+  order_id: string;
+  outcome: ReturnOutcome;
+  location_id: ColumnType<string | null, string | null | undefined, string | null>;
+  note: string;
+  /** The ownership ORBES took back (ended by the return) when the buyer had registered the piece. */
+  ownership_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  created_at: TimestampDefault;
+}
+
+/** An invoice or a credit note (migration 0022, M7), numbered per kind and year, its content as issued. Never changed. */
+export interface InvoicesTable {
+  id: Generated<string>;
+  kind: InvoiceKind;
+  year: number;
+  sequence: number;
+  order_id: string;
+  credits_invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
+  issuer: Jsonb<JsonObject>;
+  buyer: Jsonb<JsonObject>;
+  lines: Jsonb<JsonValue[]>;
+  currency: string;
+  subtotal_minor: number;
+  vat_rate_bp: ColumnType<number | null, number | null | undefined, number | null>;
+  vat_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  total_minor: number;
+  issued_at: TimestampDefault;
+}
+
+/**
+ * The event journal (migration 0022, N1): every change of an order, the stock, a piece or an invoice, written once in
+ * the change's transaction; replayed in order of id. Only `consumed_by` changes; never deleted.
+ */
+export interface EventJournalTable {
+  id: Generated<number>;               // bigint identity
+  type: string;                        // dotted lowercase: order.pay, stock.move…
+  entity_type: string;
+  entity_id: string;
+  payload: Jsonb<JsonObject>;
+  created_at: TimestampDefault;
+  consumed_by: WithDefault<string[]>;
+}
+
+/** The delays after which an order stands out (migration 0022, M3), in days; one row at most, none inserted. */
+export interface OrderAlertSettingsTable {
+  id: WithDefault<number>;             // always 1
+  reserved_days: WithDefault<number>;
+  ready_days: WithDefault<number>;
+  shipped_days: WithDefault<number>;
+  unregistered_days: WithDefault<number>;
+  updated_by: string | null;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * The guests of an after-room (migration 0023, A3): the parent's entries still WAITING or QUEUED at its sell-out, each
+ * with its place in the after-room's line (their order in the parent's), remembered once; never changed.
+ */
+export interface AfterRoomGuestsTable {
+  /** The after-room (drops.id of the child release). */
+  drop_id: string;
+  /** The parent's entry (live_entries.id), unique. */
+  entry_id: string;
+  position: number;                    // ≥ 1, unique per after-room
+  remembered_at: Timestamp;
+}
+
+/** A collector's answer to a release's question after (migration 0023, G4): one per account and release, changeable. */
+export interface ReleaseAnswersTable {
+  drop_id: string;
+  account_id: string;
+  /** The position of the answer chosen, 1..6. */
+  answer: number;
+  answered_at: TimestampDefault;
+}
+
+/** A saved group of collectors (migration 0023, N5): its name (unique whatever the case) and its rule tree. */
+export interface SegmentsTable {
+  id: Generated<string>;
+  name: string;                        // 1..60 characters
+  criteria: Jsonb<JsonObject>;
+  created_by: string | null;           // admin_users.id
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/** The sign-ins and scans per whole UTC hour, country (ZZ unknown) and tier (migration 0023, G3): aggregates, no account. */
+export interface ActivityHourlyTable {
+  hour: Timestamp;
+  country: string;
+  tier: number;                        // 0..3
+  sign_ins: WithDefault<number>;
+  scans: WithDefault<number>;
 }
 
 export interface RevocationsTable {
@@ -988,6 +1340,22 @@ export interface Database {
   live_interest: LiveInterestTable;
   live_messages: LiveMessagesTable;
   live_tier_windows: LiveTierWindowsTable;
+  stock_locations: StockLocationsTable;
+  skus: SkusTable;
+  stock_movements: StockMovementsTable;
+  sku_thresholds: SkuThresholdsTable;
+  carriers: CarriersTable;
+  orders: OrdersTable;
+  order_events: OrderEventsTable;
+  bench_items: BenchItemsTable;
+  returns: ReturnsTable;
+  invoices: InvoicesTable;
+  event_journal: EventJournalTable;
+  order_alert_settings: OrderAlertSettingsTable;
+  after_room_guests: AfterRoomGuestsTable;
+  release_answers: ReleaseAnswersTable;
+  segments: SegmentsTable;
+  activity_hourly: ActivityHourlyTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -1072,6 +1440,19 @@ export type LiveEntryUpdate = Updateable<LiveEntriesTable>;
 export type LiveAddonRow = Selectable<LiveAddonsTable>;
 export type LiveMessageRow = Selectable<LiveMessagesTable>;
 export type LiveTierWindowRow = Selectable<LiveTierWindowsTable>;
+export type StockLocationRow = Selectable<StockLocationsTable>;
+export type SkuRow = Selectable<SkusTable>;
+export type StockMovementRow = Selectable<StockMovementsTable>;
+export type CarrierRow = Selectable<CarriersTable>;
+export type OrderRow = Selectable<OrdersTable>;
+export type OrderUpdate = Updateable<OrdersTable>;
+export type OrderEventRow = Selectable<OrderEventsTable>;
+export type BenchItemRow = Selectable<BenchItemsTable>;
+export type EventJournalRow = Selectable<EventJournalTable>;
+export type AfterRoomGuestRow = Selectable<AfterRoomGuestsTable>;
+export type ReleaseAnswerRow = Selectable<ReleaseAnswersTable>;
+export type SegmentRow = Selectable<SegmentsTable>;
+export type ActivityHourlyRow = Selectable<ActivityHourlyTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

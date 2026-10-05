@@ -41,6 +41,19 @@
  *                   link to its page in a new tab (CARE_SUBSCRIBE_URL), or
  *                   "Subscriptions open soon." while none is published
  *   ── next piece ──
+ *   AFTER THE RELEASES                       the question after each LIVE RELEASE the account said I'LL BE THERE
+ *     MONOLITHE · 2 NOV 2026                 to and did not come to, for a week after its end (plan LIVE
+ *     WHAT WOULD YOU HAVE WANTED?            RELEASE+, choice 11; views/question.ts): one tap, changeable;
+ *     ANOTHER SIZE · ANOTHER FINISH · …      nothing when none is open
+ *   YOUR ORDERS                              the account's orders (plan LIVE RELEASE+, choice 6), one per piece,
+ *     MONOLITHE                              the latest first: the model, where it was sold, what its step means;
+ *     LIVE RELEASE · MONOLITHE — LIVE        RESERVED · PAID · SHIPPED · DELIVERED with their dates (or CANCELLED,
+ *     ● RESERVED 5 OCT 2026 … ○ DELIVERED    or RETURNED), the current one marked; SIZE, PRICE, the add-ons, TOTAL;
+ *     SIZE · PRICE · ENGRAVING · TOTAL       once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT
+ *     CARRIER · TRACKING NUMBER              (the carrier's page, a new tab); its DOCUMENTS (M6): the INVOICE and
+ *     TRACK THE SHIPMENT                     the CREDIT NOTE (PDFs), the model's CARE GUIDE (opened under them),
+ *     DOCUMENTS · INVOICE INV-… · CARE GUIDE  the OWNERSHIP CERTIFICATE once the piece is registered to the account
+ *     ORDER OR-1A2B3C4D                      (PDF); ORDER OR-…, for ORBES Client Services. Nothing when none.
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
  *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
  *                                            TITANE up, YOUR TIER says it: its benefits or NEXT)
@@ -73,21 +86,24 @@
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
-import { ApiError, type ApiClient } from '../api.js';
+import { saveDownload } from '../../shared/download.js';
+import { ApiError, type ApiClient, type OrderDocumentKind } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, ORBES_CARE, PHOTOS, PIECES, RELEASES } from '../copy.js';
+import { ACCOUNT_PASSWORD, DEFAULT_CARE, ORBES_CARE, ORDERS, PHOTOS, PIECES, QUESTION, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import { myLiveEntries } from '../live-model.js';
+import { orderModels, type OrderModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
-import type { CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import type { AccountOrder, AccountQuestion, CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
+import { QuestionBlock } from './question.js';
 import { tabsView } from './tabs.js';
 
 export interface PiecesDeps {
@@ -102,8 +118,12 @@ export interface PiecesDeps {
   /** THE RELEASES (P-R03): the drops, in the app; and one release's page, from an entry. */
   onReleases?(): void;
   onRelease?(id: string): void;
+  /** An after-room's entry: its page, through the release it follows. */
+  onAfterRoom?(parentId: string): void;
   /** THE CIRCLE (P-X01): the owners' circle, in the app. */
   onCircle?(): void;
+  /** This phone's time zone: the question after's dates on its calendar (UTC by default). */
+  localZone?: string;
 }
 
 export interface PiecesView {
@@ -124,6 +144,10 @@ class PiecesPage {
   private readonly body = h('div', { class: 'pieces__body' });
   /** YOUR TIER (P-X04): the badge, the benefits and the way to the next tier, at the head of the page. */
   private readonly tierBlock = h('section', { class: 'pieces__tier', attrs: { 'aria-labelledby': 'pieces-tier', hidden: true } });
+  /** YOUR ORDERS (plan LIVE RELEASE+, choice 6): the account's orders, one per piece, step by step, under its pieces. */
+  private readonly ordersBlock = h('section', { class: 'pieces__orders', attrs: { 'aria-labelledby': 'pieces-orders', hidden: true } });
+  /** AFTER THE RELEASES (plan LIVE RELEASE+, choice 11): the questions after the releases the account did not come to. */
+  private readonly questionsBlock = h('section', { class: 'pieces__questions', attrs: { 'aria-labelledby': 'pieces-questions', hidden: true } });
   /** EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM, recalled once the club's status is read. */
   private readonly early = h('section', { class: 'pieces__early', attrs: { 'aria-labelledby': 'pieces-early', hidden: true } });
   /** YOUR RELEASES (P-R03): the account's entries in the drops, under its pieces. */
@@ -142,6 +166,13 @@ class PiecesPage {
   private entries: ClubEntry[] | null = [];
   /** Its entries in the LIVE RELEASES (plan of 2026-10-04: they stay here after the release); null when unread. */
   private liveEntries: LiveAccountEntry[] | null = [];
+  /** Its orders (plan LIVE RELEASE+, choice 6), the latest first; null when they could not be read. */
+  private orders: AccountOrder[] | null = [];
+  /** The questions after open for it (choice 11); none when they could not be read (they are only asked). */
+  private questions: AccountQuestion[] = [];
+  /** Each question's block, kept while the page lives (a tap keeps its focus), and the questions they were laid out for. */
+  private questionBlocks = new Map<string, QuestionBlock>();
+  private questionsKey = '';
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
   /** The club's status as read with the pieces (P-X04, the tier block); null until read, or when it could not be. */
@@ -168,6 +199,8 @@ class PiecesPage {
       ),
       this.tierBlock,
       this.body,
+      this.questionsBlock,
+      this.ordersBlock,
       this.early,
       this.releases,
       this.account,
@@ -227,6 +260,10 @@ class PiecesPage {
       this.load = { kind: 'idle' };
       this.cards = [];
       this.entries = [];
+      this.orders = [];
+      this.questions = [];
+      this.questionBlocks.clear();
+      this.questionsKey = '';
       this.tier = null;
       this.club = null;
       this.circle.hidden = true;
@@ -246,8 +283,9 @@ class PiecesPage {
     this.renderBody();
     try {
       // The open certificate links with the pieces (F-06); without them, the pieces still show, and each says so. The
-      // account's entries in the drops (P-R03) likewise: without them, the page says they could not be shown.
-      const [list, certificates, club, live] = await Promise.all([
+      // account's entries in the drops (P-R03) and its orders likewise: without them, the page says they could not be
+      // shown.
+      const [list, certificates, club, live, orders, questions] = await Promise.all([
         this.deps.api.products(),
         this.deps.api.certificates().catch((e: unknown) => {
           this.deps.session.noteError(e);
@@ -260,6 +298,15 @@ class PiecesPage {
         this.deps.api.liveMine().catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
+        }),
+        this.deps.api.orders().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+        // A question unread is a question not asked: the page says nothing of it.
+        this.deps.api.questions().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return [] as AccountQuestion[];
         }),
       ]);
       if (gen !== this.loadGen || this.disposed) return;
@@ -274,6 +321,8 @@ class PiecesPage {
       );
       this.entries = club ? club.entries : null;
       this.liveEntries = live;
+      this.orders = orders;
+      this.questions = questions;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
       this.club = club;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
@@ -302,6 +351,8 @@ class PiecesPage {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
     this.renderTier();
+    this.renderOrders();
+    this.renderQuestions();
     this.renderEarly();
     this.renderReleases();
     if (!this.ready) {
@@ -386,6 +437,71 @@ class PiecesPage {
   }
 
   /**
+   * YOUR ORDERS (plan LIVE RELEASE+, choice 6): each order of the account, one per piece, the latest first, as
+   * orders-model.ts reads it. Shown once the pieces are read, signed in; nothing when the account has no order; said
+   * when they could not be read (the pieces still show).
+   */
+  private renderOrders(): void {
+    const signedIn = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready';
+    if (!signedIn || (this.orders !== null && this.orders.length === 0)) {
+      this.ordersBlock.hidden = true;
+      this.ordersBlock.replaceChildren();
+      return;
+    }
+    this.ordersBlock.hidden = false;
+    const heading = sectionLabel(ORDERS.title, 'pieces-orders');
+    if (this.orders === null) {
+      this.ordersBlock.replaceChildren(heading, h('p', { class: 'form__error', attrs: { role: 'alert' }, text: ORDERS.loadFailed }));
+      return;
+    }
+    const cards = orderModels(this.orders);
+    const deps = { api: this.deps.api, session: this.deps.session };
+    this.ordersBlock.replaceChildren(heading, h('ul', { class: 'pieces__order-list' }, ...cards.map((m) => h('li', { class: 'pieces__order-item' }, orderCard(m, deps)))));
+  }
+
+  /**
+   * AFTER THE RELEASES (plan LIVE RELEASE+, choice 11): one block per question open, signed in, once the pieces are
+   * read; each answered in one tap and kept here as answered. Nothing when none is open.
+   */
+  private renderQuestions(): void {
+    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.questions.length > 0;
+    if (!shown) {
+      this.questionsBlock.hidden = true;
+      this.questionsBlock.replaceChildren();
+      this.questionsKey = '';
+      return;
+    }
+    this.questionsBlock.hidden = false;
+    const blocks = this.questions.map((q) => {
+      let block = this.questionBlocks.get(q.dropId);
+      if (!block) {
+        block = new QuestionBlock({
+          api: this.deps.api,
+          session: this.deps.session,
+          localZone: this.deps.localZone ?? 'UTC',
+          tone: 'ivory',
+          named: true,
+          onAnswered: (next) => {
+            const at = this.questions.findIndex((x) => x.dropId === next.dropId);
+            if (at >= 0) this.questions[at] = next;
+          },
+        });
+        this.questionBlocks.set(q.dropId, block);
+      }
+      block.show(q);
+      return block;
+    });
+    const key = this.questions.map((q) => q.dropId).join(' ');
+    if (key === this.questionsKey) return;
+    this.questionsKey = key;
+    this.questionsBlock.replaceChildren(
+      sectionLabel(QUESTION.piecesTitle, 'pieces-questions'),
+      h('p', { class: 'prose pieces__questions-lead', text: QUESTION.piecesLead }),
+      h('ul', { class: 'pieces__question-list' }, ...blocks.map((b) => h('li', { class: 'pieces__question' }, b.el))),
+    );
+  }
+
+  /**
    * EARLY ACCESS (P-X02): the privilege of PLATINE and PALLADIUM recalled, once the pieces and the club's status are
    * read, signed in, for an account that holds no piece only. From TITANE up, YOUR TIER already says it: among the
    * account's own benefits (PLATINE, PALLADIUM) or under NEXT: PLATINE (TITANE), so it is not said twice.
@@ -432,9 +548,10 @@ class PiecesPage {
         attrs: { href: m.href },
         on: {
           click: (ev) => {
-            if (!this.deps.onRelease || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+            const open = m.afterRoomOf ? this.deps.onAfterRoom : this.deps.onRelease;
+            if (!open || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
             ev.preventDefault();
-            this.deps.onRelease(m.dropId);
+            open(m.afterRoomOf ?? m.dropId);
           },
         },
       },
@@ -565,6 +682,137 @@ class PiecesPage {
       }
     })();
   }
+}
+
+// ── One order ──────────────────────────────────────────────────────────────
+
+/**
+ * One order of YOUR ORDERS: the model (its heading), where it was sold, what its step means; its steps, the current one
+ * marked for a screen reader (aria-current); its terms; once shipped, the carrier, the number and TRACK THE SHIPMENT,
+ * a text link to the carrier's page in a new tab (the page keeps one hairline button); its documents (M6); its reference.
+ */
+function orderCard(m: OrderModel, deps: { api: ApiClient; session: SessionStore }): HTMLElement {
+  const titleId = `${m.key}-title`;
+  const steps = h(
+    'ol',
+    { class: 'pieces__order-steps', attrs: { 'aria-label': ORDERS.stepsLabel } },
+    ...m.steps.map((s) =>
+      h(
+        'li',
+        { class: 'pieces__order-step', attrs: { 'aria-current': s.state === 'current' ? 'step' : undefined }, data: { state: s.state, step: s.status } },
+        h('span', { class: 'pieces__order-step-label', text: s.label }),
+        s.date ? h('span', { class: 'pieces__order-step-date', text: s.date }) : null,
+      ),
+    ),
+  );
+  const shipment = m.shipment
+    ? [
+        rows(m.shipment.rows, 'pieces__order-shipment'),
+        m.shipment.href
+          ? h(
+              'div',
+              { class: 'ownership__actions' },
+              h('a', {
+                class: 'textlink pieces__order-track',
+                attrs: { href: m.shipment.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': m.shipment.label },
+                text: ORDERS.track,
+              }),
+            )
+          : null,
+      ]
+    : [];
+  return h(
+    'article',
+    { class: 'pieces__order', attrs: { 'aria-labelledby': titleId }, data: { status: m.status } },
+    h('h4', { class: 'pieces__order-title', id: titleId }, ...withNumerals(m.title)),
+    h('p', { class: 'ownership__meta micro soft pieces__order-line' }, ...withPhrases(m.line)),
+    h('p', { class: 'prose pieces__order-sentence', text: m.sentence }),
+    steps,
+    m.rows.length > 0 ? rows(m.rows, 'pieces__order-rows') : null,
+    ...shipment,
+    m.documents.length > 0 ? orderDocumentsBlock(m, deps) : null,
+    h('p', { class: 'ownership__meta micro soft pieces__order-reference', text: m.reference }),
+  );
+}
+
+/**
+ * An order's DOCUMENTS (M6), text links (the page keeps its one hairline button): INVOICE and CREDIT NOTE with their
+ * numbers and OWNERSHIP CERTIFICATE save their PDFs; CARE GUIDE opens the model's care guide under them (read once, on
+ * first opening; the house's general care text when the model has none) and closes it again (aria-expanded). A
+ * document that cannot be read says so under the links, the others still work.
+ */
+function orderDocumentsBlock(m: OrderModel, deps: { api: ApiClient; session: SessionStore }): HTMLElement {
+  const D = ORDERS.documents;
+  const titleId = `${m.key}-documents`;
+  const careId = `${m.key}-care`;
+  const error = h('p', { class: 'form__error pieces__order-document-error', attrs: { role: 'alert', hidden: true } });
+  const care = h('div', { class: 'pieces__order-care', id: careId, attrs: { hidden: true } });
+  let careText: string | null = null;
+  const fail = (text: string) => {
+    error.textContent = text;
+    error.hidden = false;
+  };
+  const save = async (b: HTMLButtonElement, file: OrderDocumentKind) => {
+    if (b.getAttribute('aria-busy') === 'true') return;
+    b.setAttribute('aria-busy', 'true');
+    error.hidden = true;
+    try {
+      saveDownload(await deps.api.orderDocument(m.id, file));
+    } catch (e) {
+      deps.session.noteError(e);
+      fail(D.downloadFailed);
+    } finally {
+      b.setAttribute('aria-busy', 'false');
+    }
+  };
+  const toggleCare = async (b: HTMLButtonElement) => {
+    if (b.getAttribute('aria-expanded') === 'true') {
+      b.setAttribute('aria-expanded', 'false');
+      care.hidden = true;
+      return;
+    }
+    if (careText === null) {
+      if (b.getAttribute('aria-busy') === 'true') return;
+      b.setAttribute('aria-busy', 'true');
+      error.hidden = true;
+      try {
+        const g = await deps.api.orderCareGuide(m.id);
+        careText = g.text && g.text.trim() ? g.text.trim() : DEFAULT_CARE;
+      } catch (e) {
+        deps.session.noteError(e);
+        fail(D.careFailed);
+        return;
+      } finally {
+        b.setAttribute('aria-busy', 'false');
+      }
+      care.replaceChildren(h('p', { class: 'prose pieces__order-care-text', text: careText }));
+    }
+    b.setAttribute('aria-expanded', 'true');
+    care.hidden = false;
+  };
+  const link = (d: OrderModel['documents'][number]) => {
+    // The label in the display face, the number in the reading face (`.numeral`).
+    const b: HTMLButtonElement = h(
+      'button',
+      {
+        class: 'textlink pieces__order-document',
+        attrs: { type: 'button', 'aria-label': d.ariaLabel, ...(d.file === null ? { 'aria-expanded': 'false', 'aria-controls': careId } : {}) },
+        data: { document: d.kind },
+        on: { click: () => void (d.file === null ? toggleCare(b) : save(b, d.file)) },
+      },
+      d.label,
+      ...(d.number ? [' ', h('span', { class: 'numeral', text: d.number })] : []),
+    );
+    return h('li', null, b);
+  };
+  return h(
+    'div',
+    { class: 'pieces__order-documents', attrs: { role: 'group', 'aria-labelledby': titleId } },
+    h('p', { class: 'pieces__order-documents-title', id: titleId, text: D.title }),
+    h('ul', { class: 'pieces__order-document-list' }, ...m.documents.map(link)),
+    care,
+    error,
+  );
 }
 
 // ── One piece ──────────────────────────────────────────────────────────────

@@ -468,13 +468,17 @@ export class MediaService {
     if (previous) await this.deleteIfUnused(previous);
   }
 
-  /** A LIVE RELEASE's row FOR UPDATE, neither cancelled nor announced (its announcement, or its publication without one). */
+  /**
+   * A LIVE RELEASE's row FOR UPDATE, neither cancelled nor announced (its announcement, or its publication without one);
+   * never an after-room, which has no staged reveal (services/after-room.ts).
+   */
   private async lockUnannouncedRelease(tx: Db, id: string): Promise<{ silhouette_sha256: string | null }> {
     const row = await tx
       .selectFrom('drops')
       .select(['silhouette_sha256', 'cancelled_at', 'announce_at', 'published_at'])
       .where('id', '=', id)
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .forUpdate()
       .executeTakeFirst();
     if (!row) throw releaseNotFound();

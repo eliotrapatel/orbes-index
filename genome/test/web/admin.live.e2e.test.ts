@@ -9,16 +9,25 @@
  *     link (shown once) and publishes it with a post of the circle. Once announced, nothing edits it any more.
  *  2. A release live now: the board follows the console's stream (no reload): the line, LET IN, the turns given by the
  *     engine, a seal held, FREE, REMOVE (ADMIN), PAUSE and RESUME, a host message, ADD PIECES with what the quantity line
- *     promised; Client Services concludes a reservation with a note and downloads the CSV; END NOW after the typed phrase.
+ *     promised; a reservation confirmed becomes its orders, followed on the Orders board narrowed to the release (plan
+ *     LIVE RELEASE+); END NOW after the typed phrase.
  *  3. An OPERATOR runs the controls but neither ends nor removes; a page left while its open entries are on their way
  *     starts no stream once they arrive, the page on screen keeping its own; an AUDITOR reads the board, the line and
- *     the reservations with the emails masked, without one action.
+ *     the release's orders with the emails masked, without one action.
  *  4. A release published to be announced later: its post of the circle added then withdrawn on its page; then, the page
  *     never reloaded, its board's stream brings each state and the page is drawn again for it: ADD PIECES and the host
  *     message once announced, no cancellation once the room opens, PAUSE at T0, no control left after the end.
+ *  5. The after-room (plan LIVE RELEASE+, choice 2): set in its dialog with the release (step 1); once the release has
+ *     sold out, its state, timing and guests on the release's page, and its own page: the live board and its controls,
+ *     what it takes from the release, never a setting, a publication, a cancellation, a silhouette or a board link; never
+ *     listed among the drops on its own.
+ *  6. Step S8 of LIVE RELEASE+: New live release proposes its sizes from the stock at its location (choice 13); the
+ *     question after rewritten (choice 11); the best time to open beside its settings and in Analytics, by tier and
+ *     country (choice 10); PUBLISH shows the feasibility check per size and publishes all the same (choice 12); once a
+ *     release has ended, who was asked where and each answer counted.
  * No CSP violation, no page error, no figure in the display face.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -33,6 +42,8 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { inTransaction } from '../../src/server/db/connection.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { holdPieces } from '../support/live.js';
 
@@ -249,6 +260,22 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('#live-part-addons').textContent()).toContain('Your initials, by hand');
 
+    // The after-room: a second door after a sell-out, its own model, price, stock and delay; none until set.
+    await expect.poll(() => p.locator('#live-part-after-room .notice').textContent()).toBe('None: the release closes at its sell-out.');
+    await p.click('[data-testid=live-edit-after-room]');
+    await p.locator('dialog label.ccheck', { hasText: 'An after-room after a sell-out' }).click();
+    await p.selectOption('dialog select[name=modelId]', modelId);
+    await p.fill('dialog input[name=price]', '900');
+    await p.fill('dialog input[name=delay]', '0');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
+    await p.fill('dialog input[name=delay]', '5');
+    await p.fill('dialog textarea[name=sizes]', 'ONE SIZE = 3');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent()).toBe('AFTER A SELL-OUT');
+    expect(await p.locator('[data-testid=live-after-room-timing]').textContent()).toBe('5 min after the sell-out, open 15 min');
+    expect(await p.locator('[data-testid=live-after-room-sizes]').textContent()).toBe('ONE SIZE × 3');
+
     // Nothing changed: said in the dialog, nothing sent.
     await p.click('[data-testid=live-edit-release]');
     await p.click('[data-testid=dialog-confirm]');
@@ -283,7 +310,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
     await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toMatch(/^Post shown from /);
-    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-addons', 'live-silhouette-edit', 'live-publish']) {
+    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-addons', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
       expect(await p.locator(`[data-testid=${edit}]`).count(), edit).toBe(0);
     }
     const post = await ctx.db.selectFrom('circle_posts').select(['min_tier', 'drop_id']).where('drop_id', '=', id).executeTakeFirstOrThrow();
@@ -385,25 +412,23 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('.live__sizes tbody tr', { hasText: '54' }).locator('td').nth(1).textContent(), { timeout: 10_000 }).toBe('4');
 
-    // Client Services: a reservation confirmed on /verify, concluded with a note; the CSV.
+    // Client Services: a reservation confirmed on /verify becomes its orders, followed on the Orders board, narrowed to
+    // the release from its page (plan LIVE RELEASE+: the LIVE plan's list is retired).
     await secure(y, r.id);
     const engraving = (await ctx.services.liveConsole.get(r.id)).addons[0]!;
     await ctx.services.live.setAddons(y.id, r.id, [engraving.id], y.actor);
     await ctx.services.live.confirm(y.id, r.id, y.actor);
     await p.reload();
-    const reservation = p.locator('#live-services tbody tr');
-    await expect.poll(() => reservation.count()).toBe(1);
-    expect(await reservation.textContent()).toContain(y.email);
-    expect(await reservation.textContent()).toContain('ENGRAVING € 150');
-    expect(await reservation.textContent()).toContain('€ 9 900');
-    await reservation.locator('[data-testid=live-conclude]').click();
-    await p.fill('dialog textarea[name=note]', 'Paid by transfer; delivered in Paris.');
-    await confirmDialog(p);
-    await expect.poll(() => reservation.locator('[data-testid=live-outcome]').textContent()).toMatch(/^CONCLUDEDconsole@orbes\.test · .*Paid by transfer; delivered in Paris\.$/);
-    const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=live-csv]')]);
-    expect(download.suggestedFilename()).toMatch(new RegExp(`^ORBES-live-${r.id.slice(0, 8).toUpperCase()}-reservations-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
-    const csv = readFileSync((await download.path())!, 'utf8');
-    expect(csv).toContain(`"${y.email}","54","2","EUR","4800.00","ENGRAVING (150.00)","9900.00"`);
+    await expect.poll(() => p.locator('[data-testid=live-orders]').textContent()).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
+    expect(await p.locator('#live-services tbody tr').count()).toBe(0);
+    await p.locator('#live-services a', { hasText: 'Orders of this release' }).click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
+    expect(decodeURIComponent(new URL(p.url()).hash)).toBe(`#/orders?dropId=${r.id}`);
+    const cards = p.locator('[data-testid=column-RESERVED] [data-testid=order-card]');
+    await expect.poll(() => cards.count()).toBe(2);
+    expect(await cards.first().textContent()).toContain(y.email);
+    expect(await cards.first().textContent()).toContain('ENGRAVING');
+    await go(p, `#/club/live/${r.id}`, 'THE VAULT RING');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'board');
 
@@ -474,15 +499,18 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await o.unrouteAll();
     await o.context().close();
 
-    // An AUDITOR reads the board, the line and the reservations, the emails masked, without one action.
+    // An AUDITOR reads the board, the line and the release's orders, the emails masked, without one action.
     const a = await open(AUDITOR);
     await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
-    await expect.poll(() => a.locator('#live-services tbody tr').count()).toBe(1);
-    expect(await a.locator('#live-services tbody tr').textContent()).toContain('l***@example.com');
+    await expect.poll(() => a.locator('[data-testid=live-orders]').textContent()).toMatch(/^1 confirmed reservation/);
+    await go(a, `#/orders?dropId=${r.id}`, 'Orders');
+    await expect.poll(() => a.locator('[data-testid=order-card]').count()).toBe(2);
+    expect(await a.locator('[data-testid=order-card]').first().textContent()).toContain('l***@example.com');
     expect(await a.locator('body').textContent()).not.toContain(y.email);
+    await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
     await go(a, `#/club/live/${live2.id}`, 'THE SECOND RING');
     await expect.poll(() => a.locator('[data-testid=live-entry-account]').first().textContent()).toBe('l***@example.com');
-    for (const action of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in', 'live-free', 'live-remove', 'live-board-issue', 'live-cancel', 'live-conclude']) {
+    for (const action of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in', 'live-free', 'live-remove', 'live-board-issue', 'live-cancel']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     await go(a, '#/club?tab=drops', 'Club');
@@ -556,6 +584,189 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(await lead()).toMatch(/^Over: /);
     expect(await p.evaluate(() => (window as unknown as { __kept?: boolean }).__kept)).toBe(true);
     expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('shows a release’s after-room once its sell-out opened it, then its own page: the live board and controls, never a setting, a publication or a board link', async () => {
+    const r = await ctx.services.liveConsole.create(
+      {
+        modelId,
+        title: 'THE NIGHT RING',
+        opensAt: new Date(Date.now() + 4 * HOUR),
+        closesAt: new Date(Date.now() + 5 * HOUR),
+        priceMinor: 100_000,
+        sizes: [{ label: '52', stock: 1 }],
+        afterRoom: { modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }] },
+      },
+      admin,
+    );
+    await ctx.services.liveConsole.publish(r.id, {}, admin);
+    // T0 passed; two collectors in the line; the first secures and pays the one piece: SOLD OUT, the second remembered.
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 60_000), closes_at: new Date(Date.now() + HOUR) }).where('id', '=', r.id).execute();
+    const [first, second] = [await collector(51, 0), await collector(52, 0)];
+    for (const c of [first, second]) await ctx.services.live.enter(c.id, r.id, { sizeId: (await ctx.services.liveConsole.get(r.id)).sizes[0]!.id }, c.actor);
+    await ctx.services.live.advance(r.id);
+    await secure(first!, r.id);
+    await ctx.services.live.confirm(first!.id, r.id, first!.actor);
+
+    const p = await open(ADMIN);
+    await go(p, `#/club/live/${r.id}`, 'THE NIGHT RING');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('SOLD OUT');
+    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent()).toBe('OPENS SOON');
+    expect(await p.locator('[data-testid=live-after-room-guests]').textContent()).toBe('1');
+    expect(await p.locator('[data-testid=live-after-room-timing]').textContent()).toBe('10 min after the sell-out, open 15 min');
+    expect(await p.locator('#live-part-after-room').textContent()).toContain('Its guests see it from its opening');
+    await shot(p, 'after-room-parent');
+
+    // Its own page: the release it follows, its offer read only, its board; no setting, publication, cancellation, board link.
+    await p.click('#live-part-after-room a.cbtn');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('THE NIGHT RING · THE AFTER-ROOM');
+    expect(await p.locator('.page-head__lead').textContent()).toMatch(/^Opened by the release’s sell-out/);
+    expect(await p.locator('[data-testid=live-after-room-of]').textContent()).toBe('THE NIGHT RING');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('OPENS SOON');
+    expect(await p.locator('#live-part-after-room-own').textContent()).toContain('30 s to hold the seal · 5 min to press PAY · 1 piece per person');
+    await expect.poll(() => p.locator('[data-testid=live-in-room]').count()).toBe(1);
+    for (const id of ['live-edit-release', 'live-edit-sizes', 'live-edit-after-room', 'live-publish', 'live-cancel', 'live-circle-post', 'live-board-issue', 'live-silhouette-edit', 'live-page']) {
+      expect(await p.locator(`[data-testid=${id}]`).count(), id).toBe(0);
+    }
+    // Its live controls are there (announced at the sell-out): ADD PIECES and the host message.
+    expect(await p.locator('[data-testid=live-message-new]').count()).toBe(1);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'after-room-own');
+    // Never listed among the drops on its own.
+    await go(p, '#/club?tab=drops', 'Club');
+    await expect.poll(() => p.locator('#live-releases tbody tr', { hasText: 'THE NIGHT RING' }).count()).toBe(1);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('proposes the sizes from the stock, rewrites the question after, reads the best time to open, warns per size at PUBLISH and counts the answers', async () => {
+    // A model of its own, in stock at FRANCE WAREHOUSE (the default location): 52 × 2, 54 × 1.
+    const category = (await ctx.categories.getByCode('J'))!.index;
+    const nocturne = (
+      await ctx.db.insertInto('models').values({ category_id: category, name: 'NOCTURNE', type: 'RING', sku_prefix: 'NCT-RG', default_material: '925 STERLING SILVER' }).returning('id').executeTakeFirstOrThrow()
+    ).id;
+    const france = (await ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    for (const [label, n] of [['52', 2], ['54', 1]] as const) {
+      const skuId = await inTransaction(ctx.db, (tx) => ensureSku(tx, nocturne, label));
+      await ctx.services.stock.adjust({ skuId, locationId: france, delta: n, note: 'Pieces counted at the atelier.' }, admin);
+    }
+    // The activity of two days ago at a known hour: 50 sign-ins from PALLADIUM in France, 80 without a tier in the United
+    // States an hour later (no account in either row).
+    const paris = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', hourCycle: 'h23' }).format(d));
+    const hh = (n: number) => `${String(n).padStart(2, '0')}:00`;
+    const at = new Date(Math.floor((Date.now() - 2 * 24 * HOUR) / HOUR) * HOUR);
+    await ctx.db
+      .insertInto('activity_hourly')
+      .values([
+        { hour: at, country: 'FR', tier: 3, sign_ins: 50, scans: 0 },
+        { hour: new Date(at.getTime() + HOUR), country: 'US', tier: 0, sign_ins: 80, scans: 0 },
+      ])
+      .execute();
+    const [frHour, usHour] = [paris(at), paris(new Date(at.getTime() + HOUR))];
+
+    const p = await open(ADMIN);
+    await go(p, '#/club?tab=drops', 'Club');
+    await p.click('[data-testid=live-new]');
+    await expect.poll(() => p.locator('dialog select[name=locationId] option').first().textContent()).toBe('The default (FRANCE WAREHOUSE)');
+    await p.selectOption('dialog select[name=modelId]', nocturne);
+    // The stock first: written into the sizes, said with where each comes from.
+    await expect.poll(() => p.locator('dialog [data-testid=live-size-mix-line]').textContent(), { timeout: 15_000 }).toBe('52 = 2 (2 in stock) · 54 = 1 (1 in stock)');
+    await expect.poll(() => p.locator('dialog textarea[name=sizes]').inputValue()).toBe('52 = 2\n54 = 1');
+    expect(await p.locator('dialog [data-testid=live-size-mix-why]').textContent()).toContain('In stock at FRANCE WAREHOUSE: 52: 2, 54: 1, offered first.');
+    // Yours to change: typed by hand, the proposal never writes over it.
+    await p.fill('dialog textarea[name=sizes]', '52 = 3\n54 = 1\n56 = 1');
+    await p.fill('dialog input[name=title]', 'THE NOCTURNE RING');
+    const t0 = new Date(Math.floor((Date.now() + 26 * HOUR) / HOUR) * HOUR);
+    const local = (d: Date) => d.toISOString().slice(0, 16);
+    await p.fill('dialog input[name=opensAt]', local(t0));
+    await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + HOUR)));
+    await p.fill('dialog input[name=price]', '2 400');
+    expect(await p.locator('dialog textarea[name=sizes]').inputValue()).toBe('52 = 3\n54 = 1\n56 = 1');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('THE NOCTURNE RING');
+    const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent()).toBe('52 × 3 · 54 × 1 · 56 × 1');
+    expect(await p.locator('[data-testid=live-location]').textContent()).toBe('FRANCE WAREHOUSE');
+
+    // The question after: the default one, rewritten.
+    expect(await p.locator('[data-testid=live-question]').textContent()).toBe('WHAT WOULD YOU HAVE WANTED? · ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND (the default question)');
+    expect(await p.locator('[data-testid=live-question-state]').textContent()).toBe('Asked at the release’s end, for 7 days');
+    await p.click('[data-testid=live-edit-question]');
+    await p.fill('dialog input[name=text]', 'WHICH FINISH?');
+    await p.fill('dialog textarea[name=answers]', 'GOLD\nGOLD');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The answer GOLD is listed twice.');
+    await p.fill('dialog textarea[name=answers]', 'GOLD\nSILVER\nBLACK');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-question]').textContent()).toBe('WHICH FINISH? · GOLD · SILVER · BLACK');
+
+    // The best time to open, for every collector (its tiers): the busiest hour, its T0 beside it.
+    const panel = p.locator('#live-best-time');
+    await expect.poll(() => panel.locator('[data-testid=best-time-suggested]').textContent()).toMatch(new RegExp(`^${hh(usHour)} Paris · \\d+ % of the activity of every collector$`));
+    expect(await panel.locator('[data-testid=best-time-release]').textContent()).toMatch(new RegExp(`^Its T0 · ${hh(paris(t0))} Paris · \\d+ % of that activity$`));
+    expect(await panel.locator(`.best__col--suggested`).getAttribute('data-hour')).toBe(String(usHour));
+    expect(await panel.locator('.best__col').count()).toBe(24);
+    expect(await panel.locator('table').textContent()).toContain(hh(frHour));
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'question-best-time');
+
+    // PUBLISH: the stock checked per size, a warning, published all the same.
+    await p.click('[data-testid=live-publish]');
+    await expect.poll(() => p.locator('dialog [data-testid=live-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale would be made to order once sold (FRANCE WAREHOUSE).');
+    expect(await p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents()).toEqual([
+      '52: 3 pieces on sale; 2 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
+      '56: 1 piece on sale; 0 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
+    ]);
+    await shot(p, 'feasibility');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
+    const published = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();
+    expect(published.details).toMatchObject({ locationId: france, toMakeToOrder: 2, shortSizes: ['52:1', '56:1'] });
+    // Announced: the question is fixed, the best time no longer read.
+    expect(await p.locator('[data-testid=live-edit-question]').count()).toBe(0);
+    expect(await p.locator('#live-best-time').count()).toBe(0);
+
+    // Analytics: every tier, then from PLATINE, then France only.
+    await go(p, '#/analytics', 'Analytics');
+    const best = p.locator('#analytics-best-time');
+    await expect.poll(() => best.locator('[data-testid=best-time-suggested]').textContent(), { timeout: 15_000 }).toMatch(new RegExp(`^${hh(usHour)} Paris · \\d+ % of the activity of every collector$`));
+    await p.click('[data-testid=best-time-tier-2]');
+    await expect.poll(() => best.locator('[data-testid=best-time-suggested]').textContent(), { timeout: 15_000 }).toMatch(new RegExp(`^${hh(frHour)} Paris · \\d+ % of the activity of collectors from PLATINE$`));
+    expect(await p.locator('[data-testid=best-time-tier-2]').getAttribute('aria-current')).toBe('page');
+    await p.click('[data-testid=best-time-tier-0]');
+    await expect.poll(() => best.locator('[data-testid=best-time-suggested]').textContent(), { timeout: 15_000 }).toMatch(/of the activity of every collector$/);
+    await p.selectOption('[data-testid=best-time-country]', 'FR');
+    await expect.poll(() => best.locator('[data-testid=best-time-suggested]').textContent(), { timeout: 15_000 }).toBe(`${hh(frHour)} Paris · 100 % of the activity of every collector in FR · France`);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'analytics-best-time');
+
+    // A release ended: who was asked where, the answers counted.
+    const r = await ctx.services.liveConsole.create(
+      { modelId: nocturne, title: 'THE ASKED RING', opensAt: new Date(Date.now() + 6 * HOUR), closesAt: new Date(Date.now() + 7 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }] },
+      admin,
+    );
+    await ctx.services.liveConsole.publish(r.id, {}, admin);
+    const [first, second, absent] = [await collector(61, 0), await collector(62, 0), await collector(63, 0)];
+    const size = (await ctx.services.liveConsole.get(r.id)).sizes[0]!.id;
+    await ctx.services.live.setInterest(absent.id, r.id, size, absent.actor);
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 60_000), closes_at: new Date(Date.now() + HOUR) }).where('id', '=', r.id).execute();
+    for (const c of [first, second]) await ctx.services.live.enter(c.id, r.id, { sizeId: size }, c.actor);
+    await ctx.services.live.advance(r.id);
+    await secure(first, r.id);
+    await ctx.services.live.confirm(first.id, r.id, first.actor);
+    await ctx.services.live.advance(r.id);
+    await ctx.services.questions.answer(second.id, r.id, 1, second.actor);
+    await ctx.services.questions.answer(absent.id, r.id, 1, absent.actor);
+    await go(p, `#/club/live/${r.id}`, 'THE ASKED RING');
+    await expect.poll(() => p.locator('[data-testid=live-question-state]').textContent()).toMatch(/^Open until \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    expect(await p.locator('[data-testid=live-question-asked]').textContent()).toBe('2');
+    expect(await p.locator('#live-part-question').textContent()).toContain('1 on the end page (took part, no piece) · 1 in MY PIECES (I’LL BE THERE, did not come)');
+    expect(await p.locator('[data-testid=live-question-answered]').textContent()).toBe('2');
+    expect(await p.locator('[data-testid=live-question-tally] .bar__label').allTextContents()).toEqual(['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND']);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'question-counted');
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);

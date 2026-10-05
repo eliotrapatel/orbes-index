@@ -51,6 +51,13 @@ function tangentDeg(px: number, py: number, cx: number, cy: number, r: number, s
 }
 
 const SIX_T = tangentDeg(0.48, 0, 0.31, 0.7, 0.3, -1);
+/**
+ * The at sign of an email on a document: a small o (centre 0.5, 0.51, r 0.17), its stem down its right side, a hook
+ * under it that runs into the outer ring (centre 0.5, 0.5, r 0.45) where the ring crosses the hook's line (y 0.66).
+ */
+const AT_RING = 0.45;
+const AT_JOIN_DEG = (Math.asin((0.66 - 0.5) / AT_RING) * 180) / Math.PI;
+const AT_HOOK_R = (0.5 + AT_RING * Math.cos((AT_JOIN_DEG * Math.PI) / 180) - 0.67) / 2;
 const NINE_T = tangentDeg(0.16, 1, 0.33, 0.3, 0.3, -1);
 
 const GLYPHS: Readonly<Record<string, GlyphDef>> = {
@@ -108,7 +115,40 @@ const GLYPHS: Readonly<Record<string, GlyphDef>> = {
   X: { w: 0.66, ops: [['M', 0.02, 0], ['L', 0.64, 1], ['M', 0.64, 0], ['L', 0.02, 1]] },
   Y: { w: 0.66, ops: [['M', 0, 0], ['L', 0.33, 0.5], ['L', 0.66, 0], ['M', 0.33, 0.5], ['L', 0.33, 1]] },
   Z: { w: 0.66, ops: [['M', 0.04, 0], ['L', 0.62, 0], ['L', 0.04, 1], ['L', 0.62, 1]] },
+  // Documents only (DOCUMENT_CHARSET: an invoice's address and email, plan LIVE RELEASE+ M7), never on a label.
+  ',': { w: 0.16, ops: [['M', 0.12, 0.82], ['L', 0.04, 1]] },
+  "'": { w: 0.12, ops: [['M', 0.06, 0], ['L', 0.06, 0.26]] },
+  '+': { w: 0.52, ops: [['M', 0.26, 0.32], ['L', 0.26, 0.8], ['M', 0.02, 0.56], ['L', 0.5, 0.56]] },
+  '(': { w: 0.3, ops: [['M', ...pointOn(0.3, 0.5, 0.26, 0.6, 236)], ['arc', 0.3, 0.5, 0.26, 0.6, 236, 124]] },
+  ')': { w: 0.3, ops: [['M', ...pointOn(0, 0.5, 0.26, 0.6, -56)], ['arc', 0, 0.5, 0.26, 0.6, -56, 56]] },
+  // The underscore of an email (jean_dupont@…), on the baseline.
+  _: { w: 0.5, ops: [['M', 0.02, 1], ['L', 0.48, 1]] },
+  // The ampersand of an address (Arts & Métiers): a loop on the cap line, a bowl on the baseline, the stroke crossing.
+  '&': {
+    w: 0.72,
+    ops: [
+      ['M', 0.7, 1],
+      lineAt(0.3, 0.21, 0.18, 135),
+      arc(0.3, 0.21, 0.18, 135, 405),
+      lineAt(0.3, 0.73, 0.26, 215),
+      arc(0.3, 0.73, 0.26, 215, 20),
+      ['L', 0.7, 0.5],
+    ],
+  },
+  '@': {
+    w: 1.0,
+    ops: [
+      ...circle(0.5, 0.51, 0.17),
+      ['M', 0.67, 0.34],
+      ['L', 0.67, 0.66],
+      arc(0.67 + AT_HOOK_R, 0.66, AT_HOOK_R, 180, 0),
+      arc(0.5, 0.5, AT_RING, AT_JOIN_DEG, AT_JOIN_DEG - 300),
+    ],
+  },
 };
+
+/** The characters only documents letter (an invoice's address, a buyer's email): never on a piece's label or card. */
+const DOCUMENT_ONLY = Object.freeze([',', "'", '+', '(', ')', '&', '_', '@']);
 
 /** Space between glyph boxes before tracking, in cap heights. */
 const SIDE_BEARING = 0.16;
@@ -116,7 +156,10 @@ const SIDE_BEARING = 0.16;
 const MAX_ARC_DEG = 90;
 const DECIMALS = 3;
 
-export const LABEL_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS));
+/** What a label, a card or a certificate letters (toLabelText). */
+export const LABEL_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS).filter((ch) => !DOCUMENT_ONLY.includes(ch)));
+/** What a document letters besides (toDocumentText): the punctuation of an address and of an email (the slash a label has already). */
+export const DOCUMENT_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS));
 
 /** Letters that do not decompose into a base letter and accents (NFKD), spelt the way French and English print them in capitals. */
 const SPELLED: Readonly<Record<string, string>> = Object.freeze({ Æ: 'AE', Œ: 'OE', Ø: 'O', Đ: 'D', Ł: 'L', Þ: 'TH' });
@@ -129,13 +172,30 @@ const DASHES = /[\u2010-\u2015\u2212]/g;
  * "Argent 925, œuvre" → "ARGENT 925 OEUVRE". Never throws.
  */
 export function toLabelText(text: string): string {
+  return lettered(text, LABEL_CHARSET);
+}
+
+/** Typographic quotes that stand for the apostrophe of a name (O’Neil). */
+const APOSTROPHES = /[\u2018\u2019\u02bc]/g;
+
+/**
+ * Free text on a document (an invoice, a credit note: a buyer's name, address and email) as the lettering can draw it:
+ * as toLabelText, keeping besides the comma, the apostrophe, the plus, parentheses, the ampersand, the underscore and
+ * the at sign (DOCUMENT_CHARSET).
+ * "Rue de l’Église, 12" → "RUE DE L'EGLISE, 12". Never throws.
+ */
+export function toDocumentText(text: string): string {
+  return lettered(text.replace(APOSTROPHES, "'"), DOCUMENT_CHARSET);
+}
+
+function lettered(text: string, charset: ReadonlySet<string>): string {
   const upper = text
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
     .toUpperCase()
     .replace(DASHES, '-');
   let out = '';
-  for (const ch of upper) out += SPELLED[ch] ?? (LABEL_CHARSET.has(ch) ? ch : ' ');
+  for (const ch of upper) out += SPELLED[ch] ?? (charset.has(ch) ? ch : ' ');
   return out.replace(/ {2,}/g, ' ').trim();
 }
 

@@ -45,7 +45,11 @@
  * PDF of the live record at `/verify/c#…` (services/ownership-certificates.ts).
  * It names no owner, never says AUTHENTIC (it attests a record, not the
  * object it is shown with) and carries its live address, lettered and as a
- * link, so whoever holds the page can check that it is still valid.
+ * link, so whoever holds the page can check that it is still valid. The same
+ * page names an order instead of a live address for the certificate among an
+ * order's documents in MY PIECES (plan LIVE RELEASE+, M6): a new document for
+ * the piece's registered buyer, never its claim card. The invoices and credit
+ * notes (./invoice.ts) are lettered with the same helpers.
  */
 import { ORBES_CODE_STYLES } from '../../core/code/styles.js';
 import { genomeLayout } from '../../core/genome/render.js';
@@ -147,9 +151,10 @@ export class CertificateInputError extends RangeError {
 
 // ── Card layout ────────────────────────────────────────────────────────────
 
-const INK = '#0A0A0A';
+/** The ink of every card and document (black on white). */
+export const INK = '#0A0A0A';
 /** Hairline floor: thinner strokes do not survive a print shop's plate (0.1 mm ≈ 0.28 pt). */
-const MIN_STROKE_MM = 0.1;
+export const MIN_STROKE_MM = 0.1;
 const CROCKFORD_GROUP = '[0-9A-HJKMNP-TV-Z]{4}';
 const CLAIM_CODE_RE = new RegExp(`^${CROCKFORD_GROUP}-${CROCKFORD_GROUP}-${CROCKFORD_GROUP}$`);
 const PRODUCT_ID_RE = /^O\d{2}-[A-Z]-\d{5,6}$/;
@@ -198,15 +203,17 @@ export interface CertificateCard {
   code: StrokePath;
 }
 
-function fmt(n: number): string {
+/** A coordinate in millimetres for path data: three decimals at most. */
+export function fmt(n: number): string {
   if (!Number.isFinite(n)) throw new CertificateInputError('non-finite coordinate');
   const s = n.toFixed(3).replace(/\.?0+$/, '');
   return s === '-0' ? '0' : s;
 }
 
-const stroked = (run: TextRun): StrokePath => ({ d: run.d, width: Math.max(run.strokeWidth, MIN_STROKE_MM) });
+/** A run of lettering as a stroked path, never thinner than the hairline floor. */
+export const stroked = (run: TextRun): StrokePath => ({ d: run.d, width: Math.max(run.strokeWidth, MIN_STROKE_MM) });
 
-interface LineSpec {
+export interface LineSpec {
   cap: number;
   tracking: number;
   x: number;
@@ -218,7 +225,7 @@ interface LineSpec {
  * Free text on one line of at most `maxWidth`: at its cap height when it
  * fits, shrunk down to `minCap` otherwise, and only then cut short with '...'.
  */
-function fittedRun(text: string, spec: LineSpec & { minCap: number; maxWidth: number }): TextRun {
+export function fittedRun(text: string, spec: LineSpec & { minCap: number; maxWidth: number }): TextRun {
   const width = (t: string) => measureText(t, spec.tracking);
   let t = text;
   // The cap height at which the whole text fills the line. Whether to cut is
@@ -386,7 +393,7 @@ export function layoutCertificateSheet(count: number): SheetLayout {
 
 // ── Outputs ────────────────────────────────────────────────────────────────
 
-const PDF_TYPE = 'application/pdf';
+export const PDF_TYPE = 'application/pdf';
 
 /** Cards as a vector PDF: one 85 × 55 mm page per card, or A4 sheets of ten with cut marks and a scale bar. */
 export async function renderCertificatePdf(items: readonly CertificateItem[], opts: CertificateOptions): Promise<RenderedCertificates> {
@@ -519,6 +526,7 @@ export const OWNERSHIP_CERTIFICATE_COPY = Object.freeze({
     status: 'STATUS',
     issued: 'ISSUED',
     validUntil: 'VALID UNTIL',
+    order: 'ORDER',
   }),
   verified: 'VERIFIED',
   unverified: 'REGISTERED · NOT YET VERIFIED',
@@ -584,18 +592,27 @@ export interface OwnershipCertificateDocument {
   /** The day the ownership began, 'YYYY-MM-DD' (UTC). */
   since: string;
   warranty: { status: WarrantySummaryStatus; startDate?: string; endDate?: string };
-  issuedAt: Date;
-  expiresAt: Date;
+  /** A link's creation and expiry (F-06): with `link` only. */
+  issuedAt?: Date;
+  expiresAt?: Date;
   /** When the record was read: the PDF's date (CreationDate, file name). */
   checkedAt: Date;
-  /** The certificate's live address, `https://host/verify/c#` and its 52-character token. */
-  link: string;
+  /**
+   * The certificate's live address, `https://host/verify/c#` and its 52-character token (F-06, a link its owner
+   * shares). Without one, `order` names the order the piece was bought with: the certificate an order's documents give
+   * its buyer in MY PIECES (plan LIVE RELEASE+, M6), the record as read then, with no live address.
+   */
+  link?: string;
+  /** The order's reference, `OR-1A2B3C4D` (M6): only without `link`. */
+  order?: string;
 }
+
+const ORDER_REFERENCE_RE = /^OR-[0-9A-F]{8}$/;
 
 const LONG_MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
 
 /** 'YYYY-MM-DD' or a Date → '3 OCTOBER 2026' (UTC). */
-function longDate(v: string | Date): string {
+export function longDate(v: string | Date): string {
   const iso = typeof v === 'string' ? v : v.toISOString();
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m || !LONG_MONTHS[Number(m[2]) - 1]) throw new CertificateInputError('not a date');
@@ -617,10 +634,13 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
   if (!PRODUCT_ID_RE.test(d.productId)) throw new CertificateInputError('not a canonical product id');
   if (d.genome && !FINGERPRINT_RE.test(d.genome.fingerprint)) throw new CertificateInputError('not a genome fingerprint');
   if (!(d.warranty.status in OWNERSHIP_CERTIFICATE_COPY.warranty)) throw new CertificateInputError('unknown warranty status');
+  if (d.link !== undefined ? d.order !== undefined || !d.issuedAt || !d.expiresAt : !ORDER_REFERENCE_RE.test(d.order ?? '')) {
+    throw new CertificateInputError('a certificate has its link and its dates, or the reference of its order');
+  }
   const L = OWNERSHIP_CERTIFICATE_LAYOUT;
   const C = OWNERSHIP_CERTIFICATE_COPY;
   const [pw, ph] = SHEET_PAGES[L.page];
-  const live = certificateLinkLettering(d.link);
+  const live = d.link !== undefined ? certificateLinkLettering(d.link) : null;
   const strokes: StrokePath[] = [];
   const line = (text: string, s: LineSpec) => strokes.push(stroked(textRun(text, { capHeight: s.cap, tracking: s.tracking, x: s.x, baseline: s.baseline, align: s.align ?? 'start' })));
   const fitted = (text: string, s: LineSpec & { minCap: number; maxWidth: number }) => {
@@ -698,13 +718,18 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
   column(L.columns[1], C.record, record);
   rule(L.ruleMiddle);
 
-  // This certificate: valid when, issued, until; what it attests; its live address.
+  // This certificate: valid when, issued, until (a link), or the order it was bought with; what it attests; its live
+  // address (a link).
   const pad = (n: number) => String(n).padStart(2, '0');
   const at = d.checkedAt;
   const certificate: [string, string][] = [
     [C.rows.status, C.valid(`${longDate(at)} · ${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())} UTC`)],
-    [C.rows.issued, longDate(d.issuedAt)],
-    [C.rows.validUntil, longDate(d.expiresAt)],
+    ...(live
+      ? [
+          [C.rows.issued, longDate(d.issuedAt!)] as [string, string],
+          [C.rows.validUntil, longDate(d.expiresAt!)] as [string, string],
+        ]
+      : [[C.rows.order, d.order!] as [string, string]]),
   ];
   line(C.certificate, { cap: L.section.cap, tracking: L.section.tracking, x: L.left, baseline: L.certificate.baseline });
   certificate.forEach(([label, value], i) => {
@@ -716,9 +741,11 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
     strokes.push(stroked(fittedRun(text, { cap: L.statement.cap, minCap: L.statement.cap * 0.8, tracking: L.statement.tracking, x: L.left, baseline: L.statement.baselines[i], maxWidth: L.right - L.left }))),
   );
   const V = L.live;
-  line(C.checkLive, { cap: L.section.cap, tracking: L.section.tracking, x: L.left, baseline: V.labelBaseline });
-  strokes.push(stroked(fittedRun(live.address, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.addressBaseline, maxWidth: L.right - L.left })));
-  strokes.push(stroked(fittedRun(live.code, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.codeBaseline, maxWidth: L.right - L.left })));
+  if (live) {
+    line(C.checkLive, { cap: L.section.cap, tracking: L.section.tracking, x: L.left, baseline: V.labelBaseline });
+    strokes.push(stroked(fittedRun(live.address, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.addressBaseline, maxWidth: L.right - L.left })));
+    strokes.push(stroked(fittedRun(live.code, { cap: V.cap, minCap: V.minCap, tracking: V.tracking, x: L.left, baseline: V.codeBaseline, maxWidth: L.right - L.left })));
+  }
   line(C.verifyOnly, { cap: L.verifyOnly.cap, tracking: L.verifyOnly.tracking, x: L.left, baseline: L.verifyOnly.baseline });
 
   const top = V.addressBaseline - V.cap - 1;
@@ -730,7 +757,7 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
     markColor: INK,
     fills: [{ d: `M${fmt(P.x)} ${fmt(P.y)}L${fmt(P.x + P.w)} ${fmt(P.y)}L${fmt(P.x + P.w)} ${fmt(P.y + P.h)}L${fmt(P.x)} ${fmt(P.y + P.h)}Z`, color: ORBES_CODE_STYLES.ivory.paper }],
     shapes: monogram.map((m) => ({ d: m, color: INK })),
-    links: [{ xMm: L.left, yMm: top, wMm: L.right - L.left, hMm: V.codeBaseline + 1 - top, url: d.link }],
+    links: live ? [{ xMm: L.left, yMm: top, wMm: L.right - L.left, hMm: V.codeBaseline + 1 - top, url: d.link! }] : [],
   };
 }
 
@@ -740,7 +767,7 @@ export async function renderOwnershipCertificatePdf(d: OwnershipCertificateDocum
   const day = d.checkedAt.toISOString().slice(0, 10);
   const body = await renderPdf([page], {
     title: `ORBES OWNERSHIP CERTIFICATE ${d.productId}`,
-    subject: `The ORBES record of ${d.productId} on ${day}. It attests a record, not the object it is shown with.`,
+    subject: `The ORBES record of ${d.productId} on ${day}${d.order ? `, bought with order ${d.order}` : ''}. It attests a record, not the object it is shown with.`,
     keywords: ['ORBES', 'ownership certificate', d.productId].join(', '),
     creationDate: d.checkedAt,
   });

@@ -13,10 +13,13 @@
  * Access (routes/club.ts): a signed-in account that holds a piece now, as the
  * club counts them (club.ts `tierOf`), read again at every request, so the
  * circle goes with the last piece (403 OWNERS_ONLY). A post reads from its
- * `min_tier` up only, from its `published_at` on (the publication of a LIVE
+ * `min_tier` up only, and, when it names a segment (`segment_id`, plan LIVE
+ * RELEASE+ choice 27), by that segment's members only, read at every request
+ * (services/segments.ts), from its `published_at` on (the publication of a LIVE
  * RELEASE schedules its post for the release's announcement): below its tier,
- * unpublished, not shown yet or unknown, it answers the same 404
- * CIRCLE_POST_NOT_FOUND. A LIVE RELEASE it links is named once its name is
+ * outside its segment, unpublished, not shown yet or unknown, it answers the
+ * same 404 CIRCLE_POST_NOT_FOUND. A segment's name is the console's: a member
+ * never reads it. A LIVE RELEASE it links is named once its name is
  * revealed, and linked only once announced (`linkedDrop`). The feed is paginated and carries no body (the
  * verify client refuses answers over 256 000 characters): a post does.
  *
@@ -46,11 +49,12 @@ import { makePage, noopLogger, pageOffset, pageRequest, systemClock, type Actor,
 import type { AuditService } from './audit.js';
 import { clubMembersByTier, ownersOnly, tierOf, type ClubMembers } from './club.js';
 import { dropNotFound, dropState, type DropState } from './drops.js';
-import { isAnnounced, liveStages } from './live.js';
+import { isAnnounced, liveStages, stagesAt } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { readActingAccount } from './ownership.js';
 import { addDays, daySpan } from './scan-stats.js';
+import { isSegmentMember, memberSegments } from './segments.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +177,7 @@ export function normalizePollOptions(v: unknown): string[] {
 
 /** Said as /verify says it (verify/copy.ts CIRCLE.notFound): a post below the reader's tier answers the same. */
 export const circlePostNotFound = () => new DomainError('CIRCLE_POST_NOT_FOUND', 404, 'This post is not in the circle.');
+const segmentNotFound = () => notFound('Segment', 'SEGMENT_NOT_FOUND');
 const notInvitation = () => conflict('CIRCLE_NOT_INVITATION', 'Only an invitation takes an answer.');
 const notPoll = () => conflict('CIRCLE_NOT_POLL', 'Only a poll takes a vote.');
 const circleFull = () => conflict('CIRCLE_FULL', 'Every place of this invitation is taken.');
@@ -294,6 +299,8 @@ export interface AdminCirclePost {
   drop: { id: string; title: string; state: DropState } | null;
   model: { id: string; name: string; type: string; lookbook: LookbookState; slug: string | null } | null;
   externalUrl: string | null;
+  /** Read by this segment's members only (among its tiers); null: by its tiers. */
+  segment: { id: string; name: string } | null;
   published: boolean;
   publishedAt: Date | null;
   createdAt: Date;
@@ -340,6 +347,8 @@ export interface CirclePostInput {
   dropId?: string | null;
   modelId?: string | null;
   externalUrl?: string | null;
+  /** A segment whose members alone read it (among its tiers); null: its tiers. */
+  segmentId?: string | null;
 }
 
 /** A change of a post: any field but its kind; null (or '') clears an optional one. */
@@ -407,8 +416,10 @@ const CARD_COLUMNS = [
   'p.published_at',
   'p.created_by',
   'p.created_at',
+  'p.segment_id',
 ] as const;
 
+/** A post's card: everything but its body. */
 type CardRow = Omit<CirclePostRow, 'body'>;
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -444,7 +455,21 @@ export class CircleService {
     const now = this.clock();
     const { tier } = await tierOf(this.db, accountId, now);
     if (tier < 1) throw ownersOnly();
-    const shown = this.db.selectFrom('circle_posts as p').where('p.published_at', '<=', now).where('p.min_tier', '<=', tier);
+    // The segments of the posts shown to the tier, each read now for this account.
+    const named = await this.db
+      .selectFrom('circle_posts')
+      .select('segment_id')
+      .distinct()
+      .where('published_at', '<=', now)
+      .where('min_tier', '<=', tier)
+      .where('segment_id', 'is not', null)
+      .execute();
+    const mine = [...(await memberSegments(this.db, accountId, named.map((r) => r.segment_id!), now))];
+    const shown = this.db
+      .selectFrom('circle_posts as p')
+      .where('p.published_at', '<=', now)
+      .where('p.min_tier', '<=', tier)
+      .where((eb) => eb.or([eb('p.segment_id', 'is', null), ...(mine.length ? [eb('p.segment_id', 'in', mine)] : [])]));
     const total = await shown.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await shown.select([...CARD_COLUMNS]).orderBy('p.published_at', 'desc').orderBy('p.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const ids = rows.map((r) => r.id);
@@ -493,8 +518,8 @@ export class CircleService {
       if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < 1) throw ownersOnly();
-      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'event_at', 'capacity']).where('id', '=', id).forUpdate().executeTakeFirst();
-      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier) throw circlePostNotFound();
+      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'segment_id', 'event_at', 'capacity']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier || !(await this.inSegment(tx, p.segment_id, accountId, now))) throw circlePostNotFound();
       if (p.kind !== 'INVITATION') throw notInvitation();
       if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();
       const mine = await tx.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
@@ -531,8 +556,8 @@ export class CircleService {
       if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < 1) throw ownersOnly();
-      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'poll_options']).where('id', '=', id).forShare().executeTakeFirst();
-      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier) throw circlePostNotFound();
+      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'segment_id', 'poll_options']).where('id', '=', id).forShare().executeTakeFirst();
+      if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier || !(await this.inSegment(tx, p.segment_id, accountId, now))) throw circlePostNotFound();
       if (p.kind !== 'POLL' || !p.poll_options) throw notPoll();
       if (option >= p.poll_options.length) throw validationError('Choose one of the options of this poll.');
       const voted = await tx.selectFrom('circle_poll_votes').select('option_index').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
@@ -583,8 +608,10 @@ export class CircleService {
     const externalUrl = normalizeCircleUrl(input.externalUrl ?? null);
     const dropId = input.dropId === undefined || input.dropId === null || input.dropId === '' ? null : knownLink(input.dropId, dropNotFound);
     const modelId = input.modelId === undefined || input.modelId === null || input.modelId === '' ? null : knownLink(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
+    const segmentId = input.segmentId === undefined || input.segmentId === null || input.segmentId === '' ? null : knownLink(input.segmentId, segmentNotFound);
     return inTransaction(this.db, async (tx) => {
       await this.checkLinks(tx, dropId, modelId);
+      await this.checkSegment(tx, segmentId);
       const row = await tx
         .insertInto('circle_posts')
         .values({
@@ -599,6 +626,7 @@ export class CircleService {
           drop_id: dropId,
           model_id: modelId,
           external_url: externalUrl,
+          segment_id: segmentId,
           created_by: actor.id!,
           created_at: this.clock(),
         })
@@ -622,6 +650,7 @@ export class CircleService {
             dropId,
             modelId,
             externalUrl,
+            segmentId,
           },
         },
         tx,
@@ -679,6 +708,9 @@ export class CircleService {
       await this.checkLinks(tx, dropId !== p.drop_id ? dropId : null, modelId !== p.model_id ? modelId : null);
       note('dropId', 'drop_id', p.drop_id, dropId);
       note('modelId', 'model_id', p.model_id, modelId);
+      const segmentId = change.segmentId === undefined ? p.segment_id : change.segmentId === null || change.segmentId === '' ? null : knownLink(change.segmentId, segmentNotFound);
+      if (segmentId !== p.segment_id) await this.checkSegment(tx, segmentId);
+      note('segmentId', 'segment_id', p.segment_id, segmentId);
       if (Object.keys(set).length > 0) {
         await tx.updateTable('circle_posts').set(set).where('id', '=', id).execute();
         await this.audit.record({ actor, action: 'circle.post.update', targetType: 'circle_post', targetId: id, details: { before, after } }, tx);
@@ -695,7 +727,7 @@ export class CircleService {
       const p = await this.lock(tx, id);
       if (p.published_at) throw alreadyPublished();
       await tx.updateTable('circle_posts').set({ published_at: this.clock() }).where('id', '=', id).execute();
-      await this.audit.record({ actor, action: 'circle.post.publish', targetType: 'circle_post', targetId: id, details: { kind: p.kind, minTier: p.min_tier } }, tx);
+      await this.audit.record({ actor, action: 'circle.post.publish', targetType: 'circle_post', targetId: id, details: { kind: p.kind, minTier: p.min_tier, segmentId: p.segment_id } }, tx);
       return this.adminPost(tx, id);
     });
   }
@@ -779,10 +811,26 @@ export class CircleService {
     return p;
   }
 
-  /** The drop and the model a post links, when they change: each must exist (404 DROP_NOT_FOUND, MODEL_NOT_FOUND). */
+  /**
+   * The drop and the model a post links, when they change: each must exist (404 DROP_NOT_FOUND, MODEL_NOT_FOUND); an
+   * after-room is never linked (services/after-room.ts: nobody but its guests sees it), the same 404.
+   */
   private async checkLinks(tx: Db, dropId: string | null, modelId: string | null): Promise<void> {
-    if (dropId && !(await tx.selectFrom('drops').select('id').where('id', '=', dropId).executeTakeFirst())) throw dropNotFound();
+    if (dropId && !(await tx.selectFrom('drops').select('id').where('id', '=', dropId).where('parent_drop_id', 'is', null).executeTakeFirst())) throw dropNotFound();
     if (modelId && !(await tx.selectFrom('models').select('id').where('id', '=', modelId).executeTakeFirst())) throw notFound('Model', 'MODEL_NOT_FOUND');
+  }
+
+  /**
+   * A segment a post names exists (404 SEGMENT_NOT_FOUND), read FOR KEY SHARE: a deletion under way waits for this
+   * transaction and then finds it in use (409 SEGMENT_IN_USE), or this one waits for the deletion and finds it gone.
+   */
+  private async checkSegment(tx: Db, segmentId: string | null): Promise<void> {
+    if (segmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', segmentId).forKeyShare().executeTakeFirst())) throw segmentNotFound();
+  }
+
+  /** Whether a post's segment, when it names one, has the account among its members now. */
+  private async inSegment(db: Db, segmentId: string | null, accountId: string, now: Date): Promise<boolean> {
+    return segmentId === null || isSegmentMember(db, segmentId, accountId, now);
   }
 
   /** The first photograph of each post. */
@@ -852,7 +900,7 @@ export class CircleService {
     const db = this.db;
     const now = this.clock();
     const p = await db.selectFrom('circle_posts').selectAll().where('id', '=', id).executeTakeFirst();
-    if (!p || !shownAt(p.published_at, now) || p.min_tier > tier) throw circlePostNotFound();
+    if (!p || !shownAt(p.published_at, now) || p.min_tier > tier || !(await this.inSegment(db, p.segment_id, accountId, now))) throw circlePostNotFound();
     const [images, mine, vote, drop, model] = await Promise.all([
       db.selectFrom('circle_post_images').select(['sha256', 'alt']).where('post_id', '=', id).orderBy('position').execute(),
       db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
@@ -924,7 +972,8 @@ export class CircleService {
     const dropIds = [...new Set(rows.map((r) => r.drop_id).filter((x): x is string => x !== null))];
     const modelIds = [...new Set(rows.map((r) => r.model_id).filter((x): x is string => x !== null))];
     const staff = [...new Set(rows.map((r) => r.created_by).filter((x): x is string => x !== null))];
-    const [images, answers, results, drops, models, creators] = await Promise.all([
+    const segmentIds = [...new Set(rows.map((r) => r.segment_id).filter((x): x is string => x !== null))];
+    const [images, answers, results, drops, models, creators, segments] = await Promise.all([
       db.selectFrom('circle_post_images').select(['post_id', 'sha256', 'alt', 'position']).where('post_id', 'in', ids).orderBy('post_id').orderBy('position').execute(),
       this.answerCounts(db, ids),
       this.results(
@@ -934,7 +983,9 @@ export class CircleService {
       dropIds.length ? db.selectFrom('drops').select(['id', 'title', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at']).where('id', 'in', dropIds).execute() : [],
       modelIds.length ? db.selectFrom('models').select(['id', 'name', 'type', 'lookbook', 'slug']).where('id', 'in', modelIds).execute() : [],
       staff.length ? db.selectFrom('admin_users').select(['id', 'email']).where('id', 'in', staff).execute() : [],
+      segmentIds.length ? db.selectFrom('segments').select(['id', 'name']).where('id', 'in', segmentIds).execute() : [],
     ]);
+    const segmentOf = new Map(segments.map((x) => [x.id, x]));
     const photos = new Map<string, AdminCirclePhoto[]>();
     for (const i of images) {
       const url = mediaUrl(i.sha256);
@@ -961,6 +1012,7 @@ export class CircleService {
         drop: d ? { id: d.id, title: d.title, state: dropState(d, now) } : null,
         model: m ? { id: m.id, name: m.name, type: m.type, lookbook: m.lookbook, slug: m.slug } : null,
         externalUrl: r.external_url,
+        segment: r.segment_id ? (segmentOf.get(r.segment_id) ?? null) : null,
         published: r.published_at !== null,
         publishedAt: r.published_at,
         createdAt: r.created_at,
@@ -991,15 +1043,20 @@ function shownAt(publishedAt: Date | null, now: Date): boolean {
 
 /** What a member's view of a post reads of the drop it links. */
 const LINKED_DROP_COLUMNS = [
-  'id', 'title', 'mode', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes',
+  'id', 'title', 'mode', 'parent_drop_id', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes', 'ended_at',
 ] as const;
 
 /**
  * The drop a post links, as a member reads it: a draw once published; a LIVE RELEASE once announced and while not
- * cancelled, its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too).
+ * cancelled (an after-room never), its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too),
+ * each read at its end once ended (services/live.ts stagesAt).
  */
 function linkedDrop(d: Pick<DropRow, (typeof LINKED_DROP_COLUMNS)[number]>, now: Date): { id: string; title: string } | null {
+  // An after-room is never linked (checkLinks): should one be, the circle still says nothing of it.
+  if (d.parent_drop_id !== null) return null;
   if (d.mode !== 'LIVE') return dropState(d, now) !== 'DRAFT' ? { id: d.id, title: d.title } : null;
-  if (d.cancelled_at || !isAnnounced(d, now)) return null;
-  return { id: d.id, title: liveStages(d, now)?.name ? d.title : 'LIVE RELEASE' };
+  // Read at its end once ended: one ended before its announcement or its name's stage stays unnamed.
+  const at = stagesAt(d, now);
+  if (d.cancelled_at || !isAnnounced(d, at)) return null;
+  return { id: d.id, title: liveStages(d, at)?.name ? d.title : 'LIVE RELEASE' };
 }

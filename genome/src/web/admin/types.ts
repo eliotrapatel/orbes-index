@@ -7,8 +7,9 @@
  * the browser bundle; test/web/admin.model.test.ts asserts they stay equal.
  */
 
+/** RESERVED: an identity reserved for a piece to make (the atelier's work sheet), not issued yet. */
 export const PRODUCT_STATUSES = [
-  'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
+  'RESERVED', 'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
   'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN',
 ] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
@@ -96,6 +97,38 @@ export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
 
+/** How a request of the private salon was closed (shop_requests.outcome): ACCEPTED, an order follows, or DECLINED. */
+export const SHOP_REQUEST_OUTCOMES = ['ACCEPTED', 'DECLINED'] as const;
+export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
+
+/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon. */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
+/** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
+export const ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** What an order RESERVED or PAID holds at its location (orders.reservation): a piece in stock, or a piece to make. */
+export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
+export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
+
+/** Why the stock moved (stock_movements.reason). */
+export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED'] as const;
+export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
+
+/** A piece to make at the atelier (bench_items.status). */
+export const BENCH_ITEM_STATUSES = ['TO_MAKE', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
+export type BenchItemStatus = (typeof BENCH_ITEM_STATUSES)[number];
+
+/** Where a returned order's piece goes (returns.outcome). */
+export const RETURN_OUTCOMES = ['RESTOCKED', 'ARCHIVED'] as const;
+export type ReturnOutcome = (typeof RETURN_OUTCOMES)[number];
+
+/** An invoice, or its credit note (invoices.kind). */
+export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
 export type DropMode = (typeof DROP_MODES)[number];
@@ -111,6 +144,70 @@ export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
 /** How ORBES Client Services concluded a confirmed reservation of a LIVE RELEASE (live_entries.resolution). */
 export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
 export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
+
+/** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
+export const ACCESS_COMBINES = ['AND', 'OR'] as const;
+export type AccessCombine = (typeof ACCESS_COMBINES)[number];
+
+/** The criteria of a segment (services/segments.ts SEGMENT_CRITERIA), by the four groups of choice 27, in order. */
+export const SEGMENT_CRITERIA = {
+  RELEASES: ['PARTICIPATIONS', 'TOOK_PART', 'SECURED', 'SECURED_IN'],
+  CLUB: ['TIER', 'OWNS_MODEL', 'OWNS_COLLECTION'],
+  PROFILE: ['SIZE', 'COUNTRY'],
+  SIGNALS: ['INTEREST', 'ANSWER', 'ACTIVE'],
+} as const;
+export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
+export const SEGMENT_RULE_KINDS = [...SEGMENT_CRITERIA.RELEASES, ...SEGMENT_CRITERIA.CLUB, ...SEGMENT_CRITERIA.PROFILE, ...SEGMENT_CRITERIA.SIGNALS] as const;
+export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
+/** A group of a segment matches ALL of its rules, or ANY. */
+export const SEGMENT_MATCHES = ['ALL', 'ANY'] as const;
+export type SegmentMatch = (typeof SEGMENT_MATCHES)[number];
+
+/** A criterion of a segment; `not`: the collectors it does not match. */
+export type SegmentRule = { not?: boolean } & (
+  | { kind: 'PARTICIPATIONS'; min: number }
+  | { kind: 'TOOK_PART'; dropId: string }
+  | { kind: 'SECURED'; min: number }
+  | { kind: 'SECURED_IN'; dropId: string }
+  | { kind: 'TIER'; tiers: number[] }
+  | { kind: 'OWNS_MODEL'; modelIds: string[] }
+  | { kind: 'OWNS_COLLECTION'; collectionIds: string[] }
+  | { kind: 'SIZE'; sizes: string[] }
+  | { kind: 'COUNTRY'; countries: string[] }
+  | { kind: 'INTEREST'; dropId: string | null }
+  | { kind: 'ANSWER'; dropId: string; answer: number }
+  | { kind: 'ACTIVE'; days: number }
+);
+
+/** A segment's rule tree: ALL or ANY of its criteria and groups of criteria (one level down). */
+export interface SegmentGroup {
+  match: SegmentMatch;
+  rules: (SegmentRule | SegmentGroup)[];
+}
+
+/** A segment (GET /api/admin/segments, /:id): its rule tree, its members now and what uses it. */
+export interface Segment {
+  id: string;
+  name: string;
+  criteria: SegmentGroup;
+  count: number;
+  usedBy: { releases: { id: string; title: string }[]; posts: { id: string; title: string }[] };
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** A segment as a release's access rule or a post's audience chooses it (GET /api/admin/segments/names). */
+export type SegmentName = Pick<Segment, 'id' | 'name'>;
+
+/** What the builder names (GET /api/admin/segments/options). */
+export interface SegmentOptions {
+  releases: { id: string; title: string; mode: DropMode; opensAt: Iso; answers: string[] | null }[];
+  models: { id: string; name: string; type: string }[];
+  collections: { id: string; name: string }[];
+  sizes: string[];
+  countries: string[];
+}
 
 /** Where a LIVE RELEASE stands (services/live.ts livePhase): HIDDEN is published, announced later. */
 export const LIVE_PHASES = ['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ROOM', 'LIVE', 'ENDED', 'CANCELLED'] as const;
@@ -306,6 +403,13 @@ export interface Model {
   privateMinTier: number;
   /** The gallery of its sheet, in its order (the reference photograph is the cover, apart). */
   gallery: GalleryImage[];
+  /** N2: its base price in minor units with its currency (both or neither): the Shopify product export's price. */
+  basePriceMinor: number | null;
+  baseCurrency: string | null;
+  /** M6: its care guide, shown in MY PIECES with each order of the model; null: its care instructions stand in. */
+  careGuide: string | null;
+  /** N2: its Shopify product id once pasted back (null: not linked), the sizes the export gives it, those linked. */
+  shopify: { productId: string | null; variants: number; linked: number };
   createdAt: Iso;
 }
 
@@ -340,6 +444,35 @@ export interface ModelChange {
   /** THE PRIVATE SALON (P-X08): '' clears the price. */
   priceLabel?: string;
   privateMinTier?: number;
+  /** N2: the base price with its currency, sent together; null for both clears it. */
+  basePriceMinor?: number | null;
+  baseCurrency?: OrderCurrency | null;
+  /** M6: '' clears the care guide. */
+  careGuide?: string;
+}
+
+/** N2: a size of a model as the Shopify product export gives it, and its variant id once pasted back. */
+export interface ShopifyVariant {
+  /** null: one size. */
+  size: string | null;
+  sku: string;
+  /** Its SKU exists (a model never issued nor sold has none yet: it is made when its id is pasted). */
+  known: boolean;
+  variantId: string | null;
+}
+
+/** GET /api/admin/models/:id/shopify: the model's Shopify product, its handle, its sizes and their ids. */
+export interface ShopifyProduct {
+  model: { id: string; name: string; skuPrefix: string };
+  handle: string;
+  productId: string | null;
+  variants: ShopifyVariant[];
+}
+
+/** PUT /api/admin/models/:id/shopify: the ids pasted back (a number, or the address of its page in Shopify's admin). */
+export interface ShopifyLink {
+  productId: string | null;
+  variants: { size: string | null; variantId: string | null }[];
 }
 
 // ── Products, genomes, codes ───────────────────────────────────────────────
@@ -786,6 +919,65 @@ export interface OwnerSheet {
   pieces: OwnedPiece[];
   transfers: { id: string; productId: string; createdAt: Iso; expiresAt: Iso }[];
   scans: { id: string; reference: string; occurredAt: Iso; eventType: string; state: string; productId: string | null; country: string | null }[];
+  /** N4: its orders, the latest first, each with its steps' times and its timing. */
+  orders: ClientOrder[];
+  /** N4: the releases it took part in, the latest first; `count` of them, `secured` the pieces secured in all. */
+  releases: { count: number; secured: number; items: ClientRelease[] };
+  /** N4: its answers to the questions after, the latest first. */
+  answers: ClientAnswer[];
+  /** N4: its I'LL BE THERE, the latest release first. */
+  interest: ClientInterest[];
+  /** N4: the segments it belongs to now. */
+  segments: { id: string; name: string }[];
+  /** N4: Client Services' notes on its orders, entries and requests, the latest first. */
+  notes: ClientNote[];
+}
+
+/** N4: an order on the client sheet: the board's card (without the collector) and the time it reached each step. */
+export interface ClientOrder extends Omit<OrderCard, 'account'> {
+  priceMinor: number | null;
+  currency: string | null;
+  steps: { reservedAt: Iso; paidAt: Iso | null; shippedAt: Iso | null; deliveredAt: Iso | null; cancelledAt: Iso | null; returnedAt: Iso | null };
+}
+
+/** N4: a release taken part in, and the pieces secured there (its after-room's included; 0: took part). */
+export interface ClientRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  title: string;
+  opensAt: Iso;
+  secured: number;
+}
+
+/** N4: an answer to a release's question after: its position (from 1) and its words. */
+export interface ClientAnswer {
+  dropId: string;
+  title: string;
+  question: string;
+  answer: number;
+  answerText: string | null;
+  answeredAt: Iso;
+}
+
+/** N4: an I'LL BE THERE, and what became of it. */
+export interface ClientInterest {
+  dropId: string;
+  title: string;
+  size: string;
+  since: Iso;
+  opensAt: Iso;
+  outcome: 'UPCOMING' | 'CAME' | 'DID_NOT_COME' | 'CANCELLED';
+}
+
+/** N4: a note of Client Services: what it is about, its words, who wrote it. */
+export interface ClientNote {
+  at: Iso;
+  about: 'ORDER' | 'DRAW' | 'SALON' | 'LIVE';
+  /** The order's OR- reference, the release's title, the model's name. */
+  subject: string;
+  orderId: string | null;
+  text: string;
+  by: string | null;
 }
 
 /** POST /api/admin/owners/:id/lock. */
@@ -1019,7 +1211,22 @@ export interface LiveRelease extends LiveCard {
   perAccount: number;
   minTier: number;
   tierPriority: boolean;
-  access: { models: { id: string; name: string }[]; collection: { id: string; name: string } | null; text: string };
+  /** Who may enter: models, collection, releases taken part in, a segment, how they combine, and the rule as the public reads it. */
+  access: {
+    models: { id: string; name: string }[];
+    collection: { id: string; name: string } | null;
+    minParticipations: number | null;
+    segment: { id: string; name: string } | null;
+    combine: AccessCombine;
+    text: string;
+  };
+  /** A surprise in every box: on or off, its description (internal). */
+  surprise: { enabled: boolean; text: string | null };
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16): as set (null: the default), and the one it means. */
+  locationId: string | null;
+  location: { id: string; name: string } | null;
+  /** The question after (choice 11), its answers counted; null for an after-room. */
+  question: LiveQuestion | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -1041,6 +1248,117 @@ export interface LiveRelease extends LiveCard {
   createdAt: Iso;
   createdBy: { id: string; email: string } | null;
   seedHash: string;
+  /** Its after-room, set or opened (plan LIVE RELEASE+, choice 2); null without one, and for an after-room. */
+  afterRoom: LiveAfterRoom | null;
+  /** An after-room's own page: the release it follows; null for a release. */
+  afterRoomOf: { id: string; title: string } | null;
+}
+
+/** Where the question after stands: never asked (OFF), until the release's end (WAITING), the week after it (OPEN), CLOSED. */
+export const LIVE_QUESTION_STATES = ['OFF', 'WAITING', 'OPEN', 'CLOSED'] as const;
+export type LiveQuestionState = (typeof LIVE_QUESTION_STATES)[number];
+
+/** The question after a release in the console (services/question.ts AdminQuestion). */
+export interface LiveQuestion {
+  text: string;
+  answers: string[];
+  /** Rewritten for the release (false: the default question). */
+  custom: boolean;
+  enabled: boolean;
+  state: LiveQuestionState;
+  opensAt: Iso | null;
+  closesAt: Iso | null;
+  /** Asked on the end page (took part, no piece) and in MY PIECES (I'LL BE THERE, never came). */
+  asked: { tookPart: number; interest: number };
+  answered: number;
+  tally: { answer: number; label: string; count: number }[];
+}
+
+/** A size against the stock (GET /api/admin/live/:id/feasibility, services/release-stock.ts). */
+export interface LiveFeasibilityLine {
+  sizeId: string;
+  label: string;
+  onSale: number;
+  available: number;
+  toMake: number;
+  fromStock: number;
+  fromBench: number;
+  short: number;
+}
+
+/** The feasibility check before publishing (plan LIVE RELEASE+, choice 12): warnings, never a refusal. */
+export interface LiveFeasibility {
+  location: { id: string; name: string } | null;
+  sizes: LiveFeasibilityLine[];
+  afterRoom: LiveFeasibilityLine[] | null;
+  short: number;
+  warnings: string[];
+  reasoning: string[];
+}
+
+/** The size mix a new release is proposed (GET /api/admin/live/size-mix, choice 13). */
+export interface LiveSizeMix {
+  model: { id: string; name: string };
+  location: { id: string; name: string };
+  sizes: { label: string; stock: number; fromStock: number; fromDemand: number }[];
+  quantity: number;
+  inStock: number;
+  planned: number | null;
+  reasoning: string[];
+}
+
+/** An hour of the day, Paris time, in the best time to open. */
+export interface BestTimeHour {
+  hour: number;
+  signIns: number;
+  scans: number;
+  activity: number;
+  byTier: number[];
+  past: { releases: number; present: number };
+}
+
+/** The best time to open (GET /api/admin/live/:id/best-time, /api/admin/analytics/best-time; choice 10). */
+export interface BestTime {
+  days: number;
+  from: Iso;
+  to: Iso;
+  minTier: number;
+  country: string | null;
+  hours: BestTimeHour[];
+  countries: { country: string; activity: number; peakHour: number }[];
+  total: number;
+  suggested: { hour: number; activity: number; share: number } | null;
+  release: { hour: number; activity: number; share: number } | null;
+  pastReleases: number;
+  reasoning: string[];
+}
+
+/** Where an after-room stands: waiting for the sell-out, opening at its time, open, over, or never opened. */
+export const AFTER_ROOM_STATES = ['WAITING', 'OPENS', 'OPEN', 'OVER', 'NOT_OPENED'] as const;
+export type AfterRoomState = (typeof AFTER_ROOM_STATES)[number];
+
+/** Why an after-room never opened: nobody left in the line at the sell-out, no sell-out, its release cancelled. */
+export type AfterRoomSkip = 'NO_GUESTS' | 'NOT_SOLD_OUT' | 'CANCELLED';
+
+/** A release's after-room in the console (services/live-console.ts AdminAfterRoom). */
+export interface LiveAfterRoom {
+  id: string;
+  model: { id: string; name: string; type: string; active: boolean };
+  priceMinor: number;
+  currency: string;
+  sizes: { id: string; label: string; stock: number }[];
+  quantity: number;
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  delayMinutes: number;
+  lengthMinutes: number;
+  state: AfterRoomState;
+  phase: LivePhase;
+  opensAt: Iso | null;
+  closesAt: Iso | null;
+  endedReason: LiveEndReason | null;
+  skipped: AfterRoomSkip | null;
+  guests: number;
+  entries: Record<LiveEntryStatus, number>;
 }
 
 /** POST /api/admin/live: every setting (the defaults for those left out); PATCH: any of them until the announcement. */
@@ -1060,6 +1378,11 @@ export interface LiveSettings {
   tierPriority?: boolean;
   accessModelIds?: string[];
   accessCollectionId?: string | null;
+  minParticipations?: number | null;
+  accessSegmentId?: string | null;
+  accessCombine?: AccessCombine;
+  surpriseEnabled?: boolean;
+  surpriseText?: string | null;
   sizes: { id?: string | null; label: string; stock: number }[];
   quantityLine?: string | null;
   addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
@@ -1068,6 +1391,24 @@ export interface LiveSettings {
   nameAt?: Iso | null;
   photoAt?: Iso | null;
   tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
+  /** The after-room: its own model, price, sizes and stock, add-ons, delay and length; null: none. */
+  afterRoom?: LiveAfterRoomSettings | null;
+  /** Where its orders hold or make their pieces; null: the default location. */
+  stockLocationId?: string | null;
+  /** The question after: on by default; its words and answers (both, or null for the default question). */
+  questionEnabled?: boolean;
+  questionText?: string | null;
+  questionAnswers?: string[] | null;
+}
+
+/** An after-room's own settings (the rest is its release's). */
+export interface LiveAfterRoomSettings {
+  modelId: string;
+  priceMinor: number;
+  sizes: { id?: string | null; label: string; stock: number }[];
+  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  delayMinutes?: number;
+  lengthMinutes?: number;
 }
 
 export type LiveSettingsChange = Partial<LiveSettings>;
@@ -1151,26 +1492,6 @@ export interface LiveState {
   quantity: number;
   quantityLine: string;
   sizes: { id: string; label: string; stock: number }[];
-}
-
-/** A confirmed reservation for ORBES Client Services (GET /api/admin/live/:id/reservations): the email masked for an AUDITOR. */
-export interface LiveReservation {
-  id: string;
-  /** `LR-` and the first eight figures of the entry's id, as the client reads it. */
-  reference: string;
-  accountId: string;
-  email: string;
-  size: { id: string; label: string };
-  quantity: number;
-  currency: LiveCurrency;
-  priceMinor: number;
-  addons: { id: string; label: string; priceMinor: number }[];
-  totalMinor: number;
-  confirmedAt: Iso;
-  resolution: LiveResolution | null;
-  note: string | null;
-  handledBy: { id: string; email: string } | null;
-  handledAt: Iso | null;
 }
 
 // ── The Club: the LIVE RELEASES' intelligence (services/live-insights.ts) ──
@@ -1420,6 +1741,8 @@ export interface CirclePost {
   drop: { id: string; title: string; state: DropState } | null;
   model: { id: string; name: string; type: string; lookbook: LookbookState; slug: string | null } | null;
   externalUrl: string | null;
+  /** Read by this segment's members only (among its tiers); null: by its tiers. */
+  segment: { id: string; name: string } | null;
   published: boolean;
   publishedAt: Iso | null;
   createdAt: Iso;
@@ -1443,6 +1766,7 @@ export interface CirclePostInput {
   dropId?: string | null;
   modelId?: string | null;
   externalUrl?: string | null;
+  segmentId?: string | null;
 }
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */
@@ -1481,6 +1805,8 @@ export interface ShopRequest {
   handledAt: Iso | null;
   /** What was done; null while open, or closed with a lock of the account. */
   resolutionNote: string | null;
+  /** ACCEPTED (an order was created) or DECLINED once closed; null while open, or closed before the orders. */
+  outcome: ShopRequestOutcome | null;
 }
 
 // ── The Club: the tiers (P-X04) ────────────────────────────────────────────
@@ -1497,4 +1823,334 @@ export interface ClubTierSheet {
   /** The console changed its words. */
   edited: boolean;
   updatedAt: Iso | null;
+}
+
+// ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────
+
+/** Why an order stands out (M3): RESERVED too long, READY but not shipped, SHIPPED not delivered, DELIVERED not registered. */
+export const ORDER_LATE_RULES = ['RESERVED', 'READY', 'SHIPPED', 'UNREGISTERED'] as const;
+export type OrderLateRule = (typeof ORDER_LATE_RULES)[number];
+
+/** The currencies an order is priced in (services/orders.ts ORDER_CURRENCIES). */
+export const ORDER_CURRENCIES = ['EUR', 'GBP', 'USD', 'CHF'] as const;
+export type OrderCurrency = (typeof ORDER_CURRENCIES)[number];
+
+/** An order's time in its step and whether it is late (services/fulfilment.ts orderTiming). */
+export interface OrderTiming {
+  since: Iso;
+  dueAt: Iso | null;
+  rule: OrderLateRule | null;
+  late: boolean;
+}
+
+/** An order on the board (GET /api/admin/orders): the email masked for an AUDITOR. */
+export interface OrderCard {
+  id: string;
+  /** OR- and the first eight figures of its id. */
+  reference: string;
+  /** A LIVE reservation's LR- reference, as the collector holds it; null for the other channels. */
+  sourceReference: string | null;
+  channel: OrderChannel;
+  status: OrderStatus;
+  release: { id: string; title: string } | null;
+  account: { id: string; email: string };
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+  skuCode: string | null;
+  addons: { label: string }[];
+  surprise: string | null;
+  engraving: boolean;
+  location: { id: string; name: string };
+  reservation: OrderReservation | null;
+  bench: { status: BenchItemStatus } | null;
+  piece: string | null;
+  shipment: { carrier: string; trackingNumber: string } | null;
+  timing: OrderTiming;
+}
+
+export interface OrderBoardColumn {
+  status: OrderStatus;
+  total: number;
+  late: number;
+  items: OrderCard[];
+}
+
+/** The delays after which an order stands out (M3), in days. */
+export interface OrderAlertDelays {
+  reservedDays: number;
+  readyDays: number;
+  shippedDays: number;
+  unregisteredDays: number;
+}
+
+export interface OrderAlertSettings extends OrderAlertDelays {
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
+export interface OrderBoard {
+  now: Iso;
+  delays: OrderAlertSettings;
+  columns: OrderBoardColumn[];
+  releases: { id: string; title: string }[];
+  locations: { id: string; name: string }[];
+}
+
+/** The board's filters (its query). */
+export interface OrderBoardFilters {
+  channel?: OrderChannel;
+  dropId?: string;
+  locationId?: string;
+  late?: boolean;
+  q?: string;
+}
+
+/** An order as its page reads it (the buyer masked for an AUDITOR: `J*** D***`, the address `***`). */
+export interface OrderView {
+  id: string;
+  reference: string;
+  channel: OrderChannel;
+  source: { liveEntryId: string | null; piece: number; dropEntryId: string | null; shopRequestId: string | null };
+  release: { id: string; title: string } | null;
+  accountId: string;
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+  skuId: string | null;
+  priceMinor: number | null;
+  currency: OrderCurrency | null;
+  addons: { id: string; label: string; priceMinor: number }[];
+  surprise: string | null;
+  engravingText: string | null;
+  buyer: { name: string | null; address: string | null };
+  status: OrderStatus;
+  reservedAt: Iso;
+  paidAt: Iso | null;
+  shippedAt: Iso | null;
+  deliveredAt: Iso | null;
+  cancelledAt: Iso | null;
+  returnedAt: Iso | null;
+  location: { id: string; name: string };
+  reservation: OrderReservation | null;
+  bench: { id: string; status: BenchItemStatus; productId: string } | null;
+  shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
+  productId: string | null;
+  shopifyOrderId: string | null;
+  /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
+  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Iso; ownershipReclaimed: boolean } | null;
+  /** Its invoice and credit note, in order of issue. */
+  invoices: OrderDocument[];
+  events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];
+}
+
+/** An invoice or a credit note of an order, as its page lists it. */
+export interface OrderDocument {
+  id: string;
+  kind: InvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  currency: OrderCurrency;
+  totalMinor: number;
+}
+
+/** GET /api/admin/orders/:id: the order, its collector, its timing, its piece, who changed it. */
+export interface OrderDetail {
+  order: OrderView;
+  sourceReference: string | null;
+  account: { id: string; email: string };
+  timing: OrderTiming;
+  piece: { productId: string; status: ProductStatus; registered: boolean } | null;
+  actors: Record<string, string>;
+  delays: OrderAlertDelays;
+}
+
+/** POST /api/admin/orders/:id/transition. */
+export type OrderTransitionInput =
+  | { to: 'PAID'; note?: string }
+  | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor?: number | null; note?: string }
+  | { to: 'DELIVERED'; note?: string }
+  | { to: 'CANCELLED'; note: string };
+
+/** POST /api/admin/orders/:id/return (choice 20): back to stock at a location, or to the archive, with a note. */
+export type OrderReturnInput = { outcome: 'RESTOCKED'; locationId: string; note: string } | { outcome: 'ARCHIVED'; note: string };
+
+/** The order after its return, and the claim code of its piece's new card when it went back to stock (shown once). */
+export interface OrderReturned extends OrderDetail {
+  productId: string;
+  claimCode?: string;
+}
+
+// ── Invoices (routes/admin/invoices.ts) ───────────────────────────────────
+
+/** An invoice or a credit note (the buyer masked for an AUDITOR). */
+export interface Invoice {
+  id: string;
+  kind: InvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  order: { id: string; reference: string };
+  credits: { id: string; number: string } | null;
+  creditedBy: { id: string; number: string } | null;
+  issuer: { name: string; address: string[] };
+  buyer: { name: string | null; address: string | null; email: string | null };
+  lines: { kind: 'PIECE' | 'ADDON'; label: string; detail: string | null; amountMinor: number }[];
+  currency: OrderCurrency;
+  subtotalMinor: number;
+  vatRateBp: number | null;
+  vatMinor: number | null;
+  totalMinor: number;
+}
+
+/** GET /api/admin/invoices: a month's documents and their totals per currency. */
+export interface InvoiceList {
+  month: string;
+  /** The month now (UTC, the server's): the latest the page offers. */
+  currentMonth: string;
+  items: Invoice[];
+  totals: { currency: OrderCurrency; invoiced: number; credited: number; net: number }[];
+}
+
+/** The Invoices page's filters (its query). */
+export interface InvoiceFilters {
+  month?: string;
+  kind?: InvoiceKind;
+  q?: string;
+}
+
+/** PATCH /api/admin/orders/:id/terms: only the terms that change. */
+export interface OrderTermsChange {
+  sizeLabel?: string | null;
+  priceMinor?: number | null;
+  currency?: OrderCurrency | null;
+  engravingText?: string | null;
+}
+
+// ── Locations and carriers (routes/admin/logistics.ts) ───────────────────
+
+export interface StockLocation {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  shopifyLocationId: string | null;
+}
+
+export interface Carrier {
+  id: string;
+  name: string;
+  /** https, with {tracking} where the number goes. */
+  trackingUrl: string;
+  active: boolean;
+}
+
+// ── The atelier (routes/admin/atelier.ts) ─────────────────────────────────
+
+/** What the list of pieces to make shows. */
+export const BENCH_VIEWS = ['OPEN', 'DONE', 'CANCELLED', 'ALL'] as const;
+export type BenchView = (typeof BENCH_VIEWS)[number];
+
+export interface SkuRef {
+  id: string;
+  code: string;
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+}
+
+export interface StockLevel {
+  onHand: number;
+  reserved: number;
+  available: number;
+}
+
+export interface AtelierStockRow extends StockLevel {
+  sku: SkuRef;
+  location: { id: string; name: string };
+  toMake: number;
+  minimum: number | null;
+  suggestion: number;
+}
+
+export interface AtelierStock {
+  rows: AtelierStockRow[];
+  skus: SkuRef[];
+  locations: { id: string; name: string; isDefault: boolean }[];
+}
+
+/** Whom pieces to make are for. */
+export type BenchOrigin = { kind: 'RELEASE'; release: { id: string; title: string } } | { kind: 'SALON' } | { kind: 'STOCK' };
+
+export interface BenchItem {
+  id: string;
+  status: BenchItemStatus;
+  createdAt: Iso;
+  startedAt: Iso | null;
+  doneAt: Iso | null;
+  cancelledAt: Iso | null;
+  piece: { id: string; reference: string; status: ProductStatus; material: string; signed: boolean };
+  order: { id: string; reference: string; status: OrderStatus; channel: OrderChannel } | null;
+  origin: BenchOrigin;
+  sku: SkuRef;
+  location: { id: string; name: string };
+  engravingText: string | null;
+  surprise: string | null;
+  addons: string[];
+}
+
+export interface BenchGroup {
+  origin: BenchOrigin;
+  sku: SkuRef;
+  counts: Record<BenchItemStatus, number>;
+  items: BenchItem[];
+}
+
+export interface BenchList {
+  groups: BenchGroup[];
+  total: number;
+  releases: { id: string; title: string }[];
+}
+
+/** The list's filters (its query). */
+export interface BenchFilters {
+  view?: BenchView;
+  /** A release's id, SALON or STOCK. */
+  origin?: string;
+  skuId?: string;
+  locationId?: string;
+}
+
+/** A work sheet (POST /api/admin/atelier/sheets, OPERATOR): its code's data to draw at print size. */
+export interface WorkSheet {
+  benchItemId: string;
+  status: BenchItemStatus;
+  reference: string;
+  code: { codeId: string; data: string; glyphs: number[] };
+  model: string;
+  sizeLabel: string | null;
+  skuCode: string;
+  addons: string[];
+  engravingText: string | null;
+  surprise: string | null;
+  release: string | null;
+  order: { reference: string; channel: OrderChannel } | null;
+  location: string;
+  createdAt: Iso;
+}
+
+export interface WorkSheets {
+  printedAt: Iso;
+  sheets: WorkSheet[];
+}
+
+/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece. */
+export interface IssueBenchInput {
+  material?: string;
+  productionBatch?: string;
+  productionDate?: string;
+  withClaimSecret: boolean;
+}
+
+export interface IssuedBenchItem {
+  item: BenchItem;
+  productId: string;
+  codeId: string;
+  /** Shown once. */
+  claimCode?: string;
 }

@@ -22,10 +22,16 @@ import {
   RELEASES_PATH,
   releaseSheet,
   releasesRouteOf,
+  afterRoomPath,
+  participationModel,
+  pastCards,
+  PastPages,
+  PAST_PAGE_SIZE,
   tierLabel,
   twoClocks,
+  zonedDate,
 } from '../../src/web/verify/releases-model.js';
-import type { ClubEntry, DropCard, DropSheet } from '../../src/web/verify/types.js';
+import type { ClubEntry, DropCard, DropSheet, PastRelease } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
 const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
@@ -60,7 +66,6 @@ function sheet(extra: Partial<DropSheet> = {}): DropSheet {
     drawnAt: null,
     seedHash: HASH,
     seed: null,
-    entries: null,
     reserved: 0,
     ...extra,
   };
@@ -100,6 +105,12 @@ describe('the releases\' addresses (P-R03)', () => {
     expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/BOARD/`)).toEqual({ release: ID, board: true });
     expect(releasesRouteOf('/verify/releases/not-a-release/board')).toEqual({ release: null });
     expect(releasesRouteOf(`/verify/releases/${ID}/boards`)).toEqual({ release: null });
+    // An after-room (plan LIVE RELEASE+): its own route, by the release it follows.
+    expect(releasesRouteOf(`/verify/releases/${ID}/after-room`)).toEqual({ release: ID, afterRoom: true });
+    expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/AFTER-ROOM/`)).toEqual({ release: ID, afterRoom: true });
+    expect(releasesRouteOf('/verify/releases/not-a-release/after-room')).toEqual({ release: null });
+    expect(releasesRouteOf(`/verify/releases/${ID}/after-room/x`)).toEqual({ release: null });
+    expect(afterRoomPath(ID)).toBe(`/verify/releases/${ID}/after-room`);
     expect(releasesRouteOf('/verify/lookbook')).toBeNull();
     expect(releasesRouteOf('/verify/releasesx')).toBeNull();
     expect(isReleaseId(ID)).toBe(true);
@@ -135,7 +146,7 @@ describe('the releases\' list and pages (P-R03)', () => {
 
   it('gives a release\'s facts, its model\'s sheet when it is public, and its seed only once drawn', () => {
     const s = releaseSheet(sheet(), 120);
-    expect(s).toMatchObject({ id: ID, title: 'MONOLITHE — RELEASE I', state: 'OPEN', stateLabel: 'ENTRIES OPEN', eyebrow: 'ORBIT 2026', model: 'MONOLITHE · RING', lookbookSlug: 'monolithe', drawn: false, seed: null, seedHex: null, entries: null });
+    expect(s).toMatchObject({ id: ID, title: 'MONOLITHE — RELEASE I', state: 'OPEN', stateLabel: 'ENTRIES OPEN', eyebrow: 'ORBIT 2026', model: 'MONOLITHE · RING', lookbookSlug: 'monolithe', drawn: false, seed: null, seedHex: null });
     expect(s.rows).toEqual([
       { label: 'PIECES', value: '3' },
       { label: 'ENTRIES OPEN', value: '12 OCT 2026 · 10:00 UTC', local: '12 OCT 2026 · 12:00 on this phone (UTC+02:00)' },
@@ -144,10 +155,13 @@ describe('the releases\' list and pages (P-R03)', () => {
     ]);
     expect(s.seedHash).toBe(groupHex(HASH));
     expect(s.seedHash.split(' ')).toHaveLength(16);
-    // A seed sent before the draw is not shown; once drawn it is, with the draw's time and the entries counted.
+    // A seed sent before the draw is not shown; once drawn it is, with the draw's time; the release is over (plan LIVE
+    // RELEASE+, decision 30), and never says how many took part (no end figure, choice 5).
     expect(releaseSheet(sheet({ seed: 'cd'.repeat(32) }), 0).seed).toBeNull();
-    const d = releaseSheet(sheet({ state: 'DRAWN', seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z', entries: 7 }), 0);
-    expect(d).toMatchObject({ drawn: true, seedHex: 'cd'.repeat(32), seed: groupHex('cd'.repeat(32)), entries: 7 });
+    const d = releaseSheet(sheet({ state: 'DRAWN', seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z' }), 0);
+    expect(d).toMatchObject({ drawn: true, stateLabel: 'THIS RELEASE IS OVER', seedHex: 'cd'.repeat(32), seed: groupHex('cd'.repeat(32)) });
+    expect(d).not.toHaveProperty('entries');
+    expect(RELEASES.entriesLead).not.toMatch(/\d/);
     expect(d.rows.at(-1)).toEqual({ label: 'DRAWN', value: '14 OCT 2026 · 12:00 UTC', local: null });
     // No collection: the model's name over the title; an address that is none: no link to a sheet.
     expect(releaseSheet(sheet({ model: { ...card().model, collection: null, lookbook: 'Not One' } }), 0)).toMatchObject({ eyebrow: 'MONOLITHE', lookbookSlug: null });
@@ -230,9 +244,10 @@ describe('the early access of a release (P-X02)', () => {
     // Every piece reserved: said after the state until the draw, entries opened or not.
     expect(releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 3 }), 0)).toMatchObject({ stateLabel: 'EARLY ACCESS · EVERY PIECE RESERVED', full: true });
     expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', reserved: 3 }), 0)).toMatchObject({ stateLabel: 'ENTRIES OPEN · EVERY PIECE RESERVED', full: true, earlyAccess: { open: false } });
-    const drawn = releaseSheet(sheet({ ...EARLY, state: 'DRAWN', reserved: 3, seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z', entries: 2 }), 0);
-    expect(drawn).toMatchObject({ stateLabel: 'DRAWN', full: false });
-    expect(drawn.rows.find((r) => r.label === 'RESERVED DIRECTLY')?.value).toBe('3 OF 3 PIECES');
+    // Drawn, the release is over: no end figure, the places reserved directly no longer counted.
+    const drawn = releaseSheet(sheet({ ...EARLY, state: 'DRAWN', reserved: 3, seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z' }), 0);
+    expect(drawn).toMatchObject({ stateLabel: 'THIS RELEASE IS OVER', full: false });
+    expect(drawn.rows.map((r) => r.label)).toEqual(['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD', 'DRAWN']);
     // A server that says the early access is open after the opening is not believed; one piece says PIECE.
     expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', earlyAccessOpen: true, reserved: 0, quantity: 1 }), 0)).toMatchObject({ stateLabel: 'ENTRIES OPEN', earlyAccess: { open: false } });
     expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', quantity: 1 }), 0).rows.find((r) => r.label === 'RESERVED DIRECTLY')?.value).toBe('0 OF 1 PIECE');
@@ -278,6 +293,93 @@ describe('the early access of a release (P-X02)', () => {
     // Concluded or lapsed, as a place drawn; MY PIECES names it so.
     expect(entryModel(release, { ...mine, status: 'CONFIRMED' }, opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed });
     expect(myEntries([mine], opts).map((e) => [e.stateLabel, e.entry.label])).toEqual([['ENTRIES OPEN SOON', 'PLACE RESERVED']]);
+  });
+});
+
+describe('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5)', () => {
+  const DRAW = '5c2e7a10-3b4d-4e6f-8a9b-1c2d3e4f5a6b';
+  const past = (extra: Partial<PastRelease> = {}): PastRelease => ({
+    id: ID,
+    kind: 'LIVE',
+    title: 'Monolithe — live',
+    model: { name: 'Monolithe', type: 'Ring', collection: 'Orbit 2026' },
+    imageUrl: media(1),
+    opensAt: '2026-10-11T17:00:00.000Z',
+    quantityLine: '25 pieces',
+    ...extra,
+  });
+
+  it('shows each release ended as announced: LIVE RELEASE or DRAW, its name, its opening date on this phone, its quantity line; no end figure', () => {
+    const [live, draw] = pastCards(
+      [past(), past({ id: DRAW, kind: 'DRAW', title: 'Eclipse — release I', model: { name: 'Eclipse', type: 'Pendant', collection: null }, imageUrl: null, opensAt: '2026-09-01T10:00:00.000Z', quantityLine: '3 PIECES' })],
+      'Europe/Paris',
+    );
+    // A LIVE RELEASE named by its model, as its card and page; a draw by its title, as its card.
+    expect(live).toEqual({
+      id: ID,
+      href: `/verify/releases/${ID}`,
+      kind: 'LIVE RELEASE',
+      title: 'MONOLITHE',
+      model: 'RING · ORBIT 2026',
+      line: '11 OCT 2026 · 25 PIECES',
+      image: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES' },
+    });
+    expect(draw).toEqual({ id: DRAW, href: `/verify/releases/${DRAW}`, kind: 'DRAW', title: 'ECLIPSE — RELEASE I', model: 'ECLIPSE · PENDANT', line: '1 SEP 2026 · 3 PIECES', image: null });
+    // Ended before its name was revealed: LIVE RELEASE, nothing more; a photograph from the media route only.
+    expect(pastCards([past({ title: null, model: { name: null, type: null, collection: null }, imageUrl: 'https://elsewhere.example/x.jpg' })], 'UTC')[0]).toMatchObject({ title: 'LIVE RELEASE', model: '', image: null });
+    // Not a release: left out.
+    expect(pastCards([past({ id: 'nope' }), past({ kind: 'SALON' as 'LIVE' })], 'UTC')).toEqual([]);
+  });
+
+  it('reads PAST a page at a time by the page counted: a release ended between two pages, or one unreadable, never keeps SHOW MORE from the last release', () => {
+    const idOf = (n: number) => `${n.toString(16).padStart(8, '0')}-4b2e-4f3a-9c1d-0e5f6a7b8c9d`;
+    // The server's PAST: 25 releases, the newest first; a page of PAST_PAGE_SIZE.
+    let server = Array.from({ length: 25 }, (_, i) => past({ id: idOf(100 - i) }));
+    const read = (pages: PastPages) => {
+      const page = pages.next;
+      const items = server.slice((page - 1) * PAST_PAGE_SIZE, page * PAST_PAGE_SIZE);
+      return pages.add(page, pastCards(items, 'UTC'), server.length);
+    };
+    const pages = new PastPages();
+    expect([pages.next, pages.more]).toEqual([1, false]);
+    expect(read(pages)).toHaveLength(PAST_PAGE_SIZE);
+    expect([pages.next, pages.more]).toEqual([2, true]);
+    // A release ends while the first page is on screen: the others move down one, the second page brings one already shown.
+    server = [past({ id: idOf(200) }), ...server];
+    const second = read(pages);
+    expect(second).toHaveLength(PAST_PAGE_SIZE - 1);
+    expect(second.map((c) => c.id)).not.toContain(idOf(100 - (PAST_PAGE_SIZE - 1)));
+    // SHOW MORE asks for the third page, never the second again, and reaches the last release; then it is gone.
+    expect([pages.cards.length, pages.next, pages.more]).toEqual([2 * PAST_PAGE_SIZE - 1, 3, true]);
+    expect(read(pages).map((c) => c.id)).toEqual([idOf(100 - 23), idOf(100 - 24)]);
+    expect(pages.cards.map((c) => c.id)).toEqual(Array.from({ length: 25 }, (_, i) => idOf(100 - i)));
+    expect([pages.next, pages.more]).toEqual([4, false]);
+    // A release unreadable is left out, the next page still counted.
+    const odd = new PastPages();
+    expect(odd.add(1, pastCards([past({ id: 'nope' }), past()], 'UTC'), 13)).toHaveLength(1);
+    expect([odd.next, odd.more]).toEqual([2, true]);
+    // Nothing ended: no SHOW MORE.
+    const none = new PastPages();
+    none.add(1, [], 0);
+    expect(none.more).toBe(false);
+  });
+
+  it('dates a release on this phone\'s calendar', () => {
+    expect(zonedDate('2026-10-11T23:30:00.000Z', 'Europe/Paris')).toBe('12 OCT 2026');
+    expect(zonedDate('2026-10-11T23:30:00.000Z', 'America/New_York')).toBe('11 OCT 2026');
+    expect(zonedDate('2026-09-01T10:00:00.000Z', 'Not/AZone')).toBe('1 SEP 2026');
+    expect(zonedDate('nonsense', 'UTC')).toBe('');
+  });
+
+  it('says how many releases the account took part in, and on each YOU SECURED A PIECE or YOU TOOK PART', () => {
+    const m = participationModel({ count: 3, releases: [{ id: ID, secured: true }, { id: DRAW, secured: false }, { id: 'nope', secured: true }] });
+    expect(m.taken).toBe('You have taken part in 3 releases.');
+    expect([...m.marks]).toEqual([
+      [ID, 'YOU SECURED A PIECE'],
+      [DRAW, 'YOU TOOK PART'],
+    ]);
+    expect(participationModel({ count: 1, releases: [{ id: ID, secured: false }] }).taken).toBe('You have taken part in 1 release.');
+    expect(participationModel({ count: 0, releases: [] }).taken).toBe('You have taken part in 0 releases.');
   });
 });
 

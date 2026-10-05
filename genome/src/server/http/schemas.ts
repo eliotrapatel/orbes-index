@@ -11,6 +11,7 @@
  */
 import { z } from 'zod';
 import {
+  ACCESS_COMBINES,
   ANOMALY_SEVERITIES,
   ANOMALY_STATUSES,
   CIRCLE_POST_KINDS,
@@ -18,39 +19,61 @@ import {
   CLUB_TIER_NAMES,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
+  INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
-  LIVE_RESOLUTIONS,
   LOOKBOOK_STATES,
+  ORDER_CHANNELS,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
+  RETURN_OUTCOMES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
+  SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
   STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
-import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
+import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
+import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
-import { LIVE_ADD_PIECES, LIVE_ADDONS_MAX, LIVE_EXTEND_MINUTES, LIVE_MESSAGE_MAX, LIVE_PAY_MINUTES, LIVE_PER_ACCOUNT, LIVE_ROOM_OPENS_MINUTES, LIVE_SIZE_STOCK_MAX, LIVE_TURN_SECONDS } from '../services/live.js';
+import { LIVE_QUESTION_LIMITS } from '../services/question.js';
+import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
+import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../services/after-room.js';
+import {
+  LIVE_ADD_PIECES,
+  LIVE_ADDONS_MAX,
+  LIVE_EXTEND_MINUTES,
+  LIVE_MESSAGE_MAX,
+  LIVE_MIN_PARTICIPATIONS,
+  LIVE_PAY_MINUTES,
+  LIVE_PER_ACCOUNT,
+  LIVE_ROOM_OPENS_MINUTES,
+  LIVE_SIZE_STOCK_MAX,
+  LIVE_SURPRISE_MAX,
+  LIVE_TURN_SECONDS,
+} from '../services/live.js';
 import {
   LIVE_ACCESS_MODELS_MAX,
   LIVE_ADDON_LIMITS,
   LIVE_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
-  LIVE_RESOLUTION_NOTE_MAX,
   LIVE_SIZES,
 } from '../services/live-console.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
+import { SHOPIFY_PERIOD_MAX_DAYS } from '../services/shopify.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
+import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
+import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../services/orders.js';
+import { CARRIER_NAME_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -279,6 +302,11 @@ export const liveAddonsBody = body({ addonIds: z.array(liveRef).max(LIVE_ADDONS_
  */
 export const liveBoardBody = optionalBody({ token: z.string().max(256).optional() });
 
+/** PUT /api/v1/live/:id/answer: the answer chosen to the question after (plan LIVE RELEASE+, choice 11), its position from 1. */
+export const liveAnswerBody = body({
+  answer: z.number().int('Must be one of the answers').min(1, 'Must be one of the answers').max(LIVE_QUESTION_LIMITS.maxAnswers, 'Must be one of the answers'),
+});
+
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
 const email = z.string().trim().min(3, 'Required').max(254, 'At most 254 characters');
@@ -456,10 +484,20 @@ export const updateModelBody = body({
   specs: z.preprocess((v) => (v === '' ? null : v), text(SPECS_MAX).nullable().optional()),
   priceLabel: z.preprocess((v) => (v === '' ? null : v), text(PRICE_LABEL_MAX).nullable().optional()),
   privateMinTier: z.number().int('Must be a tier: 1, 2 or 3').min(1, 'At least 1 (TITANE)').max(3, 'At most 3 (PALLADIUM)').optional(),
+  // N2: the base price of the Shopify product export, with its currency; null for both clears it.
+  basePriceMinor: z.number().int('Must be a whole number of cents').min(1, 'At least 1 cent').max(BASE_PRICE_MAX_MINOR, `At most ${BASE_PRICE_MAX_MINOR} cents`).nullable().optional(),
+  baseCurrency: z.preprocess((v) => (v === '' ? null : v), z.enum(ORDER_CURRENCIES).nullable().optional()),
+  // M6: the care guide MY PIECES shows with each order of the model.
+  careGuide: z.preprocess((v) => (v === '' ? null : v), text(CARE_GUIDE_MAX).nullable().optional()),
   category: modelIdentity,
   categoryCode: modelIdentity,
   skuPrefix: modelIdentity,
-}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change');
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change')
+  .refine((b) => (b.basePriceMinor === undefined) === (b.baseCurrency === undefined) && (b.basePriceMinor === null) === (b.baseCurrency === null), {
+    message: 'A base price is sent with its currency, or both are cleared (null)',
+    path: ['basePriceMinor'],
+  });
 
 /** DELETE /api/admin/models/:id/gallery/:sha256 (P-R02): a photograph of the model's gallery. */
 export const galleryImageParams = z.object({ id: uuid, sha256: sha256Hex });
@@ -552,6 +590,20 @@ const whole = (min: number, max: number, unit: string) =>
   z.number().int(`Must be a whole number of ${unit}`).min(min, `At least ${min} ${unit}`).max(max, `At most ${max} ${unit}`);
 const livePrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(LIVE_PRICE_MAX_MINOR, `At most ${LIVE_PRICE_MAX_MINOR} cents`);
 const liveTime = z.preprocess(emptyToNull, isoDateTime.nullable().optional());
+const liveSizes = z
+  .array(z.strictObject({ id: uuid.nullable().optional(), label: text(LIVE_SIZES.label), stock: whole(0, LIVE_SIZE_STOCK_MAX, 'pieces') }))
+  .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
+  .max(LIVE_SIZES.max, `At most ${LIVE_SIZES.max} sizes`);
+const liveAddons = z
+  .array(
+    z.strictObject({
+      id: uuid.nullable().optional(),
+      label: text(LIVE_ADDON_LIMITS.label),
+      line: z.preprocess(emptyToNull, text(LIVE_ADDON_LIMITS.line).nullable().optional()),
+      priceMinor: livePrice,
+    }),
+  )
+  .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`);
 /** The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists' ids). */
 const liveSettingsFields = {
   modelId: uuid,
@@ -569,22 +621,16 @@ const liveSettingsFields = {
   tierPriority: z.boolean().optional(),
   accessModelIds: z.array(uuid).max(LIVE_ACCESS_MODELS_MAX, `At most ${LIVE_ACCESS_MODELS_MAX} models`).optional(),
   accessCollectionId: z.preprocess(emptyToNull, uuid.nullable().optional()),
-  sizes: z
-    .array(z.strictObject({ id: uuid.nullable().optional(), label: text(LIVE_SIZES.label), stock: whole(0, LIVE_SIZE_STOCK_MAX, 'pieces') }))
-    .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
-    .max(LIVE_SIZES.max, `At most ${LIVE_SIZES.max} sizes`),
+  /** Plan LIVE RELEASE+: the releases taken part in (choice 4), a segment (choice 27), how every rule combines. */
+  minParticipations: whole(LIVE_MIN_PARTICIPATIONS.min, LIVE_MIN_PARTICIPATIONS.max, 'releases').nullable().optional(),
+  accessSegmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  accessCombine: z.enum(ACCESS_COMBINES).optional(),
+  /** A surprise in every box (choice 3): on or off, its description (internal). */
+  surpriseEnabled: z.boolean().optional(),
+  surpriseText: z.preprocess(emptyToNull, z.string().trim().max(LIVE_SURPRISE_MAX, `At most ${LIVE_SURPRISE_MAX} characters`).nullable().optional()),
+  sizes: liveSizes,
   quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
-  addons: z
-    .array(
-      z.strictObject({
-        id: uuid.nullable().optional(),
-        label: text(LIVE_ADDON_LIMITS.label),
-        line: z.preprocess(emptyToNull, text(LIVE_ADDON_LIMITS.line).nullable().optional()),
-        priceMinor: livePrice,
-      }),
-    )
-    .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`)
-    .optional(),
+  addons: liveAddons.optional(),
   announceAt: liveTime,
   silhouetteAt: liveTime,
   nameAt: liveTime,
@@ -598,6 +644,28 @@ const liveSettingsFields = {
       }),
     )
     .max(4, 'At most one override per tier')
+    .optional(),
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16); null: the default location. */
+  stockLocationId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  /** The question after (choice 11): on by default; its words and 2 to 6 answers, both or neither (null: the default question). */
+  questionEnabled: z.boolean().optional(),
+  questionText: z.preprocess(emptyToNull, text(LIVE_QUESTION_LIMITS.text).nullable().optional()),
+  questionAnswers: z
+    .array(text(LIVE_QUESTION_LIMITS.answer))
+    .max(LIVE_QUESTION_LIMITS.maxAnswers, `At most ${LIVE_QUESTION_LIMITS.maxAnswers} answers`)
+    .nullable()
+    .optional(),
+  /** The after-room (plan LIVE RELEASE+, choice 2): its model, price, sizes and stock, add-ons, delay and length; null: none. */
+  afterRoom: z
+    .strictObject({
+      modelId: uuid,
+      priceMinor: livePrice,
+      sizes: liveSizes,
+      addons: liveAddons.optional(),
+      delayMinutes: whole(AFTER_ROOM_DELAY_MINUTES.min, AFTER_ROOM_DELAY_MINUTES.max, 'minutes').optional(),
+      lengthMinutes: whole(AFTER_ROOM_LENGTH_MINUTES.min, AFTER_ROOM_LENGTH_MINUTES.max, 'minutes').optional(),
+    })
+    .nullable()
     .optional(),
 };
 
@@ -621,14 +689,29 @@ export const liveStockBody = body({ sizeId: uuid, pieces: whole(LIVE_ADD_PIECES.
 /** POST /api/admin/live/:id/messages: one line for the room. */
 export const liveMessageBody = body({ text: text(LIVE_MESSAGE_MAX).refine((s) => !/[\r\n]/.test(s), 'One line') });
 
+/** GET /api/admin/live/size-mix (plan LIVE RELEASE+, choice 13): the model of a new release, and the location (none: the default). */
+export const liveSizeMixQuery = z.object({ modelId: uuid, locationId: queryOptional(uuid) });
+
+const bestTimeDays = queryOptional(
+  z.preprocess(
+    (v) => (typeof v === 'string' && /^\s*\d{1,4}\s*$/.test(v) ? Number(v) : v),
+    z.number().int('Must be a whole number of days').min(1, 'At least 1 day').max(ANALYTICS_MAX_DAYS, `At most ${ANALYTICS_MAX_DAYS} days`),
+  ),
+);
+const bestTimeCountry = queryOptional(z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, 'Two letters (ISO 3166-1)'));
+
+/** GET /api/admin/live/:id/best-time (choice 10): the last `days` days (30 by default), everywhere or in one country. */
+export const liveBestTimeQuery = z.object({ days: bestTimeDays, country: bestTimeCountry });
+
+/** GET /api/admin/analytics/best-time: the same, for a tier and above (0, everyone, by default). */
+export const bestTimeQuery = z.object({
+  days: bestTimeDays,
+  country: bestTimeCountry,
+  tier: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*[0-3]\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3'))),
+});
+
 /** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
 export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });
-
-/** POST /api/admin/live/:id/entries/:entryId/resolve: CONCLUDED or CANCELLED, with an optional note (Client Services). */
-export const liveResolveBody = body({
-  resolution: z.enum(LIVE_RESOLUTIONS),
-  note: z.preprocess(emptyToNull, text(LIVE_RESOLUTION_NOTE_MAX).nullable().optional()),
-});
 
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
@@ -655,6 +738,8 @@ const circleFields = {
   dropId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   modelId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   externalUrl: z.preprocess(emptyToNull, z.string().trim().max(CIRCLE_URL_MAX, `At most ${CIRCLE_URL_MAX} characters`).nullable().optional()),
+  /** Plan LIVE RELEASE+ (choice 27): the post shown to a segment's members only (among its tiers); null: to the tiers. */
+  segmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
 };
 
 /**
@@ -666,6 +751,45 @@ export const createCirclePostBody = body({ kind: z.enum(CIRCLE_POST_KINDS), ...c
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind (an unknown field, `kind` included, is 400); at least one. */
 export const updateCirclePostBody = body(circleFields).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the post to change');
+
+// ── Admin: the segments (plan LIVE RELEASE+, choice 27) ─────────────────────
+
+export const segmentParams = z.object({ id: uuid });
+
+const segmentCount = whole(SEGMENT_LIMITS.count.min, SEGMENT_LIMITS.count.max, 'releases or pieces');
+const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Name at least one').max(SEGMENT_LIMITS.items, `At most ${SEGMENT_LIMITS.items}`);
+const negated = { not: z.boolean().optional() };
+/** A criterion of a segment, by its kind (services/segments.ts holds the rest: the ids named exist, an answer is one of its release's). */
+const segmentRule = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('PARTICIPATIONS'), min: segmentCount, ...negated }),
+  z.strictObject({ kind: z.literal('TOOK_PART'), dropId: uuid, ...negated }),
+  z.strictObject({ kind: z.literal('SECURED'), min: segmentCount, ...negated }),
+  z.strictObject({ kind: z.literal('SECURED_IN'), dropId: uuid, ...negated }),
+  z.strictObject({ kind: z.literal('TIER'), tiers: segmentItems(z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3')), ...negated }),
+  z.strictObject({ kind: z.literal('OWNS_MODEL'), modelIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('OWNS_COLLECTION'), collectionIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('SIZE'), sizes: segmentItems(text(SEGMENT_LIMITS.sizeLabel)), ...negated }),
+  z.strictObject({ kind: z.literal('COUNTRY'), countries: segmentItems(z.string().trim().regex(/^[A-Za-z]{2}$/, 'Two letters')), ...negated }),
+  z.strictObject({ kind: z.literal('INTEREST'), dropId: uuid.nullable(), ...negated }),
+  z.strictObject({ kind: z.literal('ANSWER'), dropId: uuid, answer: z.number().int('Must be an answer: 1 to 6').min(1, 'At least 1').max(6, 'At most 6'), ...negated }),
+  z.strictObject({ kind: z.literal('ACTIVE'), days: whole(SEGMENT_LIMITS.days.min, SEGMENT_LIMITS.days.max, 'days'), ...negated }),
+]);
+const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
+/** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */
+const segmentCriteria = z.strictObject({
+  match: z.enum(SEGMENT_MATCHES),
+  rules: segmentRules(z.union([segmentRule, z.strictObject({ match: z.enum(SEGMENT_MATCHES), rules: segmentRules(segmentRule) })])),
+});
+const segmentName = text(SEGMENT_LIMITS.name).refine((s) => !/[\r\n]/.test(s), 'One line');
+
+/** POST /api/admin/segments: a segment, its name and its criteria. */
+export const createSegmentBody = body({ name: segmentName, criteria: segmentCriteria });
+
+/** PATCH /api/admin/segments/:id: its name, its criteria, or both. */
+export const updateSegmentBody = body({ name: segmentName.optional(), criteria: segmentCriteria.optional() }).refine((b) => b.name !== undefined || b.criteria !== undefined, 'Send the name, the criteria, or both');
+
+/** POST /api/admin/segments/count: the members criteria being built would have now. */
+export const segmentCountBody = body({ criteria: segmentCriteria });
 
 /** GET /api/admin/circle/posts/:id/answers: one answer, or every one. */
 export const circleAnswersQuery = z.object({ answer: queryOptional(z.enum(CIRCLE_RSVP_ANSWERS)) });
@@ -705,8 +829,11 @@ export const shopRequestsQuery = z.object({ status: queryOptional(z.enum(SHOP_RE
 
 export const shopRequestParams = z.object({ id: uuid });
 
-/** POST /api/admin/club/requests/:id/close: a note is required, what was done for the client or why nothing was. */
-export const closeShopRequestBody = body({ note: text(SHOP_RESOLUTION_MAX) });
+/**
+ * POST /api/admin/club/requests/:id/close: a note is required, what was done for the client or why nothing was, and the
+ * outcome: ACCEPTED (the sale concluded: its order is created) or DECLINED.
+ */
+export const closeShopRequestBody = body({ note: text(SHOP_RESOLUTION_MAX), outcome: z.enum(SHOP_REQUEST_OUTCOMES) });
 
 // ── Admin: products ────────────────────────────────────────────────────────
 
@@ -1022,6 +1149,167 @@ export const auditListQuery = z.object({
   targetId: z.string().trim().max(200).optional(),
 });
 
+// ── Admin: the orders (plan LIVE RELEASE+, routes/admin/orders.ts) ─────────
+
+export const orderParams = z.object({ id: uuid });
+
+/** GET /api/admin/orders and its CSV: one channel, one release, one location, the late ones, a search. */
+export const orderBoardQuery = z.object({
+  channel: queryOptional(z.enum(ORDER_CHANNELS)),
+  dropId: queryOptional(uuid),
+  locationId: queryOptional(uuid),
+  late: queryBool,
+  q: queryOptional(z.string().trim().max(BOARD_SEARCH_MAX, `At most ${BOARD_SEARCH_MAX} characters`)),
+});
+
+const orderNote = z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.note).nullable().optional());
+const orderAmount = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ORDER_AMOUNT_MAX_MINOR, `At most ${ORDER_AMOUNT_MAX_MINOR} cents`);
+
+/**
+ * POST /api/admin/orders/:id/transition: the next step and what it requires (services/orders.ts holds which step
+ * follows which): PAID; SHIPPED with an active carrier, the tracking number and the value declared for the insurance;
+ * DELIVERED; CANCELLED with a note. A return is opened elsewhere.
+ */
+export const orderTransitionBody = z.discriminatedUnion('to', [
+  body({ to: z.literal('PAID'), note: orderNote }),
+  body({
+    to: z.literal('SHIPPED'),
+    carrierId: uuid,
+    trackingNumber: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/, 'A tracking number has 3 to 40 letters and digits'),
+    declaredValueMinor: orderAmount.nullable().optional(),
+    note: orderNote,
+  }),
+  body({ to: z.literal('DELIVERED'), note: orderNote }),
+  body({ to: z.literal('CANCELLED'), note: text(ORDER_TEXT_LIMITS.note) }),
+]);
+
+/** POST /api/admin/orders/:id/location: where the order is served from (what it holds moves with it). */
+export const orderLocationBody = body({ locationId: uuid });
+
+/**
+ * PATCH /api/admin/orders/:id/terms: a draw's or a salon's size (`null`: one size), price and currency (both or
+ * neither), and any order's engraving text (`null` or '' clears it). At least one.
+ */
+export const orderTermsBody = body({
+  sizeLabel: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.size).nullable().optional()),
+  priceMinor: orderAmount.nullable().optional(),
+  currency: z.enum(ORDER_CURRENCIES).nullable().optional(),
+  engravingText: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.engraving).nullable().optional()),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one term of the order to change');
+
+/** PUT /api/admin/orders/:id/buyer: the buyer's name and address (decision 31); `null` or '' clears one. */
+export const orderBuyerBody = body({
+  name: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerName).nullable()),
+  address: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerAddress).nullable()),
+});
+
+/** POST /api/admin/orders/:id/piece: the piece picked from the stock to fulfil the order, by its reference. */
+export const orderPieceBody = body({ productId: productRef });
+
+/**
+ * POST /api/admin/orders/:id/return (choice 20): where the piece goes, back to stock at a location (RESTOCKED) or to
+ * the archive (ARCHIVED, no location), and a note.
+ */
+export const orderReturnBody = body({
+  outcome: z.enum(RETURN_OUTCOMES),
+  locationId: uuid.nullable().optional(),
+  note: text(ORDER_TEXT_LIMITS.note),
+}).refine((b) => (b.outcome === 'RESTOCKED') === Boolean(b.locationId), { message: 'A piece back to stock goes to a location; one archived, to none', path: ['locationId'] });
+
+// ── Admin: the invoices (plan LIVE RELEASE+, M7: routes/admin/invoices.ts) ─
+
+/** A month, `YYYY-MM` (UTC). */
+const invoiceMonth = z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/, 'A month reads YYYY-MM');
+
+/** GET /api/admin/invoices: a month's documents (the current one by default), one kind, a number or an order's reference. */
+export const invoiceListQuery = z.object({
+  month: queryOptional(invoiceMonth),
+  kind: queryOptional(z.enum(INVOICE_KINDS)),
+  q: queryOptional(z.string().trim().max(40, 'At most 40 characters')),
+});
+
+/** GET /api/admin/invoices.csv: the month's CSV for the accountant. */
+export const invoiceCsvQuery = z.object({ month: invoiceMonth });
+
+export const invoiceParams = z.object({ id: uuid });
+
+/** GET /api/v1/account/orders/:id/…: one of the account's orders (MY PIECES, M6). */
+export const accountOrderParams = z.object({ id: uuid });
+
+/** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
+export const orderAlertsBody = body({
+  reservedDays: whole(ORDER_ALERT_LIMITS.reservedDays.min, ORDER_ALERT_LIMITS.reservedDays.max, 'days'),
+  readyDays: whole(ORDER_ALERT_LIMITS.readyDays.min, ORDER_ALERT_LIMITS.readyDays.max, 'days'),
+  shippedDays: whole(ORDER_ALERT_LIMITS.shippedDays.min, ORDER_ALERT_LIMITS.shippedDays.max, 'days'),
+  unregisteredDays: whole(ORDER_ALERT_LIMITS.unregisteredDays.min, ORDER_ALERT_LIMITS.unregisteredDays.max, 'days'),
+});
+
+// ── Admin: locations and carriers (routes/admin/logistics.ts) ─────────────
+
+export const logisticsParams = z.object({ id: uuid });
+
+export const createLocationBody = body({ name: text(LOCATION_NAME_MAX) });
+
+/** PATCH /api/admin/locations/:id: its name, or made the default (`isDefault: true`). At least one. */
+export const updateLocationBody = body({ name: text(LOCATION_NAME_MAX).optional(), isDefault: z.literal(true).optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the location to change',
+);
+
+export const createCarrierBody = body({ name: text(CARRIER_NAME_MAX), trackingUrl: text(TRACKING_URL_MAX) });
+
+/** PATCH /api/admin/carriers/:id: its name, its tracking link, whether it is offered. At least one. */
+export const updateCarrierBody = body({ name: text(CARRIER_NAME_MAX).optional(), trackingUrl: text(TRACKING_URL_MAX).optional(), active: z.boolean().optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the carrier to change',
+);
+
+// ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
+
+/** GET /api/admin/atelier/stock: one model, one location. */
+export const atelierStockQuery = z.object({ modelId: queryOptional(uuid), locationId: queryOptional(uuid) });
+
+
+/** POST /api/admin/atelier/stock/transfer: pieces of a SKU moved from one location to another. */
+export const stockTransferBody = body({ skuId: uuid, fromLocationId: uuid, toLocationId: uuid, quantity: whole(1, STOCK_MOVE_MAX, 'pieces'), note: z.preprocess(emptyToNull, text(STOCK_NOTE_MAX).nullable().optional()) });
+
+/** POST /api/admin/atelier/stock/adjust: a count corrected, up or down, with why. */
+export const stockAdjustBody = body({
+  skuId: uuid,
+  locationId: uuid,
+  delta: z.number().int('Must be a whole number of pieces').min(-STOCK_MOVE_MAX, `At least -${STOCK_MOVE_MAX}`).max(STOCK_MOVE_MAX, `At most ${STOCK_MOVE_MAX}`).refine((n) => n !== 0, 'Not 0'),
+  note: text(STOCK_NOTE_MAX),
+});
+
+/** PUT /api/admin/atelier/thresholds: a SKU's minimum at a location (L2), or none (`null`). */
+export const stockThresholdBody = body({ skuId: uuid, locationId: uuid, minimum: whole(1, THRESHOLD_MAX, 'pieces').nullable() });
+
+/** POST /api/admin/atelier/make: pieces to make for the stock (a suggestion confirmed). */
+export const makeForStockBody = body({ skuId: uuid, locationId: uuid, quantity: whole(1, ATELIER_MAKE_MAX, 'pieces') });
+
+const benchOrigin = z.union([uuid, z.enum(['SALON', 'STOCK'])]);
+
+/** GET /api/admin/atelier/bench and its CSV: open, finished, cancelled or all; one origin (a release, SALON, STOCK), one SKU, one location. */
+export const benchQuery = z.object({ view: queryOptional(z.enum(BENCH_VIEWS)), origin: queryOptional(benchOrigin), skuId: queryOptional(uuid), locationId: queryOptional(uuid) });
+
+export const benchParams = z.object({ id: uuid });
+
+/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece; a claim code unless refused. */
+export const benchDoneBody = optionalBody({
+  material: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.material).nullable().optional()),
+  productionBatch: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.productionBatch).nullable().optional()),
+  productionDate: z.preprocess(emptyToNull, isoDate.nullable().optional()),
+  withClaimSecret: z.boolean().optional(),
+});
+
+/** POST /api/admin/atelier/sheets: the work sheets of the pieces named, or of those an origin, a SKU and a location keep. */
+export const workSheetsBody = body({
+  benchItemIds: z.array(uuid).min(1, 'At least one piece').max(WORK_SHEETS_MAX, `At most ${WORK_SHEETS_MAX} pieces`).optional(),
+  origin: benchOrigin.optional(),
+  skuId: uuid.optional(),
+  locationId: uuid.optional(),
+}).refine((b) => !(b.benchItemIds && (b.origin || b.skuId || b.locationId)), 'Name the pieces, or narrow by origin, SKU and location: not both');
+
 // ── Admin: keys ────────────────────────────────────────────────────────────
 
 export const keyParams = z.object({
@@ -1039,4 +1327,26 @@ export const rotateKeyBody = optionalBody({
 export const revokeKeyBody = body({
   reason: text(500),
   compromisedAt: z.preprocess((v) => (v === '' || v === null ? undefined : v), isoDateTime.optional()),
+});
+
+// ── Shopify readiness (plan LIVE RELEASE+, N2 and N3) ──────────────────────
+
+/** GET /api/admin/shopify/products.csv: the store's currency; the models priced in it. */
+export const shopifyProductsQuery = z.object({ currency: z.enum(ORDER_CURRENCIES) });
+
+/** GET /api/admin/shopify/orders.csv: the orders reserved from one UTC day to another, both included, a year at most. */
+export const shopifyOrdersQuery = z
+  .object({ from: isoDate, to: isoDate })
+  .refine((q) => q.from <= q.to, { message: 'from must not be after to', path: ['to'] })
+  .refine((q) => daySpan(q.from, q.to) <= SHOPIFY_PERIOD_MAX_DAYS, { message: `At most ${SHOPIFY_PERIOD_MAX_DAYS} days`, path: ['to'] });
+
+/** An id pasted from Shopify's admin: the number, or the address of its page (the service reads the number in it). */
+const shopifyPasted = z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(300, 'At most 300 characters').nullable());
+
+/** PUT /api/admin/models/:id/shopify: the product's id and each size's variant id, pasted back; null clears one. */
+export const shopifyLinkBody = body({
+  productId: shopifyPasted,
+  variants: z
+    .array(z.strictObject({ size: z.string().trim().min(1, 'Required').max(100, 'At most 100 characters').nullable(), variantId: shopifyPasted }))
+    .max(200, 'At most 200 sizes'),
 });

@@ -15,14 +15,15 @@
  * Responses never expose internal ids of other people, product statuses or
  * staff data; the account itself is described by email and display name.
  */
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountOrderParams, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
+import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
 
 /** The public view of an account (contract: `{ email, displayName }`). */
@@ -33,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, ownership, recovery, warranty } = ctx.services;
+  const { auth, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -97,6 +98,61 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/products', async (request) => {
     const { account } = requireAccount(request);
     return { products: await ownership.listForAccount(account.id) };
+  });
+
+  // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.
+  app.get('/api/v1/account/orders', async (request) => {
+    const { account } = requireAccount(request);
+    return { orders: await orders.forAccount(account.id) };
+  });
+
+  // THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases the account took part in, each with whether it
+  // secured a piece there (YOU TOOK PART, YOU SECURED A PIECE), and how many (« You have taken part in N releases »).
+  app.get('/api/v1/account/participation', async (request) => {
+    const { account } = requireAccount(request);
+    return pastReleases.participation(account.id);
+  });
+
+  // MY PIECES (plan LIVE RELEASE+, choice 11): the questions after the LIVE RELEASES the account said I'LL BE THERE to
+  // and never came to, open for a week after each one's end, with its answer when it gave one.
+  app.get('/api/v1/account/questions', async (request) => {
+    const { account } = requireAccount(request);
+    return { questions: await questions.forPieces(account.id) };
+  });
+
+  // An order's documents in MY PIECES (plan LIVE RELEASE+, M6), its own only (404 for any other): the invoice and the
+  // credit note, the ownership certificate once its piece is registered to the account (PDFs, never stored by a
+  // cache), and the model's care guide.
+  const sendPdf = (reply: FastifyReply, file: { contentType: string; body: Uint8Array | string; filename: string }) => {
+    reply.header('content-type', file.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(file.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    const body = file.body as Uint8Array;
+    return reply.send(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+  };
+
+  app.get('/api/v1/account/orders/:id/invoice.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await invoices.accountDocument(account.id, id, 'INVOICE'));
+  });
+
+  app.get('/api/v1/account/orders/:id/credit-note.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await invoices.accountDocument(account.id, id, 'CREDIT_NOTE'));
+  });
+
+  app.get('/api/v1/account/orders/:id/certificate.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await ownershipCertificates.orderCertificatePdf(account.id, id));
+  });
+
+  app.get('/api/v1/account/orders/:id/care-guide', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return { careGuide: await orders.careGuide(account.id, id) };
   });
 
   app.get('/api/v1/products/:productId/service-history', async (request) => {

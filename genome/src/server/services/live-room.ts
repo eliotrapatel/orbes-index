@@ -4,12 +4,15 @@
  * own entries. Read only.
  *
  * Public (routes/live.ts, no session):
- *   list      THE RELEASES' LIVE half: every LIVE RELEASE announced and not ended, the next opening first;
- *   sheet     one of them; an ended one answers only that it is over (the plan's choice 32: nothing public after it);
+ *   list      THE RELEASES' LIVE tab: every LIVE RELEASE announced and not ended, the next opening first (once ended,
+ *             it is in THE RELEASES' PAST, services/past-releases.ts);
+ *   sheet     one of them; once over, its final state (plan LIVE RELEASE+, decision 30: what was announced, each part
+ *             from its stage as it stood at the end, the opening and the quantity line; never an end figure: no stock,
+ *             count, reason or interest);
  *   next      the banner of /verify and MY PIECES: the release live now, else the room open, else the next announced;
  *   calendar  its .ics: the room's opening, an alarm 10 minutes before, the name once revealed, no personal data.
- * Before its announcement (`announce_at`, the publication when NULL), a draft, a cancelled release, a DRAW, an unknown
- * or malformed id: one 404 DROP_NOT_FOUND, on every surface.
+ * Before its announcement (`announce_at`, the publication when NULL; for good when it ended before it), a draft, a
+ * cancelled release, a DRAW, an unknown or malformed id: one 404 DROP_NOT_FOUND, on every surface.
  *
  * The staged reveals (`liveStages`): the silhouette at `silhouette_at`, the name at `name_at` (the release's title, the
  * model's name, type and collection, the description), the photograph and the lookbook's link at `photo_at`, each NULL
@@ -25,12 +28,18 @@
  * share of it (the countdown, the door, the pieces left overall: no personal data). `viewer` says who may read it: a
  * signed-in account allowed to enter the release now, or holding an entry in it (a REMOVED one reads its state but
  * follows no stream); never anyone else (spectator mode was declined).
+ *
+ * An after-room (services/after-room.ts, plan LIVE RELEASE+ decision 28) is on no public surface: not in the list, the
+ * banner, the .ics, the boutique board, nor its own public page (each the 404 of an unknown release). Its guests alone
+ * read it, from its T0: its page by its parent's (`afterRoomSheet`, an account's answer, never kept), its room and their
+ * own entry (`viewer`); their own entry in the parent says when the second door appears (live.ts LiveEntryView.afterRoom).
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
 import type { DropRow, LiveEndReason } from '../db/schema.js';
 import { DomainError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
+import { afterRoomPlace, isAfterRoom } from './after-room.js';
 import { dropNotFound } from './drops.js';
 import {
   accessOf,
@@ -44,6 +53,7 @@ import {
   liveRuleText,
   liveStages,
   roomOpensAt,
+  stagesAt,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
@@ -109,8 +119,14 @@ export interface LiveCard {
   /** The quantity as the console wrote it (« 25 PIECES »). */
   quantityLine: string;
   perAccount: number;
-  /** Who may enter: the lowest tier (0 any ORBES account … 3 PALLADIUM), and the rule in words after « for » (« owners from PLATINE »). */
+  /**
+   * Who may enter: the lowest tier (0 any ORBES account … 3 PALLADIUM), and every rule in words after « for » (« owners
+   * from PLATINE », « collectors who have taken part in 3 releases », « selected collectors », joined by « or » when any
+   * one is enough: live.ts liveRuleText).
+   */
   access: { minTier: number; text: string };
+  /** A surprise in every box (plan LIVE RELEASE+, choice 3): the page says so, never what (its description is internal). */
+  surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (« 428 COLLECTORS WILL BE THERE »), public. */
   interest: number;
 }
@@ -134,12 +150,33 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   tierPriority: boolean;
 }
 
-/** A LIVE RELEASE's page once it has ended: nothing more (the plan's choice 32). */
+/**
+ * A LIVE RELEASE's page once it is over, in its final state (plan LIVE RELEASE+, decision 30, which lifts the LIVE plan's
+ * choice 32): what was announced, each part from its stage as it stood at the end (its title, its model's name, type and
+ * collection, its description; its silhouette, its photograph and its lookbook sheet: one ended before a stage never
+ * reveals it), its opening and its quantity line as announced (decision 29). No end figure (choice 5): no sizes or
+ * stock, no count, no reason of the end, no interest.
+ */
 export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+  title: string | null;
+  name: string | null;
+  type: string | null;
+  collection: string | null;
+  description: string | null;
+  silhouetteUrl: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
+  /** T0. */
+  opensAt: Date;
+  /** The quantity as the console wrote it and the announcement said it (« 25 PIECES »), even after pieces added live. */
+  quantityLine: string;
 }
+
+/** An after-room's page, as its guest reads it (`afterRoomSheet`): its own page, and the release it follows. */
+export type LiveAfterRoomSheet = (LiveSheet | LiveEndedSheet) & { afterRoom: { parentId: string } };
 
 /** The banner (GET /api/v1/live/next): LIVE RELEASE · <name once revealed> · OPENS IN … / THE ROOM IS OPEN / LIVE NOW. */
 export interface LiveBanner {
@@ -244,6 +281,8 @@ export interface LiveAccountEntry {
     imageUrl: string | null;
     opensAt: Date;
     closesAt: Date;
+    /** An after-room's: the release it follows (its page is read through that release's); null otherwise. */
+    afterRoomOf: string | null;
   };
   entry: LiveEntryView;
 }
@@ -251,6 +290,8 @@ export interface LiveAccountEntry {
 const streamRefused = () => new DomainError('LIVE_REMOVED', 403, 'Your entry in this release has been removed.');
 
 type ReadRow = DropRow & {
+  /** An after-room's: its parent's surprise, which it inherits; null for a release. */
+  parent_surprise: boolean | null;
   model_name: string;
   model_type: string;
   model_image: string | null;
@@ -363,18 +404,53 @@ export class LiveRoomService {
 
   /**
    * A release's page: 404 before its announcement; once over (the end recorded, no turn or hold left, as the room's
-   * `over`), only that it is. Between the end and the last deadline a turn may still be secured and a hold confirmed
+   * `over`), its final state (LiveEndedSheet). Between the end and the last deadline a turn may still be secured and a hold confirmed
    * (the plan's The end, item 10): the page is whole, its phase ENDED.
    */
   async sheet(dropId: string): Promise<LiveSheet | LiveEndedSheet> {
     const id = releaseId(dropId);
     const now = this.clock();
-    const r = await this.publicRow(id, now);
+    return this.sheetOf(await this.publicRow(id, now), now);
+  }
+
+  /**
+   * An after-room's page for one of its guests (GET /api/v1/live/:id/after-room, :id the release it follows), from its
+   * T0, as `sheet` writes a release's (its final state, once over), with the release it follows; the same 404 as
+   * an unknown release for anyone else, before its T0, and for a release without one opened.
+   */
+  async afterRoomSheet(accountId: string, parentId: string): Promise<LiveAfterRoomSheet> {
+    const id = releaseId(parentId);
+    const now = this.clock();
+    const r = await this.reads().where('d.parent_drop_id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
+    if (!r || (await afterRoomPlace(this.db, r, accountId, now)) === null) throw dropNotFound();
+    return { ...(await this.sheetOf(r, now)), afterRoom: { parentId: id } };
+  }
+
+  private async sheetOf(r: ReadRow, now: Date): Promise<LiveSheet | LiveEndedSheet> {
+    const id = r.id;
+    const stages = liveStages(r, now)!;
     if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
-      if (!open) return { id, kind: 'LIVE', phase: 'ENDED' };
+      if (!open) {
+        // As announced at its end: a stage it ended before is never revealed, even once its time has passed.
+        const atEnd = liveStages(r, stagesAt(r, now))!;
+        return {
+          id,
+          kind: 'LIVE',
+          phase: 'ENDED',
+          title: atEnd.name ? r.title : null,
+          name: atEnd.name ? r.model_name : null,
+          type: atEnd.name ? r.model_type : null,
+          collection: atEnd.name ? r.collection : null,
+          description: atEnd.name ? r.description : null,
+          silhouetteUrl: atEnd.silhouette ? mediaUrl(r.silhouette_sha256) : null,
+          imageUrl: atEnd.photo ? mediaUrl(r.model_image) : null,
+          lookbook: atEnd.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+          opensAt: r.opens_at,
+          quantityLine: r.quantity_line ?? '',
+        };
+      }
     }
-    const stages = liveStages(r, now)!;
     const [sizes, addons, interest] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
@@ -431,20 +507,22 @@ export class LiveRoomService {
   // ── The room ─────────────────────────────────────────────────────────────
 
   /**
-   * Who may read a release's room: an announced LIVE RELEASE (404 otherwise), and a signed-in account allowed to enter it
-   * now or holding an entry in it (403 LIVE_NOT_ELIGIBLE, with the rule in words, otherwise). For a stream, not a
-   * REMOVED entry (403 LIVE_REMOVED).
+   * Who may read a release's room: an announced LIVE RELEASE (404 otherwise; an after-room, its guests from its T0), and
+   * a signed-in account allowed to enter it now or holding an entry in it (403 LIVE_NOT_ELIGIBLE, with the rule in words,
+   * otherwise). For a stream, not a REMOVED entry (403 LIVE_REMOVED).
    */
   async viewer(accountId: string, dropId: string, purpose: 'state' | 'stream'): Promise<LiveViewer> {
     const id = releaseId(dropId);
     const now = this.clock();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
-    if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
+    if (!d || d.cancelled_at || !isAnnounced(d, stagesAt(d, now))) throw dropNotFound();
+    // An after-room: its guests, from its T0; anyone else reads an unknown release.
+    if (isAfterRoom(d) && (await afterRoomPlace(this.db, d, accountId, now)) === null) throw dropNotFound();
     const [entry, access] = await Promise.all([
       this.db.selectFrom('live_entries').select('status').where('drop_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       accessOf(this.db, d, accountId, now),
     ]);
-    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now));
+    if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now), access);
     if (purpose === 'stream' && entry?.status === 'REMOVED') throw streamRefused();
     return { dropId: id, access, entry: entry?.status ?? null };
   }
@@ -483,7 +561,7 @@ export class LiveRoomService {
     const id = releaseId(dropId);
     const now = this.clock();
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
-    if (!r || r.cancelled_at || !isAnnounced(r, now)) return null;
+    if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) return null;
     const [sizes, counts, message] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
@@ -561,6 +639,7 @@ export class LiveRoomService {
       .where('id', '=', id)
       .where('board_token_hash', '=', hash)
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .executeTakeFirst();
     if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
@@ -616,6 +695,7 @@ export class LiveRoomService {
           imageUrl: stages?.photo ? mediaUrl(r.model_image) : null,
           opensAt: r.opens_at,
           closesAt: r.closes_at,
+          afterRoomOf: r.parent_drop_id,
         },
         entry: views.get(r.id)!,
       };
@@ -629,14 +709,24 @@ export class LiveRoomService {
       .selectFrom('drops as d')
       .innerJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
+      .leftJoin('drops as pd', 'pd.id', 'd.parent_drop_id')
       .selectAll('d')
-      .select(['m.name as model_name', 'm.type as model_type', 'm.image_sha256 as model_image', 'm.slug as model_slug', 'm.lookbook as model_lookbook', 'c.name as collection']);
+      .select([
+        'pd.surprise_enabled as parent_surprise',
+        'm.name as model_name',
+        'm.type as model_type',
+        'm.image_sha256 as model_image',
+        'm.slug as model_slug',
+        'm.lookbook as model_lookbook',
+        'c.name as collection',
+      ]);
   }
 
-  /** The LIVE RELEASES announced and not ended at `now`, the next opening first. */
+  /** The LIVE RELEASES announced and not ended at `now`, the next opening first; never an after-room. */
   private async current(now: Date): Promise<ReadRow[]> {
     return this.reads()
       .where('d.mode', '=', 'LIVE')
+      .where('d.parent_drop_id', 'is', null)
       .where('d.published_at', 'is not', null)
       .where('d.cancelled_at', 'is', null)
       .where('d.ended_at', 'is', null)
@@ -648,10 +738,11 @@ export class LiveRoomService {
       .execute();
   }
 
-  /** An announced LIVE RELEASE, not cancelled: its row with its model; 404 otherwise. */
+  /** An announced LIVE RELEASE, not cancelled: its row with its model; 404 otherwise, and for an after-room. */
   private async publicRow(id: string, now: Date): Promise<ReadRow> {
-    const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
-    if (!r || r.cancelled_at || !isAnnounced(r, now)) throw dropNotFound();
+    const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).where('d.published_at', 'is not', null).executeTakeFirst();
+    // One ended before its announcement was never announced.
+    if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) throw dropNotFound();
     return r;
   }
 
@@ -697,6 +788,8 @@ export class LiveRoomService {
       quantityLine: r.quantity_line ?? '',
       perAccount: r.per_account ?? LIVE_PER_ACCOUNT.default,
       access: { minTier: rule.minTier, text: liveRuleText(rule) },
+      // An after-room's boxes hold its release's surprise (services/after-room.ts).
+      surprise: (r.parent_drop_id ? r.parent_surprise : r.surprise_enabled) === true,
       interest,
     };
   }

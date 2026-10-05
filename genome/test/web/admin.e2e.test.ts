@@ -1943,10 +1943,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
-    // One link more, Club, in the Clients group after Owners; the ADMIN's sidebar, twenty links, still fits a 900 px screen.
+    // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+, with Atelier in
+    // the Registry); the ADMIN's sidebar, twenty-four links, still fits a 900 px screen.
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
-    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['owners', 'club', 'warranties', 'retailers', 'sale']);
-    expect(await p.locator('.side__link').count()).toBe(20);
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'retailers', 'sale']);
+    expect(await p.locator('.side__link').count()).toBe(24);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
@@ -2561,17 +2562,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('.status__text').textContent()).toBe('OPEN');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-requests', { full: true });
-    // Closed with a note: the row says who closed it and what was done.
+    // Closed with a note and its outcome: the row says the outcome, who closed it and what was done; ACCEPTED created
+    // the request's order (plan LIVE RELEASE+).
     await row.locator('[data-testid=close-request]').click();
     await p.fill('dialog textarea[name=note]', 'Called the client: a fitting on Tuesday.');
+    await p.selectOption('dialog select[name=outcome]', 'ACCEPTED');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Request closed.")');
     await expect.poll(() => row.locator('.status__text').textContent()).toBe('CLOSED');
+    expect(await row.locator('[data-testid=request-outcome]').textContent()).toMatch(/^ACCEPTED · /);
     expect(await row.locator('.cell-details').last().textContent()).toBe('Called the client: a fitting on Tuesday.');
     expect(await row.locator('[data-testid=close-request]').count()).toBe(0);
-    expect(await ctx.db.selectFrom('shop_requests').select(['status', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
-      { status: 'CLOSED', resolution_note: 'Called the client: a fitting on Tuesday.' },
+    expect(await ctx.db.selectFrom('shop_requests').select(['status', 'outcome', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
+      { status: 'CLOSED', outcome: 'ACCEPTED', resolution_note: 'Called the client: a fitting on Tuesday.' },
     ]);
+    expect(await ctx.db.selectFrom('orders').select(['channel', 'status']).where('account_id', '=', a.account.id).execute()).toEqual([{ channel: 'SALON', status: 'RESERVED' }]);
     // Narrowed to the open requests: none is left.
     await p.selectOption('#requests select[name=status]', 'OPEN');
     await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/club?tab=requests&status=OPEN');

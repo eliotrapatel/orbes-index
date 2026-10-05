@@ -17,6 +17,30 @@
  */
 import type {
   AdminProfile,
+  BestTime,
+  LiveFeasibility,
+  LiveSizeMix,
+  AtelierStock,
+  BenchFilters,
+  BenchItem,
+  BenchList,
+  Carrier,
+  InvoiceFilters,
+  InvoiceList,
+  IssueBenchInput,
+  IssuedBenchItem,
+  OrderAlertDelays,
+  OrderAlertSettings,
+  OrderBoard,
+  OrderBoardFilters,
+  OrderDetail,
+  OrderReturned,
+  OrderReturnInput,
+  OrderTermsChange,
+  OrderTransitionInput,
+  StockLevel,
+  StockLocation,
+  WorkSheets,
   AdminSession,
   AdminSessionInfo,
   AdminUser,
@@ -65,8 +89,6 @@ import type {
   LiveReleaseComparison,
   LiveReleasePlan,
   LiveReleaseReport,
-  LiveReservation,
-  LiveResolution,
   LiveSettings,
   LiveSettingsChange,
   LiveState,
@@ -83,8 +105,11 @@ import type {
   Model,
   ModelChange,
   OwnerList,
+  ShopifyLink,
+  ShopifyProduct,
   OwnerLock,
   ShopRequest,
+  ShopRequestOutcome,
   ShopRequestStatus,
   OwnerSheet,
   Paged,
@@ -106,6 +131,10 @@ import type {
   StatusChange,
   TotpEnrollment,
   WarrantyRecord,
+  Segment,
+  SegmentGroup,
+  SegmentName,
+  SegmentOptions,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -409,6 +438,11 @@ export class AdminApi {
     return this.get('/api/admin/analytics', q);
   }
 
+  /** The best time to open (plan LIVE RELEASE+, choice 10): a tier and above, everywhere or in one country, over `days`. */
+  bestTime(q: { days?: number; tier?: number; country?: string } = {}): Promise<BestTime> {
+    return this.get('/api/admin/analytics/best-time', q);
+  }
+
   /** The panel The Circle (P-X01): the members of the club by tier now, the visits of the same window by day. */
   circleStats(q: { days?: number; from?: string; to?: string } = {}): Promise<CircleStats> {
     return this.get('/api/admin/analytics/circle', q);
@@ -462,6 +496,30 @@ export class AdminApi {
 
   updateModel(id: string, change: ModelChange): Promise<Model> {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
+  }
+
+  // ── Shopify readiness (plan LIVE RELEASE+, N2 and N3): files in Shopify's formats, nothing sent to it ──
+
+  /** N2: the product CSV of the models priced in the store's currency. */
+  async shopifyProductsCsv(currency: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/shopify/products.csv', { raw: true, query: { currency } });
+    return toDownload(res, `ORBES-shopify-products-${currency}.csv`);
+  }
+
+  /** N2: a model's Shopify product, its sizes and their ids. */
+  modelShopify(id: string): Promise<ShopifyProduct> {
+    return this.get(`/api/admin/models/${encodeURIComponent(id)}/shopify`);
+  }
+
+  /** N2, OPERATOR: the product's and the variants' ids pasted back from Shopify. */
+  linkModelShopify(id: string, link: ShopifyLink): Promise<ShopifyProduct> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/shopify`, { body: link });
+  }
+
+  /** N3: the order CSV of the orders reserved from one day to another (UTC, both included); emails and buyers masked for an AUDITOR. */
+  async shopifyOrdersCsv(from: string, to: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/shopify/orders.csv', { raw: true, query: { from, to } });
+    return toDownload(res, `ORBES-shopify-orders-${from}-to-${to}.csv`);
   }
 
   /** P-R06, ADMIN: the model discontinued (inactive, said DISCONTINUED on its pieces' results). */
@@ -632,7 +690,7 @@ export class AdminApi {
     return this.get('/api/admin/owners', q);
   }
 
-  /** The owner's sheet: pieces, transfers in progress, latest scans. */
+  /** The owner's sheet: pieces, transfers in progress, latest scans; the client sheet (N4): orders, releases, answers, interest, segments, notes. */
   owner(accountId: string): Promise<OwnerSheet> {
     return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}`);
   }
@@ -785,19 +843,212 @@ export class AdminApi {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/remove`);
   }
 
-  liveReservations(id: string, page = 1, pageSize = 50): Promise<Paged<LiveReservation>> {
-    return this.get(`/api/admin/live/${encodeURIComponent(id)}/reservations`, { page, pageSize });
+  // ── Orders (plan LIVE RELEASE+) ──────────────────────────────────────────
+
+  /** The fulfilment board: every order the filters keep, by step (the emails masked for an AUDITOR). */
+  orderBoard(f: OrderBoardFilters = {}): Promise<OrderBoard> {
+    return this.get('/api/admin/orders', { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q });
   }
 
-  /** Every confirmed reservation as a CSV (the emails masked for an AUDITOR). */
-  async liveReservationsCsv(id: string): Promise<Download> {
-    const res = await this.request<Response>('GET', `/api/admin/live/${encodeURIComponent(id)}/reservations.csv`, { raw: true });
-    return toDownload(res, 'orbes-live-reservations.csv');
+  /** Every order the same filters keep, as a CSV (the emails and the buyers masked for an AUDITOR). */
+  async ordersCsv(f: OrderBoardFilters = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/orders.csv', {
+      raw: true,
+      query: { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q },
+    });
+    return toDownload(res, 'orbes-orders.csv');
   }
 
-  /** CONCLUDED or CANCELLED, with an optional note (Client Services). */
-  resolveLiveReservation(id: string, entryId: string, resolution: LiveResolution, note: string): Promise<LiveReservation> {
-    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/resolve`, note ? { resolution, note } : { resolution });
+  order(id: string): Promise<OrderDetail> {
+    return this.get(`/api/admin/orders/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: the order's next step (PAID, SHIPPED, DELIVERED, CANCELLED) with what it requires. */
+  transitionOrder(id: string, input: OrderTransitionInput): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/transition`, input);
+  }
+
+  /** OPERATOR: served from another location (what it holds moves with it). */
+  changeOrderLocation(id: string, locationId: string): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/location`, { locationId });
+  }
+
+  /** OPERATOR: a draw's or a salon's size, price and currency; any order's engraving text. */
+  setOrderTerms(id: string, change: OrderTermsChange): Promise<OrderDetail> {
+    return this.patch(`/api/admin/orders/${encodeURIComponent(id)}/terms`, change);
+  }
+
+  /** OPERATOR: the buyer's name and address (null clears one). */
+  setOrderBuyer(id: string, buyer: { name: string | null; address: string | null }): Promise<OrderDetail> {
+    return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });
+  }
+
+  /** OPERATOR: the piece picked from the stock to fulfil the order. */
+  linkOrderPiece(id: string, productId: string): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
+  }
+
+  /** OPERATOR: RETURNED, back to stock at a location or to the archive; the new card's claim code when the piece went back to stock. */
+  returnOrder(id: string, input: OrderReturnInput): Promise<OrderReturned> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/return`, input);
+  }
+
+  // ── Invoices (plan LIVE RELEASE+, M7) ────────────────────────────────────
+
+  /** A month's invoices and credit notes (the current month by default), with their totals; the buyer masked for an AUDITOR. */
+  invoices(f: InvoiceFilters = {}): Promise<InvoiceList> {
+    return this.get('/api/admin/invoices', { month: f.month, kind: f.kind, q: f.q });
+  }
+
+  /** The month's CSV for the accountant. */
+  async invoicesCsv(month: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/invoices.csv', { raw: true, query: { month } });
+    return toDownload(res, `ORBES-invoices-${month}.csv`);
+  }
+
+  /** One document's PDF. */
+  async invoicePdf(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/invoices/${encodeURIComponent(id)}/pdf`, { raw: true });
+    return toDownload(res, 'ORBES-invoice.pdf');
+  }
+
+  // ── Segments (plan LIVE RELEASE+, choice 27) ─────────────────────────────
+
+  /** Every segment, by name, with its members now and what uses it. */
+  async segments(): Promise<Segment[]> {
+    return (await this.get<{ items: Segment[] }>('/api/admin/segments')).items;
+  }
+
+  /** Every segment's id and name, by name: the choices of a release's access rule and a post's audience (no count read). */
+  async segmentNames(): Promise<SegmentName[]> {
+    return (await this.get<{ items: SegmentName[] }>('/api/admin/segments/names')).items;
+  }
+
+  segment(id: string): Promise<Segment> {
+    return this.get(`/api/admin/segments/${encodeURIComponent(id)}`);
+  }
+
+  /** What the builder names: the releases, models, collections, sizes and countries known. */
+  segmentOptions(): Promise<SegmentOptions> {
+    return this.get('/api/admin/segments/options');
+  }
+
+  /** The members criteria being built would have now (OPERATOR); a background read, as the builder asks it at each change. */
+  segmentCount(criteria: SegmentGroup): Promise<{ count: number }> {
+    return this.request('POST', '/api/admin/segments/count', { body: { criteria }, background: true });
+  }
+
+  createSegment(input: { name: string; criteria: SegmentGroup }): Promise<Segment> {
+    return this.post('/api/admin/segments', input);
+  }
+
+  updateSegment(id: string, change: { name?: string; criteria?: SegmentGroup }): Promise<Segment> {
+    return this.patch(`/api/admin/segments/${encodeURIComponent(id)}`, change);
+  }
+
+  deleteSegment(id: string): Promise<void> {
+    return this.del(`/api/admin/segments/${encodeURIComponent(id)}`);
+  }
+
+  /** A segment's members now, as a CSV (emails masked for an AUDITOR). */
+  async segmentCsv(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/segments/${encodeURIComponent(id)}/members.csv`, { raw: true });
+    return toDownload(res, 'orbes-segment.csv');
+  }
+
+  orderAlerts(): Promise<OrderAlertSettings> {
+    return this.get('/api/admin/orders/alerts');
+  }
+
+  /** ADMIN: the delays after which an order stands out. */
+  setOrderAlerts(delays: OrderAlertDelays): Promise<OrderAlertSettings> {
+    return this.request('PUT', '/api/admin/orders/alerts', { body: delays });
+  }
+
+  // ── Locations and carriers ───────────────────────────────────────────────
+
+  locations(): Promise<Items<StockLocation>> {
+    return this.get('/api/admin/locations');
+  }
+
+  /** ADMIN. */
+  createLocation(name: string): Promise<StockLocation> {
+    return this.post('/api/admin/locations', { name });
+  }
+
+  /** ADMIN: renamed, or made the default. */
+  updateLocation(id: string, change: { name?: string; isDefault?: true }): Promise<StockLocation> {
+    return this.patch(`/api/admin/locations/${encodeURIComponent(id)}`, change);
+  }
+
+  carriers(): Promise<Items<Carrier>> {
+    return this.get('/api/admin/carriers');
+  }
+
+  /** ADMIN. */
+  createCarrier(input: { name: string; trackingUrl: string }): Promise<Carrier> {
+    return this.post('/api/admin/carriers', input);
+  }
+
+  /** ADMIN: its name, its tracking link, offered or set aside. */
+  updateCarrier(id: string, change: { name?: string; trackingUrl?: string; active?: boolean }): Promise<Carrier> {
+    return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
+  }
+
+  // ── The atelier ──────────────────────────────────────────────────────────
+
+  atelierStock(f: { modelId?: string; locationId?: string } = {}): Promise<AtelierStock> {
+    return this.get('/api/admin/atelier/stock', { modelId: f.modelId, locationId: f.locationId });
+  }
+
+  /** OPERATOR: pieces of a SKU moved between locations. */
+  transferStock(input: { skuId: string; fromLocationId: string; toLocationId: string; quantity: number; note?: string }): Promise<{ transferId: string; from: StockLevel; to: StockLevel }> {
+    return this.post('/api/admin/atelier/stock/transfer', input);
+  }
+
+  /** OPERATOR: a count corrected, with why. */
+  adjustStock(input: { skuId: string; locationId: string; delta: number; note: string }): Promise<StockLevel> {
+    return this.post('/api/admin/atelier/stock/adjust', input);
+  }
+
+  /** OPERATOR: a SKU's minimum at a location, or none. */
+  setStockThreshold(input: { skuId: string; locationId: string; minimum: number | null }): Promise<void> {
+    return this.request('PUT', '/api/admin/atelier/thresholds', { body: input });
+  }
+
+  /** OPERATOR: pieces to make for the stock (a suggestion confirmed). */
+  makeForStock(input: { skuId: string; locationId: string; quantity: number }): Promise<Items<BenchItem>> {
+    return this.post('/api/admin/atelier/make', input);
+  }
+
+  bench(f: BenchFilters = {}): Promise<BenchList> {
+    return this.get('/api/admin/atelier/bench', { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId });
+  }
+
+  /** What to make, as a CSV. */
+  async benchCsv(f: BenchFilters = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/atelier/bench.csv', { raw: true, query: { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId } });
+    return toDownload(res, 'orbes-atelier.csv');
+  }
+
+  /** OPERATOR: TO MAKE → IN PROGRESS. */
+  startBench(id: string): Promise<BenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/start`);
+  }
+
+  /** OPERATOR: IN PROGRESS → DONE, the piece issued (its claim code shown once). */
+  finishBench(id: string, input: IssueBenchInput): Promise<IssuedBenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/done`, input);
+  }
+
+  /** OPERATOR: a piece to make for the stock cancelled. */
+  cancelBench(id: string): Promise<BenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** OPERATOR: the work sheets of the pieces named, or of those the filters keep (each code's data to draw). */
+  workSheets(input: { benchItemIds?: string[]; origin?: string; skuId?: string; locationId?: string }): Promise<WorkSheets> {
+    return this.post('/api/admin/atelier/sheets', input);
   }
 
   // ── The Club: the LIVE RELEASES' intelligence ────────────────────────────
@@ -841,6 +1092,21 @@ export class AdminApi {
   /** The release beside the others whose T0 has passed. */
   liveComparison(id: string): Promise<LiveReleaseComparison> {
     return this.get(`/api/admin/live/${encodeURIComponent(id)}/comparison`);
+  }
+
+  /** The best time to open the release: its tiers' activity by hour, Paris time, and its T0's. */
+  liveBestTime(id: string, q: { days?: number; country?: string } = {}): Promise<BestTime> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/best-time`, q);
+  }
+
+  /** The feasibility check before publishing: each size against the stock at the release's location (warnings only). */
+  liveFeasibility(id: string): Promise<LiveFeasibility> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/feasibility`);
+  }
+
+  /** The size mix a new release of a model is proposed: the stock at the location first, then the planner. */
+  liveSizeMix(modelId: string, locationId?: string | null): Promise<LiveSizeMix> {
+    return this.get('/api/admin/live/size-mix', { modelId, ...(locationId ? { locationId } : {}) });
   }
 
   // ── The Club: drops (P-R03) ──────────────────────────────────────────────
@@ -955,9 +1221,9 @@ export class AdminApi {
     return this.get('/api/admin/club/requests', q);
   }
 
-  /** OPERATOR: close a request with a note, what was done for the client. */
-  closeShopRequest(id: string, note: string): Promise<ShopRequest> {
-    return this.post(`/api/admin/club/requests/${encodeURIComponent(id)}/close`, { note });
+  /** OPERATOR: close a request with a note, what was done for the client, and its outcome (ACCEPTED creates its order). */
+  closeShopRequest(id: string, note: string, outcome: ShopRequestOutcome): Promise<ShopRequest> {
+    return this.post(`/api/admin/club/requests/${encodeURIComponent(id)}/close`, { note, outcome });
   }
 
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {

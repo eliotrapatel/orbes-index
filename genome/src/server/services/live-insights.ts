@@ -10,7 +10,9 @@
  *                        unserved pieces at the turns' conversion; LIVE_INSIGHT_RULES.defaultDemandPerPerson without a
  *                        past release); the size mix, that quantity shared out (largest remainder) by the interest in
  *                        each size plus the eligible collectors whose latest piece of the model's type is in that size
- *                        (`products.variant`); the eligible collectors by tier.
+ *                        (`products.variant`); the eligible collectors by tier. Eligible: what the release's rules let
+ *                        in now; with a rule of taking part or of a segment, or rules combined by OR (plan LIVE
+ *                        RELEASE+), every rule read for every account as at the entry (live.ts accessAccounts).
  *   audience forecast    (`forecast`) the room at T0 as a range: from the interest (I'LL BE THERE) at the share of the
  *                        interest present at T0 in past releases (their lowest and highest; LIVE_INSIGHT_RULES.
  *                        defaultShowUp without one); before any interest, from the eligible accounts of each tier at
@@ -53,17 +55,23 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
-import { effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
+import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
+import { notFound } from '../errors.js';
+import { releaseSizeLabel, sizeMix, type SizeMix } from './release-stock.js';
+import { defaultLocationId, knownLocation, stockBalances } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
 /**
  * The room the server holds, the limit the audience forecast warns against: measured by the load test of the VPS
- * profile (scripts/live-load.ts, 2026-10-04; docs/reports/live-load.md), the largest level that met every target in
- * every run (500 and 1 000 did in all three; 1 500 in two of three; 2 000 in none).
+ * profile (scripts/live-load.ts; docs/reports/live-load.md), the largest level that met every target in every run.
+ * Measured again on 2026-10-05 with LIVE RELEASE+ (the rules read at each check, the orders made at PAY, an after-room
+ * whose second door opens for all its guests at once): 500 did in all three runs; 750 in two of three, the after-room's
+ * door in the third; 1 000 in none, the after-room's door every time (the room itself met them in two of three). It was
+ * 1 000 for the LIVE RELEASE alone (2026-10-04).
  */
-export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 1000 });
+export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 500 });
 
 /** Every number the intelligence's rules use (each one is in the reasoning it gives). */
 export const LIVE_INSIGHT_RULES = Object.freeze({
@@ -216,9 +224,25 @@ export interface InsightEntry {
   confirmedAt: Date | null;
   endedAt: Date | null;
   gestureMs: number | null;
+  /**
+   * How ORBES Client Services concluded a confirmed reservation, as its orders say (plan LIVE RELEASE+: the LIVE plan's
+   * resolution is retired into the orders, `entryOutcome`): CONCLUDED once one of them is paid, CANCELLED once every
+   * one is cancelled, null before.
+   */
   resolution: LiveResolution | null;
   country: string | null;
 }
+
+/**
+ * The outcome of a LIVE entry from its orders (services/orders.ts), as SQL over `live_entries` aliased `e`: CANCELLED
+ * when every order of the entry is cancelled, CONCLUDED when one of them was paid, NULL otherwise; the entry's own
+ * resolution (the LIVE plan's, kept as history) only for an entry without orders.
+ */
+export const entryOutcome = sql<LiveResolution | null>`CASE
+    WHEN NOT EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id) THEN e.resolution
+    WHEN NOT EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id AND o.status <> 'CANCELLED') THEN 'CANCELLED'
+    WHEN EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id AND o.paid_at IS NOT NULL) THEN 'CONCLUDED'
+    ELSE NULL END`;
 
 export function insightRelease(d: DropRow, sizes: readonly InsightSize[]): InsightRelease {
   return {
@@ -1392,7 +1416,7 @@ export function compareReleases(rows: readonly { summary: ReleaseSummary; curren
       addonsRevenueMinor,
     })),
     reasoning: [
-      `The release beside the others whose T0 has passed (the latest ${count(LIVE_INSIGHT_RULES.pastReleases)}, cancelled ones left out), latest first.`,
+      `The release beside the others whose T0 has passed (the latest ${count(LIVE_INSIGHT_RULES.pastReleases)}, cancelled ones and after-rooms left out), latest first.`,
       'The room counts everyone who entered; the line at T0, those placed at T0 itself. The sell-through: the pieces confirmed of the stock (the pieces added included). The missed share: the turns that ran out, of every turn.',
       'The time to sell out runs from T0 to the last piece confirmed, pauses included. A release not over yet shows its figures so far.',
       'The revenue: the pieces and add-ons of the confirmed reservations at their prices, those ORBES Client Services cancelled left out.',
@@ -1420,20 +1444,37 @@ interface Rule {
   minTier: number;
   models: readonly string[];
   collectionId: string | null;
+  /**
+   * The accounts a release's rules let in now, read by live.ts accessAccounts when it has a rule of taking part or of a
+   * segment, or combines its rules by OR (plan LIVE RELEASE+); null: the tier and the pieces alone, read from `Holder`.
+   */
+  accounts: Set<string> | null;
 }
 
-/** The eligible accounts of a rule by tier (0 to 3): a tier from `minTier`, and a piece of a model or collection it names. */
+/** Whether a holder of pieces is let in by a rule. */
+function allowedBy(h: Holder, rule: Rule): boolean {
+  if (rule.accounts) return rule.accounts.has(h.accountId);
+  if (tierForPieces(h.pieces) < rule.minTier) return false;
+  if (rule.models.length === 0 && rule.collectionId === null) return true;
+  return rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId));
+}
+
+/**
+ * The eligible accounts of a rule by tier (0 to 3): a tier from `minTier`, and a piece of a model or collection it names;
+ * or, for a release whose rules go beyond them, the accounts they let in now, each at its tier.
+ */
 function eligibleOf(el: Eligibility, rule: Rule): number[] {
   const out = [0, 0, 0, 0];
-  const named = rule.models.length > 0 || rule.collectionId !== null;
+  let holders = 0;
   for (const h of el.holders) {
-    const tier = tierForPieces(h.pieces);
-    if (tier < rule.minTier) continue;
-    if (named && !(rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId)))) continue;
-    out[tier] += 1;
+    if (!allowedBy(h, rule)) continue;
+    out[tierForPieces(h.pieces)] += 1;
+    holders += 1;
   }
   // The accounts holding no piece the club counts: tier 0, never the owners of a named model or collection.
-  if (rule.minTier === 0 && !named) out[0] += Math.max(0, el.active - el.holders.length);
+  const named = rule.models.length > 0 || rule.collectionId !== null;
+  if (rule.accounts) out[0] += Math.max(0, rule.accounts.size - holders);
+  else if (rule.minTier === 0 && !named) out[0] += Math.max(0, el.active - el.holders.length);
   return out;
 }
 
@@ -1459,13 +1500,56 @@ export class LiveInsightsService {
     const { d, release, rule, modelType } = await this.release(dropId);
     const [el, past, interest] = await Promise.all([this.eligibility(), this.past(d, now), this.interest(d.id)]);
     const forecast = audienceForecast({ interest: interest.length, eligibleByTier: eligibleOf(el, rule), past: past.map((p) => p.audience(el)), inRoom: await this.inRoom(d, now) });
-    const eligible = new Set(el.holders.filter((h) => this.allowed(h, rule)).map((h) => h.accountId));
+    const eligible = new Set(el.holders.filter((h) => allowedBy(h, rule)).map((h) => h.accountId));
     const variants = await this.variants(modelType);
     const collectorsBySize = new Map<string, number>();
     for (const v of variants) if (eligible.has(v.accountId)) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
     const interestBySize = new Map<string, number>();
     for (const i of interest) interestBySize.set(i.sizeId, (interestBySize.get(i.sizeId) ?? 0) + 1);
     return releasePlan({ sizes: release.sizes, forecast, past: past.map((p) => p.summary), interestBySize, collectorsBySize, modelType });
+  }
+
+  /**
+   * The size mix a new release of a model is proposed (plan LIVE RELEASE+, choice 13, L1; services/release-stock.ts
+   * sizeMix): the sizes in stock at the location (the default one when none is given) first, then the planner's demand
+   * per size, read as for a release open to every ORBES account opening now (once created, its page's planner reads its
+   * own rules).
+   */
+  async sizeMix(modelId: string, locationId: string | null): Promise<SizeMix> {
+    if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const model = await this.db.selectFrom('models').select(['id', 'name', 'type']).where('id', '=', modelId.toLowerCase()).executeTakeFirst();
+    if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const locId = locationId ? await knownLocation(this.db, locationId) : await defaultLocationId(this.db);
+    const now = this.clock();
+    const [location, balances, el, past, variants] = await Promise.all([
+      this.db.selectFrom('stock_locations').select(['id', 'name']).where('id', '=', locId).executeTakeFirstOrThrow(),
+      stockBalances(this.db, { modelId: model.id, locationId: locId }),
+      this.eligibility(),
+      this.past({ id: '00000000-0000-0000-0000-000000000000', opens_at: now }, now),
+      this.variants(model.type),
+    ]);
+    const stock = balances.map((b) => ({ label: releaseSizeLabel(b.sku.sizeLabel), available: Math.max(0, b.available) }));
+    const open: Rule = { minTier: 0, models: [], collectionId: null, accounts: null };
+    const forecast = audienceForecast({ interest: 0, eligibleByTier: eligibleOf(el, open), past: past.map((p) => p.audience(el)), inRoom: null });
+    const collectorsBySize = new Map<string, number>();
+    for (const v of variants) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
+    const labels = [...new Set([...stock.map((x) => x.label.trim().toUpperCase()), ...collectorsBySize.keys()])].filter((l) => l.length > 0);
+    const plan = releasePlan({
+      sizes: labels.map((l) => ({ id: l, label: l, stock: stock.filter((x) => x.label.trim().toUpperCase() === l).reduce((n, x) => n + x.available, 0) })),
+      forecast,
+      past: past.map((p) => p.summary),
+      interestBySize: new Map(),
+      collectorsBySize,
+      modelType: model.type,
+    });
+    return sizeMix({
+      model: { id: model.id, name: model.name },
+      location,
+      stock,
+      planned: plan.quantity,
+      demand: plan.sizes.map((x) => ({ label: x.label, pieces: x.suggested ?? 0 })),
+      plannerReasoning: ['The planner, as for a release open to every ORBES account opening now:', ...forecast.reasoning, ...plan.reasoning],
+    });
   }
 
   /** The audience forecast: the room expected at T0. */
@@ -1567,6 +1651,7 @@ export class LiveInsightsService {
         .distinct()
         .where('e.account_id', 'in', chunk)
         .where('x.mode', '=', 'LIVE')
+        .where('x.parent_drop_id', 'is', null)
         .where('x.id', '!=', d.id)
         .where('x.opens_at', '<', d.opens_at)
         .execute();
@@ -1575,7 +1660,7 @@ export class LiveInsightsService {
     return collectorInsights(release, entries, emails, repeat);
   }
 
-  /** The release beside the others whose T0 has passed. */
+  /** The release beside the others whose T0 has passed (after-rooms left out: each is part of its release). */
   async comparison(dropId: string): Promise<ReleaseComparison> {
     const now = this.clock();
     const { d } = await this.release(dropId);
@@ -1583,6 +1668,7 @@ export class LiveInsightsService {
       .selectFrom('drops')
       .selectAll()
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('opens_at', '<=', now)
@@ -1620,16 +1706,11 @@ export class LiveInsightsService {
     return {
       d,
       release: insightRelease(d, sizes),
-      rule: { minTier: d.live_min_tier ?? 0, models: models.map((m) => m.model_id), collectionId: d.access_collection_id },
+      rule: { minTier: d.live_min_tier ?? 0, models: models.map((m) => m.model_id), collectionId: d.access_collection_id, accounts: await accessAccounts(this.db, d, this.clock()) },
       modelType: model.type,
     };
   }
 
-  private allowed(h: Holder, rule: Rule): boolean {
-    if (tierForPieces(h.pieces) < rule.minTier) return false;
-    if (rule.models.length === 0 && rule.collectionId === null) return true;
-    return rule.models.some((m) => h.models.has(m)) || (rule.collectionId !== null && h.collections.has(rule.collectionId));
-  }
 
   private sizes(dropId: string): Promise<InsightSize[]> {
     return this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
@@ -1647,11 +1728,12 @@ export class LiveInsightsService {
   private async entries(dropIds: readonly string[]): Promise<(InsightEntry & { dropId: string })[]> {
     if (dropIds.length === 0) return [];
     const rows = await this.db
-      .selectFrom('live_entries')
+      .selectFrom('live_entries as e')
       .select([
         'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'queued_at', 'turn_at', 'turn_expires_at', 'secured_at',
-        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'resolution', 'country',
+        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country',
       ])
+      .select(entryOutcome.as('resolution'))
       .where('drop_id', 'in', [...dropIds])
       .orderBy('drop_id')
       .orderBy(sql`position IS NULL`)
@@ -1752,14 +1834,15 @@ export class LiveInsightsService {
   }
 
   /**
-   * The past releases (published, not cancelled, ended or closed by now, T0 before this one's), the latest
-   * LIVE_INSIGHT_RULES.pastReleases by T0: their summaries, their entries, and their audience under their rule.
+   * The past releases (published, not cancelled, ended or closed by now, T0 before this one's; never an after-room, a
+   * second door for a sold-out line, not a release of its own), the latest LIVE_INSIGHT_RULES.pastReleases by T0: their summaries, their entries, and their audience under their rule.
    */
-  private async past(d: DropRow, now: Date) {
+  private async past(d: Pick<DropRow, 'id' | 'opens_at'>, now: Date) {
     const rows = await this.db
       .selectFrom('drops')
       .selectAll()
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('id', '!=', d.id)
@@ -1776,10 +1859,11 @@ export class LiveInsightsService {
       this.interestCounts(ids),
       ids.length ? this.db.selectFrom('live_access_models').select(['drop_id', 'model_id']).where('drop_id', 'in', ids).execute() : Promise.resolve([]),
     ]);
-    return rows.map((p) => {
+    const accounts = await Promise.all(rows.map((p) => accessAccounts(this.db, p, now)));
+    return rows.map((p, i) => {
       const own = entries.filter((e) => e.dropId === p.id);
       const summary = summarize(insightRelease(p, sizes.get(p.id) ?? []), own, interest.get(p.id) ?? 0);
-      const rule: Rule = { minTier: p.live_min_tier ?? 0, models: models.filter((m) => m.drop_id === p.id).map((m) => m.model_id), collectionId: p.access_collection_id };
+      const rule: Rule = { minTier: p.live_min_tier ?? 0, models: models.filter((m) => m.drop_id === p.id).map((m) => m.model_id), collectionId: p.access_collection_id, accounts: accounts[i]! };
       return {
         summary,
         entries: own,
@@ -1817,7 +1901,7 @@ export class LiveInsightsService {
       .select((eb) => ['e.drop_id', eb.fn.sum<number>(sql`x.price_minor * e.quantity`).as('minor')])
       .where('e.drop_id', 'in', [...ids])
       .where('e.status', '=', 'CONFIRMED')
-      .where('e.resolution', 'is distinct from', 'CANCELLED')
+      .where(sql<boolean>`(${entryOutcome}) IS DISTINCT FROM 'CANCELLED'`)
       .groupBy('e.drop_id')
       .execute();
     return new Map(rows.map((r) => [r.drop_id, Number(r.minor ?? 0)]));

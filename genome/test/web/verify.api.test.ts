@@ -202,6 +202,74 @@ describe('ApiClient', () => {
     await expect(api.products()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });
 
+  it('MY PIECES\' orders (plan LIVE RELEASE+, choice 6): reads the account\'s own with a GET, no CSRF header; a list that is not one is a bad response', async () => {
+    const order = { id: 'o1', reference: 'OR-1A2B3C4D', status: 'SHIPPED' };
+    const f = fakeFetch([() => json(200, { orders: [order] }), () => json(200, { orders: null }), () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } })]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.orders()).toEqual([order]);
+    expect(f.calls[0]).toMatchObject({ url: '/api/v1/account/orders', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    await expect(api.orders()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.orders()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
+  it('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, and the account\'s part in them, each with a GET and no CSRF header', async () => {
+    const page = { items: [{ id: 'r1', kind: 'DRAW' }], page: 2, pageSize: 12, total: 13 };
+    const part = { count: 1, releases: [{ id: 'r1', secured: true }] };
+    const f = fakeFetch([
+      () => json(200, page),
+      () => json(200, { items: null, total: 1 }),
+      () => json(200, part),
+      () => json(200, { releases: [] }),
+      () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.pastReleases(2, 12)).toEqual(page);
+    expect(f.calls[0]).toMatchObject({ url: '/api/v1/releases/past?page=2&pageSize=12', method: 'GET', credentials: 'same-origin', body: undefined });
+    await expect(api.pastReleases(1, 12)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(await api.participation()).toEqual(part);
+    expect(f.calls[2]).toMatchObject({ url: '/api/v1/account/participation', method: 'GET', body: undefined });
+    for (const c of f.calls) expect(c.headers['x-csrf-token']).toBeUndefined();
+    await expect(api.participation()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.participation()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
+  it('the question after (plan LIVE RELEASE+, choice 11): read with a GET, answered with a PUT and the CSRF token, MY PIECES\' list; anything else a bad response', async () => {
+    const q = { dropId: 'r1', name: 'MONOLITHE', opensAt: '2026-11-02T18:00:00.000Z', text: 'WHAT WOULD YOU HAVE WANTED?', answers: ['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND'], answer: null, closesAt: '2026-11-09T19:00:00.000Z', asked: 'TOOK_PART' };
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(200, { question: q }),
+      () => json(200, { question: null }),
+      () => json(200, { question: { ...q, answer: 2 } }),
+      () => json(200, { questions: [{ ...q, asked: 'INTEREST' }] }),
+      // Not a question this app can read: an answer outside its answers, a single answer, no list.
+      () => json(200, { question: { ...q, answer: 4 } }),
+      () => json(200, { question: { ...q, answers: ['ONLY ONE'] } }),
+      () => json(200, {}),
+      () => json(200, { questions: null }),
+      () => json(403, { error: { code: 'LIVE_QUESTION_NOT_ASKED', message: 'This question is for the collectors who took part in this release without a piece, or who said they would be there.' } }),
+      () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect(await api.question('r1')).toEqual(q);
+    expect(f.calls[1]).toMatchObject({ url: '/api/v1/live/r1/question', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect(f.calls[1].headers['x-csrf-token']).toBeUndefined();
+    expect(await api.question('r1')).toBeNull();
+    expect(await api.answer('r1', 2)).toEqual({ ...q, answer: 2 });
+    expect(f.calls[3]).toMatchObject({ url: '/api/v1/live/r1/answer', method: 'PUT', body: { answer: 2 } });
+    expect(f.calls[3].headers['x-csrf-token']).toBe('t1');
+    expect(await api.questions()).toEqual([{ ...q, asked: 'INTEREST' }]);
+    expect(f.calls[4]).toMatchObject({ url: '/api/v1/account/questions', method: 'GET', body: undefined });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.questions()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    // A refusal reads as the server wrote it.
+    await expect(api.answer('r1', 1)).rejects.toMatchObject({ status: 403, code: 'LIVE_QUESTION_NOT_ASKED' });
+    await expect(api.questions()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
   it('RECEIVE THIS PIECE (F-03): sends the code with the piece scanned and the transfer token of that scan, with the CSRF token', async () => {
     const f = fakeFetch([
       () => json(200, SESSION('t1')),
@@ -221,6 +289,39 @@ describe('ApiClient', () => {
     // A refusal is no sign-out.
     expect(api.hasSession).toBe(true);
     expect(await api.acceptTransfer('2KRJ-RW75-58PH', 'O26-J-00184', token)).toMatchObject({ productId: 'O26-J-00184', verified: true });
+  });
+
+  it('an order\'s documents (M6): its PDFs and its care guide read with a GET, no CSRF header; a body that is not one is a bad response', async () => {
+    const ID = '1a2b3c4d-0000-4000-8000-000000000001';
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const asPdf = (name: string) => () => new Response(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${name}"` } });
+    const f = fakeFetch([
+      asPdf('ORBES-invoice-INV-2026-000001.pdf'),
+      asPdf('ORBES-credit-note-CN-2026-000001.pdf'),
+      asPdf('ORBES-ownership-certificate-O26-J-00184-2026-11-11.pdf'),
+      () => json(409, { error: { code: 'CERTIFICATE_NOT_AVAILABLE', message: 'The ownership certificate of this order is not available.' } }),
+      () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: 'Store it alone.' } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: null } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: 3 } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect((await api.orderDocument(ID, 'invoice')).filename).toBe('ORBES-invoice-INV-2026-000001.pdf');
+    expect((await api.orderDocument(ID, 'credit-note')).filename).toBe('ORBES-credit-note-CN-2026-000001.pdf');
+    const file = await api.orderDocument(ID, 'certificate');
+    expect(new Uint8Array(await file.blob.arrayBuffer())).toEqual(pdf);
+    expect(f.calls.map((c) => [c.method, c.url])).toEqual([
+      ['GET', `/api/v1/account/orders/${ID}/invoice.pdf`],
+      ['GET', `/api/v1/account/orders/${ID}/credit-note.pdf`],
+      ['GET', `/api/v1/account/orders/${ID}/certificate.pdf`],
+    ]);
+    expect(f.calls.every((c) => c.headers['x-csrf-token'] === undefined && c.credentials === 'same-origin')).toBe(true);
+    await expect(api.orderDocument(ID, 'certificate')).rejects.toMatchObject({ status: 409, code: 'CERTIFICATE_NOT_AVAILABLE' });
+    await expect(api.orderDocument(ID, 'invoice')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(await api.orderCareGuide(ID)).toEqual({ model: 'MONOLITHE', text: 'Store it alone.' });
+    expect(f.calls.at(-1)).toMatchObject({ method: 'GET', url: `/api/v1/account/orders/${ID}/care-guide` });
+    expect(await api.orderCareGuide(ID)).toEqual({ model: 'MONOLITHE', text: null });
+    await expect(api.orderCareGuide(ID)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });
 
   it('ownership certificates (F-06): creates, lists and withdraws with the CSRF token; reads one and its PDF with none, the token in the body', async () => {
@@ -309,6 +410,25 @@ describe('ApiClient', () => {
       ['POST', `/api/v1/live/${ID}/release`, {}],
     ]);
     for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
+  });
+
+  it('LIVE RELEASE: the after-room read through the release it follows, a session\'s answer; anything else is a bad response', async () => {
+    const PARENT = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const CHILD = '8a1e0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const f = fakeFetch([
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: PARENT } }),
+      () => json(404, { error: { code: 'DROP_NOT_FOUND', message: 'This release is not known to ORBES.' } }),
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED' }),
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: CHILD } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.liveAfterRoom(PARENT)).toEqual({ id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: PARENT } });
+    expect(f.calls[0]).toMatchObject({ method: 'GET', url: `/api/v1/live/${PARENT}/after-room` });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ status: 404, code: 'DROP_NOT_FOUND' });
+    // A release's own page, or another release's after-room: never taken for this one's.
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
   });
 
   it('LIVE RELEASE: the banner; I’LL BE THERE said, changed and withdrawn with the CSRF header; the board by its secret in a POST body', async () => {

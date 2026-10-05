@@ -10,11 +10,14 @@
  *    that allow a transfer, the tiers of the club and the statuses they leave
  *    out, the early access of the releases, the hosts of the circle's links,
  *    the private salon's note, price and tiers (P-X08), the settings of the
- *    LIVE RELEASES and the days their networks' fingerprints are kept), and
- *    every absence of §10 (no email, no reset link, no undoing an accepted
- *    transfer, no account deletion, no age check, no vote of the circle and
- *    no note of the private salon in the audit log, no payment taken, no
- *    public view of a LIVE RELEASE's room) holding in the code;
+ *    LIVE RELEASES and the days their networks' fingerprints are kept, the
+ *    steps of the orders, the issuer of their invoices and when their
+ *    certificate is offered, the after-room's times, the releases a rule may
+ *    require and the week of the question after), and every absence of §10
+ *    (no email, no reset link, no undoing an accepted transfer, no account
+ *    deletion, no age check, no vote of the circle and no note of the private
+ *    salon in the audit log, no payment taken, no public view of a LIVE
+ *    RELEASE's room, no call to an online store) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -45,18 +48,22 @@ import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_M
 import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
 import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces, tierName } from '../../src/server/services/club.js';
+import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { normalizeMinTier, PRICE_LABEL_MAX } from '../../src/server/services/lookbook.js';
 import {
   LIVE_ADDONS_MAX,
   LIVE_GESTURE_MIN_MS,
+  LIVE_MIN_PARTICIPATIONS,
   LIVE_NETWORK_RETENTION_DAYS,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_TURN_SECONDS,
 } from '../../src/server/services/live.js';
+import { ORDER_CERTIFICATE_STATUSES, ORDER_TRANSITIONS } from '../../src/server/services/orders.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
   CERTIFICATE_ENDING_STATUSES,
@@ -71,10 +78,12 @@ import {
   TRANSFER_TTL_MS,
   TRANSFERABLE_STATUSES,
 } from '../../src/server/services/ownership.js';
+import { LIVE_QUESTION_OPEN_DAYS } from '../../src/server/services/question.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { normalizeShopNote, SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
+import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { ASSURANCE_NOTE, LEGAL as LEGAL_COPY, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { PACKAGING_KIT, REPO, findForbidden, forbiddenTerms, readDoc, section } from './lexicon.js';
 
@@ -388,6 +397,59 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     fr: [`${LIVE_NETWORK_RETENTION_DAYS} jours`],
     en: [`${LIVE_NETWORK_RETENTION_DAYS} days`],
   },
+  // The orders (plan LIVE RELEASE+ of 2026-10-04): their steps, the issuer of their invoices, their certificate.
+  ORDER_TRANSITIONS: {
+    value: '—',
+    holds: () => {
+      // R121: exactly the steps the plan's Interconnection names, CANCELLED and RETURNED final (article 14 lists them).
+      expect(ORDER_TRANSITIONS).toEqual({ RESERVED: ['PAID', 'CANCELLED'], PAID: ['SHIPPED', 'CANCELLED'], SHIPPED: ['DELIVERED', 'RETURNED'], DELIVERED: ['RETURNED'], CANCELLED: [], RETURNED: [] });
+    },
+  },
+  INVOICE_ISSUER: {
+    value: '—',
+    fr: [`${INVOICE_ISSUER.name} émet sa facture`, 'en anglais et sans TVA'],
+    en: [`${INVOICE_ISSUER.name} issues its invoice`, 'in English and without VAT'],
+    holds: () => {
+      // R128: the publisher the legal notice names, at its registered office (choice 22).
+      expect(INVOICE_ISSUER.name).toBe(LEGAL_IDENTITY.companyName);
+      expect(INVOICE_ISSUER.address.join(', ')).toBe('30 N Gould St, Ste N, Sheridan, WY 82801, United States');
+      // No VAT: an invoice leaves its VAT fields empty and its total is its subtotal.
+      const issue = /export async function issueInvoice\([\s\S]*?\n\}/.exec(readDoc('genome/src/server/services/invoices.ts'))?.[0] ?? '';
+      expect(issue).toContain('total_minor: total,');
+      expect(issue).not.toMatch(/vat_rate_bp|vat_minor/);
+    },
+  },
+  ORDER_CERTIFICATE_STATUSES: {
+    value: '—',
+    holds: () => {
+      // R132: paid and neither cancelled nor returned (and the piece registered to the account, the row's other terms).
+      expect([...ORDER_CERTIFICATE_STATUSES].sort()).toEqual(['DELIVERED', 'PAID', 'SHIPPED']);
+    },
+  },
+  // The releases and the collectors (plan LIVE RELEASE+): the after-room's times, the participation rule, the question.
+  'AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES': {
+    value: `${AFTER_ROOM_DELAY_MINUTES.default} minutes après l'épuisement par défaut, de ${AFTER_ROOM_DELAY_MINUTES.min} à ${AFTER_ROOM_DELAY_MINUTES.max} ; ouverte ${AFTER_ROOM_LENGTH_MINUTES.default} minutes par défaut, de ${AFTER_ROOM_LENGTH_MINUTES.min} à ${AFTER_ROOM_LENGTH_MINUTES.max}`,
+    fr: [
+      `${AFTER_ROOM_DELAY_MINUTES.default} minutes après l'épuisement`,
+      `de ${AFTER_ROOM_DELAY_MINUTES.min} à ${AFTER_ROOM_DELAY_MINUTES.max} minutes`,
+      `ouverte ${AFTER_ROOM_LENGTH_MINUTES.default} minutes`,
+      `de ${AFTER_ROOM_LENGTH_MINUTES.min} à ${AFTER_ROOM_LENGTH_MINUTES.max} minutes`,
+    ],
+    en: [
+      `${AFTER_ROOM_DELAY_MINUTES.default} minutes after the sell-out`,
+      `from ${AFTER_ROOM_DELAY_MINUTES.min} to ${AFTER_ROOM_DELAY_MINUTES.max} minutes`,
+      `open ${AFTER_ROOM_LENGTH_MINUTES.default} minutes`,
+      `from ${AFTER_ROOM_LENGTH_MINUTES.min} to ${AFTER_ROOM_LENGTH_MINUTES.max} minutes`,
+    ],
+    // The plan's defaults (choice 2): 10 minutes after the sell-out, open 15.
+    holds: () => expect([AFTER_ROOM_DELAY_MINUTES.default, AFTER_ROOM_LENGTH_MINUTES.default]).toEqual([10, 15]),
+  },
+  LIVE_MIN_PARTICIPATIONS: { value: `de ${LIVE_MIN_PARTICIPATIONS.min} à ${LIVE_MIN_PARTICIPATIONS.max} sorties` },
+  LIVE_QUESTION_OPEN_DAYS: {
+    value: `${LIVE_QUESTION_OPEN_DAYS} jours`,
+    fr: [`pendant ${LIVE_QUESTION_OPEN_DAYS} jours`],
+    en: [`for ${LIVE_QUESTION_OPEN_DAYS} days`],
+  },
 };
 
 /** The rules the plan names for TERMS-FACTS, by the fragment of code that applies each one. */
@@ -431,11 +493,12 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a discontinued model\'s pieces verify as before, said DISCONTINUED with the year (P-R06)': 'discontinuedYear: reg.modelDiscontinuedAt.getUTCFullYear()',
   'SUBSCRIBE of ORBES Care only once its address is published (P-M02)': "field('CARE_SUBSCRIBE_URL', zHttpsLink, e.CARE_SUBSCRIBE_URL) ?? null",
   'no stage of a LIVE RELEASE before its time (choice 30)': 'photo: t >= photoAt,',
-  'access by tier, model or collection, read again at each step (choices 1, 35)': "if (tier < (d.live_min_tier ?? 0)) return { allowed: false, tier, missing: 'TIER' };",
+  'access by tier, model or collection, read again at each step (choices 1, 35)': "if ((d.live_min_tier ?? 0) > 0) rules.push({ rule: 'TIER', met: async () => tier >= (d.live_min_tier ?? 0) });",
   'the room opens before T0 (choice 16)': 'if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));',
   'the size never changes after T0 (choice 6)': 'throw sizeLocked();',
   'the line at T0 by tier, then the sealed seed (choices 2, 14)': 'const seed = openDropSeed(this.seedKey, d);',
-  'arrivals after T0 behind, in arrival order (choice 2)': "const place = late ? { status: 'QUEUED' as const, position: (await this.lastPosition(tx, id)) + 1, queued_at: now }",
+  // (an after-room's guest at its own place instead: plan LIVE RELEASE+, choice 2)
+  'arrivals after T0 behind, in arrival order (choice 2)': "? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }",
   'the hold gesture checked on the server (choice 8)': 'if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();',
   'PAY confirms a reservation, nothing paid (choices 4, 33)': ".set({ status: 'CONFIRMED', confirmed_at: now })",
   'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",
@@ -444,6 +507,30 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a person in the line let take their turn (choice 3)': 'await this.grant(tx, d, [entry], now, admin);',
   'closed at the sell-out (choice 26)': "soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT'",
   'the network\'s fingerprint erased after 30 days': 'const cutoff = new Date(now.getTime() - LIVE_NETWORK_RETENTION_DAYS * DAY_MS);',
+  // LIVE RELEASE+ (plan of 2026-10-04).
+  'an order per piece at PAY (choice 6, Interconnection)': 'notes.push(...(await ordersForLiveEntry(tx, e.id, actor, now)).notes);',
+  'an order for a draw\'s entry confirmed (choice 6)': "const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, notes: [] };",
+  'an order for a salon request ACCEPTED (choice 6)': "const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };",
+  'the legal steps of an order (Interconnection)': 'if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);',
+  'a piece in stock, or one to make with its identity reserved (choices 8, 15)': 'const identity = await reserveIdentity(tx, { modelId: o.model_id, skuId: o.sku_id, sizeLabel: o.size_label }, now);',
+  'DELIVERED by itself at the buyer\'s registration (Interconnection)': 'const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);',
+  'a cancellation retires the reserved identity (Interconnection)': 'const retired = await retireReservedIdentity(tx, bench.product_id, reason, actor, now);',
+  'a return takes the ownership back (choice 20)': "await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();",
+  'the invoice issued by CONGLOMERAT LLC, without VAT (choice 22)': 'issuer: jsonText({ name: INVOICE_ISSUER.name, address: [...INVOICE_ISSUER.address] }),',
+  'a credit note cancels the invoice once (choices 20, 22)': 'credits_invoice_id: invoice.id,',
+  'the buyer never in the journal (decision 31)': 'buyer: o.buyer_name !== null',
+  'MY PIECES reads its own orders (choice 6)': "app.get('/api/v1/account/orders', async (request) => {",
+  'the ownership certificate once the piece is registered (choice 21)': 'certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null',
+  'the after-room\'s guests, those still waiting at the sell-out, in their order (choice 2)': ".where('status', 'in', ['WAITING', 'QUEUED'])",
+  'the after-room unseen by anyone else (choice 2, decision 28)': 'if (isAfterRoom(d) && (await afterRoomPlace(this.db, d, account, now)) === null) throw dropNotFound();',
+  'a surprise in every box, never said (choice 3)': 'surprise: (r.parent_drop_id ? r.parent_surprise : r.surprise_enabled) === true,',
+  'taking part: a place in the line at T0, an entry at the draw (choice 4)': ".where('le.position', 'is not', null)",
+  'access by participation and by segment, AND or OR (choices 4, 27)': "if (d.access_combine === 'OR') {",
+  'segments read live, never stored (choice 27)': 'export function segmentMembers(db: Db, criteria: SegmentGroup, now: Date) {',
+  'PAST: ended releases, never an after-room (choice 5, decision 28)': ".where('d.parent_drop_id', 'is', null)",
+  'YOU TOOK PART, YOU SECURED A PIECE (choice 5)': "app.get('/api/v1/account/participation', async (request) => {",
+  'the question after for a week (choice 11)': 'return { opensAt, closesAt: new Date(opensAt.getTime() + LIVE_QUESTION_OPEN_DAYS * DAY_MS) };',
+  'activity counted per hour without any account (choice 10)': ".insertInto('activity_hourly')",
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -485,10 +572,12 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(customer.sort()).toEqual(['post /api/v1/account/password', 'post /api/v1/account/recover']);
   },
   N3: () => {
-    // An ownership begins only by a first registration or a transfer, and ends only by a transfer.
+    // An ownership begins only by a first registration or a transfer, and ends only by a transfer, or when ORBES takes
+    // it back with a return (plan LIVE RELEASE+, choice 20: the piece goes back to ORBES, to no account).
     expect(new Set(matches(/acquired_via:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['FIRST_REGISTRATION', 'TRANSFER']));
     expect(matches(/insertInto\('ownership'\)/g)).toHaveLength(matches(/acquired_via:\s*'(\w+)'/g).length);
-    expect(new Set(matches(/ended_reason:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['TRANSFERRED_OUT']));
+    expect(new Set(matches(/ended_reason:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['TRANSFERRED_OUT', 'RETURNED']));
+    expect(matches(/ended_reason:\s*'RETURNED'/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'orders.ts')]);
     // No other write to an ownership row than its end and its verification; no raw SQL that would bypass them.
     const updated = matches(/updateTable\('ownership'\)\s*\.set\(\{([^}]*)\}\)/g).flatMap((m) => [...m.match[1].matchAll(/(\w+)\s*:/g)].map((k) => k[1]));
     expect(new Set(updated)).toEqual(new Set(['ended_at', 'ended_reason', 'verified']));
@@ -514,13 +603,14 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/action:\s*'([a-z.]*vote[a-z._]*)'/g).map((m) => m.match[1])).toEqual([]);
   },
   N7: () => {
-    // The private salon (P-X08) audits a request and its closing with the model alone (and a lock's reason): never a note.
+    // The private salon (P-X08) audits a request and its closing with the model alone, its outcome and the order an
+    // ACCEPTED one created (plan LIVE RELEASE+), and a lock's reason: never a note.
     const salon = readDoc('genome/src/server/services/salon.ts');
     const records = [...salon.matchAll(/audit\.record\(\{[^\n]*\}, tx\)/g)].map((m) => m[0]);
     expect(records).toHaveLength(3);
     for (const r of records) {
       expect(r).toMatch(/action: 'shop\.request(?:\.close)?'/);
-      expect(r).toMatch(/details: \{ modelId(?:: [\w.]+)?(?:, reason)? \}/);
+      expect(r).toMatch(/details: \{ modelId(?:: [\w.]+)?(?:, outcome: (?:[\w.]+|'DECLINED'))?(?:, reason|, \.\.\.orderId)? \}/);
       expect(r).not.toMatch(/note|words|resolution/i);
     }
     // No other audit entry of the salon: every write of shop_requests is in services/salon.ts.
@@ -531,7 +621,9 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
     expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
-    expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge|invoice/i.test(r.path))).toEqual([]);
+    expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge/i.test(r.path))).toEqual([]);
+    // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken.
+    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get')).toEqual([]);
     // The confirmation is a status, and the only one PAY writes.
     expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
   },
@@ -549,6 +641,18 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const board = /export interface LiveBoard \{([\s\S]*?)\n\}/.exec(readDoc('genome/src/server/services/live-room.ts'))?.[1] ?? '';
     expect(board).toContain('quantityLine');
     expect(board).not.toMatch(/\b(?:account|email|inRoom|line|sizes|message|entries)\??:/);
+  },
+  N10: () => {
+    // No call to an online store (plan LIVE RELEASE+, choice 9: Shopify not decided, exports only): no dependency for
+    // one, and no request the server sends out at all.
+    const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((d) => /shopify/i.test(d))).toEqual([]);
+    const server = SOURCES.filter(({ file }) => file.startsWith(join('src', 'server')));
+    expect(server.length).toBeGreaterThan(50);
+    expect(server.filter(({ text }) => /\bfetch\(|\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
+    // The exports exist, as files of the console.
+    expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/orders.csv' });
+    expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/products.csv' });
   },
 };
 

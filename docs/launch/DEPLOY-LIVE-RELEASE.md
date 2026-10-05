@@ -6,7 +6,9 @@ La LIVE RELEASE (plan du 2026-10-04) part en production en **un seul déploiemen
 
 | Déploiement | Élément | Migration | Changement de l'hôte | État |
 |---|---|---|---|---|
-| D | La LIVE RELEASE : la salle, la file, le tour, PAY, la console et son intelligence | `0021` | le Caddyfile d'ORBES, convenu d'abord avec le responsable de l'hôte (§1.1) | **À faire** |
+| D | La LIVE RELEASE : la salle, la file, le tour, PAY, la console et son intelligence | `0021` | le Caddyfile d'ORBES, convenu d'abord avec le responsable de l'hôte (§1.1) | **Fait** le 2026-10-05 à 02:13 UTC (image `orbes-genome:86bd579e4aa9`) |
+
+Le déploiement suivant, E (LIVE RELEASE+, les migrations `0022` et `0023`), a [son propre runbook](DEPLOY-LIVE-RELEASE-PLUS.md) et part de la production de D.
 
 Le point de départ : la production tourne le commit `78959e8516cc146a297cab46ddec68e157fe2847` (image `orbes-genome:78959e8516cc`) depuis le 2026-10-04, le déploiement B+C, avec les vingt migrations `0001` à `0020` ([le runbook précédent](DEPLOY-POTENTIEL-2026-10.md), §2). Si un autre déploiement a eu lieu depuis, ce document ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer. Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
 

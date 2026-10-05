@@ -341,6 +341,79 @@ export const PIECES = Object.freeze({
 });
 
 /**
+ * MY PIECES' orders (plan LIVE RELEASE+, choice 6; GET /api/v1/account/orders): one order per piece, sold in a LIVE
+ * RELEASE, a draw or the private salon, step by step: RESERVED · PAID · SHIPPED · DELIVERED with their dates, or
+ * CANCELLED, or RETURNED; the model, the size, the add-ons and the price; once shipped, the carrier and the tracking
+ * number, with its link to the carrier's site in a new tab. ORBES Client Services moves each step (DELIVERED also comes
+ * when the piece is registered): nothing here changes an order.
+ */
+export const ORDERS = Object.freeze({
+  title: 'YOUR ORDERS',
+  loadFailed: 'Your orders could not be shown just now.',
+  /** Accessible name of an order's steps. */
+  stepsLabel: 'Steps of this order',
+  step: Object.freeze({ RESERVED: 'RESERVED', PAID: 'PAID', SHIPPED: 'SHIPPED', DELIVERED: 'DELIVERED', CANCELLED: 'CANCELLED', RETURNED: 'RETURNED' }),
+  /** What the order's step means now. */
+  sentence: Object.freeze({
+    RESERVED: 'Your piece is reserved. ORBES Client Services will contact you to settle payment and delivery.',
+    PAID: 'Your payment is received. ORBES is preparing your piece for shipping.',
+    SHIPPED: 'Your piece is on its way. Once it has arrived, scan its ORBES CODE to register it to your account.',
+    DELIVERED: 'Your piece has been delivered.',
+    CANCELLED: 'This order has been cancelled.',
+    RETURNED: 'This order has been returned to ORBES.',
+  }),
+  /** Where the piece was sold. */
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON' }),
+  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  oneSize: 'ONE SIZE',
+  /** A draw's or a salon's size or price, before ORBES Client Services enters it. */
+  toConfirm: 'TO BE CONFIRMED',
+  track: 'TRACK THE SHIPMENT',
+  /** Accessible name of TRACK THE SHIPMENT: the number, the carrier, and that the carrier's site opens apart. */
+  trackLabel: (trackingNumber: string, carrier: string) => `Track the shipment ${trackingNumber} on the site of ${carrier} (opens in a new tab)`,
+  /** The order's reference, for ORBES Client Services. */
+  reference: (reference: string) => `ORDER ${reference}`,
+  /**
+   * Its documents (plan LIVE RELEASE+, M6): the invoice and the credit note (PDFs, issued by CONGLOMERAT LLC), the
+   * model's care guide (shown under them), and once the piece is registered to the account its ownership certificate.
+   */
+  documents: Object.freeze({
+    title: 'DOCUMENTS',
+    /** Followed by the document's number, in the reading face. */
+    invoice: 'INVOICE',
+    creditNote: 'CREDIT NOTE',
+    careGuide: 'CARE GUIDE',
+    certificate: 'OWNERSHIP CERTIFICATE',
+    /** Accessible names: what each link does. */
+    invoiceLabel: (number: string) => `Download the invoice ${number} (PDF)`,
+    creditNoteLabel: (number: string) => `Download the credit note ${number} (PDF)`,
+    certificateLabel: (model: string) => `Download the ownership certificate of your ${model} (PDF)`,
+    careGuideLabel: (model: string) => `The care guide of ${model}`,
+    downloadFailed: 'This document could not be downloaded just now.',
+    careFailed: 'The care guide could not be shown just now.',
+  }),
+});
+
+/**
+ * The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): for 7 days from the release's end, on its end page
+ * to those who took part without a piece, in MY PIECES to those who said I'LL BE THERE and did not come. One tap,
+ * changeable until it closes; the question and its answers are the release's (the console's words, or the default
+ * WHAT WOULD YOU HAVE WANTED? · ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND).
+ */
+export const QUESTION = Object.freeze({
+  label: 'ONE QUESTION',
+  /** Before an answer, and after it: until when it may change (the date on this phone's calendar). */
+  ask: (until: string) => `One tap. You may change your answer until ${until}.`,
+  answered: (until: string) => `Thank you: your answer is recorded. You may change it until ${until}.`,
+  saving: 'Recording your answer…',
+  failed: 'Your answer could not be recorded just now.',
+  /** MY PIECES: the section, its lead, and each release by its name (else LIVE RELEASE) and opening date. */
+  piecesTitle: 'AFTER THE RELEASES',
+  piecesLead: 'You said you would be there. One question about each release, for a week after it.',
+  release: (name: string, date: string) => [name, date].filter(Boolean).join(' · '),
+});
+
+/**
  * The CARE tab of a piece in MY PIECES (P-M02): the care of its model (the result's CARE text), then ORBES Care, the
  * subscription that looks after the owner's pieces. SUBSCRIBE opens its page in a new tab once ORBES publishes one
  * (CARE_SUBSCRIBE_URL); until then, a plain sentence says subscriptions open soon, with nothing to press.
@@ -651,6 +724,29 @@ export const RELEASES = Object.freeze({
   liveFailed: 'The LIVE RELEASES could not be shown just now.',
   retry: 'TRY AGAIN',
   empty: 'No release is announced yet.',
+  /**
+   * The two tabs (plan LIVE RELEASE+, choice 5): LIVE, the releases to come and under way (THE RELEASES' calendar); PAST,
+   * the releases ended.
+   */
+  tabs: Object.freeze({ label: 'THE RELEASES', live: 'LIVE', past: 'PAST' }),
+  /** PAST: every release ended, the newest first, as announced (no end figure); signed in, the account's part in each. */
+  past: Object.freeze({
+    empty: 'No release has ended yet.',
+    loadFailed: 'The past releases could not be shown just now.',
+    more: 'SHOW MORE',
+    moreFailed: 'More releases could not be shown just now.',
+    kind: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW' }),
+    /** A card's opening date, then its quantity as announced: `11 OCT 2026 · 25 PIECES`. */
+    line: (date: string, quantity: string) => [date, quantity].filter(Boolean).join(' · '),
+    /** At the top of PAST, signed in. */
+    taken: (n: number) => `You have taken part in ${n} ${n === 1 ? 'release' : 'releases'}.`,
+    takenFailed: 'Your part in the releases could not be shown just now.',
+    /** On a card, and on the release's page. */
+    tookPart: 'YOU TOOK PART',
+    secured: 'YOU SECURED A PIECE',
+  }),
+  /** A release ended, on its page (plan LIVE RELEASE+, decision 30): a neutral status, never how it ended. */
+  over: 'THIS RELEASE IS OVER',
   /** The text link of each release of the list. */
   see: 'SEE THE RELEASE',
   scan: 'SCAN ORBES CODE',
@@ -730,7 +826,8 @@ export const RELEASES = Object.freeze({
   /** The check made on this phone, once the seed is published. */
   seedChecked: 'Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.',
   seedMismatch: 'Checked on this phone: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
-  entriesLead: (n: number) => (n === 1 ? '1 entry took part in the draw.' : `${n} entries took part in the draw.`),
+  /** Over the draw's list: what it shows, never how many (no end figure, plan LIVE RELEASE+ choice 5). */
+  entriesLead: 'Every entry the draw ranked, in its order: its rank, its tier and its seniority at the draw, then its identifier.',
   /** One entry of the draw's list: its rank, its tier and its seniority. */
   entryLine: (rank: number, tier: string, years: number) => `${rank} · ${tier} · ${years === 1 ? '1 YEAR' : `${years} YEARS`}`,
   noTier: 'NO TIER',
@@ -838,6 +935,15 @@ export const SOUND = Object.freeze({
   off: 'OFF',
 });
 
+/** A release's label for a model in one size (services/release-stock.ts releaseSizeLabel), whatever its case. */
+const isOneSize = (size: string) => typeof size === 'string' && size.trim().toUpperCase() === 'ONE SIZE';
+/** A size in reading text: `in size 52`, or `in ONE SIZE` (never `in size ONE SIZE`). */
+const inSizeWords = (size: string) => (isOneSize(size) ? 'in ONE SIZE' : `in size ${size}`);
+/** Its twin for the display face: `IN SIZE 52`, or `IN ONE SIZE`. */
+const inSizeLabel = (size: string) => (isOneSize(size) ? 'IN ONE SIZE' : `IN SIZE ${size}`);
+/** A size named alone: `SIZE 52`, or `ONE SIZE`. */
+const sizeName = (size: string) => (isOneSize(size) ? 'ONE SIZE' : `SIZE ${size}`);
+
 /**
  * The LIVE RELEASE (plan of 2026-10-04, The experience): its card in THE RELEASES, its page at /verify/releases/<id>
  * as it becomes the room, the line, the turn, the piece secured and the reservation confirmed, and its edge pages, each
@@ -856,8 +962,13 @@ export const LIVE = Object.freeze({
   /** A time of the release in Paris (`SUNDAY 11 OCTOBER · 19:00 PARIS`), then on this phone when its zone differs. */
   paris: (day: string, time: string) => `${day} · ${time} PARIS`,
   onThisPhone: (day: string, time: string) => `${day} · ${time} ON THIS PHONE`,
-  /** The rule of access as the page states it (after « FOR »: « owners from PLATINE »). */
+  /**
+   * The rules of access as the page states them, after « FOR »: « owners from PLATINE », « collectors who have taken part
+   * in 3 releases », « selected collectors » (a segment's name is never said), joined by « or » when any one is enough.
+   */
   forWhom: (rule: string) => `FOR ${rule.toUpperCase()}`,
+  /** A surprise in every box (plan LIVE RELEASE+, choice 3): a vault label on the release's page; what it is stays unsaid. */
+  surprise: 'A SURPRISE IN EVERY BOX',
   perAccount: (n: number) => (n === 1 ? 'ONE PER COLLECTOR' : `UP TO ${n} PER COLLECTOR`),
   roomOpens: (minutes: number) => `THE ROOM OPENS ${minutes} ${minutes === 1 ? 'MINUTE' : 'MINUTES'} BEFORE`,
   calendar: 'ADD TO CALENDAR',
@@ -870,7 +981,7 @@ export const LIVE = Object.freeze({
   there: Object.freeze({
     action: 'I’LL BE THERE',
     lead: 'Say you will be there, with your size: the room preselects it when it opens.',
-    said: (size: string) => `YOU’LL BE THERE · SIZE ${size}`,
+    said: (size: string) => `YOU’LL BE THERE · ${sizeName(size)}`,
     change: 'Another size changes it. You may withdraw until the opening.',
     withdraw: 'WITHDRAW',
     /** Said aloud once withdrawn. */
@@ -918,9 +1029,9 @@ export const LIVE = Object.freeze({
     pending: 'not ready yet',
   }),
   yourSize: 'YOUR SIZE',
-  size: (label: string) => `SIZE ${label}`,
+  size: (label: string) => sizeName(label),
   /** A size that has no piece left to give. */
-  soldOutSize: (size: string) => `Size ${size}, no piece left`,
+  soldOutSize: (size: string) => (isOneSize(size) ? 'One size, no piece left' : `Size ${size}, no piece left`),
   quantity: 'PIECES',
   fewer: 'One piece fewer',
   more: 'One piece more',
@@ -941,9 +1052,9 @@ export const LIVE = Object.freeze({
   yourPlace: 'YOUR PLACE',
   /** The place's label as a screen reader says it, before the figure. */
   yourPlaceSaid: 'Your place',
-  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT IN SIZE ${size}` : `${n} AHEAD OF YOU IN SIZE ${size}`),
+  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT ${inSizeLabel(size)}` : `${n} AHEAD OF YOU ${inSizeLabel(size)}`),
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
-  inSize: (n: number, size: string) => `${n} IN SIZE ${size}`,
+  inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
   held: (n: number) => (n === 1 ? '1 HELD PIECE MAY RETURN' : `${n} HELD PIECES MAY RETURN`),
   lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open.',
   // The turn
@@ -972,7 +1083,11 @@ export const LIVE = Object.freeze({
   confirmed: 'CONFIRMED',
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
   reservedIn: (size: string, quantity: number) =>
-    `${quantity > 1 ? `Your ${quantity} pieces are reserved in size ${size}.` : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
+    `${quantity > 1 ? `Your ${quantity} pieces are reserved ${inSizeWords(size)}.` : isOneSize(size) ? 'Your piece is reserved in ONE SIZE.' : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
+  /** MY PIECES' YOUR RELEASES (plan LIVE RELEASE+, Interconnection): the piece secured, a past fact true at every step of
+   *  its order (paid, shipped, delivered, cancelled or returned); its steps are its order's. */
+  securedInPieces: (size: string, quantity: number) =>
+    quantity > 1 ? `You secured ${quantity} pieces ${inSizeWords(size)}. Their steps follow in YOUR ORDERS.` : `You secured your piece ${inSizeWords(size)}. Its steps follow in YOUR ORDERS.`,
   rows: Object.freeze({ reserved: 'RESERVED', size: 'SIZE', pieces: 'PIECES', total: 'TOTAL', reference: 'REFERENCE' }),
   clientServices: 'CLIENT SERVICES',
   // The edge pages: a title, a sentence, one action
@@ -985,7 +1100,7 @@ export const LIVE = Object.freeze({
     left: Object.freeze({ title: 'YOU LEFT THE LINE', text: 'Your place has gone to the collectors behind you.' }),
     removed: Object.freeze({ title: 'YOUR ENTRY IS REMOVED', text: 'ORBES has removed your entry from this release. ORBES Client Services can assist you.' }),
     soldOut: Object.freeze({
-      title: (size: string) => `SOLD OUT IN SIZE ${size}`,
+      title: (size: string) => (isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${size}`),
       stay: 'Every piece in your size is taken. You keep your place in case one returns, or you may leave.',
       none: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.',
       leave: 'LEAVE THE LINE',
@@ -996,6 +1111,7 @@ export const LIVE = Object.freeze({
       CLOSED: Object.freeze({ title: 'THE RELEASE HAS CLOSED', text: 'Its time has run out before your turn came.' }),
       ENDED: Object.freeze({ title: 'THE RELEASE HAS ENDED', text: 'ORBES has ended this release before your piece was secured.' }),
     }),
+    /** A release that no longer answers while its page is open (cancelled): it is in neither LIVE nor PAST. A release ended opens in its final state. */
     over: Object.freeze({ title: 'THIS RELEASE IS OVER', text: 'It no longer appears in THE RELEASES. Your entry, if you had one, stays in MY PIECES.' }),
   }),
   back: 'THE RELEASES',
@@ -1004,7 +1120,7 @@ export const LIVE = Object.freeze({
   retry: 'TRY AGAIN',
   /** What the page says aloud as it changes (aria-live). */
   announce: Object.freeze({
-    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next in size ${size}` : `${ahead} ahead of you in size ${size}`}.`,
+    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next ${inSizeWords(size)}` : `${ahead} ahead of you ${inSizeWords(size)}`}.`,
     turn: 'Your turn. Press and hold the seal until the ring is full.',
     returned: 'A piece has returned: your turn. Press and hold the seal until the ring is full.',
     secured: (name: string) => `Secured: ${name} is held for you.`,
@@ -1038,4 +1154,27 @@ export const LIVE = Object.freeze({
     ENDED: 'The release ended before your piece was secured.',
   }),
   reference: (ref: string) => `REFERENCE ${ref}`,
+  /**
+   * The after-room (plan LIVE RELEASE+, choice 2): a second door in the same vault, after a sell-out, for those who were
+   * still in the line, in the same order; announced nowhere else.
+   */
+  afterRoom: Object.freeze({
+    kind: 'THE AFTER-ROOM',
+    title: 'A SECOND DOOR',
+    text: 'You were still in the line when the last piece was secured. Behind this door, another piece is offered to those who were waiting, in the same order, for a short time.',
+    enter: 'ENTER THE AFTER-ROOM',
+    openUntil: (time: string) => `OPEN UNTIL ${time}`,
+    /** In the after-room, before entering its line. */
+    joinLine: 'You keep your place from the line. Choose your size to take it.',
+    confirmedOf: (name: string) => `THE AFTER-ROOM · ${name}`,
+    over: Object.freeze({ title: 'THE AFTER-ROOM IS CLOSED', text: 'Your entry, if you had one, stays in MY PIECES.' }),
+    /** An entry of the after-room that ends with it (its edge pages are overlined THE AFTER-ROOM): never "the release". */
+    ended: Object.freeze({
+      SOLD_OUT: Object.freeze({ title: 'SOLD OUT', text: 'Every piece of the after-room is reserved.' }),
+      CLOSED: Object.freeze({ title: 'THE AFTER-ROOM IS CLOSED', text: 'Its time has run out before your turn came.' }),
+      ENDED: Object.freeze({ title: 'THE AFTER-ROOM HAS ENDED', text: 'ORBES has ended the after-room before your piece was secured.' }),
+    }),
+    /** Said aloud when the door appears. */
+    announce: 'A second door has opened.',
+  }),
 });

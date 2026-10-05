@@ -30,7 +30,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['anomaly', 'auth', 'authenticators', 'catalog', 'certificates', 'circle', 'club', 'drops', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'lookbook', 'media', 'owners', 'ownership', 'ownershipCertificates', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'verification', 'warranty'].sort(),
+        ['activity', 'anomaly', 'atelier', 'auth', 'authenticators', 'catalog', 'certificates', 'circle', 'club', 'drops', 'fulfilment', 'invoices', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'lookbook', 'media', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'stock', 'verification', 'warranty'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);

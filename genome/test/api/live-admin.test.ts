@@ -18,8 +18,9 @@
  *    AUDITOR (in its stream too, which follows a change of role and ends with its session), the controls with their roles
  *    (OPERATOR: pause, resume, extend, add pieces, free a hold, let in, message; ADMIN: end now, remove), each audited;
  *    a host message only from the announcement to the end;
- *  - Client Services: the confirmed reservations with their sizes, add-ons and totals, CONCLUDED or CANCELLED with a note
- *    kept out of the audit log, once; the CSV (masked for an AUDITOR, no formula run).
+ *  - Client Services: the confirmed reservations followed as orders on the Orders board (plan LIVE RELEASE+: the LIVE
+ *    plan's list, its CSV and its resolution retired), one per piece with its add-ons, narrowed to the release, paid or
+ *    cancelled there; the orders' CSV (masked for an AUDITOR, no formula run).
  */
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -297,6 +298,44 @@ describe('LIVE RELEASES: the console', () => {
       // The stock never goes down: there is no way to.
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[0].id, pieces: -1 })).code).toBe('VALIDATION_FAILED');
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[0].id, pieces: 0 })).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('sets the after-room with the release (plan LIVE RELEASE+, choice 2): its own page never set, published, cancelled nor listed on its own', async () => {
+      const afterRoom = { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }], delayMinutes: 5 };
+      const r = await create({ afterRoom });
+      expect(r.afterRoom).toMatchObject({ state: 'WAITING', priceMinor: 90_000, delayMinutes: 5, lengthMinutes: 15, quantity: 2, sizes: [{ label: 'ONE SIZE', stock: 2 }], guests: 0 });
+      expect(r.afterRoomOf).toBeNull();
+      const child = r.afterRoom.id as string;
+      // The schema's bounds and shape; the service's rules behind them.
+      for (const bad of [{ ...afterRoom, delayMinutes: 0 }, { ...afterRoom, lengthMinutes: 121 }, { ...afterRoom, sizes: [] }, { ...afterRoom, colour: 'ivory' }, { ...afterRoom, priceMinor: -1 }]) {
+        const res = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: bad });
+        expect([res.statusCode, errorOf(res).code]).toEqual([400, 'VALIDATION_FAILED']);
+      }
+      const longer = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: { ...afterRoom, lengthMinutes: 30 } });
+      expect(longer.statusCode, longer.body).toBe(200);
+      expect((safeJson(longer) as Json).afterRoom).toMatchObject({ id: child, lengthMinutes: 30 });
+      expect((await audits('drop.live.update', r.id)).at(-1)!.details).toMatchObject({ before: { afterRoom: { lengthMinutes: 15 } }, after: { afterRoom: { lengthMinutes: 30 } } });
+      // Its own page: read by an AUDITOR, never set, published, cancelled, posted or given a board.
+      expect(safeJson(await auditor.get(`/api/admin/live/${child}`))).toMatchObject({ id: child, afterRoomOf: { id: r.id }, editable: false, phase: 'DRAFT', afterRoom: null });
+      for (const [method, url, body] of [
+        ['PATCH', `/api/admin/live/${child}`, { priceMinor: 1 }],
+        ['POST', `/api/admin/live/${child}/publish`, {}],
+        ['POST', `/api/admin/live/${child}/cancel`, {}],
+        ['POST', `/api/admin/live/${child}/circle-post`, {}],
+        ['POST', `/api/admin/live/${child}/board-link`, {}],
+      ] as const) {
+        const res = await op.request(method, url, { body });
+        expect([url, res.statusCode, errorOf(res).code]).toEqual([url, 409, 'LIVE_AFTER_ROOM']);
+      }
+      const silhouette = await op.request('POST', `/api/admin/live/${child}/silhouette`, { body: Buffer.from(jpegPhoto(12, 16)), headers: { 'content-type': 'image/jpeg' } });
+      expect([silhouette.statusCode, errorOf(silhouette).code]).toEqual([404, 'DROP_NOT_FOUND']);
+      const list = safeJson(await auditor.get('/api/admin/live?pageSize=100')) as { items: { id: string }[] };
+      expect(list.items.map((x) => x.id)).toContain(r.id);
+      expect(list.items.map((x) => x.id)).not.toContain(child);
+      // Off: removed.
+      const off = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: null });
+      expect((safeJson(off) as Json).afterRoom).toBeNull();
+      expect((await auditor.get(`/api/admin/live/${child}`)).statusCode).toBe(404);
     });
   });
 
@@ -621,8 +660,8 @@ describe('LIVE RELEASES: the console', () => {
     });
   });
 
-  describe('Client Services', () => {
-    it('lists the confirmed reservations with sizes, add-ons and totals; concludes or cancels each once, with a note kept out of the audit log; a CSV', async () => {
+  describe('Client Services: the orders', () => {
+    it('follows the confirmed reservations as orders, one per piece, narrowed to the release; pays or cancels them there; the LIVE list is retired; a CSV', async () => {
       const r = await create({ inMinutes: 10, perAccount: 2, addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: '=GIFT BOX', priceMinor: 0 }] });
       await op.post(`/api/admin/live/${r.id}/publish`, {});
       h.clock.advance(6 * MINUTE);
@@ -642,59 +681,79 @@ describe('LIVE RELEASES: the console', () => {
       h.clock.advance(SECOND);
       await f.live.confirm(b.id, r.id, b.actor);
 
-      const list = safeJson(await op.get(`/api/admin/live/${r.id}/reservations`)) as { items: Json[]; total: number };
-      expect(list.total).toBe(2);
-      const ea = (await f.live.entry(a.id, r.id))!;
-      expect(list.items[0]).toMatchObject({
-        id: ea.id,
-        reference: liveReference(ea.id),
-        email: a.email,
-        size: { label: '52' },
-        quantity: 2,
-        currency: 'EUR',
-        priceMinor: 480_000,
-        addons: [
-          { label: 'ENGRAVING', priceMinor: 15_000 },
-          { label: '=GIFT BOX', priceMinor: 0 },
-        ],
-        totalMinor: 2 * (480_000 + 15_000),
-        resolution: null,
-      });
-      expect(list.items[1]).toMatchObject({ email: b.email, size: { label: '54' }, quantity: 1, addons: [{ label: '=GIFT BOX', priceMinor: 0 }], totalMinor: 480_000 });
-      expect(((safeJson(await auditor.get(`/api/admin/live/${r.id}/reservations`)) as { items: Json[] }).items[0]!.email)).toBe(`${a.email[0]}***@example.com`);
+      // The LIVE plan's list, its CSV and its resolution are retired.
+      for (const [method, url] of [
+        ['GET', `/api/admin/live/${r.id}/reservations`],
+        ['GET', `/api/admin/live/${r.id}/reservations.csv`],
+        ['POST', `/api/admin/live/${r.id}/entries/${r.id}/resolve`],
+      ] as const) {
+        expect((await op.request(method, url, method === 'POST' ? { body: { resolution: 'CONCLUDED' } } : {})).statusCode, url).toBe(404);
+      }
 
-      expect((await auditor.post(`/api/admin/live/${r.id}/entries/${ea.id}/resolve`, { resolution: 'CONCLUDED' })).statusCode).toBe(403);
-      const concluded = safeJson(await op.post(`/api/admin/live/${r.id}/entries/${ea.id}/resolve`, { resolution: 'CONCLUDED', note: 'Paid by transfer; delivered in Paris.' })) as Json;
-      expect(concluded).toMatchObject({ resolution: 'CONCLUDED', note: 'Paid by transfer; delivered in Paris.', handledBy: { email: expect.stringMatching(/^operator-/) } });
-      expect(errorOf(await op.post(`/api/admin/live/${r.id}/entries/${ea.id}/resolve`, { resolution: 'CANCELLED' })).code).toBe('LIVE_ALREADY_RESOLVED');
+      const ea = (await f.live.entry(a.id, r.id))!;
       const eb = (await f.live.entry(b.id, r.id))!;
-      expect((safeJson(await op.post(`/api/admin/live/${r.id}/entries/${eb.id}/resolve`, { resolution: 'CANCELLED' })) as Json)).toMatchObject({ resolution: 'CANCELLED', note: null });
-      expect(errorOf(await op.post(`/api/admin/live/${r.id}/entries/${eb.id}/resolve`, { resolution: 'LOST' })).code).toBe('VALIDATION_FAILED');
-      const resolves = await audits('drop.live.resolve', r.id);
-      expect(resolves.map((x) => x.details)).toEqual([
-        { entryId: ea.id, resolution: 'CONCLUDED', noted: true },
-        { entryId: eb.id, resolution: 'CANCELLED' },
-      ]);
-      expect(JSON.stringify(resolves)).not.toContain('Paid by transfer');
+      const board = safeJson(await op.get(`/api/admin/orders?dropId=${r.id}`)) as { columns: { status: string; total: number; items: Json[] }[] };
+      const reserved = board.columns.find((c) => c.status === 'RESERVED')!;
+      expect(reserved.total).toBe(3);
+      expect(board.columns.filter((c) => c.status !== 'RESERVED').every((c) => c.total === 0)).toBe(true);
+      const cardsOf = (entryId: string) => reserved.items.filter((x) => x.sourceReference === liveReference(entryId));
+      expect(cardsOf(ea.id)).toHaveLength(2);
+      expect(cardsOf(ea.id)[0]).toMatchObject({ channel: 'LIVE', release: { id: r.id }, account: { email: a.email }, sizeLabel: '52', addons: [{ label: 'ENGRAVING' }, { label: '=GIFT BOX' }] });
+      expect(cardsOf(eb.id)).toMatchObject([{ account: { email: b.email }, sizeLabel: '54', addons: [{ label: '=GIFT BOX' }] }]);
+      const masked = safeJson(await auditor.get(`/api/admin/orders?dropId=${r.id}`)) as typeof board;
+      expect(masked.columns[0]!.items.map((x) => x.account.email)).toContain(`${a.email[0]}***@example.com`);
+      expect(JSON.stringify(masked)).not.toContain(a.email);
+
+      // Paid and cancelled on the orders, each step with Client Services' note.
+      for (const card of cardsOf(ea.id)) {
+        expect((await auditor.post(`/api/admin/orders/${card.id}/transition`, { to: 'PAID' })).statusCode).toBe(403);
+        const paid = safeJson(await op.post(`/api/admin/orders/${card.id}/transition`, { to: 'PAID', note: 'Paid by transfer; delivered in Paris.' })) as { order: Json };
+        expect(paid.order).toMatchObject({ status: 'PAID', priceMinor: 480_000, currency: 'EUR' });
+      }
+      const [cb] = cardsOf(eb.id);
+      expect(errorOf(await op.post(`/api/admin/orders/${cb!.id}/transition`, { to: 'CANCELLED' })).code).toBe('VALIDATION_FAILED');
+      expect((safeJson(await op.post(`/api/admin/orders/${cb!.id}/transition`, { to: 'CANCELLED', note: 'The client withdrew.' })) as { order: Json }).order).toMatchObject({ status: 'CANCELLED' });
+      expect(errorOf(await op.post(`/api/admin/orders/${cb!.id}/transition`, { to: 'PAID' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
       // A cancellation gives no piece back to the line.
       expect((await f.live.entry(b.id, r.id))!.status).toBe('CONFIRMED');
       const other = await customer(0);
       await f.live.enter(other.id, r.id, { sizeId: r.sizes[1].id }, other.actor).catch((e) => expect((e as { code: string }).code).toBe('LIVE_SIZE_SOLD_OUT'));
+      // The release report reads the outcome from the orders.
+      const report = safeJson(await op.get(`/api/admin/live/${r.id}/report`)) as { funnel: { step: string; people: number }[]; cancelled: Json };
+      expect(report.funnel.find((x) => x.step === 'CONCLUDED')!.people).toBe(1);
+      expect(report.cancelled).toEqual({ reservations: 1, pieces: 1 });
 
-      const csv = await op.get(`/api/admin/live/${r.id}/reservations.csv`);
+      const csv = await op.get(`/api/admin/orders.csv?dropId=${r.id}`);
       expect(csv.statusCode).toBe(200);
       expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8; header=present');
-      expect(csv.headers['content-disposition']).toMatch(new RegExp(`^attachment; filename="ORBES-live-${r.id.slice(0, 8).toUpperCase()}-reservations-\\d{4}-\\d{2}-\\d{2}\\.csv"$`));
+      expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="ORBES-orders-\d{4}-\d{2}-\d{2}\.csv"$/);
       const lines = csv.body.trimEnd().split('\r\n');
-      expect(lines[0]).toBe('"reference","entry","account","size","pieces","currency","price","add-ons","total","confirmed at","resolution","note","handled by","handled at"');
-      expect(lines[1]).toContain(`"${liveReference(ea.id)}","${ea.id}","${a.email}","52","2","EUR","4800.00","ENGRAVING (150.00); =GIFT BOX (0.00)","9900.00"`);
-      expect(lines[1]).toContain('"CONCLUDED","Paid by transfer; delivered in Paris."');
+      expect(lines).toHaveLength(4);
+      const aLine = lines.find((l) => l.includes(liveReference(ea.id)))!;
+      expect(aLine).toContain(`"${liveReference(ea.id)}","LIVE","THE MONOLITHE RING","${a.email}"`);
+      expect(aLine).toContain('"EUR","4800.00","ENGRAVING (150.00); =GIFT BOX (0.00)"');
       // No formula run: a cell starting with « = » is prefixed with an apostrophe.
-      expect(lines[2]).toContain(`"${b.email}","54","1","EUR","4800.00","'=GIFT BOX (0.00)","4800.00"`);
-      const masked = await auditor.get(`/api/admin/live/${r.id}/reservations.csv`);
-      expect(masked.body).not.toContain(a.email);
-      expect(masked.body).toContain(`${a.email[0]}***@example.com`);
-      expect(createHash('sha256').update(masked.body).digest('hex')).not.toBe(createHash('sha256').update(csv.body).digest('hex'));
+      expect(lines.find((l) => l.includes(liveReference(eb.id)))).toContain(`"'=GIFT BOX (0.00)"`);
+      const maskedCsv = await auditor.get(`/api/admin/orders.csv?dropId=${r.id}`);
+      expect(maskedCsv.body).not.toContain(a.email);
+      expect(maskedCsv.body).toContain(`${a.email[0]}***@example.com`);
+      expect(createHash('sha256').update(maskedCsv.body).digest('hex')).not.toBe(createHash('sha256').update(csv.body).digest('hex'));
+    });
+  });
+
+  describe('the post of the circle after the end', () => {
+    it('never names, in its post of the circle, a release ended before its name, even once the time set for its name has passed', async () => {
+      const r = await create({ inMinutes: 3 * 60, announceAt: iso(10 * MINUTE), nameAt: iso(30 * MINUTE), photoAt: iso(30 * MINUTE), accessModelIds: [f.modelId] });
+      const p = safeJson(await op.post(`/api/admin/live/${r.id}/publish`, { circlePost: true })) as Json;
+      const { client, email } = await accountClient(h);
+      const { id: memberId } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+      await holdPieces(h.ctx.db, memberId, 1, f.modelId);
+      const link = async () => ((safeJson(await client.get(`/api/v1/club/circle/${p.circlePosts[0].id}`)) as Json).links as Json).drop;
+      h.clock.advance(15 * MINUTE);
+      expect(await link()).toEqual({ id: r.id, title: 'LIVE RELEASE' });
+      await f.live.end(r.id, f.admin);
+      h.clock.advance(30 * MINUTE);
+      expect(await link()).toEqual({ id: r.id, title: 'LIVE RELEASE' });
     });
   });
 });

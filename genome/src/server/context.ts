@@ -13,7 +13,11 @@
  *   3. category cache load (the core identity resolver is synchronous);
  *   4. services;
  *   5. first-run admin bootstrap (BOOTSTRAP_ADMIN_*), and the signing key:
- *      created on demand in development/test, self-tested in production.
+ *      created on demand in development/test, self-tested in production;
+ *   6. the stock and the orders (plan LIVE RELEASE+): the first boot's
+ *      locations and carriers, the pieces and sizes on sale linked to their
+ *      SKUs, the orders of the sales committed without them
+ *      (OrderService.prepare, idempotent).
  */
 import { closeDb, createDb, type Db } from './db/connection.js';
 import { parseDatabaseUrl } from './db/url.js';
@@ -43,15 +47,25 @@ import { LookbookService } from './services/lookbook.js';
 import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
+import { OrderService } from './services/orders.js';
+import { InvoiceService } from './services/invoices.js';
+import { AtelierService } from './services/atelier.js';
+import { FulfilmentService } from './services/fulfilment.js';
 import { OwnerService } from './services/owners.js';
+import { PastReleaseService } from './services/past-releases.js';
 import { SalonService } from './services/salon.js';
+import { ShopifyExportService } from './services/shopify.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
 import { SaleService } from './services/sale.js';
+import { SegmentService } from './services/segments.js';
+import { ActivityService, aggregateActivity } from './services/activity.js';
+import { QuestionService } from './services/question.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
+import { StockService } from './services/stock.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
 import { noopLogger, SYSTEM_ACTOR, systemClock, type Clock, type Logger } from './types.js';
@@ -97,10 +111,30 @@ export interface AppServices {
   live: LiveService;
   /** What the LIVE RELEASES show: their announcements stage by stage, the room as its viewers read it, the boutique board, an account's own entries. */
   liveRoom: LiveRoomService;
+  /** THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases ended, public, and the releases an account took part in. */
+  pastReleases: PastReleaseService;
   /** The LIVE RELEASES in the console: created, edited until their announcement, published, cancelled; the live board; Client Services' reservations. */
   liveConsole: LiveConsoleService;
   /** The console's intelligence on the LIVE RELEASES: the planner, the forecasts, the radars, the alerts, the report, the collectors, the comparison. */
   liveInsights: LiveInsightsService;
+  /** The stock (plan LIVE RELEASE+): per SKU and location, from the ledger; transfers between locations and counts corrected. */
+  stock: StockService;
+  /** The orders of every sales channel (plan LIVE RELEASE+), step by step: what each holds, its steps, its buyer; the boot's setup. */
+  orders: OrderService;
+  /** The invoices and credit notes of the orders (plan LIVE RELEASE+, M7): a month's, their PDFs, the accountant's CSV; MY PIECES' own. */
+  invoices: InvoiceService;
+  /** The fulfilment board (plan LIVE RELEASE+): the orders by step, their time in it and the late ones (M3), the CSV, the delays. */
+  fulfilment: FulfilmentService;
+  /** The atelier (plan LIVE RELEASE+): the stock and its thresholds, the pieces to make, their work sheets, the pieces issued. */
+  atelier: AtelierService;
+  /** The segments (plan LIVE RELEASE+, choice 27): saved groups of collectors, their members read live, their CSV. */
+  segments: SegmentService;
+  /** The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): who is asked it, their answers, the console's count. */
+  questions: QuestionService;
+  /** The best time to open (plan LIVE RELEASE+, choice 10): the sign-ins and scans by hour, country and tier, no account. */
+  activity: ActivityService;
+  /** Shopify readiness (plan LIVE RELEASE+, N2 and N3): the product and order exports in Shopify's formats, the ids pasted back. */
+  shopify: ShopifyExportService;
 }
 
 export interface AppContext {
@@ -199,8 +233,18 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const turnKey = deriveLiveTurnKey(config);
     const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, clock });
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
+    const pastReleases = new PastReleaseService({ db, clock });
     const liveInsights = new LiveInsightsService({ db, clock });
-    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
+    const questions = new QuestionService({ db, audit, clock });
+    const activity = new ActivityService({ db, clock });
+    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, questions, clock });
+    const stock = new StockService({ db, audit, clock });
+    const orders = new OrderService({ db, audit, lifecycle, clock, log });
+    const invoices = new InvoiceService({ db, clock });
+    const fulfilment = new FulfilmentService({ db, audit, orders, clock });
+    const atelier = new AtelierService({ db, audit, issuance, orders, clock });
+    const segments = new SegmentService({ db, audit, clock });
+    const shopify = new ShopifyExportService({ db, audit, publicOrigin: config.publicOrigin, clock });
 
     const services: AppServices = {
       issuance,
@@ -227,8 +271,18 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       circle,
       live,
       liveRoom,
+      pastReleases,
       liveConsole,
       liveInsights,
+      stock,
+      orders,
+      invoices,
+      fulfilment,
+      atelier,
+      segments,
+      questions,
+      activity,
+      shopify,
       ...overrides.services,
     };
 
@@ -263,6 +317,11 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       // Verification keeps working (it only needs public keys); issuance does not.
       log.error({}, 'signing key self-test failed or no ACTIVE key: issuance is unavailable until a key is rotated in');
     }
+    // The stock and the orders: the first boot's locations and carriers, the SKUs, the orders of sales made without them.
+    const prepared = await services.orders.prepare();
+    if (prepared.locations.length + prepared.carriers.length + prepared.linked.products + prepared.linked.sizes + prepared.orders > 0) {
+      log.info(prepared, 'stock and orders ready');
+    }
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});
@@ -274,22 +333,24 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; scanHistory: number; liveNetworks: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
 
 /**
  * Purges expired sessions and scan tokens, expires stale transfers, counts
- * the scans of every complete UTC day into scan_daily_stats and, when
+ * the scans of every complete UTC day into scan_daily_stats, counts the
+ * sign-ins and scans of every complete UTC hour into activity_hourly (the best
+ * time to open, plan LIVE RELEASE+: services/activity.ts) and, when
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
  * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
  * after their release ended (services/live.ts), every `intervalMs` (default
  * 10 min).
  *
- * The daily statistics always run before the purge, and a pass whose
- * statistics failed purges nothing: no scan leaves the history before it is
- * counted (DATABASE §10).
+ * The daily statistics and the hourly activity always run before the purge,
+ * and a pass where either failed purges nothing: no scan leaves the history
+ * before it is counted (DATABASE §10).
  */
 export function startHousekeeping(
   ctx: AppContext,
@@ -301,7 +362,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, scanHistory: 0, liveNetworks: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -317,8 +378,9 @@ export function startHousekeeping(
     await job('scanTokens', () => purgeScanTokens(ctx.db, new Date(ctx.clock().getTime() - graceMs)));
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
+    const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
     const retentionDays = ctx.config.scanRetentionDays;
-    if (counted && retentionDays !== null && retentionDays !== undefined) {
+    if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );

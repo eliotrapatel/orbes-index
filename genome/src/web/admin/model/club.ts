@@ -24,7 +24,7 @@
  */
 import { formatDateTime } from '../format.js';
 import { can } from './permissions.js';
-import { SHOP_REQUEST_STATUSES, type AdminRole, type ClubTierSheet, type Drop, type DropChange, type DropEntry, type DropInput, type OwnerSheet, type ShopRequest, type ShopRequestStatus } from '../types.js';
+import { SHOP_REQUEST_OUTCOMES, SHOP_REQUEST_STATUSES, type AdminRole, type ClubTierSheet, type Drop, type DropChange, type DropEntry, type DropInput, type OwnerSheet, type ShopRequest, type ShopRequestStatus } from '../types.js';
 
 /** The tabs of the Club page, in their order. */
 export const CLUB_TABS = [
@@ -307,13 +307,24 @@ export function canCloseRequest(role: AdminRole, r: Pick<ShopRequest, 'status'>)
   return r.status === 'OPEN' && can(role, 'closeShopRequest');
 }
 
-/** What the server would refuse in the Close dialog, said before anything is sent; null when it may be sent. */
-export function closeRequestProblem(note: string): string | null {
+/**
+ * What the server would refuse in the Close dialog, said before anything is sent; null when it may be sent. With the
+ * outcome (the dialog's choice): ACCEPTED or DECLINED, one of the two.
+ */
+export function closeRequestProblem(note: string, outcome?: string): string | null {
   const t = note.trim();
   if (t.length === 0) return 'Say in the note what was done for the client.';
   if (t.length > SHOP_REQUEST_LIMITS.resolution) return `The note must be at most ${SHOP_REQUEST_LIMITS.resolution} characters.`;
+  if (outcome !== undefined && !(SHOP_REQUEST_OUTCOMES as readonly string[]).includes(outcome)) return 'Say whether the request is accepted or declined.';
   return null;
 }
+
+/** The choices of the Close dialog's outcome: ACCEPTED creates the request's order, DECLINED none. */
+export const SHOP_REQUEST_OUTCOME_OPTIONS: readonly { value: string; label: string }[] = Object.freeze([
+  { value: '', label: 'Choose' },
+  { value: 'ACCEPTED', label: 'Accepted: the sale is concluded' },
+  { value: 'DECLINED', label: 'Declined: no sale' },
+]);
 
 /** Said under a request's model: its type and, when the salon shows one, its price. */
 export function requestModelLine(r: Pick<ShopRequest, 'model'>): string {

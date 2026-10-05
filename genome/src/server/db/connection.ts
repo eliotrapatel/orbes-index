@@ -135,6 +135,10 @@ export const ADVISORY_LOCK = Object.freeze({
   ADMIN_ROSTER: 0x4f52_0201,
   /** The engine of the LIVE RELEASES (services/live-engine.ts): a session lock, held by the one process that ticks. */
   LIVE_ENGINE: 0x4f52_0301,
+  /** The numbers of the invoices and credit notes (services/invoices.ts), with the kind and the year as its second part. */
+  INVOICE_NUMBER: 0x4f52_0401,
+  /** The ids pasted back from Shopify (services/shopify.ts), with the product id's hash as its second part. */
+  SHOPIFY_PRODUCT: 0x4f52_0501,
 });
 
 /**

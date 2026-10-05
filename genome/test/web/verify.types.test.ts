@@ -11,6 +11,8 @@ import {
   DROP_ENTRY_STATUSES as SERVER_ENTRY_STATUSES,
   LIVE_END_REASONS as SERVER_LIVE_END_REASONS,
   LIVE_ENTRY_STATUSES as SERVER_LIVE_ENTRY_STATUSES,
+  ORDER_CHANNELS as SERVER_ORDER_CHANNELS,
+  ORDER_STATUSES as SERVER_ORDER_STATUSES,
   REPORT_CHANNELS as SERVER_CHANNELS,
   VERIFICATION_STATES as SERVER_STATES,
 } from '../../src/server/db/schema.js';
@@ -33,6 +35,7 @@ import type {
   LiveRoom as ServerLiveRoom,
   LiveSheet as ServerLiveSheet,
 } from '../../src/server/services/live-room.js';
+import type { AccountParticipation as ServerAccountParticipation, PastReleaseCard as ServerPastReleaseCard } from '../../src/server/services/past-releases.js';
 import type { Page } from '../../src/server/types.js';
 import { INCIDENT_TYPES as SERVER_INCIDENTS, type OwnedProduct } from '../../src/server/services/ownership.js';
 import type {
@@ -42,6 +45,7 @@ import type {
 } from '../../src/server/services/ownership-certificates.js';
 import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
+import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import {
   CIRCLE_ANSWERS,
@@ -51,8 +55,12 @@ import {
   INCIDENT_TYPES,
   LIVE_END_REASONS,
   LIVE_ENTRY_STATUSES,
+  ORDER_CHANNELS,
+  ORDER_STATUSES,
   REPORT_CHANNELS,
   VERIFICATION_STATES,
+  type AccountOrder,
+  type OrderCareGuide,
   type ClubEntry,
   type ClubStatus,
   type DrawEntriesPage,
@@ -78,6 +86,8 @@ import {
   type LookbookSheet,
   type OwnedPiece,
   type OwnerCertificate,
+  type Participation,
+  type PastReleasesPage,
   type ShopRequest,
   type VerifyInput,
   type VerifyOutcome,
@@ -123,6 +133,13 @@ export const liveEntryFits = (e: Json<ServerLiveEntry>): LiveEntry => e;
 export const liveAccessFits = (a: Json<ServerLiveAccess>): LiveAccess => a;
 export const liveInterestFits = (i: Json<ServerLiveInterest>): LiveInterest => i;
 export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry => e;
+// …and MY PIECES' orders (plan LIVE RELEASE+, choice 6): an order of GET /api/v1/account/orders.
+export const accountOrderFits = (o: Json<ServerAccountOrder>): AccountOrder => o;
+// …and an order's care guide (M6): GET /api/v1/account/orders/:id/care-guide.
+export const careGuideFits = (g: Json<ServerOrderCareGuide>): OrderCareGuide => g;
+// …and THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, and the account's part in them.
+export const pastPageFits = (p: Json<Page<ServerPastReleaseCard>>): PastReleasesPage => p;
+export const participationFits = (p: Json<ServerAccountParticipation>): Participation => p;
 export const liveBannerFits = (b: Json<ServerLiveBanner>): LiveBanner => b;
 export const liveBoardFits = (b: Json<ServerLiveBoard>): LiveBoard => b;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
@@ -157,6 +174,11 @@ describe('verify wire types', () => {
     expect([...LIVE_END_REASONS]).toEqual([...SERVER_LIVE_END_REASONS]);
   });
 
+  it('know the same steps and channels of an order as the server (plan LIVE RELEASE+, choice 6)', () => {
+    expect([...ORDER_STATUSES]).toEqual([...SERVER_ORDER_STATUSES]);
+    expect([...ORDER_CHANNELS]).toEqual([...SERVER_ORDER_CHANNELS]);
+  });
+
   it('are structurally compatible (checked by tsc)', () => {
     expect(typeof outcomeFits).toBe('function');
     expect(typeof inputFits).toBe('function');
@@ -167,7 +189,7 @@ describe('verify wire types', () => {
     expect(typeof cardFits).toBe('function');
     expect(typeof sheetFits).toBe('function');
     for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
-    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits]) expect(typeof fits).toBe('function');
+    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits, accountOrderFits, careGuideFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
   });
 });

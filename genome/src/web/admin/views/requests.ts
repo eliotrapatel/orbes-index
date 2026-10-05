@@ -6,18 +6,20 @@
  * (REQUEST THIS PIECE), open ones first, then the newest; `?status=` narrows
  * to OPEN or CLOSED. Each row: when it was made, the client (its sheet; the
  * email masked for an AUDITOR, j***@example.com), the model (its type and the
- * price the salon shows), the client's note, and its status (who closed it,
- * when, and what was done). Close (OPERATOR) opens the dialog of the note,
- * required, then the tab is read again; the server audits it
- * (`shop.request.close`, never the note). ORBES Client Services concludes the
- * sale with the client: nothing is paid on /verify, and no email is sent.
+ * price the salon shows), the client's note, and its status (its outcome, who
+ * closed it, when, and what was done). Close (OPERATOR) opens the dialog of the
+ * note and the outcome, both required: ACCEPTED, the sale concluded, creates the
+ * request's order (Clients › Orders), DECLINED none; then the tab is read
+ * again; the server audits it (`shop.request.close`, never the note). ORBES
+ * Client Services concludes the sale with the client: nothing is paid on
+ * /verify, and no email is sent.
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime, humanize } from '../format.js';
-import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, shopRequestStatusOf } from '../model/club.js';
+import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, SHOP_REQUEST_OUTCOME_OPTIONS, shopRequestStatusOf } from '../model/club.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { SHOP_REQUEST_STATUSES, type ShopRequest } from '../types.js';
+import { SHOP_REQUEST_STATUSES, type ShopRequest, type ShopRequestOutcome } from '../types.js';
 import { button, field, filterBar, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -44,6 +46,15 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
               body: r.note ? h('p', { class: 'dialog__text' }, r.note) : undefined,
               fields: [
                 {
+                  name: 'outcome',
+                  label: 'Outcome',
+                  kind: 'select',
+                  options: [...SHOP_REQUEST_OUTCOME_OPTIONS],
+                  value: '',
+                  required: true,
+                  hint: 'Accepted: the sale is concluded, and its order is created RESERVED for Client Services to follow.',
+                },
+                {
                   name: 'note',
                   label: 'Note',
                   kind: 'textarea',
@@ -52,10 +63,10 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
                   hint: 'What was done for the client: the sale concluded, a fitting arranged, or why nothing was. Kept with the request.',
                 },
               ],
-              validate: (v) => closeRequestProblem(v.note),
+              validate: (v) => closeRequestProblem(v.note, v.outcome),
               confirmLabel: 'Close request',
               submit: async (v) => {
-                await ctx.api.closeShopRequest(r.id, v.note.trim());
+                await ctx.api.closeShopRequest(r.id, v.note.trim(), v.outcome as ShopRequestOutcome);
               },
             }).then((done) => {
               if (!done) return;
@@ -96,7 +107,9 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
                 'span',
                 null,
                 statusMark(humanize(r.status), toneOf('shopRequest', r.status)),
-                r.handledAt ? h('span', { class: 'cell-sub' }, [r.handledBy?.email, formatDateTime(r.handledAt)].filter(Boolean).join(' · ')) : null,
+                r.handledAt
+                  ? h('span', { class: 'cell-sub', attrs: { 'data-testid': 'request-outcome' } }, [r.outcome ? humanize(r.outcome) : null, r.handledBy?.email, formatDateTime(r.handledAt)].filter(Boolean).join(' · '))
+                  : null,
                 r.resolutionNote ? h('span', { class: 'cell-details' }, r.resolutionNote) : null,
               ),
           },

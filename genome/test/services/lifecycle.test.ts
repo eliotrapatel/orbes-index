@@ -43,7 +43,7 @@ async function seedCatalog(db: Db): Promise<string> {
   return model.id;
 }
 
-async function seedProduct(db: Db, modelId: string, at: Date): Promise<{ id: string; productId: string }> {
+async function seedProduct(db: Db, modelId: string, at: Date, reserved = false): Promise<{ id: string; productId: string }> {
   const serial = ++serialCounter;
   const productId = `O26-J-${String(serial).padStart(5, '0')}`;
   const row = await db
@@ -57,11 +57,14 @@ async function seedProduct(db: Db, modelId: string, at: Date): Promise<{ id: str
       sku: `MON-RING-${serial}`,
       model_id: modelId,
       material: '925 STERLING SILVER',
+      ...(reserved ? { status: 'RESERVED' as const } : {}),
       created_at: at,
       updated_at: at,
     })
     .returning('id')
     .executeTakeFirstOrThrow();
+  // A RESERVED identity has no history yet (migration 0022: it starts when the atelier issues it).
+  if (reserved) return { id: row.id, productId };
   // Issuance writes the initial history row (NULL → ISSUED).
   await db
     .insertInto('product_status_history')
@@ -71,7 +74,7 @@ async function seedProduct(db: Db, modelId: string, at: Date): Promise<{ id: str
 }
 
 /** Canonical path from ISSUED to each status, and the return target it leaves behind. */
-const PATHS: Record<ProductStatus, ProductStatus[]> = {
+const PATHS: Record<Exclude<ProductStatus, 'RESERVED'>, ProductStatus[]> = {
   ISSUED: [],
   ACTIVATED: ['ACTIVATED'],
   REGISTERED: ['ACTIVATED', 'REGISTERED'],
@@ -104,6 +107,9 @@ describe('state machine data (contract §2.6)', () => {
 
   it('matches the contract table exactly', () => {
     const incident = ['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'];
+    // A reserved identity leaves through the atelier or its order's cancellation, never a transition; nothing enters it.
+    expect(TRANSITIONS.RESERVED).toEqual([]);
+    for (const targets of Object.values(TRANSITIONS)) expect(targets).not.toContain('RESERVED');
     expect(TRANSITIONS.ISSUED).toEqual(['ACTIVATED', 'SERVICED', ...incident]);
     expect(TRANSITIONS.ACTIVATED).toEqual(['REGISTERED', 'OWNED', 'SERVICED', 'RESOLD', ...incident]);
     expect(TRANSITIONS.REGISTERED).toEqual(['OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD', ...incident]);
@@ -187,6 +193,8 @@ describe('LifecycleService', () => {
   afterAll(() => t.close());
 
   async function productIn(status: ProductStatus) {
+    // RESERVED comes before ISSUED: an identity reserved for a piece to make (migration 0022), seeded as such.
+    if (status === 'RESERVED') return seedProduct(t.db, modelId, clock.now(), true);
     const p = await seedProduct(t.db, modelId, clock.now());
     for (const step of PATHS[status]) {
       clock.advance(1000);
