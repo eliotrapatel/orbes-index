@@ -365,13 +365,18 @@ function stockSection(ctx: ViewContext, stock: AtelierStock, manage: boolean, do
             label: '',
             cell: (r) =>
               manage
-                ? h(
+                ? // MAKE, when the atelier suggests pieces, over the row's other actions: the column keeps its width.
+                  h(
                     'span',
-                    { class: 'row-actions' },
+                    { class: 'stock__actions' },
                     r.suggestion > 0 ? button('Make', { kind: 'secondary', testId: 'stock-make', onClick: () => make(r) }) : null,
-                    stock.locations.length > 1 && r.available > 0 ? button('Transfer', { kind: 'ghost', testId: 'stock-transfer', onClick: () => transfer(r) }) : null,
-                    button('Correct', { kind: 'ghost', onClick: () => correct(r.sku.id, r.location.id, `${skuLabel(r.sku)} · ${r.location.name}`) }),
-                    button('Minimum', { kind: 'ghost', onClick: () => minimum(r.sku.id, r.location.id, r.minimum, `${skuLabel(r.sku)} · ${r.location.name}`) }),
+                    h(
+                      'span',
+                      { class: 'row-actions' },
+                      stock.locations.length > 1 && r.available > 0 ? button('Transfer', { kind: 'ghost', testId: 'stock-transfer', onClick: () => transfer(r) }) : null,
+                      button('Correct', { kind: 'ghost', onClick: () => correct(r.sku.id, r.location.id, `${skuLabel(r.sku)} · ${r.location.name}`) }),
+                      button('Minimum', { kind: 'ghost', onClick: () => minimum(r.sku.id, r.location.id, r.minimum, `${skuLabel(r.sku)} · ${r.location.name}`) }),
+                    ),
                   )
                 : null,
             kind: ['actions', 'wrap'],

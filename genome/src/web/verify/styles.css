@@ -2895,8 +2895,16 @@ h1[tabindex="-1"]:focus,
   margin-top: 2px;
 }
 
+/* Set on the left edge with the title above it: no indent balancing the tracking of a centred link. */
 .pieces__order-document {
   white-space: nowrap;
+  padding-inline: 0;
+  text-indent: 0;
+}
+
+.pieces__order-document::after {
+  left: 0;
+  right: var(--track-micro);
 }
 
 .pieces__order-document[aria-busy="true"] {
@@ -4547,6 +4555,11 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 
 .live-card__line {
   color: var(--ink);
+}
+
+/* A rule in words wraps in balanced lines, never its last word alone. */
+.live-card__access {
+  text-wrap: balance;
 }
 
 /* A fact of a line kept whole when it fits (views/common.ts withPhrases). */

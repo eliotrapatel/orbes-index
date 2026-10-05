@@ -526,7 +526,7 @@ body {
 
 .bar {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 64px 48px;
+  grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 64px 48px;
   align-items: center;
   gap: 20px;
   min-height: 42px;
@@ -3365,6 +3365,11 @@ a.bar__label:hover {
   max-width: 100%;
 }
 
+/* A country's bar names it in full with its busiest hour (GB · UNITED KINGDOM · 16:00). */
+.panel--best {
+  --bar-label: 280px;
+}
+
 .best__headline {
   font-size: var(--fs-lead);
   letter-spacing: 0.02em;
@@ -3649,6 +3654,8 @@ a.bar__label:hover {
 
 .ocard--late {
   border-left: 3px solid var(--ink);
+  /* The rule takes its 2 extra pixels from the padding: a late card's text lines up with the others'. */
+  padding-left: 12px;
 }
 
 .ocard__top {
@@ -3679,6 +3686,8 @@ a.bar__label:hover {
   font-size: var(--fs-line);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* A release's name wraps in balanced lines, never its numeral alone (MONOLITHE — / LIVE II). */
+  text-wrap: balance;
 }
 
 .ocard__piece {
@@ -3766,6 +3775,43 @@ a.bar__label:hover {
 
 .bench__head .cbtn {
   margin-left: auto;
+}
+
+/* A stock row's actions: MAKE over the others, all at the row's right edge. */
+.stock__actions {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Every group of pieces to make on the same columns: the pieces line up from one release to the next. */
+.bench .table th:nth-child(1) {
+  width: 120px;
+}
+
+.bench .table th:nth-child(2) {
+  width: 130px;
+}
+
+.bench .table th:nth-child(3) {
+  width: 120px;
+}
+
+.bench .table th:nth-child(4) {
+  width: 170px;
+}
+
+.bench .table th:nth-child(6) {
+  width: 110px;
+}
+
+.bench .table th:nth-child(7) {
+  width: 120px;
+}
+
+.bench .table .col--wide {
+  width: auto;
 }
 
 .stock__suggest {

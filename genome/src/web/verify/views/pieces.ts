@@ -99,7 +99,7 @@ import { myEntries, type MyEntryModel } from '../releases-model.js';
 import { tierModel } from '../tier-model.js';
 import type { AccountOrder, AccountQuestion, CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { photoPlate } from './photos.js';
@@ -725,7 +725,7 @@ function orderCard(m: OrderModel, deps: { api: ApiClient; session: SessionStore 
     'article',
     { class: 'pieces__order', attrs: { 'aria-labelledby': titleId }, data: { status: m.status } },
     h('h4', { class: 'pieces__order-title', id: titleId }, ...withNumerals(m.title)),
-    h('p', { class: 'ownership__meta micro soft pieces__order-line' }, ...withNumerals(m.line)),
+    h('p', { class: 'ownership__meta micro soft pieces__order-line' }, ...withPhrases(m.line)),
     h('p', { class: 'prose pieces__order-sentence', text: m.sentence }),
     steps,
     m.rows.length > 0 ? rows(m.rows, 'pieces__order-rows') : null,

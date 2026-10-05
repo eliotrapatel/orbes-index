@@ -13,7 +13,7 @@
  * collector by email (how the store will match its customers to the accounts); masked for an AUDITOR. Nothing is sent
  * to Shopify.
  */
-import { h } from '../../shared/dom.js';
+import { h, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import { boardFilters, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence } from '../model/orders.js';
 import { defaultPeriod, periodProblem, SHOPIFY_PERIOD_MAX_DAYS } from '../model/shopify.js';
@@ -129,6 +129,12 @@ function holdsOf(x: OrderCard): HTMLElement | null {
   return line === '—' ? null : h('span', { class: 'ocard__holds' }, line);
 }
 
+/** An email that wraps after its @ when the column is narrow, never inside a word (the local part, then the domain). */
+function wrappableEmail(email: string): Child[] {
+  const at = email.lastIndexOf('@');
+  return at > 0 ? [email.slice(0, at + 1), h('wbr'), email.slice(at + 1)] : [email];
+}
+
 function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
   const origin = x.release?.title ?? CHANNEL_LABELS[x.channel];
   const size = x.sizeLabel ?? (x.skuCode ? 'ONE SIZE' : 'Size to enter');
@@ -146,9 +152,10 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
       h('span', { class: 'ocard__channel' }, CHANNEL_LABELS[x.channel]),
     ),
     x.timing.late && x.timing.rule ? h('span', { class: 'ocard__late', attrs: { title: lateSentence(x.timing.rule, board.delays) } }, statusMark(LATE_LABELS[x.timing.rule], 'alert')) : null,
-    x.release ? h('span', { class: 'ocard__origin' }, x.release.title) : null,
+    // The dash of a release's name keeps to the word before it: a balanced line never opens on it.
+    x.release ? h('span', { class: 'ocard__origin' }, x.release.title.replace(/ ([—–]) /g, '\u00a0$1 ')) : null,
     h('span', { class: 'ocard__piece' }, `${x.model.name} · ${size}`),
-    h('span', { class: 'ocard__who' }, x.account.email),
+    h('span', { class: 'ocard__who' }, ...wrappableEmail(x.account.email)),
     x.sourceReference ? h('span', { class: ['ocard__line', 'mono'] }, x.sourceReference) : null,
     x.addons.length ? h('span', { class: 'ocard__line' }, x.addons.map((a) => a.label).join(' · ')) : null,
     x.engraving ? h('span', { class: 'ocard__line' }, 'Engraving entered') : null,
