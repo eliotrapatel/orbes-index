@@ -5,8 +5,8 @@
  *    time in its step, and whether it is late (M3) and why; the next steps (OPERATOR): MARK PAID (once priced: its
  *    invoice is issued), SHIP (a carrier of the settings, the tracking number, the value declared for the insurance),
  *    MARK DELIVERED, CANCEL (with a note; a credit note once paid), OPEN A RETURN (choice 20: back to stock at a
- *    location, or to the archive, with a note; when ORBES takes its buyer's ownership back and the piece goes back to
- *    stock, the claim code of its new card is shown once, with its card to download).
+ *    location, or to the archive, with a note; ORBES takes back its buyer's ownership if they registered it; back to
+ *    stock, the claim code of the piece's new card is shown once, with its card to download).
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
@@ -83,6 +83,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       body: h('p', { class: 'dialog__text' }, 'ORBES Client Services received the payment of this order: it reads PAID, with the time, and its invoice is issued by CONGLOMERAT LLC to the buyer entered on the order.'),
       fields: [noteField(false, 'How it was paid, for Client Services: kept in the order’s history. Optional.')],
       validate: (v) => noteProblem(v.note, false),
+      // An invoice is never changed: one issued before the buyer is entered carries the account's email only.
+      live: () => {
+        const missing = !o.buyer.name && !o.buyer.address ? 'No buyer is entered on the order: its invoice will carry the account’s email only.' : !o.buyer.name ? 'The buyer’s name is not entered: its invoice will be issued without it.' : !o.buyer.address ? 'The buyer’s address is not entered: its invoice will be issued without it.' : null;
+        return missing ? h('p', { class: 'dialog__text', data: { testid: 'pay-no-buyer' } }, `${missing} An invoice is never changed: enter the buyer first.`) : [];
+      },
       confirmLabel: 'Mark paid',
       submit: async (v) => step({ to: 'PAID', ...(v.note.trim() ? { note: v.note.trim() } : {}) }),
     }).then(done('Order paid.'));
@@ -170,7 +175,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
           ? h(
               'p',
               { class: 'dialog__text' },
-              'The piece is counted again in stock, ready to be sold. If its buyer registered it, ORBES takes the ownership back: the piece is no longer registered, and a new claim code is issued for its new certificate card, shown once.',
+              'The piece is counted again in stock, ready to be sold, with a new claim code for its new certificate card, shown once: the card that left with it no longer registers it. If its buyer registered it, ORBES takes the ownership back.',
             )
           : v.outcome === 'ARCHIVED'
             ? h('p', { class: 'dialog__text' }, 'The piece leaves circulation: it is retired, and its code answers as a retired piece. If its buyer registered it, ORBES takes the ownership back.')
@@ -203,7 +208,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       title: 'Its new claim code',
       eyebrow: productId,
       body: [
-        h('p', { class: 'dialog__text' }, 'ORBES took the ownership back: the piece’s next buyer registers it with this code. Shown once: download its certificate card now. Only its hash is kept.'),
+        h('p', { class: 'dialog__text' }, 'The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.'),
         h('p', { class: 'claimcode', data: { testid: 'claim-code' } }, mono(code)),
         h('div', { class: 'row-actions' }, copyButton(code, 'Copy the claim code'), card),
       ],

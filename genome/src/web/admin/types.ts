@@ -1662,7 +1662,7 @@ export type OrderTransitionInput =
 /** POST /api/admin/orders/:id/return (choice 20): back to stock at a location, or to the archive, with a note. */
 export type OrderReturnInput = { outcome: 'RESTOCKED'; locationId: string; note: string } | { outcome: 'ARCHIVED'; note: string };
 
-/** The order after its return, and the claim code of its piece's new card when ORBES took its buyer's ownership back (shown once). */
+/** The order after its return, and the claim code of its piece's new card when it went back to stock (shown once). */
 export interface OrderReturned extends OrderDetail {
   productId: string;
   claimCode?: string;

@@ -20,6 +20,7 @@
  *                buyer masked for an AUDITOR by the routes), an order's page, and its buyer in MY PIECES (the PDFs of
  *                their own orders only: `accountDocument`).
  */
+import { sql, type RawBuilder } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, type Db } from '../db/connection.js';
 import { INVOICE_KINDS, jsonText, type InvoiceKind, type JsonObject, type OrderChannel, type OrderRow } from '../db/schema.js';
 import { notFound, validationError } from '../errors.js';
@@ -336,6 +337,12 @@ export interface InvoiceServiceDeps {
 /** LIKE's own characters, taken literally. */
 const likeLiteral = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+/** A document's number in SQL, as invoiceNumber writes it (`INV-2026-000001`), for the search. */
+function numberSql(kind: string | RawBuilder<unknown>, year: string, sequence: string): RawBuilder<string> {
+  const k = typeof kind === 'string' ? sql.ref(kind) : kind;
+  return sql<string>`(CASE ${k} WHEN 'INVOICE' THEN ${sql.lit(INVOICE_PREFIXES.INVOICE)} ELSE ${sql.lit(INVOICE_PREFIXES.CREDIT_NOTE)} END) || '-' || ${sql.ref(year)}::text || '-' || lpad(${sql.ref(sequence)}::text, 6, '0')`;
+}
+
 export class InvoiceService {
   private readonly db: Db;
   private readonly clock: Clock;
@@ -346,8 +353,9 @@ export class InvoiceService {
   }
 
   /**
-   * A month's invoices and credit notes (UTC; the current one by default), the latest first, with their totals per
-   * currency; `kind` keeps one kind, `q` a number or an order's reference (in part).
+   * A month's invoices and credit notes (UTC; the current one by default), the latest first (INVOICE_LIST_MAX at most);
+   * `kind` keeps one kind, `q` a number or an order's reference (in part), both in SQL before the limit. The totals per
+   * currency are the whole month's, whatever the list keeps.
    */
   async list(filter: InvoiceFilter = {}): Promise<InvoiceList> {
     const currentMonth = monthOf(this.clock());
@@ -356,24 +364,40 @@ export class InvoiceService {
     if (filter.kind !== undefined && !INVOICE_KINDS.includes(filter.kind)) throw validationError('Unknown kind of document.');
     const q = (filter.q ?? '').trim().toUpperCase();
     if (q.length > 40) throw validationError('Search with a number or an order’s reference.');
-    let items = await readInvoices(this.db, (b) =>
+    const like = `%${likeLiteral(q)}%`;
+    const items = await readInvoices(this.db, (b) =>
       b
         .where('i.issued_at', '>=', from)
         .where('i.issued_at', '<', to)
         .$if(filter.kind !== undefined, (x) => x.where('i.kind', '=', filter.kind!))
+        .$if(q.length > 0, (x) =>
+          x.where((eb) =>
+            eb.or([
+              eb(numberSql('i.kind', 'i.year', 'i.sequence'), 'like', like),
+              eb(sql<string>`'OR-' || upper(left(replace(i.order_id::text, '-', ''), 8))`, 'like', like),
+              eb(numberSql(sql.lit('INVOICE'), 'c.year', 'c.sequence'), 'like', like),
+            ]),
+          ),
+        )
         .orderBy('i.issued_at', 'desc')
         .orderBy('i.kind')
         .orderBy('i.sequence', 'desc')
         .limit(INVOICE_LIST_MAX),
     );
-    if (q) items = items.filter((v) => v.number.includes(q) || v.order.reference.includes(q) || (v.credits?.number.includes(q) ?? false));
+    const sums = await this.db
+      .selectFrom('invoices')
+      .select((eb) => ['currency', 'kind', eb.fn.sum<string>('total_minor').as('total')])
+      .where('issued_at', '>=', from)
+      .where('issued_at', '<', to)
+      .groupBy(['currency', 'kind'])
+      .execute();
     const totals = new Map<string, { currency: string; invoiced: number; credited: number; net: number }>();
-    for (const v of items) {
-      const t = totals.get(v.currency) ?? { currency: v.currency, invoiced: 0, credited: 0, net: 0 };
-      if (v.kind === 'INVOICE') t.invoiced += v.totalMinor;
-      else t.credited += v.totalMinor;
+    for (const r of sums) {
+      const t = totals.get(r.currency) ?? { currency: r.currency, invoiced: 0, credited: 0, net: 0 };
+      if (r.kind === 'INVOICE') t.invoiced += Number(r.total);
+      else t.credited += Number(r.total);
       t.net = t.invoiced - t.credited;
-      totals.set(v.currency, t);
+      totals.set(r.currency, t);
     }
     return { month, currentMonth, items, totals: [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency)) };
   }

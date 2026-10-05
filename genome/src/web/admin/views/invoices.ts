@@ -5,8 +5,9 @@
  *
  * The month (UTC; the current one by default), one kind, a number or an order's reference narrow the list
  * (`?month=YYYY-MM&kind=&q=`). Each row: its number, kind, date, order (its page), buyer (masked for an AUDITOR), total,
- * what it cancels or what cancels it, and its PDF. The month's totals per currency (invoiced, credited, net) head the
- * list; DOWNLOAD THE MONTH gives the accountant's CSV. Nothing here issues or changes a document: the orders' steps do.
+ * what it cancels or what cancels it, and its PDF. The month's totals per currency (invoiced, credited, net), the whole
+ * month's whatever the list keeps, head the list; DOWNLOAD THE MONTH gives the accountant's CSV. Nothing here issues or
+ * changes a document: the orders' steps do.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime } from '../format.js';

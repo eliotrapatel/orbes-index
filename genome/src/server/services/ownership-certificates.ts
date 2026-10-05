@@ -54,7 +54,7 @@ import { renderOwnershipCertificatePdf, type RenderedCertificates } from '../ren
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { CROCKFORD_ALPHABET, normalizeCrockford } from './claim-codes.js';
-import { orderReference } from './orders.js';
+import { ORDER_CERTIFICATE_STATUSES, orderReference } from './orders.js';
 import { CERTIFICATE_ENDING_STATUSES, lockForOwnerAction, notOwner, readActingAccount, type OwnershipService } from './ownership.js';
 import { utcDate, type WarrantySummary } from './warranty.js';
 
@@ -562,10 +562,11 @@ export class OwnershipCertificateService {
 
   /**
    * The ownership certificate among an order's documents in MY PIECES (plan LIVE RELEASE+, M6): a new document, never
-   * the claim card, for the order's own account once the piece that fulfils it is registered to it, and while a
-   * certificate may be created for it (not LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED nor RETIRED). The page of a
-   * link's certificate with the record read now, naming the order instead of a live address. 404 ORDER_NOT_FOUND for
-   * another account's order or an unknown one; 409 CERTIFICATE_NOT_AVAILABLE otherwise. Not audited (a read).
+   * the claim card, for the order's own account once the piece that fulfils it is registered to it, while the order is
+   * paid and neither cancelled nor returned (ORDER_CERTIFICATE_STATUSES), and while a certificate may be created for the
+   * piece (not LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED nor RETIRED). The page of a link's certificate with the
+   * record read now, naming the order instead of a live address. 404 ORDER_NOT_FOUND for another account's order or an
+   * unknown one; 409 CERTIFICATE_NOT_AVAILABLE otherwise. Not audited (a read).
    */
   async orderCertificatePdf(accountId: string, orderId: string): Promise<RenderedCertificates> {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw orderNotFound();
@@ -574,12 +575,14 @@ export class OwnershipCertificateService {
       .leftJoin('products as p', 'p.id', 'o.product_id')
       .leftJoin('models as m', 'm.id', 'p.model_id')
       .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').onRef('w.account_id', '=', 'o.account_id').on('w.ended_at', 'is', null))
-      .select(['o.id', 'o.product_id', 'p.status', 'm.discontinued_at', 'w.id as ownership_id'])
+      .select(['o.id', 'o.status as order_status', 'o.product_id', 'p.status', 'm.discontinued_at', 'w.id as ownership_id'])
       .where('o.id', '=', orderId.toLowerCase())
       .where('o.account_id', '=', accountId.toLowerCase())
       .executeTakeFirst();
     if (!order) throw orderNotFound();
-    if (order.product_id === null || order.ownership_id === null || order.status === null || CERTIFICATE_ENDING_STATUSES.includes(order.status)) throw certificateNotAvailable();
+    if (!ORDER_CERTIFICATE_STATUSES.includes(order.order_status) || order.product_id === null || order.ownership_id === null || order.status === null || CERTIFICATE_ENDING_STATUSES.includes(order.status)) {
+      throw certificateNotAvailable();
+    }
     const [owned] = await this.ownership.listForAccount(accountId.toLowerCase(), { productUuid: order.product_id });
     if (!owned || owned.incident !== null) throw certificateNotAvailable();
     return renderOwnershipCertificatePdf({

@@ -850,7 +850,7 @@ export class AdminApi {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
   }
 
-  /** OPERATOR: RETURNED, back to stock at a location or to the archive; the new card's claim code when ORBES took the ownership back. */
+  /** OPERATOR: RETURNED, back to stock at a location or to the archive; the new card's claim code when the piece went back to stock. */
   returnOrder(id: string, input: OrderReturnInput): Promise<OrderReturned> {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/return`, input);
   }

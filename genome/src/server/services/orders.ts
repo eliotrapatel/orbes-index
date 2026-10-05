@@ -59,9 +59,11 @@
  * a resolution already given mapped (CONCLUDED → PAID, CANCELLED → CANCELLED).
  *
  * Lock order: the source's rows (the release, then the entry; the request), the order, the SKU (stock.ts lockSku), the
- * piece to make and its identity (or the piece returned, then its ownership and transfer); the invoice numbers
- * (invoices.ts); the journal; the audit log last: the functions a sale's transaction calls return their audit entries
- * for it to write after its own (a return's change of the piece's status, LifecycleService, writes its own, last).
+ * piece to make and its identity; a return takes the piece returned before the order (as a registration does:
+ * OwnershipService.registerFirst holds the piece, then delivers its order), then the SKU, the piece's ownership and
+ * transfer; the invoice numbers (invoices.ts); the journal; the audit log last: the functions a sale's transaction calls
+ * return their audit entries for it to write after its own (a return's change of the piece's status, LifecycleService,
+ * writes its own, last).
  */
 import { inTransaction, type Db } from '../db/connection.js';
 import {
@@ -113,6 +115,11 @@ export const ORDER_STEP_ACTIONS: Readonly<Record<Exclude<OrderStatus, 'RESERVED'
 
 /** The statuses in which an order holds a piece (STOCK) or a piece to make (BENCH). */
 export const ORDER_HOLDING_STATUSES: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID']);
+/**
+ * The statuses in which an order offers its piece's ownership certificate (M6): paid and not cancelled nor returned. A
+ * piece its account later buys again through a new order is certified by that order only.
+ */
+export const ORDER_CERTIFICATE_STATUSES: readonly OrderStatus[] = Object.freeze(['PAID', 'SHIPPED', 'DELIVERED']);
 
 /** The currencies an order is priced in: the house's, as a LIVE RELEASE's (live-console.ts LIVE_CURRENCIES). */
 export const ORDER_CURRENCIES = Object.freeze(['EUR', 'GBP', 'USD', 'CHF'] as const);
@@ -176,12 +183,12 @@ export interface OrderReturnInput {
   note: string;
 }
 
-/** A return done: the order, its piece, and the claim code of the piece's new card when ORBES took its ownership back. */
+/** A return done: the order, its piece, and the claim code of the piece's new card when it went back to stock. */
 export interface OrderReturned {
   order: OrderView;
   /** The piece's reference. */
   productId: string;
-  /** Shown once: only its hash is kept (back to stock, the buyer's ownership taken back). */
+  /** Shown once: only its hash is kept (back to stock: the card that left with the piece no longer registers it). */
   claimCode?: string;
 }
 
@@ -1097,7 +1104,7 @@ export class OrderService {
         invoice: documentOf(r.id, 'INVOICE'),
         creditNote: documentOf(r.id, 'CREDIT_NOTE'),
         careGuide: r.status !== 'CANCELLED' && r.status !== 'RETURNED',
-        certificate: r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
+        certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
       },
     }));
   }
@@ -1142,31 +1149,37 @@ export class OrderService {
    * Services with a note: the piece goes back to stock at a location (the ledger's RETURNED, +1; the piece RESOLD, ready
    * to be sold again, or still ISSUED if it never was: 409 ORDER_RETURN_NOT_RESTOCKABLE when its record is in service,
    * reported or flagged) or to the archive (RETIRED, unless already retired or revoked). When its buyer had registered
-   * it, ORBES takes the ownership back: it ends (RETURNED, `returns.ownership_id`), a transfer pending is cancelled, the
-   * piece is not registered any more and, back to stock, carries a new claim code (returned once, for its new card;
-   * only its hash is kept). A credit note cancels the invoice. Audited `order.return`, `ownership.reclaim` (and
-   * `ownership.transfer.cancel`), `invoice.credit` and the piece's `product.transition`, in one transaction.
+   * it, ORBES takes the ownership back: it ends (RETURNED, `returns.ownership_id`), a transfer pending is cancelled and
+   * the piece is not registered any more. Back to stock, the piece carries a new claim code whether or not its buyer had
+   * registered it (they kept its card and could read its code: returned once, for its new card; only its hash is kept).
+   * A credit note cancels the invoice. Audited `order.return`, `ownership.reclaim` (and `ownership.transfer.cancel`),
+   * `invoice.credit` and the piece's `product.transition`, in one transaction, the piece's row locked before the order's.
    */
   async returnOrder(orderId: string, input: OrderReturnInput, actor: Actor): Promise<OrderReturned> {
     assertOperator(actor);
     const id = knownOrderId(orderId);
     const r = checkReturn(input);
-    // Whether an ownership is taken back is read first: the new claim code's scrypt runs outside the transaction, which
-    // refuses the return if that changed meanwhile.
+    // The piece and whether an ownership is taken back are read first: the piece's row is locked before the order's, and
+    // the transaction refuses the return if either changed meanwhile. Back to stock, the new claim code's scrypt runs
+    // outside it.
     const peek = await this.db
       .selectFrom('orders as o')
       .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').on('w.ended_at', 'is', null))
-      .select(['o.id', 'w.id as ownership_id'])
+      .select(['o.id', 'o.product_id', 'w.id as ownership_id'])
       .where('o.id', '=', id)
       .executeTakeFirst();
     if (!peek) throw orderNotFound();
     const reclaim = peek.ownership_id !== null;
-    const claimCode = reclaim && r.outcome === 'RESTOCKED' ? generateClaimCode() : undefined;
+    const claimCode = r.outcome === 'RESTOCKED' ? generateClaimCode() : undefined;
     const claimHash = claimCode ? await hashClaimCode(claimCode) : null;
+    const pieceFirst = async (tx: Db) => {
+      if (peek.product_id !== null) await tx.selectFrom('products').select('id').where('id', '=', peek.product_id).forUpdate().execute();
+    };
     let productId = '';
     await this.change(id, async (tx, o, now, notes) => {
       if (!isOrderTransitionAllowed(o.status, 'RETURNED')) throw stepNotAllowed(o.status, 'RETURNED');
       if (o.product_id === null || o.sku_id === null) throw pieceNotLinked();
+      if (o.product_id !== peek.product_id) throw returnChanged();
       const locationId = r.outcome === 'RESTOCKED' ? await knownLocation(tx, r.locationId!) : null;
       if (locationId) await lockSku(tx, o.sku_id);
       const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
@@ -1190,12 +1203,6 @@ export class OrderService {
           .where('status', '=', 'PENDING')
           .returning('id')
           .execute();
-        await tx
-          .updateTable('products')
-          .set({ ownership_state: 'UNREGISTERED', updated_at: now, ...(claimHash ? { claim_secret_hash: claimHash } : {}) })
-          .where('id', '=', p.id)
-          .execute();
-        p.ownership_state = 'UNREGISTERED';
         extra.push(
           {
             actor,
@@ -1207,12 +1214,29 @@ export class OrderService {
           ...transfers.map((t): AuditRecordInput => ({ actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason: 'order_returned' } })),
         );
       }
+      if (owner || claimHash) {
+        // Unregistered once its ownership is taken back; back to stock, a new claim code: the card that left with it no
+        // longer registers it.
+        await tx
+          .updateTable('products')
+          .set({ updated_at: now, ...(owner ? { ownership_state: 'UNREGISTERED' as const } : {}), ...(claimHash ? { claim_secret_hash: claimHash } : {}) })
+          .where('id', '=', p.id)
+          .execute();
+        if (owner) p.ownership_state = 'UNREGISTERED';
+        if (claimHash) p.claim_secret_hash = claimHash;
+      }
       await tx
         .insertInto('returns')
         .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
         .execute();
       const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
-      const details: JsonObject = { outcome: r.outcome, ...(locationId ? { locationId } : {}), ownershipReclaimed: owner !== undefined, ...(to ? { pieceStatus: to } : {}) };
+      const details: JsonObject = {
+        outcome: r.outcome,
+        ...(locationId ? { locationId } : {}),
+        ownershipReclaimed: owner !== undefined,
+        ...(claimHash ? { claimCodeReissued: true } : {}),
+        ...(to ? { pieceStatus: to } : {}),
+      };
       notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra);
       const credit = await issueCreditNote(tx, after, 'return', actor, now);
       if (credit) notes.push(credit);
@@ -1221,7 +1245,7 @@ export class OrderService {
         await this.lifecycle.applyForService(tx, p, to, { reason: `Order ${orderReference(o.id)} returned`, via: 'order.return', ...(owner ? { ownershipState: 'UNREGISTERED' } : {}) }, actor);
       }
       productId = p.product_id;
-    });
+    }, pieceFirst);
     return { order: await this.get(id), productId, ...(claimCode ? { claimCode } : {}) };
   }
 
@@ -1392,9 +1416,10 @@ export class OrderService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
-  /** One change of an order in its transaction: the order's row first, the audit entries last. */
-  private async change(id: string, fn: (tx: Db, o: OrderRow, now: Date, notes: AuditRecordInput[]) => Promise<void>): Promise<void> {
+  /** One change of an order in its transaction: the order's row first (after what `first` locks), the audit entries last. */
+  private async change(id: string, fn: (tx: Db, o: OrderRow, now: Date, notes: AuditRecordInput[]) => Promise<void>, first?: (tx: Db) => Promise<void>): Promise<void> {
     await inTransaction(this.db, async (tx) => {
+      if (first) await first(tx);
       const o = await lockOrder(tx, id);
       const now = this.clock();
       const notes: AuditRecordInput[] = [];

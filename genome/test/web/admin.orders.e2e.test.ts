@@ -308,6 +308,13 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await confirmDialog(p);
     await expect.poll(() => p.locator('#order-facts').textContent()).toMatch(/€\s4\s800/u);
     expect(await p.locator('#order-facts').textContent()).toContain('A. & L.');
+    // Paid before its buyer is entered, its invoice would carry the account's email only: the dialog says so.
+    await p.click('[data-testid=order-pay]');
+    await expect.poll(() => p.locator('dialog [data-testid=pay-no-buyer]').textContent()).toBe(
+      'No buyer is entered on the order: its invoice will carry the account’s email only. An invoice is never changed: enter the buyer first.',
+    );
+    await p.click('[data-testid=dialog-cancel]');
+    await p.waitForSelector('dialog.dialog', { state: 'detached' });
     await p.click('[data-testid=order-buyer]');
     await p.fill('dialog input[name=name]', 'Jane Doe');
     await p.fill('dialog textarea[name=address]', '1 rue de la Paix\n75002 Paris\nFrance');
@@ -315,6 +322,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('[data-testid=buyer-name]').textContent()).toBe('Jane Doe');
     await p.click('[data-testid=order-pay]');
     await p.fill('dialog textarea[name=note]', 'Paid by transfer.');
+    expect(await p.locator('dialog [data-testid=pay-no-buyer]').count()).toBe(0);
     await confirmDialog(p);
     await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('PAID');
     expect(await p.locator('[data-testid=order-late]').count()).toBe(0);
@@ -468,13 +476,13 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
     await p.selectOption('dialog select[name=outcome]', 'RESTOCKED');
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('a new claim code is issued for its new certificate card');
+    await expect.poll(() => p.locator('dialog').textContent()).toContain('with a new claim code for its new certificate card');
     await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Choose the location the piece goes back to.');
     await p.selectOption('dialog select[name=locationId]', { label: 'FRANCE WAREHOUSE' });
     await p.click('[data-testid=dialog-confirm]');
-    // ORBES took the ownership back: the new claim code, once, with its card.
+    // Back to stock: the new claim code, once, with its card (ORBES took the ownership back).
     await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
     const fresh = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
     expect(fresh).not.toBe(lateClaim);
@@ -508,6 +516,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     // One kind; a search; the order's page from its reference.
     await p.selectOption('select[name=kind]', 'CREDIT_NOTE');
     await expect.poll(() => rows.count()).toBe(1);
+    // The month's totals stay the whole month's, whatever the list keeps.
+    expect(await p.locator('#invoices-totals tbody tr').textContent()).toBe(totals);
     await p.selectOption('select[name=kind]', '');
     await p.fill('input[name=q]', orderReference(o.stock));
     await p.press('input[name=q]', 'Enter');

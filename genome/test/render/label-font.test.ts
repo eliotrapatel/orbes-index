@@ -47,11 +47,15 @@ describe('label lettering', () => {
   });
 
   it('documents letter the punctuation of an address and an email besides (plan LIVE RELEASE+, M7); a label never does', () => {
-    expect([...DOCUMENT_CHARSET].filter((ch) => !LABEL_CHARSET.has(ch)).sort()).toEqual(["'", '(', ')', '+', ',', '@'].sort());
+    expect([...DOCUMENT_CHARSET].filter((ch) => !LABEL_CHARSET.has(ch)).sort()).toEqual(["'", '(', ')', '+', ',', '&', '_', '@'].sort());
     for (const ch of LABEL_CHARSET) expect(DOCUMENT_CHARSET.has(ch), ch).toBe(true);
     expect(toDocumentText('Rue de l’Église, 12 (Bât. B) — jeanne+orbes@example.com')).toBe("RUE DE L'EGLISE, 12 (BAT. B) - JEANNE+ORBES@EXAMPLE.COM");
     expect(toLabelText('Rue de l’Église, 12 (Bât. B)')).toBe('RUE DE L EGLISE 12 BAT. B');
-    expect(toDocumentText('✓ & ✓')).toBe('');
+    // An email's underscore, an address's slash and ampersand: as written.
+    expect(toDocumentText('jean_dupont+shop@mail-box.example.com')).toBe('JEAN_DUPONT+SHOP@MAIL-BOX.EXAMPLE.COM');
+    expect(toDocumentText('12/14 rue des Arts & Métiers')).toBe('12/14 RUE DES ARTS & METIERS');
+    expect(toLabelText('Arts & Métiers_')).toBe('ARTS METIERS');
+    expect(toDocumentText('✓ ✓')).toBe('');
   });
 
   it('draws every glyph inside its advance box, with arcs continuous from the pen', () => {

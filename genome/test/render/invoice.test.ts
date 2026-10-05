@@ -74,6 +74,9 @@ describe('invoice and credit note (M7)', () => {
     expect(addressLines('1\n2\n3\n4\n5\n6\n7')).toEqual(['1', '2', '3', '4', '5, 6, 7']);
     expect(addressLines(null)).toEqual([]);
     expect(toDocumentText('jeanne.muller+orbes@example.com (home)')).toBe('JEANNE.MULLER+ORBES@EXAMPLE.COM (HOME)');
+    expect(toDocumentText('jean_dupont+shop@mail-box.example.com')).toBe('JEAN_DUPONT+SHOP@MAIL-BOX.EXAMPLE.COM');
+    expect(addressLines('12/14 rue des Arts & Métiers\n75003 Paris')).toEqual(['12/14 RUE DES ARTS & METIERS', '75003 PARIS']);
+    expect(() => layoutInvoice(doc({ buyer: { name: 'Jean Dupont', address: '12/14 rue des Arts & Métiers', email: 'jean_dupont+shop@mail-box.example.com' } }))).not.toThrow();
     // A label never letters them: a piece's card keeps the lettering it always had.
     expect(toLabelText('Argent 925, (œuvre)')).toBe('ARGENT 925 OEUVRE');
     expect(invoiceFilename('INVOICE', 'INV-2026-000001')).toBe('ORBES-invoice-INV-2026-000001.pdf');

@@ -8,7 +8,8 @@
  *    transfer pending is cancelled; the certificate links end); back to stock, the piece is RESOLD and not registered,
  *    with a new claim code shown once (the old one no longer registers it): it can be picked from the stock for
  *    another order and registered by its next buyer; archived, it is RETIRED;
- *  - a piece never registered: back to stock as it was (ISSUED, its claim code unchanged), or retired;
+ *  - a piece never registered: back to stock still ISSUED, with a new claim code shown once (its buyer kept the card
+ *    that left with it: the old code no longer registers it), or retired;
  *  - a piece whose record is reported (LOST) does not go back to stock, but may be archived;
  *  - every return: one event, its audit entries (`order.return`, `ownership.reclaim`, `invoice.credit`,
  *    `product.transition`) and journal entries, a credit note for its invoice; MY PIECES says RETURNED, with the credit
@@ -126,7 +127,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect(await t.db.selectFrom('returns').select('id').where('order_id', '=', id).execute()).toEqual([]);
   });
 
-  it('back to stock, a piece never registered: counted again where Client Services chose, as it was (ISSUED, its claim code unchanged), picked again for another order', async () => {
+  it('back to stock, a piece never registered: counted again where Client Services chose, still ISSUED with a new claim code (the old card no longer registers it), picked again for another order', async () => {
     const piece = await stockPiece('61');
     const buyer = await createAccount(t.db);
     const id = await shippedOrder(buyer.id, piece, '61');
@@ -134,7 +135,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect(await stockLevel(t.db, piece.sku, france)).toEqual({ onHand: 0, reserved: 0, available: 0 });
     clock.advance(MINUTE);
     const r = await orders().returnOrder(id, { outcome: 'RESTOCKED', locationId: logistics, note: 'Returned unworn, in its box.' }, admin);
-    expect(r.claimCode).toBeUndefined();
+    expect(r.claimCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
     expect(r.productId).toBe(piece.product.productId);
     expect(r.order).toMatchObject({ status: 'RETURNED', returnedAt: clock.now() });
     expect(r.order.return).toEqual({ outcome: 'RESTOCKED', location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, note: 'Returned unworn, in its box.', at: clock.now(), ownershipReclaimed: false });
@@ -142,12 +143,17 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     const [moved] = await t.db.selectFrom('stock_movements').selectAll().where('order_id', '=', id).where('reason', '=', 'RETURNED').execute();
     expect(moved).toMatchObject({ sku_id: piece.sku, location_id: logistics, delta: 1, product_id: piece.product.id, note: 'Returned unworn, in its box.', actor_id: admin.id });
     const after = await productRow(piece.product.id);
-    expect([after.status, after.ownership_state, after.claim_secret_hash]).toEqual(['ISSUED', 'UNREGISTERED', before.claim_secret_hash]);
+    expect([after.status, after.ownership_state]).toEqual(['ISSUED', 'UNREGISTERED']);
+    // Its buyer kept the card that left with it: its code no longer registers it, the new one does.
+    expect(after.claim_secret_hash).not.toBe(before.claim_secret_hash);
+    expect(await verifyClaimCode(piece.claimCode!, after.claim_secret_hash!)).toBe(false);
+    expect(await verifyClaimCode(r.claimCode!, after.claim_secret_hash!)).toBe(true);
     expect(await t.db.selectFrom('returns').select(['outcome', 'location_id', 'ownership_id']).where('order_id', '=', id).execute()).toEqual([{ outcome: 'RESTOCKED', location_id: logistics, ownership_id: null }]);
     // Its audit: the return, its credit note; nothing about an ownership.
     expect((await auditsOf(id)).map((a) => a.action)).toContain('order.return');
-    expect((await auditsOf(id)).at(-1)!.details).toMatchObject({ from: 'SHIPPED', to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, ownershipReclaimed: false, noted: true });
+    expect((await auditsOf(id)).at(-1)!.details).toMatchObject({ from: 'SHIPPED', to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, ownershipReclaimed: false, claimCodeReissued: true, noted: true });
     expect((await auditsOf(piece.product.productId)).map((a) => a.action)).not.toContain('ownership.reclaim');
+    expect(JSON.stringify(await t.db.selectFrom('audit_logs').select('details').execute())).not.toContain(r.claimCode!);
     // Picked again from the stock for another collector's order.
     const next = await createAccount(t.db);
     const request = await t.db.insertInto('shop_requests').values({ account_id: next.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
@@ -197,7 +203,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect(audits.find((a) => a.action === 'ownership.transfer.cancel')!.details).toMatchObject({ reason: 'order_returned' });
     expect(audits.filter((a) => a.action === 'product.transition').at(-1)!.details).toMatchObject({ from: 'OWNED', to: 'RESOLD', via: 'order.return' });
     expect(JSON.stringify(await t.db.selectFrom('audit_logs').select('details').execute())).not.toContain(r.claimCode!);
-    expect((await auditsOf(id)).at(-1)!.details).toMatchObject({ to: 'RETURNED', ownershipReclaimed: true, pieceStatus: 'RESOLD' });
+    expect((await auditsOf(id)).at(-1)!.details).toMatchObject({ to: 'RETURNED', ownershipReclaimed: true, claimCodeReissued: true, pieceStatus: 'RESOLD' });
     // The journal: the order, the piece, the credit note.
     const journal = await t.db.selectFrom('event_journal').select(['type', 'entity_id', 'payload']).where('created_at', '=', clock.now()).orderBy('id').execute();
     expect(journal.map((j) => j.type)).toEqual(['stock.move', 'order.return', 'invoice.credit', 'product.transition']);
@@ -223,6 +229,24 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect((await ctx.services.ownership.currentOwner(piece.product.productId))?.accountId).toBe(next.id);
     const [theirs] = (await orders().forAccount(next.id)).filter((o) => o.id === second);
     expect(theirs!.documents.certificate).toBe(true);
+  });
+
+  it('a piece returned, then bought again by the same account: only the order that holds it now offers its certificate', async () => {
+    const piece = await stockPiece('66');
+    const buyer = await createAccount(t.db);
+    const first = await shippedOrder(buyer.id, piece, '66');
+    await register(buyer.id, piece.code.data, piece.claimCode!, piece.product.id);
+    clock.advance(MINUTE);
+    const r = await orders().returnOrder(first, { outcome: 'RESTOCKED', locationId: france, note: 'Returned within the delay.' }, admin);
+    // Bought again, registered again by the same account with the new code: its ownership is open once more.
+    const again = await shippedOrder(buyer.id, { ...piece, claimCode: r.claimCode }, '66');
+    await register(buyer.id, piece.code.data, r.claimCode!, piece.product.id, false);
+    expect((await ctx.services.ownership.currentOwner(piece.product.productId))?.accountId).toBe(buyer.id);
+    const mine = new Map((await orders().forAccount(buyer.id)).map((o) => [o.id, o]));
+    expect([mine.get(first)!.status, mine.get(first)!.documents.certificate]).toEqual(['RETURNED', false]);
+    expect([mine.get(again)!.status, mine.get(again)!.documents.certificate]).toEqual(['DELIVERED', true]);
+    await rejects(ctx.services.ownershipCertificates.orderCertificatePdf(buyer.id, first), 'CERTIFICATE_NOT_AVAILABLE', 409);
+    expect((await ctx.services.ownershipCertificates.orderCertificatePdf(buyer.id, again)).contentType).toBe('application/pdf');
   });
 
   it('to the archive, a piece its buyer registered: ORBES takes the ownership back and the piece is retired; no claim code, nothing back in stock', async () => {

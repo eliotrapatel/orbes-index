@@ -121,6 +121,20 @@ const GLYPHS: Readonly<Record<string, GlyphDef>> = {
   '+': { w: 0.52, ops: [['M', 0.26, 0.32], ['L', 0.26, 0.8], ['M', 0.02, 0.56], ['L', 0.5, 0.56]] },
   '(': { w: 0.3, ops: [['M', ...pointOn(0.3, 0.5, 0.26, 0.6, 236)], ['arc', 0.3, 0.5, 0.26, 0.6, 236, 124]] },
   ')': { w: 0.3, ops: [['M', ...pointOn(0, 0.5, 0.26, 0.6, -56)], ['arc', 0, 0.5, 0.26, 0.6, -56, 56]] },
+  // The underscore of an email (jean_dupont@…), on the baseline.
+  _: { w: 0.5, ops: [['M', 0.02, 1], ['L', 0.48, 1]] },
+  // The ampersand of an address (Arts & Métiers): a loop on the cap line, a bowl on the baseline, the stroke crossing.
+  '&': {
+    w: 0.72,
+    ops: [
+      ['M', 0.7, 1],
+      lineAt(0.3, 0.21, 0.18, 135),
+      arc(0.3, 0.21, 0.18, 135, 405),
+      lineAt(0.3, 0.73, 0.26, 215),
+      arc(0.3, 0.73, 0.26, 215, 20),
+      ['L', 0.7, 0.5],
+    ],
+  },
   '@': {
     w: 1.0,
     ops: [
@@ -134,7 +148,7 @@ const GLYPHS: Readonly<Record<string, GlyphDef>> = {
 };
 
 /** The characters only documents letter (an invoice's address, a buyer's email): never on a piece's label or card. */
-const DOCUMENT_ONLY = Object.freeze([',', "'", '+', '(', ')', '@']);
+const DOCUMENT_ONLY = Object.freeze([',', "'", '+', '(', ')', '&', '_', '@']);
 
 /** Space between glyph boxes before tracking, in cap heights. */
 const SIDE_BEARING = 0.16;
@@ -144,7 +158,7 @@ const DECIMALS = 3;
 
 /** What a label, a card or a certificate letters (toLabelText). */
 export const LABEL_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS).filter((ch) => !DOCUMENT_ONLY.includes(ch)));
-/** What a document letters besides (toDocumentText): the punctuation of an address and of an email. */
+/** What a document letters besides (toDocumentText): the punctuation of an address and of an email (the slash a label has already). */
 export const DOCUMENT_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS));
 
 /** Letters that do not decompose into a base letter and accents (NFKD), spelt the way French and English print them in capitals. */
@@ -166,7 +180,8 @@ const APOSTROPHES = /[\u2018\u2019\u02bc]/g;
 
 /**
  * Free text on a document (an invoice, a credit note: a buyer's name, address and email) as the lettering can draw it:
- * as toLabelText, keeping besides the comma, the apostrophe, the plus, parentheses and the at sign (DOCUMENT_CHARSET).
+ * as toLabelText, keeping besides the comma, the apostrophe, the plus, parentheses, the ampersand, the underscore and
+ * the at sign (DOCUMENT_CHARSET).
  * "Rue de l’Église, 12" → "RUE DE L'EGLISE, 12". Never throws.
  */
 export function toDocumentText(text: string): string {

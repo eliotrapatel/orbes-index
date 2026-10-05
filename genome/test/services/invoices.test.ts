@@ -235,6 +235,16 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect(invoiceTwo!.creditedBy).toEqual({ id: credit!.id, number: credit!.number });
     expect((await invoices().list({ month: '2027-03', kind: 'INVOICE' })).items).toHaveLength(2);
     expect((await invoices().list({ month: '2027-03', q: credit!.order.reference.toLowerCase() })).items.map((i) => i.id)).toEqual([credit!.id, invoiceTwo!.id]);
+    // The month's totals stay the whole month's, whatever the kind and the search keep.
+    const credits = await invoices().list({ month: '2027-03', kind: 'CREDIT_NOTE' });
+    expect(credits.items.map((i) => i.id)).toEqual([credit!.id]);
+    expect(credits.totals).toEqual(march.totals);
+    expect((await invoices().list({ month: '2027-03', q: march.items[2]!.order.reference })).totals).toEqual(march.totals);
+    // A number in part, the credit note found by the invoice it cancels; nothing for a search matching none.
+    expect((await invoices().list({ month: '2027-03', q: invoiceTwo!.number })).items.map((i) => i.id)).toEqual([credit!.id, invoiceTwo!.id]);
+    expect((await invoices().list({ month: '2027-03', q: credit!.number.slice(0, 7).toLowerCase() })).items.map((i) => i.id)).toEqual([credit!.id]);
+    expect((await invoices().list({ month: '2027-03', q: '%' })).items).toEqual([]);
+    expect((await invoices().list({ month: '2027-03', q: 'INV_2027' })).items).toEqual([]);
     expect((await invoices().list({})).month).toBe('2027-04');
     await rejects(invoices().list({ month: '2027-3' }), 'VALIDATION_FAILED', 400);
 
