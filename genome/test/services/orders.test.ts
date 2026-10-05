@@ -31,7 +31,6 @@ import { accountOfTier, createAccount, createLiveRelease, liveFixtureOn, type Li
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
-const NOTE = 'Agreed with the client by phone.';
 
 async function rejects(p: Promise<unknown>, code: string, status?: number): Promise<DomainError> {
   const e = await p.then(
@@ -705,36 +704,6 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       clock.advance(MINUTE);
       expect((await orders().setBuyer(o.id, { name: null, address: null }, admin)).buyer).toEqual({ name: null, address: null });
       expect((await auditsOf(o.id, 'order.buyer')).at(-1)!.details).toMatchObject({ cleared: true });
-    });
-  });
-
-  // ── the LIVE resolution, carried by the orders ───────────────────────────
-
-  describe('the LIVE RELEASE\'s Client Services resolution', () => {
-    it('CONCLUDED pays the reservation\'s orders; CANCELLED cancels them, releasing what they hold; refused once one is shipped', async () => {
-      const concluded = await liveSale({ quantity: 2 });
-      clock.advance(MINUTE);
-      await ctx.services.liveConsole.resolve(concluded.release.id, concluded.entry.id, { resolution: 'CONCLUDED', note: NOTE }, admin);
-      expect((await Promise.all(concluded.orders.map((o) => orderRow(o.id)))).map((o) => [o.status, o.paid_at])).toEqual([
-        ['PAID', clock.now()],
-        ['PAID', clock.now()],
-      ]);
-      expect((await eventsOf(concluded.orders[0]!.id)).at(-1)).toMatchObject({ action: 'order.pay', note: NOTE });
-      const cancelled = await liveSale();
-      const [bench] = await benchOf(cancelled.orders[0]!.id);
-      clock.advance(MINUTE);
-      await ctx.services.liveConsole.resolve(cancelled.release.id, cancelled.entry.id, { resolution: 'CANCELLED', note: null }, admin);
-      expect(await orderRow(cancelled.orders[0]!.id)).toMatchObject({ status: 'CANCELLED', reservation: null });
-      expect((await productRow(bench!.product_id)).status).toBe('RETIRED');
-      expect((await eventsOf(cancelled.orders[0]!.id)).at(-1)).toMatchObject({ action: 'order.cancel', note: 'Cancelled by ORBES Client Services.' });
-      // A reservation whose order was shipped is no longer cancelled by Client Services' list: the order is.
-      await receive(await skuOf('80'), france, 1);
-      const shipped = await liveSale({ sizes: [{ label: '80', stock: 1 }] });
-      const o = shipped.orders[0]!;
-      expect(o.reservation).toBe('STOCK');
-      await walk(o.id, ['PAID', 'SHIPPED']);
-      await rejects(ctx.services.liveConsole.resolve(shipped.release.id, shipped.entry.id, { resolution: 'CANCELLED', note: null }, admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
-      expect((await t.db.selectFrom('live_entries').select('resolution').where('id', '=', shipped.entry.id).executeTakeFirstOrThrow()).resolution).toBeNull();
     });
   });
 

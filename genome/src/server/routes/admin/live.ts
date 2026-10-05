@@ -24,9 +24,6 @@
  *   POST   /api/admin/live/:id/entries/:entryId/free         OPERATOR  a hold freed: the piece to the next in line
  *   POST   /api/admin/live/:id/entries/:entryId/let-in       OPERATOR  a person in the line takes their turn now
  *   POST   /api/admin/live/:id/entries/:entryId/remove       ADMIN     removed from the release
- *   GET    /api/admin/live/:id/reservations                  AUDITOR   Client Services: the confirmed reservations
- *   GET    /api/admin/live/:id/reservations.csv              AUDITOR   the same, every one, as a CSV
- *   POST   /api/admin/live/:id/entries/:entryId/resolve      OPERATOR  CONCLUDED or CANCELLED, with a note
  *
  * The intelligence (services/live-insights.ts; each answer carries its reasoning; the live alerts and the live sell-out
  * forecast ride on the live board and its stream, `alerts` and `sellOut`):
@@ -40,9 +37,12 @@
  *   GET    /api/admin/live/:id/collectors                    AUDITOR   the collector insights
  *   GET    /api/admin/live/:id/comparison                    AUDITOR   the release beside the others
  *
- * An AUDITOR reads the customers' emails masked (`j***@example.com`), in the board, its stream, the entries, the
- * reservations and their CSV, the bot radar and the collector insights; OPERATOR and ADMIN in clear (serialize.ts). The
- * board link's secret is in the answer that issues it and nowhere else. Every mutation is audited by its service.
+ * Client Services follows the confirmed reservations through their orders (routes/admin/orders.ts: the Orders board
+ * replaces the LIVE plan's list, its CSV and its CONCLUDED / CANCELLED resolution).
+ *
+ * An AUDITOR reads the customers' emails masked (`j***@example.com`), in the board, its stream, the entries, the bot
+ * radar and the collector insights; OPERATOR and ADMIN in clear (serialize.ts). The board link's secret is in the
+ * answer that issues it and nowhere else. Every mutation is audited by its service.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import {
@@ -52,7 +52,6 @@ import {
   liveEntriesQuery,
   liveExtendBody,
   liveMessageBody,
-  liveResolveBody,
   liveStockBody,
   createLiveBody,
   pageOf,
@@ -63,7 +62,7 @@ import {
 import { adminActor, requireAdmin } from '../../http/sessions.js';
 import { dropNotFound } from '../../services/drops.js';
 import type { AdminLiveEntry } from '../../services/live.js';
-import type { AdminLiveBoard, AdminLiveReservation } from '../../services/live-console.js';
+import type { AdminLiveBoard } from '../../services/live-console.js';
 import type { BotRadar, CollectorInsights } from '../../services/live-insights.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, readsClientEmails } from './serialize.js';
@@ -76,10 +75,6 @@ export function liveEntryJson(e: AdminLiveEntry, inClear: boolean): AdminLiveEnt
 /** The live board as the caller may read it (the console's stream reads it the same way). */
 export function liveBoardJson(board: AdminLiveBoard, inClear: boolean): AdminLiveBoard {
   return { ...board, line: board.line.map((e) => liveEntryJson(e, inClear)) };
-}
-
-function reservationJson(r: AdminLiveReservation, inClear: boolean): AdminLiveReservation {
-  return { ...r, email: clientEmail(r.email, inClear) };
 }
 
 /** The bot radar as the caller may read it. */
@@ -240,30 +235,6 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id, entryId } = parse(liveAdminEntryParams, request.params);
     parse(emptyBody, request.body);
     return liveEntryJson(await live.remove(id, entryId, adminActor(request)), readsClientEmails(request));
-  });
-
-  // ── Client Services ──────────────────────────────────────────────────────
-
-  app.get('/api/admin/live/:id/reservations', async (request) => {
-    const { id } = parse(liveAdminParams, request.params);
-    const page = await liveConsole.reservations(id, pageOf(request.query));
-    const inClear = readsClientEmails(request);
-    return { ...page, items: page.items.map((r) => reservationJson(r, inClear)) };
-  });
-
-  app.get('/api/admin/live/:id/reservations.csv', async (request, reply) => {
-    const { id } = parse(liveAdminParams, request.params);
-    const inClear = readsClientEmails(request);
-    const file = await liveConsole.reservationsCsv(id, (email) => clientEmail(email, inClear));
-    reply.header('cache-control', 'no-store');
-    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
-    return reply.type(file.contentType).send(file.body);
-  });
-
-  app.post('/api/admin/live/:id/entries/:entryId/resolve', async (request) => {
-    const { id, entryId } = parse(liveAdminEntryParams, request.params);
-    const b = parse(liveResolveBody, request.body);
-    return reservationJson(await liveConsole.resolve(id, entryId, { resolution: b.resolution, note: b.note ?? null }, adminActor(request)), readsClientEmails(request));
   });
 
   // ── The intelligence (reads only) ────────────────────────────────────────

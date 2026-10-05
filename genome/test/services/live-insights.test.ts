@@ -41,6 +41,7 @@ import {
   type InsightRelease,
   type LineRates,
 } from '../../src/server/services/live-insights.js';
+import { OrderService } from '../../src/server/services/orders.js';
 import { liveNetworkHash, LIVE_GESTURE_MIN_MS } from '../../src/server/services/live.js';
 import { HOLD_MS } from '../../src/web/verify/live-model.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -789,7 +790,7 @@ describe('LiveInsightsService on a database', () => {
     expect(cmp.releases.length).toBeLessThanOrEqual(LIVE_INSIGHT_RULES.pastReleases + 1);
   });
 
-  it('leaves a reservation ORBES Client Services cancelled out of the revenue, its add-ons included', async () => {
+  it('leaves a reservation ORBES Client Services cancelled out of the revenue, its add-ons included: as its orders say', async () => {
     const reserved = await t.db.selectFrom('live_entries').select(['id', 'quantity']).where('drop_id', '=', pastId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
     const { price_minor: price } = await t.db.selectFrom('drops').select('price_minor').where('id', '=', pastId).executeTakeFirstOrThrow();
     const addon = await t.db.insertInto('live_addons').values({ drop_id: pastId, label: 'ENGRAVING', line: null, price_minor: 15_000, position: 1 }).returning('id').executeTakeFirstOrThrow();
@@ -800,7 +801,13 @@ describe('LiveInsightsService on a database', () => {
       return [own.piecesRevenueMinor, own.addonsRevenueMinor, rep.piecesRevenueMinor, rep.addonsRevenueMinor, rep.cancelled];
     };
     expect(await revenue()).toEqual([price! * reserved.quantity, 15_000, price! * reserved.quantity, 15_000, { reservations: 0, pieces: 0 }]);
-    await t.db.updateTable('live_entries').set({ resolution: 'CANCELLED', handled_by: f.admin.id, handled_at: now() }).where('id', '=', reserved.id).execute();
+    // Cancelled by ORBES Client Services: its orders are (plan LIVE RELEASE+, the Orders board), the entry's own resolution
+    // left as the LIVE plan had it.
+    const orders = new OrderService({ db: t.db, audit: f.audit, clock: f.clock.now });
+    for (const o of await t.db.selectFrom('orders').select('id').where('live_entry_id', '=', reserved.id).execute()) {
+      await orders.transition(o.id, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin);
+    }
     expect(await revenue()).toEqual([0, 0, 0, 0, { reservations: 1, pieces: reserved.quantity }]);
+    expect((await t.db.selectFrom('live_entries').select('resolution').where('id', '=', reserved.id).executeTakeFirstOrThrow()).resolution).toBeNull();
   });
 });

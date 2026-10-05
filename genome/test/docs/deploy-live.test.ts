@@ -98,10 +98,13 @@ const VERIFY_LABELS = [
   'YOUR PLACE IS RELEASED', 'Your piece is reserved in size', 'THE RELEASE HAS ENDED', 'THIS RELEASE IS OVER', 'THIS BOARD IS NOT AVAILABLE',
   'COLLECTOR WILL BE THERE', 'MY PIECES', 'PAY · ', 'TO BE REVEALED', 'TAP AGAIN TO RELEASE', 'YOUR HOLD HAS ENDED',
 ] as const;
+/** Labels of deployment D's checks the console no longer shows (plan LIVE RELEASE+: the Client Services list retired). */
+const RETIRED_CONSOLE_LABELS = ['Cancel the reservation'] as const;
+
 const CONSOLE_LABELS = [
   'Club', 'Drops', 'New live release', 'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Sizes', 'Access', 'Add-ons',
   'Publish the release', 'Boutique board', 'Issue the link', 'Copy the link', 'Pause', 'Resume', 'Message', 'Add pieces', 'End now',
-  'Client Services', 'Cancel the reservation', 'Download CSV', 'How it is read', 'Revoke the board’s link',
+  'Client Services', 'Download CSV', 'How it is read', 'Revoke the board’s link',
   'Times (UTC)', 'Silhouette revealed', 'Name revealed', 'Photograph revealed', 'Silhouette', 'Choose a photograph', 'To be sent: ', 'Save photograph',
   'Silhouette saved.', 'Extend', 'Minutes', 'Release extended.', 'Free', 'Free the hold', 'Hold freed.', 'Let in', 'Remove',
 ] as const;
@@ -244,6 +247,12 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     for (const label of CONSOLE_LABELS) {
       expect(admin, label).toContain(label);
       expect(checks, label).toContain(label);
+    }
+    // Deployment D's record keeps its check of the LIVE plan's Client Services list, which LIVE RELEASE+ retires into
+    // the Orders board: its label is the runbook's, no longer the console's.
+    for (const label of RETIRED_CONSOLE_LABELS) {
+      expect(checks, label).toContain(label);
+      expect(admin, label).not.toContain(label);
     }
     // The silhouette's check through the edge: a photograph over the 64 KB default, through the console's own upload.
     expect(checks).toContain('bien au-delà de 64 Ko');

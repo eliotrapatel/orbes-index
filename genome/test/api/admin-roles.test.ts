@@ -8,8 +8,10 @@
  * P-X08), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, a model
- * discontinued or reinstated (P-R06), and a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
- * publication, cancellation, silhouette, board link, live controls and Client Services' outcome: OPERATOR);
+ * discontinued or reinstated (P-R06), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
+ * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
+ * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, terms, buyer and piece, and the
+ * atelier's stock, pieces to make and work sheets: OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -30,7 +32,7 @@ import { adminClient, createHarness, errorOf, type Client, type Harness } from '
  * `min`: the rank the route needs; `roles`, when given, the exact roles it lets in instead (the sale mode). `headers`:
  * a body that is not JSON (the photographs of F-04 take the image itself).
  */
-type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; headers?: Record<string, string>; min: AdminRole; roles?: readonly AdminRole[]; group: string };
+type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; body?: unknown; headers?: Record<string, string>; min: AdminRole; roles?: readonly AdminRole[]; group: string };
 const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
 const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
@@ -115,7 +117,7 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
   // The LIVE RELEASES (plan of 2026-10-04): read by an AUDITOR; created, edited, published, cancelled, their silhouette and
-  // board link, their live controls and Client Services' outcome by an OPERATOR; END NOW and REMOVE by an ADMIN.
+  // board link and their live controls by an OPERATOR; END NOW and REMOVE by an ADMIN.
   { group: 'live', method: 'GET', url: '/api/admin/live', min: 'AUDITOR' },
   { group: 'live', method: 'POST', url: '/api/admin/live', body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}`, min: 'AUDITOR' },
@@ -141,9 +143,6 @@ const PROBES: Probe[] = [
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/free`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/let-in`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/remove`, body: INVALID, min: 'ADMIN' },
-  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/reservations`, min: 'AUDITOR' },
-  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/reservations.csv`, min: 'AUDITOR' },
-  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/resolve`, body: INVALID, min: 'OPERATOR' },
   // The intelligence: reads for every console role from AUDITOR (the emails masked for an AUDITOR by the routes).
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/plan`, min: 'AUDITOR' },
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/forecast`, min: 'AUDITOR' },
@@ -171,6 +170,38 @@ const PROBES: Probe[] = [
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests', min: 'AUDITOR' },
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests?status=CLOSED', min: 'AUDITOR' },
   { group: 'requests', method: 'POST', url: `/api/admin/club/requests/${UUID}/close`, body: INVALID, min: 'OPERATOR' },
+  // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
+  // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
+  { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
+  { group: 'orders', method: 'GET', url: `/api/admin/orders?channel=LIVE&dropId=${UUID}&locationId=${UUID}&late=true&q=OR-1`, min: 'AUDITOR' },
+  { group: 'orders', method: 'GET', url: '/api/admin/orders.csv', min: 'AUDITOR' },
+  { group: 'orders', method: 'GET', url: '/api/admin/orders/alerts', min: 'AUDITOR' },
+  { group: 'orders', method: 'PUT', url: '/api/admin/orders/alerts', body: INVALID, min: 'ADMIN' },
+  { group: 'orders', method: 'GET', url: `/api/admin/orders/${UUID}`, min: 'AUDITOR' },
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/transition`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/location`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'PATCH', url: `/api/admin/orders/${UUID}/terms`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'PUT', url: `/api/admin/orders/${UUID}/buyer`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/piece`, body: INVALID, min: 'OPERATOR' },
+  { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
+  { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
+  { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'logistics', method: 'GET', url: '/api/admin/carriers', min: 'AUDITOR' },
+  { group: 'logistics', method: 'POST', url: '/api/admin/carriers', body: INVALID, min: 'ADMIN' },
+  { group: 'logistics', method: 'PATCH', url: `/api/admin/carriers/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/stock', min: 'AUDITOR' },
+  { group: 'atelier', method: 'GET', url: `/api/admin/atelier/stock?modelId=${UUID}&locationId=${UUID}`, min: 'AUDITOR' },
+  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/stock/transfer', body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/stock/adjust', body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'PUT', url: '/api/admin/atelier/thresholds', body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/make', body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/bench', min: 'AUDITOR' },
+  { group: 'atelier', method: 'GET', url: `/api/admin/atelier/bench?view=ALL&origin=STOCK&skuId=${UUID}&locationId=${UUID}`, min: 'AUDITOR' },
+  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/bench.csv', min: 'AUDITOR' },
+  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/start`, body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/done`, body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
+  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/sheets', body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
@@ -255,6 +286,9 @@ describe('admin role enforcement', () => {
       'circle',
       'tiers',
       'live',
+      'orders',
+      'logistics',
+      'atelier',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

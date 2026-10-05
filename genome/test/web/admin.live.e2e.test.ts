@@ -9,16 +9,17 @@
  *     link (shown once) and publishes it with a post of the circle. Once announced, nothing edits it any more.
  *  2. A release live now: the board follows the console's stream (no reload): the line, LET IN, the turns given by the
  *     engine, a seal held, FREE, REMOVE (ADMIN), PAUSE and RESUME, a host message, ADD PIECES with what the quantity line
- *     promised; Client Services concludes a reservation with a note and downloads the CSV; END NOW after the typed phrase.
+ *     promised; a reservation confirmed becomes its orders, followed on the Orders board narrowed to the release (plan
+ *     LIVE RELEASE+); END NOW after the typed phrase.
  *  3. An OPERATOR runs the controls but neither ends nor removes; a page left while its open entries are on their way
  *     starts no stream once they arrive, the page on screen keeping its own; an AUDITOR reads the board, the line and
- *     the reservations with the emails masked, without one action.
+ *     the release's orders with the emails masked, without one action.
  *  4. A release published to be announced later: its post of the circle added then withdrawn on its page; then, the page
  *     never reloaded, its board's stream brings each state and the page is drawn again for it: ADD PIECES and the host
  *     message once announced, no cancellation once the room opens, PAUSE at T0, no control left after the end.
  * No CSP violation, no page error, no figure in the display face.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -385,25 +386,23 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('.live__sizes tbody tr', { hasText: '54' }).locator('td').nth(1).textContent(), { timeout: 10_000 }).toBe('4');
 
-    // Client Services: a reservation confirmed on /verify, concluded with a note; the CSV.
+    // Client Services: a reservation confirmed on /verify becomes its orders, followed on the Orders board, narrowed to
+    // the release from its page (plan LIVE RELEASE+: the LIVE plan's list is retired).
     await secure(y, r.id);
     const engraving = (await ctx.services.liveConsole.get(r.id)).addons[0]!;
     await ctx.services.live.setAddons(y.id, r.id, [engraving.id], y.actor);
     await ctx.services.live.confirm(y.id, r.id, y.actor);
     await p.reload();
-    const reservation = p.locator('#live-services tbody tr');
-    await expect.poll(() => reservation.count()).toBe(1);
-    expect(await reservation.textContent()).toContain(y.email);
-    expect(await reservation.textContent()).toContain('ENGRAVING € 150');
-    expect(await reservation.textContent()).toContain('€ 9 900');
-    await reservation.locator('[data-testid=live-conclude]').click();
-    await p.fill('dialog textarea[name=note]', 'Paid by transfer; delivered in Paris.');
-    await confirmDialog(p);
-    await expect.poll(() => reservation.locator('[data-testid=live-outcome]').textContent()).toMatch(/^CONCLUDEDconsole@orbes\.test · .*Paid by transfer; delivered in Paris\.$/);
-    const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=live-csv]')]);
-    expect(download.suggestedFilename()).toMatch(new RegExp(`^ORBES-live-${r.id.slice(0, 8).toUpperCase()}-reservations-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
-    const csv = readFileSync((await download.path())!, 'utf8');
-    expect(csv).toContain(`"${y.email}","54","2","EUR","4800.00","ENGRAVING (150.00)","9900.00"`);
+    await expect.poll(() => p.locator('[data-testid=live-orders]').textContent()).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
+    expect(await p.locator('#live-services tbody tr').count()).toBe(0);
+    await p.locator('#live-services a', { hasText: 'Orders of this release' }).click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
+    expect(decodeURIComponent(new URL(p.url()).hash)).toBe(`#/orders?dropId=${r.id}`);
+    const cards = p.locator('[data-testid=column-RESERVED] [data-testid=order-card]');
+    await expect.poll(() => cards.count()).toBe(2);
+    expect(await cards.first().textContent()).toContain(y.email);
+    expect(await cards.first().textContent()).toContain('ENGRAVING');
+    await go(p, `#/club/live/${r.id}`, 'THE VAULT RING');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'board');
 
@@ -474,15 +473,18 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await o.unrouteAll();
     await o.context().close();
 
-    // An AUDITOR reads the board, the line and the reservations, the emails masked, without one action.
+    // An AUDITOR reads the board, the line and the release's orders, the emails masked, without one action.
     const a = await open(AUDITOR);
     await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
-    await expect.poll(() => a.locator('#live-services tbody tr').count()).toBe(1);
-    expect(await a.locator('#live-services tbody tr').textContent()).toContain('l***@example.com');
+    await expect.poll(() => a.locator('[data-testid=live-orders]').textContent()).toMatch(/^1 confirmed reservation/);
+    await go(a, `#/orders?dropId=${r.id}`, 'Orders');
+    await expect.poll(() => a.locator('[data-testid=order-card]').count()).toBe(2);
+    expect(await a.locator('[data-testid=order-card]').first().textContent()).toContain('l***@example.com');
     expect(await a.locator('body').textContent()).not.toContain(y.email);
+    await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
     await go(a, `#/club/live/${live2.id}`, 'THE SECOND RING');
     await expect.poll(() => a.locator('[data-testid=live-entry-account]').first().textContent()).toBe('l***@example.com');
-    for (const action of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in', 'live-free', 'live-remove', 'live-board-issue', 'live-cancel', 'live-conclude']) {
+    for (const action of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in', 'live-free', 'live-remove', 'live-board-issue', 'live-cancel']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     await go(a, '#/club?tab=drops', 'Club');

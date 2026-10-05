@@ -27,10 +27,13 @@
  *                archive.
  *   history      every change is one event of the order (order_events: its audit action, the status after it, a note,
  *                who, when), one audit entry (`order.create`, `.pay`, `.ship`, `.deliver`, `.cancel`, `.return`,
- *                `.location`, `.terms`, `.buyer`) and one entry of the event journal (the order as it stands after
+ *                `.location`, `.terms`, `.buyer`, `.link`) and one entry of the event journal (the order as it stands after
  *                it; services/journal.ts), in the transaction of the change; the pieces to make (`bench.create`,
- *                `.cancel`, `.move`, `.engrave`), the identities (`product.reserve`, `product.retire`) and the stock (`stock.move`)
- *                journal their own changes.
+ *                `.cancel`, `.move`, `.engrave`, and the atelier's `.start` and `.done`: services/atelier.ts), the
+ *                identities (`product.reserve`, `product.retire`, `product.issue`) and the stock (`stock.move`) journal
+ *                their own changes.
+ *   the piece    the one that fulfils the order, linked when the atelier issues its piece to make or picks one from
+ *                stock (`attachPiece`, `order.link`): the order then holds it in stock until it is shipped.
  *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
  *                only, never in the audit log, the order's events nor the journal (which say they were entered, never
  *                what they are), and exported to the account under the right of access (`accountOrders`); the
@@ -38,9 +41,9 @@
  *                The engraving text likewise stays on the order and its piece to make.
  *   Shopify      an order keeps its future Shopify id (`shopify_order_id`); nothing calls Shopify in this lot.
  *
- * The LIVE RELEASES' Client Services resolution maps onto the orders and is carried by them (`resolveLiveOrders`:
- * CONCLUDED → PAID, CANCELLED → CANCELLED). The sales committed before migration 0022, or by the previous image, get
- * their orders at boot (`OrderService.prepare`), the resolution mapped the same way.
+ * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
+ * sales committed before migration 0022, or by the previous image, get their orders at boot (`OrderService.prepare`),
+ * a resolution already given mapped (CONCLUDED → PAID, CANCELLED → CANCELLED).
  *
  * Lock order: the source's rows (the release, then the entry; the request), the order, the SKU (stock.ts lockSku), the
  * piece to make and its identity; the journal; the audit log last: the functions a sale's transaction calls return
@@ -52,7 +55,6 @@ import {
   RETURN_OUTCOMES,
   jsonText,
   type JsonObject,
-  type LiveResolution,
   type OrderAddonSnapshot,
   type OrderChannel,
   type OrderReservation,
@@ -751,26 +753,18 @@ export async function deliverOnRegistration(tx: Db, productUuid: string, account
 }
 
 /**
- * The resolution of a confirmed reservation of a LIVE RELEASE, carried by its orders (the LIVE plan's Client Services
- * list, retired into the orders): CONCLUDED pays each order still RESERVED; CANCELLED cancels each order RESERVED or
- * PAID (409 ORDER_TRANSITION_NOT_ALLOWED when one has been shipped). The orders the entry lacks are created first (a
- * cancellation creates them holding nothing). In the caller's transaction, the release's and the entry's rows held;
- * returns the audit entries to write last.
+ * Link the piece that fulfils an order (Interconnection: the atelier issues it, or picks one from stock), in the
+ * caller's transaction, the order's row and its SKU locked, the piece issued: the order RESERVED or PAID now holds
+ * that piece in stock at its location (`reservation` STOCK, `product_id`); `via` says how (`bench`: its piece to make
+ * finished, `stock`: a piece picked from the stock). One event, one journal entry and the audit entry returned for the
+ * caller to write last (`order.link`).
  */
-export async function resolveLiveOrders(tx: Db, entryId: string, resolution: LiveResolution, note: string | null, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
-  const notes: AuditRecordInput[] = [];
-  notes.push(...(await ordersForLiveEntry(tx, entryId, actor, now, { hold: resolution !== 'CANCELLED' })).notes);
-  const orders = await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', entryId).orderBy('piece').forUpdate().execute();
-  for (const o of orders) {
-    if (resolution === 'CONCLUDED') {
-      if (o.status === 'RESERVED') await step(tx, o, { to: 'PAID', note }, actor, now, notes);
-    } else if (o.status === 'RESERVED' || o.status === 'PAID') {
-      await step(tx, o, { to: 'CANCELLED', note: note ?? 'Cancelled by ORBES Client Services.' }, actor, now, notes);
-    } else if (o.status !== 'CANCELLED') {
-      throw stepNotAllowed(o.status, 'CANCELLED');
-    }
-  }
-  return notes;
+export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via: 'bench' | 'stock', actor: Actor, now: Date): Promise<{ order: OrderRow; note: AuditRecordInput }> {
+  if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
+  if (o.product_id !== null) throw pieceLinked();
+  const after = await updateOrder(tx, o.id, { product_id: productUuid, reservation: 'STOCK' });
+  const note = await recordChange(tx, o, after, 'order.link', { details: { productId: productUuid, via, reservation: 'STOCK' } }, actor, now);
+  return { order: after, note };
 }
 
 /** Every order of an account, oldest first, for its right-of-access export (OwnerService.exportData). */

@@ -10,13 +10,14 @@
  *    would refuse before anything is sent, and the change to send (the lists with the ids they keep).
  *  - What each role may do now: edit until the announcement, publish, cancel before the room opens, the silhouette and
  *    the board link (OPERATOR); the live controls (OPERATOR: pause, resume, extend, add pieces, free a hold, let in, a
- *    host message; ADMIN: end now with a typed phrase, remove from the line); Client Services' outcome (OPERATOR).
- *  - The live board's figures, and a reservation's reference, add-ons and total.
+ *    host message; ADMIN: end now with a typed phrase, remove from the line). Client Services follows each confirmed
+ *    reservation on the Orders board (plan LIVE RELEASE+: model/orders.ts).
+ *  - The live board's figures, and a reservation's reference.
  */
 import { formatCount, formatDateTime } from '../format.js';
 import { can } from './permissions.js';
 import { localUtc, tierName, utcInstant } from './club.js';
-import { LIVE_CURRENCIES, type AdminRole, type LiveBoard, type LiveCard, type LiveCurrency, type LiveEntry, type LivePhase, type LiveRelease, type LiveReservation, type LiveSettings, type LiveSettingsChange } from '../types.js';
+import { LIVE_CURRENCIES, type AdminRole, type LiveBoard, type LiveCard, type LiveCurrency, type LiveEntry, type LivePhase, type LiveRelease, type LiveSettings, type LiveSettingsChange } from '../types.js';
 
 /** The bounds of services/live.ts and services/live-console.ts (test/web/admin.model.test.ts compares them). */
 export const LIVE_LIMITS = Object.freeze({
@@ -38,7 +39,6 @@ export const LIVE_LIMITS = Object.freeze({
   extendMinutes: Object.freeze({ min: 1, max: 240 }),
   addPieces: Object.freeze({ min: 1, max: 1000 }),
   message: 140,
-  note: 500,
   accessModels: 20,
   /** The open entries the live board carries. */
   line: 200,
@@ -67,7 +67,7 @@ export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'>)
       return 'Live: the line takes its turns, size by size, while pieces are free. The board below follows it second by second.';
     case 'ENDED':
       return r.over
-        ? 'Over: the release has left THE RELEASES. ORBES Client Services concludes each confirmed reservation below.'
+        ? 'Over: the release has left THE RELEASES. ORBES Client Services follows each confirmed reservation on the Orders board.'
         : 'Ending: no new turn; the turns and holds still running finish at their deadlines.';
     default:
       return 'Cancelled before its room opened: its page answers that it is not known.';
@@ -521,19 +521,7 @@ export function liveEntryDeadline(e: Pick<LiveEntry, 'status' | 'turnExpiresAt' 
   return null;
 }
 
-// ── Client Services ────────────────────────────────────────────────────────
-
-/** A reservation's add-ons: `ENGRAVING € 150 · GIFT BOX € 0`, or none. */
-export function reservationAddons(r: Pick<LiveReservation, 'addons' | 'currency'>): string {
-  return r.addons.length ? r.addons.map((a) => `${a.label} ${formatMoney(a.priceMinor, r.currency)}`).join(' · ') : 'None';
-}
-
-/** Whether `role` may conclude or cancel the reservation now: OPERATOR, while it has no outcome. */
-export function canResolve(r: Pick<LiveReservation, 'resolution'>, role: AdminRole | null | undefined): boolean {
-  return r.resolution === null && can(role, 'manageDrops');
-}
-
-/** The phases where the release has been published and lives (the board, the line, Client Services). */
+/** The phases where the release has been published and lives (the board, the line, its orders). */
 export function hasBoard(phase: LivePhase): boolean {
   return phase !== 'DRAFT' && phase !== 'CANCELLED';
 }

@@ -6,7 +6,8 @@
  * unless a route asks for ADMIN (keys, revocations, reinstatement,
  * categories, console users, a customer's recovery code, lock and export,
  * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
- * ended now or an entry removed from it); every mutation needs the CSRF token and a same-origin
+ * ended now or an entry removed from it, the delays of the order alerts,
+ * a location or a carrier added or changed); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
@@ -22,6 +23,7 @@ import { sessionGuard } from '../../http/sessions.js';
 import type { RouteDeps } from '../public.js';
 import { adminUserRoutes } from './admins.js';
 import { adminAnalyticsRoutes } from './analytics.js';
+import { adminAtelierRoutes } from './atelier.js';
 import { adminDocumentRoutes } from './documents.js';
 import { adminDropRoutes } from './drops.js';
 import { adminAuthRoutes } from './auth.js';
@@ -34,7 +36,9 @@ import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminKeyRoutes } from './keys.js';
 import { adminLiveRoutes } from './live.js';
+import { adminLogisticsRoutes } from './logistics.js';
 import { adminMediaRoutes } from './media.js';
+import { adminOrderRoutes } from './orders.js';
 import { adminOwnerRoutes } from './owners.js';
 import { adminProductRoutes } from './products.js';
 import { adminRecordRoutes } from './records.js';
@@ -65,6 +69,9 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminOwnerRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);
+  await app.register(adminOrderRoutes, deps);
+  await app.register(adminAtelierRoutes, deps);
+  await app.register(adminLogisticsRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);
   await app.register(adminReportRoutes, deps);

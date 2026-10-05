@@ -25,6 +25,10 @@ export const ROUTES = [
   /** A LIVE RELEASE's page: from its row of the Drops tab, no link of its own in the sidebar. */
   { name: 'liveRelease', path: '/club/live/:dropId' },
   { name: 'circlePost', path: '/club/circle/:postId' },
+  /** The orders (plan LIVE RELEASE+): the board; an order's page and its packing slip, from its card. */
+  { name: 'orders', path: '/orders' },
+  { name: 'order', path: '/orders/:orderId' },
+  { name: 'packingSlip', path: '/orders/:orderId/slip' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },
   { name: 'cases', path: '/cases' },
@@ -33,11 +37,16 @@ export const ROUTES = [
   { name: 'audit', path: '/audit' },
   { name: 'team', path: '/team' },
   { name: 'catalogue', path: '/catalogue' },
+  /** The atelier (plan LIVE RELEASE+): the stock, the pieces to make; their work sheets printed from it, no link of their own. */
+  { name: 'atelier', path: '/atelier' },
+  { name: 'workSheets', path: '/atelier/sheets' },
   /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */
   { name: 'model', path: '/catalogue/:modelId' },
   { name: 'retailers', path: '/retailers' },
   { name: 'sale', path: '/sale' },
   { name: 'documents', path: '/documents' },
+  /** The settings of the orders (plan LIVE RELEASE+): the delays of their alerts, the locations, the carriers; from the Orders board and the Atelier. */
+  { name: 'settings', path: '/settings' },
   { name: 'document', path: '/documents/:docId' },
 ] as const;
 

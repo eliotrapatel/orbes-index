@@ -484,8 +484,10 @@ describe('legal pages: the privacy policy, written from the code', () => {
       ['drop.live.let_in', 'letting you in', 'vous faire entrer'],
       ['drop.live.free', 'freeing your piece', 'libérer votre pièce'],
       ['drop.live.remove', 'removing your entry', 'retirer votre entrée'],
-      ['drop.live.resolve', 'concluding or cancelling your reservation, never its note', 'conclure ou annuler votre réservation, jamais sa note'],
     ];
+    // Concluding or cancelling a reservation: the LIVE plan's `drop.live.resolve`, retired into the orders' steps (plan
+    // LIVE RELEASE+: `order.pay`, `order.cancel`), which name the order and never its note.
+    const RESOLVED = ['concluding or cancelling your reservation, never its note', 'conclure ou annuler votre réservation, jamais sa note'] as const;
     // What the code records about one account: an action whose details carry the entry, or the interest's own.
     const code = ['genome/src/server/services/live.ts', 'genome/src/server/services/live-console.ts'].map(readDoc).join('\n');
     const details = new Map<string, string[]>();
@@ -493,13 +495,19 @@ describe('legal pages: the privacy policy, written from the code', () => {
     const personal = [...details].filter(([action, d]) => action.startsWith('drop.live.interest') || d.some((x) => /\bentryId\b/.test(x))).map(([action]) => action);
     expect(personal.sort()).toEqual(NAMED.map(([action]) => action).sort());
     expect(details.get('drop.live.secure')!.join()).toContain('gestureMs');
-    expect(details.get('drop.live.resolve')!.join()).not.toMatch(/note:/);
+    expect(details.has('drop.live.resolve')).toBe(false);
+    const orders = readDoc('genome/src/server/services/orders.ts');
+    expect(orders).toContain("PAID: 'order.pay'");
+    expect(orders).toContain("CANCELLED: 'order.cancel'");
+    // The audit entry of an order's change says a note was written (`noted`), never what it says.
+    expect(orders).toMatch(/details: \{ \.\.\.\(before \? \{ from: before\.status \} : \{ channel: after\.channel \}\), to: after\.status, \.\.\.details, \.\.\.\(change\.note \? \{ noted: true \} : \{\}\) \}/);
     // The engine's own: the line at the opening and the end, as counts, naming no entry.
     expect(details.get('drop.live.queue')).toEqual([' entries: placed.length ']);
     expect(details.get('drop.live.end')!.join()).not.toMatch(/entryId|account/);
     for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture et la fin d'une sortie n'y sont inscrites qu'en nombres."]] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'live');
       for (const row of NAMED) expect(text, `${lang}: ${row[0]}`).toContain(row[i]);
+      expect(text).toContain(RESOLVED[i - 1]!);
       expect(text).toContain(counts);
     }
   });

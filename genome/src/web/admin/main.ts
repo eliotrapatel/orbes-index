@@ -41,6 +41,7 @@ import { failure, loading } from './ui/components.js';
 import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
 import { notify, notifyError } from './ui/toast.js';
 import { analyticsView } from './views/analytics.js';
+import { atelierView } from './views/atelier.js';
 import { documentsView, documentView } from './views/documents.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
@@ -57,6 +58,8 @@ import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
+import { orderView } from './views/order.js';
+import { ordersView } from './views/orders.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -68,6 +71,9 @@ import { revocationsView } from './views/revocations.js';
 import { disposeSaleView, saleView } from './views/sale.js';
 import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
+import { settingsView } from './views/settings.js';
+import { workSheetsView } from './views/sheets.js';
+import { packingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
 
@@ -93,6 +99,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'genomes', label: 'Genomes' },
       { route: 'codes', label: 'Codes' },
       { route: 'catalogue', label: 'Catalogue' },
+      { route: 'atelier', label: 'Atelier' },
     ],
   },
   {
@@ -109,6 +116,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { route: 'owners', label: 'Owners' },
       { route: 'club', label: 'Club' },
+      { route: 'orders', label: 'Orders' },
       { route: 'warranties', label: 'Warranties' },
       { route: 'retailers', label: 'Points of sale' },
       { route: 'sale', label: 'Sale mode', cap: 'sell' },
@@ -152,6 +160,12 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   retailers: { view: retailersView, title: 'Points of sale', nav: 'retailers' },
   sale: { view: saleView, title: 'Sale mode', nav: 'sale' },
   documents: { view: documentsView, title: 'Documents', nav: 'documents' },
+  settings: { view: settingsView, title: 'Settings', nav: 'orders' },
+  orders: { view: ordersView, title: 'Orders', nav: 'orders' },
+  order: { view: orderView, title: 'Order', nav: 'orders' },
+  packingSlip: { view: packingSlipView, title: 'Packing slip', nav: 'orders' },
+  atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
+  workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };
 

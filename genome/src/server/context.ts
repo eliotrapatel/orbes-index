@@ -48,6 +48,8 @@ import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
 import { OrderService } from './services/orders.js';
+import { AtelierService } from './services/atelier.js';
+import { FulfilmentService } from './services/fulfilment.js';
 import { OwnerService } from './services/owners.js';
 import { SalonService } from './services/salon.js';
 import { ScanReportService } from './services/scan-reports.js';
@@ -111,6 +113,10 @@ export interface AppServices {
   stock: StockService;
   /** The orders of every sales channel (plan LIVE RELEASE+), step by step: what each holds, its steps, its buyer; the boot's setup. */
   orders: OrderService;
+  /** The fulfilment board (plan LIVE RELEASE+): the orders by step, their time in it and the late ones (M3), the CSV, the delays. */
+  fulfilment: FulfilmentService;
+  /** The atelier (plan LIVE RELEASE+): the stock and its thresholds, the pieces to make, their work sheets, the pieces issued. */
+  atelier: AtelierService;
 }
 
 export interface AppContext {
@@ -213,6 +219,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
     const stock = new StockService({ db, audit, clock });
     const orders = new OrderService({ db, audit, clock, log });
+    const fulfilment = new FulfilmentService({ db, audit, orders, clock });
+    const atelier = new AtelierService({ db, audit, issuance, orders, clock });
 
     const services: AppServices = {
       issuance,
@@ -243,6 +251,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       liveInsights,
       stock,
       orders,
+      fulfilment,
+      atelier,
       ...overrides.services,
     };
 

@@ -128,7 +128,8 @@ body {
 .side__link {
   position: relative;
   display: block;
-  padding: 4px 0;
+  /* 3 px: the sidebar of an ADMIN (Orders and Atelier included, plan LIVE RELEASE+) fits a 900 px screen with its foot. */
+  padding: 3px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;
@@ -3346,7 +3347,13 @@ a.bar__label:hover {
 .saleshell__link,
 .sale__status,
 .sale__title,
-.sale__label {
+.sale__label,
+.board__title,
+.ocard__channel,
+.osteps__label,
+.printdoc__title,
+.printdoc__label,
+.printdoc__heading {
   font-family: var(--font-display);
 }
 
@@ -3364,6 +3371,427 @@ a.bar__label:hover {
 .cbtn__figure,
 .range__figure {
   font-family: var(--font);
+}
+
+/* ── Orders, the atelier, the settings (plan LIVE RELEASE+) ──────────────── */
+
+.panel__text {
+  margin: 12px 0 4px;
+  max-width: 760px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.prewrap {
+  white-space: pre-line;
+}
+
+.breakall {
+  overflow-wrap: anywhere;
+}
+
+/* The board: its figures and delays, then six columns side by side (scrolled sideways when the console is narrow). */
+.board__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin: 18px 0 22px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.board__figures {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(168px, 1fr));
+  gap: 0;
+  overflow-x: auto;
+  border-top: 1px solid var(--ink);
+}
+
+.board__col {
+  min-width: 0;
+  padding: 0 14px 24px;
+  border-left: 1px solid var(--hairline);
+}
+
+.board__col:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.board__col--cancelled,
+.board__col--returned {
+  background: var(--ivory);
+  padding-left: 14px;
+}
+
+.board__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 16px 0 14px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.board__title {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.board__count {
+  font-size: var(--fs-line);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.board__late {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.board__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.board__empty,
+.board__more {
+  padding-top: 14px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* A card: a link to the order's page, hairline-framed; a late one carries an ink rule on its left. */
+.ocard {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 14px 14px 12px;
+  background: var(--white);
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.ocard:hover,
+.ocard:focus-visible {
+  border-color: var(--ink);
+}
+
+.ocard--late {
+  border-left: 3px solid var(--ink);
+}
+
+.ocard__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+}
+
+.ocard__ref,
+.ocard__channel {
+  white-space: nowrap;
+}
+
+.ocard__ref {
+  font-size: var(--fs-mono-sm);
+}
+
+.ocard__channel {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ocard__origin {
+  font-size: var(--fs-line);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ocard__piece {
+  font-size: var(--fs-line);
+}
+
+.ocard__who,
+.ocard__line,
+.ocard__holds {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.ocard__time {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An order's steps: RESERVED → PAID → SHIPPED → DELIVERED, each with when it was reached. */
+.osteps {
+  list-style: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  margin: 18px 0 8px;
+  padding: 0;
+}
+
+.osteps__step {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px 0 0;
+  border-top: 1px solid var(--hairline-strong);
+  color: var(--ink-soft);
+}
+
+.osteps__step.is-reached {
+  border-top: 3px solid var(--ink);
+  color: var(--ink);
+}
+
+.osteps__step.is-current .osteps__label {
+  font-weight: 700;
+}
+
+.osteps__label {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.osteps__time {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The atelier: a group of pieces to make per release, model and size. */
+.bench {
+  margin-top: 26px;
+}
+
+.bench__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 20px;
+  padding-bottom: 6px;
+}
+
+.bench__title {
+  font-size: var(--fs-line);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.bench__counts {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.bench__head .cbtn {
+  margin-left: auto;
+}
+
+.stock__suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stock__num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.claimcode {
+  margin: 18px 0;
+  font-size: var(--fs-lead);
+  letter-spacing: 0.2em;
+}
+
+/* Printable documents (the packing slip, the work sheets): black on white, one per page; the bar above is the screen's. */
+.printbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding-bottom: 22px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.printbar__text {
+  max-width: 640px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.printbar__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.printdoc {
+  width: 100%;
+  max-width: 180mm;
+  margin: 0 auto 32px;
+  padding: 18mm 16mm;
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+}
+
+.printdoc__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.printdoc__wordmark {
+  font-size: var(--fs-title);
+}
+
+.printdoc__title {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.printdoc__refs,
+.printdoc__list {
+  margin: 0;
+}
+
+.printdoc__row {
+  display: grid;
+  grid-template-columns: 34mm minmax(0, 1fr);
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.printdoc__label {
+  padding-top: 2px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.printdoc__value {
+  margin: 0;
+  font-size: var(--fs-body);
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+
+.printdoc__block {
+  margin-top: 26px;
+}
+
+.printdoc__heading {
+  padding-bottom: 8px;
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.printdoc__text {
+  margin-top: 8px;
+  font-size: var(--fs-body);
+  letter-spacing: 0.03em;
+  line-height: 1.6;
+}
+
+.printdoc__foot {
+  margin-top: 30px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline-strong);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* A work sheet: the piece's ORBES code at its print size, beside its reference. */
+.worksheet__identity {
+  display: flex;
+  align-items: center;
+  gap: 12mm;
+  padding: 10mm 0;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.worksheet__code {
+  margin: 0;
+  flex: none;
+}
+
+.worksheet__code svg {
+  display: block;
+  width: 30mm;
+  height: auto;
+}
+
+.worksheet__id {
+  margin-top: 6px;
+  font-size: var(--fs-title);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+@media print {
+  .printbar,
+  .page-head__actions {
+    display: none !important;
+  }
+  .view--print .printdoc {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    break-after: page;
+  }
+  .view--print .printdoc:last-child {
+    break-after: auto;
+  }
+  .worksheet__code svg {
+    width: 30mm !important;
+  }
 }
 
 /* ── Narrow screens ────────────────────────────────────────────────────── */

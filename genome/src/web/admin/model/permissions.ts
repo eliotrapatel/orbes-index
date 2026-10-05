@@ -4,7 +4,8 @@
  * reinstatement, categories (created, activated, deactivated), console users,
  * points of sale, a customer's recovery code, lock and export, the draw
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
- * an entry removed from it). Every role
+ * an entry removed from it, the settings of the orders: their alerts'
+ * delays, the locations and the carriers). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -58,6 +59,17 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageClubTiers: 'OPERATOR',
   /** The Club's requests (P-X08): close a request of the private salon, with a note. */
   closeShopRequest: 'OPERATOR',
+  /**
+   * The orders (plan LIVE RELEASE+): their steps (paid, shipped, delivered, cancelled), their location, terms and buyer,
+   * the piece picked from the stock; the buyer's details in clear (an AUDITOR reads them masked).
+   */
+  manageOrders: 'OPERATOR',
+  /** The atelier: transfers, counts, minimums, pieces to make confirmed, started, finished (issued) or cancelled. */
+  manageAtelier: 'OPERATOR',
+  /** The work sheets: each carries its piece's ORBES code at print size (signed for it), as a code's download. */
+  printWorkSheets: 'OPERATOR',
+  /** The settings of the orders: the delays of their alerts, the locations, the carriers and their tracking links. */
+  manageLogistics: 'ADMIN',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
   discontinueModel: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */

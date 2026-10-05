@@ -17,6 +17,23 @@
  */
 import type {
   AdminProfile,
+  AtelierStock,
+  BenchFilters,
+  BenchItem,
+  BenchList,
+  Carrier,
+  IssueBenchInput,
+  IssuedBenchItem,
+  OrderAlertDelays,
+  OrderAlertSettings,
+  OrderBoard,
+  OrderBoardFilters,
+  OrderDetail,
+  OrderTermsChange,
+  OrderTransitionInput,
+  StockLevel,
+  StockLocation,
+  WorkSheets,
   AdminSession,
   AdminSessionInfo,
   AdminUser,
@@ -65,8 +82,6 @@ import type {
   LiveReleaseComparison,
   LiveReleasePlan,
   LiveReleaseReport,
-  LiveReservation,
-  LiveResolution,
   LiveSettings,
   LiveSettingsChange,
   LiveState,
@@ -786,19 +801,144 @@ export class AdminApi {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/remove`);
   }
 
-  liveReservations(id: string, page = 1, pageSize = 50): Promise<Paged<LiveReservation>> {
-    return this.get(`/api/admin/live/${encodeURIComponent(id)}/reservations`, { page, pageSize });
+  // ── Orders (plan LIVE RELEASE+) ──────────────────────────────────────────
+
+  /** The fulfilment board: every order the filters keep, by step (the emails masked for an AUDITOR). */
+  orderBoard(f: OrderBoardFilters = {}): Promise<OrderBoard> {
+    return this.get('/api/admin/orders', { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q });
   }
 
-  /** Every confirmed reservation as a CSV (the emails masked for an AUDITOR). */
-  async liveReservationsCsv(id: string): Promise<Download> {
-    const res = await this.request<Response>('GET', `/api/admin/live/${encodeURIComponent(id)}/reservations.csv`, { raw: true });
-    return toDownload(res, 'orbes-live-reservations.csv');
+  /** Every order the same filters keep, as a CSV (the emails and the buyers masked for an AUDITOR). */
+  async ordersCsv(f: OrderBoardFilters = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/orders.csv', {
+      raw: true,
+      query: { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q },
+    });
+    return toDownload(res, 'orbes-orders.csv');
   }
 
-  /** CONCLUDED or CANCELLED, with an optional note (Client Services). */
-  resolveLiveReservation(id: string, entryId: string, resolution: LiveResolution, note: string): Promise<LiveReservation> {
-    return this.post(`/api/admin/live/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/resolve`, note ? { resolution, note } : { resolution });
+  order(id: string): Promise<OrderDetail> {
+    return this.get(`/api/admin/orders/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: the order's next step (PAID, SHIPPED, DELIVERED, CANCELLED) with what it requires. */
+  transitionOrder(id: string, input: OrderTransitionInput): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/transition`, input);
+  }
+
+  /** OPERATOR: served from another location (what it holds moves with it). */
+  changeOrderLocation(id: string, locationId: string): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/location`, { locationId });
+  }
+
+  /** OPERATOR: a draw's or a salon's size, price and currency; any order's engraving text. */
+  setOrderTerms(id: string, change: OrderTermsChange): Promise<OrderDetail> {
+    return this.patch(`/api/admin/orders/${encodeURIComponent(id)}/terms`, change);
+  }
+
+  /** OPERATOR: the buyer's name and address (null clears one). */
+  setOrderBuyer(id: string, buyer: { name: string | null; address: string | null }): Promise<OrderDetail> {
+    return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });
+  }
+
+  /** OPERATOR: the piece picked from the stock to fulfil the order. */
+  linkOrderPiece(id: string, productId: string): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
+  }
+
+  orderAlerts(): Promise<OrderAlertSettings> {
+    return this.get('/api/admin/orders/alerts');
+  }
+
+  /** ADMIN: the delays after which an order stands out. */
+  setOrderAlerts(delays: OrderAlertDelays): Promise<OrderAlertSettings> {
+    return this.request('PUT', '/api/admin/orders/alerts', { body: delays });
+  }
+
+  // ── Locations and carriers ───────────────────────────────────────────────
+
+  locations(): Promise<Items<StockLocation>> {
+    return this.get('/api/admin/locations');
+  }
+
+  /** ADMIN. */
+  createLocation(name: string): Promise<StockLocation> {
+    return this.post('/api/admin/locations', { name });
+  }
+
+  /** ADMIN: renamed, or made the default. */
+  updateLocation(id: string, change: { name?: string; isDefault?: true }): Promise<StockLocation> {
+    return this.patch(`/api/admin/locations/${encodeURIComponent(id)}`, change);
+  }
+
+  carriers(): Promise<Items<Carrier>> {
+    return this.get('/api/admin/carriers');
+  }
+
+  /** ADMIN. */
+  createCarrier(input: { name: string; trackingUrl: string }): Promise<Carrier> {
+    return this.post('/api/admin/carriers', input);
+  }
+
+  /** ADMIN: its name, its tracking link, offered or set aside. */
+  updateCarrier(id: string, change: { name?: string; trackingUrl?: string; active?: boolean }): Promise<Carrier> {
+    return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
+  }
+
+  // ── The atelier ──────────────────────────────────────────────────────────
+
+  atelierStock(f: { modelId?: string; locationId?: string } = {}): Promise<AtelierStock> {
+    return this.get('/api/admin/atelier/stock', { modelId: f.modelId, locationId: f.locationId });
+  }
+
+  /** OPERATOR: pieces of a SKU moved between locations. */
+  transferStock(input: { skuId: string; fromLocationId: string; toLocationId: string; quantity: number; note?: string }): Promise<{ transferId: string; from: StockLevel; to: StockLevel }> {
+    return this.post('/api/admin/atelier/stock/transfer', input);
+  }
+
+  /** OPERATOR: a count corrected, with why. */
+  adjustStock(input: { skuId: string; locationId: string; delta: number; note: string }): Promise<StockLevel> {
+    return this.post('/api/admin/atelier/stock/adjust', input);
+  }
+
+  /** OPERATOR: a SKU's minimum at a location, or none. */
+  setStockThreshold(input: { skuId: string; locationId: string; minimum: number | null }): Promise<void> {
+    return this.request('PUT', '/api/admin/atelier/thresholds', { body: input });
+  }
+
+  /** OPERATOR: pieces to make for the stock (a suggestion confirmed). */
+  makeForStock(input: { skuId: string; locationId: string; quantity: number }): Promise<Items<BenchItem>> {
+    return this.post('/api/admin/atelier/make', input);
+  }
+
+  bench(f: BenchFilters = {}): Promise<BenchList> {
+    return this.get('/api/admin/atelier/bench', { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId });
+  }
+
+  /** What to make, as a CSV. */
+  async benchCsv(f: BenchFilters = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/atelier/bench.csv', { raw: true, query: { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId } });
+    return toDownload(res, 'orbes-atelier.csv');
+  }
+
+  /** OPERATOR: TO MAKE → IN PROGRESS. */
+  startBench(id: string): Promise<BenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/start`);
+  }
+
+  /** OPERATOR: IN PROGRESS → DONE, the piece issued (its claim code shown once). */
+  finishBench(id: string, input: IssueBenchInput): Promise<IssuedBenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/done`, input);
+  }
+
+  /** OPERATOR: a piece to make for the stock cancelled. */
+  cancelBench(id: string): Promise<BenchItem> {
+    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** OPERATOR: the work sheets of the pieces named, or of those the filters keep (each code's data to draw). */
+  workSheets(input: { benchItemIds?: string[]; origin?: string; skuId?: string; locationId?: string }): Promise<WorkSheets> {
+    return this.post('/api/admin/atelier/sheets', input);
   }
 
   // ── The Club: the LIVE RELEASES' intelligence ────────────────────────────

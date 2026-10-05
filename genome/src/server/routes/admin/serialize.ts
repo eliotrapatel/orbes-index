@@ -6,7 +6,9 @@
  * codes (issuance, re-issue): anyone holding it can print a code that
  * verifies, so read-only roles get the fingerprints, not the payload.
  * Likewise a customer's email reads in clear from OPERATOR up and masked
- * (`j***@example.com`) for an AUDITOR (A-06, SECURITY-MODEL §3.6).
+ * (`j***@example.com`) for an AUDITOR (A-06, SECURITY-MODEL §3.6), and so do
+ * the buyer's name and address of an order (decision 31 of LIVE RELEASE+:
+ * `J*** D***`, the address withheld).
  */
 import type { FastifyRequest } from 'fastify';
 import { toBase64Url } from '../../../core/bytes.js';
@@ -30,6 +32,24 @@ export function readsClientEmails(request: FastifyRequest): boolean {
 /** A customer's email as the caller may read it (see `readsClientEmails`). */
 export function clientEmail(email: string, inClear: boolean): string {
   return inClear ? email : maskEmail(email);
+}
+
+/** A name as an AUDITOR reads it: the first letter of each word, then `***` (`Jane Doe` → `J*** D***`). */
+export function maskName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => `${[...w][0]}***`)
+    .join(' ');
+}
+
+/** What an AUDITOR reads of an address: that one was entered. */
+export const MASKED_ADDRESS = '***';
+
+/** An order's buyer as the caller may read it: in clear (OPERATOR, ADMIN), masked for an AUDITOR. */
+export function orderBuyer(b: { name: string | null; address: string | null }, inClear: boolean): { name: string | null; address: string | null } {
+  if (inClear) return { name: b.name, address: b.address };
+  return { name: b.name === null ? null : maskName(b.name), address: b.address === null ? null : MASKED_ADDRESS };
 }
 
 export function adminJson(a: AdminProfile) {

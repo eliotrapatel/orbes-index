@@ -1186,26 +1186,6 @@ export interface LiveState {
   sizes: { id: string; label: string; stock: number }[];
 }
 
-/** A confirmed reservation for ORBES Client Services (GET /api/admin/live/:id/reservations): the email masked for an AUDITOR. */
-export interface LiveReservation {
-  id: string;
-  /** `LR-` and the first eight figures of the entry's id, as the client reads it. */
-  reference: string;
-  accountId: string;
-  email: string;
-  size: { id: string; label: string };
-  quantity: number;
-  currency: LiveCurrency;
-  priceMinor: number;
-  addons: { id: string; label: string; priceMinor: number }[];
-  totalMinor: number;
-  confirmedAt: Iso;
-  resolution: LiveResolution | null;
-  note: string | null;
-  handledBy: { id: string; email: string } | null;
-  handledAt: Iso | null;
-}
-
 // ── The Club: the LIVE RELEASES' intelligence (services/live-insights.ts) ──
 
 /** The three live alerts (LIVE_ALERT_KINDS), in the order the board shows them. */
@@ -1532,4 +1512,274 @@ export interface ClubTierSheet {
   /** The console changed its words. */
   edited: boolean;
   updatedAt: Iso | null;
+}
+
+// ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────
+
+/** Why an order stands out (M3): RESERVED too long, READY but not shipped, SHIPPED not delivered, DELIVERED not registered. */
+export const ORDER_LATE_RULES = ['RESERVED', 'READY', 'SHIPPED', 'UNREGISTERED'] as const;
+export type OrderLateRule = (typeof ORDER_LATE_RULES)[number];
+
+/** The currencies an order is priced in (services/orders.ts ORDER_CURRENCIES). */
+export const ORDER_CURRENCIES = ['EUR', 'GBP', 'USD', 'CHF'] as const;
+export type OrderCurrency = (typeof ORDER_CURRENCIES)[number];
+
+/** An order's time in its step and whether it is late (services/fulfilment.ts orderTiming). */
+export interface OrderTiming {
+  since: Iso;
+  dueAt: Iso | null;
+  rule: OrderLateRule | null;
+  late: boolean;
+}
+
+/** An order on the board (GET /api/admin/orders): the email masked for an AUDITOR. */
+export interface OrderCard {
+  id: string;
+  /** OR- and the first eight figures of its id. */
+  reference: string;
+  /** A LIVE reservation's LR- reference, as the collector holds it; null for the other channels. */
+  sourceReference: string | null;
+  channel: OrderChannel;
+  status: OrderStatus;
+  release: { id: string; title: string } | null;
+  account: { id: string; email: string };
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+  skuCode: string | null;
+  addons: { label: string }[];
+  surprise: string | null;
+  engraving: boolean;
+  location: { id: string; name: string };
+  reservation: OrderReservation | null;
+  bench: { status: BenchItemStatus } | null;
+  piece: string | null;
+  shipment: { carrier: string; trackingNumber: string } | null;
+  timing: OrderTiming;
+}
+
+export interface OrderBoardColumn {
+  status: OrderStatus;
+  total: number;
+  late: number;
+  items: OrderCard[];
+}
+
+/** The delays after which an order stands out (M3), in days. */
+export interface OrderAlertDelays {
+  reservedDays: number;
+  readyDays: number;
+  shippedDays: number;
+  unregisteredDays: number;
+}
+
+export interface OrderAlertSettings extends OrderAlertDelays {
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
+export interface OrderBoard {
+  now: Iso;
+  delays: OrderAlertSettings;
+  columns: OrderBoardColumn[];
+  releases: { id: string; title: string }[];
+  locations: { id: string; name: string }[];
+}
+
+/** The board's filters (its query). */
+export interface OrderBoardFilters {
+  channel?: OrderChannel;
+  dropId?: string;
+  locationId?: string;
+  late?: boolean;
+  q?: string;
+}
+
+/** An order as its page reads it (the buyer masked for an AUDITOR: `J*** D***`, the address `***`). */
+export interface OrderView {
+  id: string;
+  reference: string;
+  channel: OrderChannel;
+  source: { liveEntryId: string | null; piece: number; dropEntryId: string | null; shopRequestId: string | null };
+  release: { id: string; title: string } | null;
+  accountId: string;
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+  skuId: string | null;
+  priceMinor: number | null;
+  currency: OrderCurrency | null;
+  addons: { id: string; label: string; priceMinor: number }[];
+  surprise: string | null;
+  engravingText: string | null;
+  buyer: { name: string | null; address: string | null };
+  status: OrderStatus;
+  reservedAt: Iso;
+  paidAt: Iso | null;
+  shippedAt: Iso | null;
+  deliveredAt: Iso | null;
+  cancelledAt: Iso | null;
+  returnedAt: Iso | null;
+  location: { id: string; name: string };
+  reservation: OrderReservation | null;
+  bench: { id: string; status: BenchItemStatus; productId: string } | null;
+  shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
+  productId: string | null;
+  shopifyOrderId: string | null;
+  events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];
+}
+
+/** GET /api/admin/orders/:id: the order, its collector, its timing, its piece, who changed it. */
+export interface OrderDetail {
+  order: OrderView;
+  sourceReference: string | null;
+  account: { id: string; email: string };
+  timing: OrderTiming;
+  piece: { productId: string; status: ProductStatus; registered: boolean } | null;
+  actors: Record<string, string>;
+  delays: OrderAlertDelays;
+}
+
+/** POST /api/admin/orders/:id/transition. */
+export type OrderTransitionInput =
+  | { to: 'PAID'; note?: string }
+  | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor?: number | null; note?: string }
+  | { to: 'DELIVERED'; note?: string }
+  | { to: 'CANCELLED'; note: string };
+
+/** PATCH /api/admin/orders/:id/terms: only the terms that change. */
+export interface OrderTermsChange {
+  sizeLabel?: string | null;
+  priceMinor?: number | null;
+  currency?: OrderCurrency | null;
+  engravingText?: string | null;
+}
+
+// ── Locations and carriers (routes/admin/logistics.ts) ───────────────────
+
+export interface StockLocation {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  shopifyLocationId: string | null;
+}
+
+export interface Carrier {
+  id: string;
+  name: string;
+  /** https, with {tracking} where the number goes. */
+  trackingUrl: string;
+  active: boolean;
+}
+
+// ── The atelier (routes/admin/atelier.ts) ─────────────────────────────────
+
+/** What the list of pieces to make shows. */
+export const BENCH_VIEWS = ['OPEN', 'DONE', 'CANCELLED', 'ALL'] as const;
+export type BenchView = (typeof BENCH_VIEWS)[number];
+
+export interface SkuRef {
+  id: string;
+  code: string;
+  model: { id: string; name: string };
+  sizeLabel: string | null;
+}
+
+export interface StockLevel {
+  onHand: number;
+  reserved: number;
+  available: number;
+}
+
+export interface AtelierStockRow extends StockLevel {
+  sku: SkuRef;
+  location: { id: string; name: string };
+  toMake: number;
+  minimum: number | null;
+  suggestion: number;
+}
+
+export interface AtelierStock {
+  rows: AtelierStockRow[];
+  skus: SkuRef[];
+  locations: { id: string; name: string; isDefault: boolean }[];
+}
+
+/** Whom pieces to make are for. */
+export type BenchOrigin = { kind: 'RELEASE'; release: { id: string; title: string } } | { kind: 'SALON' } | { kind: 'STOCK' };
+
+export interface BenchItem {
+  id: string;
+  status: BenchItemStatus;
+  createdAt: Iso;
+  startedAt: Iso | null;
+  doneAt: Iso | null;
+  cancelledAt: Iso | null;
+  piece: { id: string; reference: string; status: ProductStatus; material: string; signed: boolean };
+  order: { id: string; reference: string; status: OrderStatus; channel: OrderChannel } | null;
+  origin: BenchOrigin;
+  sku: SkuRef;
+  location: { id: string; name: string };
+  engravingText: string | null;
+  surprise: string | null;
+  addons: string[];
+}
+
+export interface BenchGroup {
+  origin: BenchOrigin;
+  sku: SkuRef;
+  counts: Record<BenchItemStatus, number>;
+  items: BenchItem[];
+}
+
+export interface BenchList {
+  groups: BenchGroup[];
+  total: number;
+  releases: { id: string; title: string }[];
+}
+
+/** The list's filters (its query). */
+export interface BenchFilters {
+  view?: BenchView;
+  /** A release's id, SALON or STOCK. */
+  origin?: string;
+  skuId?: string;
+  locationId?: string;
+}
+
+/** A work sheet (POST /api/admin/atelier/sheets, OPERATOR): its code's data to draw at print size. */
+export interface WorkSheet {
+  benchItemId: string;
+  status: BenchItemStatus;
+  reference: string;
+  code: { codeId: string; data: string; glyphs: number[] };
+  model: string;
+  sizeLabel: string | null;
+  skuCode: string;
+  addons: string[];
+  engravingText: string | null;
+  surprise: string | null;
+  release: string | null;
+  order: { reference: string; channel: OrderChannel } | null;
+  location: string;
+  createdAt: Iso;
+}
+
+export interface WorkSheets {
+  printedAt: Iso;
+  sheets: WorkSheet[];
+}
+
+/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece. */
+export interface IssueBenchInput {
+  material?: string;
+  productionBatch?: string;
+  productionDate?: string;
+  withClaimSecret: boolean;
+}
+
+export interface IssuedBenchItem {
+  item: BenchItem;
+  productId: string;
+  codeId: string;
+  /** Shown once. */
+  claimCode?: string;
 }

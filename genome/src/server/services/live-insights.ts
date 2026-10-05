@@ -216,9 +216,25 @@ export interface InsightEntry {
   confirmedAt: Date | null;
   endedAt: Date | null;
   gestureMs: number | null;
+  /**
+   * How ORBES Client Services concluded a confirmed reservation, as its orders say (plan LIVE RELEASE+: the LIVE plan's
+   * resolution is retired into the orders, `entryOutcome`): CONCLUDED once one of them is paid, CANCELLED once every
+   * one is cancelled, null before.
+   */
   resolution: LiveResolution | null;
   country: string | null;
 }
+
+/**
+ * The outcome of a LIVE entry from its orders (services/orders.ts), as SQL over `live_entries` aliased `e`: CANCELLED
+ * when every order of the entry is cancelled, CONCLUDED when one of them was paid, NULL otherwise; the entry's own
+ * resolution (the LIVE plan's, kept as history) only for an entry without orders.
+ */
+export const entryOutcome = sql<LiveResolution | null>`CASE
+    WHEN NOT EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id) THEN e.resolution
+    WHEN NOT EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id AND o.status <> 'CANCELLED') THEN 'CANCELLED'
+    WHEN EXISTS (SELECT 1 FROM orders o WHERE o.live_entry_id = e.id AND o.paid_at IS NOT NULL) THEN 'CONCLUDED'
+    ELSE NULL END`;
 
 export function insightRelease(d: DropRow, sizes: readonly InsightSize[]): InsightRelease {
   return {
@@ -1647,11 +1663,12 @@ export class LiveInsightsService {
   private async entries(dropIds: readonly string[]): Promise<(InsightEntry & { dropId: string })[]> {
     if (dropIds.length === 0) return [];
     const rows = await this.db
-      .selectFrom('live_entries')
+      .selectFrom('live_entries as e')
       .select([
         'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'queued_at', 'turn_at', 'turn_expires_at', 'secured_at',
-        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'resolution', 'country',
+        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country',
       ])
+      .select(entryOutcome.as('resolution'))
       .where('drop_id', 'in', [...dropIds])
       .orderBy('drop_id')
       .orderBy(sql`position IS NULL`)
@@ -1817,7 +1834,7 @@ export class LiveInsightsService {
       .select((eb) => ['e.drop_id', eb.fn.sum<number>(sql`x.price_minor * e.quantity`).as('minor')])
       .where('e.drop_id', 'in', [...ids])
       .where('e.status', '=', 'CONFIRMED')
-      .where('e.resolution', 'is distinct from', 'CANCELLED')
+      .where(sql<boolean>`(${entryOutcome}) IS DISTINCT FROM 'CANCELLED'`)
       .groupBy('e.drop_id')
       .execute();
     return new Map(rows.map((r) => [r.drop_id, Number(r.minor ?? 0)]));

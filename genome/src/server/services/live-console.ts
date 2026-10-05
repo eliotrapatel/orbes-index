@@ -22,27 +22,24 @@
  *                   the console's stream (http/live-stream.ts) read the same `board`. The routes mask the emails for an
  *                   AUDITOR.
  *   entries         every entry of the release, by status, by place then arrival.
- *   Client Services the confirmed reservations with their sizes, add-ons and totals; CONCLUDED or CANCELLED with a note
- *                   (a cancellation never returns the piece to the line: the plan's choice 26), carried by the
- *                   reservation's orders (plan LIVE RELEASE+: CONCLUDED pays them, CANCELLED cancels them, releasing
- *                   what they hold; services/orders.ts resolveLiveOrders); a CSV.
+ *
+ * Client Services follows each confirmed reservation through its orders (plan LIVE RELEASE+: the console's Orders
+ * board, services/fulfilment.ts, replaces the LIVE plan's list and its CONCLUDED / CANCELLED resolution).
  *
  * The sizes of a release are linked to their SKUs (the release's model in each size, services/stock.ts) whenever they
  * or the model change.
  *
  * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
- * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, `drop.live.resolve`
- * (never the note), and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
+ * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
  * release's post.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { toHex } from '../../core/bytes.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AdminRole, DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
-import { LIVE_ENTRY_STATUSES, LIVE_RESOLUTIONS } from '../db/schema.js';
+import type { AdminRole, DropRow, LiveEndReason, LiveEntryStatus } from '../db/schema.js';
+import { LIVE_ENTRY_STATUSES } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
-import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { LiveAlert, LiveSellOut, LiveSignals } from './live-insights.js';
@@ -68,7 +65,6 @@ import {
 } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
-import { resolveLiveOrders } from './orders.js';
 import { linkDropSizes } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -88,8 +84,6 @@ export const LIVE_ADDON_LIMITS = Object.freeze({ label: 40, line: 120 });
 export const LIVE_ACCESS_MODELS_MAX = 20;
 /** The open entries the live board carries, by place (the rest: the entries' list, page by page). */
 export const LIVE_CONSOLE_LINE_MAX = 200;
-/** Client Services' note on a reservation it concludes or cancels. */
-export const LIVE_RESOLUTION_NOTE_MAX = 500;
 /** The post of the circle a publication may write: its title (no figure: the display face sets it). */
 export const LIVE_CIRCLE_TITLE = 'A LIVE RELEASE';
 
@@ -134,8 +128,6 @@ const roomOpen = () => conflict('LIVE_ROOM_OPEN', 'The room of this release is o
 const roomPast = () => validationError('The room would already be open: set T0 later.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
-const notConfirmed = () => conflict('LIVE_NOT_CONFIRMED', 'Only a confirmed reservation is concluded or cancelled.');
-const alreadyResolved = () => conflict('LIVE_ALREADY_RESOLVED', 'This reservation has already been concluded or cancelled.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -518,28 +510,6 @@ export interface AdminLiveBoard {
   sellOut: LiveSellOut | null;
 }
 
-/** A confirmed reservation for ORBES Client Services; the routes mask the email for an AUDITOR. */
-export interface AdminLiveReservation {
-  id: string;
-  reference: string;
-  accountId: string;
-  /** As stored. */
-  email: string;
-  size: { id: string; label: string };
-  quantity: number;
-  currency: string;
-  /** Per piece. */
-  priceMinor: number;
-  addons: { id: string; label: string; priceMinor: number }[];
-  /** quantity × (price + the add-ons). */
-  totalMinor: number;
-  confirmedAt: Date;
-  resolution: LiveResolution | null;
-  note: string | null;
-  handledBy: { id: string; email: string } | null;
-  handledAt: Date | null;
-}
-
 const EMPTY_COUNTS = (): Record<LiveEntryStatus, number> => Object.fromEntries(LIVE_ENTRY_STATUSES.map((s) => [s, 0])) as Record<LiveEntryStatus, number>;
 
 type ReadRow = DropRow & { model_name: string; model_type: string; model_active: boolean };
@@ -708,47 +678,6 @@ export class LiveConsoleService {
     const total = await q.executeTakeFirstOrThrow();
     const items = await this.adminEntries(this.db, d, { statuses }, page.pageSize, pageOffset(page), this.clock());
     return makePage(items, Number(total.n), page);
-  }
-
-  /** The confirmed reservations of a release, the earliest confirmed first (Client Services). */
-  async reservations(dropId: string, page: PageRequest): Promise<Page<AdminLiveReservation>> {
-    const id = knownId(dropId, dropNotFound);
-    await this.liveRow(this.db, id);
-    const total = await this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
-    return makePage(await this.reservationRows(this.db, id, { limit: page.pageSize, offset: pageOffset(page) }), Number(total.n), page);
-  }
-
-  /**
-   * Every confirmed reservation of a release as a CSV (render/csv.ts: RFC 4180, every field quoted, a formula never run):
-   * the reference, the account (its email as `email` gives it: masked for an AUDITOR by the route), the size, the pieces,
-   * the price, the add-ons, the total, the confirmation and its outcome.
-   */
-  async reservationsCsv(dropId: string, email: (stored: string) => string): Promise<{ filename: string; contentType: string; body: string }> {
-    const id = knownId(dropId, dropNotFound);
-    await this.liveRow(this.db, id);
-    const rows = await this.reservationRows(this.db, id, {});
-    const header = ['reference', 'entry', 'account', 'size', 'pieces', 'currency', 'price', 'add-ons', 'total', 'confirmed at', 'resolution', 'note', 'handled by', 'handled at'];
-    const body = csvDocument([
-      header,
-      ...rows.map((r) => [
-        r.reference,
-        r.id,
-        email(r.email),
-        r.size.label,
-        String(r.quantity),
-        r.currency,
-        majorUnits(r.priceMinor),
-        r.addons.map((a) => `${a.label} (${majorUnits(a.priceMinor)})`).join('; '),
-        majorUnits(r.totalMinor),
-        r.confirmedAt.toISOString(),
-        r.resolution ?? '',
-        r.note ?? '',
-        r.handledBy?.email ?? '',
-        r.handledAt ? r.handledAt.toISOString() : '',
-      ]),
-    ]);
-    const day = this.clock().toISOString().slice(0, 10);
-    return { filename: `ORBES-live-${id.slice(0, 8).toUpperCase()}-reservations-${day}.csv`, contentType: CSV_CONTENT_TYPE, body };
   }
 
   /**
@@ -993,41 +922,6 @@ export class LiveConsoleService {
       for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
       return this.release(tx, id);
     });
-  }
-
-  /**
-   * CONCLUDED or CANCELLED (ORBES Client Services, OPERATOR): a CONFIRMED reservation, once (409 LIVE_ALREADY_RESOLVED),
-   * with an optional note (at most LIVE_RESOLUTION_NOTE_MAX characters, kept with the entry, never in the audit log). A
-   * cancellation returns no piece to the line (the plan's choice 26). The reservation's orders carry it, in the same
-   * transaction (services/orders.ts resolveLiveOrders): CONCLUDED pays each order still RESERVED, CANCELLED cancels each
-   * one RESERVED or PAID (409 ORDER_TRANSITION_NOT_ALLOWED once one is shipped). Audited `drop.live.resolve`, and each
-   * order's step.
-   */
-  async resolve(dropId: string, entryId: string, input: { resolution: LiveResolution; note?: string | null }, actor: Actor): Promise<AdminLiveReservation> {
-    const admin = assertStaff(actor, 'conclude a reservation');
-    const id = knownId(dropId, dropNotFound);
-    const eid = knownId(entryId, entryNotFound);
-    if (!(LIVE_RESOLUTIONS as readonly string[]).includes(input?.resolution)) throw validationError('A reservation is CONCLUDED or CANCELLED.');
-    const raw = input.note === null || input.note === undefined ? '' : String(input.note).replace(/\r\n?/g, '\n').trim();
-    const note = raw === '' ? null : raw;
-    if (note !== null && (note.length > LIVE_RESOLUTION_NOTE_MAX || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(note))) {
-      throw validationError(`A note has at most ${LIVE_RESOLUTION_NOTE_MAX} characters.`);
-    }
-    await inTransaction(this.db, async (tx) => {
-      await this.lock(tx, id);
-      const now = this.clock();
-      const e = await tx.selectFrom('live_entries').select(['id', 'status', 'resolution', 'confirmed_at']).where('id', '=', eid).where('drop_id', '=', id).forUpdate().executeTakeFirst();
-      if (!e) throw entryNotFound();
-      if (e.status !== 'CONFIRMED') throw notConfirmed();
-      if (e.resolution) throw alreadyResolved();
-      const at = e.confirmed_at && e.confirmed_at.getTime() > now.getTime() ? e.confirmed_at : now;
-      const orders = await resolveLiveOrders(tx, e.id, input.resolution, note, actor, at);
-      await tx.updateTable('live_entries').set({ resolution: input.resolution, resolution_note: note, handled_by: admin, handled_at: at }).where('id', '=', e.id).execute();
-      await this.audit.record({ actor, action: 'drop.live.resolve', targetType: 'drop', targetId: id, details: { entryId: e.id, resolution: input.resolution, ...(note !== null ? { noted: true } : {}) } }, tx);
-      for (const n of orders) await this.audit.record(n, tx);
-    });
-    const [r] = await this.reservationRows(this.db, id, { entryId: eid });
-    return r!;
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -1346,54 +1240,5 @@ export class LiveConsoleService {
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
     }));
-  }
-
-  private async reservationRows(db: Db, dropId: string, o: { limit?: number; offset?: number; entryId?: string }): Promise<AdminLiveReservation[]> {
-    let q = db
-      .selectFrom('live_entries as e')
-      .innerJoin('drops as d', 'd.id', 'e.drop_id')
-      .innerJoin('accounts as a', 'a.id', 'e.account_id')
-      .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
-      .leftJoin('admin_users as h', 'h.id', 'e.handled_by')
-      .select([
-        'e.id', 'e.account_id', 'a.email', 'e.size_id', 's.label', 'e.quantity', 'd.price_minor', 'd.currency', 'e.confirmed_at', 'e.resolution', 'e.resolution_note',
-        'e.handled_by', 'h.email as handled_email', 'e.handled_at',
-      ])
-      .where('e.drop_id', '=', dropId)
-      .where('e.status', '=', 'CONFIRMED');
-    if (o.entryId) q = q.where('e.id', '=', o.entryId);
-    q = q.orderBy('e.confirmed_at').orderBy('e.id');
-    if (o.limit !== undefined) q = q.limit(o.limit).offset(o.offset ?? 0);
-    const rows = await q.execute();
-    const addons = rows.length
-      ? await db
-          .selectFrom('live_entry_addons as x')
-          .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
-          .select(['x.entry_id', 'l.id', 'l.label', 'x.price_minor'])
-          .where('x.entry_id', 'in', rows.map((r) => r.id))
-          .orderBy('l.position')
-          .execute()
-      : [];
-    return rows.map((r) => {
-      const own = addons.filter((a) => a.entry_id === r.id).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor }));
-      const unit = (r.price_minor ?? 0) + own.reduce((n, a) => n + a.priceMinor, 0);
-      return {
-        id: r.id,
-        reference: liveReference(r.id),
-        accountId: r.account_id,
-        email: r.email,
-        size: { id: r.size_id, label: r.label },
-        quantity: r.quantity,
-        currency: r.currency ?? 'EUR',
-        priceMinor: r.price_minor ?? 0,
-        addons: own,
-        totalMinor: r.quantity * unit,
-        confirmedAt: r.confirmed_at!,
-        resolution: r.resolution,
-        note: r.resolution_note,
-        handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
-        handledAt: r.handled_at,
-      };
-    });
   }
 }

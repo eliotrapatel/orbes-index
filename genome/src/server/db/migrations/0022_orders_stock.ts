@@ -85,9 +85,10 @@
  *
  * Every foreign key leads an index; ON DELETE RESTRICT like every other. Compatible with the previous image: new
  * nullable columns it never names (it inserts products, sizes, models, drops, requests and accounts without them and reads them
- * column by column) and new tables it never reads; RESERVED products carry no code yet, so the previous image's
- * /verify still answers them as unknown. No row is inserted. `down` retires the identities still RESERVED (the
- * previous image has no such status; their serials stay taken), drops the twelve tables, then the columns and
+ * column by column) and new tables it never reads; a RESERVED identity carries a code only once its work sheet is
+ * printed (services/atelier.ts), which only this image does. No row is inserted. `down` revokes the codes of the
+ * identities still RESERVED and retires them (the previous image has no such status; their serials stay taken, their
+ * sheets never verify), drops the twelve tables, then the columns and
  * constraints this migration added: the schema of 0021 exactly. One statement per array entry (PGlite's extended
  * protocol); Kysely's Migrator applies the migration inside a transaction.
  */
@@ -438,6 +439,9 @@ export const UP: readonly string[] = [
 ];
 
 export const DOWN: readonly string[] = [
+  // A work sheet's code of an identity never issued: revoked, as retiring it in this image revokes it.
+  `UPDATE codes SET status = 'REVOKED', revoked_at = now(), revocation_reason = 'Reserved identity retired: migration 0022 rolled back'
+     WHERE status = 'ACTIVE' AND product_id IN (SELECT id FROM products WHERE status = 'RESERVED')`,
   // The previous image has no RESERVED: an identity reserved and never issued is retired, its serial kept taken.
   `INSERT INTO product_status_history (product_id, from_status, to_status, reason, actor_type)
      SELECT id, NULL, 'RETIRED', 'Reserved identity retired: migration 0022 rolled back', 'system' FROM products WHERE status = 'RESERVED'`,

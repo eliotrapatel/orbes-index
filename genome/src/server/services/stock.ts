@@ -17,6 +17,10 @@
  *              holding one of them, `orders.reservation` STOCK), available (on hand less reserved). An adjustment or a
  *              transfer never takes a reserved piece: on hand never falls below what is reserved.
  *
+ * The console's settings (Locations and carriers): a location added or renamed, made the default; a carrier added, its
+ * name or tracking link changed, set aside (`active` false: never offered for a shipment again, the orders shipped with
+ * it keep it). Audited `stock.location.create`, `stock.location.update`, `carrier.create`, `carrier.update`.
+ *
  * Every change of a SKU's stock or of its reservations takes the SKU's row FOR UPDATE first (`lockSku`), after the rows
  * of the order or the release it serves: two orders never take the same last piece, and a transfer never moves a piece
  * an order has just reserved. Each movement is journaled (`stock.move`, services/journal.ts) in its transaction; the
@@ -27,6 +31,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { JsonObject, StockMovementReason } from '../db/schema.js';
+import { isUniqueViolation } from '../db/pg-errors.js';
 import { conflict, DomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -52,6 +57,13 @@ export const CARRIER_PRESETS = Object.freeze([
 export const STOCK_MOVE_MAX = 10_000;
 /** A note on a movement, at most (stock_movements.note). */
 export const STOCK_NOTE_MAX = 500;
+/** A location's name and a carrier's, at most (stock_locations.name, carriers.name). */
+export const LOCATION_NAME_MAX = 60;
+export const CARRIER_NAME_MAX = 60;
+/** A carrier's tracking link, at most (carriers.tracking_url): https, `{tracking}` where the number goes. */
+export const TRACKING_URL_MAX = 500;
+/** Where the tracking number goes in a carrier's link. */
+export const TRACKING_PLACEHOLDER = '{tracking}';
 /** A size label a SKU keeps, at most (skus.size_label). */
 const SIZE_LABEL_MAX = 100;
 const SKU_CODE_MAX = 64;
@@ -84,8 +96,64 @@ export function sizeLabelOf(label: string | null | undefined): string | null {
 export const stockNotReady = () => new DomainError('STOCK_NOT_READY', 503, 'The stock locations are not set up yet.', { detail: 'no default stock location: ensureStockSetup has not run' });
 const skuNotFound = () => notFound('SKU', 'SKU_NOT_FOUND');
 const locationNotFound = () => notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
+const locationTaken = () => conflict('STOCK_LOCATION_NAME_TAKEN', 'Another location has this name.');
+const carrierTaken = () => conflict('CARRIER_NAME_TAKEN', 'Another carrier has this name.');
 const notAvailable = (available: number) =>
   conflict('STOCK_NOT_AVAILABLE', available === 1 ? 'Only 1 piece is available there: the others are reserved by orders.' : `Only ${available} pieces are available there: the others are reserved by orders.`);
+
+/** A location as the console reads it. */
+export interface StockLocationView {
+  id: string;
+  name: string;
+  /** Where draws and the private salon's orders go when nothing else names a location. */
+  isDefault: boolean;
+  shopifyLocationId: string | null;
+}
+
+/** A carrier as the console reads it. */
+export interface CarrierView {
+  id: string;
+  name: string;
+  /** https, with `{tracking}` where the number goes. */
+  trackingUrl: string;
+  active: boolean;
+}
+
+/** A name as the console types it: trimmed, one line, 1 to `max` characters. */
+function cleanName(v: unknown, max: number, label: string): string {
+  if (typeof v !== 'string' || v.trim() === '') throw validationError(`${label} is required.`);
+  const s = v.trim().replace(/\s+/g, ' ');
+  if (CONTROL_CHARS.test(s)) throw validationError(`${label} contains invalid characters.`);
+  if (s.length > max) throw validationError(`${label} must be at most ${max} characters.`);
+  return s;
+}
+
+/**
+ * A carrier's tracking link as the console types it (M1, editable): https, no space, at most TRACKING_URL_MAX
+ * characters, `{tracking}` exactly once, and a valid address once a number takes its place.
+ */
+export function checkTrackingUrl(v: unknown): string {
+  if (typeof v !== 'string' || v.trim() === '') throw validationError('The tracking link is required.');
+  const s = v.trim();
+  if (s.length > TRACKING_URL_MAX) throw validationError(`A tracking link has at most ${TRACKING_URL_MAX} characters.`);
+  if (!/^https:\/\/[^\s]+$/.test(s)) throw validationError('A tracking link starts with https:// and holds no space.');
+  if (s.split(TRACKING_PLACEHOLDER).length !== 2) throw validationError(`A tracking link holds ${TRACKING_PLACEHOLDER} once, where the number goes.`);
+  try {
+    const url = new URL(s.replace(TRACKING_PLACEHOLDER, '0'));
+    if (url.protocol !== 'https:' || url.hostname === '') throw new Error('not https');
+  } catch {
+    throw validationError('The tracking link is not a valid address.');
+  }
+  return s;
+}
+
+const locationView = (r: { id: string; name: string; is_default: boolean; shopify_location_id: string | null }): StockLocationView => ({
+  id: r.id,
+  name: r.name,
+  isDefault: r.is_default,
+  shopifyLocationId: r.shopify_location_id,
+});
+const carrierView = (r: { id: string; name: string; tracking_url: string; active: boolean }): CarrierView => ({ id: r.id, name: r.name, trackingUrl: r.tracking_url, active: r.active });
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -429,5 +497,116 @@ export class StockService {
       await this.audit.record({ actor, action: 'stock.adjust', targetType: 'sku', targetId: skuId, details: { locationId, delta } }, tx);
       return stockLevel(tx, skuId, locationId);
     });
+  }
+
+  // ── Locations and carriers (the console's settings) ──────────────────────
+
+  /** Every location, the default first, then by name. */
+  async locations(): Promise<StockLocationView[]> {
+    const rows = await this.db.selectFrom('stock_locations').select(['id', 'name', 'is_default', 'shopify_location_id']).orderBy('is_default', 'desc').orderBy('name').execute();
+    return rows.map(locationView);
+  }
+
+  /** A location added (its name unique whatever the case: 409 STOCK_LOCATION_NAME_TAKEN). Audited `stock.location.create`. */
+  async createLocation(input: { name: string }, actor: Actor): Promise<StockLocationView> {
+    const name = cleanName(input?.name, LOCATION_NAME_MAX, 'The name');
+    return this.named(locationTaken, () =>
+      inTransaction(this.db, async (tx) => {
+        const row = await tx.insertInto('stock_locations').values({ name, created_at: this.clock() }).returning(['id', 'name', 'is_default', 'shopify_location_id']).executeTakeFirstOrThrow();
+        await this.audit.record({ actor, action: 'stock.location.create', targetType: 'stock_location', targetId: row.id, details: { name } }, tx);
+        return locationView(row);
+      }),
+    );
+  }
+
+  /**
+   * A location renamed, or made the default (`isDefault: true`: the previous default stops being one; there is always
+   * exactly one, so a location stops being the default only when another becomes it). Audited `stock.location.update`.
+   */
+  async updateLocation(locationId: string, input: { name?: string; isDefault?: true }, actor: Actor): Promise<StockLocationView> {
+    const id = await knownLocation(this.db, locationId);
+    const name = input?.name === undefined ? undefined : cleanName(input.name, LOCATION_NAME_MAX, 'The name');
+    if (input?.isDefault !== undefined && input.isDefault !== true) throw validationError('Make another location the default instead.');
+    if (name === undefined && input?.isDefault === undefined) throw validationError('Nothing to change.');
+    return this.named(locationTaken, () =>
+      inTransaction(this.db, async (tx) => {
+        const before = await tx.selectFrom('stock_locations').select(['name', 'is_default']).where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
+        const details: JsonObject = {};
+        if (name !== undefined && name !== before.name) {
+          await tx.updateTable('stock_locations').set({ name }).where('id', '=', id).execute();
+          details.name = { from: before.name, to: name };
+        }
+        if (input.isDefault && !before.is_default) {
+          const previous = await tx.updateTable('stock_locations').set({ is_default: false }).where('is_default', '=', true).returning('id').executeTakeFirst();
+          await tx.updateTable('stock_locations').set({ is_default: true }).where('id', '=', id).execute();
+          details.default = { from: previous?.id ?? null, to: id };
+        }
+        if (Object.keys(details).length === 0) throw validationError('Nothing to change.');
+        await this.audit.record({ actor, action: 'stock.location.update', targetType: 'stock_location', targetId: id, details }, tx);
+        return locationView(await tx.selectFrom('stock_locations').select(['id', 'name', 'is_default', 'shopify_location_id']).where('id', '=', id).executeTakeFirstOrThrow());
+      }),
+    );
+  }
+
+  /** Every carrier, the active ones first, then by name. */
+  async carriers(): Promise<CarrierView[]> {
+    const rows = await this.db.selectFrom('carriers').select(['id', 'name', 'tracking_url', 'active']).orderBy('active', 'desc').orderBy('name').execute();
+    return rows.map(carrierView);
+  }
+
+  /** A carrier added with its tracking link (409 CARRIER_NAME_TAKEN for a name in use). Audited `carrier.create`. */
+  async createCarrier(input: { name: string; trackingUrl: string }, actor: Actor): Promise<CarrierView> {
+    const name = cleanName(input?.name, CARRIER_NAME_MAX, 'The name');
+    const trackingUrl = checkTrackingUrl(input?.trackingUrl);
+    return this.named(carrierTaken, () =>
+      inTransaction(this.db, async (tx) => {
+        const row = await tx.insertInto('carriers').values({ name, tracking_url: trackingUrl, created_at: this.clock() }).returning(['id', 'name', 'tracking_url', 'active']).executeTakeFirstOrThrow();
+        await this.audit.record({ actor, action: 'carrier.create', targetType: 'carrier', targetId: row.id, details: { name, trackingUrl } }, tx);
+        return carrierView(row);
+      }),
+    );
+  }
+
+  /** A carrier's name or tracking link changed, or the carrier set aside or offered again (`active`). Audited `carrier.update`. */
+  async updateCarrier(carrierId: string, input: { name?: string; trackingUrl?: string; active?: boolean }, actor: Actor): Promise<CarrierView> {
+    if (typeof carrierId !== 'string' || !UUID_RE.test(carrierId)) throw notFound('Carrier', 'CARRIER_NOT_FOUND');
+    const id = carrierId.toLowerCase();
+    const name = input?.name === undefined ? undefined : cleanName(input.name, CARRIER_NAME_MAX, 'The name');
+    const trackingUrl = input?.trackingUrl === undefined ? undefined : checkTrackingUrl(input.trackingUrl);
+    if (input?.active !== undefined && typeof input.active !== 'boolean') throw validationError('A carrier is active or not.');
+    return this.named(carrierTaken, () =>
+      inTransaction(this.db, async (tx) => {
+        const before = await tx.selectFrom('carriers').select(['name', 'tracking_url', 'active']).where('id', '=', id).forUpdate().executeTakeFirst();
+        if (!before) throw notFound('Carrier', 'CARRIER_NOT_FOUND');
+        const set: { name?: string; tracking_url?: string; active?: boolean } = {};
+        const details: JsonObject = {};
+        if (name !== undefined && name !== before.name) {
+          set.name = name;
+          details.name = { from: before.name, to: name };
+        }
+        if (trackingUrl !== undefined && trackingUrl !== before.tracking_url) {
+          set.tracking_url = trackingUrl;
+          details.trackingUrl = { from: before.tracking_url, to: trackingUrl };
+        }
+        if (input.active !== undefined && input.active !== before.active) {
+          set.active = input.active;
+          details.active = input.active;
+        }
+        if (Object.keys(set).length === 0) throw validationError('Nothing to change.');
+        const row = await tx.updateTable('carriers').set(set).where('id', '=', id).returning(['id', 'name', 'tracking_url', 'active']).executeTakeFirstOrThrow();
+        await this.audit.record({ actor, action: 'carrier.update', targetType: 'carrier', targetId: id, details }, tx);
+        return carrierView(row);
+      }),
+    );
+  }
+
+  /** A name in use (the unique index whatever the case) answers 409. */
+  private async named<T>(taken: () => DomainError, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (isUniqueViolation(e)) throw taken();
+      throw e;
+    }
   }
 }

@@ -27,14 +27,12 @@ import {
   LIVE_CURRENCIES as SERVER_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
-  LIVE_RESOLUTION_NOTE_MAX,
   LIVE_SIZES,
   liveReference as serverReference,
 } from '../../src/server/services/live-console.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
   addonsText,
-  canResolve,
   defaultQuantityLine,
   formatMoney,
   LIVE_LIMITS,
@@ -57,7 +55,6 @@ import {
   parseMoney,
   parseSizes,
   priorityLine,
-  reservationAddons,
   sizesText,
   windowLine,
 } from '../../src/web/admin/model/live.js';
@@ -143,7 +140,6 @@ describe('the console of the LIVE RELEASES mirrors the server', () => {
       extendMinutes: { ...LIVE_EXTEND_MINUTES },
       addPieces: { ...LIVE_ADD_PIECES },
       message: LIVE_MESSAGE_MAX,
-      note: LIVE_RESOLUTION_NOTE_MAX,
       accessModels: LIVE_ACCESS_MODELS_MAX,
       line: LIVE_CONSOLE_LINE_MAX,
     });
@@ -175,7 +171,6 @@ describe('the console of the LIVE RELEASES', () => {
     expect(LIVE_ENTRY_STATUSES.map((s) => toneOf('liveEntry', s))).toEqual(['outline', 'outline', 'solid', 'alert', 'solid', 'muted', 'muted', 'muted', 'muted', 'alert', 'muted']);
     // A hold waits for PAY as an open case waits for the staff.
     expect(toneOf('liveEntry', 'SECURED')).toBe(toneOf('case', 'OPEN'));
-    expect([toneOf('liveResolution', 'CONCLUDED'), toneOf('liveResolution', 'CANCELLED')]).toEqual(['solid', 'muted']);
   });
 
   it('reads and writes prices in units, as the house writes them', () => {
@@ -344,12 +339,9 @@ describe('the console of the LIVE RELEASES', () => {
     expect(liveEntryActions({ status: 'CONFIRMED' }, board, 'ADMIN')).toEqual({ letIn: false, free: false, remove: false });
     expect(liveEntryActions({ status: 'SECURED' }, board, 'AUDITOR')).toEqual({ letIn: false, free: false, remove: false });
     expect([livePhrase('end', draft), livePhrase('cancel', draft)]).toEqual(['END 0F8E7D6C', 'CANCEL 0F8E7D6C']);
-    expect(canResolve({ resolution: null }, 'OPERATOR')).toBe(true);
-    expect(canResolve({ resolution: 'CONCLUDED' }, 'ADMIN')).toBe(false);
-    expect(canResolve({ resolution: null }, 'AUDITOR')).toBe(false);
   });
 
-  it('shows the board’s figures, a deadline, the windows, the line’s rule and a reservation’s add-ons', () => {
+  it('shows the board’s figures, a deadline, the windows and the line’s rule', () => {
     const b = {
       totals: { stock: 5, left: 1, held: 2, sold: 2, waiting: 0, line: 7, turns: 2, secured: 1, confirmed: 2, missed: 3, expired: 1, interest: 40, inRoom: 12, released: 1, departed: 0, removed: 0, ended: 0 },
       lineTotal: 10,
@@ -370,13 +362,11 @@ describe('the console of the LIVE RELEASES', () => {
     expect(windowLine({ tier: 3, turnSeconds: null, payMinutes: 10 })).toBe('PALLADIUM · 10 min to pay');
     expect(windowLine({ tier: 0, turnSeconds: 60, payMinutes: 2 })).toBe('NO TIER · 60 s to hold · 2 min to pay');
     expect(priorityLine(false)).toBe('At random for all');
-    expect(reservationAddons({ currency: 'EUR', addons: [{ id: 'a', label: 'ENGRAVING', priceMinor: 15_000 }] })).toBe('ENGRAVING € 150');
-    expect(reservationAddons({ currency: 'EUR', addons: [] })).toBe('None');
   });
 });
 
 describe('AdminApi: the LIVE RELEASES', () => {
-  it('reads, edits, controls and concludes them on their paths, a timer’s read never ending the session, the CSV saved', async () => {
+  it('reads, edits and controls them on their paths, a timer’s read never ending the session', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const answers: Response[] = [];
     const fetch: FetchLike = async (url, init = {}) => {
@@ -399,8 +389,6 @@ describe('AdminApi: the LIVE RELEASES', () => {
     await api.endLive(ID);
     await api.letInLiveEntry(ID, 'e1');
     await api.removeLiveEntry(ID, 'e1');
-    await api.resolveLiveReservation(ID, 'e1', 'CANCELLED', '');
-    await api.resolveLiveReservation(ID, 'e1', 'CONCLUDED', 'Paid.');
     await api.liveEntries(ID, { status: 'OPEN', page: 1, pageSize: 50 });
     await api.setLiveSilhouette(ID, new Blob([new Uint8Array([0xff, 0xd8])], { type: 'image/webp' }));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
@@ -417,8 +405,6 @@ describe('AdminApi: the LIVE RELEASES', () => {
       `POST /api/admin/live/${ID}/end`,
       `POST /api/admin/live/${ID}/entries/e1/let-in`,
       `POST /api/admin/live/${ID}/entries/e1/remove`,
-      `POST /api/admin/live/${ID}/entries/e1/resolve`,
-      `POST /api/admin/live/${ID}/entries/e1/resolve`,
       `GET /api/admin/live/${ID}/entries?status=OPEN&page=1&pageSize=50`,
       `POST /api/admin/live/${ID}/silhouette`,
     ]);
@@ -427,9 +413,7 @@ describe('AdminApi: the LIVE RELEASES', () => {
     expect(bodies[7]).toEqual({ minutes: 15 });
     expect(bodies[8]).toEqual({ sizeId: 's52', pieces: 2 });
     expect(bodies[9]).toEqual({ text: 'The vault opens.' });
-    expect(bodies[13]).toEqual({ resolution: 'CANCELLED' });
-    expect(bodies[14]).toEqual({ resolution: 'CONCLUDED', note: 'Paid.' });
-    expect((calls[16]!.init.headers as Record<string, string>)['content-type']).toBe('image/webp');
+    expect((calls[14]!.init.headers as Record<string, string>)['content-type']).toBe('image/webp');
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
     expect(api.liveStreamUrl(ID)).toBe(`/api/admin/live/${ID}/stream`);
 
@@ -437,10 +421,5 @@ describe('AdminApi: the LIVE RELEASES', () => {
     answers.push(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }), { status: 401, headers: { 'content-type': 'application/json' } }));
     await expect(api.liveBoard(ID, { background: true })).rejects.toMatchObject({ status: 401 });
     expect(unauthorized).toBe(0);
-
-    answers.push(new Response('"reference"\r\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8; header=present', 'content-disposition': 'attachment; filename="ORBES-live-0F8E7D6C-reservations-2026-11-10.csv"' } }));
-    const csv = await api.liveReservationsCsv(ID);
-    expect(csv.filename).toBe('ORBES-live-0F8E7D6C-reservations-2026-11-10.csv');
-    expect(await csv.blob.text()).toBe('"reference"\r\n');
   });
 });

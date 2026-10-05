@@ -12,8 +12,8 @@
  *  - The entries: the line itself, live (its open entries by place: the account, its email masked for an AUDITOR, its
  *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
- *  - Client Services: the confirmed reservations, their reference, size, add-ons and total; CONCLUDED or CANCELLED with
- *    a note (OPERATOR), which pays or cancels the reservation's orders (plan LIVE RELEASE+); the CSV.
+ *  - Client Services: each confirmed reservation is an order per piece, followed on the Orders board (plan LIVE
+ *    RELEASE+, views/orders.ts), which replaces the LIVE plan's list: a link narrowed to the release.
  *  - The intelligence (views/live-intelligence.ts), each reading with how it is read: the live alerts and the live
  *    sell-out forecast on the live board (its stream keeps them current); the readings of the release's stage under the
  *    board: the release planner and the audience forecast before the announcement, the forecast and the demand radar
@@ -29,7 +29,6 @@ import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
 import { LIVE_ALERT_LABELS } from '../model/live-intelligence.js';
 import {
-  canResolve,
   defaultQuantityLine,
   formatMoney,
   hasBoard,
@@ -48,7 +47,6 @@ import {
   liveStateLabel,
   parseSizes,
   priorityLine,
-  reservationAddons,
   sizesLine,
   tierLabel,
   windowLine,
@@ -57,7 +55,7 @@ import {
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveRelease, type LiveReservation, type LiveResolution, type Model } from '../types.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveRelease, type Model } from '../types.js';
 import { button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -148,13 +146,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
-  const reservationsPage = Math.max(1, Number(ctx.route.query.rpage) || 1);
   const [r, models, collections] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections()]);
   const published = hasBoard(r.phase);
-  const [boardRead, entries, reservations, intelligence] = await Promise.all([
+  const [boardRead, entries, intelligence] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
     published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
-    published ? ctx.api.liveReservations(id, reservationsPage, 50) : Promise.resolve(null),
     loadLiveIntelligence(ctx.api, r),
   ]);
   // The console moved on while the release was read: this page is stale, and starts nothing. Every read is above this
@@ -451,82 +447,19 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     entriesSection = section('Entries', body, { id: 'live-entries', note: board ? `${formatCount(board.lineTotal)} open · ${formatCount(Object.values(r.entries).reduce((n, c) => n + c, 0))} in all` : undefined });
   }
 
-  // ── Client Services ──────────────────────────────────────────────────────
-  const resolve = (x: LiveReservation, to: LiveResolution) =>
-    void openDialog({
-      title: to === 'CONCLUDED' ? 'Reservation concluded' : 'Reservation cancelled',
-      eyebrow: `${x.reference} · ${x.email}`,
-      danger: to === 'CANCELLED',
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        to === 'CONCLUDED'
-          ? 'ORBES Client Services received the payment of this collector: the reservation reads CONCLUDED, and its orders are paid.'
-          : 'The reservation is cancelled by ORBES Client Services: it reads CANCELLED, its orders are cancelled and what they hold is released. The piece does not return to the line (the release closed at its sell-out).',
-      ),
-      fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: LIVE_LIMITS.note, hint: 'For ORBES Client Services: kept with the reservation, never in the audit log. Optional.' }],
-      confirmLabel: to === 'CONCLUDED' ? 'Concluded' : 'Cancel the reservation',
-      submit: async (v) => {
-        await ctx.api.resolveLiveReservation(r.id, x.id, to, v.note.trim());
-      },
-    }).then(done(to === 'CONCLUDED' ? 'Reservation concluded.' : 'Reservation cancelled.'));
-  const csv = button('Download CSV', { kind: 'ghost', testId: 'live-csv' });
-  csv.addEventListener('click', async () => {
-    csv.disabled = true;
-    try {
-      saveDownload(await ctx.api.liveReservationsCsv(r.id));
-    } catch (e) {
-      notifyError(e);
-    } finally {
-      csv.disabled = false;
-    }
-  });
-  const servicesSection = reservations
-    ? section(
-        'Client Services',
-        [
-          table<LiveReservation>(
-            [
-              { label: 'Reference', cell: (x) => mono(x.reference), kind: ['nowrap'] },
-              { label: 'Account', cell: (x) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }) } }, x.email), kind: ['wide'] },
-              { label: 'Size', cell: (x) => h('span', { class: 'live__size' }, x.size.label), kind: ['nowrap'] },
-              { label: 'Pieces', cell: (x) => formatCount(x.quantity), kind: ['num'] },
-              { label: 'Add-ons', cell: (x) => reservationAddons(x) },
-              { label: 'Total', cell: (x) => formatMoney(x.totalMinor, x.currency), kind: ['num', 'nowrap'] },
-              { label: 'Confirmed', cell: (x) => formatDateTime(x.confirmedAt), kind: ['nowrap'] },
-              {
-                label: 'Outcome',
-                cell: (x) =>
-                  h(
-                    'span',
-                    { data: { testid: 'live-outcome' } },
-                    x.resolution ? statusMark(humanize(x.resolution), toneOf('liveResolution', x.resolution)) : statusMark('TO CONCLUDE', 'alert'),
-                    x.handledBy ? h('span', { class: 'cell-sub' }, `${x.handledBy.email} · ${formatDateTime(x.handledAt)}`) : null,
-                    x.note ? h('span', { class: 'cell-details' }, x.note) : null,
-                  ),
-              },
-              {
-                label: '',
-                cell: (x) =>
-                  canResolve(x, role)
-                    ? h(
-                        'span',
-                        { class: 'row-actions' },
-                        button('Concluded', { kind: 'ghost', testId: 'live-conclude', onClick: () => resolve(x, 'CONCLUDED') }),
-                        button('Cancel', { kind: 'ghost', testId: 'live-cancel-reservation', onClick: () => resolve(x, 'CANCELLED') }),
-                      )
-                    : null,
-                kind: ['actions'],
-              },
-            ],
-            reservations.items,
-            { caption: 'Confirmed reservations', empty: 'No confirmed reservation yet: each PAY pressed on /verify appears here, for ORBES Client Services to conclude.' },
-          ),
-          pager(reservations, (p) => ctx.setQuery({ rpage: p })),
-        ],
-        { id: 'live-services', note: `${formatCount(reservations.total)} confirmed`, tools: reservations.total > 0 ? [csv] : [] },
-      )
-    : null;
+  // ── Client Services: the orders ──────────────────────────────────────────
+  const confirmed = r.entries.CONFIRMED ?? 0;
+  const servicesSection = section(
+    'Client Services',
+    h(
+      'p',
+      { class: 'panel__text', data: { testid: 'live-orders' } },
+      confirmed > 0
+        ? `${formatCount(confirmed)} confirmed ${confirmed === 1 ? 'reservation' : 'reservations'}: each piece is an order, followed step by step on the Orders board, from payment to delivery.`
+        : 'Each confirmed reservation becomes an order per piece, followed step by step on the Orders board, from payment to delivery.',
+    ),
+    { id: 'live-services', tools: [linkButton('Orders of this release', href('orders', {}, { dropId: r.id }), 'ghost')] },
+  );
 
   // ── The settings ─────────────────────────────────────────────────────────
   const editPart = (part: LivePart, title: string, fields: DialogField[], extra: { body?: Child; live?: (v: Record<string, string>) => Child } = {}) =>

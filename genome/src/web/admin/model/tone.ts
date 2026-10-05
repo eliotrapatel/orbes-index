@@ -77,8 +77,13 @@ const LIVE_ENTRY: Record<string, Tone> = {
   REMOVED: 'alert',
   ENDED: 'muted',
 };
-/** A reservation of a LIVE RELEASE: concluded, in force; cancelled, historical (none yet: waits for ORBES Client Services). */
-const LIVE_RESOLUTION: Record<string, Tone> = { CONCLUDED: 'solid', CANCELLED: 'muted' };
+/**
+ * An order (plan LIVE RELEASE+): reserved, it waits for its payment; paid, shipped and delivered, in force; cancelled or
+ * returned, historical. A late one stands out as needing attention (the board's own mark).
+ */
+const ORDER: Record<string, Tone> = { RESERVED: 'outline', PAID: 'solid', SHIPPED: 'solid', DELIVERED: 'solid', CANCELLED: 'muted', RETURNED: 'muted' };
+/** A piece to make: to make, pending; in progress, in force; done or cancelled, historical. */
+const BENCH: Record<string, Tone> = { TO_MAKE: 'outline', IN_PROGRESS: 'solid', DONE: 'muted', CANCELLED: 'muted' };
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
 /** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
@@ -119,7 +124,8 @@ export type ToneDomain =
   | 'shopRequest'
   | 'livePhase'
   | 'liveEntry'
-  | 'liveResolution';
+  | 'order'
+  | 'bench';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -142,7 +148,8 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   shopRequest: SHOP_REQUEST,
   livePhase: LIVE_PHASE,
   liveEntry: LIVE_ENTRY,
-  liveResolution: LIVE_RESOLUTION,
+  order: ORDER,
+  bench: BENCH,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

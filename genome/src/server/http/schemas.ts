@@ -19,8 +19,8 @@ import {
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
   LIVE_ENTRY_STATUSES,
-  LIVE_RESOLUTIONS,
   LOOKBOOK_STATES,
+  ORDER_CHANNELS,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
@@ -31,6 +31,7 @@ import {
   STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
+import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
 import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
@@ -44,7 +45,6 @@ import {
   LIVE_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
-  LIVE_RESOLUTION_NOTE_MAX,
   LIVE_SIZES,
 } from '../services/live-console.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
@@ -52,6 +52,9 @@ import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/med
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
+import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
+import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../services/orders.js';
+import { CARRIER_NAME_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -625,12 +628,6 @@ export const liveMessageBody = body({ text: text(LIVE_MESSAGE_MAX).refine((s) =>
 /** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
 export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });
 
-/** POST /api/admin/live/:id/entries/:entryId/resolve: CONCLUDED or CANCELLED, with an optional note (Client Services). */
-export const liveResolveBody = body({
-  resolution: z.enum(LIVE_RESOLUTIONS),
-  note: z.preprocess(emptyToNull, text(LIVE_RESOLUTION_NOTE_MAX).nullable().optional()),
-});
-
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
 export const circlePostParams = z.object({ id: uuid });
@@ -1025,6 +1022,137 @@ export const auditListQuery = z.object({
   targetType: z.string().trim().max(64).optional(),
   targetId: z.string().trim().max(200).optional(),
 });
+
+// ── Admin: the orders (plan LIVE RELEASE+, routes/admin/orders.ts) ─────────
+
+export const orderParams = z.object({ id: uuid });
+
+/** GET /api/admin/orders and its CSV: one channel, one release, one location, the late ones, a search. */
+export const orderBoardQuery = z.object({
+  channel: queryOptional(z.enum(ORDER_CHANNELS)),
+  dropId: queryOptional(uuid),
+  locationId: queryOptional(uuid),
+  late: queryBool,
+  q: queryOptional(z.string().trim().max(BOARD_SEARCH_MAX, `At most ${BOARD_SEARCH_MAX} characters`)),
+});
+
+const orderNote = z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.note).nullable().optional());
+const orderAmount = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ORDER_AMOUNT_MAX_MINOR, `At most ${ORDER_AMOUNT_MAX_MINOR} cents`);
+
+/**
+ * POST /api/admin/orders/:id/transition: the next step and what it requires (services/orders.ts holds which step
+ * follows which): PAID; SHIPPED with an active carrier, the tracking number and the value declared for the insurance;
+ * DELIVERED; CANCELLED with a note. A return is opened elsewhere.
+ */
+export const orderTransitionBody = z.discriminatedUnion('to', [
+  body({ to: z.literal('PAID'), note: orderNote }),
+  body({
+    to: z.literal('SHIPPED'),
+    carrierId: uuid,
+    trackingNumber: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/, 'A tracking number has 3 to 40 letters and digits'),
+    declaredValueMinor: orderAmount.nullable().optional(),
+    note: orderNote,
+  }),
+  body({ to: z.literal('DELIVERED'), note: orderNote }),
+  body({ to: z.literal('CANCELLED'), note: text(ORDER_TEXT_LIMITS.note) }),
+]);
+
+/** POST /api/admin/orders/:id/location: where the order is served from (what it holds moves with it). */
+export const orderLocationBody = body({ locationId: uuid });
+
+/**
+ * PATCH /api/admin/orders/:id/terms: a draw's or a salon's size (`null`: one size), price and currency (both or
+ * neither), and any order's engraving text (`null` or '' clears it). At least one.
+ */
+export const orderTermsBody = body({
+  sizeLabel: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.size).nullable().optional()),
+  priceMinor: orderAmount.nullable().optional(),
+  currency: z.enum(ORDER_CURRENCIES).nullable().optional(),
+  engravingText: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.engraving).nullable().optional()),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one term of the order to change');
+
+/** PUT /api/admin/orders/:id/buyer: the buyer's name and address (decision 31); `null` or '' clears one. */
+export const orderBuyerBody = body({
+  name: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerName).nullable()),
+  address: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerAddress).nullable()),
+});
+
+/** POST /api/admin/orders/:id/piece: the piece picked from the stock to fulfil the order, by its reference. */
+export const orderPieceBody = body({ productId: productRef });
+
+/** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
+export const orderAlertsBody = body({
+  reservedDays: whole(ORDER_ALERT_LIMITS.reservedDays.min, ORDER_ALERT_LIMITS.reservedDays.max, 'days'),
+  readyDays: whole(ORDER_ALERT_LIMITS.readyDays.min, ORDER_ALERT_LIMITS.readyDays.max, 'days'),
+  shippedDays: whole(ORDER_ALERT_LIMITS.shippedDays.min, ORDER_ALERT_LIMITS.shippedDays.max, 'days'),
+  unregisteredDays: whole(ORDER_ALERT_LIMITS.unregisteredDays.min, ORDER_ALERT_LIMITS.unregisteredDays.max, 'days'),
+});
+
+// ── Admin: locations and carriers (routes/admin/logistics.ts) ─────────────
+
+export const logisticsParams = z.object({ id: uuid });
+
+export const createLocationBody = body({ name: text(LOCATION_NAME_MAX) });
+
+/** PATCH /api/admin/locations/:id: its name, or made the default (`isDefault: true`). At least one. */
+export const updateLocationBody = body({ name: text(LOCATION_NAME_MAX).optional(), isDefault: z.literal(true).optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the location to change',
+);
+
+export const createCarrierBody = body({ name: text(CARRIER_NAME_MAX), trackingUrl: text(TRACKING_URL_MAX) });
+
+/** PATCH /api/admin/carriers/:id: its name, its tracking link, whether it is offered. At least one. */
+export const updateCarrierBody = body({ name: text(CARRIER_NAME_MAX).optional(), trackingUrl: text(TRACKING_URL_MAX).optional(), active: z.boolean().optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the carrier to change',
+);
+
+// ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
+
+/** GET /api/admin/atelier/stock: one model, one location. */
+export const atelierStockQuery = z.object({ modelId: queryOptional(uuid), locationId: queryOptional(uuid) });
+
+
+/** POST /api/admin/atelier/stock/transfer: pieces of a SKU moved from one location to another. */
+export const stockTransferBody = body({ skuId: uuid, fromLocationId: uuid, toLocationId: uuid, quantity: whole(1, STOCK_MOVE_MAX, 'pieces'), note: z.preprocess(emptyToNull, text(STOCK_NOTE_MAX).nullable().optional()) });
+
+/** POST /api/admin/atelier/stock/adjust: a count corrected, up or down, with why. */
+export const stockAdjustBody = body({
+  skuId: uuid,
+  locationId: uuid,
+  delta: z.number().int('Must be a whole number of pieces').min(-STOCK_MOVE_MAX, `At least -${STOCK_MOVE_MAX}`).max(STOCK_MOVE_MAX, `At most ${STOCK_MOVE_MAX}`).refine((n) => n !== 0, 'Not 0'),
+  note: text(STOCK_NOTE_MAX),
+});
+
+/** PUT /api/admin/atelier/thresholds: a SKU's minimum at a location (L2), or none (`null`). */
+export const stockThresholdBody = body({ skuId: uuid, locationId: uuid, minimum: whole(1, THRESHOLD_MAX, 'pieces').nullable() });
+
+/** POST /api/admin/atelier/make: pieces to make for the stock (a suggestion confirmed). */
+export const makeForStockBody = body({ skuId: uuid, locationId: uuid, quantity: whole(1, ATELIER_MAKE_MAX, 'pieces') });
+
+const benchOrigin = z.union([uuid, z.enum(['SALON', 'STOCK'])]);
+
+/** GET /api/admin/atelier/bench and its CSV: open, finished, cancelled or all; one origin (a release, SALON, STOCK), one SKU, one location. */
+export const benchQuery = z.object({ view: queryOptional(z.enum(BENCH_VIEWS)), origin: queryOptional(benchOrigin), skuId: queryOptional(uuid), locationId: queryOptional(uuid) });
+
+export const benchParams = z.object({ id: uuid });
+
+/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece; a claim code unless refused. */
+export const benchDoneBody = optionalBody({
+  material: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.material).nullable().optional()),
+  productionBatch: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.productionBatch).nullable().optional()),
+  productionDate: z.preprocess(emptyToNull, isoDate.nullable().optional()),
+  withClaimSecret: z.boolean().optional(),
+});
+
+/** POST /api/admin/atelier/sheets: the work sheets of the pieces named, or of those an origin, a SKU and a location keep. */
+export const workSheetsBody = body({
+  benchItemIds: z.array(uuid).min(1, 'At least one piece').max(WORK_SHEETS_MAX, `At most ${WORK_SHEETS_MAX} pieces`).optional(),
+  origin: benchOrigin.optional(),
+  skuId: uuid.optional(),
+  locationId: uuid.optional(),
+}).refine((b) => !(b.benchItemIds && (b.origin || b.skuId || b.locationId)), 'Name the pieces, or narrow by origin, SKU and location: not both');
 
 // ── Admin: keys ────────────────────────────────────────────────────────────
 
