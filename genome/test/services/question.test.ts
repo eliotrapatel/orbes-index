@@ -4,9 +4,13 @@
  *
  *  - its words: the default question and its three answers, or the console's (2 to 6 answers, both or neither, each
  *    once), on by default, turned off and kept; checked and audited with the release's settings;
- *  - who is asked, from the release's end for seven days: on its end page who took part without securing a piece; in
- *    MY PIECES who said I'LL BE THERE and never had a place in the line; never who secured one, who was removed, who
+ *  - who is asked, from the release's final end for seven days: on its end page who took part without securing a piece;
+ *    in MY PIECES who said I'LL BE THERE and never had a place in the line; never who secured one, who was removed, who
  *    never came near it;
+ *  - the final end: an after-room opened at the sell-out holds the question until it ends (its recorded end, else its
+ *    close once passed), so that its guests are asked after their second door, never one who secured a piece there; an
+ *    after-room never opened (NOT_SOLD_OUT) leaves the release's own end; a turn still running after a CLOSED end is
+ *    asked once it has run out;
  *  - one tap, changeable while open, audited `drop.live.answer`; refused before the end, after the week, to anyone
  *    not asked, out of the answers;
  *  - the console's count: who is asked in each place, how many answered, each answer's count; the right of access.
@@ -14,10 +18,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { LIVE_QUESTION_DEFAULT } from '../../src/server/services/live.js';
-import { accountReleaseAnswers, cleanQuestionWords, LIVE_QUESTION_OPEN_DAYS, QuestionService, questionWindow, releaseQuestion } from '../../src/server/services/question.js';
+import { afterRoomTimes } from '../../src/server/services/after-room.js';
+import { accountReleaseAnswers, cleanQuestionWords, LIVE_QUESTION_OPEN_DAYS, QuestionService, questionWindow, releaseFinalEnd, releaseQuestion } from '../../src/server/services/question.js';
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createLiveRelease, createModel, entriesOf, liveFixture, type LiveFixture } from '../support/live.js';
 
 const T0 = new Date('2026-11-02T10:00:00.000Z');
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -65,10 +70,15 @@ describe('the words of the question after', () => {
     }
   });
 
-  it('is open from the recorded end for seven days', () => {
-    expect(questionWindow({ ended_at: null })).toBeNull();
-    expect(questionWindow({ ended_at: T0 })).toEqual({ opensAt: T0, closesAt: new Date(T0.getTime() + LIVE_QUESTION_OPEN_DAYS * DAY) });
+  it('is open from the final end for seven days: the release’s own, or its opened after-room’s', () => {
+    expect(questionWindow({ ended_at: null }, T0)).toBeNull();
+    expect(questionWindow({ ended_at: T0 }, T0)).toEqual({ opensAt: T0, closesAt: new Date(T0.getTime() + LIVE_QUESTION_OPEN_DAYS * DAY) });
     expect(LIVE_QUESTION_OPEN_DAYS).toBe(7);
+    // An after-room opened at the sell-out: its recorded end; before it, its close once passed (a CLOSED end's moment).
+    const room = { ended_at: T0, after_room_id: '00000000-0000-4000-8000-000000000001', after_room_ended_at: null, after_room_closes_at: at(25 * MINUTE) };
+    expect(releaseFinalEnd(room, at(10 * MINUTE))).toBeNull();
+    expect(questionWindow(room, at(25 * MINUTE))).toEqual({ opensAt: at(25 * MINUTE), closesAt: at(25 * MINUTE + 7 * DAY) });
+    expect(releaseFinalEnd({ ...room, after_room_ended_at: at(12 * MINUTE) }, at(12 * MINUTE))).toEqual(at(12 * MINUTE));
   });
 });
 
@@ -236,5 +246,136 @@ describe('the question after a release', () => {
     expect((await f.liveConsole.get(r.afterRoom!.id)).question).toBeNull();
     const ghost: Actor = { type: 'account', id: '00000000-0000-4000-8000-000000000001' };
     await rejects(questions.answer(ghost.id!, r.id, 1, ghost), 'FORBIDDEN', 403);
+  });
+
+  /** Holds the seal of the account's turn, then secures it. */
+  const holdAndSecure = async (dropId: string, p: { id: string; actor: Actor }) => {
+    const token = (await f.live.entry(p.id, dropId))!.turn!.token!;
+    await f.live.press(p.id, dropId, token);
+    f.clock.advance(1500);
+    await f.live.secure(p.id, dropId, token, p.actor);
+  };
+  const endOf = async (dropId: string) => (await t.db.selectFrom('drops').select(['ended_at', 'ended_reason', 'published_at', 'cancelled_at']).where('id', '=', dropId).executeTakeFirstOrThrow());
+
+  it('waits for an opened after-room to end: its guests are asked after their second door, never one who secured a piece there', async () => {
+    f.clock.set('2026-11-11T09:00:00.000Z');
+    const opensAt = new Date('2026-11-12T10:00:00.000Z');
+    const afterModel = await createModel(t.db, 'AFTERGLOW');
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 1 }], afterRoom: { modelId: afterModel, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }] } });
+    const child = r.afterRoom!.id;
+    // A (PALLADIUM, first in line) secures the one piece; B, C and D wait in the line: the sell-out makes them its guests.
+    // E said I'LL BE THERE and never came.
+    const [a, b, c, d, e] = [await accountOfTier(f, 3), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+    await f.live.setInterest(e.id, r.id, r.sizes[0]!.id, e.actor);
+    f.clock.set(new Date(opensAt.getTime() - MINUTE));
+    for (const p of [a, b, c, d]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+    f.clock.set(opensAt);
+    await f.live.advance(r.id);
+    f.clock.advance(2 * SECOND);
+    await holdAndSecure(r.id, a);
+    await f.live.confirm(a.id, r.id, a.actor);
+    const soldOut = await endOf(r.id);
+    expect(soldOut.ended_reason).toBe('SOLD_OUT');
+    expect((await endOf(child)).published_at).toEqual(soldOut.ended_at);
+
+    // From the sell-out to the after-room's end, asked of nobody: its guests wait for their second door.
+    const door = afterRoomTimes(soldOut.ended_at!, 10, 15);
+    for (const moment of [soldOut.ended_at!, new Date(door.opensAt.getTime() - SECOND)]) {
+      f.clock.set(moment);
+      for (const p of [b, c, d, e]) expect(await questions.forAccount(p.id, r.id), moment.toISOString()).toBeNull();
+      await rejects(questions.answer(b.id, r.id, 1, b.actor), 'LIVE_QUESTION_CLOSED', 409);
+      expect(await questions.forPieces(e.id)).toEqual([]);
+      expect((await f.liveConsole.get(r.id)).question).toMatchObject({ enabled: true, state: 'WAITING', opensAt: null, closesAt: null });
+    }
+    // The after-room opens: B and C enter it, B first in its line, D never comes. Still asked of nobody.
+    f.clock.set(door.opensAt);
+    for (const p of [c, b]) await f.live.enter(p.id, child, { sizeId: r.afterRoom!.sizes[0]!.id }, p.actor);
+    await f.live.advance(child);
+    expect((await entriesOf(t.db, child)).map((x) => [x.account_id, x.status])).toEqual([
+      [b.id, 'TURN'],
+      [c.id, 'QUEUED'],
+    ]);
+    f.clock.advance(2 * SECOND);
+    await holdAndSecure(child, b);
+    for (const p of [b, c, d]) expect(await questions.forAccount(p.id, r.id)).toBeNull();
+    await rejects(questions.answer(c.id, r.id, 1, c.actor), 'LIVE_QUESTION_CLOSED', 409);
+    // B pays: the after-room sells out, the release's final end. Asked: C and D (took part, no piece); E in MY PIECES.
+    await f.live.confirm(b.id, child, b.actor);
+    const last = await endOf(child);
+    expect(last.ended_reason).toBe('SOLD_OUT');
+    expect(last.ended_at!.getTime()).toBeGreaterThan(soldOut.ended_at!.getTime());
+    const closesAt = new Date(last.ended_at!.getTime() + 7 * DAY);
+    expect(await questions.forAccount(c.id, r.id)).toMatchObject({ asked: 'TOOK_PART', closesAt });
+    expect(await questions.forAccount(d.id, r.id)).toMatchObject({ asked: 'TOOK_PART', closesAt });
+    expect(await questions.forPieces(e.id)).toEqual([expect.objectContaining({ dropId: r.id, asked: 'INTEREST', closesAt })]);
+    // Never asked: A secured a piece in the release, B in its after-room.
+    for (const p of [a, b]) {
+      expect(await questions.forAccount(p.id, r.id)).toBeNull();
+      await rejects(questions.answer(p.id, r.id, 1, p.actor), 'LIVE_QUESTION_NOT_ASKED', 403);
+    }
+    expect(await questions.answer(c.id, r.id, 2, c.actor)).toMatchObject({ answer: 2, asked: 'TOOK_PART' });
+    expect((await f.liveConsole.get(r.id)).question).toMatchObject({ state: 'OPEN', opensAt: last.ended_at, closesAt, asked: { tookPart: 2, interest: 1 }, answered: 1 });
+    // A week after the after-room's end, not the release's: closed.
+    f.clock.set(new Date(closesAt.getTime() - 1));
+    expect(await questions.forAccount(d.id, r.id)).toMatchObject({ asked: 'TOOK_PART' });
+    f.clock.set(closesAt);
+    expect(await questions.forAccount(d.id, r.id)).toBeNull();
+    expect((await f.liveConsole.get(r.id)).question).toMatchObject({ state: 'CLOSED' });
+  });
+
+  it('opens at an after-room’s close once passed, the engine yet to record it; at the release’s own end when the after-room never opened', async () => {
+    // An after-room nobody enters: open at its close, before and after the engine records it there.
+    f.clock.set('2026-11-14T09:00:00.000Z');
+    const opensAt = new Date('2026-11-15T10:00:00.000Z');
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 1 }], afterRoom: { modelId: f.modelId, priceMinor: 1000, sizes: [{ label: '54', stock: 1 }] } });
+    const [a, b] = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
+    f.clock.set(new Date(opensAt.getTime() - MINUTE));
+    for (const p of [a, b]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+    f.clock.set(opensAt);
+    await f.live.advance(r.id);
+    f.clock.advance(2 * SECOND);
+    await holdAndSecure(r.id, a);
+    await f.live.confirm(a.id, r.id, a.actor);
+    const door = afterRoomTimes((await endOf(r.id)).ended_at!, 10, 15);
+    f.clock.set(new Date(door.closesAt.getTime() - 1));
+    expect(await questions.forAccount(b.id, r.id)).toBeNull();
+    f.clock.set(door.closesAt);
+    const opened = { asked: 'TOOK_PART', closesAt: new Date(door.closesAt.getTime() + 7 * DAY) };
+    expect((await endOf(r.afterRoom!.id)).ended_at).toBeNull();
+    expect(await questions.forAccount(b.id, r.id)).toMatchObject(opened);
+    expect((await f.liveConsole.get(r.id)).question).toMatchObject({ state: 'OPEN', opensAt: door.closesAt });
+    await f.live.advance(r.afterRoom!.id);
+    expect(await endOf(r.afterRoom!.id)).toMatchObject({ ended_reason: 'CLOSED', ended_at: door.closesAt });
+    expect(await questions.forAccount(b.id, r.id)).toMatchObject(opened);
+
+    // An after-room never opened (the release CLOSED, NOT_SOLD_OUT): the release's own end. A turn still running after
+    // it (300 s to hold the seal) is asked once it has run out, as the one waiting behind it is at once.
+    f.clock.set('2026-11-14T09:00:00.000Z');
+    const closed = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + MINUTE), turnSeconds: 300, sizes: [{ label: '52', stock: 1 }], afterRoom: { modelId: f.modelId, priceMinor: 1000, sizes: [{ label: '54', stock: 1 }] } });
+    const [p, q] = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
+    f.clock.set(new Date(opensAt.getTime() - MINUTE));
+    for (const x of [p, q]) await f.live.enter(x.id, closed.id, { sizeId: closed.sizes[0]!.id }, x.actor);
+    f.clock.set(opensAt);
+    await f.live.advance(closed.id);
+    f.clock.set(new Date(opensAt.getTime() + MINUTE));
+    await f.live.advance(closed.id);
+    const end = await endOf(closed.id);
+    expect(end).toMatchObject({ ended_reason: 'CLOSED', ended_at: new Date(opensAt.getTime() + MINUTE) });
+    expect((await endOf(closed.afterRoom!.id)).cancelled_at).toEqual(end.ended_at);
+    expect((await entriesOf(t.db, closed.id)).map((x) => [x.account_id, x.status])).toEqual([
+      [p.id, 'TURN'],
+      [q.id, 'ENDED'],
+    ]);
+    const asked = { asked: 'TOOK_PART', closesAt: new Date(end.ended_at!.getTime() + 7 * DAY) };
+    expect(await questions.forAccount(q.id, closed.id)).toMatchObject(asked);
+    expect(await questions.forAccount(p.id, closed.id)).toBeNull();
+    await rejects(questions.answer(p.id, closed.id, 1, p.actor), 'LIVE_QUESTION_NOT_ASKED', 403);
+    expect((await f.liveConsole.get(closed.id)).question).toMatchObject({ state: 'OPEN', opensAt: end.ended_at, asked: { tookPart: 1, interest: 0 } });
+    // Its turn runs out: MISSED, then asked.
+    f.clock.set(new Date(opensAt.getTime() + 301 * SECOND));
+    await f.live.advance(closed.id);
+    expect((await entriesOf(t.db, closed.id))[0]!.status).toBe('MISSED');
+    expect(await questions.forAccount(p.id, closed.id)).toMatchObject(asked);
+    expect((await f.liveConsole.get(closed.id)).question).toMatchObject({ asked: { tookPart: 2, interest: 0 } });
   });
 });

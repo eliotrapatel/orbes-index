@@ -438,7 +438,7 @@ The LIVE RELEASES (§8.10, §10.12, §16.23). A LIVE RELEASE not announced (or a
 | `LIVE_ADDON_UNKNOWN` | 400 | (§10.12) Not one of the release's add-ons, or more than six. |
 | `LIVE_ANNOUNCED` | 409 | (§16.23) The release is announced: its settings no longer change; ADD PIECES raises a size's stock. |
 | `LIVE_QUESTION_NOT_ASKED` | 403 | (§10.16) The question after a release is not asked of this account: *This question is for the collectors who took part in this release without a piece, or who said they would be there.* |
-| `LIVE_QUESTION_CLOSED` | 409 | (§10.16) The question after a release is not open: before the release's end, a week after it, or turned off. |
+| `LIVE_QUESTION_CLOSED` | 409 | (§10.16) The question after a release is not open: before the release's final end (its after-room's, when one opened), a week after it, or turned off. |
 | `LIVE_NOT_ANNOUNCED` | 409 | (§16.23) Not announced yet: ADD PIECES and the host messages come from the announcement on (the sizes are a setting until then). |
 | `LIVE_ROOM_OPEN` | 409 | (§16.23) The room is open: the release is no longer cancelled, an ADMIN ends it with END NOW. |
 | `LIVE_CIRCLE_POSTED` | 409 | (§16.23) The release's post of the circle already waits for its announcement. |
@@ -2003,9 +2003,9 @@ Errors: `401 UNAUTHORIZED`, `429 RATE_LIMITED`.
 
 ### 10.16 The question after a LIVE RELEASE (extension of the contract)
 
-One question after a LIVE RELEASE (plan LIVE RELEASE+ of 2026-10-04, choice 11, G4; `routes/live.ts`, `routes/account.ts`, `services/question.ts`; `release_answers` of migration 0023): on by default, its words the console's (§16.23) or the default ones, **WHAT WOULD YOU HAVE WANTED?** with **ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND**. It is asked from the release's recorded end (`ended_at`) for **7 days**, of two kinds of collector only:
+One question after a LIVE RELEASE (plan LIVE RELEASE+ of 2026-10-04, choice 11, G4; `routes/live.ts`, `routes/account.ts`, `services/question.ts`; `release_answers` of migration 0023): on by default, its words the console's (§16.23) or the default ones, **WHAT WOULD YOU HAVE WANTED?** with **ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND**. It is asked from the release's final end for **7 days**: its recorded end (`ended_at`), or, when its after-room opened at the sell-out, the after-room's own end (its `ended_at`, else its `closes_at` once passed), so that its guests are asked once their second door has shut, never before. Of two kinds of collector only:
 
-- `TOOK_PART`, on the release's end page: an account that took part in it (a place in its line, whatever became of the entry, never `REMOVED`: §10.15) and secured no piece there (no entry `CONFIRMED`, its after-room's included);
+- `TOOK_PART`, on the release's end page: an account that took part in it (a place in its line, whatever became of the entry, never `REMOVED`: §10.15) and secured no piece there (no entry `CONFIRMED`, its after-room's included), with no turn or hold still running in it (`TURN`, `SECURED`: a CLOSED end lets one run to its deadline);
 - `INTEREST`, in MY PIECES: an account that said I'LL BE THERE and never had a place in its line (it did not come, or left the room before T0).
 
 An after-room asks none (its release's line was asked), nor a draw. One tap answers it and another changes it while it is open; `release_answers` keeps one answer per account and release (its position, from 1, and the time of its latest change). Account session on each route (`401` without one); never kept by a cache (`no-store`); the account is always the session's.

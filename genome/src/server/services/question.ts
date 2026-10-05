@@ -6,11 +6,14 @@
  *                  WANTED? », ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND) unless the console rewrites them for
  *                  the release (`drops.question_text` and `question_answers`, both or neither); turned off, never asked
  *                  (its words kept for later). An after-room asks none (its release's line was asked).
- *   who is asked   from the release's recorded end (`ended_at`, the end of its sales, as THE RELEASES' PAST reads it)
- *                  until LIVE_QUESTION_OPEN_DAYS days later:
+ *   who is asked   from the release's final end until LIVE_QUESTION_OPEN_DAYS days later: its recorded end
+ *                  (`ended_at`, the end of its sales, as THE RELEASES' PAST reads it), or, when its after-room opened
+ *                  (at the sell-out), the after-room's own end (its recorded end, else its close once passed: the engine
+ *                  records a CLOSED end at `closes_at`), so that its guests are asked once their second door has shut:
  *                   - TOOK_PART, on the release's end page: a collector who took part (a place in its line, whatever
- *                     became of it, never REMOVED: services/participation.ts) and secured no piece there (none
- *                     CONFIRMED, its after-room's included);
+ *                     became of it, never REMOVED: services/participation.ts), secured no piece there (none
+ *                     CONFIRMED, its after-room's included) and has no turn nor hold still running in it (a CLOSED end
+ *                     lets one run to its deadline);
  *                   - INTEREST, in MY PIECES: a collector who said I'LL BE THERE and never had a place in its line (did
  *                     not come, or left the room before T0).
  *                  Anyone else is never asked (403 LIVE_QUESTION_NOT_ASKED), nor anyone before the end or after the
@@ -68,16 +71,38 @@ export function questionWords(d: Pick<DropRow, 'question_text' | 'question_answe
     : { text: LIVE_QUESTION_DEFAULT.text, answers: [...LIVE_QUESTION_DEFAULT.answers], custom: false };
 }
 
-/** When the question is open: from the recorded end, LIVE_QUESTION_OPEN_DAYS days; null before the end. */
-export function questionWindow(d: Pick<DropRow, 'ended_at'>): { opensAt: Date; closesAt: Date } | null {
-  if (!d.ended_at) return null;
-  const opensAt = new Date(d.ended_at);
+/**
+ * A release's end as the question reads it: its own recorded end and, when its after-room opened (published at the
+ * sell-out, never cancelled after), that after-room's recorded end and close.
+ */
+export interface ReleaseEnd {
+  ended_at: Date | null;
+  after_room_id?: string | null;
+  after_room_ended_at?: Date | null;
+  after_room_closes_at?: Date | null;
+}
+
+/**
+ * The release's final end at `now`: its own recorded end; when its after-room opened, the after-room's (its recorded
+ * end, else its close once passed, where the engine records a CLOSED end); null while it has not come.
+ */
+export function releaseFinalEnd(d: ReleaseEnd, now: Date): Date | null {
+  if (!d.after_room_id) return d.ended_at ? new Date(d.ended_at) : null;
+  if (d.after_room_ended_at) return new Date(d.after_room_ended_at);
+  const closes = d.after_room_closes_at ? new Date(d.after_room_closes_at) : null;
+  return closes && closes.getTime() <= now.getTime() ? closes : null;
+}
+
+/** When the question is open at `now`: from the release's final end, LIVE_QUESTION_OPEN_DAYS days; null before it. */
+export function questionWindow(d: ReleaseEnd, now: Date): { opensAt: Date; closesAt: Date } | null {
+  const opensAt = releaseFinalEnd(d, now);
+  if (!opensAt) return null;
   return { opensAt, closesAt: new Date(opensAt.getTime() + LIVE_QUESTION_OPEN_DAYS * DAY_MS) };
 }
 
 /** Whether the question is open at `now`. */
-export function questionOpen(d: Pick<DropRow, 'ended_at'>, now: Date): boolean {
-  const w = questionWindow(d);
+export function questionOpen(d: ReleaseEnd, now: Date): boolean {
+  const w = questionWindow(d, now);
   return w !== null && now.getTime() >= w.opensAt.getTime() && now.getTime() < w.closesAt.getTime();
 }
 
@@ -136,7 +161,7 @@ export interface AccountQuestion {
 /** The question of a release as the console reads it. */
 export interface AdminQuestion extends ReleaseQuestion {
   enabled: boolean;
-  /** OFF (never asked), WAITING (until the end), OPEN (the week after it), CLOSED. */
+  /** OFF (never asked), WAITING (until the final end, its after-room's included), OPEN (the week after it), CLOSED. */
   state: 'OFF' | 'WAITING' | 'OPEN' | 'CLOSED';
   opensAt: Date | null;
   closesAt: Date | null;
@@ -147,7 +172,8 @@ export interface AdminQuestion extends ReleaseQuestion {
   tally: { answer: number; label: string; count: number }[];
 }
 
-type QuestionRow = Pick<DropRow, 'id' | 'mode' | 'parent_drop_id' | 'published_at' | 'cancelled_at' | 'ended_at' | 'announce_at' | 'silhouette_at' | 'name_at' | 'photo_at' | 'opens_at' | 'room_opens_minutes' | 'question_enabled' | 'question_text' | 'question_answers'> & { model_name: string };
+type QuestionRow = Pick<DropRow, 'id' | 'mode' | 'parent_drop_id' | 'published_at' | 'cancelled_at' | 'ended_at' | 'announce_at' | 'silhouette_at' | 'name_at' | 'photo_at' | 'opens_at' | 'room_opens_minutes' | 'question_enabled' | 'question_text' | 'question_answers'> &
+  ReleaseEnd & { model_name: string };
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -184,12 +210,14 @@ export class QuestionService {
     const account = assertAccount(accountId);
     const now = this.clock();
     const since = new Date(now.getTime() - LIVE_QUESTION_OPEN_DAYS * DAY_MS);
+    // The final end (releaseFinalEnd), in SQL: the release's own, or its opened after-room's.
+    const finalEnd = sql<Date | null>`(case when ar.id is null then d.ended_at else coalesce(ar.ended_at, case when ar.closes_at <= ${now} then ar.closes_at end) end)`;
     const rows = await this.reads(this.db)
-      .where('d.ended_at', 'is not', null)
-      .where('d.ended_at', '<=', now)
-      .where('d.ended_at', '>', since)
+      .where(finalEnd, 'is not', null)
+      .where(finalEnd, '<=', now)
+      .where(finalEnd, '>', since)
       .where((eb) => eb.exists(eb.selectFrom('live_interest as i').select('i.drop_id').whereRef('i.drop_id', '=', 'd.id').where('i.account_id', '=', account)))
-      .orderBy('d.ended_at', 'desc')
+      .orderBy(finalEnd, 'desc')
       .orderBy('d.id')
       .execute();
     const out: AccountQuestion[] = [];
@@ -234,7 +262,8 @@ export class QuestionService {
     const now = this.clock();
     const words = questionWords(d);
     const enabled = d.parent_drop_id === null && d.mode === 'LIVE' && d.question_enabled !== false;
-    const window = questionWindow(d);
+    const afterRoom = d.parent_drop_id === null ? await this.openedAfterRoom(db, d.id) : undefined;
+    const window = questionWindow({ ended_at: d.ended_at, after_room_id: afterRoom?.id ?? null, after_room_ended_at: afterRoom?.ended_at ?? null, after_room_closes_at: afterRoom?.closes_at ?? null }, now);
     const state: AdminQuestion['state'] = !enabled ? 'OFF' : !window ? 'WAITING' : now.getTime() < window.closesAt.getTime() ? 'OPEN' : 'CLOSED';
     const [tookPart, interest, answers] = await Promise.all([
       db
@@ -242,6 +271,7 @@ export class QuestionService {
         .select((eb) => eb.fn.countAll<number>().as('n'))
         .where((eb) => tookPartIn(db, now, eb.ref('a.id'), d.id))
         .where((eb) => eb.not(securedIn(db, eb.ref('a.id'), d.id)))
+        .where((eb) => eb.not(eb.exists(this.running(db, eb.ref('a.id'), d.id))))
         .executeTakeFirstOrThrow(),
       db
         .selectFrom('live_interest as i')
@@ -270,9 +300,12 @@ export class QuestionService {
     return db
       .selectFrom('drops as d')
       .innerJoin('models as m', 'm.id', 'd.model_id')
+      // Its after-room once opened (published at the sell-out): the question waits for it to end.
+      .leftJoin('drops as ar', (j) => j.onRef('ar.parent_drop_id', '=', 'd.id').on('ar.published_at', 'is not', null).on('ar.cancelled_at', 'is', null))
       .select([
         'd.id', 'd.mode', 'd.parent_drop_id', 'd.published_at', 'd.cancelled_at', 'd.ended_at', 'd.announce_at', 'd.silhouette_at', 'd.name_at', 'd.photo_at', 'd.opens_at',
         'd.room_opens_minutes', 'd.question_enabled', 'd.question_text', 'd.question_answers', 'm.name as model_name',
+        'ar.id as after_room_id', 'ar.ended_at as after_room_ended_at', 'ar.closes_at as after_room_closes_at',
       ])
       .where('d.mode', '=', 'LIVE')
       .where('d.published_at', 'is not', null)
@@ -298,6 +331,22 @@ export class QuestionService {
       .where(sql<string>`coalesce(pd.parent_drop_id, pd.id)`, '=', dropId);
   }
 
+  /** The release's after-room once opened (published at the sell-out, not cancelled), or undefined. */
+  private openedAfterRoom(db: Db, dropId: string) {
+    return db.selectFrom('drops').select(['id', 'ended_at', 'closes_at']).where('parent_drop_id', '=', dropId).where('published_at', 'is not', null).where('cancelled_at', 'is', null).executeTakeFirst();
+  }
+
+  /** A turn or a hold still running in the release (its after-room's included): a CLOSED end lets it run to its deadline. */
+  private running(db: Db, account: Expression<string>, dropId: string) {
+    return db
+      .selectFrom('live_entries as re')
+      .innerJoin('drops as rd', 'rd.id', 're.drop_id')
+      .select('re.id')
+      .where('re.account_id', '=', account)
+      .where('re.status', 'in', ['TURN', 'SECURED'])
+      .where(sql<string>`coalesce(rd.parent_drop_id, rd.id)`, '=', dropId);
+  }
+
   /** Where the account is asked the release's question at `now` (its words aside), or null. */
   private async askedWhere(db: Db, dropId: string, account: string, now: Date): Promise<QuestionAsked | null> {
     const r = await db
@@ -307,18 +356,19 @@ export class QuestionService {
         sql<boolean>`${securedIn(db, eb.ref('a.id'), dropId)}`.as('secured'),
         eb.exists(eb.selectFrom('live_interest as i').select('i.drop_id').where('i.drop_id', '=', dropId).whereRef('i.account_id', '=', 'a.id')).as('interest'),
         eb.exists(this.placed(db, eb.ref('a.id'), dropId)).as('placed'),
+        eb.exists(this.running(db, eb.ref('a.id'), dropId)).as('running'),
       ])
       .where('a.id', '=', account)
       .executeTakeFirst();
     if (!r) return null;
-    if (r.took_part) return r.secured ? null : 'TOOK_PART';
+    if (r.took_part) return r.secured || r.running ? null : 'TOOK_PART';
     return r.interest && !r.placed ? 'INTEREST' : null;
   }
 
   /** The question as the account reads it at `now`, when it is asked of it and open; null otherwise. */
   private async asked(db: Db, d: QuestionRow, account: string, now: Date): Promise<AccountQuestion | null> {
     const words = releaseQuestion(d);
-    const window = questionWindow(d);
+    const window = questionWindow(d, now);
     if (!words || !window || !questionOpen(d, now)) return null;
     const where = await this.askedWhere(db, d.id, account, now);
     if (!where) return null;

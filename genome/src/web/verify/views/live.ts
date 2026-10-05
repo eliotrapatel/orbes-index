@@ -33,7 +33,7 @@
  *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
  *               after-room keeps the second door until it closes). For a week after the end, to an account that took
  *               part without a piece, ONE QUESTION, the question after (plan LIVE RELEASE+, choice 11; views/question.ts),
- *               here and on the page of its entry ended by the release's end
+ *               here only: it opens at the release's final end (its after-room's, when one opened), never before
  *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
  *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
  *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
@@ -1802,15 +1802,13 @@ class LivePage {
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
     const title = this.title(copy.title);
     const note = this.note(copy.text);
-    // Ended by the release's end: the question after, as on its final page.
-    const ask = kind === 'ended' ? this.questionBlock() : null;
+    // Never the question after: it opens at the release's final end, its after-room's included, on its final page.
     const el = h(
       'section',
       { class: 'live__edge' },
       this.overline(this.name()),
       title,
       note,
-      ask?.el ?? null,
       contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
@@ -1818,7 +1816,6 @@ class LivePage {
       const now = this.edgeCopy(kind);
       if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
-      if (ask) this.askQuestion(ask);
     };
     return { kind, el, back: contact === null, update };
   }
