@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation, PG_ERROR, pgError } from '../../src/server/db/pg-errors.js';
 import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
@@ -1307,10 +1307,10 @@ describe('migrations', () => {
   const statusCheck = (o: string) => o.startsWith('constraint products products_status_check ');
   const of0022 = (o: string) =>
     new RegExp(`\\b(${TABLES_0022.join('|')})\\b`).test(o) ||
-    /^table (products|drop_sizes) sku_id |^table drops stock_location_id |^table shop_requests outcome |^table models (base_price_minor|base_currency|care_guide) /.test(o) ||
-    /^constraint (products products_reserved|drop_sizes drop_sizes_sku_id_fkey|drops drops_stock_location_id_fkey|shop_requests shop_requests_outcome_(check|closed)|models models_(base_price|base_price_minor_check|base_currency_check|care_guide_check)) /.test(o) ||
+    /^table (products|drop_sizes) sku_id |^table drops stock_location_id |^table shop_requests outcome |^table models (base_price_minor|base_currency|care_guide) |^table accounts shopify_customer_id /.test(o) ||
+    /^constraint (accounts accounts_shopify_customer_(id_check|key)|products products_reserved|drop_sizes drop_sizes_sku_id_fkey|drops drops_stock_location_id_fkey|shop_requests shop_requests_outcome_(check|closed)|models models_(base_price|base_price_minor_check|base_currency_check|care_guide_check)) /.test(o) ||
     (statusCheck(o) && o.includes("'RESERVED'")) ||
-    /^index CREATE INDEX (products_sku_id_idx|drop_sizes_sku_id_idx|drops_stock_location_id_idx) /.test(o);
+    /^index CREATE INDEX (products_sku_id_idx|drop_sizes_sku_id_idx|drops_stock_location_id_idx) |^index CREATE UNIQUE INDEX accounts_shopify_customer_key /.test(o);
 
   it('0022 adds the stock, the orders and the journal (twelve tables, the SKUs of pieces and sizes, RESERVED, the salon\'s outcome, a model\'s base price and care guide, a release\'s location), and nothing else; down retires the identities still RESERVED and restores 0021 exactly, and up again', async () => {
     const latest = await snapshot();
@@ -1341,6 +1341,7 @@ describe('migrations', () => {
     expect(columns('drops')).toEqual(['stock_location_id']);
     expect(columns('shop_requests')).toEqual(['outcome']);
     expect(columns('models')).toEqual(['base_currency', 'base_price_minor', 'care_guide']);
+    expect(columns('accounts')).toEqual(['shopify_customer_id']);
     expect(columns('stock_locations')).toEqual(['created_at', 'id', 'is_default', 'name', 'shopify_location_id']);
     expect(columns('skus')).toEqual(['code', 'created_at', 'id', 'model_id', 'shopify_product_id', 'shopify_variant_id', 'size_label']);
     expect(columns('stock_movements')).toEqual(['actor_id', 'actor_type', 'created_at', 'delta', 'id', 'location_id', 'note', 'order_id', 'product_id', 'reason', 'sku_id', 'transfer_id']);
@@ -1384,6 +1385,8 @@ describe('migrations', () => {
       /^constraint drop_sizes drop_sizes_sku_id_fkey FOREIGN KEY \(sku_id\) REFERENCES skus\(id\) ON DELETE RESTRICT$/,
       /^constraint drops drops_stock_location_id_fkey FOREIGN KEY \(stock_location_id\) REFERENCES stock_locations\(id\) ON DELETE RESTRICT$/,
       /^constraint shop_requests shop_requests_outcome_check CHECK \(\(outcome = ANY \(ARRAY\['ACCEPTED'::text, 'DECLINED'::text\]\)\)\)$/,
+      /^constraint accounts accounts_shopify_customer_id_check CHECK \(\(shopify_customer_id ~ '\^\[1-9\]\[0-9\]\{0,19\}\$'::text\)\)$/,
+      /^constraint accounts accounts_shopify_customer_key UNIQUE \(shopify_customer_id\)$/,
       /^constraint skus skus_model_size_key UNIQUE NULLS NOT DISTINCT \(model_id, size_label\)$/,
       /^constraint orders orders_sku_fkey FOREIGN KEY \(model_id, sku_id\) REFERENCES skus\(model_id, id\) ON DELETE RESTRICT$/,
       /^constraint orders orders_status_check CHECK \(\(status = ANY \(ARRAY\['RESERVED'::text, 'PAID'::text, 'SHIPPED'::text, 'DELIVERED'::text, 'CANCELLED'::text, 'RETURNED'::text\]\)\)\)$/,
@@ -1413,7 +1416,7 @@ describe('migrations', () => {
     expect(await snapshot()).toEqual(latest);
   });
 
-  it('0022: locations and SKUs unique, one default; a RESERVED identity unclaimable and never in the history; each order\'s source, price, holding, steps and shipment consistent, its identity fixed; the ledger, the events, the returns, the invoices and the journal append-only (the journal\'s readers aside); one settings row', async () => {
+  it('0022: locations, SKUs and Shopify customers unique, one default; a RESERVED identity unclaimable and never in the history; each order\'s source, price, holding, steps and shipment consistent, its identity fixed; the ledger, the events, the returns, the invoices and the journal append-only (the journal\'s readers aside); one settings row', async () => {
     await sql`INSERT INTO categories (id, code, name) VALUES (22, 'V', 'Orders test') ON CONFLICT DO NOTHING`.execute(t.db);
     const modelOf = async (prefix: string) => (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (22, 'O', 'RING', ${prefix}) RETURNING id`.execute(t.db)).rows[0].id;
     const model = await modelOf('ORDCHK');
@@ -1450,6 +1453,12 @@ describe('migrations', () => {
     await expect(run(`UPDATE skus SET size_label = '54' WHERE id = '${s52}'`)).rejects.toSatisfy(isGuardViolation);
     await run(`UPDATE skus SET shopify_product_id = '8001', shopify_variant_id = '9001' WHERE id = '${s52}'`);
     await expect(run(`UPDATE skus SET shopify_variant_id = '9001' WHERE id = '${one}'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_shopify_variant_key'));
+
+    // An account's Shopify customer: decimal, one account each.
+    const customer = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('customer@example.com', 'customer@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    await run(`UPDATE accounts SET shopify_customer_id = '6001' WHERE id = '${account}'`);
+    await expect(run(`UPDATE accounts SET shopify_customer_id = '6001' WHERE id = '${customer}'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'accounts_shopify_customer_key'));
+    await expect(run(`UPDATE accounts SET shopify_customer_id = 'gid://shopify/Customer/1' WHERE id = '${customer}'`)).rejects.toSatisfy((e) => isCheckViolation(e));
 
     // A piece of its model's SKU only; RESERVED never claimable, never written in the history.
     let serial = 0;
@@ -1602,9 +1611,11 @@ describe('migrations', () => {
     await threshold(3);
     await expect(threshold(4)).rejects.toSatisfy((e) => isUniqueViolation(e));
 
-    // Returns: back to stock at a location, or archived without one; once per order; never changed.
-    const ret = (outcome: string, locationId: string | null, orderId = o1.id) =>
-      sql<{ id: string }>`INSERT INTO returns (order_id, outcome, location_id, created_by) VALUES (${orderId}, ${outcome}, ${locationId}, ${admin}) RETURNING id`.execute(t.db);
+    // Returns: back to stock at a location, or archived without one, with a note; once per order; never changed.
+    const ret = (outcome: string, locationId: string | null, orderId = o1.id, note: string | null = 'Returned unworn.') =>
+      sql<{ id: string }>`INSERT INTO returns (order_id, outcome, location_id, note, created_by) VALUES (${orderId}, ${outcome}, ${locationId}, ${note}, ${admin}) RETURNING id`.execute(t.db);
+    await expect(ret('ARCHIVED', null, o1.id, null)).rejects.toSatisfy((e) => pgError(e)?.code === PG_ERROR.NOT_NULL_VIOLATION);
+    await expect(ret('ARCHIVED', null, o1.id, ' ')).rejects.toSatisfy((e) => isCheckViolation(e));
     await expect(ret('RESTOCKED', null)).rejects.toSatisfy((e) => isCheckViolation(e, 'returns_location'));
     await expect(ret('ARCHIVED', paris)).rejects.toSatisfy((e) => isCheckViolation(e, 'returns_location'));
     await expect(ret('LOST', null)).rejects.toSatisfy((e) => isCheckViolation(e));

@@ -23,12 +23,13 @@
  *                while it is SHIPPED (`deliverOnRegistration`, OwnershipService.registerFirst).
  *                CANCELLED, with a note: a piece in stock is released; a piece to make is cancelled and its reserved
  *                identity retired (RETIRED: its serial is never reused).
- *                RETURNED, with where the piece goes: back to stock at a location (RETURNED, +1) or to the archive.
+ *                RETURNED, with a note and where the piece goes: back to stock at a location (RETURNED, +1) or to the
+ *                archive.
  *   history      every change is one event of the order (order_events: its audit action, the status after it, a note,
  *                who, when), one audit entry (`order.create`, `.pay`, `.ship`, `.deliver`, `.cancel`, `.return`,
  *                `.location`, `.terms`, `.buyer`) and one entry of the event journal (the order as it stands after
  *                it; services/journal.ts), in the transaction of the change; the pieces to make (`bench.create`,
- *                `bench.cancel`), the identities (`product.reserve`, `product.retire`) and the stock (`stock.move`)
+ *                `.cancel`, `.move`, `.engrave`), the identities (`product.reserve`, `product.retire`) and the stock (`stock.move`)
  *                journal their own changes.
  *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
  *                only, never in the audit log, the order's events nor the journal (which say they were entered, never
@@ -288,8 +289,8 @@ export function orderPayload(o: OrderRow): JsonObject {
   };
 }
 
-/** A piece to make as the event journal says it (`bench.create`, `bench.cancel`): never its engraving text. */
-function benchPayload(b: {
+/** A piece to make as the event journal says it (`bench.create`, `.cancel`, `.move`, `.engrave`): never its engraving text. */
+export function benchPayload(b: {
   id: string;
   order_id: string | null;
   sku_id: string;
@@ -344,7 +345,7 @@ async function recordChange(
   before: OrderRow | null,
   after: OrderRow,
   action: string,
-  change: { note?: string | null; details?: JsonObject },
+  change: { note?: string | null; details?: JsonObject; at?: Date },
   actor: Actor,
   now: Date,
 ): Promise<AuditRecordInput> {
@@ -359,7 +360,7 @@ async function recordChange(
       details: jsonText(details),
       actor_type: actor.type,
       actor_id: actor.id ?? null,
-      created_at: now,
+      created_at: change.at ?? now,
     })
     .execute();
   await writeJournal(tx, [{ type: action, entityType: 'order', entityId: after.id, payload: orderPayload(after) }], now);
@@ -448,9 +449,14 @@ interface NewOrder {
   addons: OrderAddonSnapshot[];
   surprise: string | null;
   locationId: string;
+  /** When the sale was made, for an order created after it (at boot: `OrderService.prepare`); `now` otherwise. */
+  reservedAt?: Date;
 }
 
-/** Create an order RESERVED, take what it holds (unless `hold` is false), and record its creation. */
+/**
+ * Create an order RESERVED, take what it holds (unless `hold` is false), and record its creation: its RESERVED step,
+ * in its history too, at the time of the sale.
+ */
 async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
   let o = await tx
     .insertInto('orders')
@@ -470,7 +476,7 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       addons: jsonText(n.addons),
       surprise: n.surprise,
       location_id: n.locationId,
-      reserved_at: now,
+      reserved_at: n.reservedAt && n.reservedAt < now ? n.reservedAt : now,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -478,7 +484,7 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
   if (opts.hold) o = await hold(tx, o, actor, now, benchNotes);
   const source: JsonObject = n.liveEntryId ? { liveEntryId: n.liveEntryId, piece: o.piece } : n.dropEntryId ? { dropEntryId: n.dropEntryId } : { shopRequestId: n.shopRequestId! };
   notes.push(
-    await recordChange(tx, null, o, 'order.create', { details: { ...source, dropId: n.dropId, skuId: o.sku_id, locationId: o.location_id, reservation: o.reservation } }, actor, now),
+    await recordChange(tx, null, o, 'order.create', { details: { ...source, dropId: n.dropId, skuId: o.sku_id, locationId: o.location_id, reservation: o.reservation }, at: o.reserved_at }, actor, now),
     ...benchNotes,
   );
   return o;
@@ -493,10 +499,10 @@ async function releaseLocation(tx: Db, stockLocationId: string | null): Promise<
  * The orders of an entry of a LIVE RELEASE CONFIRMED, in the transaction that confirms it (the release's row and the
  * entry's held): one per piece of its quantity, each with the release's price and currency and the entry's add-ons as
  * sold, RESERVED at the release's location and holding what it can (`hold` false: nothing, for a reservation cancelled
- * before its orders existed). Idempotent: only the pieces without an order get one. Returns the orders created and the
- * audit entries to write last.
+ * before its orders existed; `reservedAt`: the time of the sale, for one confirmed before its orders existed). Idempotent:
+ * only the pieces without an order get one. Returns the orders created and the audit entries to write last.
  */
-export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { hold?: boolean } = {}): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[] }> {
+export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { hold?: boolean; reservedAt?: Date } = {}): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[] }> {
   const e = await tx
     .selectFrom('live_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
@@ -541,6 +547,7 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
           addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
           surprise: null,
           locationId,
+          reservedAt: opts.reservedAt,
         },
         { hold: opts.hold ?? true },
         actor,
@@ -554,10 +561,11 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
 
 /**
  * The order of an entry of a draw confirmed by Client Services, in the transaction that confirms it (the drop's row and
- * the entry's held): RESERVED at the drop's location, its size, price and currency to be entered (`setTerms`).
- * Idempotent (null when the entry has its order).
+ * the entry's held): RESERVED at the drop's location, its size, price and currency to be entered (`setTerms`)
+ * (`reservedAt`: the time of the sale, for an entry confirmed before its order existed). Idempotent (null when the entry
+ * has its order).
  */
-export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, now: Date): Promise<{ order: OrderRow | null; notes: AuditRecordInput[] }> {
+export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { reservedAt?: Date } = {}): Promise<{ order: OrderRow | null; notes: AuditRecordInput[] }> {
   const e = await tx
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
@@ -582,6 +590,7 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
       addons: [],
       surprise: null,
       locationId: await releaseLocation(tx, e.stock_location_id),
+      reservedAt: opts.reservedAt,
     },
     { hold: true },
     actor,
@@ -630,7 +639,7 @@ type CheckedStep =
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor: number | null; note: string | null }
   | { to: 'DELIVERED'; note: string | null; details?: JsonObject }
   | { to: 'CANCELLED'; note: string }
-  | { to: 'RETURNED'; outcome: ReturnOutcome; locationId: string | null; note: string | null };
+  | { to: 'RETURNED'; outcome: ReturnOutcome; locationId: string | null; note: string };
 
 function checkStep(input: OrderTransitionInput): CheckedStep {
   if (!input || typeof input !== 'object' || !(ORDER_STATUSES as readonly string[]).includes((input as { to: unknown }).to as string)) {
@@ -656,7 +665,7 @@ function checkStep(input: OrderTransitionInput): CheckedStep {
       const locationId = input.outcome === 'RESTOCKED' ? input.locationId ?? null : null;
       if (input.outcome === 'RESTOCKED' && (typeof locationId !== 'string' || !UUID_RE.test(locationId))) throw notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
       if (input.outcome === 'ARCHIVED' && input.locationId) throw validationError('A piece archived goes to no location.');
-      return { to: 'RETURNED', outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note: note() };
+      return { to: 'RETURNED', outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note: note(true)! };
     }
     default:
       throw validationError('An order is created RESERVED: it never moves back to it.');
@@ -894,7 +903,7 @@ export class OrderService {
   /**
    * Move an order one step (ORDER_TRANSITIONS; 409 ORDER_TRANSITION_NOT_ALLOWED otherwise), with what the step
    * requires: SHIPPED a carrier and a tracking number, the piece in stock at the order's location; CANCELLED a note;
-   * RETURNED where the piece goes. Audited `order.pay`, `.ship`, `.deliver`, `.cancel`, `.return`.
+   * RETURNED a note and where the piece goes. Audited `order.pay`, `.ship`, `.deliver`, `.cancel`, `.return`.
    */
   async transition(orderId: string, input: OrderTransitionInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -976,7 +985,14 @@ export class OrderService {
       }
       if (engraving !== undefined && engraving !== o.engraving_text) {
         after = await updateOrder(tx, o.id, { engraving_text: engraving });
-        await tx.updateTable('bench_items').set({ engraving_text: engraving }).where('order_id', '=', o.id).where('status', 'in', ['TO_MAKE', 'IN_PROGRESS']).execute();
+        const engraved = await tx
+          .updateTable('bench_items')
+          .set({ engraving_text: engraving })
+          .where('order_id', '=', o.id)
+          .where('status', 'in', ['TO_MAKE', 'IN_PROGRESS'])
+          .returningAll()
+          .executeTakeFirst();
+        if (engraved) await writeJournal(tx, [{ type: 'bench.engrave', entityType: 'bench_item', entityId: engraved.id, payload: benchPayload(engraved) }], now);
         fields.push('engraving');
       }
       if (sizeChange) {
@@ -1017,7 +1033,8 @@ export class OrderService {
    * At boot: the locations and carriers of the first boot (stock.ts ensureStockSetup), the pieces and the sizes on sale
    * linked to their SKUs (linkSkus), and the orders of the sales committed without them (before migration 0022, or by
    * the previous image): every entry of a LIVE RELEASE CONFIRMED gets one order per piece, its resolution mapped
-   * (CONCLUDED → PAID, CANCELLED → CANCELLED), every entry of a draw CONFIRMED its order. Idempotent; a sale whose
+   * (CONCLUDED → PAID, CANCELLED → CANCELLED), every entry of a draw CONFIRMED its order; each RESERVED when the sale
+   * was made (the entry's confirmation, the draw entry's handling), its later steps now. Idempotent; a sale whose
    * orders cannot be created is logged and left for the next boot.
    */
   async prepare(): Promise<{ locations: string[]; carriers: string[]; linked: { products: number; sizes: number }; orders: number }> {
@@ -1026,7 +1043,7 @@ export class OrderService {
     let orders = 0;
     const live = await this.db
       .selectFrom('live_entries as e')
-      .select(['e.id', 'e.drop_id'])
+      .select(['e.id', 'e.drop_id', 'e.confirmed_at'])
       .where('e.status', '=', 'CONFIRMED')
       .where((eb) => eb(eb.selectFrom('orders as o').select((x) => x.fn.countAll<number>().as('n')).whereRef('o.live_entry_id', '=', 'e.id'), '<', eb.ref('e.quantity')))
       .orderBy('e.confirmed_at')
@@ -1035,7 +1052,7 @@ export class OrderService {
       orders += await this.backfill(`live entry ${e.id}`, async (tx, now, notes) => {
         await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forUpdate().executeTakeFirstOrThrow();
         const entry = await tx.selectFrom('live_entries').select(['resolution', 'resolution_note']).where('id', '=', e.id).forUpdate().executeTakeFirstOrThrow();
-        const created = await ordersForLiveEntry(tx, e.id, SYSTEM_ACTOR, now, { hold: entry.resolution !== 'CANCELLED' });
+        const created = await ordersForLiveEntry(tx, e.id, SYSTEM_ACTOR, now, { hold: entry.resolution !== 'CANCELLED', reservedAt: e.confirmed_at ?? now });
         notes.push(...created.notes);
         for (const o of created.orders) {
           if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID', note: entry.resolution_note }, SYSTEM_ACTOR, now, notes);
@@ -1046,7 +1063,7 @@ export class OrderService {
     }
     const draws = await this.db
       .selectFrom('drop_entries as e')
-      .select(['e.id', 'e.drop_id'])
+      .select(['e.id', 'e.drop_id', 'e.handled_at'])
       .where('e.status', '=', 'CONFIRMED')
       .where((eb) => eb.not(eb.exists(eb.selectFrom('orders as o').select('o.id').whereRef('o.drop_entry_id', '=', 'e.id'))))
       .orderBy('e.handled_at')
@@ -1055,7 +1072,7 @@ export class OrderService {
       orders += await this.backfill(`draw entry ${e.id}`, async (tx, now, notes) => {
         await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forUpdate().executeTakeFirstOrThrow();
         await tx.selectFrom('drop_entries').select('id').where('id', '=', e.id).forUpdate().executeTakeFirstOrThrow();
-        const created = await orderForDrawEntry(tx, e.id, SYSTEM_ACTOR, now);
+        const created = await orderForDrawEntry(tx, e.id, SYSTEM_ACTOR, now, { reservedAt: e.handled_at ?? now });
         notes.push(...created.notes);
         return created.order ? 1 : 0;
       });

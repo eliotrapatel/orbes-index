@@ -22,7 +22,7 @@ import { ORDER_STATUSES, type JsonObject, type OrderStatus } from '../../src/ser
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { acknowledgeJournal, readJournal, replayJournal, stockKey, type JournalEntry } from '../../src/server/services/journal.js';
-import { ORDER_CURRENCIES, ORDER_TRANSITIONS, orderPayload, orderReference, trackingLink, type OrderTransitionInput } from '../../src/server/services/orders.js';
+import { ORDER_CURRENCIES, ORDER_TRANSITIONS, benchPayload, orderPayload, orderReference, trackingLink, type OrderTransitionInput } from '../../src/server/services/orders.js';
 import { LIVE_CURRENCIES } from '../../src/server/services/live-console.js';
 import { CARRIER_PRESETS, ensureSku, stockBalances, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -142,7 +142,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       : to === 'CANCELLED'
         ? { to, note: 'The client withdrew.' }
         : to === 'RETURNED'
-          ? { to, outcome: 'ARCHIVED' }
+          ? { to, outcome: 'ARCHIVED', note: 'Returned to the house.' }
           : ({ to } as OrderTransitionInput);
 
   // ── the first boot ───────────────────────────────────────────────────────
@@ -291,6 +291,16 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       ]);
       const [drawn] = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', drawEntry).execute();
       expect(drawn).toMatchObject({ channel: 'DRAW', drop_id: draw.id, account_id: drawer.id, status: 'RESERVED', sku_id: null, reservation: null });
+      // RESERVED when the sale was made (the entry's confirmation, the draw's handling), in their history too; the
+      // steps mapped at boot, now.
+      const sold = new Date(T.getTime() + 10_000);
+      for (const o of [...(await of(open)), ...(await of(concluded)), gone!]) {
+        expect(o.reserved_at, o.id).toEqual(sold);
+        expect((await eventsOf(o.id))[0]!.created_at, o.id).toEqual(sold);
+      }
+      expect([gone!.cancelled_at, (await eventsOf(gone!.id))[1]!.created_at]).toEqual([clock.now(), clock.now()]);
+      expect(drawn!.reserved_at).toEqual(new Date(T.getTime() + HOUR));
+      expect((await orders().get(drawn!.id)).events.map((e) => [e.status, e.at])).toEqual([['RESERVED', new Date(T.getTime() + HOUR)]]);
       // Audited by the system, marked as made at boot.
       expect((await auditsOf(gone!.id)).map((a) => [a.action, a.actor_type, (a.details as JsonObject).backfill])).toEqual([
         ['order.create', 'system', true],
@@ -572,13 +582,15 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect(trackingLink('https://track.example/{tracking}?x=1', 'AB 12/3')).toBe('https://track.example/AB12%2F3?x=1');
     });
 
-    it('RETURNED: back to stock at a location (+1, the return recorded), or to the archive', async () => {
+    it('RETURNED, with a note: back to stock at a location (+1, the return recorded), or to the archive', async () => {
       const sku = await skuOf('78');
       await receive(sku, france, 2);
       const back = await walk((await salonOrder({ size: '78' })).id, ['PAID', 'SHIPPED', 'DELIVERED']);
       const archived = await walk((await salonOrder({ size: '78' })).id, ['PAID', 'SHIPPED']);
-      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
-      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'ARCHIVED', locationId: logistics }, admin), 'VALIDATION_FAILED', 400);
+      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', note: 'Returned unworn.' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
+      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'ARCHIVED', locationId: logistics, note: 'Returned unworn.' }, admin), 'VALIDATION_FAILED', 400);
+      // A return opens with a note, as a cancellation does.
+      for (const note of [undefined, null, '  ']) await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, note }, admin), 'VALIDATION_FAILED', 400);
       clock.advance(MINUTE);
       await orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, note: 'Returned unworn.' }, admin);
       await orders().transition(archived.id, { to: 'RETURNED', outcome: 'ARCHIVED', note: 'Damaged in transit.' }, admin);
@@ -612,6 +624,20 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect(audit.details).toMatchObject({ fields: ['engraving'] });
       expect(JSON.stringify(audit.details)).not.toContain('2026');
       expect(JSON.stringify((await journalOf(live.id)).at(-1)!.payload)).not.toContain('A. & B.');
+      // Its piece to make journals the change too: engraved, never the words; cleared, no longer engraved.
+      const bench = (await benchOf(live.id))[0]!;
+      expect(live.reservation).toBe('BENCH');
+      const engraved = (await journalOf(bench.id)).at(-1)!;
+      expect([engraved.type, engraved.payload]).toEqual(['bench.engrave', benchPayload(bench)]);
+      expect(engraved.payload).toMatchObject({ engraving: true });
+      expect(JSON.stringify(engraved.payload)).not.toContain('A. & B.');
+      clock.advance(MINUTE);
+      await orders().setTerms(live.id, { engravingText: null }, admin);
+      expect((await journalOf(bench.id)).map((j) => [j.type, (j.payload as JsonObject).engraving])).toEqual([
+        ['bench.create', false],
+        ['bench.engrave', true],
+        ['bench.engrave', false],
+      ]);
       // A salon order: price and currency together, in the house's currencies, before it is paid.
       const o = await salonOrder();
       await rejects(orders().setTerms(o.id, { priceMinor: 480_000 }, admin), 'VALIDATION_FAILED', 400);
@@ -850,7 +876,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       }
       expect([...replayed.orders.keys()].sort()).toEqual(rows.map((o) => o.id).sort());
       for (const b of await t.db.selectFrom('bench_items').selectAll().execute()) {
-        expect(replayed.benchItems.get(b.id)).toMatchObject({ status: b.status, locationId: b.location_id, productId: b.product_id, orderId: b.order_id });
+        expect(replayed.benchItems.get(b.id), b.id).toEqual(benchPayload(b));
       }
       expect(replayed.products.size).toBeGreaterThan(10);
       for (const p of await t.db.selectFrom('products').select(['id', 'status']).where('id', 'in', [...replayed.products.keys()]).execute()) {

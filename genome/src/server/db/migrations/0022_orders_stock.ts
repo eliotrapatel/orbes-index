@@ -80,9 +80,11 @@
  * `shop_requests.outcome`: ACCEPTED or DECLINED, set when a request is CLOSED (NULL for one closed before 0022).
  * `models.base_price_minor` and `base_currency` (both or neither): a model's base price for the Shopify export;
  * `models.care_guide`: its care guide (1 to 8 000 characters). `drops.stock_location_id`: a release's default location.
+ * `accounts.shopify_customer_id`: the Shopify customer an account will be, matched by email once the store exists (N3;
+ * decimal, unique).
  *
  * Every foreign key leads an index; ON DELETE RESTRICT like every other. Compatible with the previous image: new
- * nullable columns it never names (it inserts products, sizes, models, drops and requests without them and reads them
+ * nullable columns it never names (it inserts products, sizes, models, drops, requests and accounts without them and reads them
  * column by column) and new tables it never reads; RESERVED products carry no code yet, so the previous image's
  * /verify still answers them as unknown. No row is inserted. `down` retires the identities still RESERVED (the
  * previous image has no such status; their serials stay taken), drops the twelve tables, then the columns and
@@ -180,6 +182,10 @@ export const UP: readonly string[] = [
   `ALTER TABLE models ADD COLUMN base_currency text NULL CONSTRAINT models_base_currency_check CHECK (base_currency ~ '^[A-Z]{3}$')`,
   `ALTER TABLE models ADD CONSTRAINT models_base_price CHECK ((base_price_minor IS NULL) = (base_currency IS NULL))`,
   `ALTER TABLE models ADD COLUMN care_guide text NULL CONSTRAINT models_care_guide_check CHECK (${words('care_guide', 8000)})`,
+
+  // ── accounts: the Shopify customer each will be ──────────────────────────
+  `ALTER TABLE accounts ADD COLUMN shopify_customer_id text NULL CONSTRAINT accounts_shopify_customer_id_check CHECK (shopify_customer_id ~ ${SHOPIFY_ID})`,
+  `ALTER TABLE accounts ADD CONSTRAINT accounts_shopify_customer_key UNIQUE (shopify_customer_id)`,
 
   // ── orders ───────────────────────────────────────────────────────────────
   `CREATE TABLE orders (
@@ -359,7 +365,7 @@ export const UP: readonly string[] = [
      order_id    uuid        NOT NULL REFERENCES orders (id) ON DELETE RESTRICT,
      outcome     text        NOT NULL CHECK (outcome IN (${RETURN_OUTCOMES})),
      location_id uuid        NULL REFERENCES stock_locations (id) ON DELETE RESTRICT,
-     note        text        NULL CHECK (${words('note', 500)}),
+     note        text        NOT NULL CHECK (${words('note', 500)}),
      created_by  uuid        NULL REFERENCES admin_users (id) ON DELETE RESTRICT,
      created_at  timestamptz NOT NULL DEFAULT now(),
      CONSTRAINT returns_order_key UNIQUE (order_id),
@@ -445,6 +451,8 @@ export const DOWN: readonly string[] = [
   `DROP TABLE IF EXISTS bench_items`,
   `DROP TABLE IF EXISTS order_events`,
   `DROP TABLE IF EXISTS orders`,
+  `ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_shopify_customer_key`,
+  `ALTER TABLE accounts DROP COLUMN IF EXISTS shopify_customer_id`,
   `ALTER TABLE models DROP CONSTRAINT IF EXISTS models_base_price`,
   `ALTER TABLE models DROP COLUMN IF EXISTS care_guide`,
   `ALTER TABLE models DROP COLUMN IF EXISTS base_currency`,

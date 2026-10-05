@@ -422,6 +422,8 @@ export interface AccountsTable {
   failed_logins_since: TimestampNullable;
   /** After an assisted recovery, new transfers out of the account are paused until then (migration 0005). */
   transfers_frozen_until: TimestampNullable;
+  /** The Shopify customer it will be, matched by email once the store exists (migration 0022, N3; decimal, unique). */
+  shopify_customer_id: string | null;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -1115,7 +1117,7 @@ export interface ReturnsTable {
   order_id: string;
   outcome: ReturnOutcome;
   location_id: ColumnType<string | null, string | null | undefined, string | null>;
-  note: ColumnType<string | null, string | null | undefined, string | null>;
+  note: string;
   created_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
   created_at: TimestampDefault;
 }
