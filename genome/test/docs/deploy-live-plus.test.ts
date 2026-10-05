@@ -12,7 +12,9 @@
  *    launch guarded by `pgrep -a pg_dump`, restore.sh only ever run to watch it refuse, no prune, the fast-forward to
  *    the final commit after its check, and nothing of the host changed (no file of deploy/vps since D, no variable);
  *  - the legal pages' one version, the one the code publishes, after D's;
- *  - the first boot it describes is the code's: the two locations and the four carriers;
+ *  - the first boot it describes is the code's: the two locations and the four carriers, and the orders of the sales
+ *    made before E, each as prepare() maps it (a concluded reservation PAID with its invoice issued at boot, without a
+ *    buyer), with what the owner does before (the open reservations) and after (the `orders` figure, the Orders page);
  *  - one real check per feature of the plan, each quoting only labels the verification app, the console or the server
  *    shows, and what the trial leaves out naming the tests that cover it;
  *  - one command per shell block, the console's shell commands as scripts/db.ts knows them, relative links that resolve.
@@ -154,8 +156,9 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
       expect(readDoc(source), `${message}: not in ${source}`).toContain(message);
     }
     // The first boot's line and the engine's are read from the whole log of the app's container, which this deployment
-    // recreates: a window (--since) would miss them when the post-checks run late.
-    expect(commands).toContain("docker compose logs app | grep -c 'stock and orders ready'");
+    // recreates: a window (--since) would miss them when the post-checks run late. The first boot's line is read whole,
+    // for the number of orders it carries.
+    expect(commands).toContain("docker compose logs app | grep 'stock and orders ready'");
     expect(commands).toContain("docker compose logs app | grep -c 'live engine: leading'");
     expect(commands.filter((c) => c.includes('docker compose logs') && c.includes('--since'))).toEqual([]);
   });
@@ -173,6 +176,47 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
       expect(migration).toMatch(new RegExp(`${column} +smallint +NOT NULL DEFAULT ${days} `));
     }
     expect(section(runbook, '### 1.7')).toContain('`Order alerts` : 2, 3, 10 et 30 jours');
+  });
+
+  it('says what each sale made before E becomes at the first boot, and what the owner does before and after', () => {
+    const orders = readDoc('genome/src/server/services/orders.ts');
+    const prepare = orders.slice(orders.indexOf('async prepare()'), orders.indexOf('// ── internals'));
+    // A LIVE reservation concluded becomes PAID, which issues its invoice there and then, with the buyer the order has: none.
+    expect(prepare).toContain("if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID'");
+    expect(prepare).toContain("if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED'");
+    expect(orders).toContain("const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now)");
+    expect(readDoc('genome/src/server/services/invoices.ts')).toContain('const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };');
+    expect(readDoc('genome/src/server/db/migrations/0022_orders_stock.ts')).toContain('CREATE TRIGGER invoices_immutable BEFORE UPDATE OR DELETE ON invoices');
+    // An open one holds a piece (the locations empty: one to make, its identity reserved); a cancelled one holds nothing;
+    // a draw's place has no SKU, so holds nothing until its terms are entered; each dated by its sale.
+    expect(prepare).toContain("{ hold: entry.resolution !== 'CANCELLED', reservedAt: e.confirmed_at ?? now }");
+    expect(prepare).toContain('orderForDrawEntry(tx, e.id, SYSTEM_ACTOR, now, { reservedAt: e.handled_at ?? now })');
+    expect(orders).toContain('if (o.sku_id === null || o.reservation !== null || !ORDER_HOLDING_STATUSES.includes(o.status)) return o;');
+    const first = section(runbook, '### 1.0');
+    for (const words of [
+      'une réservation d\'une LIVE RELEASE **conclue** (`Concluded` dans `Client Services`) devient PAID : sa facture `INV-…` est émise au démarrage, sans le nom ni l\'adresse de l\'acheteur',
+      'une réservation **annulée** devient CANCELLED et ne tient rien',
+      'une réservation **encore ouverte** devient RESERVED ; comme une conclue, elle tient une pièce du stock ou, les lieux étant vides au premier démarrage, une pièce à fabriquer dans `Atelier`, qui réserve son numéro de série',
+      'une place d\'une sortie tirée **confirmée** (depuis le déploiement A) devient RESERVED, sans taille ni prix (dans MY PIECES, les deux se lisent `TO BE CONFIRMED`)',
+      '`LATE · NOT PAID`',
+      '**Avant de déployer** (§1.1, étape 7)',
+      '**Après** (§1.6), ouvre `Orders`',
+    ]) {
+      expect(first, words).toContain(words);
+    }
+    expect(first).not.toContain('Rien à faire');
+    expect(readDoc('genome/src/web/verify/copy.ts')).toContain("toConfirm: 'TO BE CONFIRMED'");
+    expect(readDoc('genome/src/web/admin/model/orders.ts')).toContain("RESERVED: 'LATE · NOT PAID'");
+    expect(readDoc('genome/src/server/services/fulfilment.ts')).toContain('reservedDays: 2,');
+    expect(readDoc('genome/src/server/services/invoices.ts')).toContain("INVOICE: 'INV'");
+    // Before: D's console, its Client Services section, as the production image shows it.
+    expect(section(runbook, '### 1.1')).toContain('**7. Les réservations encore ouvertes.** Dans la console de D : `Club` → onglet `Drops` → chaque LIVE RELEASE, sa section `Client Services`.');
+    for (const label of ['TO CONCLUDE', 'Cancel', 'Cancel the reservation', 'Concluded', 'Pieces']) expect(section(runbook, '### 1.1'), label).toContain(`\`${label}\``);
+    // After: the figure the first boot's line carries, as context.ts logs it.
+    expect(readDoc('genome/src/server/context.ts')).toContain("log.info(prepared, 'stock and orders ready');");
+    expect(prepare).toContain('return { ...setup, linked, orders };');
+    expect(section(runbook, '### 1.6')).toContain('"orders":<nombre>,"msg":"stock and orders ready"}');
+    expect(section(runbook, '### 1.6')).toContain('Lis `"orders"`');
   });
 
   it('keeps the rules of the shared host: the window, nothing of the host changed, the guarded launch, no restore, no prune', () => {

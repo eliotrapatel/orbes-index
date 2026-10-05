@@ -39,7 +39,15 @@ Le point de départ : la production tourne le commit `86bd579e4aa96b74b86f74c0b8
 
   Elles ne cassent pas l'image `86bd579e4aa9` pendant le déploiement (des colonnes nullables qu'elle ne nomme pas, des tables qu'elle ignore), mais une fois appliquées on ne revient plus en arrière (ci-dessous).
 
-- **Au premier démarrage**, l'application crée les lieux `FRANCE WAREHOUSE` (le lieu par défaut) et `LOGISTICS WAREHOUSE`, et les transporteurs Colissimo, Chronopost, DHL Express et UPS ; elle relie les pièces et les tailles existantes à leurs références, et crée les commandes des ventes déjà confirmées (une réservation conclue devient PAID, une annulée CANCELLED). Rien à faire : une ligne du journal de l'application le dit (§1.6).
+- **Au premier démarrage**, l'application crée les lieux `FRANCE WAREHOUSE` (le lieu par défaut) et `LOGISTICS WAREHOUSE`, et les transporteurs Colissimo, Chronopost, DHL Express et UPS ; elle relie les pièces et les tailles existantes à leurs références, et crée une commande pour chaque vente déjà confirmée, datée du moment de la vente :
+  - une réservation d'une LIVE RELEASE **conclue** (`Concluded` dans `Client Services`) devient PAID : sa facture `INV-…` est émise au démarrage, sans le nom ni l'adresse de l'acheteur (D ne les connaissait pas ; seulement l'e-mail du compte), et elle le reste, car une facture ne se modifie plus ;
+  - une réservation **annulée** devient CANCELLED et ne tient rien ;
+  - une réservation **encore ouverte** devient RESERVED ; comme une conclue, elle tient une pièce du stock ou, les lieux étant vides au premier démarrage, une pièce à fabriquer dans `Atelier`, qui réserve son numéro de série ;
+  - une place d'une sortie tirée **confirmée** (depuis le déploiement A) devient RESERVED, sans taille ni prix (dans MY PIECES, les deux se lisent `TO BE CONFIRMED`) et ne tient rien tant qu'ils manquent.
+
+  Une commande RESERVED dont la vente date de plus de 2 jours paraît aussitôt en retard dans `Orders` : `LATE · NOT PAID`.
+
+  **Avant de déployer** (§1.1, étape 7), règle chaque réservation encore ouverte : annule celle qui ne se vendra pas ; laisse ouverte une vraie vente, sans `Concluded`, pour que sa commande reçoive l'acheteur avant `Mark paid` et que sa facture le porte. **Après** (§1.6), ouvre `Orders` et, pour chaque commande ainsi créée, saisis ce qui lui manque, la taille et le prix d'une place d'une sortie tirée (`Edit` dans `Order`) et l'acheteur (`The buyer`), ou annule-la (`Cancel`) si la vente ne se fait pas. Une ligne du journal de l'application compte ces commandes (§1.6).
 - **Caddy, les variables** : rien ne change. Aucune variable à poser ; aucun nouvel envoi de photo.
 - **Les pages légales** : une seule nouvelle version, `2026-10-07` (règle 6) : les conditions d'utilisation (un nouvel article 14, les commandes ; le cercle devient l'article 15 et les suivants avancent d'un rang ; les articles 1, 2, 3, 7, 10, 12, 13, 15, 16 et 17) et la politique de confidentialité (« Your orders », « Segments, the client sheet and activity », et les sections qu'elles touchent).
 - **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
@@ -104,6 +112,8 @@ pgrep -a pg_dump
 Sortie attendue : **rien**. Une ligne `<numéro> pg_dump …` : une sauvegarde tourne, attends qu'elle finisse et relance la commande.
 
 **6. L'accord pour l'heure.** Envoie au responsable de l'hôte, par exemple : « Déploiement E d'ORBES (LIVE RELEASE+) à <heure> UTC : deux migrations en une transaction, aucun changement de l'hôte (ni Caddy, ni port, ni variable), une coupure courte d'ORBES. Pré-contrôle : <les quatre résultats>. » Attends son accord.
+
+**7. Les réservations encore ouvertes.** Dans la console de D : `Club` → onglet `Drops` → chaque LIVE RELEASE, sa section `Client Services`. Chaque ligne marquée `TO CONCLUDE` : si elle ne se vendra pas (une réservation d'essai comprise), `Cancel` puis `Cancel the reservation`, avec une note ; si c'est une vraie vente, laisse-la telle quelle (pas `Concluded`) : elle deviendra une commande RESERVED, à qui tu donneras l'acheteur avant `Mark paid` (§1.0). Puis note deux totaux de la colonne `Pieces` : celui des lignes `CANCELLED` et celui des autres. Au premier démarrage, chaque pièce devient une commande : tu les compareras au §1.6.
 
 ### 1.2 Préparer le serveur
 
@@ -365,10 +375,12 @@ docker compose exec app node --import tsx scripts/db.ts status
 Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les 23 lignes `applied`, de `0001_initial` à `0023_releases_collectors`, aucune `PENDING`.
 
 ```bash
-docker compose logs app | grep -c 'stock and orders ready'
+docker compose logs app | grep 'stock and orders ready'
 ```
 
-Sortie attendue : `1` : au premier démarrage, l'application a créé les deux lieux et les quatre transporteurs, relié les références et créé les commandes des ventes déjà confirmées (§1.0). `0` : colle à Claude la sortie de `docker compose logs --tail 200 app`. Le déploiement recrée le conteneur `app` : ses journaux ne portent que sur cette version.
+Sortie attendue : **une** ligne `… {"level":"info",…,"locations":[…],"carriers":[…],"linked":{…},"orders":<nombre>,"msg":"stock and orders ready"}` : au premier démarrage, l'application a créé les deux lieux et les quatre transporteurs, relié les références et créé les commandes des ventes déjà confirmées (§1.0). Lis `"orders"` : c'est le nombre de commandes créées, une par pièce des réservations des LIVE RELEASES et une par place d'une sortie tirée confirmée. Il vaut la somme de tes deux totaux du §1.1 (étape 7), les pièces de l'essai de D comprises dans celui des `CANCELLED`, plus les places confirmées des sorties tirées : jamais moins que cette somme. Aucune ligne, ou un nombre plus petit : colle à Claude la sortie de `docker compose logs --tail 200 app`. Le déploiement recrée le conteneur `app` : ses journaux ne portent que sur cette version.
+
+Puis, dans la console, `Orders` : les commandes de l'essai de D et celles annulées au §1.1 sont `CANCELLED` ; chaque autre, RESERVED ou PAID, attend ce que dit le §1.0 : la taille et le prix d'une place d'une sortie tirée (`Edit` dans `Order`), l'acheteur (`The buyer`), ou `Cancel` si la vente ne se fait pas. Une commande PAID créée ainsi a déjà sa facture `INV-…`, sans le nom ni l'adresse de l'acheteur : saisis-les quand même dans `The buyer`, pour le bordereau et l'expédition.
 
 ```bash
 docker compose logs app | grep -c 'live engine: leading'
@@ -480,7 +492,7 @@ Restent hors de l'essai, couverts par les tests : l'annulation d'une commande (l
 
 ### 1.8 Ensuite
 
-- **Les vraies commandes** : chaque vente confirmée paraît dans `Orders` ; ORBES Client Services saisit l'acheteur, marque PAID au paiement reçu hors du service (la facture part alors), l'atelier fabrique et émet la pièce, puis l'expédition. Avant d'expédier, active la garantie de la pièce (`Warranties`), comme pour toute vente ([SALES-PLAYBOOK](SALES-PLAYBOOK.md)) : sans elle, son acheteur ne peut pas l'enregistrer, et la commande ne passe pas DELIVERED d'elle-même. Les retards ressortent dans `Orders` selon les délais des `Settings`.
+- **Les vraies commandes** : chaque vente confirmée paraît dans `Orders`, les ventes d'avant E comprises (§1.0) ; ORBES Client Services saisit l'acheteur, marque PAID au paiement reçu hors du service (la facture part alors), l'atelier fabrique et émet la pièce, puis l'expédition. Avant d'expédier, active la garantie de la pièce (`Warranties`), comme pour toute vente ([SALES-PLAYBOOK](SALES-PLAYBOOK.md)) : sans elle, son acheteur ne peut pas l'enregistrer, et la commande ne passe pas DELIVERED d'elle-même. Les retards ressortent dans `Orders` selon les délais des `Settings`.
 - **Les anciennes images (facultatif).** Une fois le déploiement E stable, les images antérieures à `86bd579e4aa9` ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_E>` ni `86bd579e4aa9`) ; la liste d'abord :
 
   ```bash
