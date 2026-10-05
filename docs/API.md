@@ -486,6 +486,9 @@ The orders, the stock, the atelier, the invoices, the segments and Shopify (plan
 | `ORDER_PIECE_NOT_LINKED` | 409 | SHIPPED, or a return, before the piece that fulfils the order is linked. |
 | `ORDER_PIECE_LINKED` | 409 | A piece is already linked to this order: transfer the piece instead. |
 | `ORDER_PIECE_TO_MAKE` | 409 | Its piece is being made: the atelier links it when it is finished. |
+| `PIECE_OTHER_SKU` | 409 | The piece picked from stock is not of the order's model and size. |
+| `PIECE_NOT_IN_STOCK` | 409 | The piece picked is not a piece in stock: it must be issued, or back from a return, and not registered. |
+| `PIECE_TAKEN` | 409 | The piece picked fulfils another order. |
 | `ORDER_CLOSED` | 409 | The order can no longer change (cancelled, returned, or no longer waiting for this piece). |
 | `ORDER_RETURN_NOT_RESTOCKABLE` | 409 | The piece's record (in service, lost, stolen, flagged) does not let it go back to stock: settle it, or archive the piece. |
 | `ORDER_RETURN_CHANGED` | 409 | The piece changed during the return: try again. |
@@ -503,6 +506,7 @@ The orders, the stock, the atelier, the invoices, the segments and Shopify (plan
 | `BENCH_FOR_ORDER` | 409 | A piece made for an order is cancelled with its order, never on its own. |
 | `BENCH_NOT_OPEN` | 409 | Only a piece being made has a work sheet. |
 | `PRODUCT_NOT_RESERVED` | 409 | The identity is no longer reserved for a piece to make (issued or retired meanwhile). |
+| `CODE_EXISTS` | 409 | An internal guard on an invariant, not expected through the API: a reserved identity has no code until the atelier signs its first one, once. |
 | `SEGMENT_NOT_FOUND` | 404 | No segment with this id. |
 | `SEGMENT_NAME_TAKEN` | 409 | A segment already has this name. |
 | `SEGMENT_IN_USE` | 409 | The segment is the access rule of a release or the audience of a post of the circle: choose another there first. |

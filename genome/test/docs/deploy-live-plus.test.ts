@@ -254,6 +254,10 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
       expect(admin, label).toContain(label);
       expect(runbook, label).toContain(`\`${label}\``);
     }
+    // GET /api/v1/live lists every release announced, whatever its access rule: the trial is seen by all, entered only by its segment.
+    expect(checks).toContain('visible **de tous** dans THE RELEASES et la bannière');
+    expect(checks).toContain('seuls les membres du segment d\'essai peuvent y entrer');
+    expect(checks).not.toMatch(/visible[^.]*pour les seuls membres/);
     // The trial's after-room: a minute after the sell-out, open 5 minutes, both within the bounds the console takes.
     expect(1).toBeGreaterThanOrEqual(AFTER_ROOM_DELAY_MINUTES.min);
     expect(5).toBeGreaterThanOrEqual(AFTER_ROOM_LENGTH_MINUTES.min);

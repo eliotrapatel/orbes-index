@@ -544,6 +544,19 @@ describe('legal pages: the privacy policy, written from the code', () => {
       const text = sectionText(DOCUMENTS.privacy[lang], 'orders');
       for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
     }
+    // Who receives the buyer: the packing slip prints the name and address for the carrier and the logistics partner
+    // (views/slip.ts), and the month's invoice CSV for the accountant carries the name, the address and the email.
+    expect(readDoc('genome/src/web/admin/views/slip.ts')).toContain("'slip-buyer-address'");
+    expect(readDoc('genome/src/server/services/invoices.ts')).toContain("'buyer name', 'buyer address', 'buyer email'");
+    for (const [lang, orders, recipients] of [
+      ['en', ["to the carrier it chooses for the shipment and to the logistics partner that keeps and ships pieces for it", 'the invoices and their table of each month to its accountant'],
+        ["- The carrier ORBES chooses for a shipment, and the logistics partner that keeps and ships pieces for ORBES: the buyer's name and address and the contents of the parcel.", "- ORBES's accountant, who receives the invoices, the credit notes and their table of each month, with the buyer's name, address and email address."]],
+      ['fr', ["au transporteur qu'il choisit pour l'envoi et au partenaire logistique qui garde et expédie des pièces pour lui", 'les factures et leur tableau de chaque mois à son comptable'],
+        ["- Le transporteur qu'ORBES choisit pour un envoi, et le partenaire logistique qui garde et expédie des pièces pour ORBES : le nom et l'adresse de l'acheteur et le contenu du colis.", "- Le comptable d'ORBES, qui reçoit les factures, les avoirs et leur tableau de chaque mois, avec le nom, l'adresse et l'adresse e-mail de l'acheteur."]],
+    ] as const) {
+      for (const s of orders) expect(sectionText(DOCUMENTS.privacy[lang], 'orders'), `${lang}: ${s}`).toContain(s);
+      for (const s of recipients) expect(sectionText(DOCUMENTS.privacy[lang], 'recipients'), `${lang}: ${s}`).toContain(s);
+    }
     // The export carries the orders with their buyer and invoices, the answers, the places in an after-room.
     const exported = /export interface ExportedOrder \{([\s\S]*?)\n\}/.exec(orders)?.[1] ?? '';
     expect(exported).toContain('buyer: { name: string | null; address: string | null };');
@@ -731,7 +744,7 @@ describe('legal pages: both languages, links, lexicon', () => {
       '2026-10-04': '5d76e46ec2b9bfb3',
       '2026-10-05': '5f46f78e4a3dbf4c',
       '2026-10-06': '3212223fecb82628',
-      '2026-10-07': '6555f203ebd98901',
+      '2026-10-07': '2841f4e7fc2fbe23',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

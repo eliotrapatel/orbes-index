@@ -436,7 +436,7 @@ Sortie attendue : `401` : la page `Orders` de la console demande une session du 
 
 ### 1.7 Une vérification réelle par élément
 
-Un **essai complet**, avant toute vraie commande. Il te faut : l'ordinateur pour la console ; deux téléphones, A et B, dont le navigateur **n'est pas connecté à la console** (une fenêtre de navigation privée suffit), chacun connecté à un compte ORBES qui détient une pièce d'un même modèle d'essai (ceux de l'essai de D conviennent) ; et un troisième compte ORBES, sans pièce de ce modèle. La sortie d'essai est visible dans THE RELEASES pendant une heure et demie environ, pour les seuls membres du segment d'essai, puis **pour toujours dans PAST** (règle 9) : fais-la avant d'annoncer le service, ou à une heure creuse. Elle consomme le numéro de série d'une pièce d'essai, archivée à la fin.
+Un **essai complet**, avant toute vraie commande. Il te faut : l'ordinateur pour la console ; deux téléphones, A et B, dont le navigateur **n'est pas connecté à la console** (une fenêtre de navigation privée suffit), chacun connecté à un compte ORBES qui détient une pièce d'un même modèle d'essai (ceux de l'essai de D conviennent) ; et un troisième compte ORBES, sans pièce de ce modèle. La sortie d'essai est visible **de tous** dans THE RELEASES et la bannière pendant une heure et demie environ, avec `FOR SELECTED COLLECTORS` ; seuls les membres du segment d'essai peuvent y entrer ; puis **pour toujours dans PAST** (règle 9) : fais-la avant d'annoncer le service, ou à une heure creuse. Elle consomme le numéro de série d'une pièce d'essai, archivée à la fin.
 
 **La préparation, dans la console :**
 
