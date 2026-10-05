@@ -555,11 +555,13 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
     const contacts = { email: 'clientservices@theorbes.com' };
     const [confirmed, missed] = myLiveEntries(list, { clientServices: contacts });
     expect(confirmed).toMatchObject({ dropId: ID, href: `/verify/releases/${ID}`, title: 'MONOLITHE — LIVE', stateLabel: 'LIVE RELEASE' });
-    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: 'Your piece is reserved in size 52. Its steps follow in YOUR ORDERS.', reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
+    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.', reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
     expect(confirmed!.entry.contact?.mailto).toContain('LR-01EDCB93');
     // Its payment and delivery are its order's steps, in YOUR ORDERS (the vault's CONFIRMED screen keeps LIVE.reservedIn).
     expect(confirmed!.entry.sentence).not.toContain('settle payment');
-    expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }], {})[0]!.entry.sentence).toBe('Your 2 pieces are reserved in size 52. Their steps follow in YOUR ORDERS.');
+    // A past fact, true once the order is paid, shipped, delivered, cancelled or returned: never "is reserved".
+    expect(confirmed!.entry.sentence).not.toContain('reserved');
+    expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }], {})[0]!.entry.sentence).toBe('You secured 2 pieces in size 52. Their steps follow in YOUR ORDERS.');
     expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
     expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);
   });

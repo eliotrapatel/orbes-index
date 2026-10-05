@@ -205,11 +205,12 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     expect(await cancelled.locator('.pieces__order-rows').count()).toBe(0);
     expect(norm(await cancelled.innerText())).not.toContain(ORDERS.toConfirm);
 
-    // YOUR RELEASES agrees with YOUR ORDERS: the LIVE RELEASE's piece reserved, its steps in the orders, never a
-    // payment still to settle once it is shipped.
+    // YOUR RELEASES agrees with YOUR ORDERS: the LIVE RELEASE's piece secured, its steps in the orders, never a
+    // payment still to settle nor a piece still "reserved" once it is shipped.
     const release = page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE' });
-    await textOf(release.locator('.pieces__entry-sentence'), 'Your piece is reserved in size 52. Its steps follow in YOUR ORDERS.');
+    await textOf(release.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
     expect(norm(await release.innerText())).not.toContain('settle payment');
+    expect(norm(await release.innerText())).not.toContain('is reserved');
 
     // The screen: contrast, figures in the reading face, one hairline button, the floors of §3.8, nothing sideways.
     const checks = await screenChecks(page);

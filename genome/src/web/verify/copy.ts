@@ -1008,9 +1008,10 @@ export const LIVE = Object.freeze({
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
   reservedIn: (size: string, quantity: number) =>
     `${quantity > 1 ? `Your ${quantity} pieces are reserved in size ${size}.` : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
-  /** MY PIECES' YOUR RELEASES (plan LIVE RELEASE+, Interconnection): the piece reserved; its steps are its order's. */
-  reservedInPieces: (size: string, quantity: number) =>
-    quantity > 1 ? `Your ${quantity} pieces are reserved in size ${size}. Their steps follow in YOUR ORDERS.` : `Your piece is reserved in size ${size}. Its steps follow in YOUR ORDERS.`,
+  /** MY PIECES' YOUR RELEASES (plan LIVE RELEASE+, Interconnection): the piece secured, a past fact true at every step of
+   *  its order (paid, shipped, delivered, cancelled or returned); its steps are its order's. */
+  securedInPieces: (size: string, quantity: number) =>
+    quantity > 1 ? `You secured ${quantity} pieces in size ${size}. Their steps follow in YOUR ORDERS.` : `You secured your piece in size ${size}. Its steps follow in YOUR ORDERS.`,
   rows: Object.freeze({ reserved: 'RESERVED', size: 'SIZE', pieces: 'PIECES', total: 'TOTAL', reference: 'REFERENCE' }),
   clientServices: 'CLIENT SERVICES',
   // The edge pages: a title, a sentence, one action

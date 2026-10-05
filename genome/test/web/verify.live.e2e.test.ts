@@ -364,7 +364,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await visible(entry);
     await textOf(entry.locator('.pieces__entry-state'), 'LIVE RELEASE · CONFIRMED');
     // Its payment and delivery are its order's steps, below (the vault's CONFIRMED screen said it at that moment).
-    await textOf(entry.locator('.pieces__entry-sentence'), 'Your piece is reserved in size 52. Its steps follow in YOUR ORDERS.');
+    await textOf(entry.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
     await textOf(entry.locator('.pieces__entry-id'), `REFERENCE ${reference}`);
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE' }).getAttribute('href')).toBe(`/verify/releases/${r.id}`);
     // …and its order (plan LIVE RELEASE+, choice 6): RESERVED, with its size and its add-on as sold.

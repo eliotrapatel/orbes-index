@@ -655,7 +655,7 @@ export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientS
       const title = upper(x.release.title ?? x.release.name ?? '') || LIVE.kind;
       const label = LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
-      const sentence = e.status === 'CONFIRMED' ? LIVE.reservedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
+      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
       const entry: EntryModel = {
         label,
         sentence,
