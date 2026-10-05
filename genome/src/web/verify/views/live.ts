@@ -33,7 +33,9 @@
  *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
  *               after-room keeps the second door until it closes). For a week after the end, to an account that took
  *               part without a piece, ONE QUESTION, the question after (plan LIVE RELEASE+, choice 11; views/question.ts),
- *               here only: it opens at the release's final end (its after-room's, when one opened), never before
+ *               here and on the page of an entry ended by the release's end with no second door (CLOSED, or SOLD OUT
+ *               without an after-room): it opens at the release's final end (its after-room's, when one opened), never
+ *               before; on the final page, read again each minute while it may still open (an after-room running)
  *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
  *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
  *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
@@ -112,6 +114,13 @@ const DOOR_DELAY_MS = 420;
 const ARMED_MS = 4000;
 /** A sync that failed is tried again after this long. */
 const SYNC_RETRY_MS = 10_000;
+/**
+ * The question after not asked yet on a final page to an account that took part without a piece: read again this
+ * often while the page stays open, for as long as a sold-out release's after-room may run (its delay, up to 60 minutes,
+ * then its length, up to 120), since the question waits for its end.
+ */
+const QUESTION_AGAIN_MS = 60_000;
+const QUESTION_WAIT_MS = 3 * 3_600_000;
 /** The outer ring of the seal button (r 128) and the hold's ring (r 116), as the mockup draws them. */
 const TURN_RING = 2 * Math.PI * 128;
 const HOLD_RING = 2 * Math.PI * 116;
@@ -242,6 +251,9 @@ class LivePage {
   private question: AccountQuestion | null = null;
   private questionRead: 'idle' | 'reading' | 'done' = 'idle';
   private questionGen = 0;
+  /** The question after read again (QUESTION_AGAIN_MS), and since when it is (Date.now()). */
+  private questionTimer: ReturnType<typeof setTimeout> | null = null;
+  private questionSince: number | null = null;
   private disposed = false;
 
   constructor(private readonly deps: LiveDeps) {
@@ -275,7 +287,7 @@ class LivePage {
     this.endHold(true);
     this.closeStream();
     this.stopPolling();
-    for (const t of [this.retryTimer, this.syncTimer]) if (t) clearTimeout(t);
+    for (const t of [this.retryTimer, this.syncTimer, this.questionTimer]) if (t) clearTimeout(t);
     if (this.pulseTimer) clearInterval(this.pulseTimer);
     this.screen?.dispose?.();
   }
@@ -342,6 +354,9 @@ class LivePage {
       this.questionGen++;
       this.question = null;
       this.questionRead = 'idle';
+      if (this.questionTimer) clearTimeout(this.questionTimer);
+      this.questionTimer = null;
+      this.questionSince = null;
       this.closeStream();
       this.stopPolling();
     }
@@ -1733,7 +1748,7 @@ class LivePage {
         if (this.partRead === 'idle' && this.deps.session.state.status === 'signed-in') void this.readPart();
         setFact(part, this.part ?? '');
         part.hidden = this.part === null;
-        this.askQuestion(ask);
+        this.askQuestion(ask, true);
       },
     };
   }
@@ -1751,10 +1766,28 @@ class LivePage {
     });
   }
 
-  /** The question after on a page of the release's end: read once signed in (never on an after-room's page), then shown. */
-  private askQuestion(block: QuestionBlock): void {
+  /**
+   * The question after on a page of the release's end: read once signed in (never on an after-room's page), then shown.
+   * `again` (the final page): not asked yet of an account that took part without a piece, read again while it may still
+   * open there (a sold-out release's after-room still running).
+   */
+  private askQuestion(block: QuestionBlock, again = false): void {
     if (this.questionRead === 'idle' && this.deps.session.state.status === 'signed-in' && !this.afterRoomOf()) void this.readQuestion();
+    else if (again) this.askAgain();
     block.show(this.question);
+  }
+
+  /** Read the question after again in QUESTION_AGAIN_MS, while it is not asked of an account that took part without a piece, for QUESTION_WAIT_MS at most. */
+  private askAgain(): void {
+    if (this.questionTimer || this.questionRead !== 'done' || this.question || this.part !== RELEASES.past.tookPart || this.disposed) return;
+    this.questionSince ??= Date.now();
+    if (Date.now() - this.questionSince >= QUESTION_WAIT_MS) return;
+    this.questionTimer = setTimeout(() => {
+      this.questionTimer = null;
+      if (this.disposed || this.questionRead !== 'done' || this.question) return;
+      this.questionRead = 'idle';
+      this.screen?.update();
+    }, QUESTION_AGAIN_MS);
   }
 
   /** The question after for the account (asked here only of one that took part without a piece); unsaid should it not be read. */
@@ -1802,13 +1835,16 @@ class LivePage {
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
     const title = this.title(copy.title);
     const note = this.note(copy.text);
-    // Never the question after: it opens at the release's final end, its after-room's included, on its final page.
+    // Ended by the release's end with no second door (CLOSED, or SOLD OUT without an after-room): its final end, the
+    // question after open (plan LIVE RELEASE+, choice 11). A guest of an after-room is asked on the final page once it ends.
+    const ask = kind === 'ended' && !this.entry?.afterRoom ? this.questionBlock() : null;
     const el = h(
       'section',
       { class: 'live__edge' },
       this.overline(this.name()),
       title,
       note,
+      ask?.el ?? null,
       contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
@@ -1816,6 +1852,7 @@ class LivePage {
       const now = this.edgeCopy(kind);
       if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
+      if (ask) this.askQuestion(ask);
     };
     return { kind, el, back: contact === null, update };
   }

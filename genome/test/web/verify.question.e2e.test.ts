@@ -2,6 +2,8 @@
  * End-to-end: the question after a LIVE RELEASE (plan LIVE RELEASE+, step S8: choice 11), served by the real server
  * (in-memory database, the real clock), driven in Chromium at a phone's size.
  *
+ *  - Still in the line when the release closes at its time, on the page being looked at: CLOSED, then ONE QUESTION,
+ *    answered there (no second door: the release's end is its final end).
  *  - On the release's end page, in the vault: ONE QUESTION for the collector who was in the line without a piece, the
  *    default question and its three answers, pressed like the sign-in's switch; one tap records it, another changes it
  *    (from the keyboard too, the focus kept); a reload shows it as answered; never for the collector who secured the
@@ -18,7 +20,7 @@ import type { Browser, BrowserContext, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock } from '../../src/server/types.js';
-import { QUESTION, RELEASES } from '../../src/web/verify/copy.js';
+import { LIVE, QUESTION, RELEASES } from '../../src/web/verify/copy.js';
 import { createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
@@ -169,6 +171,50 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     await visible(page.locator('.live__past .question'));
     await expect.poll(() => pressed(page.locator('.live__past .question')), POLL).toEqual(['true', 'false', 'false']);
     await textOf(page.locator('.live__past .question .question__note'), THANKS);
+    expect(problems).toEqual([]);
+    await context.close();
+  }, 120_000);
+
+  it('asks the collector still in the line when the release closes at its time on the page it is looking at: CLOSED, then ONE QUESTION, answered there', async () => {
+    const { ctx } = srv;
+    const first = await account();
+    const waiting = await account();
+    // One piece, its first collector's turn long enough to run past the end; the second in the line behind it.
+    const r = await createLiveRelease(f, { opensAt: new Date(Date.now() - 60_000), closesAt: new Date(Date.now() + HOUR), quantityLine: '1 PIECE', sizes: [{ label: '52', stock: 1 }], turnSeconds: 300 });
+    for (const x of [first, waiting]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
+    await ctx.services.live.advance(r.id);
+    expect((await ctx.services.live.entry(first.id, r.id))?.status).toBe('TURN');
+    const { page, context, problems } = await phone(waiting.token);
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await textOf(page.locator('.live__place-figure'), '2');
+    expect(await page.locator('.question').count()).toBe(0);
+
+    // The release reaches its closing time: CLOSED, the line ENDED; the page follows it there and asks.
+    await ctx.db.updateTable('drops').set({ closes_at: new Date() }).where('id', '=', r.id).execute();
+    await ctx.services.live.advance(r.id);
+    const ended = await ctx.db.selectFrom('drops').select('ended_reason').where('id', '=', r.id).executeTakeFirstOrThrow();
+    expect(ended.ended_reason).toBe('CLOSED');
+    expect((await ctx.services.live.entry(waiting.id, r.id))?.status).toBe('ENDED');
+    await textOf(page.locator('h1'), LIVE.edge.ended.CLOSED.title);
+    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.CLOSED.text);
+    const block = page.locator('.live__edge .question');
+    await visible(block);
+    await textOf(block.locator('.question__label'), QUESTION.label);
+    await textOf(block.locator('.question__text'), 'WHAT WOULD YOU HAVE WANTED?');
+    expect(await block.locator('.question__answer').allInnerTexts()).toEqual(ANSWERS);
+    expect(await pressed(block)).toEqual(['false', 'false', 'false']);
+    await textOf(block.locator('.question__note'), UNTIL);
+    // Its one action still: THE RELEASES.
+    expect(await page.locator('.live__edge .btn:visible').count()).toBe(1);
+    await keepsVault(page, null, [...ANSWERS, 'THE RELEASES']);
+    await sideways(page);
+    await answer(block, 'ANOTHER FINISH').click();
+    await expect.poll(() => pressed(block), POLL).toEqual(['false', 'true', 'false']);
+    await textOf(block.locator('.question__note'), THANKS);
+    const answered = await ctx.db.selectFrom('release_answers').select('answer').where('drop_id', '=', r.id).where('account_id', '=', waiting.id).executeTakeFirst();
+    expect(answered?.answer).toBe(2);
+    await sleep(900);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-live-question-closed.png'), fullPage: true });
     expect(problems).toEqual([]);
     await context.close();
   }, 120_000);

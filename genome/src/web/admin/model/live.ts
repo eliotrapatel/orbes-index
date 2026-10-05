@@ -806,3 +806,15 @@ export function liveEntryDeadline(e: Pick<LiveEntry, 'status' | 'turnExpiresAt' 
 export function hasBoard(phase: LivePhase): boolean {
   return phase !== 'DRAFT' && phase !== 'CANCELLED';
 }
+
+/**
+ * A release's stock location to choose: the default first (empty, following the default should it change), then every
+ * other location by its name; the default by its name too only when the release names it already, and the location it
+ * names kept when the locations could not be read (`named`: its name), so that saving never moves it unasked.
+ */
+export function locationOptions(locations: readonly { id: string; name: string; isDefault: boolean }[], selected: string, named?: string): { value: string; label: string }[] {
+  const byDefault = locations.find((l) => l.isDefault);
+  const options = [{ value: '', label: `The default (${byDefault?.name ?? 'none yet'})` }, ...locations.filter((l) => !l.isDefault || l.id === selected).map((l) => ({ value: l.id, label: l.name }))];
+  if (selected && !options.some((o) => o.value === selected)) options.push({ value: selected, label: named ?? 'The location set' });
+  return options;
+}

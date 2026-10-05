@@ -33,6 +33,7 @@ import {
   livePartChange,
   livePartProblem,
   livePartValues,
+  locationOptions,
   newLiveInput,
   newLiveValues,
   questionAnswers,
@@ -137,6 +138,25 @@ describe('the release and the stock in the console', () => {
     expect(livePartChange(r, 'sizes', sizes)).toEqual({});
     expect(livePartChange(r, 'sizes', { ...sizes, locationId: 'l2' })).toEqual({ stockLocationId: 'l2' });
     expect(livePartChange(release({ locationId: 'l2' }), 'sizes', { ...sizes, locationId: '' })).toEqual({ stockLocationId: null });
+  });
+
+  it('lists the default location once, as the default, unless the release names it; keeps the one it names when the locations are not read', () => {
+    const locations = [
+      { id: 'l1', name: 'FRANCE WAREHOUSE', isDefault: true },
+      { id: 'l2', name: 'GENEVA ATELIER', isDefault: false },
+    ];
+    expect(locationOptions(locations, '')).toEqual([
+      { value: '', label: 'The default (FRANCE WAREHOUSE)' },
+      { value: 'l2', label: 'GENEVA ATELIER' },
+    ]);
+    // Named already: by its name too, so that the dialog keeps it.
+    expect(locationOptions(locations, 'l1').map((o) => o.value)).toEqual(['', 'l1', 'l2']);
+    // The locations not read: the default unknown, the one named kept by its name.
+    expect(locationOptions([], '')).toEqual([{ value: '', label: 'The default (none yet)' }]);
+    expect(locationOptions([], 'l2', 'GENEVA ATELIER')).toEqual([
+      { value: '', label: 'The default (none yet)' },
+      { value: 'l2', label: 'GENEVA ATELIER' },
+    ]);
   });
 
   it('writes the size mix as the sizes’ lines and says where each size’s pieces come from', () => {

@@ -2028,7 +2028,7 @@ A question:
 
 `name` is the model's once its stage revealed it (`null` for a release ended before its name), `opensAt` its T0: MY PIECES names the release by them. `answer` is the position chosen, or `null`. `closesAt` is the end plus 7 days.
 
-In the verify app: **ONE QUESTION** under the account's part on a LIVE RELEASE's final page (§8.11) in the vault, and **AFTER THE RELEASES** in MY PIECES, one per release, in the ivory: the question, its answers one under the other pressed like the sign-in's switch (`aria-pressed`, a group named by the question), and until when the answer may change, on the phone's calendar. The console counts the answers on the release's page (§16.23); a segment reads them (`ANSWER`, §16.26).
+In the verify app: **ONE QUESTION** under the account's part on a LIVE RELEASE's final page (§8.11) in the vault (not asked yet of an account that took part without a piece, read again each minute while the page stays open, up to 3 hours: an after-room may still run), and on the page of an entry the release's end ENDED with no second door (CLOSED, or SOLD OUT without an after-room), as it opens there; and **AFTER THE RELEASES** in MY PIECES, one per release, in the ivory: the question, its answers one under the other pressed like the sign-in's switch (`aria-pressed`, a group named by the question), and until when the answer may change, on the phone's calendar. The console counts the answers on the release's page (§16.23); a segment reads them (`ANSWER`, §16.26).
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN` (a LOCKED account), `403 LIVE_QUESTION_NOT_ASKED`, `404 DROP_NOT_FOUND`, `409 LIVE_QUESTION_CLOSED`, `429 RATE_LIMITED`.
 

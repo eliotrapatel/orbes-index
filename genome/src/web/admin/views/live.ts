@@ -60,6 +60,7 @@ import {
   livePhrase,
   liveStateLabel,
   feasibilityLine,
+  locationOptions,
   parseSizes,
   priorityLine,
   questionLine,
@@ -166,7 +167,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
-  const [r, models, collections, segments, locations] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segmentNames(), ctx.api.locations()]);
+  const [r, models, collections, segments, locations] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segmentNames(), ctx.api.locations().catch(() => ({ items: [] }))]);
   const published = hasBoard(r.phase);
   // The best time to open while T0 may still move (its settings change); the after-room has none of its own.
   const timing = r.editable && !r.afterRoomOf;
@@ -528,7 +529,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           name: 'locationId',
           label: 'Stock location',
           kind: 'select',
-          options: [{ value: '', label: `The default (${locations.items.find((l) => l.isDefault)?.name ?? 'none yet'})` }, ...locations.items.map((l) => ({ value: l.id, label: l.name }))],
+          options: locationOptions(locations.items, v.locationId, r.locationId ? r.location?.name : undefined),
           value: v.locationId,
           hint: 'Where its orders hold a piece in stock, or have one made: the feasibility check reads its stock there. ORBES Client Services may move an order elsewhere.',
         },
@@ -1039,7 +1040,6 @@ function feasibilityBlock(check: LiveFeasibility | 'failed'): HTMLElement {
  */
 export function newLiveFields(models: readonly Model[], values: Record<string, string>, locations: readonly { id: string; name: string; isDefault: boolean }[] = []): DialogField[] {
   const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
-  const byDefault = locations.find((l) => l.isDefault);
   return [
     { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId },
     { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: values.title, hint: 'Revealed with the name’s stage.' },
@@ -1051,7 +1051,7 @@ export function newLiveFields(models: readonly Model[], values: Record<string, s
       name: 'locationId',
       label: 'Stock location',
       kind: 'select',
-      options: [{ value: '', label: `The default (${byDefault?.name ?? 'none yet'})` }, ...locations.filter((l) => !l.isDefault).map((l) => ({ value: l.id, label: l.name }))],
+      options: locationOptions(locations, values.locationId ?? ''),
       value: values.locationId ?? '',
       hint: 'Where its orders hold a piece in stock or have one made; the sizes are proposed from its stock.',
     },
