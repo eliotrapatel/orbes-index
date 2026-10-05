@@ -16,7 +16,8 @@
  * one at the announcement, each never before the one it follows, all of them at the room's opening at the latest. No
  * surface returns a stage before its time: the cards and sheets, the banner, the .ics, the board, and the rule of access
  * wherever it is said, a 403 LIVE_NOT_ELIGIBLE included (live.ts liveAccessRule: a model the rule names that is the
- * release's own is « this model » until its name is revealed). The room's snapshots and an account's entry name no
+ * release's own is « this model », and its model's collection « this model’s collection », until its name is
+ * revealed). The room's snapshots and an account's entry name no
  * stage at all.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
@@ -114,8 +115,12 @@ export interface LiveCard {
   interest: number;
 }
 
-/** A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live. */
-export interface LiveSheet extends LiveCard {
+/**
+ * A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live; ENDED while a turn or a
+ * hold still runs to its deadline after the end.
+ */
+export interface LiveSheet extends Omit<LiveCard, 'phase'> {
+  phase: LivePublicPhase | 'ENDED';
   /** From the name's stage. */
   description: string | null;
   /** Its sizes in order, with their stock. */
@@ -356,12 +361,19 @@ export class LiveRoomService {
     return Promise.all(rows.map((r) => this.card(r, now, interest.get(r.id) ?? 0)));
   }
 
-  /** A release's page: 404 before its announcement; once ended, only that it is. */
+  /**
+   * A release's page: 404 before its announcement; once over (the end recorded, no turn or hold left, as the room's
+   * `over`), only that it is. Between the end and the last deadline a turn may still be secured and a hold confirmed
+   * (the plan's The end, item 10): the page is whole, its phase ENDED.
+   */
   async sheet(dropId: string): Promise<LiveSheet | LiveEndedSheet> {
     const id = releaseId(dropId);
     const now = this.clock();
     const r = await this.publicRow(id, now);
-    if (livePhase(r, now) === 'ENDED') return { id, kind: 'LIVE', phase: 'ENDED' };
+    if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
+      const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
+      if (!open) return { id, kind: 'LIVE', phase: 'ENDED' };
+    }
     const stages = liveStages(r, now)!;
     const [sizes, addons, interest] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
@@ -371,6 +383,7 @@ export class LiveRoomService {
     const card = await this.card(r, now, interest.get(id) ?? 0);
     return {
       ...card,
+      phase: livePhase(r, now) as LiveSheet['phase'],
       description: stages.name ? r.description : null,
       sizes,
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
@@ -489,7 +502,9 @@ export class LiveRoomService {
       return { id: s.id, label: s.label, stock: s.stock, left: Math.max(0, s.stock - held - pieces(s.id, ['CONFIRMED'])), held };
     });
     const phase = livePhase(r, now) as LiveRoom['phase'];
-    const over = phase === 'ENDED' && people(['TURN', 'SECURED']) === 0;
+    // Over once the engine has recorded the end (with the waiting and queued entries ENDED in the same transaction) and
+    // no turn or hold remains: the clock alone (`phase`, for display) may run ahead of the engine's pass.
+    const over = r.ended_at !== null && people(['TURN', 'SECURED']) === 0;
     const stages = liveStages(r, now)!;
     const room: LiveRoom = {
       id,
@@ -549,7 +564,7 @@ export class LiveRoomService {
       .where('published_at', 'is not', null)
       .executeTakeFirst();
     if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
-    if (livePhase(d, now) === 'ENDED') {
+    if (d.ended_at) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
       if (!open) throw dropNotFound();
     }

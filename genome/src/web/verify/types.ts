@@ -535,8 +535,12 @@ export interface LiveCard {
   interest: number;
 }
 
-/** A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live. */
-export interface LiveSheet extends LiveCard {
+/**
+ * A LIVE RELEASE's page (GET /api/v1/live/:id) while it is announced, in its room, or live; ENDED while a turn or a
+ * hold still runs to its deadline after the end.
+ */
+export interface LiveSheet extends Omit<LiveCard, 'phase'> {
+  phase: LivePhase | 'ENDED';
   description: string | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];

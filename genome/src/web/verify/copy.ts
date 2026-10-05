@@ -644,7 +644,7 @@ export const RELEASES = Object.freeze({
   title: 'THE RELEASES',
   /** The text link of the landing, of MY PIECES and of a release's foot (back to the list). */
   link: 'THE RELEASES',
-  lead: 'Pieces released in a limited number. Enter the draw with your ORBES account: ORBES Client Services concludes each sale.',
+  lead: 'Pieces released in a limited number, by draw or LIVE RELEASE, with your ORBES account: ORBES Client Services concludes each sale.',
   loading: 'ONE MOMENT…',
   loadFailed: 'The releases could not be shown just now.',
   /** The LIVE RELEASES could not be read while the draws could: said above the draws. */
@@ -932,12 +932,15 @@ export const LIVE = Object.freeze({
   leaveRoom: 'LEAVE THE ROOM',
   // T0
   drawing: 'DRAWING THE PLACES',
+  /** The order at T0, true of every rule of access (the accounts without a tier, where the rule lets them in, last). */
   drawingLine: (tierPriority: boolean) =>
-    tierPriority ? 'PALLADIUM first, then PLATINE, then TITANE; at random within each tier.' : 'At random among the collectors present at the opening.',
+    tierPriority ? 'By tier, the highest first; at random within each tier.' : 'At random among the collectors present at the opening.',
   /** After T0, for an account not in the line yet. */
   joinLine: 'The release is open. Choose your size to join the line: you take your place behind those already in it.',
   // The line
   yourPlace: 'YOUR PLACE',
+  /** The place's label as a screen reader says it, before the figure. */
+  yourPlaceSaid: 'Your place',
   ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT IN SIZE ${size}` : `${n} AHEAD OF YOU IN SIZE ${size}`),
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
   inSize: (n: number, size: string) => `${n} IN SIZE ${size}`,
@@ -969,12 +972,12 @@ export const LIVE = Object.freeze({
   confirmed: 'CONFIRMED',
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
   reservedIn: (size: string, quantity: number) =>
-    `${quantity > 1 ? `Your ${quantity} pieces are reserved` : 'Your piece is reserved'} in size ${size}. ORBES Client Services will contact you to settle payment and delivery.`,
+    `${quantity > 1 ? `Your ${quantity} pieces are reserved in size ${size}.` : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
   rows: Object.freeze({ reserved: 'RESERVED', size: 'SIZE', pieces: 'PIECES', total: 'TOTAL', reference: 'REFERENCE' }),
   clientServices: 'CLIENT SERVICES',
   // The edge pages: a title, a sentence, one action
   edge: Object.freeze({
-    signIn: Object.freeze({ title: 'SIGN IN TO ENTER', text: (rule: string) => `The room is open to the ORBES accounts of its rule: ${rule}. Sign in, or create an account.` }),
+    signIn: Object.freeze({ title: 'SIGN IN TO ENTER', text: (rule: string) => `The room is open to ${rule}. Sign in, or create an account.` }),
     notEligible: Object.freeze({ text: 'Your ORBES account does not meet the rule of this release.' }),
     missed: Object.freeze({ title: 'YOUR TURN HAS PASSED', text: 'The piece went to the next collector in line.' }),
     expired: Object.freeze({ title: 'YOUR HOLD HAS ENDED', text: 'The piece has returned to the line for the next collector.' }),
@@ -1027,7 +1030,6 @@ export const LIVE = Object.freeze({
     QUEUED: 'You are in the line. Open the release to follow your place.',
     TURN: 'It is your turn. Open the release to secure your piece.',
     SECURED: 'A piece is held for you. Open the release to confirm it.',
-    CONFIRMED: (size: string) => `Your piece is reserved in size ${size}. ORBES Client Services will contact you to settle payment and delivery.`,
     MISSED: 'Your turn passed before the seal was held.',
     EXPIRED: 'Your hold ended before it was confirmed.',
     RELEASED: 'You released your place: the piece returned to the line.',

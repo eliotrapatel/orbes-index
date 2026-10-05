@@ -336,7 +336,8 @@ export interface LiveAccess {
 
 /** The rule in words, as an announcement says it after « FOR »: « owners from PLATINE », « owners of MONOLITHE ». */
 export function liveRuleText(rule: LiveAccessRule): string {
-  const names = [...rule.models.map((m) => m.name), ...(rule.collection ? [`the ${rule.collection.name} collection`] : [])];
+  const collection = rule.collection && (rule.collection.name === LIVE_UNNAMED_COLLECTION ? LIVE_UNNAMED_COLLECTION : `the ${rule.collection.name} collection`);
+  const names = [...rule.models.map((m) => m.name), ...(collection ? [collection] : [])];
   const of = names.length === 0 ? '' : ` of ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`}`;
   if (rule.minTier >= 2) return `owners from ${tierName(rule.minTier)}${of}`;
   if (rule.minTier === 1 || of) return `owners${of}`;
@@ -345,12 +346,21 @@ export function liveRuleText(rule: LiveAccessRule): string {
 
 /** The model named in place of the release's own before its name's stage. */
 export const LIVE_UNNAMED_MODEL = 'this model';
+/** The collection named in place of the release's model's own before its name's stage. */
+export const LIVE_UNNAMED_COLLECTION = 'this model’s collection';
 
 /**
- * The rule of a release as anyone may read it at `now` (an announcement, a 403 LIVE_NOT_ELIGIBLE): a model it names
- * that is the release's own is « this model » until the name's stage (liveStages), so no answer says the name before.
+ * The rule of a release as anyone may read it at `now` (an announcement, a 403 LIVE_NOT_ELIGIBLE, the circle's post): a
+ * model it names that is the release's own is « this model », and a collection that is its model's own « this model’s
+ * collection », until the name's stage (liveStages), so no answer says the name or its collection before; `unnamed`:
+ * so at any time (the circle's post, which never names the piece).
  */
-export async function liveAccessRule(db: Db, d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id'> & LiveStageRow, now: Date): Promise<LiveAccessRule> {
+export async function liveAccessRule(
+  db: Db,
+  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id'> & LiveStageRow,
+  now: Date,
+  unnamed = false,
+): Promise<LiveAccessRule> {
   const models = await db
     .selectFrom('live_access_models as a')
     .innerJoin('models as m', 'm.id', 'a.model_id')
@@ -362,11 +372,12 @@ export async function liveAccessRule(db: Db, d: Pick<DropRow, 'id' | 'model_id' 
   const collection = d.access_collection_id
     ? ((await db.selectFrom('collections').select(['id', 'name']).where('id', '=', d.access_collection_id).executeTakeFirst()) ?? null)
     : null;
-  const named = liveStages(d, now)?.name ?? false;
+  const named = !unnamed && (liveStages(d, now)?.name ?? false);
+  const own = collection && !named ? await db.selectFrom('models').select('collection_id').where('id', '=', d.model_id).executeTakeFirst() : undefined;
   return {
     minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier,
     models: named ? models : models.map((m) => (m.id === d.model_id ? { id: m.id, name: LIVE_UNNAMED_MODEL } : m)),
-    collection,
+    collection: collection && own?.collection_id === collection.id ? { id: collection.id, name: LIVE_UNNAMED_COLLECTION } : collection,
   };
 }
 
@@ -936,11 +947,9 @@ export class LiveService {
     const country = typeof client.country === 'string' && /^[A-Z]{2}$/.test(client.country) ? client.country : null;
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
       const notes: AuditRecordInput[] = [];
       if (d.cancelled_at) throw liveCancelled();
-      if (!isAnnounced(d, now)) throw dropNotFound();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));
       const access = await accessOf(tx, d, account, now);
@@ -989,8 +998,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       const e = await this.lockEntry(tx, id, account);
@@ -1015,8 +1023,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
       const e = await this.lockEntry(tx, id, account);
       if (!e) throw notEntered();
       if (e.status !== 'WAITING' && e.status !== 'QUEUED' && e.status !== 'TURN') throw notInLine();
@@ -1038,10 +1045,8 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'share');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
       if (d.cancelled_at) throw liveCancelled();
-      if (!isAnnounced(d, now)) throw dropNotFound();
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const access = await accessOf(tx, d, account, now);
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
@@ -1064,9 +1069,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'share');
-      const now = this.clock();
-      if (!isAnnounced(d, now)) throw dropNotFound();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
       if (now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const r = await tx.deleteFrom('live_interest').where('drop_id', '=', id).where('account_id', '=', account).returning('size_id').executeTakeFirst();
       if (!r) throw notInterested();
@@ -1083,8 +1086,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'share');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
       const e = await this.runningTurn(tx, d, account, token, now);
       await tx.updateTable('live_entries').set({ press_started_at: now }).where('id', '=', e.id).where('status', '=', 'TURN').execute();
     });
@@ -1102,8 +1104,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'share');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
       const e = await this.runningTurn(tx, d, account, token, now);
       const gesture = e.press_started_at ? now.getTime() - e.press_started_at.getTime() : -1;
       if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();
@@ -1132,8 +1133,7 @@ export class LiveService {
     const wanted = [...new Set(addonIds.map((a) => knownId(a, addonUnknown)))].sort();
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'share');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
       const e = await this.runningHold(tx, d, account, now);
       const addons = wanted.length ? await tx.selectFrom('live_addons').select(['id', 'price_minor']).where('drop_id', '=', id).where('id', 'in', wanted).execute() : [];
       if (addons.length !== wanted.length) throw addonUnknown();
@@ -1153,8 +1153,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
       const e = await this.runningHold(tx, d, account, now);
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const notes: AuditRecordInput[] = [{ actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } }];
@@ -1170,8 +1169,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
       const e = await this.runningHold(tx, d, account, now);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await tx.updateTable('live_entries').set({ status: 'RELEASED', ended_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
@@ -1466,6 +1464,17 @@ export class LiveService {
     const d = await (lock === 'update' ? q.forUpdate() : q.forShare()).executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
+  }
+
+  /**
+   * A customer's action: the release's row (lockLive), then the clock; before its announcement the same 404 as an
+   * unknown release, whatever else is true of it (a cancellation included), so an id says nothing of a release to come.
+   */
+  private async lockAnnouncedLive(tx: Db, id: string, lock: Lock): Promise<{ d: LiveDrop; now: Date }> {
+    const d = await this.lockLive(tx, id, lock);
+    const now = this.clock();
+    if (!isAnnounced(d, now)) throw dropNotFound();
+    return { d, now };
   }
 
   /** A LIVE RELEASE's row FOR UPDATE, published or not; anything else is the same 404 as an unknown release. */

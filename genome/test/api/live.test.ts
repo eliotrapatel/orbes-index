@@ -30,7 +30,7 @@ import { LIVE_NETWORK_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
 import { LIVE_GESTURE_MIN_MS, liveNetworkHash } from '../../src/server/services/live.js';
 import { foldIcsLine, liveStages } from '../../src/server/services/live-room.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
+import { createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { accountClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
 
@@ -90,6 +90,25 @@ describe('LIVE RELEASES: the customer API and real time', () => {
     it('answers 404 before it, for a draft, a cancelled release, a draw, an unknown or malformed id; then the release appears', async () => {
       const r = await release(h, f, { announceAt: new Date(h.clock.now().getTime() + HOUR), inMinutes: 3 * 60, minTier: 0 });
       const viewer = await member(h, f, 1);
+      // Every account mutation answers as for an unknown release before the announcement: an id says nothing of it.
+      const mutations = (id: string, sizeId: string): [string, string, unknown][] => [
+        ['PUT', `/api/v1/live/${id}/interest`, { sizeId }],
+        ['DELETE', `/api/v1/live/${id}/interest`, undefined],
+        ['POST', `/api/v1/live/${id}/enter`, { sizeId }],
+        ['POST', `/api/v1/live/${id}/size`, { sizeId }],
+        ['POST', `/api/v1/live/${id}/leave`, {}],
+        ['POST', `/api/v1/live/${id}/press`, { token: 'abc' }],
+        ['POST', `/api/v1/live/${id}/secure`, { token: 'abc' }],
+        ['PUT', `/api/v1/live/${id}/addons`, { addonIds: [] }],
+        ['POST', `/api/v1/live/${id}/confirm`, {}],
+        ['POST', `/api/v1/live/${id}/release`, {}],
+      ];
+      const unknown = async (id: string, sizeId: string) => {
+        for (const [method, url, body] of mutations(id, sizeId)) {
+          const res = await viewer.client.request(method, url, { body });
+          expect([method, url, res.statusCode, errorOf(res).code]).toEqual([method, url, 404, 'DROP_NOT_FOUND']);
+        }
+      };
       const { token } = await f.live.issueBoardLink(r.id, f.admin);
       const c = h.client();
       const hidden = async () => {
@@ -111,8 +130,13 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         }
       };
       await hidden();
+      await unknown(r.id, r.sizes[0]!.id);
       const board = await openSse(base, `/api/v1/live/${r.id}/board/stream`, { method: 'POST', body: { token }, origin: ORIGIN });
       expect(board.status).toBe(404);
+      // Cancelled before its announcement: the same 404, never 409 DROP_CANCELLED.
+      const early = await release(h, f, { announceAt: new Date(h.clock.now().getTime() + HOUR), inMinutes: 3 * 60 });
+      await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', early.id).execute();
+      await unknown(early.id, early.sizes[0]!.id);
 
       h.clock.advance(HOUR);
       expect((await c.get(`/api/v1/live/${r.id}`)).statusCode).toBe(200);
@@ -224,6 +248,51 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       await h.ctx.db.updateTable('drops').set({ silhouette_at: new Date(t + 4 * HOUR), name_at: new Date(t + 4 * HOUR), photo_at: new Date(t + 4 * HOUR) }).where('id', '=', bare.id).execute();
       expect((safeJson(await c.get(`/api/v1/live/${bare.id}`)) as { reveals: unknown }).reveals).toEqual([{ stage: 'NAME', at: new Date(t + 4 * HOUR).toISOString() }]);
       await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', bare.id).execute();
+    });
+
+    it('never names the model’s collection in the rule before the name’s stage: the list, the page, the 403s and the circle’s post', async () => {
+      const t = h.clock.now().getTime();
+      const collectionId = await createCollection(h.ctx.db, 'SOLSTICE');
+      const modelId = await createModel(h.ctx.db, 'EQUINOX', collectionId);
+      const r = await release(h, f, { modelId, inMinutes: 5 * 60, accessCollectionId: collectionId, published: false });
+      await h.ctx.db.updateTable('drops').set({ name_at: new Date(t + 2 * HOUR), photo_at: new Date(t + 2 * HOUR) }).where('id', '=', r.id).execute();
+      await h.ctx.services.liveConsole.publish(r.id, { circlePost: true }, f.admin);
+      const post = await h.ctx.db.selectFrom('circle_posts').select('body').where('drop_id', '=', r.id).executeTakeFirstOrThrow();
+      const c = h.client();
+      const outsider = await member(h, f, 0);
+      const said = async () => {
+        const list = (safeJson(await c.get('/api/v1/live')) as { releases: { id: string; access: unknown }[] }).releases.find((x) => x.id === r.id)!;
+        const sheet = safeJson(await c.get(`/api/v1/live/${r.id}`)) as { access: unknown };
+        const refusals = await Promise.all(
+          [
+            outsider.client.get(`/api/v1/live/${r.id}/state`),
+            outsider.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[0]!.id } }),
+          ].map(async (p) => errorOf(await p).message),
+        );
+        return { list: list.access, sheet: sheet.access, refusals };
+      };
+
+      // Before the name: « this model’s collection » wherever the rule is said; the post never names it.
+      expect(await said()).toEqual({
+        list: { minTier: 0, text: 'owners of this model’s collection' },
+        sheet: { minTier: 0, text: 'owners of this model’s collection' },
+        refusals: Array(2).fill('This release is for owners of this model’s collection.'),
+      });
+      expect(post.body).toContain('For owners of this model’s collection.');
+      expect(post.body).not.toContain('SOLSTICE');
+      // At the name: the collection by its name; the post, written once, still never names the piece.
+      h.clock.set(t + 2 * HOUR);
+      expect(await said()).toEqual({
+        list: { minTier: 0, text: 'owners of the SOLSTICE collection' },
+        sheet: { minTier: 0, text: 'owners of the SOLSTICE collection' },
+        refusals: Array(2).fill('This release is for owners of the SOLSTICE collection.'),
+      });
+      // A collection other than the model's own is named from the announcement: it says nothing of the piece.
+      const other = await createCollection(h.ctx.db, 'MERIDIAN');
+      const r2 = await release(h, f, { modelId, inMinutes: 5 * 60, accessCollectionId: other });
+      await h.ctx.db.updateTable('drops').set({ name_at: new Date(t + 4 * HOUR), photo_at: new Date(t + 4 * HOUR) }).where('id', '=', r2.id).execute();
+      expect((safeJson(await c.get(`/api/v1/live/${r2.id}`)) as { access: unknown }).access).toEqual({ minTier: 0, text: 'owners of the MERIDIAN collection' });
+      for (const id of [r.id, r2.id]) await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', id).execute();
     });
 
     it('reveals every stage at the room’s opening at the latest, and never names a stage in the room or the account’s state', async () => {
@@ -617,12 +686,14 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         expect(frame).toHaveBeenCalledTimes(1);
         expect(entries).toHaveBeenCalledTimes(1);
         expect(entries.mock.calls[0]![1]).toHaveLength(6);
-        // The room serialised once for the six; each viewer written once: the room, and its own entry when it changed.
+        // The room serialised once for the six; each viewer written once: its own entry first when it changed, then the
+        // room, the same bytes for all.
         expect(stringify.mock.calls.filter(([v]) => typeof v === 'object' && v !== null && 'inRoom' in v)).toHaveLength(1);
         const chunks = write.mock.calls.map(([c]) => String(c)).filter((c) => c.startsWith('event: '));
         expect(chunks).toHaveLength(6);
-        expect(new Set(chunks.map((c) => c.slice(0, c.indexOf('\n\n') + 2))).size).toBe(1);
-        expect(chunks.filter((c) => c.includes('\n\nevent: you\n'))).toHaveLength(1);
+        expect(chunks.every((c) => c.split('event: room\n').length === 2)).toBe(true);
+        expect(new Set(chunks.map((c) => c.slice(c.indexOf('event: room\n')))).size).toBe(1);
+        expect(chunks.filter((c) => c.startsWith('event: you\n'))).toHaveLength(1);
       } finally {
         stringify.mockRestore();
         write.mockRestore();
@@ -655,6 +726,55 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const after = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: a.client.cookies });
       expect(after.status).toBe(204);
       expect(h.app.liveHub.open.accounts.size).toBe(0);
+    });
+
+    it('says the end once the engine has recorded it, each viewer’s final entry before the room over; the page whole while a hold runs after an END', async () => {
+      const r = await release(h, f, { inMinutes: 4 });
+      await h.ctx.db.updateTable('drop_sizes').set({ stock: 1 }).where('drop_id', '=', r.id).execute();
+      const [a, b] = [await member(h, f, 5), await member(h, f, 1)];
+      for (const m of [a, b]) await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id });
+      h.clock.advance(4 * MINUTE);
+      await advance(h, r.id);
+      const [sa, sb] = [await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: a.client.cookies }), await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: b.client.cookies })];
+      const token = ((await sa.next((e) => e.event === 'you')).data.entry as { turn: { token: string } }).turn.token;
+      expect((await sb.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED' });
+      await a.client.post(`/api/v1/live/${r.id}/press`, { token });
+      h.clock.advance(2 * SECOND);
+      await a.client.post(`/api/v1/live/${r.id}/secure`, { token });
+
+      // Ended by ORBES with a hold running: the line ENDED at once, the hold confirmable until its deadline; the room is
+      // not over yet, and the page stays whole (its phase ENDED) so PAY can be pressed.
+      await f.live.end(r.id, f.admin);
+      const sheet = safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as { phase: string; sizes: unknown[] };
+      expect(sheet.phase).toBe('ENDED');
+      expect(sheet.sizes).toHaveLength(1);
+      const from = sb.events.length;
+      await h.app.liveHub.pulse();
+      const ended = await sb.next((e) => e.event === 'you' && (e.data.entry as { status: string }).status === 'ENDED', from);
+      expect((await sb.next((e) => e.event === 'room', from)).data).toMatchObject({ phase: 'ENDED', endedReason: 'ENDED', over: false });
+      expect(sb.events.indexOf(ended)).toBeLessThan(sb.events.findIndex((e, i) => i >= from && e.event === 'room'));
+
+      // PAY: no hold left, the release over. Each stream's last chunk: its own entry, then the room over.
+      await a.client.post(`/api/v1/live/${r.id}/confirm`, {});
+      const fromA = sa.events.length;
+      await h.app.liveHub.pulse();
+      const confirmed = await sa.next((e) => e.event === 'you' && (e.data.entry as { status: string }).status === 'CONFIRMED', fromA);
+      const over = await sa.next((e) => e.event === 'room' && e.data.over === true, fromA);
+      expect(sa.events.indexOf(confirmed)).toBeLessThan(sa.events.indexOf(over));
+      await until(() => sa.ended && sb.ended);
+      expect(safeJson(await h.client().get(`/api/v1/live/${r.id}`))).toEqual({ id: r.id, kind: 'LIVE', phase: 'ENDED' });
+
+      // The clock past the close before the engine's pass: the phase says ENDED, the room is not over, its entry open.
+      const c = await release(h, f, { inMinutes: 4 });
+      const m = await member(h, f, 1);
+      await m.client.post(`/api/v1/live/${c.id}/enter`, { sizeId: c.sizes[0]!.id });
+      h.clock.advance(4 * MINUTE + HOUR);
+      const before = safeJson(await m.client.get(`/api/v1/live/${c.id}/state`)) as { room: Record<string, unknown>; entry: { status: string } };
+      expect([before.room.phase, before.room.over, before.entry.status]).toEqual(['ENDED', false, 'WAITING']);
+      expect((safeJson(await h.client().get(`/api/v1/live/${c.id}`)) as { sizes?: unknown }).sizes).toBeDefined();
+      await advance(h, c.id);
+      const after = safeJson(await m.client.get(`/api/v1/live/${c.id}/state`)) as { room: Record<string, unknown>; entry: { status: string } };
+      expect([after.room.over, after.room.endedReason, after.entry.status]).toEqual([true, 'CLOSED', 'ENDED']);
     });
 
     it('ends a REMOVED entry’s stream after its last event', async () => {

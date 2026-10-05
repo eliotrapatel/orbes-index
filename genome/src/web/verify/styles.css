@@ -3575,6 +3575,13 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink);
 }
 
+/* Its inner outline is the choice: the keyboard's focus rings it apart, outside, in ivory. */
+.live__picker.is-choosing .btn.live__size[aria-pressed="true"]:focus-visible {
+  box-shadow:
+    0 0 0 5px var(--paper),
+    0 0 0 6px var(--ink);
+}
+
 .live__size.is-gone .live__size-label {
   text-decoration: line-through;
 }
@@ -3603,6 +3610,13 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   min-width: 2ch;
   font-size: var(--fs-lead);
   font-variant-numeric: tabular-nums;
+}
+
+/* The keyboard's focus in the vault: ivory, outside the button, also around a
+   filled one (whose words, the ring's currentColor elsewhere, are the ground's). */
+.vault .btn:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 4px;
 }
 
 /* The one primary action of a screen: filled ivory, its words in the ground's ink. */

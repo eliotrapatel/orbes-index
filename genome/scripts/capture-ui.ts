@@ -36,6 +36,17 @@
  *     owner Camille Martin, signed in · the OWNERSHIP CERTIFICATE (F-06)
  *     of one of her pieces, opened by a visitor from its link (full page)
  *   legal (the phone of verify): the FAQ (/legal/faq, J-06), in English
+ *   the LIVE RELEASE (plan of 2026-10-04, Quality bar 7; the phone of verify,
+ *     last: its releases and pieces would change the other captures) ·
+ *     the banner · THE RELEASES with its LIVE cards · announced · the room
+ *     (the closed door, READY CHECK) · the boutique board (landscape, its
+ *     secret link) · the door open at T0 · the line · the turn · secured
+ *     (the add-ons, PAY) · CONFIRMED in ivory · each edge page · the
+ *     console's live board (1440 × 900); the engine runs on the stage, the
+ *     releases and accounts made as test/support/live.ts makes them
+ *
+ *   --only live   the LIVE RELEASE's captures alone (live-*.png), the others
+ *                 left as they are
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -62,18 +73,22 @@ import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 import { Resvg } from '@resvg/resvg-js';
 import { PNG } from 'pngjs';
+import { sql } from 'kysely';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { encodeOrbesCode, ORBES_CODE_STYLES, renderOrbesCodeSvg } from '../src/core/code/encoder.js';
 import { toBase64Url } from '../src/core/bytes.js';
 import { frameCodeData } from '../src/core/payload.js';
 import { buildApp } from '../src/server/app.js';
 import { testConfig } from '../src/server/config.js';
-import { createContext, type AppContext } from '../src/server/context.js';
+import { createContext, startLiveEngine, type AppContext } from '../src/server/context.js';
 import { closeDb, createDb, type Db } from '../src/server/db/connection.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } from '../src/server/db/seed/demo.js';
 import { MemoryKeyProvider } from '../src/server/keys/memory-provider.js';
+import type { LiveEngine } from '../src/server/services/live-engine.js';
+import { sessionCookieName } from '../src/server/services/sessions.js';
 import { createManualClock, noopLogger, systemActor } from '../src/server/types.js';
 import { cameraClipFrames } from '../test/e2e/support.js';
+import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { svgToGray } from '../test/support/raster.js';
 import { writeY4m } from '../test/support/y4m.js';
 import { buildWeb } from './build-web.js';
@@ -105,15 +120,17 @@ const IPHONE_UA =
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { out: string; raw: boolean } {
+function parseArgs(argv: string[]): { out: string; raw: boolean; only: 'live' | null } {
   let out = DEFAULT_OUT;
   let raw = false;
+  let only: 'live' | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw)`);
+    else if (argv[i] === '--only' && argv[i + 1] === 'live') only = argv[++i] as 'live';
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live)`);
   }
-  return { out, raw };
+  return { out, raw, only };
 }
 
 const log = (line: string) => process.stdout.write(`${line}\n`);
@@ -666,6 +683,265 @@ async function captureLegal(stage: Stage, shots: Shots): Promise<void> {
   }
 }
 
+// ── The LIVE RELEASE ───────────────────────────────────────────────────────
+
+/** Wait until `test` holds (polled every 100 ms), or fail with `what`. */
+async function until(what: string, test: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while (!(await test())) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await sleep(100);
+  }
+}
+
+/** The text of the first element of `selector` once it is `expected` (spaces folded). */
+async function untilText(page: Page, selector: string, expected: string | RegExp, timeoutMs = 60_000): Promise<void> {
+  const ok = (t: string) => (typeof expected === 'string' ? t === expected : expected.test(t));
+  await until(`${selector} to read ${String(expected)}`, async () => ok(((await page.locator(selector).first().textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim()), timeoutMs);
+}
+
+/**
+ * Every state of the vault (plan of 2026-10-04, Quality bar 7), on the phone of verify, with the live engine running:
+ * the releases and accounts are made as the LIVE suites make them (test/support/live.ts), on the demo's MONOLITHE (no
+ * photograph: the piece shows the seal, as a release without one does). Run last: its pieces and entries would change
+ * the other captures' figures.
+ */
+async function captureLive(stage: Stage, shots: Shots): Promise<void> {
+  const { ctx, db, origin } = stage;
+  const engine: LiveEngine = startLiveEngine(ctx, { connection: 'shared' });
+  const f: LiveFixture = await liveFixtureOn(ctx, createManualClock(new Date()));
+  const monolithe = (await db.selectFrom('models').select('id').where('sku_prefix', '=', 'MNL-RG').executeTakeFirstOrThrow()).id;
+  let n = 0;
+  /** An ORBES account holding `pieces` pieces of MONOLITHE (its tier: 1 TITANE, 3 PLATINE, 5 PALLADIUM), signed in. */
+  const account = async (pieces: number) => {
+    const { account: a, session } = await ctx.services.auth.registerAccount({ email: `collector.${++n}@example.com`, password: 'capture-ui-live-password' }, {});
+    if (pieces > 0) await holdPieces(db, a.id, pieces, monolithe);
+    return { id: a.id, token: session.token, actor: { type: 'account' as const, id: a.id } };
+  };
+  const release = async (o: Partial<LiveReleaseOptions> & { opensAt: Date }) => {
+    const r = await createLiveRelease(f, { modelId: monolithe, priceMinor: 505_000, ...o });
+    await db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
+    return r;
+  };
+  const statusOf = async (dropId: string, accountId: string) =>
+    (await db.selectFrom('live_entries').select('status').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst())?.status ?? null;
+  const untilStatus = (dropId: string, accountId: string, status: string) => until(`an entry ${status}`, async () => (await statusOf(dropId, accountId)) === status);
+  const entryOf = async (dropId: string, accountId: string) => (await db.selectFrom('live_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirstOrThrow()).id;
+  /** Another phone's turn: pressed, held 1.5 s, secured, then confirmed when asked. */
+  const secureAs = async (dropId: string, a: { id: string; actor: { type: 'account'; id: string } }, confirm: boolean) => {
+    await untilStatus(dropId, a.id, 'TURN');
+    const token = (await ctx.services.liveRoom.viewerEntries(dropId, [a.id])).get(a.id)!.turn!.token!;
+    await ctx.services.live.press(a.id, dropId, token);
+    await sleep(1_500);
+    await ctx.services.live.secure(a.id, dropId, token, a.actor);
+    if (confirm) await ctx.services.live.confirm(a.id, dropId, a.actor);
+  };
+
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  /** The phone of verify, signed in as `token` when given (its session cookie, as the sign-in sets it). */
+  const phone = async (token: string | null, label: string) => {
+    const context = await mobileContext(browser);
+    if (token) await context.addCookies([{ name: sessionCookieName(ctx.config, 'account'), value: token, url: origin }]);
+    const page = await context.newPage();
+    watchPage(page, label);
+    return { context, page };
+  };
+  /** A page of the vault at rest: its fonts in, the grain hidden, its screen risen. */
+  const settle = async (page: Page, ms = 1_200) => {
+    await page.evaluate(() => document.fonts.ready);
+    await hideGrain(page);
+    await sleep(ms);
+  };
+  try {
+    // The collectors: one who will be there (PLATINE), one ahead of her at T0 (PALLADIUM), the room and the interest
+    // (the fourth of the crowd holds no piece: in neither).
+    const me = await account(3);
+    const rival = await account(5);
+    const crowd = await Promise.all([3, 3, 5, 0, 5, 3].map((p) => account(p)));
+
+    // Announced, opening in 2 h 14 min: I'LL BE THERE counted. The banner counts down to it.
+    const later = await release({
+      opensAt: new Date(Date.now() + (2 * 3600 + 14 * 60 + 12) * 1000),
+      minTier: 2,
+      sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
+      quantityLine: '25 PIECES',
+      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+    });
+    for (const [i, c] of crowd.entries()) if (i !== 3) await ctx.services.live.setInterest(c.id, later.id, later.sizes[i % 3]!.id, c.actor);
+    const { context: landing, page: home } = await phone(null, 'live-banner');
+    await home.goto(`${origin}/verify`);
+    await home.waitForSelector('a.live-banner');
+    await settle(home, 3_200);
+    await shots.viewport(home, 'live-01-banner');
+    await landing.close();
+
+    // The release lived through: its room open now, T0 in 80 s; 25 pieces, one of them in size 52.
+    const t0 = new Date(Date.now() + 80_000);
+    const r = await release({
+      opensAt: t0,
+      minTier: 1,
+      sizes: [{ label: '50', stock: 12 }, { label: '52', stock: 1 }, { label: '54', stock: 12 }],
+      quantityLine: '25 PIECES',
+      addons: [
+        { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
+        { label: 'GIFT BOX', priceMinor: 9_000 },
+        { label: 'ORBES CARE', line: 'Two years of care in the atelier', priceMinor: 12_000 },
+      ],
+    });
+    const [s50, s52, s54] = r.sizes;
+    await ctx.services.live.enter(rival.id, r.id, { sizeId: s52!.id }, rival.actor);
+    for (const [i, c] of crowd.entries()) if (i !== 3) await ctx.services.live.enter(c.id, r.id, { sizeId: (i % 2 ? s50 : s54)!.id }, c.actor);
+    await ctx.services.live.setInterest(me.id, r.id, s52!.id, me.actor);
+    await ctx.services.live.message(r.id, 'Welcome to the vault. The door opens at the hour.', f.admin);
+    const { token: boardToken } = await f.live.issueBoardLink(r.id, f.admin);
+
+    const { context, page } = await phone(me.token, 'live');
+    // THE RELEASES: the LIVE cards first, on the vault's plates.
+    await page.goto(`${origin}/verify/releases`);
+    await page.waitForSelector('article.live-card');
+    await settle(page);
+    await shots.full(page, 'live-02-releases');
+    // B1: announced.
+    await page.goto(`${origin}/verify/releases/${later.id}`);
+    await page.waitForSelector('.live__there');
+    await settle(page);
+    await shots.full(page, 'live-03-announced');
+    // B2: the room, the door closed, READY CHECK all ready, the size of I'LL BE THERE preselected.
+    await page.goto(`${origin}/verify/releases/${r.id}`);
+    await page.waitForSelector('.live-door .live-door__seal');
+    await until('READY CHECK', async () => (await page.locator('.live__check').allInnerTexts()).filter((t) => /ready$/i.test(t.trim())).length === 5);
+    await settle(page);
+    await shots.full(page, 'live-04-room');
+
+    // The boutique board, by its secret link, landscape.
+    const screen = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'no-preference' });
+    const board = await screen.newPage();
+    watchPage(board, 'live-board');
+    await board.goto(`${origin}/verify/releases/${r.id}/board#${boardToken}`);
+    await board.waitForSelector('.board__door .live-door__seal');
+    await settle(board);
+    await shots.viewport(board, 'live-05-board');
+    await screen.close();
+
+    await page.getByRole('button', { name: 'ENTER THE ROOM' }).click();
+    await untilStatus(r.id, me.id, 'WAITING');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    // T0: the lock aligned, the door open on the piece under its light.
+    await until('the door to open', async () => /is-open/.test((await page.locator('.live-door').getAttribute('class')) ?? ''), 90_000);
+    await sleep(1_100);
+    await shots.viewport(page, 'live-06-open');
+    // B3: the line, the rival's turn in size 52 ahead.
+    await untilText(page, '.live__ahead', 'YOU ARE NEXT IN SIZE 52');
+    await settle(page, 900);
+    await shots.full(page, 'live-07-line');
+    // B4: a piece has returned, the collector's turn.
+    await ctx.services.live.leave(rival.id, r.id, rival.actor);
+    await untilText(page, '.live__turn > .live__overline', 'A PIECE HAS RETURNED');
+    await settle(page, 900);
+    await shots.full(page, 'live-08-turn');
+    // The seal held: B5, the reveal, then the add-ons and PAY.
+    const box = (await page.locator('.live-hold').boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await sleep(2_100);
+    await page.mouse.up();
+    await untilText(page, '.live__secured > .live__overline', 'SECURED');
+    await sleep(2_600);
+    await page.getByRole('button', { name: /ENGRAVING/ }).click();
+    await page.mouse.move(0, 0);
+    await settle(page, 600);
+    await shots.full(page, 'live-09-secured');
+    // B6: CONFIRMED, out into the light.
+    await page.locator('.live__pay').click();
+    await untilText(page, 'h1', 'CONFIRMED');
+    await settle(page, 1_600);
+    await shots.full(page, 'live-10-confirmed');
+    await context.close();
+
+    // The edge pages, each with its one action.
+    const edge = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });
+    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 60 });
+    await sleep(3_500);
+    const [e50, e52] = edge.sizes;
+    const enter = async (dropId: string, sizeId: string, pieces = 1) => {
+      const a = await account(pieces);
+      await ctx.services.live.enter(a.id, dropId, { sizeId }, a.actor);
+      return a;
+    };
+    const left = await enter(edge.id, e50!.id);
+    await untilStatus(edge.id, left.id, 'TURN');
+    await ctx.services.live.leave(left.id, edge.id, left.actor);
+    const removed = await enter(edge.id, e50!.id);
+    await ctx.services.live.remove(edge.id, await entryOf(edge.id, removed.id), f.admin);
+    const missed = await enter(edge.id, e50!.id);
+    await untilStatus(edge.id, missed.id, 'TURN');
+    // Its turn's deadline brought to a moment after it began: the engine marks it missed.
+    await db.updateTable('live_entries').set({ turn_expires_at: sql<Date>`turn_at + interval '1 millisecond'` }).where('drop_id', '=', edge.id).where('account_id', '=', missed.id).execute();
+    await untilStatus(edge.id, missed.id, 'MISSED');
+    const expired = await enter(edge.id, e50!.id);
+    await secureAs(edge.id, expired, false);
+    await ctx.services.live.freeHold(edge.id, await entryOf(edge.id, expired.id), f.admin);
+    const released = await enter(edge.id, e50!.id);
+    await secureAs(edge.id, released, false);
+    await ctx.services.live.release(released.id, edge.id, released.actor);
+    // Sold out in size 52 for a collector in the line behind its one piece, confirmed by another.
+    const buyer = await enter(edge.id, e52!.id);
+    await untilStatus(edge.id, buyer.id, 'TURN');
+    const late = await enter(edge.id, e52!.id);
+    await secureAs(edge.id, buyer, true);
+    // Sold out before a turn came; a collector without an entry finds it over.
+    const first = await enter(ended.id, ended.sizes[0]!.id);
+    await untilStatus(ended.id, first.id, 'TURN');
+    const waiting = await enter(ended.id, ended.sizes[0]!.id);
+    await secureAs(ended.id, first, true);
+    await untilStatus(ended.id, waiting.id, 'ENDED');
+    const outsider = await account(0);
+    const nobody = await account(1);
+    const pages: [string, string | null, string][] = [
+      ['live-11-edge-sign-in', null, edge.id],
+      ['live-12-edge-not-eligible', outsider.token, edge.id],
+      ['live-13-edge-turn-passed', missed.token, edge.id],
+      ['live-14-edge-hold-ended', expired.token, edge.id],
+      ['live-15-edge-released', released.token, edge.id],
+      ['live-16-edge-left', left.token, edge.id],
+      ['live-17-edge-removed', removed.token, edge.id],
+      ['live-18-edge-sold-out', late.token, edge.id],
+      ['live-19-edge-ended', waiting.token, ended.id],
+      ['live-20-edge-over', nobody.token, ended.id],
+    ];
+    for (const [name, token, dropId] of pages) {
+      const { context: c, page: p } = await phone(token, name);
+      await p.goto(`${origin}/verify/releases/${dropId}`);
+      await p.waitForSelector('.live__edge h1');
+      await settle(p);
+      await shots.full(p, name);
+      await c.close();
+    }
+
+    // The console's live board of the release lived through, its first screen (1440 × 900, the bootstrap ADMIN).
+    const desk = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+    const admin = await desk.newPage();
+    watchPage(admin, 'live-console');
+    await admin.goto(`${origin}/admin`);
+    await admin.waitForSelector('[data-testid=login-form]');
+    await admin.fill('input[name=email]', ADMIN.email);
+    await admin.fill('input[name=password]', ADMIN.password);
+    await admin.click('[data-testid=login-submit]');
+    await admin.waitForSelector('.view--dashboard');
+    await admin.evaluate((hash) => (location.hash = hash), `#/club/live/${r.id}`);
+    await admin.waitForSelector('[data-testid=live-board-state]');
+    await until('the live board', async () => /LIVE/.test((await admin.locator('[data-testid=live-state]').textContent()) ?? ''), 20_000);
+    await admin.evaluate(() => document.fonts.ready);
+    await admin.mouse.move(0, 0);
+    await sleep(1_200);
+    await shots.viewport(admin, 'live-21-console-board');
+    await desk.close();
+  } finally {
+    await browser.close();
+    await engine.stop();
+  }
+}
+
 // ── PNG quantisation ───────────────────────────────────────────────────────
 //
 // Variance-split median cut to at most 256 colours, each palette entry
@@ -802,27 +1078,31 @@ export function quantizePng(input: Buffer, maxColors = 256): Buffer {
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { out, raw } = parseArgs(process.argv.slice(2));
+  const { out, raw, only } = parseArgs(process.argv.slice(2));
   const workDir = mkdtempSync(join(tmpdir(), 'orbes-capture-ui-'));
   let stage: Stage | undefined;
   try {
     stage = await startStage(workDir);
     const shots = new Shots(out, raw);
-    log('verify:');
-    await captureVerify(stage, shots, workDir);
-    log('admin:');
-    await addStaff(stage);
-    await captureAdmin(stage, shots);
-    log('admin, sale mode:');
-    await captureSale(stage, shots);
-    log('verify, certificate-card section:');
-    await captureVerifyCard(stage, shots);
-    log('verify, my pieces:');
-    await captureVerifyPieces(stage, shots);
-    log('verify, ownership certificate:');
-    await captureVerifyCertificate(stage, shots);
-    log('legal:');
-    await captureLegal(stage, shots);
+    if (only === null) {
+      log('verify:');
+      await captureVerify(stage, shots, workDir);
+      log('admin:');
+      await addStaff(stage);
+      await captureAdmin(stage, shots);
+      log('admin, sale mode:');
+      await captureSale(stage, shots);
+      log('verify, certificate-card section:');
+      await captureVerifyCard(stage, shots);
+      log('verify, my pieces:');
+      await captureVerifyPieces(stage, shots);
+      log('verify, ownership certificate:');
+      await captureVerifyCertificate(stage, shots);
+      log('legal:');
+      await captureLegal(stage, shots);
+    }
+    log('the LIVE RELEASE:');
+    await captureLive(stage, shots);
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))
       .reduce((s, f) => s + statSync(join(out, f)).size, 0);

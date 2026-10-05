@@ -641,7 +641,8 @@ export class LiveConsoleService {
     const sum = (k: keyof AdminLiveBoardSize) => boardSizes.reduce((n, s) => n + (s[k] as number), 0);
     const holding = people(null, ['TURN', 'SECURED']);
     const phase = livePhase(d, now);
-    const over = phase === 'ENDED' && holding === 0;
+    // Over on the recorded end (the clock alone may run ahead of the engine's pass), with no turn or hold left.
+    const over = d.ended_at !== null && holding === 0;
     const [line, lineTotal, signals] = await Promise.all([
       this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now),
       this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', 'in', [...LIVE_OPEN_STATUSES]).executeTakeFirstOrThrow(),
@@ -1153,18 +1154,18 @@ export class LiveConsoleService {
   /**
    * The release's post of the circle, as the publication writes it: shown from the announcement (now when it is
    * already due), for the release's tier (TITANE at least: the circle is the owners'), its words from the times,
-   * quantity line, price and rule (a model of the rule that is the release's own says « this model »: the post never
-   * names the piece).
+   * quantity line, price and rule (a model of the rule that is the release's own says « this model », its collection
+   * « this model’s collection »: the post never names the piece).
    */
   private async circlePost(db: Db, d: DropRow, now: Date): Promise<{ body: string; minTier: number; at: Date }> {
-    const rule = await liveAccessRule(db, d, now);
+    const rule = await liveAccessRule(db, d, now, true);
     const room = roomOpensAt(d);
     const f = new Intl.DateTimeFormat('en-GB', { timeZone: PARIS, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
     const parts = Object.fromEntries(f.formatToParts(room).map((p) => [p.type, p.value]));
     const minutes = d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default;
     const body = [
       `The room opens on ${parts.weekday} ${parts.day} ${parts.month} at ${parts.hour}:${parts.minute}, Paris time, ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} before the release.`,
-      `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${liveMoney(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText({ ...rule, models: rule.models.map((m) => (m.id === d.model_id ? { ...m, name: 'this model' } : m)) })}.`,
+      `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${liveMoney(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText(rule)}.`,
     ].join('\n\n');
     const announced = announcedAt(d) ?? now;
     return { body, minTier: Math.max(1, d.live_min_tier ?? 0), at: announced.getTime() > now.getTime() ? announced : now };
@@ -1224,7 +1225,7 @@ export class LiveConsoleService {
       title: r.title,
       model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active },
       phase,
-      over: phase === 'ENDED' && !holding,
+      over: r.ended_at !== null && !holding,
       announcedAt: announcedAt(r),
       roomOpensAt: roomOpensAt(r),
       opensAt: r.opens_at,

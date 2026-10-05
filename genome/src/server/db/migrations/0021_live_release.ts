@@ -269,6 +269,9 @@ const DROPS_COLUMNS = [
 ];
 
 export const DOWN: readonly string[] = [
+  // The previous image shows every post with a publication time: a LIVE one's post still to come is withdrawn, so the
+  // circle never announces a release cancelled just below.
+  `UPDATE circle_posts SET published_at = NULL WHERE published_at > now() AND drop_id IN (SELECT id FROM drops WHERE mode = 'LIVE')`,
   // The previous image reads every drop as a draw: a LIVE one is cancelled, so nobody enters it nor draws it there.
   `UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND cancelled_at IS NULL`,
   `DROP TABLE IF EXISTS live_tier_windows`,

@@ -547,7 +547,7 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
     const contacts = { email: 'clientservices@theorbes.com' };
     const [confirmed, missed] = myLiveEntries(list, { clientServices: contacts });
     expect(confirmed).toMatchObject({ dropId: ID, href: `/verify/releases/${ID}`, title: 'MONOLITHE — LIVE', stateLabel: 'LIVE RELEASE' });
-    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: LIVE.sentence.CONFIRMED('52'), reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
+    expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: LIVE.reservedIn('52', 1), reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
     expect(confirmed!.entry.contact?.mailto).toContain('LR-01EDCB93');
     expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
     expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);

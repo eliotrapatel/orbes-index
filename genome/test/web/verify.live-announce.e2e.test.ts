@@ -31,7 +31,7 @@ import { BANNER_REFRESH_MS } from '../../src/web/verify/views/live-banner.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
-import { keepsVault } from '../support/vault-checks.js';
+import { focusRingContrast, keepsVault } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
@@ -264,6 +264,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await size('52').click();
     expect(await action.isDisabled()).toBe(false);
     await keepsVault(page, 'I’LL BE THERE', ['50', '52', '54', 'I’LL BE THERE', 'ADD TO CALENDAR']);
+    expect(await focusRingContrast(page, action)).toBeGreaterThanOrEqual(3);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-there.png'), fullPage: true });
     await action.click();
     await textOf(there.locator('.live__there-said'), 'YOU’LL BE THERE · SIZE 52');

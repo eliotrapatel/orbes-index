@@ -1027,7 +1027,7 @@ describe('migrations', () => {
     /^constraint drops drops_(draw_fields|live_fields|live_stages|live_ended|live_paused|board_token) /.test(o) ||
     /^index CREATE (UNIQUE )?INDEX drops_(silhouette_sha256_idx|access_collection_id_idx|board_token_hash_key) /.test(o);
 
-  it('0021 adds the LIVE RELEASE (drops\' mode and settings, the sizes, entries, access, add-ons, interest, messages, per-tier windows), and nothing else; down cancels the LIVE drops and restores 0020 exactly, and up again', async () => {
+  it('0021 adds the LIVE RELEASE (drops\' mode and settings, the sizes, entries, access, add-ons, interest, messages, per-tier windows), and nothing else; down cancels the LIVE drops, withdraws their posts still to come, and restores 0020 exactly, and up again', async () => {
     const latest = await snapshot();
     // A LIVE drop published before the rollback: the previous image would read it as a draw, so the down step cancels it.
     await sql`INSERT INTO categories (id, code, name) VALUES (24, 'X', 'Live test') ON CONFLICT DO NOTHING`.execute(t.db);
@@ -1038,6 +1038,11 @@ describe('migrations', () => {
                          mode, live_min_tier, tier_priority, room_opens_minutes, turn_seconds, pay_minutes, per_account, price_minor, currency, quantity_line)
       VALUES (${model}, 'Live', 1, '2026-12-01T10:00:00Z', '2026-12-01T11:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash}, 0, now(),
               'LIVE', 0, true, 5, 30, 5, 1, 505000, 'EUR', '1 PIECE') RETURNING id`.execute(t.db)).rows[0].id;
+    // Its posts of the circle: one shown already, one still to come (the previous image would show it at its time).
+    const post = async (at: string) =>
+      (await sql<{ id: string }>`INSERT INTO circle_posts (kind, title, body, drop_id, published_at) VALUES ('NOTE', 'LIVE RELEASE', 'The room opens.', ${live}, ${at}::timestamptz) RETURNING id`.execute(t.db)).rows[0].id;
+    const shown = await post('2020-01-01T10:00:00Z');
+    const coming = await post('2099-01-01T10:00:00Z');
     const { with: withLive, without: before } = await rollBackTo('0021_live_release');
     const added = withLive.filter((o) => !before.includes(o));
     expect(added.filter((o) => !of0021(o))).toEqual([]);
@@ -1092,10 +1097,13 @@ describe('migrations', () => {
       expect(added.some((o) => o.startsWith(`constraint live_entries live_entries_status_${status} CHECK `)), status).toBe(true);
     }
     expect((await sql<{ cancelled: boolean }>`SELECT cancelled_at IS NOT NULL AS cancelled FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].cancelled).toBe(true);
+    const posts = (await sql<{ id: string; published_at: Date | null }>`SELECT id, published_at FROM circle_posts WHERE drop_id = ${live}`.execute(t.db)).rows;
+    expect(new Map(posts.map((p) => [p.id, p.published_at?.toISOString() ?? null]))).toEqual(new Map([[shown, '2020-01-01T10:00:00.000Z'], [coming, null]]));
     expect((await migrateToLatest(t.db)).applied).toEqual(['0021_live_release']);
     expect(await snapshot()).toEqual(latest);
     // Up again, it is a DRAW (cancelled): the LIVE settings went with the down step.
     expect((await sql<{ mode: string }>`SELECT mode FROM drops WHERE id = ${live}`.execute(t.db)).rows[0].mode).toBe('DRAW');
+    await sql`DELETE FROM circle_posts WHERE drop_id = ${live}`.execute(t.db);
     await sql`DELETE FROM drops WHERE id = ${live}`.execute(t.db);
     await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
   });

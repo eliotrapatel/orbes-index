@@ -441,22 +441,25 @@ export class LiveHub {
     return shared;
   }
 
-  /** Send what changed for this stream since its last events, in one write. */
+  /**
+   * Send what changed for this stream since its last events, in one write: the viewer's own entry first, then the
+   * room, so a page that stops following at a room that is over has already read its final entry.
+   */
   private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>): void {
     if (s.closed) return;
     const shared = this.shared(out, s.kind === 'viewer' ? 'room' : 'board');
     let chunk = '';
-    if (shared.json !== s.sent) {
-      s.sent = shared.json;
-      chunk = shared.event;
-    }
     const entry = s.kind === 'viewer' ? (views.get(s.accountId) ?? null) : null;
     if (s.kind === 'viewer') {
       const you = JSON.stringify(entry);
       if (you !== s.you) {
         s.you = you;
-        chunk += `event: you\ndata: {"now":${out.now},"entry":${you}}\n\n`;
+        chunk = `event: you\ndata: {"now":${out.now},"entry":${you}}\n\n`;
       }
+    }
+    if (shared.json !== s.sent) {
+      s.sent = shared.json;
+      chunk += shared.event;
     }
     if (chunk) this.write(s, chunk);
     if (entry?.status === 'REMOVED') this.close(s);

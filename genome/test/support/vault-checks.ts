@@ -4,7 +4,7 @@
  * action (filled ivory), no figure in the display face, and the floors of BRAND-DESIGN-SYSTEM §3.8 (tap-zones.ts).
  * Shared by the LIVE RELEASE's browser suites (verify.live.e2e.test.ts, verify.live-announce.e2e.test.ts).
  */
-import type { Page } from 'playwright-core';
+import type { Locator, Page } from 'playwright-core';
 import { expect } from 'vitest';
 import { tapZoneFloors } from './tap-zones.js';
 
@@ -75,4 +75,39 @@ export async function keepsVault(page: Page, primary: string | null, controls: s
   const floors = await tapZoneFloors(page);
   expect(floors.problems).toEqual([]);
   expect(floors.checked).toEqual(expect.arrayContaining(controls));
+}
+
+/**
+ * Reach `target` from the keyboard (Tab), then measure its focus ring against the ground around it (the ring is drawn
+ * outside the control): the contrast ratio of the ring's colour, the outline's or, where the outline is a mark inside
+ * the control (the size chosen before ENTER), the outermost box-shadow's; 0 when no ring shows.
+ */
+export async function focusRingContrast(page: Page, target: Locator): Promise<number> {
+  for (let i = 0; i < 80 && !(await target.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+  return target.evaluate((el) => {
+    if (el !== document.activeElement || !el.matches(':focus-visible')) return 0;
+    type RGB = [number, number, number];
+    const parse = (c: string): [number, number, number, number] => {
+      const m = /rgba?\(([^)]+)\)/.exec(c);
+      if (!m) return [0, 0, 0, 0];
+      const p = m[1]!.split(/[\s,/]+/).filter(Boolean).map(Number);
+      return [p[0]!, p[1]!, p[2]!, p[3] ?? 1];
+    };
+    const over = (top: [number, number, number, number], under: RGB): RGB => [0, 1, 2].map((i) => top[i]! * top[3] + under[i]! * (1 - top[3])) as RGB;
+    const lum = (c: RGB) => {
+      const [r, g, b] = c.map((v) => v / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    let ground: RGB = [255, 255, 255];
+    const chain: Element[] = [];
+    for (let e: Element | null = el.parentElement; e; e = e.parentElement) chain.unshift(e);
+    for (const e of chain) ground = over(parse(getComputedStyle(e).backgroundColor), ground);
+    const style = getComputedStyle(el);
+    const outside = style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 && parseFloat(style.outlineOffset) >= 0;
+    const shadows = style.boxShadow === 'none' ? [] : (style.boxShadow.match(/rgba?\([^)]*\)/g) ?? []);
+    const ring = outside ? style.outlineColor : shadows.at(-1);
+    if (!ring) return 0;
+    const [hi, lo] = [lum(over(parse(ring), ground)), lum(ground)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  });
 }

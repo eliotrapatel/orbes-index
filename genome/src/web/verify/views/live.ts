@@ -100,6 +100,8 @@ const HOLD_RING = 2 * Math.PI * 116;
 
 /** The entry statuses after which nothing changes for the account: the page stops following the room. */
 const FINAL = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 'ENDED']);
+/** The entry statuses still open while the release runs: a room over with one of them has not said its last word. */
+const OPEN = new Set(['WAITING', 'QUEUED', 'TURN', 'SECURED']);
 
 export interface LiveView {
   root: HTMLElement;
@@ -167,6 +169,8 @@ class LivePage {
   private viewer: LiveViewer = 'unknown';
   /** The read of the state under way, if any. */
   private reading: Promise<void> | null = null;
+  /** The room said it is over while the entry this page holds was still open: the state was read once more. */
+  private overRead = false;
   private refusal: string | null = null;
   /** The release no longer answers (cancelled, unpublished): it is over for this page. */
   private gone = false;
@@ -361,19 +365,26 @@ class LivePage {
     this.interest = state.interest;
     this.setRoom(state.room);
     this.setEntry(state.entry);
+    this.settle();
   }
 
-  private setRoom(room: LiveRoom): void {
+  /**
+   * `streamed`: the room of a stream, whose chunks bring the account's own entry before the room, so the entry held is
+   * at least as recent as this room; a state read brings the room before its entry is applied.
+   */
+  private setRoom(room: LiveRoom, streamed = false): void {
     // A room seen while waiting in the line with no piece free in the size: a turn that comes later is a piece that has
-    // returned. Judged on the room before this one: this one may already hold the account's own turn.
+    // returned. Judged on the room before this one (a state read's room may already hold the account's own turn) and,
+    // streamed, on this one too (the entry, read first, says it is still in the line at this room).
     const e = this.entry;
-    const before = e?.status === 'QUEUED' ? roomSize(this.room, e.size.id) : null;
-    if (e && before && before.left < e.quantity) this.sizeWasFull = true;
-    this.room = room;
-    if (this.done()) {
-      this.closeStream();
-      this.stopPolling();
+    if (e?.status === 'QUEUED') {
+      const full = (r: LiveRoom | null) => {
+        const size = roomSize(r, e.size.id);
+        return size !== null && size.left < e.quantity;
+      };
+      if (full(this.room) || (streamed && full(room))) this.sizeWasFull = true;
     }
+    this.room = room;
   }
 
   private setEntry(entry: LiveEntry | null): void {
@@ -387,9 +398,22 @@ class LivePage {
     const held = heldEntry(entry);
     if (held) this.picked = { sizeId: held.size.id, quantity: held.quantity };
     else if (this.picked.sizeId === null && this.sheet && !isEndedSheet(this.sheet)) this.picked = { sizeId: initialSize(this.sheet, entry, this.interest), quantity: this.picked.quantity };
+  }
+
+  /**
+   * After the room or the entry changed: the following stops once nothing will change. A room over while the entry
+   * shown is still open means its last change was not seen: the following stops and the state is read once more (after
+   * a read already under way, which may predate the end), so the page shows how the release ended for the account.
+   */
+  private settle(): void {
     if (this.done()) {
       this.closeStream();
       this.stopPolling();
+    } else if (this.room?.over === true && !this.overRead) {
+      this.overRead = true;
+      this.closeStream();
+      this.stopPolling();
+      void (this.reading ?? Promise.resolve()).then(() => this.readState(false));
     }
   }
 
@@ -414,13 +438,15 @@ class LivePage {
     es.addEventListener('room', (ev) => {
       const data = parse<LiveRoom & { now: string }>(ev);
       if (!data || this.stream !== es) return;
-      this.setRoom(data);
+      this.setRoom(data, true);
+      this.settle();
       this.render();
     });
     es.addEventListener('you', (ev) => {
       const data = parse<{ now: string; entry: LiveEntry | null }>(ev);
       if (!data || this.stream !== es) return;
       this.setEntry(data.entry);
+      this.settle();
       this.render();
     });
     es.addEventListener('error', () => {
@@ -441,13 +467,15 @@ class LivePage {
   }
 
   /**
-   * Nothing will change for this page any more: the release over, or the account's entry final. An entry ENDED is final
-   * once the room says why (the room and the entries are read apart: the reason may come a frame after the entry).
+   * Nothing will change for this page any more: the release over (with no open entry shown, or once read again after
+   * it), or the account's entry final. An entry ENDED is final once the room says why (the room and the entries are
+   * read apart: the reason may come a frame after the entry).
    */
   private done(): boolean {
     const e = this.entry;
     const final = e !== null && FINAL.has(e.status) && (e.status !== 'ENDED' || !!this.room?.endedReason);
-    return this.gone || this.room?.over === true || final || this.viewer === 'not-eligible';
+    const over = this.room?.over === true && (this.overRead || !(e && OPEN.has(e.status)));
+    return this.gone || over || final || this.viewer === 'not-eligible';
   }
 
   private closeStream(): void {
@@ -689,6 +717,7 @@ class LivePage {
       const entry = await run();
       if (this.disposed) return;
       this.setEntry(entry);
+      this.settle();
       after?.(entry);
       if (!this.stream) this.follow();
     } catch (e) {
@@ -1182,7 +1211,9 @@ class LivePage {
 
   /** B3: the line. */
   private lineScreen(): Screen {
-    const place = h('p', { class: 'live__place', attrs: { 'aria-labelledby': 'live-place' } });
+    // The figure read with its words (a paragraph cannot be named): the label above is the eye's, hidden from readers.
+    const figure = h('span', { class: 'live__place-figure' });
+    const place = h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden', text: `${LIVE.yourPlaceSaid} ` }), figure);
     const ahead = this.fact('', 'live__ahead');
     const meter = h('div', { class: 'live__meter', attrs: { 'aria-hidden': 'true' } });
     const left = this.fact('', 'live__left');
@@ -1192,7 +1223,7 @@ class LivePage {
       { class: 'live__line' },
       this.overline(LIVE.phase.LIVE),
       this.title(this.name()),
-      h('p', { class: 'live__overline live__place-label', id: 'live-place', text: LIVE.yourPlace }),
+      h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace }),
       place,
       ahead,
       meter,
@@ -1209,7 +1240,7 @@ class LivePage {
         const e = this.entry;
         const room = this.room;
         if (!e || !room) return;
-        place.textContent = e.position === null ? '' : String(e.position);
+        figure.textContent = e.position === null ? '' : String(e.position);
         setFact(ahead, aheadLine(e));
         const facts = lineFacts(room, e.size.id, e.size.label);
         setFact(left, facts.left);
@@ -1347,7 +1378,8 @@ class LivePage {
         left.textContent = clockText(remainingMs);
         ring.setAttribute('stroke-dashoffset', (TURN_RING * (1 - fraction)).toFixed(2));
         setFact(piece, `${this.name()} · ${LIVE.size(e.size.label)} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`);
-        button.setAttribute('aria-disabled', String(paused || this.busy));
+        // The pause alone: while the secure is sent (busy) the seal stays lit, its hold already done (startHold waits).
+        button.setAttribute('aria-disabled', String(paused));
         el.classList.toggle('is-paused', paused);
         this.showError(errorLine);
       },
@@ -1453,7 +1485,7 @@ class LivePage {
     const errorLine = this.errorLine();
     const pay = h('button', { class: 'btn live__primary live__pay', attrs: { type: 'button' }, on: { click: () => this.payNow() } });
     const deadline = h('p', { class: 'live__deadline' }, h('span', { class: 'live__deadline-time', attrs: { role: 'timer' } }), h('span', { class: 'live__deadline-label', text: LIVE.toConfirm }));
-    const release = h('button', { class: 'textlink live__release', attrs: { type: 'button' }, on: { click: () => this.armed(() => this.act(() => this.deps.api.liveGiveBack(s!.id))) } });
+    const release = h('button', { class: 'textlink live__release', attrs: { type: 'button' }, on: { click: () => this.armed(() => this.act(() => this.deps.api.liveGiveBack(this.sheet!.id))) } });
     const el = h(
       'section',
       { class: ['live__secured', revealing && !prefersReducedMotion() ? 'is-revealing' : null] },

@@ -44,7 +44,7 @@ import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
-import { keepsVault, screenChecks } from '../support/vault-checks.js';
+import { focusRingContrast, keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
@@ -232,11 +232,15 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await page.locator('.live__picker').evaluate((el) => el.classList.contains('is-choosing'))).toBe(true);
     await keepsVault(page, 'ENTER THE ROOM', ['50', '52', 'ENTER THE ROOM']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-room.png'), fullPage: true });
+    // The keyboard's focus shows on the filled action and on the size chosen (its inner outline the choice): ivory outside.
+    expect(await focusRingContrast(page, size('52'))).toBeGreaterThanOrEqual(3);
+    expect(await focusRingContrast(page, page.getByRole('button', { name: 'ENTER THE ROOM' }))).toBeGreaterThanOrEqual(3);
     await page.getByRole('button', { name: 'ENTER THE ROOM' }).click();
     await visible(page.getByText(LIVE.youreReady));
     expect(await statusOf(r.id, me.id)).toEqual({ status: 'WAITING', size_id: s52!.id });
     // Entered: the size chosen is the filled one; it changes until T0.
     await keepsVault(page, '52', ['50', '52', 'LEAVE THE ROOM']);
+    expect(await focusRingContrast(page, size('52'))).toBeGreaterThanOrEqual(3);
     await size('50').click();
     await expect.poll(async () => (await statusOf(r.id, me.id))?.size_id, POLL).toBe(s50!.id);
     await expect.poll(() => size('50').getAttribute('aria-pressed')).toBe('true');
@@ -261,7 +265,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(ticks).toHaveLength(10);
 
     // B3: the line. The rival has the turn in size 52: the collector is next, the piece held may return.
-    await textOf(page.locator('.live__place'), '2');
+    await textOf(page.locator('.live__place-figure'), '2');
     await textOf(page.locator('.live__ahead'), 'YOU ARE NEXT IN SIZE 52');
     await textOf(page.locator('.live__left'), '2 OF 3 LEFT · 0 IN SIZE 52');
     await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
@@ -332,6 +336,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(pay, 'PAY · € 5 200');
     expect(await page.getByRole('button', { name: /ENGRAVING/ }).getAttribute('aria-pressed')).toBe('true');
     await keepsVault(page, 'PAY · € 5 200');
+    expect(await focusRingContrast(page, pay)).toBeGreaterThanOrEqual(3);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-secured.png'), fullPage: true });
     await pay.click();
 
@@ -393,7 +398,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-join.png'), fullPage: true });
     await page.getByRole('button', { name: 'ENTER THE LINE' }).click();
     // Behind the first collector: the line, the held piece that may return.
-    await textOf(page.locator('.live__place'), '2');
+    await textOf(page.locator('.live__place-figure'), '2');
     await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
     expect((await statusOf(r.id, me.id))?.status).toBe('QUEUED');
     // The first collector lets the turn go: the piece has returned. The keyboard holds the seal with the space bar.
@@ -444,6 +449,35 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect((await statusOf(r.id, me.id))?.status).toBe('RELEASED');
     expect(problems).toEqual([]);
   }, 120_000);
+
+  it('follows its stream from the line through a sell-out to SOLD OUT: the entry ENDED read before the room over, no state read again', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], turnSeconds: 60 });
+    const buyer = await account(5);
+    await srv.ctx.services.live.enter(buyer.id, r.id, { sizeId: r.sizes[0]!.id }, buyer.actor);
+    await expect.poll(async () => (await statusOf(r.id, buyer.id))?.status, POLL).toBe('TURN');
+    // In the line behind the one piece, held in the buyer's turn.
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    const { page, problems } = await phone(me.token);
+    const reads: string[] = [];
+    page.on('request', (req) => {
+      if (new URL(req.url()).pathname === `/api/v1/live/${r.id}/state`) reads.push(req.url());
+    });
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await textOf(page.locator('.live__place-figure'), '2');
+    await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
+    const before = reads.length;
+    // The buyer confirms the last piece: SOLD OUT, the line ENDED in the same transaction; the stream's last chunk
+    // brings the entry first, then the room over.
+    await secureAs(r.id, buyer, true);
+    await textOf(page.locator('h1'), LIVE.edge.ended.SOLD_OUT.title);
+    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.SOLD_OUT.text);
+    expect(await page.getByRole('button', { name: LIVE.edge.soldOut.leave }).count()).toBe(0);
+    expect((await statusOf(r.id, me.id))?.status).toBe('ENDED');
+    await sleep(2_500);
+    expect(reads.length).toBe(before);
+    expect(problems).toEqual([]);
+  }, 60_000);
 
   it('says every edge page plainly, each with one action: not signed in, not eligible, turn passed, hold ended, left, removed, sold out in your size, ended, over', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });

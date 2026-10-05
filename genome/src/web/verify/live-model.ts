@@ -43,7 +43,8 @@ export const PARIS = 'Europe/Paris';
 
 /** The page of an ended release: nothing more than that it is over (the plan's choice 32). */
 export function isEndedSheet(s: LiveSheet | LiveEndedSheet | null | undefined): s is LiveEndedSheet {
-  return !!s && s.phase === 'ENDED';
+  // A whole sheet may be ENDED too: a turn or a hold may still run to its deadline after the end.
+  return !!s && s.phase === 'ENDED' && !('sizes' in s);
 }
 
 /** A picture of this origin's media route, else null. */
@@ -219,7 +220,7 @@ export interface LiveScreenInput {
 
 /** Where the release stands at the server's time `now`: its own phase once it has ended (sold out, ended by ORBES). */
 export function phaseAt(sheet: LiveSheet, room: LiveRoom | null, now: number): 'ANNOUNCED' | 'ROOM' | 'LIVE' | 'ENDED' {
-  if (room?.phase === 'ENDED') return 'ENDED';
+  if (room?.phase === 'ENDED' || sheet.phase === 'ENDED') return 'ENDED';
   const times = room ?? sheet;
   if (now >= Date.parse(times.closesAt)) return 'ENDED';
   if (now >= Date.parse(times.opensAt)) return 'LIVE';
@@ -650,7 +651,7 @@ export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientS
       const title = upper(x.release.title ?? x.release.name ?? '') || LIVE.kind;
       const label = LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
-      const sentence = e.status === 'CONFIRMED' ? LIVE.sentence.CONFIRMED(e.size.label) : LIVE.sentence[e.status];
+      const sentence = e.status === 'CONFIRMED' ? LIVE.reservedIn(e.size.label, e.quantity) : LIVE.sentence[e.status];
       const entry: EntryModel = {
         label,
         sentence,
