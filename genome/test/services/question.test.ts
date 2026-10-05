@@ -263,14 +263,17 @@ describe('the question after a release', () => {
     const afterModel = await createModel(t.db, 'AFTERGLOW');
     const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 1 }], afterRoom: { modelId: afterModel, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }] } });
     const child = r.afterRoom!.id;
-    // A (PALLADIUM, first in line) secures the one piece; B, C and D wait in the line: the sell-out makes them its guests.
-    // E said I'LL BE THERE and never came.
-    const [a, b, c, d, e] = [await accountOfTier(f, 3), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+    // A (PALLADIUM, first in line) secures the one piece; three others wait in the line: the sell-out makes them its guests.
+    // They share a tier, so the opening's draw orders them: B, C and D are named by the places it gives. E said I'LL BE
+    // THERE and never came.
+    const [a, x, y, z, e] = [await accountOfTier(f, 3), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0)];
     await f.live.setInterest(e.id, r.id, r.sizes[0]!.id, e.actor);
     f.clock.set(new Date(opensAt.getTime() - MINUTE));
-    for (const p of [a, b, c, d]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
+    for (const p of [a, x, y, z]) await f.live.enter(p.id, r.id, { sizeId: r.sizes[0]!.id }, p.actor);
     f.clock.set(opensAt);
     await f.live.advance(r.id);
+    const line = (await entriesOf(t.db, r.id)).map((row) => row.account_id);
+    const [b, c, d] = [x, y, z].sort((p, q) => line.indexOf(p.id) - line.indexOf(q.id)) as [typeof x, typeof x, typeof x];
     f.clock.advance(2 * SECOND);
     await holdAndSecure(r.id, a);
     await f.live.confirm(a.id, r.id, a.actor);
