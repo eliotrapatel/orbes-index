@@ -1721,6 +1721,8 @@ export class LiveService {
   private async runningHold(tx: Db, d: LiveDrop, accountId: string, now: Date): Promise<EntryRow> {
     const e = await this.lockEntry(tx, d.id, accountId);
     if (!e) throw notEntered();
+    // The engine may have marked the hold EXPIRED at its deadline a moment before this call took the entry's lock.
+    if (e.status === 'EXPIRED') throw holdEnded();
     if (e.status !== 'SECURED') throw notSecured();
     if (effectiveDeadline(e.hold_expires_at!, d, now).getTime() <= now.getTime()) throw holdEnded();
     return e;

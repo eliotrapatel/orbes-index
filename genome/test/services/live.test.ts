@@ -586,6 +586,10 @@ describe('LiveService', () => {
       expect(await advance(r, end)).toMatchObject({ expired: 1 });
       expect(await entry(r.id, b.id)).toMatchObject({ status: 'EXPIRED', ended_at: end });
       expect(await t.db.selectFrom('live_entry_addons').select('addon_id').where('entry_id', '=', (await entry(r.id, b.id)).id).execute()).toEqual([]);
+      // Once the engine has marked it EXPIRED, a late PAY, add-on change or RELEASE MY PLACE still says the hold has ended.
+      await rejects(f.live.confirm(b.id, r.id, b.actor), 'LIVE_HOLD_ENDED', 409);
+      await rejects(f.live.setAddons(b.id, r.id, [], b.actor), 'LIVE_HOLD_ENDED', 409);
+      await rejects(f.live.release(b.id, r.id, b.actor), 'LIVE_HOLD_ENDED', 409);
     });
 
     it('gives the piece back on RELEASE MY PLACE, on a LEAVE during a turn, a freed hold and a removal: the next in line at once', async () => {
