@@ -203,6 +203,9 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     await orders().transition(paidReady.id, { to: 'PAID' }, admin);
     const shipped = (await salonOrder('56', model)).order;
     await orders().transition(shipped.id, { to: 'PAID' }, admin);
+    // Its piece, made in advance, picked from the stock before it ships.
+    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model, variant: '56', material: '925 STERLING SILVER' }, admin);
+    await ctx.services.atelier.linkFromStock(shipped.id, piece.product.productId, admin);
     await orders().transition(shipped.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A00000000001' }, admin);
     const paidMaking = (await salonOrder('57', model)).order;
     await orders().transition(paidMaking.id, { to: 'PAID' }, admin);

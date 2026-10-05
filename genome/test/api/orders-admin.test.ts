@@ -112,16 +112,23 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect(delivered.timing).toMatchObject({ rule: 'UNREGISTERED', late: false });
   });
 
-  it('links a piece picked from the stock to an order holding one', async () => {
+  it('links a piece picked from the stock to an order holding one, which ships only then', async () => {
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '56'));
     const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '56', material: '925 STERLING SILVER' }, f.admin);
     expect((await op.post('/api/admin/atelier/stock/adjust', { skuId: sku, locationId: france, delta: 1, note: 'Counted.' })).statusCode).toBe(200);
     const id = await salonOrder();
-    await op.patch(`/api/admin/orders/${id}/terms`, { sizeLabel: '56' });
+    await op.patch(`/api/admin/orders/${id}/terms`, { sizeLabel: '56', priceMinor: 480_000, currency: 'EUR' });
+    expect((safeJson(await op.post(`/api/admin/orders/${id}/transition`, { to: 'PAID' })) as Json).order).toMatchObject({ status: 'PAID', reservation: 'STOCK', productId: null });
+    // In stock, its piece not linked yet: it does not ship.
+    const carrier = ((safeJson(await auditor.get('/api/admin/carriers')) as { items: Json[] }).items.find((c) => c.name === 'Colissimo'))!;
+    const ship = { to: 'SHIPPED', carrierId: carrier.id, trackingNumber: '6A12345678902' };
+    const unlinked = await op.post(`/api/admin/orders/${id}/transition`, ship);
+    expect([unlinked.statusCode, errorOf(unlinked).code]).toEqual([409, 'ORDER_PIECE_NOT_LINKED']);
     expect(errorOf(await op.post(`/api/admin/orders/${id}/piece`, { productId: 'nope' })).code).toBe('VALIDATION_FAILED');
     const linked = safeJson(await op.post(`/api/admin/orders/${id}/piece`, { productId: piece.product.productId })) as Json;
     expect(linked.order).toMatchObject({ reservation: 'STOCK', productId: piece.product.productId });
     expect(linked.order.events.at(-1)).toMatchObject({ action: 'order.link' });
+    expect((safeJson(await op.post(`/api/admin/orders/${id}/transition`, ship)) as Json).order).toMatchObject({ status: 'SHIPPED', productId: piece.product.productId });
   });
 
   it('sets the delays of the alerts (ADMIN), within their bounds, audited', async () => {

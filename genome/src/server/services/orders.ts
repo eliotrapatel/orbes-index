@@ -17,8 +17,9 @@
  *                SHIPPED → DELIVERED | RETURNED; DELIVERED → RETURNED.
  *                PAID: by Client Services (later Whop or Shopify, through the same transition).
  *                SHIPPED: with an active carrier and the tracking number (the value declared for the insurance
- *                optional), once the piece is in stock at the order's location (409 ORDER_NOT_READY before): it
- *                leaves the ledger (SHIPPED, −1).
+ *                optional), once the piece is in stock at the order's location (409 ORDER_NOT_READY before) and
+ *                linked to the order (409 ORDER_PIECE_NOT_LINKED before: the atelier issues it, or picks it from
+ *                stock): it leaves the ledger (SHIPPED, −1).
  *                DELIVERED: by Client Services, or by itself when the buyer registers the piece linked to the order
  *                while it is SHIPPED (`deliverOnRegistration`, OwnershipService.registerFirst).
  *                CANCELLED, with a note: a piece in stock is released; a piece to make is cancelled and its reserved
@@ -129,6 +130,7 @@ const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
 const stepNotAllowed = (from: OrderStatus, to: OrderStatus) =>
   new DomainError('ORDER_TRANSITION_NOT_ALLOWED', 409, 'This order cannot move to that step.', { detail: `${from} → ${to}` });
 const notReady = () => conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
+const pieceNotLinked = () => conflict('ORDER_PIECE_NOT_LINKED', 'Link the piece that fulfils this order before it ships.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
@@ -686,6 +688,7 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
       break;
     case 'SHIPPED': {
       if (o.reservation !== 'STOCK') throw notReady();
+      if (o.product_id === null) throw pieceNotLinked();
       const carrier = await tx.selectFrom('carriers').select(['id', 'active']).where('id', '=', s.carrierId).executeTakeFirst();
       if (!carrier || !carrier.active) throw carrierUnknown();
       if (s.declaredValueMinor !== null && o.currency === null) throw validationError('Enter the order’s price and currency before declaring a value.');

@@ -127,10 +127,23 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     return orderRow(order.id);
   }
 
-  /** Move an order through steps (each valid for it). */
+  /**
+   * The piece that fulfils an order holding one in stock, linked before it ships (step S2): a piece of its SKU issued
+   * in advance, picked from the stock by the atelier. Nothing when the order has its piece, or holds none in stock.
+   */
+  async function linkPiece(orderId: string) {
+    const o = await orderRow(orderId);
+    if (o.product_id !== null || o.reservation !== 'STOCK') return;
+    const sku = await t.db.selectFrom('skus').select(['model_id', 'size_label']).where('id', '=', o.sku_id!).executeTakeFirstOrThrow();
+    const { product } = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: sku.model_id, ...(sku.size_label !== null ? { variant: sku.size_label } : {}), material: '925 STERLING SILVER' }, admin);
+    await ctx.services.atelier.linkFromStock(orderId, product.productId, admin);
+  }
+
+  /** Move an order through steps (each valid for it), its piece linked before it ships. */
   async function walk(orderId: string, steps: OrderStatus[]) {
     for (const s of steps) {
       clock.advance(MINUTE);
+      if (s === 'SHIPPED') await linkPiece(orderId);
       await orders().transition(orderId, inputFor(s), admin);
     }
     return orderRow(orderId);
@@ -518,6 +531,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           await receive(sku, france, 1);
           const o = await walk((await salonOrder({ size: '72', priceMinor: 480_000 })).id, PATHS[from]);
           expect(o.status).toBe(from);
+          if (to === 'SHIPPED') await linkPiece(o.id);
           const before = { events: (await eventsOf(o.id)).length, journal: (await journalOf(o.id)).length, audit: (await auditsOf(o.id)).length };
           clock.advance(MINUTE);
           if (allowed) {
@@ -542,7 +556,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       }
     }
 
-    it('SHIPPED needs an active carrier, a tracking number and its piece in stock at its location: the piece leaves the ledger; the tracking link', async () => {
+    it('SHIPPED needs an active carrier, a tracking number and its piece in stock at its location, linked to it: the piece leaves the ledger; the tracking link', async () => {
       const sku = await skuOf('74');
       // A piece still to make does not ship.
       const toMake = await walk((await salonOrder({ size: '74', priceMinor: 480_000 })).id, ['PAID']);
@@ -555,6 +569,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await orders().setTerms(ready.id, { sizeLabel: '74' }, admin);
       const o = await walk(ready.id, ['PAID']);
       expect(o.reservation).toBe('STOCK');
+      // In stock but not yet linked to its piece: it does not ship (the atelier picks the piece first).
+      await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'ORDER_PIECE_NOT_LINKED', 409);
+      expect((await orderRow(o.id)).status).toBe('PAID');
+      await linkPiece(o.id);
+      const linked = await orderRow(o.id);
       for (const [input, code] of [
         [{ to: 'SHIPPED', carrierId: colissimo, trackingNumber: 'x' }, 'VALIDATION_FAILED'],
         [{ to: 'SHIPPED', carrierId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', trackingNumber: '6A12345678901' }, 'CARRIER_NOT_FOUND'],
@@ -576,7 +595,8 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect(view.reservation).toBeNull();
       expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 0, reserved: 0, available: 0 });
       const [moved] = await t.db.selectFrom('stock_movements').selectAll().where('order_id', '=', o.id).execute();
-      expect(moved).toMatchObject({ sku_id: sku, location_id: logistics, delta: -1, reason: 'SHIPPED', actor_type: 'admin', actor_id: admin.id });
+      expect(moved).toMatchObject({ sku_id: sku, location_id: logistics, delta: -1, reason: 'SHIPPED', product_id: linked.product_id, actor_type: 'admin', actor_id: admin.id });
+      expect(linked.product_id).not.toBeNull();
       expect((await auditsOf(o.id, 'order.ship'))[0]!.details).toMatchObject({ from: 'PAID', to: 'SHIPPED', carrierId: colissimo, declaredValueMinor: 480_000 });
       expect(trackingLink('https://track.example/{tracking}?x=1', 'AB 12/3')).toBe('https://track.example/AB12%2F3?x=1');
     });
@@ -790,6 +810,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
                 const o = await orderRow(id);
                 if (o.status === 'RESERVED') await orders().transition(id, { to: 'PAID' }, admin);
                 else if (o.reservation === 'STOCK') {
+                  await linkPiece(id);
                   await orders().transition(id, inputFor('SHIPPED'), admin);
                   open.splice(open.indexOf(id), 1);
                 }
@@ -890,24 +911,25 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const buyer = await createAccount(t.db);
       const sku = await skuOf('76');
       await receive(sku, france, 3);
-      const shipped = await walk((await salonOrder({ size: '76', accountId: buyer.id })).id, ['PAID', 'SHIPPED']);
-      const other = await walk((await salonOrder({ size: '76', accountId: buyer.id })).id, ['PAID', 'SHIPPED']);
-      const paid = await walk((await salonOrder({ size: '76', accountId: buyer.id })).id, ['PAID']);
-      const issue = async () => {
-        const p = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '76', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
-        await ctx.services.warranty.activate(p.product.id, { purchaseDate: '2026-11-01', retailer: 'ORBES PARIS', country: 'FR' }, admin);
-        return p;
-      };
+      const issue = () => ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '76', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+      // Its warranty activated at the sale, the piece registered by its buyer.
       const register = async (accountId: string, p: Awaited<ReturnType<typeof issue>>) => {
+        await ctx.services.warranty.activate(p.product.id, { purchaseDate: '2026-11-01', retailer: 'ORBES PARIS', country: 'FR' }, admin);
         const scan = await ctx.services.verification.verify({ code: p.code.data }, {});
         return ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode: p.claimCode! }, { type: 'account', id: accountId });
       };
-      // The atelier links each piece to its order (step S2, here by hand). Registered by another account, or before the
-      // order is shipped, nothing changes.
+      // The atelier picks each order's piece from the stock before it ships. Registered by another account, or before
+      // the order is shipped, nothing changes.
       const [p1, p2, p3] = [await issue(), await issue(), await issue()];
-      await t.db.updateTable('orders').set({ product_id: p1.product.id }).where('id', '=', shipped.id).execute();
-      await t.db.updateTable('orders').set({ product_id: p2.product.id }).where('id', '=', paid.id).execute();
-      await t.db.updateTable('orders').set({ product_id: p3.product.id }).where('id', '=', other.id).execute();
+      const linkedTo = async (p: Awaited<ReturnType<typeof issue>>, steps: OrderStatus[]) => {
+        const o = await walk((await salonOrder({ size: '76', accountId: buyer.id })).id, ['PAID']);
+        await ctx.services.atelier.linkFromStock(o.id, p.product.productId, admin);
+        return walk(o.id, steps);
+      };
+      const shipped = await linkedTo(p1, ['SHIPPED']);
+      const other = await linkedTo(p3, ['SHIPPED']);
+      const paid = await linkedTo(p2, []);
+      expect([shipped.product_id, other.product_id, paid.product_id]).toEqual([p1.product.id, p3.product.id, p2.product.id]);
       const stranger = await createAccount(t.db);
       clock.advance(MINUTE);
       await register(stranger.id, p3);

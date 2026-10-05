@@ -196,7 +196,7 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
   const sale = o.channel !== 'LIVE';
   return {
     pay: ok && o.status === 'RESERVED',
-    ship: ok && o.status === 'PAID' && o.reservation === 'STOCK',
+    ship: ok && o.status === 'PAID' && o.reservation === 'STOCK' && o.productId !== null,
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
     location: ok && holding && o.productId === null,
@@ -212,6 +212,7 @@ export function shipWaitsFor(o: OrderView): string | null {
   if (o.skuId === null) return 'Its size is to be entered.';
   if (o.reservation === 'BENCH') return 'Its piece is being made at the atelier.';
   if (o.status === 'RESERVED') return 'It ships once paid.';
+  if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';
   return null;
 }
 

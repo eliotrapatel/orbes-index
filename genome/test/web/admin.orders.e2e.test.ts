@@ -9,7 +9,7 @@
  *  2. An order's page: its terms and its buyer entered, MARK PAID; its piece made at the atelier (START, DONE: the claim
  *     code shown once), linked to it; SHIP with a carrier, the tracking number and its link, a declared value; MARK
  *     DELIVERED; its history. Its packing slip: the piece, its size, add-ons, engraving and surprise, never a price; in
- *     print, the slip alone. A piece picked from the stock for an order holding one.
+ *     print, the slip alone. A piece picked from the stock for an order holding one, paid: no SHIP until it is linked.
  *  3. The atelier: a minimum set, its suggestion confirmed into pieces to make for the stock; their work sheets, each
  *     with its reference and its ORBES code drawn at 30 mm (in print too); the CSV of what to make.
  *  4. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
@@ -283,7 +283,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('takes an order through its steps: terms, buyer, paid; its piece made and linked; shipped and delivered; its packing slip without a price', async () => {
+  it('takes an order through its steps: terms, buyer, paid; its piece made and linked; shipped and delivered; its packing slip without a price; a piece picked from the stock before it ships', async () => {
     const p = await open(OPERATOR);
     await go(p, `#/orders/${o.late}`, orderReference(o.late));
     expect(await p.locator('[data-testid=order-late]').textContent()).toContain('Reserved for over 2 days, not paid yet.');
@@ -369,13 +369,18 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('[data-testid=slip-surprise]').textContent()).toBe('A silk pouch');
     expect(await p.locator('[data-testid=slip-source]').textContent()).toMatch(/^LR-/);
 
-    // A piece picked from the stock for the order holding one.
+    // A piece picked from the stock for the order holding one, paid: it ships only once its piece is linked.
+    await ctx.services.orders.transition(o.stock, { to: 'PAID' }, admin);
     await go(p, `#/orders/${o.stock}`, orderReference(o.stock));
+    expect(await p.locator('#order-step').textContent()).toContain('Link its piece from the stock.');
+    expect(await p.locator('[data-testid=order-ship]').count()).toBe(0);
     await p.click('[data-testid=order-link]');
     await p.fill('dialog input[name=productId]', stockPiece.toLowerCase());
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe(`Piece ${stockPiece}`);
     expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
+    expect(await p.locator('[data-testid=order-ship]').count()).toBe(1);
+    expect(await p.locator('#order-step').textContent()).not.toContain('Link its piece from the stock.');
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);

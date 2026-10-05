@@ -537,6 +537,9 @@ export class StockService {
           details.name = { from: before.name, to: name };
         }
         if (input.isDefault && !before.is_default) {
+          // The current default locked first: two locations made the default at once queue here, and the second one
+          // then moves the default from the first (never a violation of stock_locations_one_default).
+          await tx.selectFrom('stock_locations').select('id').where('is_default', '=', true).forUpdate().execute();
           const previous = await tx.updateTable('stock_locations').set({ is_default: false }).where('is_default', '=', true).returning('id').executeTakeFirst();
           await tx.updateTable('stock_locations').set({ is_default: true }).where('id', '=', id).execute();
           details.default = { from: previous?.id ?? null, to: id };

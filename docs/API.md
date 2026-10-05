@@ -118,8 +118,8 @@ Roles are ranked **ADMIN > OPERATOR > AUDITOR > RETAIL**; a role may do everythi
 |---|---|
 | RETAIL | A seller (A-08, migration 0008). The sale mode of a phone (§16.18: look a scanned piece up, start its warranty at a point of sale) and the list of points of sale it chooses from (`GET /api/admin/retailers`, §16.17). Manage its own session, password and second factor. **Nothing else**: no product, code, scan, owner, warranty list or dashboard, no download. |
 | AUDITOR | Read every admin resource, with customers' emails masked (`j***@example.com`, §16.2), the list of points of sale included. Manage its own session, password and second factor. **Nothing it does changes the registry**: although ranked above RETAIL, it does not use the sale mode (`403 FORBIDDEN` on `/api/admin/sale/*`; the console shows it no Sale mode link). |
-| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's lookbook, its place, address, story and specifications, and its gallery (§13.4; P-R02), its price and tier in the private salon (§13.4; P-X08), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), the releases of the Club page, created, edited, published and cancelled, and their entries concluded, lapsed or offered to the waiting list (§16.19; P-R03; their early access, P-X02), the posts of the circle, created, edited, published and withdrawn, and their photographs (§16.20; P-X01), the words of the tiers' benefits (§16.21; P-X04), the requests of the private salon closed with a note (§16.22; P-X08), the LIVE RELEASES, created, edited, published and cancelled, their silhouette and their board's link, their live controls (pause, resume, extend, add pieces, free a hold, let a person in the line take their turn, host messages) and their reservations concluded or cancelled (§16.23), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
-| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data), the draw of a release (§16.19; P-R03), a model discontinued and reinstated (§13.4; P-R06), and a LIVE RELEASE ended now or an entry removed from it (§16.23). |
+| OPERATOR | Additionally: every mutation not reserved to ADMIN (issuance, lifecycle transitions except to REVOKED and RETIRED, code re-issue, warranty activation, extension and voiding, service records, ownership confirmation, collections and models, created and edited (§13.3, §13.4), a model's lookbook, its place, address, story and specifications, and its gallery (§13.4; P-R02), its price and tier in the private salon (§13.4; P-X08), a model's reference photograph and the photograph of a piece, set and removed (§13.4, §14.12; F-04), the releases of the Club page, created, edited, published and cancelled, and their entries concluded, lapsed or offered to the waiting list (§16.19; P-R03; their early access, P-X02), the posts of the circle, created, edited, published and withdrawn, and their photographs (§16.20; P-X01), the words of the tiers' benefits (§16.21; P-X04), the requests of the private salon closed with a note (§16.22; P-X08), the LIVE RELEASES, created, edited, published and cancelled, their silhouette and their board's link, their live controls (pause, resume, extend, add pieces, free a hold, let a person in the line take their turn, host messages) (§16.23), the orders of every channel stepped (paid, shipped, delivered, cancelled), their terms, buyer and location entered and their piece picked from the stock, the atelier's stock counted and transferred, its minimums, the pieces to make started, finished and cancelled, and their work sheets (§16.24), anomaly triage) and **downloading code artifacts, print sheets (and their manifests) and certificate cards** (an artifact download is a `GET`, but it produces printable codes; a certificate card carries a claim code). Reads customers' emails in clear. |
+| ADMIN | Additionally: categories, created, deactivated and activated again (§13.2), product revocation and retirement (transitions to REVOKED or RETIRED: both end the product's public validity, RETIRED is terminal) and reinstatement, code revocation, the revocation register, signing keys, console users (the console's Team page, §17.7–§17.13: list, create OPERATOR, AUDITOR and RETAIL accounts, change a role between OPERATOR, AUDITOR and RETAIL, disable and enable, unlock, list and end sessions, reset a lost second factor), the register of points of sale (§16.17: create, rename, deactivate), a customer's one-time recovery code (§16.10), locking and unlocking a customer's account (§16.12) and the export of everything held about it (§16.13; a `GET`, but it hands over a customer's personal data), the draw of a release (§16.19; P-R03), a model discontinued and reinstated (§13.4; P-R06), a LIVE RELEASE ended now or an entry removed from it (§16.23), and the delays after which an order stands out as late, the stock locations and the carriers (§16.24). |
 
 ADMIN accounts and the ADMIN role are given from the shell only (`scripts/admin.ts create --role ADMIN` and `role --role ADMIN`, [DEPLOYMENT §8.2](DEPLOYMENT.md#82-further-admins-lost-authenticators-scriptsadmints)), where the second factor is enrolled out of band (SECURITY-MODEL §3.3): no route grants ADMIN. An ADMIN cannot act on its own account through the Team routes (`409 SELF_ACTION`; the TOTP reset excepted), and no change may leave the console without an active ADMIN (`409 LAST_ADMIN`).
 
@@ -451,8 +451,6 @@ The LIVE RELEASES (§8.10, §10.12, §16.23). A LIVE RELEASE not announced (or a
 | `LIVE_ENTRY_NOT_SECURED` | 409 | (§16.23) FREE: only a held piece. |
 | `LIVE_ENTRY_CLOSED` | 409 | (§16.23) REMOVE: the entry is no longer in the release. |
 | `LIVE_NO_BOARD_LINK` | 409 | (§16.23) The release has no board link to revoke. |
-| `LIVE_NOT_CONFIRMED` | 409 | (§16.23) Only a confirmed reservation is concluded or cancelled. |
-| `LIVE_ALREADY_RESOLVED` | 409 | (§16.23) The reservation is concluded or cancelled already. |
 
 The circle (P-X01, §10.11, §16.20):
 
@@ -677,9 +675,6 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/live/:id/entries/:entryId/free` | OPERATOR | yes | admin | 16.23 |
 | POST | `/api/admin/live/:id/entries/:entryId/let-in` | OPERATOR | yes | admin | 16.23 |
 | POST | `/api/admin/live/:id/entries/:entryId/remove` | **ADMIN** | yes | admin | 16.23 |
-| GET | `/api/admin/live/:id/reservations` | AUDITOR | — | admin | 16.23 |
-| GET | `/api/admin/live/:id/reservations.csv` | AUDITOR | — | admin | 16.23 |
-| POST | `/api/admin/live/:id/entries/:entryId/resolve` | OPERATOR | yes | admin | 16.23 |
 | GET | `/api/admin/live/:id/plan` | AUDITOR | — | admin | 16.23 |
 | GET | `/api/admin/live/:id/forecast` | AUDITOR | — | admin | 16.23 |
 | GET | `/api/admin/live/:id/radar` | AUDITOR | — | admin | 16.23 |
@@ -688,6 +683,33 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/live/:id/report.csv` | AUDITOR | — | admin | 16.23 |
 | GET | `/api/admin/live/:id/collectors` | AUDITOR | — | admin | 16.23 |
 | GET | `/api/admin/live/:id/comparison` | AUDITOR | — | admin | 16.23 |
+| GET | `/api/admin/orders` | AUDITOR | — | admin | 16.24 |
+| GET | `/api/admin/orders.csv` | AUDITOR | — | admin | 16.24 |
+| GET | `/api/admin/orders/alerts` | AUDITOR | — | admin | 16.24 |
+| PUT | `/api/admin/orders/alerts` | **ADMIN** | yes | admin | 16.24 |
+| GET | `/api/admin/orders/:id` | AUDITOR | — | admin | 16.24 |
+| POST | `/api/admin/orders/:id/transition` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/orders/:id/location` | OPERATOR | yes | admin | 16.24 |
+| PATCH | `/api/admin/orders/:id/terms` | OPERATOR | yes | admin | 16.24 |
+| PUT | `/api/admin/orders/:id/buyer` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/orders/:id/piece` | OPERATOR | yes | admin | 16.24 |
+| GET | `/api/admin/atelier/stock` | AUDITOR | — | admin | 16.24 |
+| POST | `/api/admin/atelier/stock/transfer` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/atelier/stock/adjust` | OPERATOR | yes | admin | 16.24 |
+| PUT | `/api/admin/atelier/thresholds` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/atelier/make` | OPERATOR | yes | admin | 16.24 |
+| GET | `/api/admin/atelier/bench` | AUDITOR | — | admin | 16.24 |
+| GET | `/api/admin/atelier/bench.csv` | AUDITOR | — | admin | 16.24 |
+| POST | `/api/admin/atelier/bench/:id/start` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/atelier/bench/:id/done` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/atelier/bench/:id/cancel` | OPERATOR | yes | admin | 16.24 |
+| POST | `/api/admin/atelier/sheets` | OPERATOR | yes | admin | 16.24 |
+| GET | `/api/admin/locations` | AUDITOR | — | admin | 16.24 |
+| POST | `/api/admin/locations` | **ADMIN** | yes | admin | 16.24 |
+| PATCH | `/api/admin/locations/:id` | **ADMIN** | yes | admin | 16.24 |
+| GET | `/api/admin/carriers` | AUDITOR | — | admin | 16.24 |
+| POST | `/api/admin/carriers` | **ADMIN** | yes | admin | 16.24 |
+| PATCH | `/api/admin/carriers/:id` | **ADMIN** | yes | admin | 16.24 |
 | GET | `/api/admin/keys` | AUDITOR | — | admin | 17.1 |
 | POST | `/api/admin/keys/rotate` | **ADMIN** | yes | admin | 17.2 |
 | POST | `/api/admin/keys/:keyId/retire` | **ADMIN** | yes | admin | 17.3 |
@@ -3463,7 +3485,7 @@ In the console: Club (Clients), **Requests** (`#/club?tab=requests`): the filter
 
 ### 16.23 The LIVE RELEASES: the Club page's live releases (extension of the contract)
 
-The console of the LIVE RELEASES (plan of 2026-10-04; `routes/admin/live.ts`, `services/live-console.ts`, `services/live.ts` for the live controls, `services/live-insights.ts` for the intelligence, `MediaService` for the silhouette): the **Club** page's **Drops** tab lists them (`Live releases`, `New live release`), and a release's page is `#/club/live/:dropId`. An **AUDITOR** reads everything, the customers' emails masked (`j***@example.com`: in the board, its stream, the entries, the reservations and their CSV, the bot radar and the collector insights); an **OPERATOR** creates, edits, publishes and cancels a release, runs the live controls and concludes the reservations; **END NOW** and **REMOVE** are **ADMIN**'s. Every mutation is audited by its service (`drop.live.*`, ids only, never an email, a secret or a note); every route has its role probe (`test/api/admin-roles.test.ts`). A DRAW's id answers `404 DROP_NOT_FOUND` here, a LIVE RELEASE's on the draw's routes `409 DROP_LIVE` (§16.19).
+The console of the LIVE RELEASES (plan of 2026-10-04; `routes/admin/live.ts`, `services/live-console.ts`, `services/live.ts` for the live controls, `services/live-insights.ts` for the intelligence, `MediaService` for the silhouette): the **Club** page's **Drops** tab lists them (`Live releases`, `New live release`), and a release's page is `#/club/live/:dropId`. An **AUDITOR** reads everything, the customers' emails masked (`j***@example.com`: in the board, its stream, the entries, the bot radar and the collector insights); an **OPERATOR** creates, edits, publishes and cancels a release and runs the live controls; **END NOW** and **REMOVE** are **ADMIN**'s. Every mutation is audited by its service (`drop.live.*`, ids only, never an email, a secret or a note); every route has its role probe (`test/api/admin-roles.test.ts`). A DRAW's id answers `404 DROP_NOT_FOUND` here, a LIVE RELEASE's on the draw's routes `409 DROP_LIVE` (§16.19).
 
 **Settings** (`POST /api/admin/live`, `PATCH /api/admin/live/:id`; `createLiveBody`, `updateLiveBody`): `modelId` (a model offered for new pieces), `title`, `description`; `opensAt` (T0) and `closesAt` (the end of the sales, after T0); `roomOpensMinutes` (1–60, 5 by default), `turnSeconds` (10–300, 30), `payMinutes` (1–60, 5), `perAccount` (1–5, 1); `priceMinor` (cents) and `currency` (`EUR`, `GBP`, `USD`, `CHF`; EUR by default); who may enter, `minTier` (0 any ORBES account … 3 PALLADIUM), `accessModelIds` (at most 20) and `accessCollectionId`; `tierPriority` (on by default); `sizes`, 1 to 24 rows `{ id?, label (≤ 12), stock (0–10 000) }`, 1 to 10 000 pieces in all (the release's `quantity` is their sum); `quantityLine` (≤ 40 characters; empty: `<quantity> PIECES`, which then follows the stock); `addons`, at most 6 `{ id?, label (≤ 40), line (≤ 120)?, priceMinor }`; the staged reveals `announceAt` (empty: at the publication), `silhouetteAt`, `nameAt`, `photoAt` (empty: at the announcement), in that order and all before the room's opening (the CHECK `drops_live_stages` reads an empty stage as the announcement, so a stage set after an empty one is refused); `tierWindows`, at most one per tier `{ tier, turnSeconds?, payMinutes? }` (e.g. PALLADIUM: 10 minutes to pay). A list given replaces the release's (a row with the `id` of an existing size or add-on keeps it). The seed is drawn and sealed at creation (`seedHash`, its SHA-256, shown in the console, never revealed for a LIVE RELEASE). **Everything changes until the announcement**; after it, **`409 LIVE_ANNOUNCED`**: only the stock rises, with ADD PIECES.
 
@@ -3490,9 +3512,7 @@ The console of the LIVE RELEASES (plan of 2026-10-04; `routes/admin/live.ts`, `s
 | POST | `/api/admin/live/:id/entries/:entryId/free` | OPERATOR | FREE A HOLD: a `SECURED` entry `EXPIRED`, its add-ons dropped; the piece to the next in line. Audited `drop.live.free` |
 | POST | `/api/admin/live/:id/entries/:entryId/let-in` | OPERATOR | LET IN: a `QUEUED` entry takes its turn now, out of order, within the free pieces of its size, the release live and not paused (`409 LIVE_NO_FREE_PIECE`). The entry keeps who (`let_in_by`). Audited `drop.live.let_in` with its place |
 | POST | `/api/admin/live/:id/entries/:entryId/remove` | **ADMIN** | REMOVE: an open entry `REMOVED`, its add-ons dropped; a piece it held goes to the next. Audited `drop.live.remove` |
-| GET | `/api/admin/live/:id/reservations` | AUDITOR | ORBES Client Services: the `CONFIRMED` reservations, paginated: `{ id, reference (LR-…), accountId, email, size, quantity, currency, priceMinor, addons, totalMinor, confirmedAt, resolution, note, handledBy, handledAt }` |
-| GET | `/api/admin/live/:id/reservations.csv` | AUDITOR | The same, every one, as a CSV attachment (`no-store`) |
-| POST | `/api/admin/live/:id/entries/:entryId/resolve` | OPERATOR | `{ "resolution": "CONCLUDED" \| "CANCELLED", "note"? (≤ 500) }`, once (`409 LIVE_ALREADY_RESOLVED`; `409 LIVE_NOT_CONFIRMED` for another status). A cancellation returns no piece to the line (choice 26). The note stays with the entry, never in the audit log. Audited `drop.live.resolve` |
+| — | — | — | A confirmed sale's orders, one per piece, are stepped on the Orders board (§16.24), which replaces the LIVE plan's Client Services list |
 
 **The engine's own entries** (the system as actor): `drop.live.queue` at T0 (the entries placed), `drop.live.end` for `SOLD_OUT` and `CLOSED`. The customers' (§10.12): `drop.live.enter`, `.size`, `.leave`, `.interest`, `.interest.withdraw`, `.secure` (with the gesture's length), `.addons`, `.confirm`, `.release`.
 
@@ -3512,6 +3532,33 @@ The console of the LIVE RELEASES (plan of 2026-10-04; `routes/admin/live.ts`, `s
 The **live alerts** and the **live sell-out forecast** ride on the live board and its stream (`alerts`, `sellOut`), from T0: a size sold out; a wave of missed turns (5 or more in 2 minutes, and half of the turns ended then); a line stalled while pieces are free (a turn due for 10 s, none given); and, per size and overall, the pace of the pieces secured in the last 5 minutes against what the line can still absorb.
 
 Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 DROP_NOT_FOUND`, `404 LIVE_ENTRY_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `409 DROP_CANCELLED`, `409 DROP_ALREADY_PUBLISHED`, `409 DROP_NOT_PUBLISHED`, `409 MODEL_INACTIVE`, and the `LIVE_*` codes of §5.2.
+
+### 16.24 Orders, the Atelier, locations and carriers (extension of the contract)
+
+The fulfilment of every sales channel (plan LIVE RELEASE+ of 2026-10-04; `routes/admin/orders.ts`, `routes/admin/atelier.ts`, `routes/admin/logistics.ts`; `services/orders.ts`, `services/fulfilment.ts`, `services/atelier.ts`, `services/stock.ts`; migration 0022): one order per piece sold (a LIVE RELEASE's entry confirmed, a draw's entry confirmed, a private salon's request accepted), `RESERVED` → `PAID` | `CANCELLED`; `PAID` → `SHIPPED` | `CANCELLED`; `SHIPPED` → `DELIVERED` | `RETURNED`; `DELIVERED` → `RETURNED`. While `RESERVED` or `PAID`, an order holds a piece in stock at its location (`STOCK`) or a piece to make (`BENCH`) whose ORBES identity is reserved. It ships once that piece is in stock at its location (`409 ORDER_NOT_READY` before) and linked to it (`409 ORDER_PIECE_NOT_LINKED` before: the atelier links the piece it finishes, or Client Services picks one from the stock); it is `DELIVERED` by Client Services or by itself when its buyer registers that piece. An **AUDITOR** reads everything, the collectors' emails and the buyer's name masked and the address withheld; an **OPERATOR** steps the orders, enters their terms, buyer and location, picks their piece, runs the atelier and prints its work sheets; the alerts' delays, the locations and the carriers are **ADMIN**'s. Every mutation is audited by its service (`order.*`, `bench.*`, `stock.*`, `carrier.*`, `product.issue`; never the buyer's details nor an engraving's words); every route has its role probe (`test/api/admin-roles.test.ts`).
+
+| Method | Path | Role | What it does |
+|---|---|---|---|
+| GET | `/api/admin/orders` | AUDITOR | The board: six columns by step, their counts and late counts, the longest waiting first (`?channel=&dropId=&locationId=&late=&q=`), and the delays |
+| GET | `/api/admin/orders.csv` | AUDITOR | Every order the same filters keep, as a CSV attachment (`no-store`) |
+| GET, PUT | `/api/admin/orders/alerts` | AUDITOR, **ADMIN** | The delays after which an order stands out as late (reserved and not paid; paid with its piece ready and not shipped; shipped and not delivered; delivered and its piece not registered), changed within their bounds. Audited `order.alerts` |
+| GET | `/api/admin/orders/:id` | AUDITOR | One order: its facts, timing, piece and history |
+| POST | `/api/admin/orders/:id/transition` | OPERATOR | `PAID`; `SHIPPED` (an active carrier, the tracking number, the value declared optional); `DELIVERED`; `CANCELLED` (a note). Audited `order.pay`, `.ship`, `.deliver`, `.cancel` |
+| POST | `/api/admin/orders/:id/location` | OPERATOR | Served from another location: what it holds moves (`409 ORDER_PIECE_LINKED` once its piece is linked). Audited `order.location` |
+| PATCH | `/api/admin/orders/:id/terms` | OPERATOR | A draw's or a salon's size, price and currency; the engraving of any order. Audited `order.terms` |
+| PUT | `/api/admin/orders/:id/buyer` | OPERATOR | The buyer's name and address. Audited `order.buyer`, never what they are |
+| POST | `/api/admin/orders/:id/piece` | OPERATOR | `{ "productId" }`: an issued piece of the order's SKU, never registered and fulfilling no other order, linked to an order holding one in stock. Audited `order.link` |
+| GET | `/api/admin/atelier/stock` | AUDITOR | The stock per SKU and location (on hand, reserved, available), its minimums and suggestions (`?modelId=&locationId=`) |
+| POST | `/api/admin/atelier/stock/transfer`, `/adjust` | OPERATOR | Pieces of a SKU moved between locations; a count corrected, with why. Audited `stock.transfer`, `stock.adjust` |
+| PUT | `/api/admin/atelier/thresholds` | OPERATOR | A SKU's minimum at a location, or none. Audited `stock.threshold` |
+| POST | `/api/admin/atelier/make` | OPERATOR | Pieces to make for the stock (a suggestion confirmed). Audited `bench.create` |
+| GET | `/api/admin/atelier/bench`, `/bench.csv` | AUDITOR | The pieces to make per release, model and size (`?view=OPEN\|DONE\|CANCELLED\|ALL&origin=&skuId=&locationId=`); the CSV of what to make |
+| POST | `/api/admin/atelier/bench/:id/start`, `/done`, `/cancel` | OPERATOR | TO MAKE → IN PROGRESS → DONE: the piece issued with its reserved identity, in the ledger and linked to its order (its claim code in this answer only, `no-store`); a piece to make for the stock cancelled. Audited `bench.start`, `.done`, `.cancel`, `product.issue` |
+| POST | `/api/admin/atelier/sheets` | OPERATOR | The work sheets, each with its reference and its ORBES code's data (`no-store`). Audited `bench.sheet` |
+| GET, POST, PATCH | `/api/admin/locations`, `/:id` | AUDITOR, **ADMIN** | The locations, the default first; one added; renamed or made the default. Audited `stock.location.create`, `.update` |
+| GET, POST, PATCH | `/api/admin/carriers`, `/:id` | AUDITOR, **ADMIN** | The carriers, the active ones first; one added with its tracking link; its name, its link, offered or set aside. Audited `carrier.create`, `.update` |
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 ORDER_NOT_FOUND`, `404 BENCH_ITEM_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`, `404 SKU_NOT_FOUND`, `404 STOCK_LOCATION_NOT_FOUND`, `404 CARRIER_NOT_FOUND`, `409 ORDER_TRANSITION_NOT_ALLOWED`, `409 ORDER_NOT_READY`, `409 ORDER_PIECE_NOT_LINKED`, `409 ORDER_PIECE_LINKED`, `409 ORDER_PIECE_TO_MAKE`, `409 ORDER_TERMS_FIXED`, `409 ORDER_PAID`, `409 ORDER_CLOSED`, `409 PIECE_OTHER_SKU`, `409 PIECE_NOT_IN_STOCK`, `409 PIECE_TAKEN`, `409 BENCH_STEP_NOT_ALLOWED`, `409 BENCH_NOT_OPEN`, `409 BENCH_FOR_ORDER`, `409 STOCK_NOT_AVAILABLE`, `409 STOCK_LOCATION_NAME_TAKEN`, `409 CARRIER_NAME_TAKEN`, `503 STOCK_NOT_READY`.
 
 ## 17. Admin: keys, audit log and console users
 

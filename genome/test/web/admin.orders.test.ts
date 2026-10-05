@@ -199,7 +199,7 @@ describe('what a role may do with an order', () => {
     expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, location: false, terms: { size: false, price: false, engraving: false }, buyer: false, linkPiece: false });
     expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: true, ship: false, deliver: false, cancel: true, location: true, terms: { size: true, price: true, engraving: true }, buyer: true, linkPiece: false });
     const paidStock = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK' });
-    expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: true, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
+    expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: false, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
     const live = view({ channel: 'LIVE', skuId: 's', reservation: 'BENCH', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
     expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true });
     expect(orderActions(live, 'ADMIN').linkPiece).toBe(false);
@@ -218,7 +218,8 @@ describe('what a role may do with an order', () => {
     expect(shipWaitsFor(view())).toBe('Its size is to be entered.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'BENCH' }))).toBe('Its piece is being made at the atelier.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'STOCK' }))).toBe('It ships once paid.');
-    expect(shipWaitsFor(paidStock)).toBeNull();
+    expect(shipWaitsFor(paidStock)).toBe('Link its piece from the stock.');
+    expect(shipWaitsFor(linked)).toBeNull();
   });
 
   it('checks the dialogs and sends what the server takes', () => {

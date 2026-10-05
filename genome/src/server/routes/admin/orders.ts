@@ -8,8 +8,8 @@
  *   GET    /api/admin/orders/alerts             AUDITOR   the delays after which an order stands out (M3)
  *   PUT    /api/admin/orders/alerts             ADMIN     those delays, changed (the console's settings)
  *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history
- *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; SHIPPED (carrier, tracking number, declared value);
- *                                                         DELIVERED; CANCELLED (a note)
+ *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; SHIPPED (its piece linked; carrier, tracking number,
+ *                                                         declared value); DELIVERED; CANCELLED (a note)
  *   POST   /api/admin/orders/:id/location       OPERATOR  served from another location (what it holds moves)
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
