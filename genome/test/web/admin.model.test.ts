@@ -110,6 +110,10 @@ import {
 } from '../../src/web/admin/model/generator.js';
 import { formatCount } from '../../src/web/admin/format.js';
 import {
+  BASE_PRICE_MAX_MINOR,
+  basePriceProblem,
+  CARE_GUIDE_MAX,
+  careGuideText,
   carePreview,
   categoryImpact,
   collectionImpact,
@@ -170,7 +174,12 @@ import {
   normalizeBenefits,
   type ClubTierSheet as ServerClubTierSheet,
 } from '../../src/server/services/club.js';
-import type { ModelRecord as ServerModelRecord } from '../../src/server/services/catalog.js';
+import {
+  BASE_PRICE_MAX_MINOR as SERVER_BASE_PRICE_MAX,
+  CARE_GUIDE_MAX as SERVER_CARE_GUIDE_MAX,
+  normalizeCareGuide,
+  type ModelRecord as ServerModelRecord,
+} from '../../src/server/services/catalog.js';
 import type { LockOutcome as ServerLockOutcome, OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
 import type { AdminShopRequest as ServerShopRequest } from '../../src/server/services/salon.js';
 import {
@@ -1724,12 +1733,25 @@ describe('catalogue edits (A-10)', () => {
     careInstructions: 'Polish with a soft dry cloth.',
     active: true,
     products: 184,
+    basePriceMinor: null,
+    baseCurrency: null,
+    careGuide: null,
+    shopify: { productId: null, variants: 1, linked: 0 },
     createdAt: '2026-10-01T08:00:00.000Z',
-  } as Model;
+  } as unknown as Model;
 
   it('sends only what differs, trimmed; never the category nor the SKU prefix', () => {
     const f = modelForm(model);
-    expect(f).toEqual({ name: 'MONOLITHE', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Polish with a soft dry cloth.', collectionId: 'c1', status: 'active' });
+    expect(f).toEqual({
+      name: 'MONOLITHE',
+      defaultMaterial: '925 STERLING SILVER',
+      careInstructions: 'Polish with a soft dry cloth.',
+      collectionId: 'c1',
+      status: 'active',
+      basePrice: '',
+      baseCurrency: 'EUR',
+      careGuide: '',
+    });
     expect(modelChange(model, f)).toEqual({});
     expect(modelChange(model, { ...f, name: ' MONOLITHE ', careInstructions: ' Polish with a soft dry cloth.\n' })).toEqual({});
     expect(modelChange(model, { ...f, name: 'MONOLITHE II', defaultMaterial: '  ', careInstructions: 'Wipe it.', collectionId: '', status: 'inactive' })).toEqual({
@@ -1791,6 +1813,29 @@ describe('catalogue edits (A-10)', () => {
     const f = modelForm(discontinued);
     expect(modelChange(discontinued, { ...f, status: undefined as unknown as string })).toEqual({});
     expect(modelChange(discontinued, { ...f, status: 'active', name: 'MONOLITHE II' })).toEqual({ name: 'MONOLITHE II' });
+  });
+
+  it('sends the base price with its currency, or clears both, and the care guide as the server keeps it (plan LIVE RELEASE+, N2 and M6)', () => {
+    const f = modelForm(model);
+    expect(modelChange(model, { ...f, basePrice: '4 800.50', baseCurrency: 'CHF' })).toEqual({ basePriceMinor: 480_050, baseCurrency: 'CHF' });
+    expect(modelChange(model, { ...f, basePrice: '4800', baseCurrency: '' })).toEqual({ basePriceMinor: 480_000, baseCurrency: 'EUR' });
+    const priced = { ...model, basePriceMinor: 480_050, baseCurrency: 'EUR', careGuide: 'Wipe it.\n\nKeep it in its box.' } as Model;
+    const g = modelForm(priced);
+    expect([g.basePrice, g.baseCurrency, g.careGuide]).toEqual(['4800.50', 'EUR', 'Wipe it.\n\nKeep it in its box.']);
+    expect(modelChange(priced, g)).toEqual({});
+    // The currency alone changes: both are sent; emptied, both are cleared.
+    expect(modelChange(priced, { ...g, baseCurrency: 'USD' })).toEqual({ basePriceMinor: 480_050, baseCurrency: 'USD' });
+    expect(modelChange(priced, { ...g, basePrice: ' ' })).toEqual({ basePriceMinor: null, baseCurrency: null });
+    // Not a price: nothing sent for it, and said before.
+    expect(modelChange(priced, { ...g, basePrice: 'about 4800' })).toEqual({});
+    for (const bad of ['about 4800', '0', '0.00', '10000000.01', '4800.505']) expect(basePriceProblem({ basePrice: bad }), bad).toBe('The base price is an amount in units: 4800, or 4800.50.');
+    for (const ok of ['', '4800', '4 800,5', '1000000']) expect(basePriceProblem({ basePrice: ok }), ok).toBeNull();
+    // The care guide as the server keeps it: lines without trailing spaces, one blank line at most.
+    const typed = '  Wipe it.   \r\n\r\n\r\n\r\nKeep it in its box.  ';
+    expect(careGuideText(typed)).toBe(normalizeCareGuide(typed));
+    expect(modelChange(priced, { ...g, careGuide: typed })).toEqual({});
+    expect(modelChange(priced, { ...g, careGuide: '' })).toEqual({ careGuide: '' });
+    expect([CARE_GUIDE_MAX, BASE_PRICE_MAX_MINOR]).toEqual([SERVER_CARE_GUIDE_MAX, SERVER_BASE_PRICE_MAX]);
   });
 
   it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {

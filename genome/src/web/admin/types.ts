@@ -403,6 +403,13 @@ export interface Model {
   privateMinTier: number;
   /** The gallery of its sheet, in its order (the reference photograph is the cover, apart). */
   gallery: GalleryImage[];
+  /** N2: its base price in minor units with its currency (both or neither): the Shopify product export's price. */
+  basePriceMinor: number | null;
+  baseCurrency: string | null;
+  /** M6: its care guide, shown in MY PIECES with each order of the model; null: its care instructions stand in. */
+  careGuide: string | null;
+  /** N2: its Shopify product id once pasted back (null: not linked), the sizes the export gives it, those linked. */
+  shopify: { productId: string | null; variants: number; linked: number };
   createdAt: Iso;
 }
 
@@ -437,6 +444,35 @@ export interface ModelChange {
   /** THE PRIVATE SALON (P-X08): '' clears the price. */
   priceLabel?: string;
   privateMinTier?: number;
+  /** N2: the base price with its currency, sent together; null for both clears it. */
+  basePriceMinor?: number | null;
+  baseCurrency?: OrderCurrency | null;
+  /** M6: '' clears the care guide. */
+  careGuide?: string;
+}
+
+/** N2: a size of a model as the Shopify product export gives it, and its variant id once pasted back. */
+export interface ShopifyVariant {
+  /** null: one size. */
+  size: string | null;
+  sku: string;
+  /** Its SKU exists (a model never issued nor sold has none yet: it is made when its id is pasted). */
+  known: boolean;
+  variantId: string | null;
+}
+
+/** GET /api/admin/models/:id/shopify: the model's Shopify product, its handle, its sizes and their ids. */
+export interface ShopifyProduct {
+  model: { id: string; name: string; skuPrefix: string };
+  handle: string;
+  productId: string | null;
+  variants: ShopifyVariant[];
+}
+
+/** PUT /api/admin/models/:id/shopify: the ids pasted back (a number, or the address of its page in Shopify's admin). */
+export interface ShopifyLink {
+  productId: string | null;
+  variants: { size: string | null; variantId: string | null }[];
 }
 
 // ── Products, genomes, codes ───────────────────────────────────────────────
@@ -883,6 +919,65 @@ export interface OwnerSheet {
   pieces: OwnedPiece[];
   transfers: { id: string; productId: string; createdAt: Iso; expiresAt: Iso }[];
   scans: { id: string; reference: string; occurredAt: Iso; eventType: string; state: string; productId: string | null; country: string | null }[];
+  /** N4: its orders, the latest first, each with its steps' times and its timing. */
+  orders: ClientOrder[];
+  /** N4: the releases it took part in, the latest first; `count` of them, `secured` the pieces secured in all. */
+  releases: { count: number; secured: number; items: ClientRelease[] };
+  /** N4: its answers to the questions after, the latest first. */
+  answers: ClientAnswer[];
+  /** N4: its I'LL BE THERE, the latest release first. */
+  interest: ClientInterest[];
+  /** N4: the segments it belongs to now. */
+  segments: { id: string; name: string }[];
+  /** N4: Client Services' notes on its orders, entries and requests, the latest first. */
+  notes: ClientNote[];
+}
+
+/** N4: an order on the client sheet: the board's card (without the collector) and the time it reached each step. */
+export interface ClientOrder extends Omit<OrderCard, 'account'> {
+  priceMinor: number | null;
+  currency: string | null;
+  steps: { reservedAt: Iso; paidAt: Iso | null; shippedAt: Iso | null; deliveredAt: Iso | null; cancelledAt: Iso | null; returnedAt: Iso | null };
+}
+
+/** N4: a release taken part in, and the pieces secured there (its after-room's included; 0: took part). */
+export interface ClientRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  title: string;
+  opensAt: Iso;
+  secured: number;
+}
+
+/** N4: an answer to a release's question after: its position (from 1) and its words. */
+export interface ClientAnswer {
+  dropId: string;
+  title: string;
+  question: string;
+  answer: number;
+  answerText: string | null;
+  answeredAt: Iso;
+}
+
+/** N4: an I'LL BE THERE, and what became of it. */
+export interface ClientInterest {
+  dropId: string;
+  title: string;
+  size: string;
+  since: Iso;
+  opensAt: Iso;
+  outcome: 'UPCOMING' | 'CAME' | 'DID_NOT_COME' | 'CANCELLED';
+}
+
+/** N4: a note of Client Services: what it is about, its words, who wrote it. */
+export interface ClientNote {
+  at: Iso;
+  about: 'ORDER' | 'DRAW' | 'SALON' | 'LIVE';
+  /** The order's OR- reference, the release's title, the model's name. */
+  subject: string;
+  orderId: string | null;
+  text: string;
+  by: string | null;
 }
 
 /** POST /api/admin/owners/:id/lock. */

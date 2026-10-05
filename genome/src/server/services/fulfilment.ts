@@ -19,13 +19,15 @@
  *              order's reference OR-…, a LIVE reservation's LR-…, a piece's O26-J-…, or words of the model or the
  *              release). Each card: its channel and release, the collector (the routes mask the email for an AUDITOR),
  *              the model and size, the add-ons, the surprise, what it holds, its time in its step and whether it is late.
+ *   a client   every order of one collector, the latest first, each with its steps' times and its timing: the client
+ *              sheet's (N4, routes/admin/owners.ts).
  *   the CSV    every order the filters keep, the oldest first, with its buyer's details as `buyer` gives them (masked for
  *              an AUDITOR by the route) and never a price hidden: the CSV is Client Services' own (the packing slip is
  *              the document without prices).
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
+import type { BenchItemStatus, JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
 import { ORDER_STATUSES } from '../db/schema.js';
 import { validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
@@ -178,7 +180,7 @@ export interface OrderCard {
   location: { id: string; name: string };
   reservation: OrderReservation | null;
   /** Its open piece to make. */
-  bench: { status: string } | null;
+  bench: { status: BenchItemStatus } | null;
   /** The piece that fulfils it, by its reference. */
   piece: string | null;
   shipment: { carrier: string; trackingNumber: string } | null;
@@ -209,6 +211,13 @@ export interface OrderBoardFilter {
   locationId?: string;
   late?: boolean;
   q?: string;
+}
+
+/** An order of a collector as the client sheet lists it (N4): the board's card and the time it reached each step. */
+export interface ClientOrder extends Omit<OrderCard, 'account'> {
+  priceMinor: number | null;
+  currency: string | null;
+  steps: { reservedAt: Date; paidAt: Date | null; shippedAt: Date | null; deliveredAt: Date | null; cancelledAt: Date | null; returnedAt: Date | null };
 }
 
 /** An order as its page reads it: the order, its collector, its timing, its piece; the routes mask for an AUDITOR. */
@@ -267,7 +276,7 @@ interface BoardRow {
   carrier_name: string | null;
   tracking_url: string | null;
   piece_reference: string | null;
-  bench_status: string | null;
+  bench_status: BenchItemStatus | null;
   registered: boolean;
 }
 
@@ -422,6 +431,25 @@ export class FulfilmentService {
     return { filename: `ORBES-orders-${now.toISOString().slice(0, 10)}.csv`, contentType: CSV_CONTENT_TYPE, body };
   }
 
+  /** Every order of one collector, the latest first (the client sheet, N4). An unknown account has none. */
+  async forAccount(accountId: string): Promise<ClientOrder[]> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) return [];
+    const now = this.clock();
+    const delays = await this.delays();
+    const rows = await this.rows({}, accountId.toLowerCase());
+    const timed = await this.timed(rows, delays, now);
+    timed.sort((a, b) => b.row.reserved_at.getTime() - a.row.reserved_at.getTime() || a.row.id.localeCompare(b.row.id));
+    return timed.map(({ row: r, timing }) => {
+      const { account: _account, ...card } = this.card(r, timing);
+      return {
+        ...card,
+        priceMinor: r.price_minor,
+        currency: r.currency,
+        steps: { reservedAt: r.reserved_at, paidAt: r.paid_at, shippedAt: r.shipped_at, deliveredAt: r.delivered_at, cancelledAt: r.cancelled_at, returnedAt: r.returned_at },
+      };
+    });
+  }
+
   /** One order as its page reads it (404 ORDER_NOT_FOUND). */
   async detail(orderId: string): Promise<OrderDetail> {
     const order = await this.orders.get(orderId);
@@ -469,29 +497,32 @@ export class FulfilmentService {
   /** The cards the filters keep, timed. */
   private async cards(filter: OrderBoardFilter, delays: OrderAlertDelays, now: Date): Promise<OrderCard[]> {
     const timed = await this.timed(await this.rows(filter), delays, now);
-    return timed
-      .filter((t) => !filter.late || t.timing.late)
-      .map(({ row: r, timing }) => ({
-        id: r.id,
-        reference: orderReference(r.id),
-        sourceReference: r.live_entry_id ? liveReference(r.live_entry_id) : null,
-        channel: r.channel,
-        status: r.status,
-        release: r.drop_id && r.release_title ? { id: r.drop_id, title: r.release_title } : null,
-        account: { id: r.account_id, email: r.email },
-        model: { id: r.model_id, name: r.model_name },
-        sizeLabel: r.size_label,
-        skuCode: r.sku_code,
-        addons: r.addons.map((a) => ({ label: a.label })),
-        surprise: r.surprise,
-        engraving: r.engraving_text !== null,
-        location: { id: r.location_id, name: r.location_name },
-        reservation: r.reservation,
-        bench: r.bench_status ? { status: r.bench_status } : null,
-        piece: r.piece_reference,
-        shipment: r.carrier_name && r.tracking_number ? { carrier: r.carrier_name, trackingNumber: r.tracking_number } : null,
-        timing,
-      }));
+    return timed.filter((t) => !filter.late || t.timing.late).map(({ row, timing }) => this.card(row, timing));
+  }
+
+  /** A row as the board's card. */
+  private card(r: BoardRow, timing: OrderTiming): OrderCard {
+    return {
+      id: r.id,
+      reference: orderReference(r.id),
+      sourceReference: r.live_entry_id ? liveReference(r.live_entry_id) : null,
+      channel: r.channel,
+      status: r.status,
+      release: r.drop_id && r.release_title ? { id: r.drop_id, title: r.release_title } : null,
+      account: { id: r.account_id, email: r.email },
+      model: { id: r.model_id, name: r.model_name },
+      sizeLabel: r.size_label,
+      skuCode: r.sku_code,
+      addons: r.addons.map((a) => ({ label: a.label })),
+      surprise: r.surprise,
+      engraving: r.engraving_text !== null,
+      location: { id: r.location_id, name: r.location_name },
+      reservation: r.reservation,
+      bench: r.bench_status ? { status: r.bench_status } : null,
+      piece: r.piece_reference,
+      shipment: r.carrier_name && r.tracking_number ? { carrier: r.carrier_name, trackingNumber: r.tracking_number } : null,
+      timing,
+    };
   }
 
   /** Each row with its timing; the history read only for the PAID orders holding a piece in stock (their readiness). */
@@ -521,8 +552,8 @@ export class FulfilmentService {
     }));
   }
 
-  /** The orders the filters keep (but `late`, which needs their timing), with what the board and the CSV show. */
-  private async rows(filter: OrderBoardFilter): Promise<BoardRow[]> {
+  /** The orders the filters keep (but `late`, which needs their timing), with what the board and the CSV show; one collector's. */
+  private async rows(filter: OrderBoardFilter, accountId?: string): Promise<BoardRow[]> {
     const q = (filter.q ?? '').trim().slice(0, BOARD_SEARCH_MAX);
     let query = this.db
       .selectFrom('orders as o')
@@ -542,6 +573,7 @@ export class FulfilmentService {
         'p.product_id as piece_reference', 'b.status as bench_status',
       ])
       .select(sql<boolean>`EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = o.product_id AND w.account_id = o.account_id)`.as('registered'));
+    if (accountId) query = query.where('o.account_id', '=', accountId);
     if (filter.channel) query = query.where('o.channel', '=', filter.channel);
     if (filter.dropId) query = query.where('o.drop_id', '=', filter.dropId);
     if (filter.locationId) query = query.where('o.location_id', '=', filter.locationId);

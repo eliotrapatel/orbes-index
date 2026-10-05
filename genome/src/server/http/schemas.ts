@@ -35,7 +35,7 @@ import {
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
-import { MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
+import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
@@ -68,6 +68,7 @@ import {
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
+import { SHOPIFY_PERIOD_MAX_DAYS } from '../services/shopify.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
@@ -483,10 +484,20 @@ export const updateModelBody = body({
   specs: z.preprocess((v) => (v === '' ? null : v), text(SPECS_MAX).nullable().optional()),
   priceLabel: z.preprocess((v) => (v === '' ? null : v), text(PRICE_LABEL_MAX).nullable().optional()),
   privateMinTier: z.number().int('Must be a tier: 1, 2 or 3').min(1, 'At least 1 (TITANE)').max(3, 'At most 3 (PALLADIUM)').optional(),
+  // N2: the base price of the Shopify product export, with its currency; null for both clears it.
+  basePriceMinor: z.number().int('Must be a whole number of cents').min(1, 'At least 1 cent').max(BASE_PRICE_MAX_MINOR, `At most ${BASE_PRICE_MAX_MINOR} cents`).nullable().optional(),
+  baseCurrency: z.preprocess((v) => (v === '' ? null : v), z.enum(ORDER_CURRENCIES).nullable().optional()),
+  // M6: the care guide MY PIECES shows with each order of the model.
+  careGuide: z.preprocess((v) => (v === '' ? null : v), text(CARE_GUIDE_MAX).nullable().optional()),
   category: modelIdentity,
   categoryCode: modelIdentity,
   skuPrefix: modelIdentity,
-}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change');
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the model to change')
+  .refine((b) => (b.basePriceMinor === undefined) === (b.baseCurrency === undefined) && (b.basePriceMinor === null) === (b.baseCurrency === null), {
+    message: 'A base price is sent with its currency, or both are cleared (null)',
+    path: ['basePriceMinor'],
+  });
 
 /** DELETE /api/admin/models/:id/gallery/:sha256 (P-R02): a photograph of the model's gallery. */
 export const galleryImageParams = z.object({ id: uuid, sha256: sha256Hex });
@@ -1316,4 +1327,26 @@ export const rotateKeyBody = optionalBody({
 export const revokeKeyBody = body({
   reason: text(500),
   compromisedAt: z.preprocess((v) => (v === '' || v === null ? undefined : v), isoDateTime.optional()),
+});
+
+// ── Shopify readiness (plan LIVE RELEASE+, N2 and N3) ──────────────────────
+
+/** GET /api/admin/shopify/products.csv: the store's currency; the models priced in it. */
+export const shopifyProductsQuery = z.object({ currency: z.enum(ORDER_CURRENCIES) });
+
+/** GET /api/admin/shopify/orders.csv: the orders reserved from one UTC day to another, both included, a year at most. */
+export const shopifyOrdersQuery = z
+  .object({ from: isoDate, to: isoDate })
+  .refine((q) => q.from <= q.to, { message: 'from must not be after to', path: ['to'] })
+  .refine((q) => daySpan(q.from, q.to) <= SHOPIFY_PERIOD_MAX_DAYS, { message: `At most ${SHOPIFY_PERIOD_MAX_DAYS} days`, path: ['to'] });
+
+/** An id pasted from Shopify's admin: the number, or the address of its page (the service reads the number in it). */
+const shopifyPasted = z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(300, 'At most 300 characters').nullable());
+
+/** PUT /api/admin/models/:id/shopify: the product's id and each size's variant id, pasted back; null clears one. */
+export const shopifyLinkBody = body({
+  productId: shopifyPasted,
+  variants: z
+    .array(z.strictObject({ size: z.string().trim().min(1, 'Required').max(100, 'At most 100 characters').nullable(), variantId: shopifyPasted }))
+    .max(200, 'At most 200 sizes'),
 });

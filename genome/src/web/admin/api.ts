@@ -105,6 +105,8 @@ import type {
   Model,
   ModelChange,
   OwnerList,
+  ShopifyLink,
+  ShopifyProduct,
   OwnerLock,
   ShopRequest,
   ShopRequestOutcome,
@@ -496,6 +498,30 @@ export class AdminApi {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
   }
 
+  // ── Shopify readiness (plan LIVE RELEASE+, N2 and N3): files in Shopify's formats, nothing sent to it ──
+
+  /** N2: the product CSV of the models priced in the store's currency. */
+  async shopifyProductsCsv(currency: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/shopify/products.csv', { raw: true, query: { currency } });
+    return toDownload(res, `ORBES-shopify-products-${currency}.csv`);
+  }
+
+  /** N2: a model's Shopify product, its sizes and their ids. */
+  modelShopify(id: string): Promise<ShopifyProduct> {
+    return this.get(`/api/admin/models/${encodeURIComponent(id)}/shopify`);
+  }
+
+  /** N2, OPERATOR: the product's and the variants' ids pasted back from Shopify. */
+  linkModelShopify(id: string, link: ShopifyLink): Promise<ShopifyProduct> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/shopify`, { body: link });
+  }
+
+  /** N3: the order CSV of the orders reserved from one day to another (UTC, both included); emails and buyers masked for an AUDITOR. */
+  async shopifyOrdersCsv(from: string, to: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/shopify/orders.csv', { raw: true, query: { from, to } });
+    return toDownload(res, `ORBES-shopify-orders-${from}-to-${to}.csv`);
+  }
+
   /** P-R06, ADMIN: the model discontinued (inactive, said DISCONTINUED on its pieces' results). */
   discontinueModel(id: string): Promise<Model> {
     return this.post(`/api/admin/models/${encodeURIComponent(id)}/discontinue`, {});
@@ -664,7 +690,7 @@ export class AdminApi {
     return this.get('/api/admin/owners', q);
   }
 
-  /** The owner's sheet: pieces, transfers in progress, latest scans. */
+  /** The owner's sheet: pieces, transfers in progress, latest scans; the client sheet (N4): orders, releases, answers, interest, segments, notes. */
   owner(accountId: string): Promise<OwnerSheet> {
     return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}`);
   }

@@ -54,6 +54,7 @@ import { FulfilmentService } from './services/fulfilment.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { SalonService } from './services/salon.js';
+import { ShopifyExportService } from './services/shopify.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
 import { SaleService } from './services/sale.js';
@@ -132,6 +133,8 @@ export interface AppServices {
   questions: QuestionService;
   /** The best time to open (plan LIVE RELEASE+, choice 10): the sign-ins and scans by hour, country and tier, no account. */
   activity: ActivityService;
+  /** Shopify readiness (plan LIVE RELEASE+, N2 and N3): the product and order exports in Shopify's formats, the ids pasted back. */
+  shopify: ShopifyExportService;
 }
 
 export interface AppContext {
@@ -241,6 +244,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const fulfilment = new FulfilmentService({ db, audit, orders, clock });
     const atelier = new AtelierService({ db, audit, issuance, orders, clock });
     const segments = new SegmentService({ db, audit, clock });
+    const shopify = new ShopifyExportService({ db, audit, publicOrigin: config.publicOrigin, clock });
 
     const services: AppServices = {
       issuance,
@@ -278,6 +282,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       segments,
       questions,
       activity,
+      shopify,
       ...overrides.services,
     };
 

@@ -16,14 +16,25 @@
  *   - Export data: everything held about the account, as a JSON file, for a
  *     request under the right of access.
  * An AUDITOR reads the sheet with the email masked, without the actions.
+ *
+ * The client sheet (plan LIVE RELEASE+, N4) gathers, beside the account, its
+ * tier and its pieces: its orders, each with its steps and their dates (late
+ * ones stand out, as on the Orders board) and linked to its page; the releases
+ * it took part in with the pieces it secured; its answers to the questions
+ * after; its I'LL BE THERE and whether it came; the segments it belongs to
+ * now; and the notes Client Services wrote on its orders, draw entries,
+ * requests of the private salon and LIVE reservations.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
 import { tierStanding } from '../model/club.js';
+import { formatMoney } from '../model/live.js';
+import { CHANNEL_LABELS, LATE_LABELS, sizeText } from '../model/orders.js';
+import { INTEREST_OUTCOME_LABELS, NOTE_ABOUT_LABELS, orderSteps, participationLine, RELEASE_KIND_LABELS } from '../model/owners.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import type { OwnerSheet } from '../types.js';
+import type { ClientRelease, OwnerSheet } from '../types.js';
 import { button, busy, defList, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -114,8 +125,8 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       title: o.email,
       identifier: true,
       lead: can(role, 'readClientEmails')
-        ? 'The client’s account, pieces, transfers in progress and latest verifications.'
-        : 'The client’s account, pieces, transfers in progress and latest verifications. Emails are masked for your role.',
+        ? 'The client’s account and tier, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications.'
+        : 'The client’s account and tier, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications. Emails are masked for your role.',
       actions,
     }),
     slot,
@@ -149,6 +160,12 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       ),
       { id: 'pieces', note: `${formatCount(owned.length)} owned now · ${formatCount(sheet.pieces.length)} ever` },
     ),
+    ordersPanel(sheet),
+    releasesPanel(sheet),
+    answersPanel(sheet),
+    interestPanel(sheet),
+    segmentsPanel(sheet),
+    notesPanel(sheet),
     section(
       'Transfers in progress',
       table(
@@ -164,6 +181,147 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       { id: 'transfers' },
     ),
     scansPanel(sheet),
+  );
+}
+
+/** N4: the collector's orders, the latest first, each with its steps and their dates, linked to its page. */
+function ordersPanel(sheet: OwnerSheet): HTMLElement {
+  const late = sheet.orders.filter((o) => o.timing.late).length;
+  return section(
+    'Orders',
+    table(
+      [
+        { label: 'Order', cell: (o) => h('a', { class: 'idlink', attrs: { href: href('order', { orderId: o.id }) }, data: { testid: 'client-order' } }, o.reference), kind: ['nowrap'] },
+        { label: 'Sold', cell: (o) => h('span', null, CHANNEL_LABELS[o.channel], o.release ? h('span', { class: 'cell-sub' }, o.release.title) : null) },
+        { label: 'Piece', cell: (o) => h('span', null, o.model.name, h('span', { class: 'cell-sub' }, sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuCode !== null }))) },
+        { label: 'Price', cell: (o) => (o.priceMinor === null || o.currency === null ? 'To enter' : formatMoney(o.priceMinor, o.currency)), kind: ['nowrap'] },
+        {
+          label: 'Step',
+          cell: (o) =>
+            h(
+              'span',
+              { class: 'row-marks' },
+              statusMark(humanize(o.status), toneOf('order', o.status)),
+              o.timing.late && o.timing.rule ? statusMark(LATE_LABELS[o.timing.rule], 'alert') : null,
+            ),
+          kind: ['nowrap'],
+        },
+        {
+          label: 'Steps',
+          cell: (o) => h('span', { class: 'client-steps', data: { testid: 'client-order-steps' } }, ...orderSteps(o).map((x) => h('span', { class: 'client-steps__step' }, `${humanize(x.step)} ${formatDate(x.at)}`))),
+          kind: ['wide'],
+        },
+      ],
+      sheet.orders,
+      { empty: 'No order.', onRow: (o) => href('order', { orderId: o.id }), caption: 'Orders' },
+    ),
+    { id: 'orders', note: `${formatCount(sheet.orders.length)} ${sheet.orders.length === 1 ? 'order' : 'orders'} · ${formatCount(late)} late` },
+  );
+}
+
+/** A release's page in the console: a LIVE RELEASE's, or a draw's on the Club page. */
+const releaseHref = (r: Pick<ClientRelease, 'id' | 'kind'>) => (r.kind === 'LIVE' ? href('liveRelease', { dropId: r.id }) : href('drop', { dropId: r.id }));
+
+/** N4: the releases the collector took part in, the latest first, with the pieces it secured in each. */
+function releasesPanel(sheet: OwnerSheet): HTMLElement {
+  return section(
+    'Releases',
+    table(
+      [
+        { label: 'Release', cell: (r) => h('a', { class: 'idlink', attrs: { href: releaseHref(r) } }, r.title) },
+        { label: 'Kind', cell: (r) => RELEASE_KIND_LABELS[r.kind], kind: ['nowrap'] },
+        { label: 'Opened', cell: (r) => formatDate(r.opensAt), kind: ['nowrap'] },
+        { label: 'Part', cell: (r) => statusMark(r.secured > 0 ? 'SECURED A PIECE' : 'TOOK PART', r.secured > 0 ? 'solid' : 'outline'), kind: ['nowrap'] },
+        { label: 'Pieces secured', cell: (r) => formatCount(r.secured), kind: ['num'] },
+      ],
+      sheet.releases.items,
+      { empty: 'No release taken part in.', caption: 'Releases' },
+    ),
+    { id: 'releases', note: participationLine(sheet.releases) },
+  );
+}
+
+/** N4: the collector's answers to the questions after the LIVE RELEASES, the latest first. */
+function answersPanel(sheet: OwnerSheet): HTMLElement {
+  return section(
+    'Answers to the question after',
+    table(
+      [
+        { label: 'Release', cell: (a) => h('a', { class: 'idlink', attrs: { href: href('liveRelease', { dropId: a.dropId }) } }, a.title) },
+        { label: 'Question', cell: (a) => a.question, kind: ['wide'] },
+        { label: 'Answer', cell: (a) => a.answerText ?? `Answer ${a.answer}`, kind: ['nowrap'] },
+        { label: 'Answered', cell: (a) => formatDateTime(a.answeredAt), kind: ['nowrap'] },
+      ],
+      sheet.answers,
+      { empty: 'No answer.', caption: 'Answers to the question after' },
+    ),
+    { id: 'answers' },
+  );
+}
+
+/** N4: the collector's I'LL BE THERE, the latest release first, and whether it came. */
+function interestPanel(sheet: OwnerSheet): HTMLElement {
+  return section(
+    'Interest',
+    table(
+      [
+        { label: 'Release', cell: (i) => h('a', { class: 'idlink', attrs: { href: href('liveRelease', { dropId: i.dropId }) } }, i.title) },
+        { label: 'Size', cell: (i) => i.size, kind: ['nowrap'] },
+        { label: 'Said', cell: (i) => formatDate(i.since), kind: ['nowrap'] },
+        { label: 'Opens', cell: (i) => formatDateTime(i.opensAt), kind: ['nowrap'] },
+        {
+          label: 'Outcome',
+          cell: (i) => statusMark(INTEREST_OUTCOME_LABELS[i.outcome], i.outcome === 'CAME' ? 'solid' : i.outcome === 'UPCOMING' ? 'outline' : 'muted'),
+          kind: ['nowrap'],
+        },
+      ],
+      sheet.interest,
+      { empty: 'No I’LL BE THERE.', caption: 'Interest' },
+    ),
+    { id: 'interest', note: 'I’LL BE THERE, and whether the collector came into the line' },
+  );
+}
+
+/** N4: the segments the collector belongs to now. */
+function segmentsPanel(sheet: OwnerSheet): HTMLElement {
+  return section(
+    'Segments',
+    sheet.segments.length === 0
+      ? h('p', { class: 'soft', data: { testid: 'client-segments' } }, 'In no segment.')
+      : h(
+          'ul',
+          { class: 'client-segments', data: { testid: 'client-segments' } },
+          ...sheet.segments.map((x) => h('li', null, h('a', { class: 'idlink', attrs: { href: href('segment', { segmentId: x.id }) } }, x.name))),
+        ),
+    { id: 'segments', note: 'Read now, as a release’s access rule reads them' },
+  );
+}
+
+/** N4: the notes Client Services wrote on the collector's orders, entries and requests, the latest first. */
+function notesPanel(sheet: OwnerSheet): HTMLElement {
+  return section(
+    'Notes',
+    table(
+      [
+        { label: 'When', cell: (n) => formatDateTime(n.at), kind: ['nowrap'] },
+        {
+          label: 'About',
+          cell: (n) =>
+            h(
+              'span',
+              null,
+              NOTE_ABOUT_LABELS[n.about],
+              h('span', { class: 'cell-sub' }, n.orderId ? h('a', { class: 'idlink', attrs: { href: href('order', { orderId: n.orderId }) } }, n.subject) : n.subject),
+            ),
+          kind: ['nowrap'],
+        },
+        { label: 'Note', cell: (n) => h('span', { class: 'client-note', data: { testid: 'client-note' } }, n.text), kind: ['wide'] },
+        { label: 'By', cell: (n) => n.by ?? '—', kind: ['nowrap'] },
+      ],
+      sheet.notes,
+      { empty: 'No note.', caption: 'Notes' },
+    ),
+    { id: 'notes', note: 'Written by ORBES Client Services on the orders, draw entries, requests of the private salon and LIVE reservations' },
   );
 }
 

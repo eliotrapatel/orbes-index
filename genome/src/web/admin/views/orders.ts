@@ -8,15 +8,21 @@
  * it holds (in stock, being made, the size to enter, its piece) and its time in its step; a late one stands out (M3:
  * the delays of the console's settings) with why. A card opens the order's page (views/order.ts), where its steps are
  * taken. The filters (`?channel=&dropId=&locationId=&late=true&q=`) narrow the board and its CSV.
+ *
+ * SHOPIFY EXPORT (plan LIVE RELEASE+, N3): the priced orders reserved in a period, in Shopify's order format, each
+ * collector by email (how the store will match its customers to the accounts); masked for an AUDITOR. Nothing is sent
+ * to Shopify.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import { boardFilters, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence } from '../model/orders.js';
+import { defaultPeriod, periodProblem, SHOPIFY_PERIOD_MAX_DAYS } from '../model/shopify.js';
 import { href } from '../router.js';
 import { ORDER_CHANNELS, type OrderBoard, type OrderBoardColumn, type OrderCard } from '../types.js';
 import { button, checkbox, field, filterBar, input, linkButton, pageHeader, section, select, statusMark } from '../ui/components.js';
+import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
-import { notifyError } from '../ui/toast.js';
+import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 const LEAD =
@@ -54,13 +60,37 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
     }
   });
 
+  // N3: the orders of a period in Shopify's format (the board's filters do not apply).
+  const shopify = button('Shopify export', { kind: 'ghost', testId: 'orders-shopify-export' });
+  shopify.addEventListener('click', () => {
+    const period = defaultPeriod(now);
+    void openDialog({
+      title: 'Shopify order export',
+      eyebrow: 'Orders',
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        `A file in Shopify’s order format: every order reserved in the period and priced, its piece and its add-ons as line items, its steps as Shopify’s statuses, its buyer, and the collector’s email, by which the store will match its customers to the accounts. At most ${SHOPIFY_PERIOD_MAX_DAYS} days, in UTC. Nothing is sent to Shopify.`,
+      ),
+      fields: [
+        { name: 'from', label: 'First day', kind: 'date', required: true, value: period.from },
+        { name: 'to', label: 'Last day', kind: 'date', required: true, value: period.to },
+      ],
+      validate: (v) => periodProblem(v.from, v.to),
+      confirmLabel: 'Download',
+      submit: async (v) => {
+        saveDownload(await ctx.api.shopifyOrdersCsv(v.from, v.to));
+      },
+    }).then((r) => r && notify('Shopify order export downloaded.'));
+  });
+
   const totals = board.columns.reduce((n, c) => n + c.total, 0);
   const lateTotal = board.columns.reduce((n, c) => n + c.late, 0);
 
   return h(
     'div',
     { class: 'view view--orders' },
-    pageHeader({ eyebrow: 'Clients', title: 'Orders', lead: LEAD, actions: [linkButton('Settings', href('settings'), 'ghost'), csv] }),
+    pageHeader({ eyebrow: 'Clients', title: 'Orders', lead: LEAD, actions: [linkButton('Settings', href('settings'), 'ghost'), shopify, csv] }),
     filterBar(field('Channel', channel), field('Release', release), field('Location', location), field('Search', search), h('div', { class: 'cfield cfield--checks' }, late)),
     h(
       'p',

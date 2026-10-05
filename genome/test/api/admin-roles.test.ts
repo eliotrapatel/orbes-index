@@ -13,7 +13,8 @@
  * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
  * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR;
  * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR; the
- * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR);
+ * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
+ * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -207,6 +208,11 @@ const PROBES: Probe[] = [
   { group: 'segments', method: 'PATCH', url: `/api/admin/segments/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'segments', method: 'DELETE', url: `/api/admin/segments/${UUID}`, min: 'OPERATOR' },
   { group: 'segments', method: 'GET', url: `/api/admin/segments/${UUID}/members.csv`, min: 'AUDITOR' },
+  // Step S9: the Shopify exports read by an AUDITOR (the order CSV masked), the ids pasted back by an OPERATOR.
+  { group: 'shopify', method: 'GET', url: '/api/admin/shopify/products.csv?currency=JPY', min: 'AUDITOR' },
+  { group: 'shopify', method: 'GET', url: `/api/admin/models/${UUID}/shopify`, min: 'AUDITOR' },
+  { group: 'shopify', method: 'PUT', url: `/api/admin/models/${UUID}/shopify`, body: INVALID, min: 'OPERATOR' },
+  { group: 'shopify', method: 'GET', url: '/api/admin/shopify/orders.csv?from=2026-11-30&to=2026-11-01', min: 'AUDITOR' },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -315,6 +321,7 @@ describe('admin role enforcement', () => {
       'orders',
       'invoices',
       'segments',
+      'shopify',
       'logistics',
       'atelier',
     ]) {

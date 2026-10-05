@@ -4581,3 +4581,43 @@ a.bar__label:hover {
     border: 1px solid var(--hairline);
   }
 }
+
+/* ── The client sheet (plan LIVE RELEASE+, N4) ───────────────────────────── */
+
+/* An order's step and, when late, why: side by side, wrapping under each other in a narrow column. */
+.row-marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The steps an order reached, each with its date, in the reading face. */
+.client-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: var(--fs-micro);
+  color: var(--ink-soft);
+}
+
+.client-steps__step {
+  white-space: nowrap;
+}
+
+/* The segments the collector belongs to: one link per line. */
+.client-segments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+/* A note keeps its line breaks and wraps within its column. */
+.client-note {
+  display: block;
+  min-width: 220px;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+}

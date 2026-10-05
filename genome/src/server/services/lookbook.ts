@@ -84,7 +84,7 @@ export function normalizeSlug(v: unknown): string | null {
 }
 
 /** Line breaks as \n, the text trimmed; '' and null clear it. */
-function plainText(v: unknown, label: string, max: number): string | null {
+export function plainText(v: unknown, label: string, max: number): string | null {
   if (v === null || v === undefined) return null;
   if (typeof v !== 'string') throw validationError(`${label} must be text.`);
   const s = v.replace(/\r\n?/g, '\n').trim();

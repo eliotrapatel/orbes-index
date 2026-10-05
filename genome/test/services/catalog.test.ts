@@ -175,6 +175,44 @@ describe('CatalogService (collections and models)', () => {
       await expect(t.db.updateTable('models').set({ sku_prefix: 'NEW-RG' }).where('id', '=', model.id).execute()).rejects.toSatisfy(isGuardViolation);
     });
 
+    it('sets a model\'s base price with its currency and its care guide (plan LIVE RELEASE+, N2 and M6), audited, the guide as its fingerprint', async () => {
+      clock.advance(60_000);
+      const fresh = await catalog.getModel(model.id);
+      expect([fresh.basePriceMinor, fresh.baseCurrency, fresh.careGuide]).toEqual([null, null, null]);
+      expect(fresh.shopify).toEqual({ productId: null, variants: 1, linked: 0 });
+      const guide = 'Wipe it with a soft cloth.   \r\n\r\n\r\n\r\nKeep it in its box.';
+      const updated = await catalog.updateModel(model.id, { basePriceMinor: 480_050, baseCurrency: 'EUR', careGuide: guide }, admin);
+      expect([updated.basePriceMinor, updated.baseCurrency, updated.careGuide]).toEqual([480_050, 'EUR', 'Wipe it with a soft cloth.\n\nKeep it in its box.']);
+      const [entry] = (await audit.list({ action: 'model.update' })).items;
+      expect(entry.details).toEqual({
+        before: { basePriceMinor: null, baseCurrency: null, careGuide: null },
+        after: { basePriceMinor: 480_050, baseCurrency: 'EUR', careGuide: { length: 'Wipe it with a soft cloth.\n\nKeep it in its box.'.length, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) } },
+        issuedPieces: 2,
+      });
+      expect(JSON.stringify(entry.details)).not.toContain('Keep it');
+      // The currency alone changes; the same again writes nothing; null clears both.
+      expect((await catalog.updateModel(model.id, { basePriceMinor: 480_050, baseCurrency: 'CHF' }, admin)).baseCurrency).toBe('CHF');
+      const audited = (await audit.list({ action: 'model.update' })).items.length;
+      await catalog.updateModel(model.id, { basePriceMinor: 480_050, baseCurrency: 'CHF', careGuide: 'Wipe it with a soft cloth.\n\nKeep it in its box.' }, admin);
+      expect((await audit.list({ action: 'model.update' })).items).toHaveLength(audited);
+      const cleared = await catalog.updateModel(model.id, { basePriceMinor: null, baseCurrency: null, careGuide: '' }, admin);
+      expect([cleared.basePriceMinor, cleared.baseCurrency, cleared.careGuide]).toEqual([null, null, null]);
+      for (const bad of [
+        { basePriceMinor: 480_000 },
+        { baseCurrency: 'EUR' },
+        { basePriceMinor: 480_000, baseCurrency: null },
+        { basePriceMinor: 0, baseCurrency: 'EUR' },
+        { basePriceMinor: 12.5, baseCurrency: 'EUR' },
+        { basePriceMinor: 100_000_001, baseCurrency: 'EUR' },
+        { basePriceMinor: 480_000, baseCurrency: 'JPY' },
+        { careGuide: 'x'.repeat(8001) },
+        { careGuide: 'bell\u0007' },
+      ]) {
+        const e = await domainError(catalog.updateModel(model.id, bad as unknown as UpdateModelInput, admin));
+        expect([e.httpStatus, e.code], JSON.stringify(bad)).toEqual([400, 'VALIDATION_FAILED']);
+      }
+    });
+
     it('discontinues a model (P-R06): inactive in the same transaction, dated, audited; reinstated, active again; never active while discontinued', async () => {
       clock.advance(60_000);
       const before = await catalog.getModel(model.id);

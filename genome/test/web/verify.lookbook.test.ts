@@ -320,6 +320,10 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     priceLabel: null,
     privateMinTier: 1,
     gallery: [],
+    basePriceMinor: null,
+    baseCurrency: null,
+    careGuide: null,
+    shopify: { productId: null, variants: 1, linked: 0 },
     createdAt: '2026-10-01T08:00:00.000Z',
     ...extra,
   });
