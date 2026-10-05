@@ -49,7 +49,7 @@ import { galleryMoved, galleryWithAlt } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model, type Segment } from '../types.js';
+import { CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model, type SegmentName } from '../types.js';
 import { barList, button, defList, emptyState, field, filterBar, linkButton, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
@@ -61,7 +61,7 @@ const stateOf = (p: Pick<CirclePost, 'published'>) => (p.published ? 'PUBLISHED'
 const stateMark = (p: Pick<CirclePost, 'published'>) => statusMark(p.published ? 'Published' : 'Not published', toneOf('circle', stateOf(p)));
 
 /** The fields of a post's dialog of `kind`: its words and tiers, the fields of its kind, its links. */
-export function circleFields(kind: CirclePostKind, values: Record<string, string>, drops: readonly Drop[], models: readonly Model[], segments: readonly Segment[]): DialogField[] {
+export function circleFields(kind: CirclePostKind, values: Record<string, string>, drops: readonly Drop[], models: readonly Model[], segments: readonly SegmentName[]): DialogField[] {
   const out: DialogField[] = [
     { name: 'title', label: 'Title', required: true, maxlength: CIRCLE_LIMITS.title, value: values.title, hint: 'As the circle names it on /verify.' },
     {
@@ -119,7 +119,7 @@ const KIND_LEADS: Readonly<Record<CirclePostKind, string>> = Object.freeze({
 
 /** The Circle tab of the Club page: every post, and the three ways to write one. */
 export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
-  const [list, drops, models, segments] = await Promise.all([ctx.api.circlePosts(pageParam(ctx), 50), ctx.api.drops(1, 50), ctx.api.models(), ctx.api.segments()]);
+  const [list, drops, models, segments] = await Promise.all([ctx.api.circlePosts(pageParam(ctx), 50), ctx.api.drops(1, 50), ctx.api.models(), ctx.api.segmentNames()]);
   const canManage = can(ctx.session.admin.role, 'manageCircle');
 
   let created: string | null = null;
@@ -199,7 +199,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const [drops, models, segments, answers] = await Promise.all([
     ctx.api.drops(1, 50),
     ctx.api.models(),
-    ctx.api.segments(),
+    ctx.api.segmentNames(),
     p.kind === 'INVITATION' ? ctx.api.circleAnswers(id, { ...(answer ? { answer } : {}), page: pageParam(ctx), pageSize: 50 }) : Promise.resolve(null),
   ]);
   const role = ctx.session.admin.role;

@@ -197,6 +197,9 @@ export interface Segment {
   updatedAt: Iso;
 }
 
+/** A segment as a release's access rule or a post's audience chooses it (GET /api/admin/segments/names). */
+export type SegmentName = Pick<Segment, 'id' | 'name'>;
+
 /** What the builder names (GET /api/admin/segments/options). */
 export interface SegmentOptions {
   releases: { id: string; title: string; mode: DropMode; opensAt: Iso; answers: string[] | null }[];

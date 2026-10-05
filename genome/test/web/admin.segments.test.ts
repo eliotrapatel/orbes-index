@@ -157,6 +157,8 @@ describe('AdminApi: the segments', () => {
     const tree: SegmentGroup = { match: 'ALL', rules: [{ kind: 'SECURED', min: 1 }] };
     answers.push(json({ items: [{ id: ID }] }));
     expect((await api.segments()).map((s: Pick<Segment, 'id'>) => s.id)).toEqual([ID]);
+    answers.push(json({ items: [{ id: ID, name: 'Buyers' }] }));
+    expect(await api.segmentNames()).toEqual([{ id: ID, name: 'Buyers' }]);
     await api.segment(ID);
     await api.segmentOptions();
     await api.segmentCount(tree);
@@ -168,6 +170,7 @@ describe('AdminApi: the segments', () => {
     expect((await api.segmentCsv(ID)).filename).toBe('orbes-segment-buyers.csv');
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
       'GET /api/admin/segments',
+      'GET /api/admin/segments/names',
       `GET /api/admin/segments/${ID}`,
       'GET /api/admin/segments/options',
       'POST /api/admin/segments/count',
@@ -177,9 +180,9 @@ describe('AdminApi: the segments', () => {
       `GET /api/admin/segments/${ID}/members.csv`,
     ]);
     const bodies = calls.map((c) => (typeof c.init.body === 'string' ? JSON.parse(c.init.body) : c.init.body));
-    expect(bodies[3]).toEqual({ criteria: tree });
-    expect(bodies[4]).toEqual({ name: 'Buyers', criteria: tree });
-    expect(bodies[5]).toEqual({ name: 'Collectors' });
+    expect(bodies[4]).toEqual({ criteria: tree });
+    expect(bodies[5]).toEqual({ name: 'Buyers', criteria: tree });
+    expect(bodies[6]).toEqual({ name: 'Collectors' });
     // The live count is a background read: a 401 there leaves the session to the admin's next action.
     answers.push(json({ error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }, 401));
     await expect(api.segmentCount(tree)).rejects.toMatchObject({ status: 401 });

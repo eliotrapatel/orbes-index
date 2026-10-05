@@ -721,6 +721,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/invoices.csv` | AUDITOR | — | admin | 16.25 |
 | GET | `/api/admin/invoices/:id/pdf` | AUDITOR | — | admin | 16.25 |
 | GET | `/api/admin/segments` | AUDITOR | — | admin | 16.26 |
+| GET | `/api/admin/segments/names` | AUDITOR | — | admin | 16.26 |
 | GET | `/api/admin/segments/options` | AUDITOR | — | admin | 16.26 |
 | POST | `/api/admin/segments/count` | OPERATOR | yes | admin | 16.26 |
 | POST | `/api/admin/segments` | OPERATOR | yes | admin | 16.26 |
@@ -3680,6 +3681,7 @@ Lists hold 1 to 50 items, written sorted and once. The releases, models and coll
 | Method | Path | Role | Purpose |
 |---|---|---|---|
 | GET | `/api/admin/segments` | AUDITOR | `{ "items": [ … ] }`, every segment by name: `{ id, name, criteria, count, usedBy: { releases: [{ id, title }], posts: [{ id, title }] }, createdAt, createdBy, updatedAt }`, `count` its members now |
+| GET | `/api/admin/segments/names` | AUDITOR | `{ "items": [{ id, name }] }`, every segment by name, no count read: the choices of a release's access rule and a post's audience |
 | GET | `/api/admin/segments/options` | AUDITOR | What the builder names: `releases` (published, not cancelled, never an after-room: `{ id, title, mode, opensAt, answers }`, `answers` a LIVE RELEASE's question's, else `null`), `models`, `collections`, the `sizes` and `countries` known |
 | POST | `/api/admin/segments/count` | OPERATOR | `{ "criteria" }` → `{ "count" }`: the members criteria being built would have now (the builder's live count) |
 | POST | `/api/admin/segments` | OPERATOR | `{ "name" (1–60, one line, unique whatever the case), "criteria" }` → **201**, the segment. Audited `segment.create` (name, criteria) |

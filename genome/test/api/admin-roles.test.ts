@@ -192,6 +192,7 @@ const PROBES: Probe[] = [
   { group: 'invoices', method: 'GET', url: `/api/admin/invoices/${UUID}/pdf`, min: 'AUDITOR' },
   // Step S6: the segments (choice 27).
   { group: 'segments', method: 'GET', url: '/api/admin/segments', min: 'AUDITOR' },
+  { group: 'segments', method: 'GET', url: '/api/admin/segments/names', min: 'AUDITOR' },
   { group: 'segments', method: 'GET', url: '/api/admin/segments/options', min: 'AUDITOR' },
   { group: 'segments', method: 'POST', url: '/api/admin/segments/count', body: INVALID, min: 'OPERATOR' },
   { group: 'segments', method: 'POST', url: '/api/admin/segments', body: INVALID, min: 'OPERATOR' },

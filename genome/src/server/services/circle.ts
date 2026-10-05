@@ -820,9 +820,12 @@ export class CircleService {
     if (modelId && !(await tx.selectFrom('models').select('id').where('id', '=', modelId).executeTakeFirst())) throw notFound('Model', 'MODEL_NOT_FOUND');
   }
 
-  /** A segment a post names exists (404 SEGMENT_NOT_FOUND). */
+  /**
+   * A segment a post names exists (404 SEGMENT_NOT_FOUND), read FOR KEY SHARE: a deletion under way waits for this
+   * transaction and then finds it in use (409 SEGMENT_IN_USE), or this one waits for the deletion and finds it gone.
+   */
   private async checkSegment(tx: Db, segmentId: string | null): Promise<void> {
-    if (segmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', segmentId).executeTakeFirst())) throw segmentNotFound();
+    if (segmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', segmentId).forKeyShare().executeTakeFirst())) throw segmentNotFound();
   }
 
   /** Whether a post's segment, when it names one, has the account among its members now. */

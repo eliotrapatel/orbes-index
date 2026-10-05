@@ -996,8 +996,8 @@ export class LiveConsoleService {
    * Publish a DRAFT: announced at `announce_at` (at once when NULL), its stages each at its time. Refused once published
    * or cancelled, when the room would already be open, when a stage is no longer after the announcement, and for a model
    * no longer offered. With `circlePost`, a post of the owners' circle linking the release (LIVE_CIRCLE_TITLE, its times
-   * in Paris, its quantity and price, its rule), for its tier (TITANE at least), shown from the announcement. Audited
-   * `drop.live.publish` (and `circle.post.create`).
+   * in Paris, its quantity and price, its rule), for its tier (TITANE at least; every owner when OR opens it beyond the
+   * tier), shown from the announcement. Audited `drop.live.publish` (and `circle.post.create`).
    */
   async publish(dropId: string, opts: { circlePost?: boolean }, actor: Actor): Promise<AdminLiveRelease> {
     const admin = assertStaff(actor, 'publish a release');
@@ -1200,9 +1200,13 @@ export class LiveConsoleService {
     if (!model.active) throw modelInactive();
   }
 
-  /** The models, the collection and the segment a rule names exist (404 otherwise). */
+  /**
+   * The models, the collection and the segment a rule names exist (404 otherwise). The segment is read FOR KEY SHARE: a
+   * deletion under way waits for this transaction and then finds it in use (409 SEGMENT_IN_USE), or this one waits for
+   * the deletion and finds it gone (404), never a foreign key refused.
+   */
   private async checkAccess(tx: Db, s: Settings): Promise<void> {
-    if (s.accessSegmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', s.accessSegmentId).executeTakeFirst())) {
+    if (s.accessSegmentId && !(await tx.selectFrom('segments').select('id').where('id', '=', s.accessSegmentId).forKeyShare().executeTakeFirst())) {
       throw notFound('Segment', 'SEGMENT_NOT_FOUND');
     }
     if (s.accessModelIds.length > 0) {
@@ -1449,7 +1453,8 @@ export class LiveConsoleService {
 
   /**
    * The release's post of the circle, as the publication writes it: shown from the announcement (now when it is
-   * already due), for the release's tier (TITANE at least: the circle is the owners'), its words from the times,
+   * already due), for the release's tier (TITANE at least: the circle is the owners'), or for every owner when the rules
+   * combine by OR and the tier is not the only one (the tier then no longer limits who may enter), its words from the times,
    * quantity line, price and rule (a model of the rule that is the release's own says « this model », its collection
    * « this model’s collection »: the post never names the piece).
    */
@@ -1464,7 +1469,9 @@ export class LiveConsoleService {
       `${d.quantity_line ?? defaultQuantityLine(d.quantity)} · ${liveMoney(d.price_minor ?? 0, d.currency ?? 'EUR')}. For ${liveRuleText(rule)}.`,
     ].join('\n\n');
     const announced = announcedAt(d) ?? now;
-    return { body, minTier: Math.max(1, d.live_min_tier ?? 0), at: announced.getTime() > now.getTime() ? announced : now };
+    const widened = d.access_combine === 'OR' && (rule.models.length > 0 || rule.collection !== null || !!rule.minParticipations || rule.segment);
+    const minTier = widened ? 1 : Math.max(1, d.live_min_tier ?? 0);
+    return { body, minTier, at: announced.getTime() > now.getTime() ? announced : now };
   }
 
   /** The posts the publication scheduled (linking the release, not shown yet), kept in step with its new settings. */

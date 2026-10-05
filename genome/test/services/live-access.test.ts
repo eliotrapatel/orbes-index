@@ -286,5 +286,30 @@ describe('a release’s rules, read at each step', () => {
       expect(post.body).toContain('For selected collectors who have taken part in 2 releases.');
       expect(post.body).not.toContain('Secret circle');
     });
+
+    it('writes the release’s post of the circle for every owner when OR opens it beyond the tier, and rewrites a scheduled one', async () => {
+      // OR with a rule beside the tier: a TITANE owner who has taken part may enter, so reads the post.
+      const open = await f.liveConsole.create({ ...base(), minTier: 3, minParticipations: 2, accessCombine: 'OR' }, f.admin);
+      await f.liveConsole.publish(open.id, { circlePost: true }, f.admin);
+      const opened = await t.db.selectFrom('circle_posts').select(['body', 'min_tier']).where('drop_id', '=', open.id).executeTakeFirstOrThrow();
+      expect(opened.body).toContain('For owners from PALLADIUM or collectors who have taken part in 2 releases.');
+      expect(opened.min_tier).toBe(1);
+      // OR with the tier alone limits as AND does.
+      const alone = await f.liveConsole.create({ ...base(), minTier: 3, accessCombine: 'OR' }, f.admin);
+      await f.liveConsole.publish(alone.id, { circlePost: true }, f.admin);
+      expect((await t.db.selectFrom('circle_posts').select('min_tier').where('drop_id', '=', alone.id).executeTakeFirstOrThrow()).min_tier).toBe(3);
+      // Announced later: the scheduled post follows the rules changed from AND to OR, and back.
+      const later = await f.liveConsole.create({ ...base(), announceAt: new Date(f.clock.now().getTime() + HOUR), minTier: 3, minParticipations: 2 }, f.admin);
+      await f.liveConsole.publish(later.id, { circlePost: true }, f.admin);
+      const scheduled = await t.db.selectFrom('circle_posts').select(['id', 'min_tier']).where('drop_id', '=', later.id).executeTakeFirstOrThrow();
+      expect(scheduled.min_tier).toBe(3);
+      const minTier = async () => (await t.db.selectFrom('circle_posts').select('min_tier').where('id', '=', scheduled.id).executeTakeFirstOrThrow()).min_tier;
+      await f.liveConsole.update(later.id, { accessCombine: 'OR' }, f.admin);
+      expect(await minTier()).toBe(1);
+      const rewrite = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'circle.post.update').where('target_id', '=', scheduled.id).executeTakeFirstOrThrow();
+      expect(rewrite.details).toMatchObject({ before: { minTier: 3 }, after: { minTier: 1 }, by: 'drop.live.update' });
+      await f.liveConsole.update(later.id, { accessCombine: 'AND' }, f.admin);
+      expect(await minTier()).toBe(3);
+    });
   });
 });

@@ -157,7 +157,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
-  const [r, models, collections, segments] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segments()]);
+  const [r, models, collections, segments] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segmentNames()]);
   const published = hasBoard(r.phase);
   const [boardRead, entries, intelligence] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),

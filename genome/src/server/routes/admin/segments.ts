@@ -3,6 +3,8 @@
  * services/segments.ts).
  *
  *   GET    /api/admin/segments                  AUDITOR   every segment, its members now and what uses it
+ *   GET    /api/admin/segments/names            AUDITOR   every segment's id and name, by name (a release's access rule
+ *                                                         and a post's audience choose among them), no count read
  *   GET    /api/admin/segments/options          AUDITOR   what the builder names: releases, models, collections, sizes,
  *                                                         countries
  *   POST   /api/admin/segments/count            OPERATOR  the members criteria being built would have now (live count)
@@ -24,6 +26,8 @@ export const adminSegmentRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   const { segments } = ctx.services;
 
   app.get('/api/admin/segments', async () => ({ items: await segments.list() }));
+
+  app.get('/api/admin/segments/names', async () => ({ items: await segments.names() }));
 
   app.get('/api/admin/segments/options', async () => segments.options());
 

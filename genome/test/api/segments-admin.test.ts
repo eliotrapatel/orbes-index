@@ -3,7 +3,8 @@
  * with real sessions:
  *
  *  - the console's Segments routes: the builder's options, the live count (OPERATOR), a segment created (201), changed,
- *    read with its members now and what uses it, refused when malformed (400) or named twice (409), deleted only when
+ *    read with its members now and what uses it (and by its id and name alone, the choices of a release and a post),
+ *    refused when malformed (400) or named twice (409), deleted only when
  *    nothing uses it (409 SEGMENT_IN_USE, then 204); its members' CSV, an attachment no cache keeps, the emails in clear
  *    for an OPERATOR and masked for an AUDITOR;
  *  - a LIVE RELEASE's settings: the releases taken part in, the segment, AND or OR, the surprise; then its public page
@@ -76,6 +77,8 @@ describe('segments and the access rules: the console’s and the public routes',
     await op.patch(`/api/admin/segments/${s.id}`, { criteria: SIZE_58 });
     const list = safeJson(await auditor.get('/api/admin/segments')) as Json;
     expect(list.items.map((x: Json) => [x.name, x.count])).toEqual([['Size 58', 1]]);
+    // The choices of a release's access rule and a post's audience: the id and the name, no count read.
+    expect(safeJson(await auditor.get('/api/admin/segments/names'))).toEqual({ items: [{ id: s.id, name: 'Size 58' }] });
     const missing = await auditor.get('/api/admin/segments/00000000-0000-4000-8000-000000000000');
     expect([missing.statusCode, errorOf(missing).code]).toEqual([404, 'SEGMENT_NOT_FOUND']);
   });

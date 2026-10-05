@@ -354,6 +354,12 @@ export interface AdminSegment {
   updatedAt: Date;
 }
 
+/** A segment as a choice names it (a release's access rule, a post's audience): its id and name, never its members. */
+export interface SegmentName {
+  id: string;
+  name: string;
+}
+
 /** What the builder names: the releases (their question after for a LIVE one), models, collections, sizes and countries known. */
 export interface SegmentOptions {
   releases: { id: string; title: string; mode: 'DRAW' | 'LIVE'; opensAt: Date; answers: string[] | null }[];
@@ -413,6 +419,11 @@ export class SegmentService {
   async list(): Promise<AdminSegment[]> {
     const rows = await this.db.selectFrom('segments').selectAll().orderBy(sql`lower(name)`).orderBy('id').execute();
     return Promise.all(rows.map((r) => this.view(this.db, r)));
+  }
+
+  /** Every segment's id and name, by name: the choices a release's access rule and a post's audience offer, no count read. */
+  async names(): Promise<SegmentName[]> {
+    return this.db.selectFrom('segments').select(['id', 'name']).orderBy(sql`lower(name)`).orderBy('id').execute();
   }
 
   /** One segment (404 SEGMENT_NOT_FOUND). */

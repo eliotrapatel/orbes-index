@@ -128,6 +128,7 @@ import type {
   WarrantyRecord,
   Segment,
   SegmentGroup,
+  SegmentName,
   SegmentOptions,
 } from './types.js';
 
@@ -882,6 +883,11 @@ export class AdminApi {
   /** Every segment, by name, with its members now and what uses it. */
   async segments(): Promise<Segment[]> {
     return (await this.get<{ items: Segment[] }>('/api/admin/segments')).items;
+  }
+
+  /** Every segment's id and name, by name: the choices of a release's access rule and a post's audience (no count read). */
+  async segmentNames(): Promise<SegmentName[]> {
+    return (await this.get<{ items: SegmentName[] }>('/api/admin/segments/names')).items;
   }
 
   segment(id: string): Promise<Segment> {
