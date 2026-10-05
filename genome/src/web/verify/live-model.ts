@@ -15,6 +15,7 @@
  *
  * Nothing the server did not send: a picture is taken from this origin's media route only.
  */
+import { isLookbookSlug } from '../shared/lookbook.js';
 import { LIVE, RELEASES } from './copy.js';
 import { isReleaseId, releasePath, tierLabel, type EntryModel, type MyEntryModel } from './releases-model.js';
 import type {
@@ -475,6 +476,8 @@ export interface LiveSheetModel {
   roomOpens: string;
   rule: string;
   picture: LivePicture | null;
+  /** SEE THE MODEL: its sheet's `<slug>` in the lookbook, from the photograph's stage and when the sheet is public; else null. */
+  lookbook: string | null;
   calendarHref: string;
   description: string | null;
 }
@@ -494,6 +497,7 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     roomOpens: LIVE.roomOpens(s.roomOpensMinutes),
     rule: LIVE.rule(s.tierPriority),
     picture: pictureOf(s),
+    lookbook: isLookbookSlug(s.lookbook) ? s.lookbook : null,
     calendarHref: `/api/v1/live/${encodeURIComponent(s.id)}/calendar.ics`,
     description: s.description && s.description.trim() ? s.description.trim() : null,
   };

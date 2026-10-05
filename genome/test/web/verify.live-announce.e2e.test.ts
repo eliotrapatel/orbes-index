@@ -7,7 +7,8 @@
  *    then; N COLLECTORS WILL BE THERE; a release leaves the list at its end, and within a minute when sold out before it.
  *  - The release's page announced: THE REVEALS; I'LL BE THERE with a size, its public count following, another size
  *    changing it, WITHDRAW; read again, the size said; signed out, the sign-in under it; outside the rule, the rule and
- *    why.
+ *    why. SEE THE MODEL at the photograph's stage and never before, then in the room until T0; it opens the model's
+ *    sheet in the lookbook.
  *  - The banner on /verify and MY PIECES, an ink strip: LIVE RELEASE · OPENS IN hh:mm:ss, the name once revealed, THE
  *    ROOM IS OPEN, LIVE NOW, hidden at the end; it opens the release's page.
  *  - The boutique board by its secret link only (landscape): the countdown, the door, the pieces left overall, live; the
@@ -31,7 +32,7 @@ import { BANNER_REFRESH_MS } from '../../src/web/verify/views/live-banner.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
-import { focusRingContrast, keepsVault } from '../support/vault-checks.js';
+import { focusRingContrast, keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
@@ -326,6 +327,71 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(await interestOf(r.id, outsider.id)).toBeNull();
     expect(out.problems).toEqual([]);
     for (const w of [page, anon.page, out.page]) await w.context().close();
+  }, 90_000);
+
+  it('SEE THE MODEL at the photograph’s stage and never before, then in the room until T0: it opens the model’s sheet in the lookbook', async () => {
+    await clear();
+    const t = Date.now();
+    // A model of its own, photographed and PUBLIC in the lookbook at /verify/lookbook/halo.
+    const halo = await createModel(srv.ctx.db, 'HALO');
+    await srv.ctx.services.media.setModelImage(halo, { mime: 'image/jpeg', bytes: jpegPhoto(520, 520) }, SYSTEM_ACTOR);
+    await srv.ctx.services.catalog.updateModel(halo, { slug: 'halo', lookbook: 'PUBLIC' }, SYSTEM_ACTOR);
+    const sheetPath = '/verify/lookbook/halo';
+    // Announced, its photograph at t + 6 s, its room open at t + 12 s; another, its room open now, T0 at t + 30 s.
+    const [photoAt, roomAt, t0] = [t + 6 * SECOND, t + 12 * SECOND, t + 30 * SECOND];
+    const r = await release({ modelId: halo, opensAt: new Date(roomAt + 60 * SECOND), roomOpensMinutes: 1 });
+    await srv.ctx.db.updateTable('drops').set({ title: 'HALO — LIVE', name_at: new Date(t - SECOND), photo_at: new Date(photoAt) }).where('id', '=', r.id).execute();
+    const opening = await release({ modelId: halo, opensAt: new Date(t0), roomOpensMinutes: 1 });
+    const me = await account(1);
+    const { page, problems } = await phone(me.token);
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await visible(page.locator('.live__there'));
+    await textOf(page.locator('.live__title'), 'HALO');
+    await textOf(page.locator('.live__reveals'), /^THE REVEALS THE PHOTOGRAPH [A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
+    // Before the photograph's stage: neither the link nor the sheet's address, on screen or in the page.
+    await holdsUntil(photoAt, async () => {
+      expect(await page.locator('.live__see-model').count()).toBe(0);
+      expect(await page.content()).not.toContain(sheetPath);
+    });
+    const see = page.locator('.live__announced').getByRole('link', { name: 'SEE THE MODEL' });
+    await visible(see);
+    expect(Date.now()).toBeGreaterThanOrEqual(photoAt);
+    expect(await see.getAttribute('href')).toBe(sheetPath);
+    await visible(page.locator('.live__plate--announce .live__img--photo'));
+    expect(await page.locator('.live__reveals').count()).toBe(0);
+    // A text link of the vault, in the display face, under the price; the screen's contrast, figures and floors kept.
+    expect(await see.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    expect(await see.evaluate((el) => el.previousElementSibling?.classList.contains('live__price'))).toBe(true);
+    const checks = await screenChecks(page);
+    expect(checks.contrast).toEqual([]);
+    expect(checks.figures).toEqual([]);
+    const floors = await tapZoneFloors(page);
+    expect(floors.problems).toEqual([]);
+    expect(floors.checked).toEqual(expect.arrayContaining(['SEE THE MODEL', 'ADD TO CALENDAR']));
+    await page.screenshot({ path: join(OUT_DIR, 'verify-live-see-model.png'), fullPage: true });
+
+    // The room open: SEE THE MODEL under the model's line, over the closed door; it opens the sheet.
+    const inRoom = page.locator('.live__room').getByRole('link', { name: 'SEE THE MODEL' });
+    await visible(inRoom, 30_000);
+    expect(Date.now()).toBeGreaterThanOrEqual(roomAt - SECOND);
+    expect(await inRoom.evaluate((el) => el.previousElementSibling?.classList.contains('live__offer'))).toBe(true);
+    expect((await tapZoneFloors(page)).checked).toEqual(expect.arrayContaining(['SEE THE MODEL']));
+    await inRoom.click();
+    await textOf(page.locator('h1'), 'HALO');
+    expect(new URL(page.url()).pathname).toBe(sheetPath);
+    expect(problems).toEqual([]);
+
+    // At T0 the room is the piece's alone: the link gone as the door opens.
+    const other = await phone(me.token);
+    await other.page.goto(`${srv.origin}/verify/releases/${opening.id}`);
+    const roomLink = other.page.locator('.live__room .live__see-model');
+    await visible(roomLink);
+    await holdsUntil(t0, async () => expect(await roomLink.isVisible()).toBe(true));
+    await expect.poll(() => roomLink.isVisible(), POLL).toBe(false);
+    expect(Date.now()).toBeGreaterThanOrEqual(t0 - SECOND);
+    expect(await other.page.locator('.live-door').getAttribute('class')).toMatch(/is-aligned/);
+    expect(other.problems).toEqual([]);
+    for (const w of [page, other.page]) await w.context().close();
   }, 90_000);
 
   it('the banner on /verify and MY PIECES: OPENS IN to T0, the name once revealed, THE ROOM IS OPEN, LIVE NOW, hidden at the end; it opens the release', async () => {

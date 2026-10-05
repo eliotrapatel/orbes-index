@@ -3233,6 +3233,16 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   letter-spacing: 0.04em;
 }
 
+/* SEE THE MODEL (from the photograph's stage): a text link in the vault's ivory, under the price as announced and
+   under the model's line in the room; its 44 px tap zone is the text link's own. */
+.live__see-model {
+  margin-top: 8px;
+}
+
+.live__offer + .live__see-model {
+  margin-top: 4px;
+}
+
 .live__announced .live__rule + .live__overline {
   margin-top: 20px;
 }

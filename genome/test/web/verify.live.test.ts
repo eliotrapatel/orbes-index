@@ -410,6 +410,14 @@ describe('the release announced, and its card in THE RELEASES', () => {
     expect(pictureOf({ ...before, silhouetteUrl: 'https://elsewhere.example/s.png' })).toBeNull();
   });
 
+  it('offers SEE THE MODEL only once the server sends its sheet with the photograph: never before, never an address it cannot be', () => {
+    expect(liveSheetModel(sheet(), 'Europe/Paris').lookbook).toBeNull();
+    expect(liveSheetModel(sheet({ lookbook: 'monolithe' }), 'Europe/Paris').lookbook).toBe('monolithe');
+    // Before the photograph's stage the server sends neither the photograph nor the sheet.
+    expect(liveSheetModel(sheet({ imageUrl: null, lookbook: null, revealed: { silhouette: true, name: true, photo: false } }), 'Europe/Paris')).toMatchObject({ lookbook: null, picture: { kind: 'silhouette' } });
+    for (const bad of ['../admin', 'Monolithe', 'mono lithe', '', 'x'.repeat(81)]) expect(liveSheetModel(sheet({ lookbook: bad }), 'Europe/Paris').lookbook).toBeNull();
+  });
+
   it('lists its LIVE RELEASES on vault plates: where each stands, its name or TO BE REVEALED, its opening, price, quantity, limit per collector and rule', () => {
     const [announced, room0, live, unnamed] = liveCards(
       [

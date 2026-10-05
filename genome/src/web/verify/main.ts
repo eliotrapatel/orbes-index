@@ -568,6 +568,7 @@ class App {
           onReleases: () => this.openReleases(),
           onPieces: () => this.openPieces(),
           onScan: () => void this.startScan(),
+          onModel: (slug) => this.openSheet(slug),
           clientServices: () => this.contactDetails(),
           localZone: localZone(),
         });

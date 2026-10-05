@@ -3,12 +3,14 @@
  * which becomes, as the release advances, its room, its line, the turn, the piece secured and the reservation confirmed.
  *
  *   announced   LIVE RELEASE · the piece on its plate (photograph, else silhouette, else the seal) · its name, price ·
+ *               SEE THE MODEL from the photograph's stage, when the model's sheet is public ·
  *               OPENS IN dd:hh:mm or hh:mm:ss · the time in Paris, then on this phone · the rule, the quantity line and
  *               the limit per collector, when the room opens · THE REVEALS still to come, each with its time (each stage
  *               appears at its own, the page reading the release again then) · N COLLECTORS WILL BE THERE · I'LL BE
  *               THERE with a size for an account the rule lets in (another size changes it, WITHDRAW until T0); signed
  *               out, the sign-in under it; outside the rule, the rule and why · ADD TO CALENDAR · how the places are drawn
- *   room        THE ROOM IS OPEN · the model, its price and the quantity line · the closed vault door, its lock the seal ·
+ *   room        THE ROOM IS OPEN · the model, its price and the quantity line (SEE THE MODEL, as announced, until T0) ·
+ *               the closed vault door, its lock the seal ·
  *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
  *               preselected) · ENTER THE ROOM, then YOU'RE READY.
  *               The last minute the seal's orbits turn back into alignment, the last ten seconds tick (P-D07's
@@ -75,7 +77,7 @@ import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
 import type { ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
 import { releaseContactModel, upper } from '../view-model.js';
-import { contactBlock, legalLinks, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
+import { contactBlock, legalLinks, lookbookLink, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 import { CEREMONY_VIBRATION } from './result.js';
@@ -121,6 +123,8 @@ export interface LiveDeps {
   onReleases(): void;
   onPieces(): void;
   onScan(): void;
+  /** SEE THE MODEL: the model's sheet in the lookbook (`/verify/lookbook/<slug>`), from the photograph's stage. */
+  onModel(slug: string): void;
   clientServices(): Promise<ClientServices>;
   /** This phone's time zone (Intl), the second clock of the release's times. */
   localZone: string;
@@ -689,6 +693,11 @@ class LivePage {
     return bracket(plate);
   }
 
+  /** SEE THE MODEL, once the photograph is revealed and the model's sheet is public; else nothing. */
+  private seeModel(slug: string | null): HTMLAnchorElement | null {
+    return slug ? lookbookLink(() => this.deps.onModel(slug), { slug, extraClass: 'live__see-model' }) : null;
+  }
+
   private hairline(): HTMLElement {
     return h('hr', { class: 'live__rule' });
   }
@@ -780,6 +789,7 @@ class LivePage {
       this.title(m.name),
       m.line ? this.fact(m.line, 'live__kindline') : null,
       h('p', { class: 'live__price', text: m.price }),
+      this.seeModel(m.lookbook),
       this.hairline(),
       h('p', { class: 'live__overline', id: 'live-opens', text: LIVE.opensIn }),
       clock,
@@ -1036,6 +1046,8 @@ class LivePage {
     const choose = this.note(LIVE.chooseLine, 'live__choose');
     const leave = h('button', { class: 'textlink live__leave', attrs: { type: 'button' }, on: { click: () => void this.act(() => this.deps.api.liveLeave(s.id)) }, text: LIVE.leaveRoom });
     const prep = h('div', { class: 'live__prep' }, plate, picker.el, errorLine, choose, enter, ready, readyLine, leave);
+    // SEE THE MODEL under the model's line while the door is closed; at T0 the room is the piece's alone.
+    const seeModel = this.seeModel(m.lookbook);
     // The ticks sound only from a context a gesture made: any tap or key in the room before T0 makes it (a collector
     // who entered earlier, on this page or another, then came back). A tap's pointerup is the gesture a browser grants.
     const prime = (): void => this.deps.sound.prime();
@@ -1045,6 +1057,7 @@ class LivePage {
       overline,
       this.title(m.name),
       this.fact(m.offer, 'live__offer'),
+      seeModel,
       door,
       h('div', { class: 'live__count-block' }, count, until, presence),
       drawing,
@@ -1074,6 +1087,7 @@ class LivePage {
         overline.replaceChildren(...withNumerals(LIVE.phase.LIVE));
         drawing.hidden = false;
         prep.hidden = true;
+        if (seeModel) seeModel.hidden = true;
         this.say(LIVE.announce.open);
         setTimeout(() => door.classList.add('is-open'), prefersReducedMotion() ? 0 : DOOR_DELAY_MS);
       }
