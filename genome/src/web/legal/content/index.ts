@@ -19,13 +19,16 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
 
 /**
  * The date of this version of the four texts (ISO 8601): one per deployment, dated the day of that deployment, and a
- * date already published never changes. 2026-10-04 was deployment A of the plan of 2026-10-03 (the releases of P-R03
- * and their early access, P-X02, in the terms, article 12; the owners' circle, P-X01; the tiers' benefits, P-X04; and
- * the privacy policy). 2026-10-06 is the one version of deployment D, the LIVE RELEASE (plan of 2026-10-04): the
- * terms' article 13 (the LIVE RELEASES, the circle becoming article 14 and those after it moving by one), articles 1,
- * 2, 3, 15 and 16, and the privacy policy's LIVE RELEASES. Deployment B+C published 2026-10-05, so D's date comes after
- * it; 2026-10-06 is a placeholder, the earliest the rule allows: the day deployment D is fixed, this constant and its
- * line in test/web/legal.content.test.ts take that day (docs/launch/DEPLOY-LIVE-RELEASE.md §0, rule 6).
+ * date already published never changes. 2026-10-04 was deployment A of the plan of 2026-10-03 (the releases, their
+ * early access, the circle, the tiers' benefits). 2026-10-05 was the one version of deployment B+C (stages B and C
+ * combined): the terms' article 4 (a model discontinued, P-R06), article 11 (ORBES Care, P-M02), article 12 (the
+ * private salon, P-X08) and articles 1, 2, 3, 14 and 15 (now 15 and 16); the privacy policy's requests of the private
+ * salon, ORBES Care's page and the sound preference kept on the device (P-D07); the FAQ's sound. 2026-10-06 is the one
+ * version of deployment D, the LIVE RELEASE (plan of 2026-10-04): the terms' article 13 (the LIVE RELEASES, the circle
+ * becoming article 14 and those after it moving by one), articles 1, 2, 3, 15 and 16, and the privacy policy's LIVE
+ * RELEASES. 2026-10-06 is a placeholder, the earliest the rule allows after B+C's 2026-10-05: the day deployment D is
+ * fixed, this constant and its line in test/web/legal.content.test.ts take that day
+ * (docs/launch/DEPLOY-LIVE-RELEASE.md §0, rule 6).
  */
 export const LEGAL_VERSION = '2026-10-06';
 

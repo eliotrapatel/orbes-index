@@ -6,7 +6,7 @@ Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du 
 
 ## Article 1 — Objet
 
-Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les LIVE RELEASES, et le cercle des propriétaires.
+Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les LIVE RELEASES, les demandes du salon privé, et le cercle des propriétaires. MY PIECES présente aussi ORBES Care (article 11).
 
 Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
 
@@ -24,15 +24,17 @@ Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité compl
 - **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.
 - **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).
 - **Palier** : TITANE, PLATINE ou PALLADIUM, le rang d'un compte selon le nombre de pièces qui y sont enregistrées (article 12).
+- **Salon privé** : les modèles qu'ORBES réserve aux propriétaires d'une pièce, chacun à partir d'un palier, présentés avec un prix indicatif, qu'un compte peut demander (article 12).
 - **LIVE RELEASE** : une sortie qui se vit en direct, sans tirage : une salle avant son ouverture, une file à son ouverture, un tour pour chaque compte dans son ordre (article 13).
 - **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 14).
+- **ORBES Care** : l'abonnement d'entretien qu'ORBES présente dans MY PIECES (article 11).
 - **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).
 
 *Code : — (clause juridique).*
 
 ## Article 3 — Accès au service
 
-La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties, à entrer dans les LIVE RELEASES et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires.
+La vérification d'une pièce est gratuite et ouverte à tous, sans compte ni connexion. Le compte ORBES sert à enregistrer, transférer et suivre ses pièces, à s'inscrire aux sorties, à entrer dans les LIVE RELEASES et, pour les propriétaires d'une pièce, à lire le cercle des propriétaires et à demander les modèles du salon privé.
 
 ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut être interrompu, notamment pour maintenance. ORBES ne fait vérifier ses pièces qu'à l'adresse theorbes.com/verify, qui mène à verify.theorbes.com. Une autre adresse, ou un code imprimé à côté de la pièce, ne vient pas d'ORBES.
 
@@ -50,9 +52,11 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 **Révocation.** ORBES peut révoquer une identité ORBES, par exemple quand un code est remplacé ou qu'une pièce est retirée. Une vérification affiche alors REVOKED (UNUSUAL ACTIVITY DETECTED quand le code lu, ou son ORBES GENOME, ne correspond pas à ce qu'ORBES a émis).
 
+**Modèle arrêté.** ORBES peut arrêter un modèle, puis le rétablir. Les pièces d'un modèle arrêté se vérifient comme avant : un résultat AUTHENTIC, la fiche du modèle et le certificat de propriété de ses pièces indiquent alors DISCONTINUED et l'année. Aucune nouvelle pièce n'est émise avec un modèle arrêté.
+
 **L'enregistrement n'est pas un titre de propriété.** Le registre ORBES indique le compte auquel une pièce est enregistrée. Il ne vaut pas titre de propriété et ne remplace ni une facture ni un acte de vente. La propriété d'une pièce se prouve selon les règles du droit applicable.
 
-*Code : R02, R03, R04, R05, R06.*
+*Code : R02, R03, R04, R05, R06, R91.*
 
 ## Article 5 — Le compte ORBES
 
@@ -142,9 +146,11 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 **Conditions.** Les conditions de la garantie commerciale ORBES figurent dans [À COMPLÉTER : document des conditions de la garantie commerciale]. ORBES peut annuler la garantie d'une pièce dans les cas que ces conditions prévoient. Les garanties légales restent dues dans tous les cas.
 
-*Code : R42, R52, R53, R54, R55.*
+**ORBES Care.** MY PIECES présente ORBES Care, un abonnement d'entretien de vos pièces : un entretien annuel par l'atelier ORBES, une réparation prioritaire et une garantie prolongée. ORBES Care n'est pas en vente tant que SUBSCRIBE n'apparaît pas dans MY PIECES. Une fois ouvert, l'abonnement se souscrit sur une page tierce (Whop), selon les conditions propres à cette page : le service n'encaisse aucun paiement, et ne transmet à cette page rien de votre compte ni de vos pièces.
 
-## Article 12 — Sorties
+*Code : R42, R52, R53, R54, R55, R92.*
+
+## Article 12 — Sorties et salon privé
 
 ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie, annoncée sur le service (THE RELEASES) avec son nombre de pièces, les dates de ses inscriptions et la règle de son tirage. ORBES peut annuler une sortie tant que son tirage n'a pas eu lieu.
 
@@ -162,7 +168,9 @@ ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie
 
 **Aucune obligation.** Une place réservée ne vous oblige à rien : ORBES Client Services conclut chaque vente avec vous, hors du service. Passé son délai, une place qui n'a pas été conclue expire, et ORBES peut la proposer à l'inscription suivante de la liste d'attente.
 
-*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84.*
+**Le salon privé.** ORBES peut réserver des modèles aux propriétaires d'une pièce (THE PRIVATE SALON). Chaque modèle est présenté, avec un prix indicatif, aux comptes connectés dont le palier atteint celui qu'ORBES fixe pour lui (TITANE, PLATINE ou PALLADIUM) ; au-dessous de ce palier, il n'est pas présenté. Depuis la fiche d'un modèle, un compte peut le demander, avec une note facultative de 500 caractères au plus. Une demande n'engage ni le compte ni ORBES et ne forme aucun contrat : ORBES Client Services contacte le compte et conclut avec lui toute vente, hors du service. Rien n'est payé sur le service, et il n'envoie aucun e-mail. Un compte a une seule demande ouverte par modèle ; une fois qu'ORBES Client Services l'a close, avec une note de ce qui a été fait, le compte peut demander le modèle de nouveau. Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service.
+
+*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, N7.*
 
 ## Article 13 — LIVE RELEASES
 
@@ -192,7 +200,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **Ce qui est enregistré.** Pour chaque entrée, le service enregistre le compte, la taille et la quantité, le palier, la place dans la file, l'heure de chaque étape, la durée de l'appui, les options choisies et l'issue de la réservation ; et, de la connexion, son pays et une empreinte à clé de son réseau, jamais son adresse. Cette empreinte est effacée 30 jours après la fin de la sortie. Ces données servent à faire vivre la sortie et à repérer les entrées automatisées ; la politique de confidentialité en dit plus (article 16).
 
-*Code : R85, R86, R87, R88, R89, R90, R91, R92, R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, N7, N8.*
+*Code : R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, N8, N9.*
 
 ## Article 14 — Le cercle des propriétaires
 
@@ -214,15 +222,15 @@ ORBES publie dans le cercle des propriétaires (THE CIRCLE), pour les propriéta
 
 ORBES Client Services peut verrouiller un compte ORBES, [À COMPLÉTER : motifs du verrouillage, par exemple à la demande de son titulaire, en cas de soupçon de prise de contrôle ou de manquement aux présentes conditions, selon l'avis de l'avocat].
 
-Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), retire ses entrées en cours dans les LIVE RELEASES et son I'LL BE THERE pour celles qui n'ont pas encore ouvert (article 13), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, une réservation confirmée dans une LIVE RELEASE reste à conclure par ORBES Client Services, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.
+Le verrouillage ferme toutes les sessions du compte, révoque son code de récupération, retire ses liens de certificat et ses inscriptions aux sorties pas encore tirées (article 12), clôt ses demandes ouvertes du salon privé (article 12), retire ses entrées en cours dans les LIVE RELEASES et son I'LL BE THERE pour celles qui n'ont pas encore ouvert (article 13), et annule ses transferts en attente. Une place déjà réservée reste tenue jusqu'à ce qu'ORBES Client Services la conclue ou la laisse expirer, une réservation confirmée dans une LIVE RELEASE reste à conclure par ORBES Client Services, et ses réponses aux invitations du cercle restent telles quelles. Le compte ne peut plus se connecter, même avec le bon mot de passe. Ses pièces restent enregistrées à son nom. Seul ORBES Client Services lève le verrouillage.
 
-*Code : R19, R20, R108.*
+*Code : R19, R20, R116.*
 
 ## Article 16 — Données personnelles
 
-ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses et votes du cercle) comme le décrit sa politique de confidentialité. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie.
+ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses et votes du cercle, demandes du salon privé) comme le décrit sa politique de confidentialité. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie.
 
-*Code : R21, R109.*
+*Code : R21, R90, R117.*
 
 ## Article 17 — Responsabilité
 

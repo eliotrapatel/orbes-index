@@ -6,7 +6,7 @@ Each article ends with a *Code: …* line that points to the rules of the code i
 
 ## Article 1 — Purpose
 
-These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the LIVE RELEASES, and the owners' circle.
+These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the LIVE RELEASES, the requests of the private salon, and the owners' circle. MY PIECES also presents ORBES Care (article 11).
 
 The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
 
@@ -24,15 +24,17 @@ The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is gi
 - **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.
 - **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).
 - **Tier**: TITANE, PLATINE or PALLADIUM, the rank of an account by the number of pieces registered to it (article 12).
+- **Private salon**: the models ORBES reserves for the owners of a piece, each from a tier, shown with an indicative price, which an account may request (article 12).
 - **LIVE RELEASE**: a release that takes place live, without a draw: a room before its opening, a line at its opening, a turn for each account in its order (article 13).
 - **Owners' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 14).
+- **ORBES Care**: the care subscription ORBES presents in MY PIECES (article 11).
 - **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).
 
 *Code: — (legal clause).*
 
 ## Article 3 — Access to the service
 
-Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and the LIVE RELEASES and, for the owners of a piece, to read the owners' circle.
+Verifying a piece is free and open to everyone, without an account or a sign-in. The ORBES account is used to register, transfer and follow one's pieces, to enter the releases and the LIVE RELEASES and, for the owners of a piece, to read the owners' circle and to request the models of the private salon.
 
 ORBES endeavours to keep the service available, without committing to it: it may be interrupted, in particular for maintenance. ORBES has its pieces verified only at theorbes.com/verify, which leads to verify.theorbes.com. Another address, or a code printed beside the piece, does not come from ORBES.
 
@@ -50,9 +52,11 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 **Revocation.** ORBES may revoke an ORBES identity, for example when a code is replaced or a piece is withdrawn. A verification then reads REVOKED (UNUSUAL ACTIVITY DETECTED when the code read, or its ORBES GENOME, does not match what ORBES issued).
 
+**Discontinued model.** ORBES may discontinue a model, and reinstate it. The pieces of a discontinued model verify as before: an AUTHENTIC result, the page of the model and the ownership certificate of its pieces then say DISCONTINUED and the year. No new piece is issued with a discontinued model.
+
 **Registration is not a title of ownership.** The ORBES registry states the account to which a piece is registered. It is not a title of ownership and replaces neither an invoice nor a deed of sale. The ownership of a piece is proven under the rules of the applicable law.
 
-*Code: R02, R03, R04, R05, R06.*
+*Code: R02, R03, R04, R05, R06, R91.*
 
 ## Article 5 — The ORBES account
 
@@ -142,9 +146,11 @@ A report in the ORBES registry does not replace a complaint to the authorities. 
 
 **Conditions.** The conditions of the ORBES commercial warranty are set out in [À COMPLÉTER: document of the commercial warranty conditions]. ORBES may void the warranty of a piece in the cases those conditions provide for. The statutory guarantees remain due in every case.
 
-*Code: R42, R52, R53, R54, R55.*
+**ORBES Care.** MY PIECES presents ORBES Care, a care subscription for your pieces: an annual care service by the ORBES atelier, priority repair and an extended warranty. ORBES Care is not on sale until SUBSCRIBE appears in MY PIECES. Once open, the subscription is taken out on a third-party page (Whop), under that page's own terms: the service takes no payment, and sends that page nothing about your account or your pieces.
 
-## Article 12 — Releases
+*Code: R42, R52, R53, R54, R55, R92.*
+
+## Article 12 — Releases and the private salon
 
 ORBES may offer a model in a limited number of pieces in a release, announced on the service (THE RELEASES) with its number of pieces, the dates of its entries and the rule of its draw. ORBES may cancel a release until its draw.
 
@@ -162,7 +168,9 @@ ORBES may offer a model in a limited number of pieces in a release, announced on
 
 **No obligation.** A place held obliges you to nothing: ORBES Client Services concludes each sale with you, outside the service. Once its time has passed, a place that has not been concluded lapses, and ORBES may offer it to the next entry on the waiting list.
 
-*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84.*
+**The private salon.** ORBES may reserve models for the owners of a piece (THE PRIVATE SALON). Each model is shown, with an indicative price, to the signed-in accounts whose tier reaches the one ORBES sets for it (TITANE, PLATINE or PALLADIUM); below that tier, it is not shown. From the page of a model, an account may request it, with an optional note of at most 500 characters. A request obliges neither the account nor ORBES and creates no contract: ORBES Client Services contacts the account and concludes any sale with it, outside the service. Nothing is paid on the service, and it sends no email. An account holds one open request per model; once ORBES Client Services has closed it, with a note of what was done, the account may request the model again. Neither your note nor that of ORBES Client Services is written to the service's audit log.
+
+*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, N7.*
 
 ## Article 13 — LIVE RELEASES
 
@@ -192,7 +200,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **What is recorded.** For each entry, the service records the account, the size and the quantity, the tier, the place in the line, the time of each step, the length of the hold, the options chosen and the outcome of the reservation; and, from the connection, its country and a keyed fingerprint of its network, never its address. That fingerprint is erased 30 days after the end of the release. These data serve to run the release and to spot automated entries; the privacy policy says more (article 16).
 
-*Code: R85, R86, R87, R88, R89, R90, R91, R92, R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, N7, N8.*
+*Code: R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, N8, N9.*
 
 ## Article 14 — The owners' circle
 
@@ -214,15 +222,15 @@ In the owners' circle (THE CIRCLE), ORBES publishes content of the maison for th
 
 ORBES Client Services may lock an ORBES account, [À COMPLÉTER: grounds for a lock, for example at its holder's request, on suspicion of a takeover or of a breach of these terms, on counsel's advice].
 
-The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), removes its entries under way in the LIVE RELEASES and withdraws its I'LL BE THERE in those not yet open (article 13), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, a reservation confirmed in a LIVE RELEASE stays for ORBES Client Services to conclude, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.
+The lock ends every session of the account, revokes its recovery code, withdraws its certificate links and its entries in releases not yet drawn (article 12), closes its open requests in the private salon (article 12), removes its entries under way in the LIVE RELEASES and withdraws its I'LL BE THERE in those not yet open (article 13), and cancels its pending transfers. A place already held stays held until ORBES Client Services concludes it or lets it lapse, a reservation confirmed in a LIVE RELEASE stays for ORBES Client Services to conclude, and its answers to the circle's invitations stay as they are. The account can no longer sign in, even with the right password. Its pieces stay registered to it. Only ORBES Client Services lifts the lock.
 
-*Code: R19, R20, R108.*
+*Code: R19, R20, R116.*
 
 ## Article 16 — Personal data
 
-ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers and votes in the circle) as its privacy policy describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy.
+ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers and votes in the circle, requests in the private salon) as its privacy policy describes. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy.
 
-*Code: R21, R109.*
+*Code: R21, R90, R117.*
 
 ## Article 17 — Liability
 

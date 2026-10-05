@@ -44,12 +44,14 @@ import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/servi
 import { LIVE_NETWORK_RETENTION_DAYS, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
 import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '../../src/server/services/ownership.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
+import { SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { cookieName, SESSION_COOKIE } from '../../src/server/services/sessions.js';
 import { RESALE_GUIDANCE_FR } from '../../src/web/legal/content/faq.js';
 import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument } from '../../src/web/legal/content/index.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { parseBlock, plainText } from '../../src/web/legal/model.js';
 import { LEGAL_PAGES } from '../../src/web/shared/legal.js';
+import { setSoundPref, SOUND_OFF, SOUND_PREF_KEY } from '../../src/web/shared/prefs.js';
 import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { PACKAGING_KIT, REPO, findForbidden, forbiddenTerms, readDoc, section } from '../docs/lexicon.js';
 
@@ -405,6 +407,35 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('names the one preference the verify app keeps on the device, the sound (P-D07): its key, off only, never sent', () => {
+    expect(SOUND_PREF_KEY).toBe('orbes.sound');
+    expect(SOUND_OFF).toBe('off');
+    expect(sectionText(DOCUMENTS.privacy.en, 'cookies')).toContain(`under the key **${SOUND_PREF_KEY}**: the value ${SOUND_OFF}, written only when you press SOUND OFF`);
+    expect(sectionText(DOCUMENTS.privacy.fr, 'cookies')).toContain(`sous la clé **${SOUND_PREF_KEY}** : la valeur ${SOUND_OFF}, écrite seulement quand vous appuyez sur SOUND OFF`);
+    expect(sectionText(DOCUMENTS.privacy.en, 'cookies')).toContain('is never sent to ORBES');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'cookies')).toContain("n'est jamais envoyée à ORBES");
+    // Turning the sound on again removes the key: nothing is stored while the default holds.
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+    setSoundPref(false, storage);
+    expect([...store]).toEqual([[SOUND_PREF_KEY, SOUND_OFF]]);
+    setSoundPref(true, storage);
+    expect(store.size).toBe(0);
+  });
+
+  it('describes the requests of the private salon (P-X08): the note and its limit, kept with the account, exported, closed by a lock, never audited', () => {
+    expect(SHOP_NOTE_MAX).toBe(500);
+    const en = sectionText(DOCUMENTS.privacy.en, 'salon');
+    const fr = sectionText(DOCUMENTS.privacy.fr, 'salon');
+    for (const s of [`at most ${SHOP_NOTE_MAX} characters`, 'the note ORBES Client Services writes when it closes it', 'sees it masked', 'Neither your note nor that of ORBES Client Services is written to the service\'s audit log', 'is in the copy of your data', 'its open requests are closed']) expect(en, s).toContain(s);
+    for (const s of [`${SHOP_NOTE_MAX} caractères au plus`, "la note qu'ORBES Client Services écrit en la clôturant", 'la voit masquée', "Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit", 'figure dans la copie de vos données', 'ses demandes ouvertes sont closes']) expect(fr, s).toContain(s);
+    expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('**Requests in the private salon**');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain('**Demandes au salon privé**');
+    // ORBES Care's page is a third party's: nothing of the account or the piece goes to it.
+    expect(sectionText(DOCUMENTS.privacy.en, 'account')).toContain('the service sends it neither your account nor your piece');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'account')).toContain('le service ne lui transmet ni votre compte ni votre pièce');
+  });
+
   it('says what a LIVE RELEASE records, as the code keeps it: the network as a keyed fingerprint for 30 days, the country alone', () => {
     // The network: the /24 of an IPv4 address (its first three parts), the /48 of an IPv6 one (its first three groups).
     expect(liveNetworkPrefix('203.0.113.77')).toBe('203.0.113.0/24');
@@ -610,11 +641,15 @@ describe('legal pages: both languages, links, lexicon', () => {
     // and their early access, P-X02: terms article 12; the circle, P-X01: terms article 13; the tiers' benefits, P-X04;
     // the privacy policy's entries, reservations, answers, votes and visits); its items until that deployment move this
     // line, never another.
-    // 2026-10-06: deployment D, the LIVE RELEASE (plan of 2026-10-04), one version for the whole deployment (the terms'
-    // article 13 and the articles it moves, the privacy policy's LIVE RELEASES). 2026-10-05 is deployment B+C's, on its
-    // own branch: D comes after it. The date is a placeholder until deployment D is fixed (its runbook, §0 rule 6): this
-    // line and LEGAL_VERSION then take that day, with the fingerprint of the texts as they are then.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-06': 'f59b54e84cfe2f93' };
+    // 2026-10-05: deployment B+C of the same plan (stages B and C combined on 2026-10-04), one version for the whole
+    // deployment, distinct from A's published 2026-10-04 (a model discontinued, P-R06: terms article 4; ORBES Care,
+    // P-M02: article 11 and the privacy policy; the private salon, P-X08: article 12, articles 1, 2, 3, 14 and 15, and
+    // the privacy policy's requests; the sound preference kept on the device, P-D07: the privacy policy and the FAQ).
+    // 2026-10-06: deployment D, the LIVE RELEASE (plan of 2026-10-04), one version for the whole deployment, after
+    // B+C's published 2026-10-05 (the terms' article 13 and the articles it moves, the privacy policy's LIVE RELEASES).
+    // The date is a placeholder until deployment D is fixed (its runbook, §0 rule 6): this line and LEGAL_VERSION then
+    // take that day, with the fingerprint of the texts as they are then.
+    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-05': '5f46f78e4a3dbf4c', '2026-10-06': '3212223fecb82628' };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

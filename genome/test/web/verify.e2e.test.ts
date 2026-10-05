@@ -2319,6 +2319,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Read again, the sheet still says the piece is requested.
     await page.goto(`${srv.origin}/verify/lookbook/zenith`);
     await textOf(page.getByRole('region', { name: 'THE PRIVATE SALON' }).locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
+    // Closed in the console, the sheet offers REQUEST THIS PIECE again; requested meanwhile from another device, the
+    // stale sheet's request (409 SHOP_REQUEST_OPEN) reads the sheet again: REQUESTED with the contact, no failure.
+    const desk = await srv.ctx.services.auth.createAdmin({ email: 'salon.desk@orbes.test', password: 'orbes salon desk passphrase', role: 'OPERATOR' }, SYSTEM_ACTOR);
+    await srv.ctx.services.salon.close(requested[0]!.id, 'Called the client.', { type: 'admin', id: desk.id });
+    await page.reload();
+    const again = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+    await visible(again.getByRole('button', { name: 'REQUEST THIS PIECE' }));
+    const elsewhere = await srv.ctx.services.salon.request(owner.account.id, 'zenith', null, { type: 'account', id: owner.account.id });
+    await again.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
+    await textOf(again.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
+    await textOf(again.locator('.ownership__status'), 'REQUESTED');
+    await visible(again.locator('.contact__email'));
+    await countOf(again.locator('.form__error'), 0);
+    await countOf(page.locator('.btn'), 0);
+    expect(new URL((await again.locator('.contact__email').getAttribute('href'))!).searchParams.get('body')).toContain(`REQUEST: ${elsewhere.request.id}`);
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
