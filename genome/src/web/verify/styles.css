@@ -2246,6 +2246,64 @@ h1[tabindex="-1"]:focus,
   white-space: nowrap;
 }
 
+/* THE RELEASES' two tabs (plan LIVE RELEASE+, choice 5): LIVE, the releases to come and under way; PAST, those ended.
+   The tabs of a result, a little closer to the lead; each panel's list under them. */
+.releases__tabs {
+  margin-top: 40px;
+}
+
+/* Two short words: each tap zone widened to 44 px and more around LIVE, the dot between them further apart, so the
+   zones never meet. */
+.releases__tabs .tabs__list {
+  gap: 18px;
+}
+
+.releases__tabs .tabs__tab {
+  --tab-pad: 14px;
+}
+
+.releases__tabs .releases__body {
+  margin-top: 30px;
+}
+
+.releases__past {
+  margin-top: 30px;
+}
+
+/* « You have taken part in N releases. », signed in, at the top of PAST. */
+.releases__taken {
+  max-width: 34ch;
+  margin: 0 auto 26px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.releases__past-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 22px;
+  text-align: center;
+}
+
+/* A release ended, signed in: YOU TOOK PART or YOU SECURED A PIECE, a label in the ink between its line and its link. */
+.release-card__mark,
+.release__part {
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink);
+}
+
+.release-card__mark {
+  margin-top: 10px;
+}
+
+.release__part {
+  margin-top: 6px;
+}
+
 .releases__foot,
 .release__foot {
   display: flex;
@@ -4203,6 +4261,30 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 18px;
 }
 
+/* A release over, in its final state (plan LIVE RELEASE+, decision 30): the piece as announced, then the neutral status,
+   its date and quantity line, and the account's part in it, in the ivory. */
+.live__plate--past {
+  margin-top: 18px;
+}
+
+.live__past .live__title {
+  margin-top: 26px;
+  font-size: var(--fs-display-sm);
+}
+
+.live__past .live__rule + .live__fact {
+  margin-top: 22px;
+}
+
+.live__past-status,
+.live__past-part {
+  color: var(--ink);
+}
+
+.live__past-part {
+  margin-top: 14px;
+}
+
 /* The edge pages: a title, a sentence, one action. */
 .live__edge {
   padding-top: 56px;
@@ -4850,6 +4932,8 @@ body[data-screen="board"] .corners {
 .release-card__state,
 .release-card__title,
 .release-card__model,
+.release-card__mark,
+.release__part,
 .release__title,
 .release__eyebrow,
 .release__state,

@@ -213,6 +213,27 @@ describe('ApiClient', () => {
     await expect(api.orders()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
   });
 
+  it('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, and the account\'s part in them, each with a GET and no CSRF header', async () => {
+    const page = { items: [{ id: 'r1', kind: 'DRAW' }], page: 2, pageSize: 12, total: 13 };
+    const part = { count: 1, releases: [{ id: 'r1', secured: true }] };
+    const f = fakeFetch([
+      () => json(200, page),
+      () => json(200, { items: null, total: 1 }),
+      () => json(200, part),
+      () => json(200, { releases: [] }),
+      () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.pastReleases(2, 12)).toEqual(page);
+    expect(f.calls[0]).toMatchObject({ url: '/api/v1/releases/past?page=2&pageSize=12', method: 'GET', credentials: 'same-origin', body: undefined });
+    await expect(api.pastReleases(1, 12)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(await api.participation()).toEqual(part);
+    expect(f.calls[2]).toMatchObject({ url: '/api/v1/account/participation', method: 'GET', body: undefined });
+    for (const c of f.calls) expect(c.headers['x-csrf-token']).toBeUndefined();
+    await expect(api.participation()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.participation()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
   it('RECEIVE THIS PIECE (F-03): sends the code with the piece scanned and the transfer token of that scan, with the CSRF token', async () => {
     const f = fakeFetch([
       () => json(200, SESSION('t1')),

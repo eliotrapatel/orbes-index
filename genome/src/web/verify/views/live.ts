@@ -26,7 +26,12 @@
  *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, ORBES Client
  *               Services
  *   edge pages  not signed in (the sign-in), not eligible, turn passed, hold ended, place released, left, removed,
- *               the release ended, over: a vault page with one action each
+ *               the release ended, gone: a vault page with one action each
+ *   past        plan LIVE RELEASE+ (decision 30): ended, the page in its final state, as THE RELEASES' PAST opens it:
+ *               LIVE RELEASE · the piece on its plate · its name and line · SEE THE MODEL · THIS RELEASE IS OVER · its
+ *               opening date and quantity line as announced · signed in, YOU TOOK PART or YOU SECURED A PIECE · its
+ *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
+ *               after-room keeps the second door until it closes)
  *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
  *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
  *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
@@ -44,7 +49,7 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE } from '../copy.js';
+import { LIVE, RELEASES } from '../copy.js';
 import {
   addonChoices,
   aheadLine,
@@ -62,6 +67,7 @@ import {
   liveReference,
   liveScreen,
   liveSheetModel,
+  livePastModel,
   lockAngle,
   placeAnnouncement,
   PRESS_GAP_MS,
@@ -79,6 +85,7 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { sealSvg, turnRings } from '../live-seal.js';
+import { participationModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
 import type { ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
@@ -224,6 +231,10 @@ class LivePage {
   private frozenHold: number | null = null;
   /** How many of the stage times and the room's opening had passed at the last pulse. */
   private stagesDue: number | null = null;
+  /** Over: the account's part in the release (YOU TOOK PART, YOU SECURED A PIECE), read once signed in; null for none. */
+  private part: string | null = null;
+  private partRead: 'idle' | 'reading' | 'done' = 'idle';
+  private partGen = 0;
   private disposed = false;
 
   constructor(private readonly deps: LiveDeps) {
@@ -318,6 +329,9 @@ class LivePage {
       this.viewer = 'signed-out';
       this.entry = null;
       this.access = null;
+      this.partGen++;
+      this.part = null;
+      this.partRead = 'idle';
       this.closeStream();
       this.stopPolling();
     }
@@ -659,6 +673,8 @@ class LivePage {
         return this.confirmedScreen();
       case 'afterRoom':
         return this.afterRoomScreen();
+      case 'past':
+        return this.pastScreen();
       default:
         return this.edgeScreen(kind);
     }
@@ -1671,6 +1687,61 @@ class LivePage {
         setFact(until, closes ? LIVE.afterRoom.openUntil(closes.time) : '');
       },
     };
+  }
+
+  /**
+   * Over (plan LIVE RELEASE+, decision 30): the release in its final state, as THE RELEASES' PAST opens it. What was
+   * announced (each part from its stage), THIS RELEASE IS OVER, and signed in the account's part in it; never an end
+   * figure. Its one action: THE RELEASES.
+   */
+  private pastScreen(): Screen {
+    const m = livePastModel(this.sheet!, this.deps.localZone);
+    const part = this.fact('', 'live__past-part');
+    part.hidden = true;
+    const el = h(
+      'section',
+      { class: 'live__past' },
+      this.overline(LIVE.kind),
+      this.piece(m.picture, 'live__plate--past'),
+      this.title(m.name),
+      m.line ? this.fact(m.line, 'live__kindline') : null,
+      this.seeModel(m.lookbook),
+      this.hairline(),
+      this.fact(RELEASES.over, 'live__past-status'),
+      this.fact(m.facts, 'live__past-facts'),
+      part,
+      storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' }),
+      this.action(LIVE.back, () => this.deps.onReleases()),
+    );
+    return {
+      kind: 'past',
+      el,
+      back: true,
+      update: () => {
+        if (this.partRead === 'idle' && this.deps.session.state.status === 'signed-in') void this.readPart();
+        setFact(part, this.part ?? '');
+        part.hidden = this.part === null;
+      },
+    };
+  }
+
+  /** The account's part in this release, from the releases it took part in; left unsaid should it not be read. */
+  private async readPart(): Promise<void> {
+    const id = this.sheet?.id;
+    if (!id) return;
+    const gen = ++this.partGen;
+    this.partRead = 'reading';
+    let part: string | null = null;
+    try {
+      part = participationModel(await this.deps.api.participation()).marks.get(id) ?? null;
+    } catch (e) {
+      if (gen !== this.partGen || this.disposed) return;
+      this.deps.session.noteError(e);
+    }
+    if (gen !== this.partGen || this.disposed) return;
+    this.part = part;
+    this.partRead = 'done';
+    this.screen?.update();
   }
 
   /** An edge page: its title, its sentence, its one action. */

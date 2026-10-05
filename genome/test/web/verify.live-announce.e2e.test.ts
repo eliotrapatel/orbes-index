@@ -4,7 +4,8 @@
  *
  *  - THE RELEASES as the release calendar: a release's card says the reveals still to come and their times, then each
  *    stage at its own (the silhouette, the name, the photograph), never before it, the page reading the releases again
- *    then; N COLLECTORS WILL BE THERE; a release leaves the list at its end, and within a minute when sold out before it.
+ *    then; N COLLECTORS WILL BE THERE; a release leaves the LIVE tab at its end (for PAST), and within a minute when sold
+ *    out before it.
  *  - The release's page announced: THE REVEALS; I'LL BE THERE with a size, its public count following, another size
  *    changing it, WITHDRAW; read again, the size said; signed out, the sign-in under it; outside the rule, the rule and
  *    why. SEE THE MODEL at the photograph's stage and never before, then in the room until T0; it opens the model's
@@ -192,7 +193,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await expect.poll(() => card.locator('.live-card__reveals').count()).toBe(0);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-calendar-revealed.png'), fullPage: true });
 
-    // The end: the release leaves THE RELEASES (choice 32), the other stays.
+    // The end: the release leaves the LIVE tab (for PAST, plan LIVE RELEASE+ choice 5), the other stays.
     await holdsUntil(t + 26 * SECOND, async () => expect(await other.count()).toBe(1));
     await expect.poll(() => other.count(), POLL).toBe(0);
     expect(Date.now()).toBeGreaterThanOrEqual(t + 26 * SECOND);

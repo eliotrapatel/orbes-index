@@ -697,12 +697,18 @@ export class DropService {
 
   // ── Public ───────────────────────────────────────────────────────────────
 
-  /** The published drops, the latest opening first (DROP_LIST_LIMIT): a DRAFT never, a cancelled one as CANCELLED. */
+  /**
+   * The published drops still to come or under way (THE RELEASES' LIVE tab: UPCOMING, OPEN, CLOSED), the latest opening
+   * first (DROP_LIST_LIMIT): never a DRAFT, nor a cancelled one; once drawn, a drop is in THE RELEASES' PAST
+   * (services/past-releases.ts), its page unchanged.
+   */
   async listPublic(): Promise<DropCard[]> {
     const now = this.clock();
     const rows = await this.reads(this.db)
       .where('d.published_at', 'is not', null)
       .where('d.mode', '=', 'DRAW')
+      .where('d.drawn_at', 'is', null)
+      .where('d.cancelled_at', 'is', null)
       .orderBy('d.opens_at', 'desc')
       .orderBy('d.id')
       .limit(DROP_LIST_LIMIT)

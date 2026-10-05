@@ -367,7 +367,10 @@ describe('the after-room', () => {
       expect(await audits(child, 'drop.live.after_room')).toEqual([]);
       // Over: the door is gone from the parent's page; its guest reads that it is over, with its own entry.
       expect((await room.viewerEntries(r.id, [first!.id])).get(first!.id)!.afterRoom).toBeNull();
-      expect(await room.afterRoomSheet(first!.id, r.id)).toEqual({ id: child, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: r.id } });
+      // Over: its final state (plan LIVE RELEASE+, decision 30), still for its guests only, never an end figure.
+      const over = await room.afterRoomSheet(first!.id, r.id);
+      expect(over).toMatchObject({ id: child, kind: 'LIVE', phase: 'ENDED', name: 'AFTERGLOW', quantityLine: '1 PIECE', afterRoom: { parentId: r.id } });
+      expect(over).not.toHaveProperty('sizes');
       expect((await room.viewer(first!.id, child, 'state')).entry).toBe('CONFIRMED');
       expect((await f.liveConsole.get(r.id)).afterRoom).toMatchObject({ state: 'OVER', endedReason: 'SOLD_OUT', entries: { CONFIRMED: 1, ENDED: 1 } });
       // MY PIECES: the after-room's entry names the release it follows; the right of access keeps the place.

@@ -35,6 +35,7 @@ import type {
   LiveRoom as ServerLiveRoom,
   LiveSheet as ServerLiveSheet,
 } from '../../src/server/services/live-room.js';
+import type { AccountParticipation as ServerAccountParticipation, PastReleaseCard as ServerPastReleaseCard } from '../../src/server/services/past-releases.js';
 import type { Page } from '../../src/server/types.js';
 import { INCIDENT_TYPES as SERVER_INCIDENTS, type OwnedProduct } from '../../src/server/services/ownership.js';
 import type {
@@ -85,6 +86,8 @@ import {
   type LookbookSheet,
   type OwnedPiece,
   type OwnerCertificate,
+  type Participation,
+  type PastReleasesPage,
   type ShopRequest,
   type VerifyInput,
   type VerifyOutcome,
@@ -134,6 +137,9 @@ export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry 
 export const accountOrderFits = (o: Json<ServerAccountOrder>): AccountOrder => o;
 // …and an order's care guide (M6): GET /api/v1/account/orders/:id/care-guide.
 export const careGuideFits = (g: Json<ServerOrderCareGuide>): OrderCareGuide => g;
+// …and THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, and the account's part in them.
+export const pastPageFits = (p: Json<Page<ServerPastReleaseCard>>): PastReleasesPage => p;
+export const participationFits = (p: Json<ServerAccountParticipation>): Participation => p;
 export const liveBannerFits = (b: Json<ServerLiveBanner>): LiveBanner => b;
 export const liveBoardFits = (b: Json<ServerLiveBoard>): LiveBoard => b;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */

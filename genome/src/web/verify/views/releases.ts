@@ -17,7 +17,9 @@
  *   THE COLLECTION
  *   PRIVACY · TERMS · LEGAL · HELP
  *
- * A release's page: its collection (or model), its title and state, then,
+ * A release's page: its collection (or model), its title and state (once
+ * drawn THIS RELEASE IS OVER, and signed in the account's part in it: YOU
+ * TOOK PART or YOU SECURED A PIECE, plan LIVE RELEASE+ decision 30), then,
  * with an early access (P-X02), the line PLATINE AND PALLADIUM: FROM … ·
  * EVERYONE: FROM … (UTC); the model's photograph on an ivory plate, its
  * description; THE RELEASE (the model, with SEE THE MODEL when its sheet is
@@ -30,19 +32,28 @@
  * place held the contact of ORBES Client Services); THE DRAW (its rule,
  * word for word, and the seed's fingerprint; once drawn the seed, checked
  * on this phone against the fingerprint, and the entries by rank, the
- * account's own marked, a hundred at a time). ENTER THE DRAW, or RESERVE A
+ * account's own marked, a hundred at a time, never said how many). ENTER THE DRAW, or RESERVE A
  * PLACE, is the page's hairline button while it is offered (the foot's
  * SCAN ORBES CODE is then a text link), as DOWNLOAD PDF is on a
  * certificate. After a reservation, the page is read again: its places.
  *
- * THE RELEASES lists the LIVE RELEASES first (plan of 2026-10-04: LIVE RELEASE cards), each on a vault plate among
- * the ivory ones of the draws: the release calendar. Its picture of the stage reached (the seal before any), LIVE
- * RELEASE and where it stands, its name once revealed, its opening in Paris (then on this phone), its price and quantity
- * line, its rule, the reveals still to come with their times, N COLLECTORS WILL BE THERE, and
- * SEE THE RELEASE; its page is the LIVE RELEASE's (views/live.ts). The list is read again at each moment that changes a
- * LIVE RELEASE's card, on the server's clock (a stage, its room, T0, its end), and every BANNER_REFRESH_MS while a room
- * is open or a release live: each stage shows at its time, and the release leaves THE RELEASES at its end, within a
- * minute when it comes early (sold out, or ended by ORBES).
+ * THE RELEASES has two tabs (plan LIVE RELEASE+, choice 5; keyboard and screen-reader tabs, views/tabs.ts), the one
+ * shown kept with the page's place in the history (back from a release returns to it):
+ *
+ *   LIVE  the releases to come and under way: the LIVE RELEASES first (plan of 2026-10-04: LIVE RELEASE cards), each on
+ *         a vault plate among the ivory ones of the draws (neither drawn nor cancelled): the release calendar. Its
+ *         picture of the stage reached (the seal before any), LIVE RELEASE and where it stands, its name once revealed,
+ *         its opening in Paris (then on this phone), its price and quantity line, its rule, the reveals still to come
+ *         with their times, N COLLECTORS WILL BE THERE, and SEE THE RELEASE; its page is the LIVE RELEASE's
+ *         (views/live.ts). The list is read again at each moment that changes a LIVE RELEASE's card, on the server's
+ *         clock (a stage, its room, T0, its end), and every BANNER_REFRESH_MS while a room is open or a release live:
+ *         each stage shows at its time, and the release leaves LIVE for PAST at its end, within a minute when it comes
+ *         early (sold out, or ended by ORBES).
+ *   PAST  every release ended, the newest first, LIVE RELEASES and draws together (never a cancelled one nor an
+ *         after-room), PAST_PAGE_SIZE at a time (SHOW MORE): each an ivory plate with its photograph, LIVE RELEASE or
+ *         DRAW, its name, its opening date and its quantity line as announced (no end figure), SEE THE RELEASE (its page
+ *         in its final state, decision 30); signed in, « You have taken part in N releases. » at the top, and YOU TOOK
+ *         PART or YOU SECURED A PIECE on each release concerned. Read when the tab is first shown.
  *
  * Every action is a same-origin JSON call through ApiClient (the session
  * cookie, the CSRF token); server messages are shown as they come. A 401
@@ -58,9 +69,14 @@ import { sealSvg } from '../live-seal.js';
 import {
   drawLines,
   entryModel,
+  participationModel,
+  pastCards,
+  PAST_PAGE_SIZE,
   releaseCards,
   releaseSheet,
   type EntryModel,
+  type ParticipationModel,
+  type PastCardModel,
   type ReleaseCardModel,
   type ReleasePhoto,
   type ReleaseRow,
@@ -72,14 +88,25 @@ import { contactBlock, legalLinks, lookbookLink, releasesLink, sectionLabel, vie
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
+import { tabsView } from './tabs.js';
 
 export interface ReleasesView {
   root: HTMLElement;
   dispose(): void;
 }
 
+/** THE RELEASES' tabs (plan LIVE RELEASE+, choice 5). */
+export type ReleasesTab = 'live' | 'past';
+export const RELEASES_TABS: readonly ReleasesTab[] = ['live', 'past'];
+
 export interface ReleasesDeps {
   api: ApiClient;
+  /** PAST: signed in, the account's part in each release. */
+  session: SessionStore;
+  /** The tab shown first (the one the page's place in the history kept). */
+  tab: ReleasesTab;
+  /** A tab chosen: the page's place in the history keeps it. */
+  onTab(tab: ReleasesTab): void;
   /** SCAN ORBES CODE, the page's hairline button. */
   onScan(): void;
   /** Open a release's page in the app. */
@@ -174,8 +201,22 @@ class ListPage {
   private drawn: string | null = null;
   private politeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** PAST, built when its tab is first shown. */
+  private past: PastList | null = null;
+
   constructor(private readonly deps: ReleasesDeps) {
     this.root = viewRoot('releases', 'releases-title');
+    const tabs = tabsView<ReleasesTab>(
+      RELEASES_TABS,
+      (tab) => {
+        if (tab === 'live') return this.body;
+        this.past = new PastList(deps);
+        return this.past.root;
+      },
+      RELEASES_TABS.includes(deps.tab) ? deps.tab : 'live',
+      { labels: { live: RELEASES.tabs.live, past: RELEASES.tabs.past }, idPrefix: 'releases-', label: RELEASES.tabs.label, regionLabel: RELEASES.tabs.label, onSelect: (tab) => deps.onTab(tab) },
+    );
+    tabs.root.classList.add('releases__tabs');
     this.root.append(
       h(
         'header',
@@ -184,7 +225,7 @@ class ListPage {
         h('h1', { class: 'releases__title', id: 'releases-title', text: RELEASES.title }),
         h('p', { class: 'prose releases__lead', text: RELEASES.lead }),
       ),
-      this.body,
+      tabs.root,
       h(
         'footer',
         { class: 'releases__foot' },
@@ -201,6 +242,7 @@ class ListPage {
     this.disposed = true;
     if (this.changeTimer) clearTimeout(this.changeTimer);
     if (this.politeTimer) clearTimeout(this.politeTimer);
+    this.past?.dispose();
   }
 
   /**
@@ -366,6 +408,188 @@ class ListPage {
   }
 }
 
+// ── PAST ───────────────────────────────────────────────────────────────────
+
+/** The account's part in the releases: not asked (signed out), being read, read, or unreadable. */
+type TakenLoad = { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; model: ParticipationModel } | { kind: 'failed' };
+
+/**
+ * THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases ended, a page at a time. The cards already shown stay
+ * as they are when more come (SHOW MORE appends them, the keyboard moved to the first of them) and when the account's
+ * part in them arrives (each card's mark filled in place): nothing is read again to a screen reader that it has read.
+ */
+class PastList {
+  readonly root: HTMLElement;
+  /** « You have taken part in N releases. », signed in. */
+  private readonly taken = h('p', { class: 'prose releases__taken', attrs: { hidden: true } });
+  /** ONE MOMENT…, NO RELEASE HAS ENDED YET, or why the releases could not be shown. */
+  private readonly status = h('div', { class: 'releases__past-status', attrs: { 'aria-live': 'polite' } });
+  private readonly list = h('ul', { class: 'releases__list releases__past-list', attrs: { hidden: true } });
+  private readonly more = h('div', { class: 'releases__past-more' });
+  /** Each card's mark (YOU TOOK PART, YOU SECURED A PIECE), by release. */
+  private readonly marks = new Map<string, HTMLElement>();
+  private cards: PastCardModel[] = [];
+  private total = 0;
+  private busy = false;
+  private part: TakenLoad = { kind: 'none' };
+  /** Bumped at each read of the account's part: an older answer is dropped. */
+  private partGen = 0;
+  private unsubscribe: (() => void) | null;
+  private disposed = false;
+
+  constructor(private readonly deps: ReleasesDeps) {
+    this.root = h('div', { class: 'releases__past' }, this.taken, this.status, this.list, this.more);
+    this.unsubscribe = deps.session.subscribe(() => this.onSession());
+    void this.load();
+    void deps.session
+      .ensure()
+      .catch(() => undefined)
+      .then(() => this.onSession());
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
+  /** The first page, or the next one (SHOW MORE). */
+  private async load(next = false): Promise<void> {
+    if (this.busy || this.disposed) return;
+    this.busy = true;
+    const page = next ? Math.floor(this.cards.length / PAST_PAGE_SIZE) + 1 : 1;
+    if (next) this.drawMore('loading');
+    else this.drawStatus(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+    try {
+      const r = await this.deps.api.pastReleases(page, PAST_PAGE_SIZE);
+      if (this.disposed) return;
+      const known = new Set(this.cards.map((c) => c.id));
+      // A release ended between two pages moves the others down: one already shown is not shown twice.
+      const fresh = pastCards(r.items, this.deps.localZone).filter((c) => !known.has(c.id));
+      this.total = r.total;
+      this.busy = false;
+      this.append(fresh, next);
+    } catch (e) {
+      if (this.disposed) return;
+      this.busy = false;
+      if (next) this.drawMore('failed', messageOf(e));
+      else {
+        this.drawStatus(
+          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.loadFailed} ${messageOf(e)}` }),
+          h('button', { class: 'textlink releases__retry', attrs: { type: 'button' }, on: { click: () => void this.load() }, text: RELEASES.retry }),
+        );
+      }
+    }
+  }
+
+  private append(fresh: PastCardModel[], next: boolean): void {
+    const first = this.cards.length;
+    this.cards.push(...fresh);
+    if (this.cards.length === 0) {
+      this.drawStatus(h('p', { class: 'prose releases__empty', text: RELEASES.past.empty }));
+      this.drawMore('idle');
+      return;
+    }
+    this.drawStatus();
+    this.list.hidden = false;
+    this.list.append(...fresh.map((c) => h('li', { class: 'releases__item' }, this.card(c))));
+    this.drawMarks();
+    this.drawMore('idle');
+    // SHOW MORE: the keyboard on the first release it brought.
+    if (next && fresh.length > 0) this.list.children[first]?.querySelector<HTMLElement>('a')?.focus();
+  }
+
+  private drawStatus(...children: HTMLElement[]): void {
+    const hadFocus = this.status.contains(document.activeElement);
+    this.status.replaceChildren(...children);
+    if (hadFocus) this.status.querySelector<HTMLElement>('button')?.focus();
+  }
+
+  /** SHOW MORE while releases remain; ONE MOMENT… as they are read; why they could not be, and SHOW MORE again. */
+  private drawMore(state: 'idle' | 'loading' | 'failed', message = ''): void {
+    const hadFocus = this.more.contains(document.activeElement);
+    const out: HTMLElement[] = [];
+    if (state === 'loading') out.push(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+    if (state === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.moreFailed} ${message}` }));
+    if (state !== 'loading' && this.cards.length > 0 && this.cards.length < this.total) {
+      out.push(h('button', { class: 'textlink releases__more', attrs: { type: 'button' }, on: { click: () => void this.load(true) }, text: RELEASES.past.more }));
+    }
+    this.more.replaceChildren(...out);
+    if (hadFocus && state === 'failed') this.more.querySelector<HTMLElement>('button')?.focus();
+  }
+
+  /** A release ended: its ivory plate, what was announced, its mark once the account's part is known. */
+  private card(c: PastCardModel): HTMLElement {
+    const id = `past-${c.id}`;
+    const link = releasesLink(() => this.deps.onRelease(c.id), { id: c.id, extraClass: 'release-card__link' });
+    link.setAttribute('aria-describedby', `${id}-title`);
+    const mark = h('p', { class: 'release-card__mark', attrs: { hidden: true } });
+    this.marks.set(c.id, mark);
+    return bracket(
+      h(
+        'article',
+        { class: 'release-card release-card--past', attrs: { 'aria-labelledby': `${id}-title` } },
+        c.image ? h('div', { class: 'release-card__frame', data: { photo: '' } }, photo(c.image, 'release-card__img')) : null,
+        h('p', { class: 'release-card__state', text: c.kind }),
+        h('h2', { class: 'release-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
+        c.model ? h('p', { class: 'release-card__model' }, ...withNumerals(c.model)) : null,
+        h('p', { class: 'release-card__line micro', text: c.line }),
+        mark,
+        link,
+      ),
+    );
+  }
+
+  // ── The account's part ──────────────────────────────────────────────────
+
+  /** Signed in: its part in the releases, read again for each account signed in; signed out: none. */
+  private onSession(): void {
+    if (this.disposed) return;
+    const s = this.deps.session.state;
+    if (s.status === 'signed-in') {
+      if (this.part.kind === 'none') void this.readPart();
+      return;
+    }
+    if (s.status === 'anonymous') {
+      this.partGen++;
+      this.part = { kind: 'none' };
+      this.drawPart();
+    }
+  }
+
+  private async readPart(): Promise<void> {
+    const gen = ++this.partGen;
+    this.part = { kind: 'loading' };
+    try {
+      const p = await this.deps.api.participation();
+      if (gen !== this.partGen || this.disposed) return;
+      this.part = { kind: 'ready', model: participationModel(p) };
+    } catch (e) {
+      if (gen !== this.partGen || this.disposed) return;
+      this.deps.session.noteError(e);
+      this.part = this.deps.session.state.status === 'signed-in' ? { kind: 'failed' } : { kind: 'none' };
+    }
+    this.drawPart();
+  }
+
+  private drawPart(): void {
+    const p = this.part;
+    this.taken.classList.toggle('form__error', p.kind === 'failed');
+    this.taken.textContent = p.kind === 'ready' ? p.model.taken : p.kind === 'failed' ? RELEASES.past.takenFailed : '';
+    this.taken.hidden = p.kind !== 'ready' && p.kind !== 'failed';
+    this.drawMarks();
+  }
+
+  private drawMarks(): void {
+    const marks = this.part.kind === 'ready' ? this.part.model.marks : null;
+    for (const [id, el] of this.marks) {
+      const text = marks?.get(id) ?? '';
+      if (el.textContent !== text) el.textContent = text;
+      el.hidden = text === '';
+    }
+  }
+}
+
 // ── A release ──────────────────────────────────────────────────────────────
 
 type ReleaseLoad = { kind: 'loading' } | { kind: 'ready'; sheet: ReleaseSheetModel } | { kind: 'missing' } | { kind: 'failed'; message: string };
@@ -383,6 +607,8 @@ class ReleasePage {
   private readonly stateLine = h('p', { class: 'release__state', attrs: { hidden: true } });
   /** P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM … (UTC), with an early access. */
   private readonly accessLine = h('p', { class: 'release__access micro', attrs: { hidden: true } });
+  /** Drawn, the release is over: signed in, the account's part in it (YOU TOOK PART, YOU SECURED A PIECE). */
+  private readonly partLine = h('p', { class: 'release__part', attrs: { hidden: true } });
   private readonly body = h('div', { class: 'release__body', attrs: { 'aria-live': 'polite' } });
   private readonly entrySection = h('section', { class: 'release__section release__entry', attrs: { 'aria-labelledby': 'release-entry' } });
   private readonly drawSection = h('section', { class: 'release__section release__draw', attrs: { 'aria-labelledby': 'release-draw' } });
@@ -402,10 +628,12 @@ class ReleasePage {
   private entryGen = 0;
   /** The account's tier now, read with its entry (the club's status): PLATINE and PALLADIUM reserve during the early access. */
   private tier = 0;
+  /** Drawn: the account's part in the release, read with its entry; null when none (or when it could not be read). */
+  private part: string | null = null;
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
-    this.root.append(h('header', { class: 'release__head' }, wordmark('release__wordmark'), this.eyebrow, this.title, this.stateLine, this.accessLine), this.body, this.foot);
+    this.root.append(h('header', { class: 'release__head' }, wordmark('release__wordmark'), this.eyebrow, this.title, this.stateLine, this.partLine, this.accessLine), this.body, this.foot);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.render();
     void this.start();
@@ -458,6 +686,7 @@ class ReleasePage {
       this.entryGen++;
       this.entry = { kind: 'none' };
       this.tier = 0;
+      this.part = null;
       this.actionError = null;
     }
     this.render();
@@ -470,8 +699,10 @@ class ReleasePage {
     this.entry = { kind: 'loading' };
     this.render();
     try {
-      const status = await this.deps.api.clubStatus();
+      // Drawn, the release is over: the account's part in it too (left unsaid should it not be read).
+      const [status, part] = await Promise.all([this.deps.api.clubStatus(), this.load.sheet.drawn ? this.deps.api.participation().catch(() => null) : null]);
       if (gen !== this.entryGen || this.disposed) return;
+      this.part = part ? (participationModel(part).marks.get(id) ?? null) : null;
       this.tier = Number(status.tier?.level) || 0;
       this.entry = { kind: 'ready', entry: status.entries.find((e) => e.dropId === id) ?? null };
     } catch (e) {
@@ -563,6 +794,7 @@ class ReleasePage {
     if (l.kind !== 'ready') {
       this.eyebrow.hidden = true;
       this.stateLine.hidden = true;
+      this.partLine.hidden = true;
       this.accessLine.hidden = true;
       this.title.textContent = RELEASES.title;
       this.foot.replaceChildren(this.scanButton('btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
@@ -592,6 +824,8 @@ class ReleasePage {
     this.stateLine.hidden = false;
     this.accessLine.textContent = s.access ?? '';
     this.accessLine.hidden = s.access === null;
+    this.partLine.textContent = s.drawn ? (this.part ?? '') : '';
+    this.partLine.hidden = !s.drawn || this.part === null;
 
     const sections: (HTMLElement | null)[] = [];
     if (s.image) {
@@ -711,7 +945,7 @@ class ReleasePage {
     const items = d.kind === 'idle' ? [] : d.items;
     const yours = this.entry.kind === 'ready' && this.entry.entry ? this.entry.entry.id : null;
     const lines = drawLines(items, yours);
-    const out: HTMLElement[] = [sectionLabel(RELEASES.section.entries, 'release-entries'), h('p', { class: 'prose release__entries-lead', text: RELEASES.entriesLead(s.entries ?? 0) })];
+    const out: HTMLElement[] = [sectionLabel(RELEASES.section.entries, 'release-entries'), h('p', { class: 'prose release__entries-lead', text: RELEASES.entriesLead })];
     if (lines.length > 0) {
       out.push(
         h(

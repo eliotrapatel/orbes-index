@@ -380,6 +380,37 @@ export interface DrawEntry {
   rank: number;
 }
 
+/** A release of THE RELEASES' PAST (GET /api/v1/releases/past, plan LIVE RELEASE+ choice 5): what was announced, no end figure. */
+export interface PastRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  /** The release's title; a LIVE RELEASE's null when it ended before its name's stage. */
+  title: string | null;
+  model: { name: string | null; type: string | null; collection: string | null };
+  /** `/api/v1/media/<sha256>`, or null. */
+  imageUrl: string | null;
+  /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
+  opensAt: string;
+  /** The quantity as announced (« 25 PIECES »). */
+  quantityLine: string;
+}
+
+/** A page of GET /api/v1/releases/past, the newest first. */
+export interface PastReleasesPage {
+  items: PastRelease[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** The releases the signed-in account took part in (GET /api/v1/account/participation). */
+export interface Participation {
+  /** « You have taken part in N releases ». */
+  count: number;
+  /** Each release once, an after-room's under the release it follows; `secured`: a piece secured there. */
+  releases: { id: string; secured: boolean }[];
+}
+
 /** A page of GET /api/v1/drops/:id/entries, by rank. */
 export interface DrawEntriesPage {
   items: DrawEntry[];
@@ -554,11 +585,26 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   afterRoom?: AfterRoomOf;
 }
 
-/** A LIVE RELEASE's page once it has ended: only that it has. */
+/**
+ * A LIVE RELEASE's page once it is over, in its final state (plan LIVE RELEASE+, decision 30): what was announced, each
+ * part from its stage, its opening and its quantity line; never an end figure.
+ */
 export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+  title: string | null;
+  name: string | null;
+  type: string | null;
+  collection: string | null;
+  description: string | null;
+  silhouetteUrl: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
+  /** T0. */
+  opensAt: string;
+  /** The quantity line as announced (« 25 PIECES »). */
+  quantityLine: string;
   afterRoom?: AfterRoomOf;
 }
 

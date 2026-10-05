@@ -83,7 +83,7 @@ import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { piecesView } from './views/pieces.js';
-import { releasesView, releaseView } from './views/releases.js';
+import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { verifyingView } from './views/verifying.js';
@@ -129,6 +129,9 @@ const afterRoomOf = (pathname: string): boolean => releasesRouteOf(pathname)?.af
 const postIdOf = (pathname: string): string | null => circleRouteOf(pathname)?.post ?? null;
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
+
+/** THE RELEASES' tab its place in the history keeps (plan LIVE RELEASE+, choice 5): PAST, or LIVE by default. */
+const releasesTabOf = (state: unknown): ReleasesTab => ((state as { tab?: unknown } | null)?.tab === 'past' ? 'past' : 'live');
 
 /** Minimum time VERIFYING… stays visible, so a fast answer never reads as a flicker. */
 const MIN_VERIFYING_MS = 650;
@@ -549,7 +552,19 @@ class App {
     this.generation++;
     this.stopCamera();
     this.releaseId = null;
-    const view = releasesView({ api: this.api, onScan: () => void this.startScan(), onRelease: (id) => this.openRelease(id), onCollection: () => this.openLookbook(), localZone: localZone() });
+    const view = releasesView({
+      api: this.api,
+      session: this.session,
+      // The tab its place in the history kept: back from a release opened from PAST returns to PAST.
+      tab: entryOf(history.state) === 'releases' ? releasesTabOf(history.state) : 'live',
+      onTab: (tab) => {
+        if (entryOf(history.state) === 'releases') history.replaceState({ ...(history.state as object), tab }, '');
+      },
+      onScan: () => void this.startScan(),
+      onRelease: (id) => this.openRelease(id),
+      onCollection: () => this.openLookbook(),
+      localZone: localZone(),
+    });
     if (await this.swap(view.root, 'releases', focus)) this.live = view;
     else view.dispose();
   }

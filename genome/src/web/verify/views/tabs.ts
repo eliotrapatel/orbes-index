@@ -1,6 +1,7 @@
 /**
  * PRODUCT · WARRANTY · CARE · OWNERSHIP on a result, OWNERSHIP · WARRANTY ·
- * SERVICE · CARE on each piece of MY PIECES (P-M02) — an ARIA tablist (manual activation
+ * SERVICE · CARE on each piece of MY PIECES (P-M02), LIVE · PAST on THE
+ * RELEASES (plan LIVE RELEASE+, choice 5) — an ARIA tablist (manual activation
  * is unnecessary here: panels are light, so arrow keys select).
  * Keyboard: ←/→ move, Home/End jump; only the selected tab is in the tab
  * order (roving tabindex). Panels are built lazily on first selection.
@@ -27,6 +28,10 @@ export interface TabsOptions<T extends string> {
   idPrefix?: string;
   /** Accessible name of the tablist (default "Product information"). */
   label?: string;
+  /** Accessible name of the tabs' region (default "Details"). */
+  regionLabel?: string;
+  /** Told each tab selected by the reader (a click or a key), not the first. */
+  onSelect?: (id: T) => void;
 }
 
 export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id: T) => HTMLElement, initial: T = ids[0], opts: TabsOptions<T> = {}): TabsView<T> {
@@ -62,7 +67,12 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
       class: 'tabs__tab',
       id: `${prefix}tab-${id}`,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': `${prefix}panel-${id}`, tabindex: -1 },
-      on: { click: () => select(id) },
+      on: {
+        click: () => {
+          select(id);
+          opts.onSelect?.(id);
+        },
+      },
       text: labels[id],
     });
     tabs.set(id, tab);
@@ -80,8 +90,9 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
     if (next === undefined) return;
     ev.preventDefault();
     select(ids[next], true);
+    opts.onSelect?.(ids[next]);
   });
 
   select(initial);
-  return { root: h('section', { class: 'tabs', attrs: { 'aria-label': 'Details' } }, list, panels), select };
+  return { root: h('section', { class: 'tabs', attrs: { 'aria-label': opts.regionLabel ?? 'Details' } }, list, panels), select };
 }

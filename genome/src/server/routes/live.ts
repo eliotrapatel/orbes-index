@@ -3,11 +3,11 @@
  *
  * Public, no session (each stage at its time, 404 DROP_NOT_FOUND before the announcement):
  *
- *   GET  /api/v1/live                       THE RELEASES' LIVE half: announced, not ended, the next opening first
+ *   GET  /api/v1/live                       THE RELEASES' LIVE tab: announced, not ended, the next opening first
  *   GET  /api/v1/live/next                  the banner of /verify and MY PIECES ({ release: null } when none)
  *   GET  /api/v1/live/clock                 the server's time, for the page's 3-sample clock sync (the banner's too: a
  *                                           cached public answer never carries a time)
- *   GET  /api/v1/live/:id                   a release's page (once ended, only that it is)
+ *   GET  /api/v1/live/:id                   a release's page (once over, its final state: no end figure)
  *   GET  /api/v1/live/:id/calendar.ics      ADD TO CALENDAR
  *   POST /api/v1/live/:id/board             the boutique board, by its secret link (in the body, from the page's fragment)
  *   POST /api/v1/live/:id/board/stream      its stream (SSE)

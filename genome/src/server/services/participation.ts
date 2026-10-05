@@ -115,3 +115,36 @@ export function securedIn(db: Db, account: Expression<string>, releaseId: string
   const draw = db.selectFrom('drop_entries as ic').select('ic.id').where('ic.account_id', '=', account).where('ic.status', '=', 'CONFIRMED').where('ic.drop_id', '=', releaseId);
   return sql<SqlBool>`(exists (${live}) or exists (${draw}))`;
 }
+
+/** A release an account took part in (THE RELEASES' PAST, plan LIVE RELEASE+ choice 5), and whether it secured a piece there. */
+export interface ReleaseTakenPart {
+  /** The release (an after-room's: the release it follows). */
+  id: string;
+  /** A piece secured in it, its after-room's included: YOU SECURED A PIECE; else YOU TOOK PART. */
+  secured: boolean;
+}
+
+/**
+ * The releases an account took part in at `now`, each once (by id), each with whether it secured a piece there: the
+ * same releases `participations` counts, so their number is the collector's « You have taken part in N releases ».
+ */
+export async function releasesTakenPart(db: Db, accountId: string, now: Date): Promise<ReleaseTakenPart[]> {
+  const took = await participatedReleases(db, accountId, now);
+  if (took.size === 0) return [];
+  const live = db
+    .selectFrom('live_entries as ce')
+    .innerJoin('drops as cd', 'cd.id', 'ce.drop_id')
+    .select(sql<string>`coalesce(cd.parent_drop_id, cd.id)`.as('release_id'))
+    .where('cd.mode', '=', 'LIVE')
+    .where('ce.account_id', '=', accountId)
+    .where('ce.status', '=', 'CONFIRMED');
+  const draw = db
+    .selectFrom('drop_entries as ce')
+    .innerJoin('drops as cd', 'cd.id', 'ce.drop_id')
+    .select('cd.id as release_id')
+    .where('cd.mode', '=', 'DRAW')
+    .where('ce.account_id', '=', accountId)
+    .where('ce.status', '=', 'CONFIRMED');
+  const secured = new Set((await live.union(draw).execute()).map((r) => r.release_id));
+  return [...took].sort().map((id) => ({ id, secured: secured.has(id) }));
+}

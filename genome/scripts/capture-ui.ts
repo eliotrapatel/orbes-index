@@ -1056,7 +1056,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
 
     // The edge pages, each with its one action.
     const edge = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });
-    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 60 });
+    const ended = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '50', stock: 1 }], turnSeconds: 300 });
     await sleep(3_500);
     const [e50, e52] = edge.sizes;
     const enter = async (dropId: string, sizeId: string, pieces = 1) => {
@@ -1085,11 +1085,12 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await untilStatus(edge.id, buyer.id, 'TURN');
     const late = await enter(edge.id, e52!.id);
     await secureAs(edge.id, buyer, true);
-    // Sold out before a turn came; a collector without an entry finds it over.
+    // Closed at its time before a turn came, the first collector's turn still running (the page whole): the one waiting
+    // reads that it has closed; a collector without an entry its final state (plan LIVE RELEASE+, decision 30).
     const first = await enter(ended.id, ended.sizes[0]!.id);
     await untilStatus(ended.id, first.id, 'TURN');
     const waiting = await enter(ended.id, ended.sizes[0]!.id);
-    await secureAs(ended.id, first, true);
+    await ctx.db.updateTable('drops').set({ closes_at: new Date() }).where('id', '=', ended.id).execute();
     await untilStatus(ended.id, waiting.id, 'ENDED');
     const outsider = await account(0);
     const nobody = await account(1);
@@ -1108,7 +1109,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     for (const [name, token, dropId] of pages) {
       const { context: c, page: p } = await phone(token, name);
       await p.goto(`${origin}/verify/releases/${dropId}`);
-      await p.waitForSelector('.live__edge h1');
+      await p.waitForSelector('.live__edge h1, .live__past h1');
       await settle(p);
       await shots.full(p, name);
       await c.close();

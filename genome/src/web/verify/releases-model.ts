@@ -13,6 +13,9 @@
  *  - The account's entry: one sentence for what it means now (a place held
  *    until a time, the waiting list's rank, …), and whether ENTER THE DRAW
  *    or WITHDRAW is offered.
+ *  - THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): each release ended as it was announced (its photograph, its
+ *    name, its opening date, its quantity line; never an end figure), and, signed in, the account's part in it (YOU
+ *    TOOK PART, YOU SECURED A PIECE) and in how many releases; a drawn release's page says THIS RELEASE IS OVER.
  *  - The early access (P-X02): the line under a release's state
  *    (PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …), its facts (when it
  *    opens, the places reserved directly), and, for an account PLATINE or
@@ -24,8 +27,8 @@
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
-import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry } from './types.js';
-import { formatDateTime, formatDateTimeLong, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
+import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
+import { formatDate, formatDateTime, formatDateTimeLong, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
 
 /** The list of the releases, and the page of one under it. */
 export const RELEASES_PATH = '/verify/releases';
@@ -177,8 +180,6 @@ export interface ReleaseSheetModel {
   seed: string | null;
   seedHex: string | null;
   seedHashHex: string;
-  /** Once drawn: how many entries took part. */
-  entries: number | null;
   drawn: boolean;
 }
 
@@ -202,8 +203,9 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     { label: RELEASES.rows.closes, value: closes.utc, local: closes.local },
     { label: RELEASES.rows.held, value: RELEASES.hours(Number(s.purchaseWindowHours) || 0) },
   );
-  // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces.
-  if (early && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
+  // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces; once
+  // drawn, the release is over and says no end figure (plan LIVE RELEASE+, choice 5).
+  if (early && state !== 'DRAWN' && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
   if (s.drawnAt) {
     const drawn = twoClocks(s.drawnAt, offsetMinutes);
     rows.push({ label: RELEASES.rows.drawn, value: drawn.utc, local: drawn.local });
@@ -216,7 +218,8 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     id: s.id,
     title: upper(s.title),
     state,
-    stateLabel: [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
+    // Drawn, the release is over (plan LIVE RELEASE+, decision 30): its page says so, neutral.
+    stateLabel: state === 'DRAWN' ? RELEASES.over : [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
     earlyAccess: early,
     access: earlyAt && opens.utc ? RELEASES.access(earlyAt.utc, opens.utc) : null,
     earlyNote: early ? RELEASES.earlyNote : null,
@@ -232,7 +235,6 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     seedHashHex,
     seed: seedHex ? groupHex(seedHex) : null,
     seedHex,
-    entries: state === 'DRAWN' && typeof s.entries === 'number' ? s.entries : null,
     drawn: state === 'DRAWN',
   };
 }
@@ -374,4 +376,82 @@ export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: 
         entry: entryModel({ id: e.dropId, title: upper(e.title), state, opensAt: e.opensAt }, e, opts),
       };
     });
+}
+
+// ── THE RELEASES' PAST (plan LIVE RELEASE+, choice 5) ──────────────────────
+
+/** The releases PAST reads at a time (SHOW MORE reads the next ones). */
+export const PAST_PAGE_SIZE = 12;
+
+/** A release of PAST: what was announced, never an end figure; the account's part in it is set by `pastMark`. */
+export interface PastCardModel {
+  id: string;
+  href: string;
+  /** LIVE RELEASE or DRAW. */
+  kind: string;
+  /** A LIVE RELEASE's model, as its card and page name it; a draw's title, as its card does. */
+  title: string;
+  /** A LIVE RELEASE's type and collection; a draw's model and type. */
+  model: string;
+  /** `11 OCT 2026 · 25 PIECES`: the opening date on this phone's calendar, the quantity as announced. */
+  line: string;
+  image: ReleasePhoto | null;
+}
+
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** `11 OCT 2026`: the date of `iso` on the calendar of `timeZone` (UTC when the zone is unknown); '' when unreadable. */
+export function zonedDate(iso: string, timeZone: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  let f = dayFormatters.get(timeZone);
+  if (!f) {
+    try {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' });
+    } catch {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric' });
+    }
+    dayFormatters.set(timeZone, f);
+  }
+  const parts = Object.fromEntries(f.formatToParts(new Date(t)).map((p) => [p.type, p.value]));
+  return formatDate(`${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`);
+}
+
+/** The releases of a page of PAST, in the server's order; one without an id of its own is left out. */
+export function pastCards(items: readonly PastRelease[], localZone: string): PastCardModel[] {
+  const out: PastCardModel[] = [];
+  for (const c of items) {
+    if (!isReleaseId(c?.id) || (c.kind !== 'LIVE' && c.kind !== 'DRAW')) continue;
+    const m = c.model ?? { name: null, type: null, collection: null };
+    const live = c.kind === 'LIVE';
+    // A LIVE RELEASE is named by its model, from its name's stage (one ended before it: LIVE RELEASE); a draw by its title.
+    const title = live ? (m.name ? upper(m.name) : RELEASES.past.kind.LIVE) : upper(c.title ?? '');
+    const model = live ? [upper(m.type), upper(m.collection)].filter((x) => x.length > 0).join(' · ') : modelLine({ name: m.name ?? '', type: m.type ?? '' });
+    out.push({
+      id: c.id,
+      href: releasePath(c.id),
+      kind: RELEASES.past.kind[c.kind],
+      title,
+      model,
+      line: RELEASES.past.line(zonedDate(c.opensAt, localZone), upper(c.quantityLine)),
+      image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: RELEASES.photosLabel(title) } : null,
+    });
+  }
+  return out;
+}
+
+/** The account's part in the releases: how many, and for each, YOU SECURED A PIECE or YOU TOOK PART. */
+export interface ParticipationModel {
+  /** « You have taken part in N releases. » */
+  taken: string;
+  marks: ReadonlyMap<string, string>;
+}
+
+export function participationModel(p: Participation): ParticipationModel {
+  const marks = new Map<string, string>();
+  for (const r of Array.isArray(p?.releases) ? p.releases : []) {
+    if (isReleaseId(r?.id)) marks.set(r.id, r.secured === true ? RELEASES.past.secured : RELEASES.past.tookPart);
+  }
+  const count = Number.isInteger(p?.count) && p.count >= 0 ? p.count : marks.size;
+  return { taken: RELEASES.past.taken(count), marks };
 }

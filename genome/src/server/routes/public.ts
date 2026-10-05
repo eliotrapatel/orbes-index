@@ -2,8 +2,9 @@
  * Public routes (contract §3): health, public keys, categories, Client
  * Services contact, verify, the photographs an authentic result shows
  * (F-04), the lookbook of the models (P-R02: the PUBLIC ones and their
- * sheets), the drops (P-R03: the published releases, a release's page
- * and, once drawn, its entries by rank), the report a customer may attach
+ * sheets), the drops (P-R03: the releases to come, a release's page
+ * and, once drawn, its entries by rank), THE RELEASES' PAST (plan LIVE
+ * RELEASE+, choice 5: the releases ended), the report a customer may attach
  * to a scan that was not authentic, and the ownership certificate an owner
  * shares (F-06: its live record and its PDF, by the token of the link).
  *
@@ -169,7 +170,8 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     return sheet;
   });
 
-  // The drops (P-R03, §8.9): the published releases, the latest opening first; never a DRAFT.
+  // The drops (P-R03, §8.9): the published releases to come (THE RELEASES' LIVE tab: neither drawn nor cancelled), the
+  // latest opening first; never a DRAFT.
   app.get('/api/v1/drops', async (_request, reply) => {
     const drops = await ctx.services.drops.listPublic();
     reply.header('cache-control', DROPS_CACHE_CONTROL);
@@ -189,6 +191,14 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
   app.get('/api/v1/drops/:id/entries', async (request, reply) => {
     const { id } = parse(publicDropParams, request.params);
     const page = await ctx.services.drops.drawEntries(id, pageOf(request.query));
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return page;
+  });
+
+  // THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): every release ended, LIVE RELEASES and draws together, the newest
+  // first, a page at a time; never a cancelled release nor an after-room, never an end figure. The same for everyone.
+  app.get('/api/v1/releases/past', async (request, reply) => {
+    const page = await ctx.services.pastReleases.page(pageOf(request.query));
     reply.header('cache-control', DROPS_CACHE_CONTROL);
     return page;
   });

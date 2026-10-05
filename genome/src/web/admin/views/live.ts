@@ -423,7 +423,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       danger: true,
       body: [
         h('p', { class: 'dialog__text' }, 'No new turn. Everyone in the room, in the line and in a turn now reads that the release has ended. A piece already held may still be paid for until its time runs out.'),
-        h('p', { class: 'dialog__text' }, 'The release then leaves THE RELEASES. Once.'),
+        h('p', { class: 'dialog__text' }, 'The release then moves to PAST in THE RELEASES, as announced. Once.'),
       ],
       phrase: livePhrase('end', r),
       confirmLabel: 'End now',

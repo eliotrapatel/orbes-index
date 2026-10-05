@@ -705,6 +705,29 @@ export const RELEASES = Object.freeze({
   liveFailed: 'The LIVE RELEASES could not be shown just now.',
   retry: 'TRY AGAIN',
   empty: 'No release is announced yet.',
+  /**
+   * The two tabs (plan LIVE RELEASE+, choice 5): LIVE, the releases to come and under way (THE RELEASES' calendar); PAST,
+   * the releases ended.
+   */
+  tabs: Object.freeze({ label: 'THE RELEASES', live: 'LIVE', past: 'PAST' }),
+  /** PAST: every release ended, the newest first, as announced (no end figure); signed in, the account's part in each. */
+  past: Object.freeze({
+    empty: 'No release has ended yet.',
+    loadFailed: 'The past releases could not be shown just now.',
+    more: 'SHOW MORE',
+    moreFailed: 'More releases could not be shown just now.',
+    kind: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW' }),
+    /** A card's opening date, then its quantity as announced: `11 OCT 2026 · 25 PIECES`. */
+    line: (date: string, quantity: string) => [date, quantity].filter(Boolean).join(' · '),
+    /** At the top of PAST, signed in. */
+    taken: (n: number) => `You have taken part in ${n} ${n === 1 ? 'release' : 'releases'}.`,
+    takenFailed: 'Your part in the releases could not be shown just now.',
+    /** On a card, and on the release's page. */
+    tookPart: 'YOU TOOK PART',
+    secured: 'YOU SECURED A PIECE',
+  }),
+  /** A release ended, on its page (plan LIVE RELEASE+, decision 30): a neutral status, never how it ended. */
+  over: 'THIS RELEASE IS OVER',
   /** The text link of each release of the list. */
   see: 'SEE THE RELEASE',
   scan: 'SCAN ORBES CODE',
@@ -784,7 +807,8 @@ export const RELEASES = Object.freeze({
   /** The check made on this phone, once the seed is published. */
   seedChecked: 'Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.',
   seedMismatch: 'Checked on this phone: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
-  entriesLead: (n: number) => (n === 1 ? '1 entry took part in the draw.' : `${n} entries took part in the draw.`),
+  /** Over the draw's list: what it shows, never how many (no end figure, plan LIVE RELEASE+ choice 5). */
+  entriesLead: 'Every entry the draw ranked, in its order: its rank, its tier and its seniority at the draw, then its identifier.',
   /** One entry of the draw's list: its rank, its tier and its seniority. */
   entryLine: (rank: number, tier: string, years: number) => `${rank} · ${tier} · ${years === 1 ? '1 YEAR' : `${years} YEARS`}`,
   noTier: 'NO TIER',
@@ -1059,6 +1083,7 @@ export const LIVE = Object.freeze({
       CLOSED: Object.freeze({ title: 'THE RELEASE HAS CLOSED', text: 'Its time has run out before your turn came.' }),
       ENDED: Object.freeze({ title: 'THE RELEASE HAS ENDED', text: 'ORBES has ended this release before your piece was secured.' }),
     }),
+    /** A release that no longer answers while its page is open (cancelled): it is in neither LIVE nor PAST. A release ended opens in its final state. */
     over: Object.freeze({ title: 'THIS RELEASE IS OVER', text: 'It no longer appears in THE RELEASES. Your entry, if you had one, stays in MY PIECES.' }),
   }),
   back: 'THE RELEASES',

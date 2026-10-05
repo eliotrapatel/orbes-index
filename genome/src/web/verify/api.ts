@@ -52,6 +52,8 @@ import type {
   OwnedPiece,
   OwnerCertificate,
   OwnershipConfirmation,
+  Participation,
+  PastReleasesPage,
   RecoveryResult,
   ReportInput,
   ServiceRecord,
@@ -216,6 +218,23 @@ export class ApiClient {
   async drawEntries(id: string, page: number, pageSize = 100): Promise<DrawEntriesPage> {
     const r = await this.request<DrawEntriesPage>('GET', `/api/v1/drops/${encodeURIComponent(id)}/entries?page=${page}&pageSize=${pageSize}`);
     if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, the newest first, LIVE RELEASES and
+   * draws together. Read afresh (the server lets a shared cache keep it a minute).
+   */
+  async pastReleases(page: number, pageSize: number): Promise<PastReleasesPage> {
+    const r = await this.request<PastReleasesPage>('GET', `/api/v1/releases/past?page=${page}&pageSize=${pageSize}`);
+    if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The releases the signed-in account took part in, each with whether it secured a piece there (401 signed out). */
+  async participation(): Promise<Participation> {
+    const r = await this.request<Participation>('GET', '/api/v1/account/participation');
+    if (!Array.isArray(r?.releases) || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }
 

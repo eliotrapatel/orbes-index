@@ -24,7 +24,7 @@ import { startLiveEngine } from '../../src/server/context.js';
 import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock } from '../../src/server/types.js';
-import { LIVE } from '../../src/web/verify/copy.js';
+import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
@@ -216,13 +216,16 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await textOf(page.locator('h1'), 'CONFIRMED');
     expect(problems).toEqual([]);
 
-    // Nobody else: another collector, and a visitor, at its address read the release's own page, its address put back;
-    // the rival who secured the release's last piece never sees a door.
+    // Nobody else: another collector, and a visitor, at its address read the release's own page in its final state (plan
+    // LIVE RELEASE+, decision 30), its address put back; the rival who secured the release's last piece reads it too, its
+    // part said, and never sees a door.
     for (const who of [stranger.token, null, rival.token]) {
       const other = await phone(who);
       await other.page.goto(`${srv.origin}/verify/releases/${r.id}/after-room`);
       await expect.poll(() => new URL(other.page.url()).pathname, POLL).toBe(`/verify/releases/${r.id}`);
-      await textOf(other.page.locator('h1'), who === rival.token ? 'CONFIRMED' : 'THIS RELEASE IS OVER');
+      await textOf(other.page.locator('h1'), 'MONOLITHE');
+      await textOf(other.page.locator('.live__past-status'), RELEASES.over);
+      if (who === rival.token) await textOf(other.page.locator('.live__past-part'), RELEASES.past.secured);
       await sleep(500);
       expect(await other.page.locator('.live__after').count()).toBe(0);
       expect(other.problems).toEqual([]);

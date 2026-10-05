@@ -4,7 +4,7 @@
  * confirmed, its edge pages, its card in THE RELEASES and its entries in MY PIECES. Pure (no DOM) and unit-tested.
  *
  *  - Which screen: from the release's page, the account's standing (signed out, outside the rule, allowed), the room and
- *    the account's entry, at the server's time (`liveScreen`). The size never changes after T0: the picker is only
+ *    the account's entry, at the server's time (`liveScreen`); once over, its final state (`livePastModel`). The size never changes after T0: the picker is only
  *    offered before it (and, after it, to an account that is not in the line yet, which joins behind).
  *  - The server's time: three round trips to /api/v1/live/clock, the offset of the shortest kept (`clockOffset`); every
  *    countdown counts on it, so the door opens on every phone at the same second.
@@ -17,7 +17,7 @@
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { LIVE, RELEASES } from './copy.js';
-import { afterRoomPath, isReleaseId, releasePath, tierLabel, type EntryModel, type MyEntryModel } from './releases-model.js';
+import { afterRoomPath, isReleaseId, releasePath, tierLabel, zonedDate, type EntryModel, type MyEntryModel } from './releases-model.js';
 import type {
   AfterRoomDoor,
   ClientServices,
@@ -43,7 +43,10 @@ const DAY = 24 * HOUR;
 /** The zone the release's times are said in first. */
 export const PARIS = 'Europe/Paris';
 
-/** The page of an ended release: nothing more than that it is over (the plan's choice 32). */
+/**
+ * The page of a release over (the end recorded, no turn or hold left): its final state, what was announced and never an
+ * end figure (plan LIVE RELEASE+, decision 30).
+ */
 export function isEndedSheet(s: LiveSheet | LiveEndedSheet | null | undefined): s is LiveEndedSheet {
   // A whole sheet may be ENDED too: a turn or a hold may still run to its deadline after the end.
   return !!s && s.phase === 'ENDED' && !('sizes' in s);
@@ -210,6 +213,7 @@ export type LiveScreenKind =
   | 'removed'
   | 'ended'
   | 'afterRoom'
+  | 'past'
   | 'over';
 
 export interface LiveScreenInput {
@@ -249,9 +253,24 @@ export function roomSize(room: LiveRoom | null, sizeId: string | undefined): Liv
   return room?.sizes.find((s) => s.id === sizeId) ?? null;
 }
 
-/** The screen of the release's page now. */
+/** The second door still to come or standing at the server's time `now`: until the after-room closes. */
+function doorAhead(door: AfterRoomDoor | null | undefined, now: number): boolean {
+  const closes = door ? Date.parse(door.closesAt) : Number.NaN;
+  return Number.isFinite(closes) && now < closes;
+}
+
+/**
+ * The screen of the release's page now. A release over is in THE RELEASES' PAST: its page opens in its final state for
+ * everyone, with the account's part in it (`past`, plan LIVE RELEASE+ decision 30), never how its entry ended; but a
+ * guest of its after-room keeps the second door until it closes. An after-room over says only that it is closed.
+ */
 export function liveScreen(i: LiveScreenInput): LiveScreenKind {
   const entry = i.viewer === 'ready' ? heldEntry(i.entry) : null;
+  const afterRoom = !!i.sheet.afterRoom;
+  if (isEndedSheet(i.sheet) && !afterRoom) {
+    if (i.viewer === 'unknown') return 'loading';
+    if (!(entry?.status === 'ENDED' && doorAhead(entry.afterRoom, i.now))) return 'past';
+  }
   if (entry) {
     switch (entry.status) {
       case 'CONFIRMED':
@@ -285,7 +304,8 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
   if (isEndedSheet(i.sheet)) return i.viewer === 'unknown' ? 'loading' : 'over';
   const phase = phaseAt(i.sheet, i.room, i.now);
   if (phase === 'ANNOUNCED') return 'announced';
-  if (phase === 'ENDED') return 'over';
+  // Ended, a turn or a hold still running to its deadline (the page whole): the final state for anyone not in it.
+  if (phase === 'ENDED') return afterRoom ? 'over' : 'past';
   switch (i.viewer) {
     case 'unknown':
       return 'loading';
@@ -513,6 +533,31 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     picture: pictureOf(s),
     lookbook: isLookbookSlug(s.lookbook) ? s.lookbook : null,
     calendarHref: `/api/v1/live/${encodeURIComponent(s.id)}/calendar.ics`,
+    description: s.description && s.description.trim() ? s.description.trim() : null,
+  };
+}
+
+/** A release's page in its final state (plan LIVE RELEASE+, decision 30): what was announced, no end figure. */
+export interface LivePastModel {
+  /** The model's name once revealed, else LIVE RELEASE. */
+  name: string;
+  /** `RING · ORBIT` once the name is revealed. */
+  line: string | null;
+  /** `11 OCT 2026 · 25 PIECES`: its opening date on this phone's calendar, its quantity line as announced. */
+  facts: string;
+  picture: LivePicture | null;
+  lookbook: string | null;
+  description: string | null;
+}
+
+export function livePastModel(s: LiveSheet | LiveEndedSheet, localZone: string): LivePastModel {
+  const name = s.name ? upper(s.name) : null;
+  return {
+    name: name ?? LIVE.kind,
+    line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
+    facts: RELEASES.past.line(zonedDate(s.opensAt, localZone), upper(s.quantityLine)),
+    picture: pictureOf(s),
+    lookbook: isLookbookSlug(s.lookbook) ? s.lookbook : null,
     description: s.description && s.description.trim() ? s.description.trim() : null,
   };
 }

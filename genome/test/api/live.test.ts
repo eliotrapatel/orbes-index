@@ -5,7 +5,7 @@
  *  - every public surface (the list, the page, the banner, the .ics, the board) 404 before the announcement, for a
  *    draft, a cancelled release, a draw, an unknown or malformed id; each stage (silhouette, name, photograph) never
  *    before its time, read in the very bytes each surface answers; an ended release leaves the list and the banner, its
- *    page says only that it is over;
+ *    page once over in its final state (plan LIVE RELEASE+, decision 30: what was announced, never an end figure);
  *  - the account's routes: I'LL BE THERE and its withdrawal, ENTER, CHANGE SIZE (before T0 only), LEAVE, PRESS,
  *    SECURE (the gesture's rule), the add-ons, PAY, RELEASE MY PLACE and the second chance, the state with the room and
  *    the account's own entry (its place, those ahead, its turn's secret), MY PIECES; the network's keyed hash kept;
@@ -315,12 +315,33 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(state.body).not.toContain('"title"');
     });
 
-    it('takes an ended release out of the list and the banner, its page saying only that it is over', async () => {
-      const r = await release(h, f, { inMinutes: 6 });
+    it('takes an ended release out of the list and the banner, its page in its final state: what was announced, never an end figure', async () => {
+      const r = await release(h, f, { inMinutes: 6, quantityLine: '25 PIECES' });
+      await h.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE', description: 'Cast in Paris.' }).where('id', '=', r.id).execute();
       const c = h.client();
       expect((safeJson(await c.get('/api/v1/live/next')) as { release: { id: string } }).release.id).toBe(r.id);
+      // Pieces added live: the quantity line stays the one announced (plan LIVE RELEASE+, decision 29).
+      await f.live.addPieces(r.id, r.sizes[0]!.id, 3, f.admin);
       await f.live.end(r.id, f.admin);
-      expect(safeJson(await c.get(`/api/v1/live/${r.id}`))).toEqual({ id: r.id, kind: 'LIVE', phase: 'ENDED' });
+      const opensAt = (await h.ctx.db.selectFrom('drops').select('opens_at').where('id', '=', r.id).executeTakeFirstOrThrow()).opens_at;
+      const ended = await c.get(`/api/v1/live/${r.id}`);
+      expect(safeJson(ended)).toEqual({
+        id: r.id,
+        kind: 'LIVE',
+        phase: 'ENDED',
+        title: 'MONOLITHE — LIVE',
+        name: 'MONOLITHE',
+        type: 'RING',
+        collection: null,
+        description: 'Cast in Paris.',
+        silhouetteUrl: null,
+        imageUrl: null,
+        lookbook: null,
+        opensAt: opensAt.toISOString(),
+        quantityLine: '25 PIECES',
+      });
+      // No end figure: no size or stock, no count, no reason of the end, no interest, no price.
+      for (const word of ['sizes', 'stock', 'interest', 'endedReason', 'SOLD_OUT', 'priceMinor', 'access']) expect(ended.body, word).not.toContain(word);
       expect((safeJson(await c.get('/api/v1/live')) as { releases: { id: string }[] }).releases.map((x) => x.id)).not.toContain(r.id);
       expect((safeJson(await c.get('/api/v1/live/next')) as { release: { id: string } | null }).release?.id).not.toBe(r.id);
       expect(errorOf(await c.get(`/api/v1/live/${r.id}/calendar.ics`)).code).toBe('DROP_NOT_FOUND');
@@ -762,7 +783,9 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const over = await sa.next((e) => e.event === 'room' && e.data.over === true, fromA);
       expect(sa.events.indexOf(confirmed)).toBeLessThan(sa.events.indexOf(over));
       await until(() => sa.ended && sb.ended);
-      expect(safeJson(await h.client().get(`/api/v1/live/${r.id}`))).toEqual({ id: r.id, kind: 'LIVE', phase: 'ENDED' });
+      const final = safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as Record<string, unknown>;
+      expect(final).toMatchObject({ id: r.id, kind: 'LIVE', phase: 'ENDED' });
+      expect(final).not.toHaveProperty('sizes');
 
       // The clock past the close before the engine's pass: the phase says ENDED, the room is not over, its entry open.
       const c = await release(h, f, { inMinutes: 4 });

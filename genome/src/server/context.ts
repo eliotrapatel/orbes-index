@@ -52,6 +52,7 @@ import { InvoiceService } from './services/invoices.js';
 import { AtelierService } from './services/atelier.js';
 import { FulfilmentService } from './services/fulfilment.js';
 import { OwnerService } from './services/owners.js';
+import { PastReleaseService } from './services/past-releases.js';
 import { SalonService } from './services/salon.js';
 import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
@@ -107,6 +108,8 @@ export interface AppServices {
   live: LiveService;
   /** What the LIVE RELEASES show: their announcements stage by stage, the room as its viewers read it, the boutique board, an account's own entries. */
   liveRoom: LiveRoomService;
+  /** THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases ended, public, and the releases an account took part in. */
+  pastReleases: PastReleaseService;
   /** The LIVE RELEASES in the console: created, edited until their announcement, published, cancelled; the live board; Client Services' reservations. */
   liveConsole: LiveConsoleService;
   /** The console's intelligence on the LIVE RELEASES: the planner, the forecasts, the radars, the alerts, the report, the collectors, the comparison. */
@@ -221,6 +224,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const turnKey = deriveLiveTurnKey(config);
     const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, clock });
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
+    const pastReleases = new PastReleaseService({ db, clock });
     const liveInsights = new LiveInsightsService({ db, clock });
     const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
     const stock = new StockService({ db, audit, clock });
@@ -255,6 +259,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       circle,
       live,
       liveRoom,
+      pastReleases,
       liveConsole,
       liveInsights,
       stock,

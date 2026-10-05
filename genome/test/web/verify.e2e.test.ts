@@ -2450,13 +2450,16 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await visible(releases.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
     await releases.getByRole('link', { name: 'ECLIPSE — RELEASE I' }).click();
     await textOf(page.locator('h1'), 'ECLIPSE — RELEASE I');
-    await textOf(page.locator('.release__state'), 'DRAWN');
+    // Drawn, the release is over (plan LIVE RELEASE+, decision 30): said so, with the account's part in it.
+    await textOf(page.locator('.release__state'), RELEASES.over);
+    await textOf(page.locator('.release__part'), RELEASES.past.tookPart);
     await textOf(page.locator('.release__entry .ownership__status'), 'PLACE HELD');
     // The seed, checked on this phone against the fingerprint published with the release; the entries by rank, its own marked.
     const seed = (await ctx.db.selectFrom('drops').select('seed').where('id', '=', drop.id).executeTakeFirstOrThrow()).seed!;
     await textOf(page.locator('.release__seed .release__hex').nth(1), groupHex(Buffer.from(seed).toString('hex')));
     await textOf(page.locator('.release__check'), RELEASES.seedChecked);
-    await textOf(page.locator('.release__entries-lead'), '3 entries took part in the draw.');
+    // Its entries by rank, never said how many (no end figure).
+    await textOf(page.locator('.release__entries-lead'), RELEASES.entriesLead);
     await countOf(page.locator('.release__item'), 3);
     await textOf(page.locator('.release__item.is-yours .release__item-line'), '1 · TITANE · 0 YEARS');
     await textOf(page.locator('.release__item.is-yours .release__item-id'), mine.id);

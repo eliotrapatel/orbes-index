@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, invoices, orders, ownership, ownershipCertificates, recovery, warranty } = ctx.services;
+  const { auth, invoices, orders, ownership, ownershipCertificates, pastReleases, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -104,6 +104,13 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/orders', async (request) => {
     const { account } = requireAccount(request);
     return { orders: await orders.forAccount(account.id) };
+  });
+
+  // THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases the account took part in, each with whether it
+  // secured a piece there (YOU TOOK PART, YOU SECURED A PIECE), and how many (« You have taken part in N releases »).
+  app.get('/api/v1/account/participation', async (request) => {
+    const { account } = requireAccount(request);
+    return pastReleases.participation(account.id);
   });
 
   // An order's documents in MY PIECES (plan LIVE RELEASE+, M6), its own only (404 for any other): the invoice and the

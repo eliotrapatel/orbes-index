@@ -4,8 +4,10 @@
  * own entries. Read only.
  *
  * Public (routes/live.ts, no session):
- *   list      THE RELEASES' LIVE half: every LIVE RELEASE announced and not ended, the next opening first;
- *   sheet     one of them; an ended one answers only that it is over (the plan's choice 32: nothing public after it);
+ *   list      THE RELEASES' LIVE tab: every LIVE RELEASE announced and not ended, the next opening first (once ended,
+ *             it is in THE RELEASES' PAST, services/past-releases.ts);
+ *   sheet     one of them; once over, its final state (plan LIVE RELEASE+, decision 30: what was announced, each part
+ *             from its stage, the opening and the quantity line; never an end figure: no stock, count, reason or interest);
  *   next      the banner of /verify and MY PIECES: the release live now, else the room open, else the next announced;
  *   calendar  its .ics: the room's opening, an alarm 10 minutes before, the name once revealed, no personal data.
  * Before its announcement (`announce_at`, the publication when NULL), a draft, a cancelled release, a DRAW, an unknown
@@ -146,11 +148,28 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   tierPriority: boolean;
 }
 
-/** A LIVE RELEASE's page once it has ended: nothing more (the plan's choice 32). */
+/**
+ * A LIVE RELEASE's page once it is over, in its final state (plan LIVE RELEASE+, decision 30, which lifts the LIVE plan's
+ * choice 32): what was announced, each part from its stage as on its card (its title, its model's name, type and
+ * collection, its description; its silhouette, its photograph and its lookbook sheet), its opening and its quantity line
+ * as announced (decision 29). No end figure (choice 5): no sizes or stock, no count, no reason of the end, no interest.
+ */
 export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+  title: string | null;
+  name: string | null;
+  type: string | null;
+  collection: string | null;
+  description: string | null;
+  silhouetteUrl: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
+  /** T0. */
+  opensAt: Date;
+  /** The quantity as the console wrote it and the announcement said it (« 25 PIECES »), even after pieces added live. */
+  quantityLine: string;
 }
 
 /** An after-room's page, as its guest reads it (`afterRoomSheet`): its own page, and the release it follows. */
@@ -382,7 +401,7 @@ export class LiveRoomService {
 
   /**
    * A release's page: 404 before its announcement; once over (the end recorded, no turn or hold left, as the room's
-   * `over`), only that it is. Between the end and the last deadline a turn may still be secured and a hold confirmed
+   * `over`), its final state (LiveEndedSheet). Between the end and the last deadline a turn may still be secured and a hold confirmed
    * (the plan's The end, item 10): the page is whole, its phase ENDED.
    */
   async sheet(dropId: string): Promise<LiveSheet | LiveEndedSheet> {
@@ -393,7 +412,7 @@ export class LiveRoomService {
 
   /**
    * An after-room's page for one of its guests (GET /api/v1/live/:id/after-room, :id the release it follows), from its
-   * T0, as `sheet` writes a release's (only that it is over, once it is), with the release it follows; the same 404 as
+   * T0, as `sheet` writes a release's (its final state, once over), with the release it follows; the same 404 as
    * an unknown release for anyone else, before its T0, and for a release without one opened.
    */
   async afterRoomSheet(accountId: string, parentId: string): Promise<LiveAfterRoomSheet> {
@@ -406,11 +425,27 @@ export class LiveRoomService {
 
   private async sheetOf(r: ReadRow, now: Date): Promise<LiveSheet | LiveEndedSheet> {
     const id = r.id;
+    const stages = liveStages(r, now)!;
     if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
-      if (!open) return { id, kind: 'LIVE', phase: 'ENDED' };
+      if (!open) {
+        return {
+          id,
+          kind: 'LIVE',
+          phase: 'ENDED',
+          title: stages.name ? r.title : null,
+          name: stages.name ? r.model_name : null,
+          type: stages.name ? r.model_type : null,
+          collection: stages.name ? r.collection : null,
+          description: stages.name ? r.description : null,
+          silhouetteUrl: stages.silhouette ? mediaUrl(r.silhouette_sha256) : null,
+          imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
+          lookbook: stages.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+          opensAt: r.opens_at,
+          quantityLine: r.quantity_line ?? '',
+        };
+      }
     }
-    const stages = liveStages(r, now)!;
     const [sizes, addons, interest] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
