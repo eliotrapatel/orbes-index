@@ -68,7 +68,7 @@ import {
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
-import { contactBlock, legalLinks, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { contactBlock, legalLinks, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
@@ -330,7 +330,7 @@ class ListPage {
         h('h2', { class: 'live-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
         h('p', { class: 'live-card__when' }, ...withNumerals(c.when.paris)),
         c.when.local ? h('p', { class: 'live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
-        h('p', { class: 'live-card__line' }, ...withNumerals(c.line)),
+        h('p', { class: 'live-card__line' }, ...withPhrases(c.line)),
         h('p', { class: 'live-card__access' }, ...withNumerals(c.access)),
         // The calendar of the reveals still to come: each stage's time, never what it shows.
         c.reveals.length

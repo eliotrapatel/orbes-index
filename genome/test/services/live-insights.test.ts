@@ -260,6 +260,9 @@ describe('the live alerts: exactly three', () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: 'SIZE_SOLD_OUT', size: { id: 's54', label: '54' }, since: at(3 * MINUTE), text: 'Size 54 is sold out.' });
     expect(alerts[0]!.reasoning).toEqual(['Its 2 pieces are all confirmed, the last at 02 NOV 2026 · 10:03:00 UTC.', '1 person still waits in this size, in case ADD PIECES serves them.']);
+    // A size of one piece is said in the singular.
+    const one = liveAlerts(release({ sizes: [{ id: 's52', label: '52', stock: 1 }] }), [confirmed(0, 20 * SECOND, 2 * MINUTE, { sizeId: 's52' })], none, now);
+    expect(one[0]!.reasoning).toEqual(['Its one piece is confirmed, at 02 NOV 2026 · 10:02:00 UTC.', 'Nobody waits in this size.']);
   });
 
   it('a wave: five turns missed in two minutes, half the turns that ended or more', () => {

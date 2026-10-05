@@ -167,6 +167,15 @@ export function withNumerals(text: string): (string | HTMLSpanElement)[] {
 }
 
 /**
+ * A line of facts joined by ` · ` (`€ 5 050 · 25 PIECES · ONE PER COLLECTOR`), each fact kept whole on one line when it
+ * fits (`.phrase`, an inline block): a narrow column breaks the line between its facts, never inside one; its figures
+ * in the reading face.
+ */
+export function withPhrases(text: string): (string | HTMLSpanElement)[] {
+  return text.split(' · ').flatMap((phrase, i): (string | HTMLSpanElement)[] => [...(i > 0 ? [' · '] : []), h('span', { class: 'phrase' }, ...withNumerals(phrase))]);
+}
+
+/**
  * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the
  * history entry is the router's); a click that opens a new tab or window is left to the browser.
  */

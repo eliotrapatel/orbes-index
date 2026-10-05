@@ -329,7 +329,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Missed', cell: (s) => formatCount(s.missed), kind: ['num'] },
           { label: 'Ended holds', cell: (s) => formatCount(s.expired), kind: ['num'] },
           { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
-          ...(b.sellOut ? [{ label: 'Forecast', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-sellout' } }, sizeSellOut(b, s.id)), kind: ['nowrap' as const] }] : []),
+          ...(b.sellOut ? [{ label: 'Forecast', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-sellout' } }, sizeSellOut(b, s.id)) }] : []),
           {
             label: '',
             cell: (s) => (acts.addPieces && !b.endedAt ? button('Add pieces', { kind: 'ghost', testId: 'live-add-pieces', onClick: () => addPieces(s) }) : null),

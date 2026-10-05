@@ -754,7 +754,7 @@ export function liveAlerts(r: InsightRelease, entries: readonly InsightEntry[], 
       since,
       text: `Size ${s.label} is sold out.`,
       reasoning: [
-        `Its ${pieces(s.stock)} are all confirmed, the last at ${utc(since)}.`,
+        s.stock === 1 ? `Its one piece is confirmed, at ${utc(since)}.` : `Its ${pieces(s.stock)} are all confirmed, the last at ${utc(since)}.`,
         waiting ? `${people(waiting)} still ${waiting === 1 ? 'waits' : 'wait'} in this size, in case ADD PIECES serves them.` : 'Nobody waits in this size.',
       ],
     });

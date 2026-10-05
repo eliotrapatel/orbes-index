@@ -37,13 +37,18 @@
  *     of one of her pieces, opened by a visitor from its link (full page)
  *   legal (the phone of verify): the FAQ (/legal/faq, J-06), in English
  *   the LIVE RELEASE (plan of 2026-10-04, Quality bar 7; the phone of verify,
- *     last: its releases and pieces would change the other captures) ·
- *     the banner · THE RELEASES with its LIVE cards · announced · the room
- *     (the closed door, READY CHECK) · the boutique board (landscape, its
- *     secret link) · the door open at T0 · the line · the turn · secured
- *     (the add-ons, PAY) · CONFIRMED in ivory · each edge page · the
- *     console's live board (1440 × 900); the engine runs on the stage, the
- *     releases and accounts made as test/support/live.ts makes them
+ *     last: its releases, pieces and MONOLITHE's photograph would change the
+ *     other captures) · the banner · THE RELEASES with its LIVE cards ·
+ *     announced at the silhouette's stage · announced, the name and the
+ *     photograph revealed · the room (the closed door, READY CHECK) · the
+ *     last minute (the lock turning) · the boutique board (landscape, its
+ *     secret link) · T0 (the door opening, its motion held) · the line ·
+ *     the turn (both rings half way) · secured (two add-ons, PAY · total) ·
+ *     CONFIRMED in ivory · each edge page · the console's live board while
+ *     the line runs and the page of a release planned, with its settings
+ *     (1440 × 900); the engine runs on the stage, the releases and accounts
+ *     made as test/support/live.ts makes them, MONOLITHE's photograph and a
+ *     silhouette drawn here (monolitheSvg)
  *
  *   --only live   the LIVE RELEASE's captures alone (live-*.png), the others
  *                 left as they are
@@ -86,7 +91,7 @@ import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } fro
 import { MemoryKeyProvider } from '../src/server/keys/memory-provider.js';
 import type { LiveEngine } from '../src/server/services/live-engine.js';
 import { sessionCookieName } from '../src/server/services/sessions.js';
-import { createManualClock, noopLogger, systemActor } from '../src/server/types.js';
+import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor } from '../src/server/types.js';
 import { cameraClipFrames } from '../test/e2e/support.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { svgToGray } from '../test/support/raster.js';
@@ -701,10 +706,118 @@ async function untilText(page: Page, selector: string, expected: string | RegExp
 }
 
 /**
+ * MONOLITHE as the captures show it once revealed (a studio picture of the ring standing in for ORBES's photograph,
+ * transparent around the piece so the light sweep follows its shape), or as its silhouette: the same ring, backlit, its
+ * form alone. A wide band of polished silver seen from above, an orbit cut around it; drawn as SVG.
+ */
+function monolitheSvg(kind: 'photo' | 'silhouette'): string {
+  const cx = 500;
+  const [R, r, k, top, H] = [330, 282, 0.4, 380, 160];
+  const bot = top + H;
+  const mid = top + H * 0.52;
+  const [Ry, ry] = [R * k, r * k];
+  /** The band's outline: the top ellipse's far half, the sides, the bottom ellipse's near half. */
+  const outline = `M${cx - R},${top} A${R},${Ry} 0 0 1 ${cx + R},${top} L${cx + R},${bot} A${R},${Ry} 0 0 1 ${cx - R},${bot} Z`;
+  /** The outer wall facing the camera. */
+  const front = `M${cx - R},${top} L${cx - R},${bot} A${R},${Ry} 0 0 0 ${cx + R},${bot} L${cx + R},${top} A${R},${Ry} 0 0 1 ${cx - R},${top} Z`;
+  const ellipse = (rx: number, ey: number, y: number) => `M${cx - rx},${y} A${rx},${ey} 0 1 0 ${cx + rx},${y} A${rx},${ey} 0 1 0 ${cx - rx},${y} Z`;
+  const nearArc = (rx: number, ey: number, y: number) => `M${cx - rx},${y} A${rx},${ey} 0 0 0 ${cx + rx},${y}`;
+  const farArc = (rx: number, ey: number, y: number) => `M${cx - rx},${y} A${rx},${ey} 0 0 1 ${cx + rx},${y}`;
+  const stops = (list: [number, string][]) => list.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('');
+  const head = `<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="896" viewBox="60 168 880 597">`;
+  if (kind === 'silhouette') {
+    return (
+      head +
+      `<defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1">${stops([[0, '#2a2825'], [1, '#100f0e']])}</linearGradient>` +
+      `<filter id="halo" x="-20%" y="-30%" width="140%" height="160%"><feGaussianBlur stdDeviation="16"/></filter></defs>` +
+      `<path d="${outline}" fill="#f6f2ea" opacity="0.28" filter="url(#halo)"/>` +
+      `<path d="${outline}" fill="url(#body)"/>` +
+      `<path d="${ellipse(r, ry, top)}" fill="#080808"/>` +
+      `<path d="${outline}" fill="none" stroke="#f6f2ea" stroke-opacity="0.62" stroke-width="1.8"/>` +
+      `<path d="${ellipse(r, ry, top)}" fill="none" stroke="#f6f2ea" stroke-opacity="0.22" stroke-width="1.2"/>` +
+      `</svg>`
+    );
+  }
+  return (
+    head +
+    `<defs>` +
+    `<linearGradient id="wall" x1="0" y1="0" x2="1" y2="0">${stops([[0, '#1b1a19'], [0.05, '#4a4844'], [0.14, '#b7b3ac'], [0.22, '#f1eee8'], [0.29, '#8e8a84'], [0.4, '#3a3835'], [0.53, '#6b6863'], [0.66, '#d6d2cb'], [0.73, '#fbf9f5'], [0.8, '#a29e97'], [0.9, '#3c3a37'], [1, '#161514']])}</linearGradient>` +
+    `<linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.1"/><stop offset="0.4" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.42"/></linearGradient>` +
+    `<linearGradient id="face" x1="0" y1="0" x2="1" y2="0">${stops([[0, '#6c6964'], [0.24, '#ebe8e2'], [0.5, '#a5a19a'], [0.76, '#f3f0ea'], [1, '#64615c']])}</linearGradient>` +
+    `<linearGradient id="inside" x1="0" y1="0" x2="1" y2="0">${stops([[0, '#252321'], [0.18, '#6f6b65'], [0.33, '#c4c0b9'], [0.5, '#4f4c48'], [0.67, '#b0aca5'], [0.82, '#66625d'], [1, '#201f1d']])}</linearGradient>` +
+    `<linearGradient id="depth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.62"/><stop offset="0.65" stop-color="#000" stop-opacity="0"/></linearGradient>` +
+    `<filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>` +
+    `</defs>` +
+    `<ellipse cx="${cx}" cy="${bot + 16}" rx="${R * 0.94}" ry="${Ry * 0.5}" fill="#000" opacity="0.42" filter="url(#blur)"/>` +
+    `<path d="${ellipse(r, ry, top)}" fill="url(#inside)"/>` +
+    `<path d="${ellipse(r, ry, top)}" fill="url(#depth)"/>` +
+    `<path d="${front}" fill="url(#wall)"/>` +
+    `<path d="${front}" fill="url(#shade)"/>` +
+    `<path d="${nearArc(R, Ry, mid)}" fill="none" stroke="#141312" stroke-opacity="0.55" stroke-width="2.2"/>` +
+    `<path d="${nearArc(R, Ry, mid + 2.6)}" fill="none" stroke="#fff" stroke-opacity="0.32" stroke-width="1"/>` +
+    `<path d="${ellipse(R, Ry, top)} ${ellipse(r, ry, top)}" fill="url(#face)" fill-rule="evenodd"/>` +
+    `<path d="${farArc(R, Ry, top)}" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="1.2"/>` +
+    `<path d="${nearArc(R, Ry, top)}" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="1.4"/>` +
+    `<path d="${nearArc(r, ry, top)}" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="1.6"/>` +
+    `<path d="${nearArc(R, Ry, bot)}" fill="none" stroke="#000" stroke-opacity="0.55" stroke-width="2"/>` +
+    `</svg>`
+  );
+}
+
+/** An SVG drawn by Chromium into a canvas, saved as a WebP with its transparency (the media store takes JPEG or WebP). */
+async function webpOf(browser: Browser, svg: string): Promise<Uint8Array> {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    const data = await page.evaluate(async (src) => {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d')!.drawImage(img, 0, 0);
+      return canvas.toDataURL('image/webp', 0.9);
+    }, `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+    if (!data.startsWith('data:image/webp;base64,')) throw new Error('Chromium could not encode a WebP');
+    return new Uint8Array(Buffer.from(data.slice('data:image/webp;base64,'.length), 'base64'));
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * The transitions and animations of `selector`'s subtree (the door, the lock, the light) held at `ms` from their start,
+ * so a moment of a motion is photographed as it is drawn (their number returned); resumeMotion plays them on.
+ */
+async function holdMotion(page: Page, selector: string, ms: number): Promise<number> {
+  return page.evaluate(
+    ([sel, at]) => {
+      const root = document.querySelector(sel);
+      // The styles brought up to date first: a transition begins with the style change that starts it.
+      for (const el of root ? [root, ...root.querySelectorAll('*')] : []) getComputedStyle(el).opacity;
+      const motions = root?.getAnimations({ subtree: true }) ?? [];
+      for (const a of motions) {
+        a.pause();
+        a.currentTime = at;
+      }
+      return motions.length;
+    },
+    [selector, ms] as const,
+  );
+}
+
+async function resumeMotion(page: Page, selector: string): Promise<void> {
+  await page.evaluate((sel) => {
+    for (const a of document.querySelector(sel)?.getAnimations({ subtree: true }) ?? []) a.play();
+  }, selector);
+}
+
+/**
  * Every state of the vault (plan of 2026-10-04, Quality bar 7), on the phone of verify, with the live engine running:
- * the releases and accounts are made as the LIVE suites make them (test/support/live.ts), on the demo's MONOLITHE (no
- * photograph: the piece shows the seal, as a release without one does). Run last: its pieces and entries would change
- * the other captures' figures.
+ * the releases and accounts are made as the LIVE suites make them (test/support/live.ts), on the demo's MONOLITHE, its
+ * photograph and a release's silhouette drawn by monolitheSvg. Run last: its pieces, entries and the model's photograph
+ * would change the other captures.
  */
 async function captureLive(stage: Stage, shots: Shots): Promise<void> {
   const { ctx, db, origin } = stage;
@@ -752,14 +865,26 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await hideGrain(page);
     await sleep(ms);
   };
+  /** The phone's viewport grown to the whole page, at its top: a moment in motion is then photographed whole at once. */
+  const wholePage = async (page: Page) => {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+    await page.setViewportSize({ width: MOBILE.width, height: Math.max(MOBILE.height, height) });
+    await sleep(300);
+  };
   try {
+    // MONOLITHE photographed (ORBES's picture of the model, revealed at a release's photograph stage).
+    await ctx.services.media.setModelImage(monolithe, { mime: 'image/webp', bytes: await webpOf(browser, monolitheSvg('photo')) }, SYSTEM_ACTOR);
+    const silhouette = await webpOf(browser, monolitheSvg('silhouette'));
+
     // The collectors: one who will be there (PLATINE), one ahead of her at T0 (PALLADIUM), the room and the interest
     // (the fourth of the crowd holds no piece: in neither).
     const me = await account(3);
     const rival = await account(5);
     const crowd = await Promise.all([3, 3, 5, 0, 5, 3].map((p) => account(p)));
+    const day = 86_400_000;
 
-    // Announced, opening in 2 h 14 min: I'LL BE THERE counted. The banner counts down to it.
+    // Announced, opening in 2 h 14 min, every stage revealed: I'LL BE THERE counted. The banner counts down to it.
     const later = await release({
       opensAt: new Date(Date.now() + (2 * 3600 + 14 * 60 + 12) * 1000),
       minTier: 2,
@@ -768,6 +893,32 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
     });
     for (const [i, c] of crowd.entries()) if (i !== 3) await ctx.services.live.setInterest(c.id, later.id, later.sizes[i % 3]!.id, c.actor);
+    // Announced in three days, at its silhouette's stage: the name tomorrow, the photograph the day after.
+    const veiled = await release({ opensAt: new Date(Date.now() + 3 * day + 6 * 3600_000), minTier: 1, sizes: [{ label: '50', stock: 6 }, { label: '52', stock: 6 }, { label: '54', stock: 6 }], quantityLine: '18 PIECES', published: false });
+    await ctx.services.media.setLiveSilhouette(veiled.id, { mime: 'image/webp', bytes: silhouette }, f.admin);
+    await db
+      .updateTable('drops')
+      .set({ name_at: new Date(Date.now() + day), photo_at: new Date(Date.now() + 2 * day), published_at: new Date() })
+      .where('id', '=', veiled.id)
+      .execute();
+    // Planned, announced tomorrow: its settings, every part editable in the console until then.
+    const planned = await release({
+      opensAt: new Date(Date.now() + 9 * day),
+      announceAt: new Date(Date.now() + day),
+      minTier: 1,
+      sizes: [{ label: '48', stock: 4 }, { label: '50', stock: 7 }, { label: '52', stock: 8 }, { label: '54', stock: 6 }],
+      quantityLine: '25 PIECES · NEVER MORE',
+      perAccount: 1,
+      windows: [{ tier: 3, payMinutes: 10 }],
+      addons: [
+        { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
+        { label: 'GIFT BOX', priceMinor: 9_000 },
+        { label: 'ORBES CARE', line: 'Two years of care in the atelier', priceMinor: 12_000 },
+      ],
+    });
+    await ctx.services.media.setLiveSilhouette(planned.id, { mime: 'image/webp', bytes: silhouette }, f.admin);
+    await db.updateTable('drops').set({ silhouette_at: new Date(Date.now() + 2 * day), name_at: new Date(Date.now() + 4 * day), photo_at: new Date(Date.now() + 6 * day) }).where('id', '=', planned.id).execute();
+
     const { context: landing, page: home } = await phone(null, 'live-banner');
     await home.goto(`${origin}/verify`);
     await home.waitForSelector('a.live-banner');
@@ -775,8 +926,19 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await shots.viewport(home, 'live-01-banner');
     await landing.close();
 
-    // The release lived through: its room open now, T0 in 80 s; 25 pieces, one of them in size 52.
-    const t0 = new Date(Date.now() + 80_000);
+    // The console, signed in now (the bootstrap ADMIN, 1440 × 900): its live board is photographed while the line runs.
+    const desk = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+    const admin = await desk.newPage();
+    watchPage(admin, 'live-console');
+    await admin.goto(`${origin}/admin`);
+    await admin.waitForSelector('[data-testid=login-form]');
+    await admin.fill('input[name=email]', ADMIN.email);
+    await admin.fill('input[name=password]', ADMIN.password);
+    await admin.click('[data-testid=login-submit]');
+    await admin.waitForSelector('.view--dashboard');
+
+    // The release lived through: its room open now, T0 on the minute at least 100 s ahead; 25 pieces, one in size 52.
+    const t0 = new Date(Math.ceil((Date.now() + 100_000) / 60_000) * 60_000);
     const r = await release({
       opensAt: t0,
       minTier: 1,
@@ -801,61 +963,95 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await page.waitForSelector('article.live-card');
     await settle(page);
     await shots.full(page, 'live-02-releases');
-    // B1: announced.
-    await page.goto(`${origin}/verify/releases/${later.id}`);
-    await page.waitForSelector('.live__there');
+    // B1: announced, at the silhouette's stage (the name and the photograph still to come).
+    await page.goto(`${origin}/verify/releases/${veiled.id}`);
+    await page.waitForSelector('.live__plate--announce .live__img--silhouette');
     await settle(page);
-    await shots.full(page, 'live-03-announced');
+    await shots.full(page, 'live-03-announced-silhouette');
+    // B1: announced, the name and the photograph revealed, a size chosen for I'LL BE THERE.
+    await page.goto(`${origin}/verify/releases/${later.id}`);
+    await page.waitForSelector('.live__plate--announce .live__img--photo');
+    await page.waitForSelector('.live__there');
+    await page.locator('.live__there').locator('button.live__size', { hasText: /^52$/ }).click();
+    await page.mouse.move(0, 0);
+    await settle(page);
+    await shots.full(page, 'live-04-announced');
     // B2: the room, the door closed, READY CHECK all ready, the size of I'LL BE THERE preselected.
     await page.goto(`${origin}/verify/releases/${r.id}`);
     await page.waitForSelector('.live-door .live-door__seal');
     await until('READY CHECK', async () => (await page.locator('.live__check').allInnerTexts()).filter((t) => /ready$/i.test(t.trim())).length === 5);
     await settle(page);
-    await shots.full(page, 'live-04-room');
+    if (t0.getTime() - Date.now() < 62_000) throw new Error('the room was reached inside its last minute: start again');
+    await shots.full(page, 'live-05-room');
 
-    // The boutique board, by its secret link, landscape.
+    // Entered; the last minute: the lock's orbits turning back into alignment, half way.
+    await page.getByRole('button', { name: 'ENTER THE ROOM' }).click();
+    await untilStatus(r.id, me.id, 'WAITING');
+    await page.mouse.move(0, 0);
+    await until('the last minute', () => t0.getTime() - Date.now() <= 31_000, 180_000);
+    await settle(page, 300);
+    await shots.full(page, 'live-06-last-minute');
+
+    // The boutique board, by its secret link, landscape, in the same last minute.
     const screen = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'no-preference' });
     const board = await screen.newPage();
     watchPage(board, 'live-board');
     await board.goto(`${origin}/verify/releases/${r.id}/board#${boardToken}`);
     await board.waitForSelector('.board__door .live-door__seal');
     await settle(board);
-    await shots.viewport(board, 'live-05-board');
+    await shots.viewport(board, 'live-07-board');
     await screen.close();
 
-    await page.getByRole('button', { name: 'ENTER THE ROOM' }).click();
-    await untilStatus(r.id, me.id, 'WAITING');
-    await page.evaluate(() => window.scrollTo(0, 0));
-    // T0: the lock aligned, the door open on the piece under its light.
-    await until('the door to open', async () => /is-open/.test((await page.locator('.live-door').getAttribute('class')) ?? ''), 90_000);
-    await sleep(1_100);
-    await shots.viewport(page, 'live-06-open');
+    // T0: the lock aligned, the door opening on the piece, held at 480 ms of its motion.
+    await page.waitForFunction(() => document.querySelector('.live-door')?.classList.contains('is-open') === true, null, { timeout: 60_000, polling: 'raf' });
+    if ((await holdMotion(page, '.live-door', 480)) === 0) throw new Error('the door opened without its motion');
+    await wholePage(page);
+    await shots.viewport(page, 'live-08-door-opening');
+    await resumeMotion(page, '.live-door');
+    await page.setViewportSize({ ...MOBILE });
+
+    // The room at work: three of the crowd secure their piece, two confirm it.
+    await Promise.all([secureAs(r.id, crowd[0]!, true), secureAs(r.id, crowd[1]!, false), secureAs(r.id, crowd[2]!, true)]);
     // B3: the line, the rival's turn in size 52 ahead.
     await untilText(page, '.live__ahead', 'YOU ARE NEXT IN SIZE 52');
     await settle(page, 900);
-    await shots.full(page, 'live-07-line');
-    // B4: a piece has returned, the collector's turn.
+    await shots.full(page, 'live-09-line');
+    // The console's live board of the release at that moment, its first screen.
+    await admin.evaluate((hash) => (location.hash = hash), `#/club/live/${r.id}`);
+    await admin.waitForSelector('[data-testid=live-board-state]');
+    await until('the live board', async () => /LIVE/.test((await admin.locator('[data-testid=live-state]').textContent()) ?? ''), 20_000);
+    await admin.evaluate(() => document.fonts.ready);
+    await admin.mouse.move(0, 0);
+    await sleep(1_500);
+    await shots.viewport(admin, 'live-23-console-board');
+
+    // B4: a piece has returned, the collector's turn; at half its time, the seal held half way.
     await ctx.services.live.leave(rival.id, r.id, rival.actor);
     await untilText(page, '.live__turn > .live__overline', 'A PIECE HAS RETURNED');
-    await settle(page, 900);
-    await shots.full(page, 'live-08-turn');
-    // The seal held: B5, the reveal, then the add-ons and PAY.
+    await settle(page, 300);
+    await wholePage(page);
+    await untilText(page, '.live__turn-left', '00:15', 30_000);
     const box = (await page.locator('.live-hold').boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await sleep(2_100);
+    await sleep(700);
+    await shots.viewport(page, 'live-10-turn');
+    await sleep(1_400);
     await page.mouse.up();
+    await page.setViewportSize({ ...MOBILE });
+    // B5: the reveal, then the add-ons and PAY with its total.
     await untilText(page, '.live__secured > .live__overline', 'SECURED');
     await sleep(2_600);
     await page.getByRole('button', { name: /ENGRAVING/ }).click();
+    await page.getByRole('button', { name: /ORBES CARE/ }).click();
     await page.mouse.move(0, 0);
     await settle(page, 600);
-    await shots.full(page, 'live-09-secured');
+    await shots.full(page, 'live-11-secured');
     // B6: CONFIRMED, out into the light.
     await page.locator('.live__pay').click();
     await untilText(page, 'h1', 'CONFIRMED');
     await settle(page, 1_600);
-    await shots.full(page, 'live-10-confirmed');
+    await shots.full(page, 'live-12-confirmed');
     await context.close();
 
     // The edge pages, each with its one action.
@@ -898,16 +1094,16 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     const outsider = await account(0);
     const nobody = await account(1);
     const pages: [string, string | null, string][] = [
-      ['live-11-edge-sign-in', null, edge.id],
-      ['live-12-edge-not-eligible', outsider.token, edge.id],
-      ['live-13-edge-turn-passed', missed.token, edge.id],
-      ['live-14-edge-hold-ended', expired.token, edge.id],
-      ['live-15-edge-released', released.token, edge.id],
-      ['live-16-edge-left', left.token, edge.id],
-      ['live-17-edge-removed', removed.token, edge.id],
-      ['live-18-edge-sold-out', late.token, edge.id],
-      ['live-19-edge-ended', waiting.token, ended.id],
-      ['live-20-edge-over', nobody.token, ended.id],
+      ['live-13-edge-sign-in', null, edge.id],
+      ['live-14-edge-not-eligible', outsider.token, edge.id],
+      ['live-15-edge-turn-passed', missed.token, edge.id],
+      ['live-16-edge-hold-ended', expired.token, edge.id],
+      ['live-17-edge-released', released.token, edge.id],
+      ['live-18-edge-left', left.token, edge.id],
+      ['live-19-edge-removed', removed.token, edge.id],
+      ['live-20-edge-sold-out', late.token, edge.id],
+      ['live-21-edge-ended', waiting.token, ended.id],
+      ['live-22-edge-over', nobody.token, ended.id],
     ];
     for (const [name, token, dropId] of pages) {
       const { context: c, page: p } = await phone(token, name);
@@ -918,23 +1114,14 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       await c.close();
     }
 
-    // The console's live board of the release lived through, its first screen (1440 × 900, the bootstrap ADMIN).
-    const desk = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris' });
-    const admin = await desk.newPage();
-    watchPage(admin, 'live-console');
-    await admin.goto(`${origin}/admin`);
-    await admin.waitForSelector('[data-testid=login-form]');
-    await admin.fill('input[name=email]', ADMIN.email);
-    await admin.fill('input[name=password]', ADMIN.password);
-    await admin.click('[data-testid=login-submit]');
-    await admin.waitForSelector('.view--dashboard');
-    await admin.evaluate((hash) => (location.hash = hash), `#/club/live/${r.id}`);
-    await admin.waitForSelector('[data-testid=live-board-state]');
-    await until('the live board', async () => /LIVE/.test((await admin.locator('[data-testid=live-state]').textContent()) ?? ''), 20_000);
+    // The console's page of the release planned, announced tomorrow, whole: its publication, its planner and forecast, then
+    // its settings, each part with its Edit, the silhouette and the board's link.
+    await admin.evaluate((hash) => (location.hash = hash), `#/club/live/${planned.id}`);
+    await admin.waitForSelector('#live-part-silhouette');
     await admin.evaluate(() => document.fonts.ready);
     await admin.mouse.move(0, 0);
     await sleep(1_200);
-    await shots.viewport(admin, 'live-21-console-board');
+    await shots.full(admin, 'live-24-console-settings');
     await desk.close();
   } finally {
     await browser.close();

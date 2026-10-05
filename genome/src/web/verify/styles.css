@@ -4145,6 +4145,13 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink);
 }
 
+/* A fact of a line kept whole when it fits (views/common.ts withPhrases). */
+.phrase {
+  display: inline-block;
+  max-width: 100%;
+  text-indent: 0;
+}
+
 .live-card__link {
   margin-top: 6px;
   white-space: nowrap;
@@ -4301,7 +4308,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 .live-banner__line {
   display: flex;
   align-items: baseline;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -4322,11 +4328,13 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   outline-offset: -6px;
 }
 
+/* The separator set as the lead's own (` · `, spaces kept), so both dots of the line sit alike. */
 .live-banner__dot {
-  opacity: 0.6;
+  white-space: pre;
 }
 
 .live-banner__clock {
+  margin-left: 8px;
   font-size: var(--fs-label);
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
