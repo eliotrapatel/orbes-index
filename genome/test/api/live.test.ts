@@ -25,7 +25,7 @@
 import { createHash } from 'node:crypto';
 import { ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { LIVE_HEARTBEAT_MS, LIVE_STREAMS_PER_ACCOUNT } from '../../src/server/http/live-stream.js';
+import { LIVE_HEARTBEAT_MS, LIVE_STREAMS_PER_ACCOUNT, liveRetryMs } from '../../src/server/http/live-stream.js';
 import { LIVE_NETWORK_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
 import { LIVE_GESTURE_MIN_MS, liveNetworkHash } from '../../src/server/services/live.js';
 import { foldIcsLine, liveStages } from '../../src/server/services/live-room.js';
@@ -576,6 +576,13 @@ describe('LIVE RELEASES: the customer API and real time', () => {
   });
 
   describe('the streams', () => {
+    it('spreads the reconnection of each stream between 2 and 5 seconds', () => {
+      expect(liveRetryMs(() => 0)).toBe(2000);
+      expect(liveRetryMs(() => 0.5)).toBe(3500);
+      expect(liveRetryMs(() => 0.9999999)).toBe(4999);
+      expect(liveRetryMs(() => 1)).toBe(4999);
+    });
+
     it('opens only for a signed-in account allowed in: the room and its own entry, then only what changed, the server’s time in each', async () => {
       const r = await release(h, f, { inMinutes: 4, minTier: 1 });
       const m = await member(h, f, 1);
@@ -593,7 +600,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const room = await s.next((e) => e.event === 'room');
       expect(room.data).toMatchObject({ now: h.clock.now().toISOString(), id: r.id, phase: 'ROOM', paused: false, over: false, inRoom: 0, line: 0, left: 2, held: 0, message: null });
       expect((await s.next((e) => e.event === 'you')).data).toEqual({ now: h.clock.now().toISOString(), entry: null });
-      expect(s.retry).toBe(2000);
+      expect(s.retry).toBeGreaterThanOrEqual(2000);
+      expect(s.retry).toBeLessThan(5000);
 
       // Nothing changed: nothing sent. Then an entry: the room and its own entry.
       const count = s.events.length;

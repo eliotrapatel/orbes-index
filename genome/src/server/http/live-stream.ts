@@ -49,8 +49,15 @@ export const LIVE_STREAM_ROUTES = Object.freeze(['/api/v1/live/:id/stream', '/ap
 export const LIVE_PULSE_MS = 1000;
 export const LIVE_HEARTBEAT_MS = 20_000;
 export const LIVE_STREAMS_PER_ACCOUNT = 2;
-/** What an EventSource waits before it reconnects a stream that dropped. */
+/**
+ * What an EventSource waits before it reconnects a stream that dropped: at least LIVE_RETRY_MS, plus a share of
+ * LIVE_RETRY_SPREAD_MS drawn per connection, so that a room dropped all at once (a restart, the edge recreated) comes
+ * back spread over three seconds rather than in the same instant.
+ */
 export const LIVE_RETRY_MS = 2000;
+export const LIVE_RETRY_SPREAD_MS = 3000;
+export const liveRetryMs = (random: () => number = Math.random): number =>
+  LIVE_RETRY_MS + Math.min(LIVE_RETRY_SPREAD_MS - 1, Math.floor(random() * LIVE_RETRY_SPREAD_MS));
 /** A client this far behind is disconnected rather than buffered without end. */
 const MAX_BUFFERED_BYTES = 256 * 1024;
 
@@ -410,7 +417,7 @@ export class LiveHub {
       connection: 'keep-alive',
     });
     request.raw.socket?.setNoDelay(true);
-    res.write(`retry: ${LIVE_RETRY_MS}\n\n`);
+    res.write(`retry: ${liveRetryMs()}\n\n`);
     return res;
   }
 
