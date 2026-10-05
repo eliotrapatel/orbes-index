@@ -5,10 +5,12 @@
  *  - PAST is public and the same for everyone (kept a minute): every release ended, the newest opening first, LIVE
  *    RELEASES (sold out, ended by ORBES, or ended before its name was revealed) and drawn draws together; never a draft,
  *    a cancelled release, an after-room (decision 28), a LIVE RELEASE not ended nor a draw not drawn (those are LIVE's,
- *    and LIVE's draws are those neither drawn nor cancelled); a page at a time;
+ *    and LIVE's draws are those neither drawn nor cancelled), a LIVE RELEASE whose hold still runs after its end (until
+ *    it is over), nor one ended before its announcement; a page at a time;
  *  - each card says what was announced and nothing of the end: its photograph, its name, its opening, the quantity line
- *    as announced even after pieces were added live (decision 29), each LIVE part from its stage; no count, stock,
- *    reason of the end or interest in the very bytes;
+ *    as announced even after pieces were added live (decision 29), each LIVE part from its stage as it stood at the end
+ *    (still unnamed long after the time set for its name, on its card, its page and its rule of access); no count, stock,
+ *    reason of the end or interest in the very bytes, nor in a drawn draw's page;
  *  - the account's part: 401 without a session, never kept by a cache; each release taken part in once (an after-room's
  *    under the release it follows), YOU SECURED A PIECE for a LIVE piece confirmed (its after-room's included) or a draw's
  *    entry confirmed, the count the access rule reads; another account's never.
@@ -98,8 +100,8 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
       sizes: [{ label: '52', stock: 1 }],
       afterRoom: { modelId: await createModel(h.ctx.db, 'AFTERGLOW'), priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }] },
     });
-    const early = await release('NOCTURNE — LIVE', { opensAt: at(5 * HOUR), closesAt: at(6 * HOUR) });
-    await h.ctx.db.updateTable('drops').set({ name_at: at(4 * HOUR), photo_at: at(4 * HOUR) }).where('id', '=', early.id).execute();
+    const early = await release('NOCTURNE — LIVE', { opensAt: at(5 * HOUR), closesAt: at(6 * HOUR), accessModels: [f.modelId] });
+    await h.ctx.db.updateTable('drops').set({ name_at: at(4 * HOUR), photo_at: at(4 * HOUR), description: 'NOCTURNE, cast in Paris.' }).where('id', '=', early.id).execute();
     const coming = await release('MONOLITHE — LIVE III', { opensAt: at(48 * HOUR) });
     const cancelled = await release('MONOLITHE — LIVE IV', { opensAt: at(40 * MINUTE) });
     await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', cancelled.id).execute();
@@ -166,6 +168,13 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
     // No end figure in the bytes: no count, stock, reason of the end, interest, entries, seed or price.
     for (const word of ['SOLD_OUT', 'endedReason', 'ended', 'stock', 'interest', 'entries', 'seed', 'price', 'quantity"', 'NOCTURNE']) expect(res.body, word).not.toContain(word);
 
+    // A drawn draw's page, which its card opens: no end figure either (not how many took part, no place reserved
+    // directly counted); its ranked entries stay, the draw's verifiable record.
+    const drawPage = await h.client().get(`/api/v1/drops/${draw.id}`);
+    expect(safeJson(drawPage)).toMatchObject({ id: draw.id, state: 'DRAWN', reserved: 0 });
+    expect(drawPage.body).not.toContain('"entries"');
+    expect((safeJson(await h.client().get(`/api/v1/drops/${draw.id}/entries`)) as { items: unknown[] }).items).toHaveLength(2);
+
     // A page at a time.
     const first = safeJson(await h.client().get('/api/v1/releases/past?page=1&pageSize=3')) as { items: Card[]; page: number; pageSize: number; total: number };
     expect([first.items.map((x) => x.id), first.page, first.pageSize, first.total]).toEqual([[early.id, sold.id, ended.id], 1, 3, 4]);
@@ -197,14 +206,49 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
     expect(await part(outsider)).toEqual({ count: 0, releases: [] });
     // The count the access rule reads (services/participation.ts).
     for (const x of [a, b, c, outsider]) expect((await part(x)).count).toBe(await participations(h.ctx.db, x.id, h.clock.now()));
+
+    // Past the time set for NOCTURNE's name and photograph, and its room's opening: read as it stood at its end, still
+    // named nowhere, on its card, its page, and in the rule of access said to an account the rule leaves out.
+    h.clock.set(at(7 * HOUR));
+    const later = await h.client().get('/api/v1/releases/past');
+    expect((safeJson(later) as { items: Card[] }).items.find((x) => x.id === early.id)).toEqual(body.items[0]);
+    expect(later.body).not.toContain('NOCTURNE');
+    const page = await h.client().get(`/api/v1/live/${early.id}`);
+    expect(safeJson(page)).toMatchObject({ phase: 'ENDED', title: null, name: null, type: null, collection: null, description: null, imageUrl: null, lookbook: null });
+    for (const word of ['NOCTURNE', 'MONOLITHE', 'RING', 'Paris']) expect(page.body, word).not.toContain(word);
+    const refused = await outsider.client.get(`/api/v1/live/${early.id}/state`);
+    expect([refused.statusCode, errorOf(refused)]).toEqual([403, { code: 'LIVE_NOT_ELIGIBLE', message: 'This release is for owners of this model.' }]);
   });
 
-  it('opens a LIVE RELEASE over in its final state; a cancelled one and an after-room stay the 404 of an unknown release', async () => {
+  it('lists and opens a LIVE RELEASE in its final state once over, a hold still running keeping it whole and out of PAST; one ended before its announcement, a cancelled one and an after-room stay the 404 of an unknown release', async () => {
+    const pastIds = async () => (safeJson(await h.client().get('/api/v1/releases/past?pageSize=50')) as { items: Card[] }).items.map((x) => x.id);
     const r = await release('MONOLITHE — LIVE VI', { opensAt: new Date(h.clock.now().getTime() + 10 * MINUTE) });
+    // A piece held when ORBES ends it: the page stays whole until it is confirmed, and PAST does not list it yet.
+    const who = await collector();
+    h.clock.advance(5 * MINUTE);
+    await f.live.enter(who.id, r.id, { sizeId: r.sizes[0]!.id }, who.actor);
+    h.clock.advance(5 * MINUTE);
+    await f.live.advance(r.id);
+    h.clock.advance(2 * SECOND);
+    const token = (await f.live.entry(who.id, r.id))!.turn!.token!;
+    await f.live.press(who.id, r.id, token);
+    h.clock.advance(1500);
+    await f.live.secure(who.id, r.id, token, who.actor);
     await f.live.end(r.id, f.admin);
+    expect(safeJson(await h.client().get(`/api/v1/live/${r.id}`))).toMatchObject({ phase: 'ENDED', sizes: [expect.objectContaining({ label: '52' })] });
+    expect(await pastIds()).not.toContain(r.id);
+    await f.live.confirm(who.id, r.id, who.actor);
+    expect(await pastIds()).toContain(r.id);
     const page = safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as Record<string, unknown>;
     expect(page).toMatchObject({ id: r.id, kind: 'LIVE', phase: 'ENDED', title: 'MONOLITHE — LIVE VI', name: 'MONOLITHE', imageUrl: image, quantityLine: '25 PIECES' });
     expect(Object.keys(page).sort()).toEqual(['collection', 'description', 'id', 'imageUrl', 'kind', 'lookbook', 'name', 'opensAt', 'phase', 'quantityLine', 'silhouetteUrl', 'title', 'type']);
+    // Ended before its announcement: never announced, even once the time set for it has passed.
+    const unseen = await release('MONOLITHE — LIVE VIII', { opensAt: new Date(h.clock.now().getTime() + 3 * HOUR), announceAt: new Date(h.clock.now().getTime() + HOUR) });
+    expect(errorOf(await h.client().get(`/api/v1/live/${unseen.id}`)).code).toBe('DROP_NOT_FOUND');
+    await f.live.end(unseen.id, f.admin);
+    h.clock.advance(2 * HOUR);
+    expect(errorOf(await h.client().get(`/api/v1/live/${unseen.id}`)).code).toBe('DROP_NOT_FOUND');
+    expect(await pastIds()).not.toContain(unseen.id);
     const cancelled = await release('MONOLITHE — LIVE VII', { opensAt: new Date(h.clock.now().getTime() + 10 * MINUTE) });
     await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', cancelled.id).execute();
     expect(errorOf(await h.client().get(`/api/v1/live/${cancelled.id}`)).code).toBe('DROP_NOT_FOUND');

@@ -7,11 +7,12 @@
  *   list      THE RELEASES' LIVE tab: every LIVE RELEASE announced and not ended, the next opening first (once ended,
  *             it is in THE RELEASES' PAST, services/past-releases.ts);
  *   sheet     one of them; once over, its final state (plan LIVE RELEASE+, decision 30: what was announced, each part
- *             from its stage, the opening and the quantity line; never an end figure: no stock, count, reason or interest);
+ *             from its stage as it stood at the end, the opening and the quantity line; never an end figure: no stock,
+ *             count, reason or interest);
  *   next      the banner of /verify and MY PIECES: the release live now, else the room open, else the next announced;
  *   calendar  its .ics: the room's opening, an alarm 10 minutes before, the name once revealed, no personal data.
- * Before its announcement (`announce_at`, the publication when NULL), a draft, a cancelled release, a DRAW, an unknown
- * or malformed id: one 404 DROP_NOT_FOUND, on every surface.
+ * Before its announcement (`announce_at`, the publication when NULL; for good when it ended before it), a draft, a
+ * cancelled release, a DRAW, an unknown or malformed id: one 404 DROP_NOT_FOUND, on every surface.
  *
  * The staged reveals (`liveStages`): the silhouette at `silhouette_at`, the name at `name_at` (the release's title, the
  * model's name, type and collection, the description), the photograph and the lookbook's link at `photo_at`, each NULL
@@ -52,6 +53,7 @@ import {
   liveRuleText,
   liveStages,
   roomOpensAt,
+  stagesAt,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
@@ -150,9 +152,10 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
 
 /**
  * A LIVE RELEASE's page once it is over, in its final state (plan LIVE RELEASE+, decision 30, which lifts the LIVE plan's
- * choice 32): what was announced, each part from its stage as on its card (its title, its model's name, type and
- * collection, its description; its silhouette, its photograph and its lookbook sheet), its opening and its quantity line
- * as announced (decision 29). No end figure (choice 5): no sizes or stock, no count, no reason of the end, no interest.
+ * choice 32): what was announced, each part from its stage as it stood at the end (its title, its model's name, type and
+ * collection, its description; its silhouette, its photograph and its lookbook sheet: one ended before a stage never
+ * reveals it), its opening and its quantity line as announced (decision 29). No end figure (choice 5): no sizes or
+ * stock, no count, no reason of the end, no interest.
  */
 export interface LiveEndedSheet {
   id: string;
@@ -429,18 +432,20 @@ export class LiveRoomService {
     if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
       if (!open) {
+        // As announced at its end: a stage it ended before is never revealed, even once its time has passed.
+        const atEnd = liveStages(r, stagesAt(r, now))!;
         return {
           id,
           kind: 'LIVE',
           phase: 'ENDED',
-          title: stages.name ? r.title : null,
-          name: stages.name ? r.model_name : null,
-          type: stages.name ? r.model_type : null,
-          collection: stages.name ? r.collection : null,
-          description: stages.name ? r.description : null,
-          silhouetteUrl: stages.silhouette ? mediaUrl(r.silhouette_sha256) : null,
-          imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
-          lookbook: stages.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+          title: atEnd.name ? r.title : null,
+          name: atEnd.name ? r.model_name : null,
+          type: atEnd.name ? r.model_type : null,
+          collection: atEnd.name ? r.collection : null,
+          description: atEnd.name ? r.description : null,
+          silhouetteUrl: atEnd.silhouette ? mediaUrl(r.silhouette_sha256) : null,
+          imageUrl: atEnd.photo ? mediaUrl(r.model_image) : null,
+          lookbook: atEnd.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
           opensAt: r.opens_at,
           quantityLine: r.quantity_line ?? '',
         };
@@ -510,7 +515,7 @@ export class LiveRoomService {
     const id = releaseId(dropId);
     const now = this.clock();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
-    if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
+    if (!d || d.cancelled_at || !isAnnounced(d, stagesAt(d, now))) throw dropNotFound();
     // An after-room: its guests, from its T0; anyone else reads an unknown release.
     if (isAfterRoom(d) && (await afterRoomPlace(this.db, d, accountId, now)) === null) throw dropNotFound();
     const [entry, access] = await Promise.all([
@@ -556,7 +561,7 @@ export class LiveRoomService {
     const id = releaseId(dropId);
     const now = this.clock();
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
-    if (!r || r.cancelled_at || !isAnnounced(r, now)) return null;
+    if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) return null;
     const [sizes, counts, message] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
@@ -736,7 +741,8 @@ export class LiveRoomService {
   /** An announced LIVE RELEASE, not cancelled: its row with its model; 404 otherwise, and for an after-room. */
   private async publicRow(id: string, now: Date): Promise<ReadRow> {
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).where('d.published_at', 'is not', null).executeTakeFirst();
-    if (!r || r.cancelled_at || !isAnnounced(r, now)) throw dropNotFound();
+    // One ended before its announcement was never announced.
+    if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) throw dropNotFound();
     return r;
   }
 

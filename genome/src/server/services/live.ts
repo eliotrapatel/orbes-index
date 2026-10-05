@@ -190,6 +190,15 @@ export function liveStages(d: LiveStageRow, now: Date): LiveStages | null {
   };
 }
 
+/**
+ * The moment a release's stages are read at `now`: its end once ended, else now. A release ended before a stage never
+ * reaches it (one ended before its name was revealed is named nowhere, even after the time its name was set for); one
+ * ended before its announcement was never announced.
+ */
+export function stagesAt(d: Pick<DropRow, 'ended_at'>, now: Date): Date {
+  return d.ended_at && new Date(d.ended_at).getTime() < now.getTime() ? new Date(d.ended_at) : now;
+}
+
 /** How long a pause in progress has lasted at `now` (0 without one). */
 export function pausedFor(d: Pick<DropRow, 'paused_at'>, now: Date): number {
   return d.paused_at ? Math.max(0, now.getTime() - new Date(d.paused_at).getTime()) : 0;
@@ -433,12 +442,12 @@ export const LIVE_UNNAMED_COLLECTION = 'this model’s collection';
 /**
  * The rule of a release as anyone may read it at `now` (an announcement, a 403 LIVE_NOT_ELIGIBLE, the circle's post): a
  * model it names that is the release's own is « this model », and a collection that is its model's own « this model’s
- * collection », until the name's stage (liveStages), so no answer says the name or its collection before; `unnamed`:
- * so at any time (the circle's post, which never names the piece).
+ * collection », until the name's stage (liveStages, read at the end once ended: stagesAt), so no answer says the name or
+ * its collection before; `unnamed`: so at any time (the circle's post, which never names the piece).
  */
 export async function liveAccessRule(
   db: Db,
-  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine'> & LiveStageRow,
+  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine' | 'ended_at'> & LiveStageRow,
   now: Date,
   unnamed = false,
 ): Promise<LiveAccessRule> {
@@ -453,7 +462,7 @@ export async function liveAccessRule(
   const collection = d.access_collection_id
     ? ((await db.selectFrom('collections').select(['id', 'name']).where('id', '=', d.access_collection_id).executeTakeFirst()) ?? null)
     : null;
-  const named = !unnamed && (liveStages(d, now)?.name ?? false);
+  const named = !unnamed && (liveStages(d, stagesAt(d, now))?.name ?? false);
   const own = collection && !named ? await db.selectFrom('models').select('collection_id').where('id', '=', d.model_id).executeTakeFirst() : undefined;
   return {
     minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier,

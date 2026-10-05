@@ -71,6 +71,7 @@ import {
   entryModel,
   participationModel,
   pastCards,
+  PastPages,
   PAST_PAGE_SIZE,
   releaseCards,
   releaseSheet,
@@ -428,8 +429,8 @@ class PastList {
   private readonly more = h('div', { class: 'releases__past-more' });
   /** Each card's mark (YOU TOOK PART, YOU SECURED A PIECE), by release. */
   private readonly marks = new Map<string, HTMLElement>();
-  private cards: PastCardModel[] = [];
-  private total = 0;
+  /** The releases shown and the pages read: SHOW MORE asks for the next page counted (a release ended meanwhile moves the others). */
+  private readonly pages = new PastPages();
   private busy = false;
   private part: TakenLoad = { kind: 'none' };
   /** Bumped at each read of the account's part: an older answer is dropped. */
@@ -457,16 +458,14 @@ class PastList {
   private async load(next = false): Promise<void> {
     if (this.busy || this.disposed) return;
     this.busy = true;
-    const page = next ? Math.floor(this.cards.length / PAST_PAGE_SIZE) + 1 : 1;
+    const page = this.pages.next;
     if (next) this.drawMore('loading');
     else this.drawStatus(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
     try {
       const r = await this.deps.api.pastReleases(page, PAST_PAGE_SIZE);
       if (this.disposed) return;
-      const known = new Set(this.cards.map((c) => c.id));
       // A release ended between two pages moves the others down: one already shown is not shown twice.
-      const fresh = pastCards(r.items, this.deps.localZone).filter((c) => !known.has(c.id));
-      this.total = r.total;
+      const fresh = this.pages.add(page, pastCards(r.items, this.deps.localZone), r.total);
       this.busy = false;
       this.append(fresh, next);
     } catch (e) {
@@ -483,9 +482,8 @@ class PastList {
   }
 
   private append(fresh: PastCardModel[], next: boolean): void {
-    const first = this.cards.length;
-    this.cards.push(...fresh);
-    if (this.cards.length === 0) {
+    const first = this.pages.cards.length - fresh.length;
+    if (this.pages.cards.length === 0) {
       this.drawStatus(h('p', { class: 'prose releases__empty', text: RELEASES.past.empty }));
       this.drawMore('idle');
       return;
@@ -511,7 +509,7 @@ class PastList {
     const out: HTMLElement[] = [];
     if (state === 'loading') out.push(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
     if (state === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.moreFailed} ${message}` }));
-    if (state !== 'loading' && this.cards.length > 0 && this.cards.length < this.total) {
+    if (state !== 'loading' && this.pages.more) {
       out.push(h('button', { class: 'textlink releases__more', attrs: { type: 'button' }, on: { click: () => void this.load(true) }, text: RELEASES.past.more }));
     }
     this.more.replaceChildren(...out);

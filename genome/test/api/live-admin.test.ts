@@ -740,4 +740,20 @@ describe('LIVE RELEASES: the console', () => {
       expect(createHash('sha256').update(maskedCsv.body).digest('hex')).not.toBe(createHash('sha256').update(csv.body).digest('hex'));
     });
   });
+
+  describe('the post of the circle after the end', () => {
+    it('never names, in its post of the circle, a release ended before its name, even once the time set for its name has passed', async () => {
+      const r = await create({ inMinutes: 3 * 60, announceAt: iso(10 * MINUTE), nameAt: iso(30 * MINUTE), photoAt: iso(30 * MINUTE), accessModelIds: [f.modelId] });
+      const p = safeJson(await op.post(`/api/admin/live/${r.id}/publish`, { circlePost: true })) as Json;
+      const { client, email } = await accountClient(h);
+      const { id: memberId } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+      await holdPieces(h.ctx.db, memberId, 1, f.modelId);
+      const link = async () => ((safeJson(await client.get(`/api/v1/club/circle/${p.circlePosts[0].id}`)) as Json).links as Json).drop;
+      h.clock.advance(15 * MINUTE);
+      expect(await link()).toEqual({ id: r.id, title: 'LIVE RELEASE' });
+      await f.live.end(r.id, f.admin);
+      h.clock.advance(30 * MINUTE);
+      expect(await link()).toEqual({ id: r.id, title: 'LIVE RELEASE' });
+    });
+  });
 });

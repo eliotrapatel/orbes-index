@@ -49,7 +49,7 @@ import { makePage, noopLogger, pageOffset, pageRequest, systemClock, type Actor,
 import type { AuditService } from './audit.js';
 import { clubMembersByTier, ownersOnly, tierOf, type ClubMembers } from './club.js';
 import { dropNotFound, dropState, type DropState } from './drops.js';
-import { isAnnounced, liveStages } from './live.js';
+import { isAnnounced, liveStages, stagesAt } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { readActingAccount } from './ownership.js';
@@ -1043,17 +1043,20 @@ function shownAt(publishedAt: Date | null, now: Date): boolean {
 
 /** What a member's view of a post reads of the drop it links. */
 const LINKED_DROP_COLUMNS = [
-  'id', 'title', 'mode', 'parent_drop_id', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes',
+  'id', 'title', 'mode', 'parent_drop_id', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes', 'ended_at',
 ] as const;
 
 /**
  * The drop a post links, as a member reads it: a draw once published; a LIVE RELEASE once announced and while not
- * cancelled (an after-room never), its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too).
+ * cancelled (an after-room never), its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too),
+ * each read at its end once ended (services/live.ts stagesAt).
  */
 function linkedDrop(d: Pick<DropRow, (typeof LINKED_DROP_COLUMNS)[number]>, now: Date): { id: string; title: string } | null {
   // An after-room is never linked (checkLinks): should one be, the circle still says nothing of it.
   if (d.parent_drop_id !== null) return null;
   if (d.mode !== 'LIVE') return dropState(d, now) !== 'DRAFT' ? { id: d.id, title: d.title } : null;
-  if (d.cancelled_at || !isAnnounced(d, now)) return null;
-  return { id: d.id, title: liveStages(d, now)?.name ? d.title : 'LIVE RELEASE' };
+  // Read at its end once ended: one ended before its announcement or its name's stage stays unnamed.
+  const at = stagesAt(d, now);
+  if (d.cancelled_at || !isAnnounced(d, at)) return null;
+  return { id: d.id, title: liveStages(d, at)?.name ? d.title : 'LIVE RELEASE' };
 }

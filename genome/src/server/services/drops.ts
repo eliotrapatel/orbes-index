@@ -401,11 +401,10 @@ export interface DropSheet extends DropCard {
   seedHash: string;
   /** The 32-byte seed in hexadecimal, once drawn (never before). */
   seed: string | null;
-  /** The entries that took part in the draw (each has a rank), once drawn; null before. */
-  entries: number | null;
   /**
    * P-X02: the places reserved directly during the early access that are held or sold (SELECTED, CONFIRMED): before
-   * the draw, `quantity` less this is what remains; at `quantity`, the drop is full.
+   * the draw, `quantity` less this is what remains; at `quantity`, the drop is full. 0 once drawn: the release is over,
+   * and its page says no end figure (plan LIVE RELEASE+, choice 5 and decision 30), nor how many took part.
    */
   reserved: number;
 }
@@ -722,19 +721,8 @@ export class DropService {
     const now = this.clock();
     const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
     if (!r) throw dropNotFound();
-    const drawn = r.drawn_at
-      ? Number(
-          (
-            await this.db
-              .selectFrom('drop_entries')
-              .select((eb) => eb.fn.countAll<number>().as('n'))
-              .where('drop_id', '=', id)
-              .where('rank', 'is not', null)
-              .executeTakeFirstOrThrow()
-          ).n,
-        )
-      : null;
-    const reserved = (await this.tallies(this.db, [id])).get(id)?.reserved ?? 0;
+    // Drawn, the release is over: no end figure (plan LIVE RELEASE+, choice 5), the places reserved directly no longer counted.
+    const reserved = r.drawn_at ? 0 : ((await this.tallies(this.db, [id])).get(id)?.reserved ?? 0);
     return {
       ...this.card(r, now),
       description: r.description,
@@ -744,7 +732,6 @@ export class DropService {
       drawnAt: r.drawn_at,
       seedHash: toHex(r.seed_hash),
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
-      entries: drawn,
       reserved,
     };
   }

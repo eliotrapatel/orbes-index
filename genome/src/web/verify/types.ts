@@ -366,9 +366,7 @@ export interface DropSheet extends DropCard {
   seedHash: string;
   /** The 32-byte seed in hexadecimal, once drawn; null before. */
   seed: string | null;
-  /** The entries that took part in the draw, once drawn; null before. */
-  entries: number | null;
-  /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full. */
+  /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full (0 once drawn). */
   reserved: number;
 }
 

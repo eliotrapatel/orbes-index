@@ -440,6 +440,44 @@ export function pastCards(items: readonly PastRelease[], localZone: string): Pas
   return out;
 }
 
+/**
+ * PAST read a page at a time (SHOW MORE). The next page is counted, never worked out from the releases shown: a release
+ * that ends between two pages moves the others down (one already shown comes again, and is shown once) and one
+ * unreadable is left out, so fewer releases may be shown than the pages read. SHOW MORE stays while a page is left on
+ * the server, and so reaches the last release.
+ */
+export class PastPages {
+  /** The releases shown, each once, in the order read. */
+  readonly cards: PastCardModel[] = [];
+  private read = 0;
+  private total = 0;
+
+  /** The page to ask for next: the first before any is read. */
+  get next(): number {
+    return this.read + 1;
+  }
+
+  /** Whether SHOW MORE has a page left to read. */
+  get more(): boolean {
+    return this.cards.length > 0 && this.read * PAST_PAGE_SIZE < this.total;
+  }
+
+  /** Page `page` read, `total` releases ended on the server: its releases not shown yet, added in order and returned. */
+  add(page: number, cards: readonly PastCardModel[], total: number): PastCardModel[] {
+    const known = new Set(this.cards.map((c) => c.id));
+    const fresh: PastCardModel[] = [];
+    for (const c of cards) {
+      if (known.has(c.id)) continue;
+      known.add(c.id);
+      fresh.push(c);
+    }
+    this.cards.push(...fresh);
+    this.read = Math.max(this.read, page);
+    this.total = Number.isInteger(total) && total > 0 ? total : 0;
+    return fresh;
+  }
+}
+
 /** The account's part in the releases: how many, and for each, YOU SECURED A PIECE or YOU TOOK PART. */
 export interface ParticipationModel {
   /** « You have taken part in N releases. » */

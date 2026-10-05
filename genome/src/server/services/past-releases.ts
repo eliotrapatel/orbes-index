@@ -7,21 +7,23 @@
  *   participation  GET /api/v1/account/participation: the releases the signed-in account took part in, each with
  *                  whether it secured a piece there (services/participation.ts, the access rule's own count).
  *
- * Ended: a LIVE RELEASE announced whose end is recorded or whose time is over (sold out, closed, or ended by ORBES); a
- * draw once drawn (before its draw, its entrants still wait: it stays with the releases to come). Never a draft, a
- * cancelled release, nor an after-room (decision 28: hidden, even after the release).
+ * Ended: a LIVE RELEASE once over (sold out, closed, or ended by ORBES: its end recorded and no turn or hold left to run
+ * to its deadline, as the room's `over`), the moment its page answers in its final state, announced before its end (one
+ * ended before its announcement was never announced); a draw once drawn (before its draw, its entrants still wait: it
+ * stays with the releases to come). Never a draft, a cancelled release, nor an after-room (decision 28: hidden, even
+ * after the release).
  *
  * A card says only what was announced (choice 5: no end figure): the photograph, the name, the opening date and the
  * quantity line as announced (decision 29, « 25 PIECES » even when pieces were added live; a draw's pieces, which never
- * change once published). A LIVE RELEASE's parts each from its stage (services/live.ts liveStages), as everywhere: one
- * ended before its name was revealed is named nowhere. No count of entries, of pieces confirmed or left, no reason of
- * the end, no interest.
+ * change once published). A LIVE RELEASE's parts each from its stage (services/live.ts liveStages), read at its end
+ * (stagesAt): one ended before its name was revealed is named nowhere, even once the time set for its name has passed.
+ * No count of entries, of pieces confirmed or left, no reason of the end, no interest.
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
 import type { DropRow } from '../db/schema.js';
 import { makePage, pageOffset, systemClock, type Clock, type Page, type PageRequest } from '../types.js';
-import { liveStages } from './live.js';
+import { liveStages, stagesAt } from './live.js';
 import { defaultQuantityLine } from './live-console.js';
 import { mediaUrl } from './media.js';
 import { releasesTakenPart, type ReleaseTakenPart } from './participation.js';
@@ -73,7 +75,7 @@ export class PastReleaseService {
   /** A page of the releases ended at now, the newest opening first. */
   async page(req: PageRequest): Promise<Page<PastReleaseCard>> {
     const now = this.clock();
-    const ended = this.ended(now);
+    const ended = this.ended();
     const total = await ended.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await ended
       .innerJoin('models as m', 'm.id', 'd.model_id')
@@ -98,8 +100,8 @@ export class PastReleaseService {
     return { count: releases.length, releases };
   }
 
-  /** The releases ended at `now`: published, never cancelled, never an after-room. */
-  private ended(now: Date) {
+  /** The releases ended: published, never cancelled, never an after-room. */
+  private ended() {
     return this.db
       .selectFrom('drops as d')
       .where('d.published_at', 'is not', null)
@@ -110,8 +112,13 @@ export class PastReleaseService {
           eb.and([eb('d.mode', '=', 'DRAW'), eb('d.drawn_at', 'is not', null)]),
           eb.and([
             eb('d.mode', '=', 'LIVE'),
-            eb(sql<Date>`coalesce(d.announce_at, d.published_at)`, '<=', now),
-            eb.or([eb('d.ended_at', 'is not', null), eb('d.closes_at', '<=', now)]),
+            eb('d.ended_at', 'is not', null),
+            eb(sql<Date>`coalesce(d.announce_at, d.published_at)`, '<=', eb.ref('d.ended_at')),
+            eb.not(
+              eb.exists(
+                eb.selectFrom('live_entries as e').select('e.id').whereRef('e.drop_id', '=', 'd.id').where('e.status', 'in', ['TURN', 'SECURED']),
+              ),
+            ),
           ]),
         ]),
       );
@@ -120,8 +127,8 @@ export class PastReleaseService {
 
 function card(r: PastRow, now: Date): PastReleaseCard {
   if (r.mode === 'LIVE') {
-    // Announced (the query's rule): its stages are known.
-    const stages = liveStages(r, now)!;
+    // Over, announced before its end (the query's rule): its stages as they stood at its end.
+    const stages = liveStages(r, stagesAt(r, now))!;
     return {
       id: r.id,
       kind: 'LIVE',
