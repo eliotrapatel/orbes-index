@@ -31,7 +31,9 @@
  *               LIVE RELEASE · the piece on its plate · its name and line · SEE THE MODEL · THIS RELEASE IS OVER · its
  *               opening date and quantity line as announced · signed in, YOU TOOK PART or YOU SECURED A PIECE · its
  *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
- *               after-room keeps the second door until it closes)
+ *               after-room keeps the second door until it closes). For a week after the end, to an account that took
+ *               part without a piece, ONE QUESTION, the question after (plan LIVE RELEASE+, choice 11; views/question.ts),
+ *               here and on the page of its entry ended by the release's end
  *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
  *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
  *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
@@ -88,11 +90,12 @@ import { sealSvg, turnRings } from '../live-seal.js';
 import { participationModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
+import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
 import { releaseContactModel, upper } from '../view-model.js';
 import { contactBlock, legalLinks, lookbookLink, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
+import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
 
 /** The state read while the stream is lost. */
@@ -235,6 +238,10 @@ class LivePage {
   private part: string | null = null;
   private partRead: 'idle' | 'reading' | 'done' = 'idle';
   private partGen = 0;
+  /** Ended: the question after (plan LIVE RELEASE+, choice 11), read once signed in; null when it is not asked of the account here. */
+  private question: AccountQuestion | null = null;
+  private questionRead: 'idle' | 'reading' | 'done' = 'idle';
+  private questionGen = 0;
   private disposed = false;
 
   constructor(private readonly deps: LiveDeps) {
@@ -332,6 +339,9 @@ class LivePage {
       this.partGen++;
       this.part = null;
       this.partRead = 'idle';
+      this.questionGen++;
+      this.question = null;
+      this.questionRead = 'idle';
       this.closeStream();
       this.stopPolling();
     }
@@ -1698,6 +1708,7 @@ class LivePage {
     const m = livePastModel(this.sheet!, this.deps.localZone);
     const part = this.fact('', 'live__past-part');
     part.hidden = true;
+    const ask = this.questionBlock();
     const el = h(
       'section',
       { class: 'live__past' },
@@ -1710,6 +1721,7 @@ class LivePage {
       this.fact(RELEASES.over, 'live__past-status'),
       this.fact(m.facts, 'live__past-facts'),
       part,
+      ask.el,
       storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' }),
       this.action(LIVE.back, () => this.deps.onReleases()),
     );
@@ -1721,8 +1733,48 @@ class LivePage {
         if (this.partRead === 'idle' && this.deps.session.state.status === 'signed-in') void this.readPart();
         setFact(part, this.part ?? '');
         part.hidden = this.part === null;
+        this.askQuestion(ask);
       },
     };
+  }
+
+  /** ONE QUESTION, in the vault: the question after, shown once read, kept when answered. */
+  private questionBlock(): QuestionBlock {
+    return new QuestionBlock({
+      api: this.deps.api,
+      session: this.deps.session,
+      localZone: this.deps.localZone,
+      tone: 'vault',
+      onAnswered: (q) => {
+        this.question = q;
+      },
+    });
+  }
+
+  /** The question after on a page of the release's end: read once signed in (never on an after-room's page), then shown. */
+  private askQuestion(block: QuestionBlock): void {
+    if (this.questionRead === 'idle' && this.deps.session.state.status === 'signed-in' && !this.afterRoomOf()) void this.readQuestion();
+    block.show(this.question);
+  }
+
+  /** The question after for the account (asked here only of one that took part without a piece); unsaid should it not be read. */
+  private async readQuestion(): Promise<void> {
+    const id = this.sheet?.id;
+    if (!id) return;
+    const gen = ++this.questionGen;
+    this.questionRead = 'reading';
+    let question: AccountQuestion | null = null;
+    try {
+      const q = await this.deps.api.question(id);
+      question = q?.asked === 'TOOK_PART' ? q : null;
+    } catch (e) {
+      if (gen !== this.questionGen || this.disposed) return;
+      this.deps.session.noteError(e);
+    }
+    if (gen !== this.questionGen || this.disposed) return;
+    this.question = question;
+    this.questionRead = 'done';
+    this.screen?.update();
   }
 
   /** The account's part in this release, from the releases it took part in; left unsaid should it not be read. */
@@ -1750,12 +1802,15 @@ class LivePage {
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
     const title = this.title(copy.title);
     const note = this.note(copy.text);
+    // Ended by the release's end: the question after, as on its final page.
+    const ask = kind === 'ended' ? this.questionBlock() : null;
     const el = h(
       'section',
       { class: 'live__edge' },
       this.overline(this.name()),
       title,
       note,
+      ask?.el ?? null,
       contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
@@ -1763,6 +1818,7 @@ class LivePage {
       const now = this.edgeCopy(kind);
       if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
+      if (ask) this.askQuestion(ask);
     };
     return { kind, el, back: contact === null, update };
   }

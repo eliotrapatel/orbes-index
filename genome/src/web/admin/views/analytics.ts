@@ -13,10 +13,16 @@
  *
  * Then The Circle (P-X01, GET /api/admin/analytics/circle, the same window):
  * the members of the club by tier now, and the visits of the circle by day,
- * counted per day without any account (no follow-up of anyone). A panel that
- * cannot be read says so; the rest of the page stands.
+ * counted per day without any account (no follow-up of anyone). Then the best
+ * time to open (plan LIVE RELEASE+, choice 10; views/best-time.ts, GET
+ * /api/admin/analytics/best-time, the same window): the sign-ins and scans by
+ * hour of the day in Paris time, for everyone or a tier and above (`?tier=`),
+ * everywhere or in one country (`?country=`), by tier and by country, the past
+ * releases' presence at T0, the suggested hour. A panel that cannot be read
+ * says so; the rest of the page stands.
  */
 import { h } from '../../shared/dom.js';
+import { BEST_TIME_TIERS, bestTimeCountry, bestTimeTier } from '../model/best-time.js';
 import { formatCount, formatDate } from '../format.js';
 import { circleMemberBars, circleVisitDays } from '../model/circle.js';
 import {
@@ -34,9 +40,10 @@ import {
   type AnalyticsRange,
 } from '../model/analytics.js';
 import { href } from '../router.js';
-import type { AnalyticsData, CircleStats } from '../types.js';
+import type { AnalyticsData, BestTime, CircleStats } from '../types.js';
 import { trendChart, sparkline } from '../ui/charts.js';
-import { barList, emptyState, kpi, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { barList, emptyState, kpi, pageHeader, section, select, statusMark, table } from '../ui/components.js';
+import { bestTimePanel } from './best-time.js';
 import type { ViewContext } from './context.js';
 
 /** LAST 30 DAYS · LAST 90 DAYS, each its own URL; the figures read in Helvetica Neue inside the display-face tab. */
@@ -143,9 +150,37 @@ function circlePanel(c: CircleStats | null): HTMLElement {
   );
 }
 
+/** The best time's filters: the tiers read as tabs (links), the country as a choice among those with activity. */
+function bestTimeFilters(ctx: ViewContext, range: AnalyticsRange, tier: number, country: string | null, best: BestTime | 'failed'): HTMLElement {
+  const tabs = BEST_TIME_TIERS.flatMap((t, i) => [
+    i > 0 ? h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }) : null,
+    h(
+      'a',
+      {
+        class: 'range__tab',
+        attrs: { href: href('analytics', {}, { days: range, tier: t.tier, ...(country ? { country } : {}) }), 'aria-current': t.tier === tier ? 'page' : null, 'data-testid': `best-time-tier-${t.tier}` },
+      },
+      t.label,
+    ),
+  ]);
+  const known = best === 'failed' ? [] : best.countries.map((c) => c.country);
+  const codes = [...new Set([...known, ...(country ? [country] : [])])].sort();
+  const choice = select('bestTimeCountry', [{ value: '', label: 'Every country' }, ...codes.map((c) => ({ value: c, label: countryLabel(c) }))], country ?? '');
+  choice.setAttribute('aria-label', 'Country');
+  choice.setAttribute('data-testid', 'best-time-country');
+  choice.addEventListener('change', () => ctx.setQuery({ country: choice.value || null }));
+  return h('div', { class: 'best__filters' }, h('nav', { class: 'range', attrs: { 'aria-label': 'Tiers' } }, ...tabs), choice);
+}
+
 export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
   const range = analyticsRange(ctx.route.query);
-  const [d, circle] = await Promise.all([ctx.api.analytics({ days: range }), ctx.api.circleStats({ days: range }).catch(() => null)]);
+  const tier = bestTimeTier(ctx.route.query);
+  const country = bestTimeCountry(ctx.route.query);
+  const [d, circle, best] = await Promise.all([
+    ctx.api.analytics({ days: range }),
+    ctx.api.circleStats({ days: range }).catch(() => null),
+    ctx.api.bestTime({ days: range, tier, ...(country ? { country } : {}) }).catch(() => 'failed' as const),
+  ]);
   const none = d.total === 0;
 
   return h(
@@ -170,5 +205,6 @@ export async function analyticsView(ctx: ViewContext): Promise<HTMLElement> {
     section('Signals by country and result', signalTable(d), { note: 'Country by country', class: 'panel--signal-table' }),
     section('Days with scans', dailyTable(d), { note: `${formatCount(d.daily.filter((x) => x.total > 0).length)} of ${formatCount(d.days)} days` }),
     circlePanel(circle),
+    bestTimePanel(best, { id: 'analytics-best-time', filters: bestTimeFilters(ctx, range, tier, country, best) }),
   );
 }

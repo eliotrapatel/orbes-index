@@ -41,6 +41,7 @@ import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPT
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
+import { LIVE_QUESTION_LIMITS } from '../services/question.js';
 import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../services/after-room.js';
 import {
@@ -299,6 +300,11 @@ export const liveAddonsBody = body({ addonIds: z.array(liveRef).max(LIVE_ADDONS_
  * request line or a log). Missing or malformed, it answers like a wrong one: 404 DROP_NOT_FOUND.
  */
 export const liveBoardBody = optionalBody({ token: z.string().max(256).optional() });
+
+/** PUT /api/v1/live/:id/answer: the answer chosen to the question after (plan LIVE RELEASE+, choice 11), its position from 1. */
+export const liveAnswerBody = body({
+  answer: z.number().int('Must be one of the answers').min(1, 'Must be one of the answers').max(LIVE_QUESTION_LIMITS.maxAnswers, 'Must be one of the answers'),
+});
 
 // ── Accounts & admin auth ──────────────────────────────────────────────────
 
@@ -628,6 +634,16 @@ const liveSettingsFields = {
     )
     .max(4, 'At most one override per tier')
     .optional(),
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16); null: the default location. */
+  stockLocationId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  /** The question after (choice 11): on by default; its words and 2 to 6 answers, both or neither (null: the default question). */
+  questionEnabled: z.boolean().optional(),
+  questionText: z.preprocess(emptyToNull, text(LIVE_QUESTION_LIMITS.text).nullable().optional()),
+  questionAnswers: z
+    .array(text(LIVE_QUESTION_LIMITS.answer))
+    .max(LIVE_QUESTION_LIMITS.maxAnswers, `At most ${LIVE_QUESTION_LIMITS.maxAnswers} answers`)
+    .nullable()
+    .optional(),
   /** The after-room (plan LIVE RELEASE+, choice 2): its model, price, sizes and stock, add-ons, delay and length; null: none. */
   afterRoom: z
     .strictObject({
@@ -661,6 +677,27 @@ export const liveStockBody = body({ sizeId: uuid, pieces: whole(LIVE_ADD_PIECES.
 
 /** POST /api/admin/live/:id/messages: one line for the room. */
 export const liveMessageBody = body({ text: text(LIVE_MESSAGE_MAX).refine((s) => !/[\r\n]/.test(s), 'One line') });
+
+/** GET /api/admin/live/size-mix (plan LIVE RELEASE+, choice 13): the model of a new release, and the location (none: the default). */
+export const liveSizeMixQuery = z.object({ modelId: uuid, locationId: queryOptional(uuid) });
+
+const bestTimeDays = queryOptional(
+  z.preprocess(
+    (v) => (typeof v === 'string' && /^\s*\d{1,4}\s*$/.test(v) ? Number(v) : v),
+    z.number().int('Must be a whole number of days').min(1, 'At least 1 day').max(ANALYTICS_MAX_DAYS, `At most ${ANALYTICS_MAX_DAYS} days`),
+  ),
+);
+const bestTimeCountry = queryOptional(z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, 'Two letters (ISO 3166-1)'));
+
+/** GET /api/admin/live/:id/best-time (choice 10): the last `days` days (30 by default), everywhere or in one country. */
+export const liveBestTimeQuery = z.object({ days: bestTimeDays, country: bestTimeCountry });
+
+/** GET /api/admin/analytics/best-time: the same, for a tier and above (0, everyone, by default). */
+export const bestTimeQuery = z.object({
+  days: bestTimeDays,
+  country: bestTimeCountry,
+  tier: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*[0-3]\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3'))),
+});
 
 /** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
 export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });

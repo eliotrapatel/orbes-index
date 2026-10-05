@@ -485,6 +485,7 @@ class App {
       onRelease: (id) => this.openRelease(id),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       onCircle: () => this.openCircle(),
+      localZone: localZone(),
     });
     if (await this.swap(view.root, 'pieces', focus)) this.live = view;
     else view.dispose();

@@ -17,6 +17,9 @@
  */
 import type {
   AdminProfile,
+  BestTime,
+  LiveFeasibility,
+  LiveSizeMix,
   AtelierStock,
   BenchFilters,
   BenchItem,
@@ -431,6 +434,11 @@ export class AdminApi {
 
   analytics(q: { days?: number; from?: string; to?: string } = {}): Promise<AnalyticsData> {
     return this.get('/api/admin/analytics', q);
+  }
+
+  /** The best time to open (plan LIVE RELEASE+, choice 10): a tier and above, everywhere or in one country, over `days`. */
+  bestTime(q: { days?: number; tier?: number; country?: string } = {}): Promise<BestTime> {
+    return this.get('/api/admin/analytics/best-time', q);
   }
 
   /** The panel The Circle (P-X01): the members of the club by tier now, the visits of the same window by day. */
@@ -1058,6 +1066,21 @@ export class AdminApi {
   /** The release beside the others whose T0 has passed. */
   liveComparison(id: string): Promise<LiveReleaseComparison> {
     return this.get(`/api/admin/live/${encodeURIComponent(id)}/comparison`);
+  }
+
+  /** The best time to open the release: its tiers' activity by hour, Paris time, and its T0's. */
+  liveBestTime(id: string, q: { days?: number; country?: string } = {}): Promise<BestTime> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/best-time`, q);
+  }
+
+  /** The feasibility check before publishing: each size against the stock at the release's location (warnings only). */
+  liveFeasibility(id: string): Promise<LiveFeasibility> {
+    return this.get(`/api/admin/live/${encodeURIComponent(id)}/feasibility`);
+  }
+
+  /** The size mix a new release of a model is proposed: the stock at the location first, then the planner. */
+  liveSizeMix(modelId: string, locationId?: string | null): Promise<LiveSizeMix> {
+    return this.get('/api/admin/live/size-mix', { modelId, ...(locationId ? { locationId } : {}) });
   }
 
   // ── The Club: drops (P-R03) ──────────────────────────────────────────────

@@ -61,6 +61,7 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
+import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
 import { accountOrders, type ExportedOrder } from './orders.js';
 import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
@@ -287,6 +288,8 @@ export interface AccountExport {
   liveEntries: ExportedLiveEntry[];
   /** The account's interest in the LIVE RELEASES (I'LL BE THERE), oldest first: the release, the size, since when. */
   liveInterest: ExportedLiveInterest[];
+  /** The account's answers to the questions after the LIVE RELEASES (plan LIVE RELEASE+), oldest first: the release, the question, the answer, when. */
+  releaseAnswers: ExportedReleaseAnswer[];
   /**
    * The account's orders (plan LIVE RELEASE+), oldest first: the channel and release, the model, size, price and
    * add-ons, the engraving text, the buyer's name and address ORBES Client Services entered, each step with its time and
@@ -572,6 +575,7 @@ export class OwnerService {
       const circle = await accountCircleData(tx, a.id);
       const shopRequests = await accountShopRequests(tx, a.id);
       const live = await accountLiveData(tx, a.id);
+      const releaseAnswers = await accountReleaseAnswers(tx, a.id);
       const orders = await accountOrders(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
@@ -651,6 +655,7 @@ export class OwnerService {
         shopRequests,
         liveEntries: live.entries,
         liveInterest: live.interest,
+        releaseAnswers,
         orders,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
@@ -683,6 +688,7 @@ export class OwnerService {
             shopRequests: out.shopRequests.length,
             liveEntries: out.liveEntries.length,
             liveInterest: out.liveInterest.length,
+            releaseAnswers: out.releaseAnswers.length,
             orders: out.orders.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),

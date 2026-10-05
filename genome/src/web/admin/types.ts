@@ -1127,6 +1127,11 @@ export interface LiveRelease extends LiveCard {
   };
   /** A surprise in every box: on or off, its description (internal). */
   surprise: { enabled: boolean; text: string | null };
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16): as set (null: the default), and the one it means. */
+  locationId: string | null;
+  location: { id: string; name: string } | null;
+  /** The question after (choice 11), its answers counted; null for an after-room. */
+  question: LiveQuestion | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -1152,6 +1157,85 @@ export interface LiveRelease extends LiveCard {
   afterRoom: LiveAfterRoom | null;
   /** An after-room's own page: the release it follows; null for a release. */
   afterRoomOf: { id: string; title: string } | null;
+}
+
+/** Where the question after stands: never asked (OFF), until the release's end (WAITING), the week after it (OPEN), CLOSED. */
+export const LIVE_QUESTION_STATES = ['OFF', 'WAITING', 'OPEN', 'CLOSED'] as const;
+export type LiveQuestionState = (typeof LIVE_QUESTION_STATES)[number];
+
+/** The question after a release in the console (services/question.ts AdminQuestion). */
+export interface LiveQuestion {
+  text: string;
+  answers: string[];
+  /** Rewritten for the release (false: the default question). */
+  custom: boolean;
+  enabled: boolean;
+  state: LiveQuestionState;
+  opensAt: Iso | null;
+  closesAt: Iso | null;
+  /** Asked on the end page (took part, no piece) and in MY PIECES (I'LL BE THERE, never came). */
+  asked: { tookPart: number; interest: number };
+  answered: number;
+  tally: { answer: number; label: string; count: number }[];
+}
+
+/** A size against the stock (GET /api/admin/live/:id/feasibility, services/release-stock.ts). */
+export interface LiveFeasibilityLine {
+  sizeId: string;
+  label: string;
+  onSale: number;
+  available: number;
+  toMake: number;
+  fromStock: number;
+  fromBench: number;
+  short: number;
+}
+
+/** The feasibility check before publishing (plan LIVE RELEASE+, choice 12): warnings, never a refusal. */
+export interface LiveFeasibility {
+  location: { id: string; name: string } | null;
+  sizes: LiveFeasibilityLine[];
+  afterRoom: LiveFeasibilityLine[] | null;
+  short: number;
+  warnings: string[];
+  reasoning: string[];
+}
+
+/** The size mix a new release is proposed (GET /api/admin/live/size-mix, choice 13). */
+export interface LiveSizeMix {
+  model: { id: string; name: string };
+  location: { id: string; name: string };
+  sizes: { label: string; stock: number; fromStock: number; fromDemand: number }[];
+  quantity: number;
+  inStock: number;
+  planned: number | null;
+  reasoning: string[];
+}
+
+/** An hour of the day, Paris time, in the best time to open. */
+export interface BestTimeHour {
+  hour: number;
+  signIns: number;
+  scans: number;
+  activity: number;
+  byTier: number[];
+  past: { releases: number; present: number };
+}
+
+/** The best time to open (GET /api/admin/live/:id/best-time, /api/admin/analytics/best-time; choice 10). */
+export interface BestTime {
+  days: number;
+  from: Iso;
+  to: Iso;
+  minTier: number;
+  country: string | null;
+  hours: BestTimeHour[];
+  countries: { country: string; activity: number; peakHour: number }[];
+  total: number;
+  suggested: { hour: number; activity: number; share: number } | null;
+  release: { hour: number; activity: number; share: number } | null;
+  pastReleases: number;
+  reasoning: string[];
 }
 
 /** Where an after-room stands: waiting for the sell-out, opening at its time, open, over, or never opened. */
@@ -1214,6 +1298,12 @@ export interface LiveSettings {
   tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
   /** The after-room: its own model, price, sizes and stock, add-ons, delay and length; null: none. */
   afterRoom?: LiveAfterRoomSettings | null;
+  /** Where its orders hold or make their pieces; null: the default location. */
+  stockLocationId?: string | null;
+  /** The question after: on by default; its words and answers (both, or null for the default question). */
+  questionEnabled?: boolean;
+  questionText?: string | null;
+  questionAnswers?: string[] | null;
 }
 
 /** An after-room's own settings (the rest is its release's). */

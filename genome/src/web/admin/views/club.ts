@@ -10,7 +10,10 @@
  * lived in real time), each with its state, T0, its pieces and price, its
  * line and its confirmed reservations; New live release (OPERATOR) creates a
  * DRAFT with its essentials, its seed drawn and committed at once, its other
- * settings by default; its row opens its page (`#/club/live/:dropId`,
+ * settings by default, its sizes proposed from the stock at its location then
+ * the planner's demand once its model is chosen (plan LIVE RELEASE+, choice
+ * 13: written into its sizes while they are the default or the last proposal,
+ * never over sizes typed by hand); its row opens its page (`#/club/live/:dropId`,
  * views/live.ts). Then the draws: every drop, the latest created first, with
  * its state, its window of entries (UTC), its pieces and its entries; New
  * release (OPERATOR) creates a DRAFT whose seed is drawn and committed at
@@ -18,19 +21,20 @@
  * publication, cancellation, the draw (ADMIN) and its entries. An AUDITOR
  * reads.
  */
-import { h } from '../../shared/dom.js';
+import { h, mount } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
-import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValues } from '../model/live.js';
+import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValues, sizeMixLine, sizeMixText } from '../model/live.js';
 import { CLUB_TABS, clubTab, DROP_LIMITS, dropFormValues, dropInput, dropProblem, placesTaken } from '../model/club.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import type { Drop, LiveCard, Model } from '../types.js';
+import type { Drop, LiveCard, LiveSizeMix, Model } from '../types.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { circleTab } from './circle.js';
 import { newLiveFields } from './live.js';
+import { reasoning } from './live-intelligence.js';
 import { pageParam, type ViewContext } from './context.js';
 import { requestsTab } from './requests.js';
 import { tiersTab } from './tiers.js';
@@ -101,11 +105,56 @@ export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
 
 /** The Drops tab: the LIVE RELEASES and New live release; every drop of the draw, and New release. */
 async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
-  const [list, models, live] = await Promise.all([ctx.api.drops(pageParam(ctx), 50), ctx.api.models(), ctx.api.liveReleases(Number(ctx.route.query.lpage) || 1, 20)]);
+  const [list, models, live, locations] = await Promise.all([
+    ctx.api.drops(pageParam(ctx), 50),
+    ctx.api.models(),
+    ctx.api.liveReleases(Number(ctx.route.query.lpage) || 1, 20),
+    ctx.api.locations().catch(() => ({ items: [] })),
+  ]);
   const canManage = can(ctx.session.admin.role, 'manageDrops');
 
   let createdLive: string | null = null;
-  const newLive = () =>
+  // The size mix of each model and location, read once per dialog.
+  const mixes = new Map<string, Promise<LiveSizeMix | 'failed'>>();
+  let proposed: string | null = null;
+  const startSizes = newLiveValues(ctx.now()).sizes;
+  const sizeMix = (v: Record<string, string>) => {
+    if (!v.modelId) return h('p', { class: 'dialog__text soft', data: { testid: 'live-size-mix' } }, 'Choose the model: its sizes are proposed from the stock at the location, then from the planner.');
+    const key = `${v.modelId}|${v.locationId ?? ''}`;
+    let read = mixes.get(key);
+    if (!read) {
+      read = ctx.api.liveSizeMix(v.modelId, v.locationId || null).catch(() => 'failed' as const);
+      mixes.set(key, read);
+    }
+    const holder = h('div', { class: 'live__mix', data: { testid: 'live-size-mix' } }, h('p', { class: 'dialog__text soft' }, 'Reading the stock and the planner…'));
+    void read.then((mix) => {
+      if (mix === 'failed') {
+        mount(holder, h('p', { class: 'dialog__text soft' }, 'The sizes could not be proposed just now: set them by hand.'));
+        return;
+      }
+      const text = sizeMixText(mix);
+      mount(
+        holder,
+        h('p', { class: 'live__mix-title' }, 'Proposed sizes'),
+        h('p', { class: 'dialog__text', data: { testid: 'live-size-mix-line' } }, text ? sizeMixLine(mix) : 'Nothing in stock and nothing the planner can tell apart yet: set the sizes by hand.'),
+        reasoning(mix.reasoning, 'live-size-mix-why'),
+      );
+      // Written into the sizes while they are the default or the last proposal: sizes typed by hand stay.
+      const area = holder.closest('form')?.querySelector<HTMLTextAreaElement>('textarea[name="sizes"]');
+      if (!text || !area) return;
+      if (area.value === text) proposed = text;
+      else if (area.value.trim() === startSizes || area.value === proposed) {
+        area.value = text;
+        proposed = text;
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    return holder;
+  };
+  const newLive = () => {
+    // Each dialog reads the stock afresh.
+    mixes.clear();
+    proposed = null;
     void openDialog({
       title: 'New live release',
       eyebrow: 'Club · Drops',
@@ -114,7 +163,8 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'dialog__text' },
         'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint: it orders the line within a tier at T0. Every other setting takes its default and is set on its page.',
       ),
-      fields: newLiveFields(models.items, newLiveValues(ctx.now())),
+      fields: newLiveFields(models.items, newLiveValues(ctx.now()), locations.items),
+      live: sizeMix,
       validate: newLiveProblem,
       confirmLabel: 'Create release',
       submit: async (v) => {
@@ -125,6 +175,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       notify('Live release created as a draft.');
       ctx.navigate(href('liveRelease', { dropId: createdLive }));
     });
+  };
 
   const liveSection = section(
     'Live releases',

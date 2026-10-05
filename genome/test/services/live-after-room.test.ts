@@ -129,9 +129,9 @@ describe('the after-room', () => {
       expect({ opens: child.opens_at, closes: child.closes_at }).toEqual({ opens: at(70 * MINUTE), closes: at(85 * MINUTE) });
       expect(r.afterRoom!.sizes).toEqual([{ id: expect.any(String), label: 'ONE SIZE', stock: 1 }]);
       expect(r.afterRoom!.addons).toEqual([{ id: expect.any(String), label: 'GIFT BOX', priceMinor: 5_000 }]);
-      // Its size is its model's SKU.
+      // Its size is its model's SKU: ONE SIZE is the model in one size (no size label), as its pieces without a variant.
       const size = await t.db.selectFrom('drop_sizes as s').innerJoin('skus as k', 'k.id', 's.sku_id').select(['k.model_id', 'k.size_label']).where('s.drop_id', '=', child.id).executeTakeFirstOrThrow();
-      expect(size).toEqual({ model_id: afterModel, size_label: 'ONE SIZE' });
+      expect(size).toEqual({ model_id: afterModel, size_label: null });
 
       // Not listed on its own; the release's page shows it, its own page names the release it follows.
       const list = await f.liveConsole.list({ page: 1, pageSize: 100 });

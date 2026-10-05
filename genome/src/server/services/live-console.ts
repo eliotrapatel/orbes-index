@@ -81,7 +81,9 @@ import {
 } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
-import { linkDropSizes } from './stock.js';
+import { knownLocation, linkDropSizes } from './stock.js';
+import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
+import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilitySize } from './release-stock.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -223,6 +225,12 @@ export interface LiveSettingsInput {
   tierWindows?: LiveTierWindowInput[];
   /** The after-room (null or omitted at creation: none). */
   afterRoom?: AfterRoomInput | null;
+  /** Where its orders hold or make their pieces (plan LIVE RELEASE+, choice 16); null: the default location. */
+  stockLocationId?: string | null;
+  /** The question after (choice 11): on by default; its words (both, or neither for the default question). */
+  questionEnabled?: boolean;
+  questionText?: string | null;
+  questionAnswers?: string[] | null;
 }
 
 /** An after-room's own settings; the rest is the release's (services/after-room.ts). */
@@ -270,6 +278,10 @@ interface Settings {
   photoAt: Date | null;
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   afterRoom: AfterRoomSettings | null;
+  stockLocationId: string | null;
+  questionEnabled: boolean;
+  questionText: string | null;
+  questionAnswers: string[] | null;
 }
 
 /** An after-room's settings, cleaned. */
@@ -409,6 +421,19 @@ function cleanSurprise(change: LiveSettingsChange, base: Settings | null): Pick<
   return { surpriseEnabled, surpriseText };
 }
 
+/** The question after a change gives: on or off (on by default), its words (both or neither: the default question), kept when it is turned off. */
+function cleanQuestion(change: LiveSettingsChange, base: Settings | null): Pick<Settings, 'questionEnabled' | 'questionText' | 'questionAnswers'> {
+  const questionEnabled = change.questionEnabled !== undefined ? change.questionEnabled === true : (base?.questionEnabled ?? true);
+  if (change.questionText === undefined && change.questionAnswers === undefined) {
+    return { questionEnabled, questionText: base?.questionText ?? null, questionAnswers: base?.questionAnswers ?? null };
+  }
+  const words = cleanQuestionWords(
+    change.questionText !== undefined ? change.questionText : (base?.questionText ?? null),
+    change.questionAnswers !== undefined ? change.questionAnswers : (base?.questionAnswers ?? null),
+  );
+  return { questionEnabled, questionText: words.text, questionAnswers: words.answers };
+}
+
 /** The settings a change gives, over the release's (or the defaults of a new one), each cleaned. */
 function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings {
   const pick = <K extends keyof LiveSettingsInput>(k: K): LiveSettingsInput[K] | undefined => (change[k] !== undefined ? change[k] : undefined);
@@ -464,6 +489,13 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     photoAt: change.photoAt !== undefined ? optionalTime(change.photoAt, 'The photograph') : (base?.photoAt ?? null),
     tierWindows: change.tierWindows !== undefined ? cleanWindows(change.tierWindows) : (base?.tierWindows ?? []),
     afterRoom: change.afterRoom !== undefined ? cleanAfterRoom(change.afterRoom, base?.afterRoom ?? null) : (base?.afterRoom ?? null),
+    stockLocationId:
+      change.stockLocationId !== undefined
+        ? change.stockLocationId === null || change.stockLocationId === ''
+          ? null
+          : knownId(change.stockLocationId, () => notFound('Location', 'STOCK_LOCATION_NOT_FOUND'))
+        : (base?.stockLocationId ?? null),
+    ...cleanQuestion(change, base),
   };
 }
 
@@ -534,6 +566,9 @@ function auditSettings(s: Settings): Record<string, unknown> {
           lengthMinutes: s.afterRoom.lengthMinutes,
         }
       : null,
+    stockLocationId: s.stockLocationId,
+    questionEnabled: s.questionEnabled,
+    question: s.questionText ? { text: s.questionText, answers: s.questionAnswers } : null,
   };
 }
 
@@ -598,6 +633,15 @@ export interface AdminLiveRelease extends AdminLiveCard {
   };
   /** A surprise in every box: on or off, and its description (internal: packing slips and work sheets). */
   surprise: { enabled: boolean; text: string | null };
+  /**
+   * Where its orders hold or make their pieces: the location set (`locationId`, null: none, the default one) and the one
+   * it means now (an after-room's: its release's).
+   */
+  locationId: string | null;
+  /** Null only before the stock's first setup (no location yet). */
+  location: { id: string; name: string } | null;
+  /** The question after (plan LIVE RELEASE+, choice 11), its answers counted; null for an after-room, which asks none. */
+  question: AdminQuestion | null;
   sizes: { id: string; label: string; stock: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
@@ -723,6 +767,8 @@ export interface LiveConsoleServiceDeps {
   publicOrigin: string;
   /** The live board's alerts and sell-out forecast (LiveInsightsService.signals); without it, none. */
   insights?: { signals(d: DropRow, now: Date): Promise<LiveSignals> };
+  /** The question after's answers (services/question.ts); one of its own when none is given. */
+  questions?: QuestionService;
   clock?: Clock;
 }
 
@@ -732,6 +778,7 @@ export class LiveConsoleService {
   private readonly seedKey: Uint8Array;
   private readonly origin: string;
   private readonly insights: LiveConsoleServiceDeps['insights'];
+  private readonly questions: QuestionService;
   private readonly clock: Clock;
 
   constructor(deps: LiveConsoleServiceDeps) {
@@ -742,6 +789,7 @@ export class LiveConsoleService {
     this.origin = deps.publicOrigin;
     this.insights = deps.insights;
     this.clock = deps.clock ?? systemClock;
+    this.questions = deps.questions ?? new QuestionService({ db: deps.db, audit: deps.audit, clock: this.clock });
   }
 
   /** The boutique board's address for a link's secret: the secret in the fragment, never sent to a server. */
@@ -767,6 +815,19 @@ export class LiveConsoleService {
   /** One LIVE RELEASE (404 DROP_NOT_FOUND for anything else). */
   get(dropId: string): Promise<AdminLiveRelease> {
     return this.release(this.db, knownId(dropId, dropNotFound));
+  }
+
+  /**
+   * The feasibility check (plan LIVE RELEASE+, choice 12, K5; services/release-stock.ts): per size, the pieces on sale
+   * against the stock available at the release's location and the pieces being made for the stock there, its
+   * after-room's sizes after its own; what remains is made to order once sold. A warning, never a refusal: the console
+   * shows it before PUBLISH, and the publication records it. Read before the publication (a release published already
+   * holds pieces for its own orders).
+   */
+  async feasibility(dropId: string): Promise<Feasibility> {
+    const d = await this.liveRow(this.db, knownId(dropId, dropNotFound));
+    if (d.parent_drop_id) throw afterRoomOwn();
+    return this.checkFeasibility(this.db, d);
   }
 
   /**
@@ -1016,6 +1077,8 @@ export class LiveConsoleService {
         const own = await tx.selectFrom('models').select('active').where('id', '=', settings.afterRoom.modelId).executeTakeFirstOrThrow();
         if (!own.active) throw afterRoomModelInactive();
       }
+      // The feasibility check, as the console showed it: recorded, never blocking (K5).
+      const feasible = await this.checkFeasibility(tx, d);
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const published = { ...d, published_at: now };
       const notes: AuditRecordInput[] = [];
@@ -1051,6 +1114,11 @@ export class LiveConsoleService {
           opensAt: d.opens_at.toISOString(),
           closesAt: d.closes_at.toISOString(),
           circlePostId: postId,
+          locationId: feasible.location?.id ?? null,
+          toMakeToOrder: feasible.short,
+          shortSizes: [...feasible.sizes.map((l) => ({ l, after: false })), ...(feasible.afterRoom ?? []).map((l) => ({ l, after: true }))]
+            .filter((x) => x.l.short > 0)
+            .map((x) => `${x.after ? 'AFTER-ROOM ' : ''}${x.l.label}:${x.l.short}`),
         },
       });
       for (const n of notes) await this.audit.record(n, tx);
@@ -1190,6 +1258,10 @@ export class LiveConsoleService {
       access_combine: s.accessCombine,
       surprise_enabled: s.surpriseEnabled,
       surprise_text: s.surpriseText,
+      stock_location_id: s.stockLocationId,
+      question_enabled: s.questionEnabled,
+      question_text: s.questionText,
+      question_answers: s.questionAnswers,
     };
   }
 
@@ -1216,6 +1288,8 @@ export class LiveConsoleService {
     if (s.accessCollectionId && !(await tx.selectFrom('collections').select('id').where('id', '=', s.accessCollectionId).executeTakeFirst())) {
       throw notFound('Collection', 'COLLECTION_NOT_FOUND');
     }
+    // A location is never deleted: known once, known for good.
+    if (s.stockLocationId) await knownLocation(tx, s.stockLocationId);
   }
 
   /**
@@ -1448,6 +1522,10 @@ export class LiveConsoleService {
       photoAt: d.photo_at,
       tierWindows: windows.map((w) => ({ tier: w.tier, turnSeconds: w.turn_seconds, payMinutes: w.pay_minutes })),
       afterRoom: await this.afterRoomSettings(db, d.id),
+      stockLocationId: d.stock_location_id ?? null,
+      questionEnabled: d.question_enabled !== false,
+      questionText: d.question_text ?? null,
+      questionAnswers: d.question_answers ?? null,
     };
   }
 
@@ -1543,11 +1621,39 @@ export class LiveConsoleService {
     };
   }
 
+  /** Where a release's orders hold or make their pieces: the location it names (an after-room: its release's), else the default; null before any location exists. */
+  private async locationOf(db: Db, d: Pick<DropRow, 'stock_location_id' | 'parent_drop_id'>): Promise<{ id: string; name: string } | null> {
+    const set = d.parent_drop_id
+      ? ((await db.selectFrom('drops').select('stock_location_id').where('id', '=', d.parent_drop_id).executeTakeFirst())?.stock_location_id ?? null)
+      : d.stock_location_id;
+    const row = await db
+      .selectFrom('stock_locations')
+      .select(['id', 'name'])
+      .$if(set !== null, (q) => q.where('id', '=', set!))
+      .$if(set === null, (q) => q.where('is_default', '=', true))
+      .executeTakeFirst();
+    return row ?? null;
+  }
+
+  /** A release's (or an after-room's) sizes as the feasibility check reads them: each with its SKU and its pieces on sale. */
+  private async sizesOnSale(db: Db, dropId: string): Promise<FeasibilitySize[]> {
+    const rows = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'sku_id']).where('drop_id', '=', dropId).orderBy('position').execute();
+    return rows.map((r) => ({ sizeId: r.id, label: r.label, skuId: r.sku_id, onSale: r.stock }));
+  }
+
+  private async checkFeasibility(db: Db, d: DropRow): Promise<Feasibility> {
+    const location = await this.locationOf(db, d);
+    const child = d.parent_drop_id ? undefined : await db.selectFrom('drops').select('id').where('parent_drop_id', '=', d.id).where('cancelled_at', 'is', null).executeTakeFirst();
+    const [sizes, afterRoom] = await Promise.all([this.sizesOnSale(db, d.id), child ? this.sizesOnSale(db, child.id) : Promise.resolve(null)]);
+    const skus = [...sizes, ...(afterRoom ?? [])].map((x) => x.skuId).filter((x): x is string => x !== null);
+    return feasibilityCheck({ location, sizes, afterRoom, supply: location ? await stockSupply(db, skus, location.id) : new Map() });
+  }
+
   private async release(db: Db, id: string): Promise<AdminLiveRelease> {
     const r = await this.reads(db).where('d.id', '=', id).where('d.mode', '=', 'LIVE').executeTakeFirst();
     if (!r) throw dropNotFound();
     const now = this.clock();
-    const [s, counts, interest, holding, models, collection, segment, posts, creator, afterRoom, parent] = await Promise.all([
+    const [s, counts, interest, holding, models, collection, segment, posts, creator, afterRoom, parent, location, question] = await Promise.all([
       this.settings(db, r),
       this.counts(db, [id]),
       this.interest(db, [id]),
@@ -1559,6 +1665,8 @@ export class LiveConsoleService {
       r.created_by ? db.selectFrom('admin_users').select(['id', 'email']).where('id', '=', r.created_by).executeTakeFirst() : undefined,
       r.parent_drop_id ? Promise.resolve(null) : this.adminAfterRoom(db, r, now),
       r.parent_drop_id ? db.selectFrom('drops').select(['id', 'title']).where('id', '=', r.parent_drop_id).executeTakeFirst() : undefined,
+      this.locationOf(db, r),
+      r.parent_drop_id ? Promise.resolve(null) : this.questions.tally(r, db),
     ]);
     const stages = liveStages(r, now);
     const silhouette = r.silhouette_sha256 ? { sha256: r.silhouette_sha256, url: mediaUrl(r.silhouette_sha256)! } : null;
@@ -1582,6 +1690,9 @@ export class LiveConsoleService {
         text: liveRuleText(consoleRule(s, models, collection ?? null)),
       },
       surprise: { enabled: s.surpriseEnabled, text: s.surpriseText },
+      locationId: s.stockLocationId,
+      location,
+      question,
       sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
       addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
       tierWindows: s.tierWindows,

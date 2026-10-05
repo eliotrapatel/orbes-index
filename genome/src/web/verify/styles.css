@@ -2645,6 +2645,109 @@ h1[tabindex="-1"]:focus,
   margin-top: 8px;
 }
 
+/* The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): ONE QUESTION, the release (in MY PIECES), the
+   question, its answers one under the other pressed like the sign-in's switch (as a poll of the circle), until when.
+   On the release's end page in the vault, centred under the account's part; in MY PIECES in the ivory: the tokens
+   follow the ground. */
+.question {
+  width: 100%;
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+
+.question--vault {
+  max-width: 340px;
+  text-align: center;
+}
+
+.question__label {
+  font-size: var(--fs-overline);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.question__release {
+  margin-top: 10px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.question__text {
+  margin-top: 14px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.question__answers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 28px;
+}
+
+.question--vault .question__answers {
+  align-items: center;
+}
+
+/* An answer narrower than a 44 px zone gains its width, as a poll's option does. */
+.question__answer {
+  min-width: 44px;
+  max-width: 100%;
+  text-align: left;
+}
+
+.question--vault .question__answer {
+  text-align: center;
+}
+
+.question__note {
+  margin-top: 24px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.question__error {
+  margin-top: 12px;
+}
+
+/* MY PIECES: AFTER THE RELEASES, one question per release the account said I'LL BE THERE to and did not come to. */
+.pieces__questions {
+  margin-top: 72px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__questions[hidden] {
+  display: none;
+}
+
+.pieces__questions-lead {
+  margin-top: 10px;
+}
+
+.pieces__question-list {
+  list-style: none;
+}
+
+.pieces__question + .pieces__question {
+  border-top: 1px solid var(--hairline);
+}
+
+.pieces__question .question {
+  margin-top: 0;
+  padding: 22px 0 18px;
+  border-top: 0;
+}
+
 /* MY PIECES: the account's orders (plan LIVE RELEASE+, choice 6), one per piece, under its pieces: the model, where it
    was sold, its sentence; its steps on a hairline track, each reached with its dot filled and its date, the current one
    ringed, those to come hollow; its terms and, once shipped, its shipment, as rows; its reference. */
@@ -4921,6 +5024,9 @@ body[data-screen="board"] .corners {
 .report__title,
 .report__status,
 .auth__option,
+.question__label,
+.question__release,
+.question__text,
 .lookbook__title,
 .lookbook__collection,
 .lookbook-card__name,

@@ -85,11 +85,22 @@ export function deriveSku(skuPrefix: string, variant: string | undefined): strin
   return (slug ? `${prefix}-${slug}` : prefix).slice(0, SKU_CODE_MAX);
 }
 
-/** The size label of a SKU for a piece's variant or a release's size: trimmed, at most 100 characters; '' is one size (null). */
+/** What the house calls a model in one size: a release's size « ONE SIZE » is the SKU of the pieces without a variant. */
+export const ONE_SIZE_LABEL = 'ONE SIZE';
+
+/**
+ * The size label of a SKU for a piece's variant or a release's size: trimmed, at most 100 characters; '' and « ONE SIZE »
+ * (whatever the case) are one size (null), so a one-size release sells the very SKU of the pieces issued without a
+ * variant, and the stock of one is the stock of the other (the feasibility check and the size mix, services/live-console.ts).
+ */
 export function sizeLabelOf(label: string | null | undefined): string | null {
   const t = typeof label === 'string' ? label.trim().slice(0, SIZE_LABEL_MAX).trim() : '';
-  return t === '' ? null : t;
+  return t === '' || t.toUpperCase() === ONE_SIZE_LABEL ? null : t;
 }
+
+/** sizeLabelOf in SQL, over a column of text (a piece's variant). */
+const sizeLabelSql = (column: string) =>
+  sql<string | null>`(CASE WHEN upper(btrim(left(btrim(${sql.ref(column)}), ${SIZE_LABEL_MAX}))) = ${ONE_SIZE_LABEL} THEN NULL ELSE nullif(btrim(left(btrim(${sql.ref(column)}), ${SIZE_LABEL_MAX})), '') END)`;
 
 // ── Errors ─────────────────────────────────────────────────────────────────
 
@@ -236,7 +247,7 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
   let sizes = 0;
   const pieces = await db
     .selectFrom('products')
-    .select(['model_id', sql<string | null>`nullif(btrim(left(btrim(variant), ${SIZE_LABEL_MAX})), '')`.as('label')])
+    .select(['model_id', sizeLabelSql('variant').as('label')])
     .where('sku_id', 'is', null)
     .groupBy(['model_id', 'label'])
     .execute();
@@ -248,7 +259,7 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
         .set({ sku_id: skuId })
         .where('model_id', '=', p.model_id)
         .where('sku_id', 'is', null)
-        .where(sql<boolean>`nullif(btrim(left(btrim(variant), ${SIZE_LABEL_MAX})), '') IS NOT DISTINCT FROM ${p.label}`)
+        .where(sql<boolean>`${sizeLabelSql('variant')} IS NOT DISTINCT FROM ${p.label}`)
         .executeTakeFirst();
       return Number(r.numUpdatedRows);
     });

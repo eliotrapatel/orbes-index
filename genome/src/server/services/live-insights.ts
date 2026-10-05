@@ -57,6 +57,9 @@ import { CLUB_EXCLUDED_STATUSES, clubStandings, tierForPieces, tierName, type Cl
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
 import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
+import { notFound } from '../errors.js';
+import { releaseSizeLabel, sizeMix, type SizeMix } from './release-stock.js';
+import { defaultLocationId, knownLocation, stockBalances } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -1503,6 +1506,49 @@ export class LiveInsightsService {
     return releasePlan({ sizes: release.sizes, forecast, past: past.map((p) => p.summary), interestBySize, collectorsBySize, modelType });
   }
 
+  /**
+   * The size mix a new release of a model is proposed (plan LIVE RELEASE+, choice 13, L1; services/release-stock.ts
+   * sizeMix): the sizes in stock at the location (the default one when none is given) first, then the planner's demand
+   * per size, read as for a release open to every ORBES account opening now (once created, its page's planner reads its
+   * own rules).
+   */
+  async sizeMix(modelId: string, locationId: string | null): Promise<SizeMix> {
+    if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const model = await this.db.selectFrom('models').select(['id', 'name', 'type']).where('id', '=', modelId.toLowerCase()).executeTakeFirst();
+    if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const locId = locationId ? await knownLocation(this.db, locationId) : await defaultLocationId(this.db);
+    const now = this.clock();
+    const [location, balances, el, past, variants] = await Promise.all([
+      this.db.selectFrom('stock_locations').select(['id', 'name']).where('id', '=', locId).executeTakeFirstOrThrow(),
+      stockBalances(this.db, { modelId: model.id, locationId: locId }),
+      this.eligibility(),
+      this.past({ id: '00000000-0000-0000-0000-000000000000', opens_at: now }, now),
+      this.variants(model.type),
+    ]);
+    const stock = balances.map((b) => ({ label: releaseSizeLabel(b.sku.sizeLabel), available: Math.max(0, b.available) }));
+    const open: Rule = { minTier: 0, models: [], collectionId: null, accounts: null };
+    const forecast = audienceForecast({ interest: 0, eligibleByTier: eligibleOf(el, open), past: past.map((p) => p.audience(el)), inRoom: null });
+    const collectorsBySize = new Map<string, number>();
+    for (const v of variants) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
+    const labels = [...new Set([...stock.map((x) => x.label.trim().toUpperCase()), ...collectorsBySize.keys()])].filter((l) => l.length > 0);
+    const plan = releasePlan({
+      sizes: labels.map((l) => ({ id: l, label: l, stock: stock.filter((x) => x.label.trim().toUpperCase() === l).reduce((n, x) => n + x.available, 0) })),
+      forecast,
+      past: past.map((p) => p.summary),
+      interestBySize: new Map(),
+      collectorsBySize,
+      modelType: model.type,
+    });
+    return sizeMix({
+      model: { id: model.id, name: model.name },
+      location,
+      stock,
+      planned: plan.quantity,
+      demand: plan.sizes.map((x) => ({ label: x.label, pieces: x.suggested ?? 0 })),
+      plannerReasoning: ['The planner, as for a release open to every ORBES account opening now:', ...forecast.reasoning, ...plan.reasoning],
+    });
+  }
+
   /** The audience forecast: the room expected at T0. */
   async forecast(dropId: string): Promise<AudienceForecast> {
     const now = this.clock();
@@ -1788,7 +1834,7 @@ export class LiveInsightsService {
    * The past releases (published, not cancelled, ended or closed by now, T0 before this one's; never an after-room, a
    * second door for a sold-out line, not a release of its own), the latest LIVE_INSIGHT_RULES.pastReleases by T0: their summaries, their entries, and their audience under their rule.
    */
-  private async past(d: DropRow, now: Date) {
+  private async past(d: Pick<DropRow, 'id' | 'opens_at'>, now: Date) {
     const rows = await this.db
       .selectFrom('drops')
       .selectAll()

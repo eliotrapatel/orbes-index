@@ -22,6 +22,7 @@
  */
 import type {
   AccountOrder,
+  AccountQuestion,
   OrderCareGuide,
   CertificateLookup,
   CertificateOffer,
@@ -115,6 +116,22 @@ const MAX_RESPONSE_CHARS = 256 * 1024;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/** A question after as the server sent it, checked; null for none or for one this app could not read. */
+function questionOf(q: AccountQuestion | null): AccountQuestion | null {
+  if (!q) return null;
+  const ok =
+    typeof q.dropId === 'string' &&
+    typeof q.text === 'string' &&
+    Array.isArray(q.answers) &&
+    q.answers.length >= 2 &&
+    q.answers.every((a) => typeof a === 'string') &&
+    (q.answer === null || (Number.isInteger(q.answer) && q.answer >= 1 && q.answer <= q.answers.length)) &&
+    (q.asked === 'TOOK_PART' || q.asked === 'INTEREST') &&
+    typeof q.closesAt === 'string';
+  if (!ok) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  return q;
+}
 
 /** An order's documents saved as PDFs (GET /api/v1/account/orders/:id/<kind>.pdf). */
 export type OrderDocumentKind = 'invoice' | 'credit-note' | 'certificate';
@@ -236,6 +253,31 @@ export class ApiClient {
     const r = await this.request<Participation>('GET', '/api/v1/account/participation');
     if (!Array.isArray(r?.releases) || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
+  }
+
+  /**
+   * The question after a LIVE RELEASE for the signed-in account (plan LIVE RELEASE+, choice 11): null when it is not
+   * asked of it, or no longer open (401 signed out).
+   */
+  async question(id: string): Promise<AccountQuestion | null> {
+    const r = await this.request<{ question?: AccountQuestion | null }>('GET', `/api/v1/live/${encodeURIComponent(id)}/question`);
+    if (!r || !('question' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return questionOf(r.question ?? null);
+  }
+
+  /** One tap: the answer chosen (its position, from 1), changeable while the question is open. */
+  async answer(id: string, answer: number): Promise<AccountQuestion> {
+    const r = await this.request<{ question?: AccountQuestion | null }>('PUT', `/api/v1/live/${encodeURIComponent(id)}/answer`, { answer }, { csrf: true });
+    const q = questionOf(r?.question ?? null);
+    if (!q) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return q;
+  }
+
+  /** The questions MY PIECES asks: after the releases the account said I'LL BE THERE to and did not come to (401 signed out). */
+  async questions(): Promise<AccountQuestion[]> {
+    const r = await this.request<{ questions?: unknown }>('GET', '/api/v1/account/questions');
+    if (!Array.isArray(r?.questions)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.questions.map((q) => questionOf(q as AccountQuestion)).filter((q): q is AccountQuestion => q !== null);
   }
 
   /** The signed-in account's tier and entries (the club; 401 signed out). */

@@ -15,14 +15,20 @@
  *  - The live board's figures, and a reservation's reference.
  *  - The after-room (plan LIVE RELEASE+, choice 2): where it stands and why it never opened, said; its own page has the
  *    live board and controls, never a setting, a publication, a cancellation or a board link of its own.
+ *  - Plan LIVE RELEASE+, step S8: the question after (choice 11), its words one answer per line and its answers
+ *    counted; the release's stock location (choice 16, in the sizes' part); the size mix proposed at creation (choice
+ *    13) written as the sizes' lines; the feasibility check before publishing (choice 12) said per size.
  */
-import { formatCount, formatDateTime } from '../format.js';
+import { formatCount, formatDateTime, percent } from '../format.js';
 import { can } from './permissions.js';
 import { localUtc, tierName, utcInstant } from './club.js';
 import {
   LIVE_CURRENCIES,
   type AdminRole,
   type AfterRoomSkip,
+  type LiveFeasibility,
+  type LiveQuestion,
+  type LiveSizeMix,
   type LiveAfterRoom,
   type LiveAfterRoomSettings,
   type LiveBoard,
@@ -64,6 +70,14 @@ export const LIVE_LIMITS = Object.freeze({
   /** The after-room (services/after-room.ts): it opens this long after the sell-out, open this long, in minutes. */
   afterRoomDelay: Object.freeze({ min: 1, max: 60, default: 10 }),
   afterRoomLength: Object.freeze({ min: 5, max: 120, default: 15 }),
+  /** The question after (services/question.ts LIVE_QUESTION_LIMITS): its words, its 2 to 6 answers of one line each. */
+  question: Object.freeze({ text: 120, answer: 40, minAnswers: 2, maxAnswers: 6 }),
+});
+
+/** The question after when the console does not rewrite it (services/live.ts LIVE_QUESTION_DEFAULT). */
+export const LIVE_QUESTION_DEFAULT = Object.freeze({
+  text: 'WHAT WOULD YOU HAVE WANTED?',
+  answers: Object.freeze(['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND']),
 });
 
 // ── Where a release stands ─────────────────────────────────────────────────
@@ -283,6 +297,7 @@ export function newLiveValues(now: Date): Record<string, string> {
     closesAt: localUtc(new Date(opens.getTime() + 3_600_000).toISOString()),
     price: '',
     currency: 'EUR',
+    locationId: '',
     sizes: 'ONE SIZE = 25',
   };
 }
@@ -318,11 +333,24 @@ export function newLiveInput(v: Record<string, string>): LiveSettings {
     priceMinor: parseMoney(v.price)!,
     currency: v.currency as LiveCurrency,
     sizes: sizes.sizes,
+    ...(v.locationId ? { stockLocationId: v.locationId } : {}),
   };
 }
 
+/** A size mix proposed (plan LIVE RELEASE+, choice 13) as the sizes' lines of a dialog: `52 = 4`, one per line; null with none. */
+export function sizeMixText(mix: Pick<LiveSizeMix, 'sizes'>): string | null {
+  return mix.sizes.length ? mix.sizes.map((s) => `${s.label} = ${s.stock}`).join('\n') : null;
+}
+
+/** The size mix in one line: `52 = 4 (in stock 4), 54 = 5 (in stock 1, 4 to make)`. */
+export function sizeMixLine(mix: Pick<LiveSizeMix, 'sizes'>): string {
+  return mix.sizes
+    .map((s) => `${s.label} = ${formatCount(s.stock)} (${[s.fromStock ? `${formatCount(s.fromStock)} in stock` : null, s.fromDemand ? `${formatCount(s.fromDemand)} to make` : null].filter(Boolean).join(', ')})`)
+    .join(' · ');
+}
+
 /** The parts of a release's settings, each its own dialog. */
-export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom' | 'surprise';
+export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom' | 'surprise' | 'question';
 
 /** A part's values, as its dialog's form holds them. */
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
@@ -330,7 +358,7 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
     case 'release':
       return { modelId: r.model.id, title: r.title, description: r.description ?? '', price: moneyField(r.priceMinor), currency: r.currency, perAccount: String(r.perAccount) };
     case 'sizes':
-      return { sizes: sizesText(r.sizes), quantityLine: r.quantityLine === defaultQuantityLine(r.quantity) ? '' : r.quantityLine };
+      return { sizes: sizesText(r.sizes), quantityLine: r.quantityLine === defaultQuantityLine(r.quantity) ? '' : r.quantityLine, locationId: r.locationId ?? '' };
     case 'access':
       return {
         minTier: String(r.minTier),
@@ -381,7 +409,27 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
     }
     case 'surprise':
       return { enabled: r.surprise.enabled ? 'true' : '', text: r.surprise.text ?? '' };
+    case 'question': {
+      const q = r.question;
+      return { enabled: q?.enabled === false ? '' : 'true', text: q?.text ?? LIVE_QUESTION_DEFAULT.text, answers: (q?.answers ?? LIVE_QUESTION_DEFAULT.answers).join('\n') };
+    }
   }
+}
+
+/** The answers typed one per line, trimmed, the empty lines left out. */
+export function questionAnswers(text: string | undefined): string[] {
+  return (text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\s+/g, ' '))
+    .filter((l) => l.length > 0);
+}
+
+/** The question's words a dialog holds, as the server stores them: null and null for the default question. */
+function questionWords(v: Record<string, string>): { text: string | null; answers: string[] | null } {
+  const text = (v.text ?? '').trim().replace(/\s+/g, ' ');
+  const answers = questionAnswers(v.answers);
+  const isDefault = text === LIVE_QUESTION_DEFAULT.text && answers.length === LIVE_QUESTION_DEFAULT.answers.length && answers.every((a, i) => a === LIVE_QUESTION_DEFAULT.answers[i]);
+  return isDefault || (text === '' && answers.length === 0) ? { text: null, answers: null } : { text, answers };
 }
 
 /** What the server would refuse in a part's dialog, said before anything is sent; null when it may be sent. */
@@ -460,6 +508,22 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       if (text.length > LIVE_LIMITS.surprise) return `The description has at most ${LIVE_LIMITS.surprise} characters.`;
       return null;
     }
+    case 'question': {
+      const q = LIVE_LIMITS.question;
+      const text = (v.text ?? '').trim();
+      const answers = questionAnswers(v.answers);
+      if (text === '' && answers.length === 0) return null;
+      if (text === '' || text.length > q.text || /[\r\n]/.test(text)) return `The question is one line of 1 to ${q.text} characters (empty with no answer: the default question).`;
+      if (answers.length < q.minAnswers || answers.length > q.maxAnswers) return `The question has ${q.minAnswers} to ${q.maxAnswers} answers, one per line.`;
+      const long = answers.find((a) => a.length > q.answer);
+      if (long) return `An answer has at most ${q.answer} characters: ${long}.`;
+      const seen = new Set<string>();
+      for (const a of answers) {
+        if (seen.has(a.toUpperCase())) return `The answer ${a} is listed twice.`;
+        seen.add(a.toUpperCase());
+      }
+      return null;
+    }
   }
 }
 
@@ -492,6 +556,8 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       const now = r.quantityLine === defaultQuantityLine(r.quantity) ? null : r.quantityLine;
       const next = typed === '' || typed === defaultQuantityLine(quantity) ? null : typed;
       if (next !== now) out.quantityLine = next;
+      const location = v.locationId || null;
+      if (v.locationId !== undefined && location !== r.locationId) out.stockLocationId = location;
       return out;
     }
     case 'access': {
@@ -573,7 +639,58 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (text !== r.surprise.text) out.surpriseText = text;
       return out;
     }
+    case 'question': {
+      const q = r.question;
+      const enabled = v.enabled === 'true';
+      if (enabled !== (q?.enabled ?? true)) out.questionEnabled = enabled;
+      const next = questionWords(v);
+      const now = q?.custom ? { text: q.text, answers: q.answers } : { text: null, answers: null };
+      if (JSON.stringify(next) !== JSON.stringify(now)) {
+        out.questionText = next.text;
+        out.questionAnswers = next.answers;
+      }
+      return out;
+    }
   }
+}
+
+/** The question after as the release's page says it: off, or its words and answers, the default one said so. */
+export function questionLine(q: Pick<LiveQuestion, 'enabled' | 'text' | 'answers' | 'custom'>): string {
+  if (!q.enabled) return 'Not asked';
+  return `${q.text} · ${q.answers.join(' · ')}${q.custom ? '' : ' (the default question)'}`;
+}
+
+/** Where the question stands, said: asked after the end for seven days, open until, closed. */
+export function questionStateLine(q: Pick<LiveQuestion, 'state' | 'opensAt' | 'closesAt'>): string {
+  switch (q.state) {
+    case 'OFF':
+      return 'Not asked';
+    case 'WAITING':
+      return 'Asked at the release’s end, for 7 days';
+    case 'OPEN':
+      return `Open until ${formatDateTime(q.closesAt!)}`;
+    case 'CLOSED':
+      return `Closed on ${formatDateTime(q.closesAt!)}`;
+  }
+}
+
+/** Each answer counted, as the hairline bars show them: its words, its count, its share of the answers. */
+export function questionTallyRows(q: Pick<LiveQuestion, 'tally' | 'answered'>): { key: string; label: string; value: number; fraction: number; share: string; tone: 'solid' }[] {
+  const top = Math.max(0, ...q.tally.map((t) => t.count));
+  return q.tally.map((t) => ({
+    key: String(t.answer),
+    label: t.label,
+    value: t.count,
+    fraction: top > 0 ? t.count / top : 0,
+    share: percent(t.count, q.answered),
+    tone: 'solid' as const,
+  }));
+}
+
+/** The feasibility check in one line: everything covered, or how many pieces would be made to order, and where. */
+export function feasibilityLine(f: Pick<LiveFeasibility, 'short' | 'location'>): string {
+  const where = f.location?.name ?? 'no location';
+  return f.short === 0 ? `Every piece on sale is covered at ${where}.` : `${formatCount(f.short)} ${f.short === 1 ? 'piece' : 'pieces'} on sale would be made to order once sold (${where}).`;
 }
 
 /** The surprise as the release's page in the console says it: `In every box · A silk pouch`, or `None`. */

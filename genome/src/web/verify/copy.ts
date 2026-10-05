@@ -395,6 +395,25 @@ export const ORDERS = Object.freeze({
 });
 
 /**
+ * The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): for 7 days from the release's end, on its end page
+ * to those who took part without a piece, in MY PIECES to those who said I'LL BE THERE and did not come. One tap,
+ * changeable until it closes; the question and its answers are the release's (the console's words, or the default
+ * WHAT WOULD YOU HAVE WANTED? · ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND).
+ */
+export const QUESTION = Object.freeze({
+  label: 'ONE QUESTION',
+  /** Before an answer, and after it: until when it may change (the date on this phone's calendar). */
+  ask: (until: string) => `One tap. You may change your answer until ${until}.`,
+  answered: (until: string) => `Thank you: your answer is recorded. You may change it until ${until}.`,
+  saving: 'Recording your answer…',
+  failed: 'Your answer could not be recorded just now.',
+  /** MY PIECES: the section, its lead, and each release by its name (else LIVE RELEASE) and opening date. */
+  piecesTitle: 'AFTER THE RELEASES',
+  piecesLead: 'You said you would be there. One question about each release, for a week after it.',
+  release: (name: string, date: string) => [name, date].filter(Boolean).join(' · '),
+});
+
+/**
  * The CARE tab of a piece in MY PIECES (P-M02): the care of its model (the result's CARE text), then ORBES Care, the
  * subscription that looks after the owner's pieces. SUBSCRIBE opens its page in a new tab once ORBES publishes one
  * (CARE_SUBSCRIBE_URL); until then, a plain sentence says subscriptions open soon, with nothing to press.

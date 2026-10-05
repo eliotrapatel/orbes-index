@@ -58,6 +58,8 @@ import { ScanReportService } from './services/scan-reports.js';
 import { RetailerService } from './services/retailers.js';
 import { SaleService } from './services/sale.js';
 import { SegmentService } from './services/segments.js';
+import { ActivityService, aggregateActivity } from './services/activity.js';
+import { QuestionService } from './services/question.js';
 import { purgeScanHistory } from './services/scan-retention.js';
 import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
@@ -126,6 +128,10 @@ export interface AppServices {
   atelier: AtelierService;
   /** The segments (plan LIVE RELEASE+, choice 27): saved groups of collectors, their members read live, their CSV. */
   segments: SegmentService;
+  /** The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): who is asked it, their answers, the console's count. */
+  questions: QuestionService;
+  /** The best time to open (plan LIVE RELEASE+, choice 10): the sign-ins and scans by hour, country and tier, no account. */
+  activity: ActivityService;
 }
 
 export interface AppContext {
@@ -226,7 +232,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
     const pastReleases = new PastReleaseService({ db, clock });
     const liveInsights = new LiveInsightsService({ db, clock });
-    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
+    const questions = new QuestionService({ db, audit, clock });
+    const activity = new ActivityService({ db, clock });
+    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, questions, clock });
     const stock = new StockService({ db, audit, clock });
     const orders = new OrderService({ db, audit, lifecycle, clock, log });
     const invoices = new InvoiceService({ db, clock });
@@ -268,6 +276,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       fulfilment,
       atelier,
       segments,
+      questions,
+      activity,
       ...overrides.services,
     };
 
@@ -318,22 +328,24 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; scanHistory: number; liveNetworks: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
 
 /**
  * Purges expired sessions and scan tokens, expires stale transfers, counts
- * the scans of every complete UTC day into scan_daily_stats and, when
+ * the scans of every complete UTC day into scan_daily_stats, counts the
+ * sign-ins and scans of every complete UTC hour into activity_hourly (the best
+ * time to open, plan LIVE RELEASE+: services/activity.ts) and, when
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
  * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
  * after their release ended (services/live.ts), every `intervalMs` (default
  * 10 min).
  *
- * The daily statistics always run before the purge, and a pass whose
- * statistics failed purges nothing: no scan leaves the history before it is
- * counted (DATABASE §10).
+ * The daily statistics and the hourly activity always run before the purge,
+ * and a pass where either failed purges nothing: no scan leaves the history
+ * before it is counted (DATABASE §10).
  */
 export function startHousekeeping(
   ctx: AppContext,
@@ -345,7 +357,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, scanHistory: 0, liveNetworks: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -361,8 +373,9 @@ export function startHousekeeping(
     await job('scanTokens', () => purgeScanTokens(ctx.db, new Date(ctx.clock().getTime() - graceMs)));
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
+    const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
     const retentionDays = ctx.config.scanRetentionDays;
-    if (counted && retentionDays !== null && retentionDays !== undefined) {
+    if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );

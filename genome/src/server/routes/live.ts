@@ -29,6 +29,11 @@
  *   PUT    /api/v1/live/:id/addons          the add-ons of the piece held
  *   POST   /api/v1/live/:id/confirm         PAY (a placeholder: the reservation confirmed)
  *   POST   /api/v1/live/:id/release         RELEASE MY PLACE
+ *   GET    /api/v1/live/:id/question        the question after, once the release has ended, for an account that took
+ *                                           part without a piece (its end page) or said I'LL BE THERE and never came
+ *                                           (MY PIECES lists those: GET /api/v1/account/questions); `{ question: null }`
+ *                                           for anyone else or once closed (plan LIVE RELEASE+, choice 11)
+ *   PUT    /api/v1/live/:id/answer          its answer, one tap, changeable while it is open
  *
  * The state and the stream are only for an account allowed to enter the release, or holding an entry in it (403
  * LIVE_NOT_ELIGIBLE otherwise, with the rule in words; 401 without a session): no live view for anyone else, the
@@ -43,7 +48,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { LiveHub } from '../http/live-stream.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { emptyBody, liveAddonsBody, liveBoardBody, liveEntryBody, liveInterestBody, liveParams, liveTurnBody, parse } from '../http/schemas.js';
+import { emptyBody, liveAddonsBody, liveAnswerBody, liveBoardBody, liveEntryBody, liveInterestBody, liveParams, liveTurnBody, parse } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { dropNotFound } from '../services/drops.js';
 import { liveNetworkHash } from '../services/live.js';
@@ -62,7 +67,7 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
   app.addHook('onRequest', rateLimitHook(limiters, 'live'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
   app.addHook('onRequest', limiters.liveAccount);
-  const { live, liveRoom } = ctx.services;
+  const { live, liveRoom, questions } = ctx.services;
 
   // ── Public ───────────────────────────────────────────────────────────────
 
@@ -222,5 +227,19 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const { id } = parse(liveParams, request.params);
     parse(emptyBody, request.body);
     return { entry: await live.release(account.id, id, accountActor(request)) };
+  });
+
+  // The question after (plan LIVE RELEASE+, choice 11): asked only of whom it is for, while it is open.
+  app.get('/api/v1/live/:id/question', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(liveParams, request.params);
+    return { question: await questions.forAccount(account.id, id) };
+  });
+
+  app.put('/api/v1/live/:id/answer', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(liveParams, request.params);
+    const { answer } = parse(liveAnswerBody, request.body);
+    return { question: await questions.answer(account.id, id, answer, accountActor(request)) };
   });
 };

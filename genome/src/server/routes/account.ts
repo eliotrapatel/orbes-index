@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, invoices, orders, ownership, ownershipCertificates, pastReleases, recovery, warranty } = ctx.services;
+  const { auth, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -111,6 +111,13 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/participation', async (request) => {
     const { account } = requireAccount(request);
     return pastReleases.participation(account.id);
+  });
+
+  // MY PIECES (plan LIVE RELEASE+, choice 11): the questions after the LIVE RELEASES the account said I'LL BE THERE to
+  // and never came to, open for a week after each one's end, with its answer when it gave one.
+  app.get('/api/v1/account/questions', async (request) => {
+    const { account } = requireAccount(request);
+    return { questions: await questions.forPieces(account.id) };
   });
 
   // An order's documents in MY PIECES (plan LIVE RELEASE+, M6), its own only (404 for any other): the invoice and the

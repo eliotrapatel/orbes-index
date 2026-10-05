@@ -234,6 +234,42 @@ describe('ApiClient', () => {
     await expect(api.participation()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
   });
 
+  it('the question after (plan LIVE RELEASE+, choice 11): read with a GET, answered with a PUT and the CSRF token, MY PIECES\' list; anything else a bad response', async () => {
+    const q = { dropId: 'r1', name: 'MONOLITHE', opensAt: '2026-11-02T18:00:00.000Z', text: 'WHAT WOULD YOU HAVE WANTED?', answers: ['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND'], answer: null, closesAt: '2026-11-09T19:00:00.000Z', asked: 'TOOK_PART' };
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(200, { question: q }),
+      () => json(200, { question: null }),
+      () => json(200, { question: { ...q, answer: 2 } }),
+      () => json(200, { questions: [{ ...q, asked: 'INTEREST' }] }),
+      // Not a question this app can read: an answer outside its answers, a single answer, no list.
+      () => json(200, { question: { ...q, answer: 4 } }),
+      () => json(200, { question: { ...q, answers: ['ONLY ONE'] } }),
+      () => json(200, {}),
+      () => json(200, { questions: null }),
+      () => json(403, { error: { code: 'LIVE_QUESTION_NOT_ASKED', message: 'This question is for the collectors who took part in this release without a piece, or who said they would be there.' } }),
+      () => json(401, { error: { code: 'UNAUTHORIZED', message: 'Sign in.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect(await api.question('r1')).toEqual(q);
+    expect(f.calls[1]).toMatchObject({ url: '/api/v1/live/r1/question', method: 'GET', credentials: 'same-origin', body: undefined });
+    expect(f.calls[1].headers['x-csrf-token']).toBeUndefined();
+    expect(await api.question('r1')).toBeNull();
+    expect(await api.answer('r1', 2)).toEqual({ ...q, answer: 2 });
+    expect(f.calls[3]).toMatchObject({ url: '/api/v1/live/r1/answer', method: 'PUT', body: { answer: 2 } });
+    expect(f.calls[3].headers['x-csrf-token']).toBe('t1');
+    expect(await api.questions()).toEqual([{ ...q, asked: 'INTEREST' }]);
+    expect(f.calls[4]).toMatchObject({ url: '/api/v1/account/questions', method: 'GET', body: undefined });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.question('r1')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.questions()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    // A refusal reads as the server wrote it.
+    await expect(api.answer('r1', 1)).rejects.toMatchObject({ status: 403, code: 'LIVE_QUESTION_NOT_ASKED' });
+    await expect(api.questions()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
   it('RECEIVE THIS PIECE (F-03): sends the code with the piece scanned and the transfer token of that scan, with the CSRF token', async () => {
     const f = fakeFetch([
       () => json(200, SESSION('t1')),

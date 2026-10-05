@@ -12,7 +12,8 @@
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
  * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
  * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR;
- * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR);
+ * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR; the
+ * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -153,6 +154,12 @@ const PROBES: Probe[] = [
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/report.csv`, min: 'AUDITOR' },
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/collectors`, min: 'AUDITOR' },
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/comparison`, min: 'AUDITOR' },
+  // Step S8: the size mix proposed at creation, the feasibility check before publishing, the best time to open: reads.
+  { group: 'live', method: 'GET', url: '/api/admin/live/size-mix?modelId=nope', min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/size-mix?modelId=${UUID}`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/feasibility`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/best-time?days=367`, min: 'AUDITOR' },
+  { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}/best-time?country=FR`, min: 'AUDITOR' },
   { group: 'circle', method: 'GET', url: '/api/admin/circle/posts', min: 'AUDITOR' },
   { group: 'circle', method: 'POST', url: '/api/admin/circle/posts', body: INVALID, min: 'OPERATOR' },
   { group: 'circle', method: 'GET', url: `/api/admin/circle/posts/${UUID}`, min: 'AUDITOR' },
@@ -221,6 +228,8 @@ const PROBES: Probe[] = [
   { group: 'atelier', method: 'POST', url: '/api/admin/atelier/sheets', body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?days=367', min: 'AUDITOR' },
+  { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?tier=4', min: 'AUDITOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },

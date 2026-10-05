@@ -409,6 +409,24 @@ export interface Participation {
   releases: { id: string; secured: boolean }[];
 }
 
+/**
+ * The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11; GET /api/v1/live/:id/question, GET
+ * /api/v1/account/questions, PUT /api/v1/live/:id/answer): asked for 7 days from the release's end, on its end page to
+ * those who took part without a piece (TOOK_PART), in MY PIECES to those who said I'LL BE THERE and did not come
+ * (INTEREST); `answer` the position of the answer chosen, from 1, or null.
+ */
+export interface AccountQuestion {
+  dropId: string;
+  /** The model's name once revealed: how MY PIECES names the release; null when it ended before its name. */
+  name: string | null;
+  opensAt: string;
+  text: string;
+  answers: string[];
+  answer: number | null;
+  closesAt: string;
+  asked: 'TOOK_PART' | 'INTEREST';
+}
+
 /** A page of GET /api/v1/drops/:id/entries, by rank. */
 export interface DrawEntriesPage {
   items: DrawEntry[];

@@ -37,6 +37,15 @@
  *   GET    /api/admin/live/:id/collectors                    AUDITOR   the collector insights
  *   GET    /api/admin/live/:id/comparison                    AUDITOR   the release beside the others
  *
+ * The release and the stock, and when to open (plan LIVE RELEASE+, choices 10, 12 and 13):
+ *
+ *   GET    /api/admin/live/size-mix?modelId&locationId       AUDITOR   the sizes a new release of a model is proposed:
+ *                                                                     the stock at the location first, then the planner
+ *   GET    /api/admin/live/:id/feasibility                   AUDITOR   per size, the pieces on sale against the stock
+ *                                                                     and the pieces being made: a warning, never a refusal
+ *   GET    /api/admin/live/:id/best-time?days&country        AUDITOR   the activity of its tiers by hour, Paris time,
+ *                                                                     the suggested hour and its T0's
+ *
  * Client Services follows the confirmed reservations through their orders (routes/admin/orders.ts: the Orders board
  * replaces the LIVE plan's list, its CSV and its CONCLUDED / CANCELLED resolution).
  *
@@ -54,6 +63,8 @@ import {
   liveMessageBody,
   liveStockBody,
   createLiveBody,
+  liveBestTimeQuery,
+  liveSizeMixQuery,
   pageOf,
   parse,
   publishLiveBody,
@@ -66,6 +77,7 @@ import type { AdminLiveBoard } from '../../services/live-console.js';
 import type { BotRadar, CollectorInsights } from '../../services/live-insights.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, readsClientEmails } from './serialize.js';
+import { countActivity } from './analytics.js';
 
 /** An entry as the caller may read it: its email in clear (OPERATOR, ADMIN) or masked (AUDITOR). */
 export function liveEntryJson(e: AdminLiveEntry, inClear: boolean): AdminLiveEntry {
@@ -90,7 +102,7 @@ export function collectorInsightsJson(c: CollectorInsights, inClear: boolean): C
 const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
 export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { live, liveConsole, liveInsights } = ctx.services;
+  const { activity, live, liveConsole, liveInsights } = ctx.services;
 
   // ── The release ──────────────────────────────────────────────────────────
 
@@ -280,5 +292,24 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.get('/api/admin/live/:id/comparison', async (request) => {
     const { id } = parse(liveAdminParams, request.params);
     return liveInsights.comparison(id);
+  });
+
+  // ── The release and the stock; when to open (reads only) ────────────────
+
+  app.get('/api/admin/live/size-mix', async (request) => {
+    const q = parse(liveSizeMixQuery, request.query);
+    return liveInsights.sizeMix(q.modelId, q.locationId ?? null);
+  });
+
+  app.get('/api/admin/live/:id/feasibility', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    return liveConsole.feasibility(id);
+  });
+
+  app.get('/api/admin/live/:id/best-time', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    const q = parse(liveBestTimeQuery, request.query);
+    await countActivity(ctx, request);
+    return activity.forRelease(id, { days: q.days, country: q.country ?? null });
   });
 };
