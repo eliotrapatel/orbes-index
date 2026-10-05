@@ -4,10 +4,12 @@
  *
  *  - The words of the board: a channel, a step, why an order is late (M3) and since when, what it holds, the delays.
  *  - The board's filters read from the page's query, kept to the values the server takes.
- *  - What each role may do with an order now (OPERATOR: its steps, its location, its terms, its buyer, a piece picked
- *    from the stock), mirroring services/orders.ts so that nobody is offered a button that will answer 409 or 403.
- *  - The dialogs: shipping (carrier, tracking number, declared value), the terms, the buyer, the delays, a location, a
- *    carrier: what the server would refuse before anything is sent, and what to send.
+ *  - What each role may do with an order now (OPERATOR: its steps, a return, its location, its terms, its buyer, a piece
+ *    picked from the stock), mirroring services/orders.ts so that nobody is offered a button that will answer 409 or 403.
+ *  - The dialogs: shipping (carrier, tracking number, declared value), a return (back to stock at a location, or to the
+ *    archive, with a note), the terms, the buyer, the delays, a location, a carrier: what the server would refuse before
+ *    anything is sent, and what to send.
+ *  - An order's documents (M7): its invoice and credit note, named.
  *  - The packing slip: the piece, its size, its add-ons, the engraving and the surprise; never a price.
  */
 import { formatCount } from '../format.js';
@@ -16,7 +18,9 @@ import { formatMoney, moneyField, parseMoney } from './live.js';
 import {
   ORDER_CHANNELS,
   ORDER_CURRENCIES,
+  RETURN_OUTCOMES,
   type AdminRole,
+  type InvoiceKind,
   type OrderAlertDelays,
   type OrderCard,
   type OrderBoardFilters,
@@ -24,6 +28,7 @@ import {
   type OrderCurrency,
   type OrderDetail,
   type OrderLateRule,
+  type OrderReturnInput,
   type OrderStatus,
   type OrderTermsChange,
   type OrderTransitionInput,
@@ -139,6 +144,12 @@ export function addonsLine(o: Pick<OrderView, 'addons' | 'currency'>): string {
   return o.addons.map((a) => (o.currency ? `${a.label} ${formatMoney(a.priceMinor, o.currency)}` : a.label)).join(' · ');
 }
 
+/** A document's kind as the console names it. */
+export const DOCUMENT_LABELS: Readonly<Record<InvoiceKind, string>> = Object.freeze({ INVOICE: 'Invoice', CREDIT_NOTE: 'Credit note' });
+
+/** Where a returned piece went. */
+export const RETURN_LABELS: Readonly<Record<(typeof RETURN_OUTCOMES)[number], string>> = Object.freeze({ RESTOCKED: 'Back to stock', ARCHIVED: 'To the archive' });
+
 /** The event of an order's history in words. */
 export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   'order.create': 'Reserved',
@@ -181,6 +192,8 @@ export interface OrderActions {
   ship: boolean;
   deliver: boolean;
   cancel: boolean;
+  /** RETURNED (choice 20): shipped or delivered. */
+  return: boolean;
   location: boolean;
   /** The size, the price and the currency (a draw's or a salon's), and the engraving text (any order). */
   terms: { size: boolean; price: boolean; engraving: boolean };
@@ -195,10 +208,11 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
   const holding = HOLDING.includes(o.status);
   const sale = o.channel !== 'LIVE';
   return {
-    pay: ok && o.status === 'RESERVED',
+    pay: ok && o.status === 'RESERVED' && o.priceMinor !== null,
     ship: ok && o.status === 'PAID' && o.reservation === 'STOCK' && o.productId !== null,
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
+    return: ok && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     location: ok && holding && o.productId === null,
     terms: { size: ok && holding && sale && o.productId === null, price: ok && o.status === 'RESERVED' && sale, engraving: ok && holding },
     buyer: ok,
@@ -210,8 +224,8 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
 export function shipWaitsFor(o: OrderView): string | null {
   if (o.status !== 'PAID' && o.status !== 'RESERVED') return null;
   if (o.skuId === null) return 'Its size is to be entered.';
-  if (o.reservation === 'BENCH') return 'Its piece is being made at the atelier.';
-  if (o.status === 'RESERVED') return 'It ships once paid.';
+  if (o.reservation === 'BENCH') return o.status === 'RESERVED' && o.priceMinor === null ? 'Its piece is being made at the atelier; its price is to be entered.' : 'Its piece is being made at the atelier.';
+  if (o.status === 'RESERVED') return o.priceMinor === null ? 'Its price is to be entered: it is paid once priced, and its invoice issued then.' : 'It ships once paid.';
   if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';
   return null;
 }
@@ -244,7 +258,19 @@ export function shipInput(v: Record<string, string>): OrderTransitionInput {
   };
 }
 
-/** A note, required (a cancellation) or not (a payment, a delivery). */
+/** A return: where the piece goes (a location when back to stock), and a note. */
+export function returnProblem(v: Record<string, string>): string | null {
+  if (!(RETURN_OUTCOMES as readonly string[]).includes(v.outcome ?? '')) return 'Choose where the piece goes.';
+  if (v.outcome === 'RESTOCKED' && !UUID_RE.test(v.locationId ?? '')) return 'Choose the location the piece goes back to.';
+  return noteProblem(v.note, true);
+}
+
+export function returnInput(v: Record<string, string>): OrderReturnInput {
+  const note = (v.note ?? '').trim();
+  return v.outcome === 'RESTOCKED' ? { outcome: 'RESTOCKED', locationId: v.locationId!, note } : { outcome: 'ARCHIVED', note };
+}
+
+/** A note, required (a cancellation, a return) or not (a payment, a delivery). */
 export function noteProblem(note: string | undefined, required: boolean): string | null {
   const t = (note ?? '').trim();
   if (required && !t) return 'Say in the note why.';

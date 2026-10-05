@@ -11,11 +11,14 @@
  *   the terms      SIZE, PRICE, each add-on at its price, and the TOTAL when there are add-ons; a draw's or a salon's size
  *                  and price read TO BE CONFIRMED until ORBES Client Services enters them (left out once cancelled);
  *   the shipment   once shipped: the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page (https only);
+ *   the documents  (M6) its INVOICE and CREDIT NOTE with their numbers (PDFs; the number in the reading face), the CARE GUIDE of its model while the
+ *                  piece is on its way or kept, its OWNERSHIP CERTIFICATE once the piece is registered to the account;
  *   the reference  ORDER OR-…, what ORBES Client Services finds it by.
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
 import { ORDERS } from './copy.js';
 import { formatMoney } from './live-model.js';
+import type { OrderDocumentKind } from './api.js';
 import { ORDER_CHANNELS, ORDER_STATUSES, type AccountOrder, type OrderStatus } from './types.js';
 import { formatDate, upper, type Row } from './view-model.js';
 
@@ -32,6 +35,8 @@ export interface OrderStepModel {
 }
 
 export interface OrderModel {
+  /** The order's id: its documents' routes. */
+  id: string;
   /** For element ids: `order-or-1a2b3c4d`. */
   key: string;
   status: OrderStatus;
@@ -45,8 +50,41 @@ export interface OrderModel {
   rows: Row[];
   /** Once shipped: CARRIER and TRACKING NUMBER, and the carrier's page (null when its address is not https). */
   shipment: { rows: Row[]; href: string | null; label: string } | null;
+  /** Its documents (M6), in this order: invoice, credit note, care guide, ownership certificate. */
+  documents: OrderDocumentModel[];
   /** `ORDER OR-1A2B3C4D`. */
   reference: string;
+}
+
+/** One document of an order: a PDF to save (`file`), or its model's care guide, shown under the documents. */
+export interface OrderDocumentModel {
+  kind: 'INVOICE' | 'CREDIT_NOTE' | 'CARE_GUIDE' | 'CERTIFICATE';
+  /** `INVOICE`, `CARE GUIDE`: the display face. */
+  label: string;
+  /** `INV-2026-000001`: the reading face, after the label; null for the care guide and the certificate. */
+  number: string | null;
+  /** What the link does, for a screen reader. */
+  ariaLabel: string;
+  /** The PDF it saves; null for the care guide. */
+  file: OrderDocumentKind | null;
+}
+
+const DOCUMENT_NUMBER = /^(INV|CN)-20\d{2}-\d{6}$/;
+
+/** An order's documents, as the server lists them; a number the app cannot read is left out. */
+export function orderDocuments(o: AccountOrder): OrderDocumentModel[] {
+  const d = o.documents;
+  if (!d || typeof d !== 'object') return [];
+  const D = ORDERS.documents;
+  const model = upper(o.model);
+  const out: OrderDocumentModel[] = [];
+  const invoice = d.invoice?.number;
+  if (typeof invoice === 'string' && DOCUMENT_NUMBER.test(invoice) && invoice.startsWith('INV-')) out.push({ kind: 'INVOICE', label: D.invoice, number: invoice, ariaLabel: D.invoiceLabel(invoice), file: 'invoice' });
+  const credit = d.creditNote?.number;
+  if (typeof credit === 'string' && DOCUMENT_NUMBER.test(credit) && credit.startsWith('CN-')) out.push({ kind: 'CREDIT_NOTE', label: D.creditNote, number: credit, ariaLabel: D.creditNoteLabel(credit), file: 'credit-note' });
+  if (d.careGuide === true) out.push({ kind: 'CARE_GUIDE', label: D.careGuide, number: null, ariaLabel: D.careGuideLabel(model), file: null });
+  if (d.certificate === true) out.push({ kind: 'CERTIFICATE', label: D.certificate, number: null, ariaLabel: D.certificateLabel(model), file: 'certificate' });
+  return out;
 }
 
 const REFERENCE = /^OR-[0-9A-F]{8}$/;
@@ -109,6 +147,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
   const shipped = o.status === 'SHIPPED' || o.status === 'DELIVERED' || o.status === 'RETURNED';
   const s = shipped ? o.shipment : null;
   return {
+    id: o.id,
     key: `order-${o.reference.toLowerCase()}`,
     status: o.status,
     title: upper(o.model),
@@ -126,6 +165,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
           label: ORDERS.trackLabel(s.trackingNumber, s.carrier),
         }
       : null,
+    documents: orderDocuments(o),
     reference: ORDERS.reference(o.reference),
   };
 }

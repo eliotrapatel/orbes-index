@@ -15,14 +15,15 @@
  * Responses never expose internal ids of other people, product statuses or
  * staff data; the account itself is described by email and display name.
  */
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountOrderParams, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
+import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
 
 /** The public view of an account (contract: `{ email, displayName }`). */
@@ -33,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, orders, ownership, recovery, warranty } = ctx.services;
+  const { auth, invoices, orders, ownership, ownershipCertificates, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -103,6 +104,41 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/orders', async (request) => {
     const { account } = requireAccount(request);
     return { orders: await orders.forAccount(account.id) };
+  });
+
+  // An order's documents in MY PIECES (plan LIVE RELEASE+, M6), its own only (404 for any other): the invoice and the
+  // credit note, the ownership certificate once its piece is registered to the account (PDFs, never stored by a
+  // cache), and the model's care guide.
+  const sendPdf = (reply: FastifyReply, file: { contentType: string; body: Uint8Array | string; filename: string }) => {
+    reply.header('content-type', file.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(file.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    const body = file.body as Uint8Array;
+    return reply.send(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+  };
+
+  app.get('/api/v1/account/orders/:id/invoice.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await invoices.accountDocument(account.id, id, 'INVOICE'));
+  });
+
+  app.get('/api/v1/account/orders/:id/credit-note.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await invoices.accountDocument(account.id, id, 'CREDIT_NOTE'));
+  });
+
+  app.get('/api/v1/account/orders/:id/certificate.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await ownershipCertificates.orderCertificatePdf(account.id, id));
+  });
+
+  app.get('/api/v1/account/orders/:id/care-guide', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return { careGuide: await orders.careGuide(account.id, id) };
   });
 
   app.get('/api/v1/products/:productId/service-history', async (request) => {

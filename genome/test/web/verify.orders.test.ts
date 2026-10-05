@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ORDERS } from '../../src/web/verify/copy.js';
-import { ORDER_PATH, orderDate, orderModel, orderModels, orderRows, orderSteps } from '../../src/web/verify/orders-model.js';
+import { ORDER_PATH, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps } from '../../src/web/verify/orders-model.js';
 import type { AccountOrder } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
@@ -175,8 +175,45 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect(orderModels(list, 0).map((m) => m.reference)).toEqual(['ORDER OR-AAAAAAAA', 'ORDER OR-BBBBBBBB']);
   });
 
+  it('lists its documents (M6): the invoice and the credit note with their numbers, the care guide, the ownership certificate; a number it cannot read left out', () => {
+    const D = ORDERS.documents;
+    // A server before the documents: none.
+    expect(orderModel(order(), 0)!.documents).toEqual([]);
+    const all = order({
+      status: 'DELIVERED',
+      documents: { invoice: { number: 'INV-2026-000001', issuedAt: '2026-10-06T09:00:00.000Z' }, creditNote: { number: 'CN-2026-000002', issuedAt: '2026-10-09T09:00:00.000Z' }, careGuide: true, certificate: true },
+    });
+    expect(orderDocuments(all)).toEqual([
+      { kind: 'INVOICE', label: 'INVOICE', number: 'INV-2026-000001', ariaLabel: 'Download the invoice INV-2026-000001 (PDF)', file: 'invoice' },
+      { kind: 'CREDIT_NOTE', label: 'CREDIT NOTE', number: 'CN-2026-000002', ariaLabel: 'Download the credit note CN-2026-000002 (PDF)', file: 'credit-note' },
+      { kind: 'CARE_GUIDE', label: 'CARE GUIDE', number: null, ariaLabel: 'The care guide of MONOLITHE', file: null },
+      { kind: 'CERTIFICATE', label: 'OWNERSHIP CERTIFICATE', number: null, ariaLabel: 'Download the ownership certificate of your MONOLITHE (PDF)', file: 'certificate' },
+    ]);
+    expect(orderModel(all, 0)!.documents).toEqual(orderDocuments(all));
+    expect(orderModel(all, 0)!.id).toBe(all.id);
+    // Only what the server lists; a number that is not one, or of the other kind, never shown.
+    const none = { invoice: null, creditNote: null, careGuide: false, certificate: false };
+    expect(orderDocuments(order({ documents: none }))).toEqual([]);
+    expect(orderDocuments(order({ documents: { ...none, careGuide: true } })).map((d) => d.kind)).toEqual(['CARE_GUIDE']);
+    for (const number of ['INV-26-1', 'CN-2026-000001', '<b>', '']) {
+      expect(orderDocuments(order({ documents: { ...none, invoice: { number, issuedAt: '2026-10-06T09:00:00.000Z' } } })), number).toEqual([]);
+    }
+    expect(orderDocuments(order({ documents: { ...none, creditNote: { number: 'INV-2026-000001', issuedAt: '2026-10-06T09:00:00.000Z' } } }))).toEqual([]);
+    expect(orderDocuments(order({ documents: 'x' as never }))).toEqual([]);
+    expect([D.title, D.careGuide, D.certificate]).toEqual(['DOCUMENTS', 'CARE GUIDE', 'OWNERSHIP CERTIFICATE']);
+  });
+
   it('writes the brand\'s English: no word of BRAND §4.5 (nor "product"), no exclamation', () => {
-    const words = [JSON.stringify(ORDERS), ORDERS.trackLabel('6A1234', 'Colissimo'), ORDERS.reference('OR-1A2B3C4D')].join('\n');
+    const D = ORDERS.documents;
+    const words = [
+      JSON.stringify(ORDERS),
+      ORDERS.trackLabel('6A1234', 'Colissimo'),
+      ORDERS.reference('OR-1A2B3C4D'),
+      D.invoiceLabel('INV-2026-000001'),
+      D.creditNoteLabel('CN-2026-000001'),
+      D.certificateLabel('MONOLITHE'),
+      D.careGuideLabel('MONOLITHE'),
+    ].join('\n');
     expect(words).not.toContain('!');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
   });

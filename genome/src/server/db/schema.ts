@@ -1118,6 +1118,8 @@ export interface ReturnsTable {
   outcome: ReturnOutcome;
   location_id: ColumnType<string | null, string | null | undefined, string | null>;
   note: string;
+  /** The ownership ORBES took back (ended by the return) when the buyer had registered the piece. */
+  ownership_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
   created_at: TimestampDefault;
 }

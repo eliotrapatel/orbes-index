@@ -60,6 +60,7 @@ import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
 import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
+import { invoicesView } from './views/invoices.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -117,6 +118,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'owners', label: 'Owners' },
       { route: 'club', label: 'Club' },
       { route: 'orders', label: 'Orders' },
+      { route: 'invoices', label: 'Invoices' },
       { route: 'warranties', label: 'Warranties' },
       { route: 'retailers', label: 'Points of sale' },
       { route: 'sale', label: 'Sale mode', cap: 'sell' },
@@ -164,6 +166,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   orders: { view: ordersView, title: 'Orders', nav: 'orders' },
   order: { view: orderView, title: 'Order', nav: 'orders' },
   packingSlip: { view: packingSlipView, title: 'Packing slip', nav: 'orders' },
+  invoices: { view: invoicesView, title: 'Invoices', nav: 'invoices' },
   atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
   workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
   document: { view: documentView, title: 'Document', nav: 'documents' },

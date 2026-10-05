@@ -1356,7 +1356,7 @@ describe('migrations', () => {
     expect(columns('bench_items')).toEqual([
       'cancelled_at', 'created_at', 'done_at', 'drop_id', 'engraving_text', 'id', 'location_id', 'order_id', 'product_id', 'sku_id', 'started_at', 'status', 'surprise',
     ]);
-    expect(columns('returns')).toEqual(['created_at', 'created_by', 'id', 'location_id', 'note', 'order_id', 'outcome']);
+    expect(columns('returns')).toEqual(['created_at', 'created_by', 'id', 'location_id', 'note', 'order_id', 'outcome', 'ownership_id']);
     expect(columns('invoices')).toEqual([
       'buyer', 'credits_invoice_id', 'currency', 'id', 'issued_at', 'issuer', 'kind', 'lines', 'order_id', 'sequence', 'subtotal_minor', 'total_minor', 'vat_minor',
       'vat_rate_bp', 'year',
@@ -1399,6 +1399,8 @@ describe('migrations', () => {
       /^constraint invoices invoices_kind_check CHECK \(\(kind = ANY \(ARRAY\['INVOICE'::text, 'CREDIT_NOTE'::text\]\)\)\)$/,
       /^constraint invoices invoices_credits_invoice_id_fkey FOREIGN KEY \(credits_invoice_id\) REFERENCES invoices\(id\) ON DELETE RESTRICT$/,
       /^constraint returns returns_outcome_check CHECK \(\(outcome = ANY \(ARRAY\['RESTOCKED'::text, 'ARCHIVED'::text\]\)\)\)$/,
+      /^constraint returns returns_ownership_id_fkey FOREIGN KEY \(ownership_id\) REFERENCES ownership\(id\) ON DELETE RESTRICT$/,
+      /^constraint returns returns_ownership_key UNIQUE \(ownership_id\)$/,
       /^constraint order_alert_settings order_alert_settings_id_check CHECK \(\(id = 1\)\)$/,
     ]) {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);

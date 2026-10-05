@@ -373,6 +373,25 @@ export const ORDERS = Object.freeze({
   trackLabel: (trackingNumber: string, carrier: string) => `Track the shipment ${trackingNumber} on the site of ${carrier} (opens in a new tab)`,
   /** The order's reference, for ORBES Client Services. */
   reference: (reference: string) => `ORDER ${reference}`,
+  /**
+   * Its documents (plan LIVE RELEASE+, M6): the invoice and the credit note (PDFs, issued by CONGLOMERAT LLC), the
+   * model's care guide (shown under them), and once the piece is registered to the account its ownership certificate.
+   */
+  documents: Object.freeze({
+    title: 'DOCUMENTS',
+    /** Followed by the document's number, in the reading face. */
+    invoice: 'INVOICE',
+    creditNote: 'CREDIT NOTE',
+    careGuide: 'CARE GUIDE',
+    certificate: 'OWNERSHIP CERTIFICATE',
+    /** Accessible names: what each link does. */
+    invoiceLabel: (number: string) => `Download the invoice ${number} (PDF)`,
+    creditNoteLabel: (number: string) => `Download the credit note ${number} (PDF)`,
+    certificateLabel: (model: string) => `Download the ownership certificate of your ${model} (PDF)`,
+    careGuideLabel: (model: string) => `The care guide of ${model}`,
+    downloadFailed: 'This document could not be downloaded just now.',
+    careFailed: 'The care guide could not be shown just now.',
+  }),
 });
 
 /**

@@ -15,7 +15,9 @@
  *                and taken again at the new location (or made for it); a piece to make goes there.
  *   steps        exactly ORDER_TRANSITIONS (`transition`): RESERVED → PAID | CANCELLED; PAID → SHIPPED | CANCELLED;
  *                SHIPPED → DELIVERED | RETURNED; DELIVERED → RETURNED.
- *                PAID: by Client Services (later Whop or Shopify, through the same transition).
+ *                PAID: by Client Services (later Whop or Shopify, through the same transition), once its price is
+ *                entered (409 ORDER_PRICE_MISSING before): its invoice is issued in the same transaction
+ *                (services/invoices.ts issueInvoice).
  *                SHIPPED: with an active carrier and the tracking number (the value declared for the insurance
  *                optional), once the piece is in stock at the order's location (409 ORDER_NOT_READY before) and
  *                linked to the order (409 ORDER_PIECE_NOT_LINKED before: the atelier issues it, or picks it from
@@ -23,16 +25,21 @@
  *                DELIVERED: by Client Services, or by itself when the buyer registers the piece linked to the order
  *                while it is SHIPPED (`deliverOnRegistration`, OwnershipService.registerFirst).
  *                CANCELLED, with a note: a piece in stock is released; a piece to make is cancelled and its reserved
- *                identity retired (RETIRED: its serial is never reused).
- *                RETURNED, with a note and where the piece goes: back to stock at a location (RETURNED, +1) or to the
- *                archive.
+ *                identity retired (RETIRED: its serial is never reused); once PAID, a credit note cancels its invoice.
+ *                RETURNED (`returnOrder`, choice 20), opened by Client Services with a note and where the piece goes:
+ *                back to stock at a location (the ledger's RETURNED, +1; the piece RESOLD, ready to be sold again, unless
+ *                it was never sold: ISSUED) or to the archive (the piece RETIRED). When its buyer had registered it, ORBES
+ *                takes the ownership back (`returns.ownership_id`, ended RETURNED; a transfer pending is cancelled): back
+ *                to stock, the piece is not registered and carries a new claim code, shown once for its new card;
+ *                archived, it is retired. A credit note cancels its invoice.
  *   history      every change is one event of the order (order_events: its audit action, the status after it, a note,
  *                who, when), one audit entry (`order.create`, `.pay`, `.ship`, `.deliver`, `.cancel`, `.return`,
  *                `.location`, `.terms`, `.buyer`, `.link`) and one entry of the event journal (the order as it stands after
  *                it; services/journal.ts), in the transaction of the change; the pieces to make (`bench.create`,
  *                `.cancel`, `.move`, `.engrave`, and the atelier's `.start` and `.done`: services/atelier.ts), the
- *                identities (`product.reserve`, `product.retire`, `product.issue`) and the stock (`stock.move`) journal
- *                their own changes.
+ *                identities (`product.reserve`, `product.retire`, `product.issue`, `product.transition`), the stock
+ *                (`stock.move`) and the invoices (`invoice.issue`, `invoice.credit`) journal their own changes; a return
+ *                that takes an ownership back is audited `ownership.reclaim` too.
  *   the piece    the one that fulfils the order, linked when the atelier issues its piece to make or picks one from
  *                stock (`attachPiece`, `order.link`): the order then holds it in stock until it is shipped.
  *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
@@ -41,8 +48,10 @@
  *                console's routes give them masked to an AUDITOR (OrderView carries them as stored, as the emails).
  *                The engraving text likewise stays on the order and its piece to make.
  *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
- *                the size, the add-ons and the price, the carrier and the tracking link once shipped; nothing of the
- *                house's side (the location, what it holds, the surprise, the value declared, the notes, who handled it).
+ *                the size, the add-ons and the price, the carrier and the tracking link once shipped, and its documents
+ *                (M6): the invoice and the credit note, the model's care guide, the ownership certificate once the piece
+ *                is registered to them; nothing of the house's side (the location, what it holds, the surprise, the
+ *                value declared, the notes, who handled it).
  *   Shopify      an order keeps its future Shopify id (`shopify_order_id`); nothing calls Shopify in this lot.
  *
  * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
@@ -50,14 +59,16 @@
  * a resolution already given mapped (CONCLUDED → PAID, CANCELLED → CANCELLED).
  *
  * Lock order: the source's rows (the release, then the entry; the request), the order, the SKU (stock.ts lockSku), the
- * piece to make and its identity; the journal; the audit log last: the functions a sale's transaction calls return
- * their audit entries for it to write after its own.
+ * piece to make and its identity (or the piece returned, then its ownership and transfer); the invoice numbers
+ * (invoices.ts); the journal; the audit log last: the functions a sale's transaction calls return their audit entries
+ * for it to write after its own (a return's change of the piece's status, LifecycleService, writes its own, last).
  */
 import { inTransaction, type Db } from '../db/connection.js';
 import {
   ORDER_STATUSES,
   RETURN_OUTCOMES,
   jsonText,
+  type InvoiceKind,
   type JsonObject,
   type OrderAddonSnapshot,
   type OrderChannel,
@@ -65,13 +76,18 @@ import {
   type OrderRow,
   type OrderStatus,
   type OrderUpdate,
+  type ProductStatus,
   type ReturnOutcome,
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import { generateClaimCode, hashClaimCode } from './claim-codes.js';
+import { issueCreditNote, issueInvoice, orderInvoices } from './invoices.js';
 import { reserveIdentity, retireReservedIdentity } from './issuance.js';
 import { writeJournal } from './journal.js';
+import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
+import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -138,6 +154,10 @@ const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already lin
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
+const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s price before it is paid: its invoice is issued then.');
+const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
+const notRestockable = (status: ProductStatus) =>
+  new DomainError('ORDER_RETURN_NOT_RESTOCKABLE', 409, 'The piece’s record does not let it go back to stock now: settle its record first, or archive it.', { detail: `status ${status}` });
 
 // ── Input ──────────────────────────────────────────────────────────────────
 
@@ -146,8 +166,24 @@ export type OrderTransitionInput =
   | { to: 'PAID'; note?: string | null }
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor?: number | null; note?: string | null }
   | { to: 'DELIVERED'; note?: string | null }
-  | { to: 'CANCELLED'; note: string }
-  | { to: 'RETURNED'; outcome: ReturnOutcome; locationId?: string | null; note?: string | null };
+  | { to: 'CANCELLED'; note: string };
+
+/** A return opened by Client Services (choice 20): back to stock at a location, or to the archive, with a note. */
+export interface OrderReturnInput {
+  outcome: ReturnOutcome;
+  /** Where the piece goes back to stock (RESTOCKED only). */
+  locationId?: string | null;
+  note: string;
+}
+
+/** A return done: the order, its piece, and the claim code of the piece's new card when ORBES took its ownership back. */
+export interface OrderReturned {
+  order: OrderView;
+  /** The piece's reference. */
+  productId: string;
+  /** Shown once: only its hash is kept (back to stock, the buyer's ownership taken back). */
+  claimCode?: string;
+}
 
 /** What Client Services enters on an order: a draw's or a salon's size, price and currency; any order's engraving text. */
 export interface OrderTermsInput {
@@ -227,8 +263,22 @@ export interface OrderView {
   /** The piece that fulfils it, by its reference. */
   productId: string | null;
   shopifyOrderId: string | null;
+  /** Its return (RETURNED): where the piece went, the note, and whether ORBES took its buyer's ownership back. */
+  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Date; ownershipReclaimed: boolean } | null;
+  /** Its invoice and credit note (services/invoices.ts), in order of issue. */
+  invoices: OrderDocument[];
   /** Its history, oldest first. */
   events: { action: string; status: OrderStatus; note: string | null; at: Date; actor: { type: string; id: string | null } }[];
+}
+
+/** An invoice or a credit note of an order, as its page lists it. */
+export interface OrderDocument {
+  id: string;
+  kind: InvoiceKind;
+  number: string;
+  issuedAt: Date;
+  currency: string;
+  totalMinor: number;
 }
 
 /** An order as the right of access exports it to its account: never who handled it, nor where it is kept. */
@@ -252,6 +302,8 @@ export interface ExportedOrder {
   returnedAt: Date | null;
   carrier: string | null;
   trackingNumber: string | null;
+  /** Its invoice and credit note: their numbers, dates and totals (their buyer is the order's). */
+  invoices: { number: string; kind: InvoiceKind; issuedAt: Date; currency: string; totalMinor: number }[];
   /** Each step with its time and the note Client Services added. */
   history: { status: OrderStatus; at: Date; note: string | null }[];
 }
@@ -287,6 +339,26 @@ export interface AccountOrder {
   cancelledAt: Date | null;
   returnedAt: Date | null;
   shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
+  /** Its documents (M6), each read by its own route (GET /api/v1/account/orders/:id/…). */
+  documents: AccountOrderDocuments;
+}
+
+/** The documents of an order in MY PIECES (M6). */
+export interface AccountOrderDocuments {
+  /** Its invoice (PDF), once PAID. */
+  invoice: { number: string; issuedAt: Date } | null;
+  /** The credit note that cancels it (PDF), once cancelled after PAID or returned. */
+  creditNote: { number: string; issuedAt: Date } | null;
+  /** The model's care guide: for an order whose piece is on its way or kept (neither cancelled nor returned). */
+  careGuide: boolean;
+  /** Its ownership certificate (PDF): once its piece is registered to this account, and while it may have one. */
+  certificate: boolean;
+}
+
+/** The model's care guide of an order (GET /api/v1/account/orders/:id/care-guide): its own words, or null for the house's general care text. */
+export interface OrderCareGuide {
+  model: string;
+  text: string | null;
 }
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -678,8 +750,7 @@ type CheckedStep =
   | { to: 'PAID'; note: string | null }
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor: number | null; note: string | null }
   | { to: 'DELIVERED'; note: string | null; details?: JsonObject }
-  | { to: 'CANCELLED'; note: string }
-  | { to: 'RETURNED'; outcome: ReturnOutcome; locationId: string | null; note: string };
+  | { to: 'CANCELLED'; note: string };
 
 function checkStep(input: OrderTransitionInput): CheckedStep {
   if (!input || typeof input !== 'object' || !(ORDER_STATUSES as readonly string[]).includes((input as { to: unknown }).to as string)) {
@@ -700,16 +771,22 @@ function checkStep(input: OrderTransitionInput): CheckedStep {
       return { to: 'DELIVERED', note: note() };
     case 'CANCELLED':
       return { to: 'CANCELLED', note: note(true)! };
-    case 'RETURNED': {
-      if (!(RETURN_OUTCOMES as readonly string[]).includes(input.outcome)) throw validationError('A return goes back to stock (RESTOCKED) or to the archive (ARCHIVED).');
-      const locationId = input.outcome === 'RESTOCKED' ? input.locationId ?? null : null;
-      if (input.outcome === 'RESTOCKED' && (typeof locationId !== 'string' || !UUID_RE.test(locationId))) throw notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
-      if (input.outcome === 'ARCHIVED' && input.locationId) throw validationError('A piece archived goes to no location.');
-      return { to: 'RETURNED', outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note: note(true)! };
-    }
     default:
+      if ((input as { to: unknown }).to === 'RETURNED') throw validationError('A return is opened with where the piece goes (returnOrder).');
       throw validationError('An order is created RESERVED: it never moves back to it.');
   }
+}
+
+/** What a return requires, checked before the transaction: where the piece goes, and a note. */
+function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locationId: string | null; note: string } {
+  if (!input || typeof input !== 'object' || !(RETURN_OUTCOMES as readonly string[]).includes(input.outcome)) {
+    throw validationError('A return goes back to stock (RESTOCKED) or to the archive (ARCHIVED).');
+  }
+  const locationId = input.outcome === 'RESTOCKED' ? input.locationId ?? null : null;
+  if (input.outcome === 'RESTOCKED' && (typeof locationId !== 'string' || !UUID_RE.test(locationId))) throw notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
+  if (input.outcome === 'ARCHIVED' && input.locationId) throw validationError('A piece archived goes to no location.');
+  const note = cleanText(input.note, ORDER_TEXT_LIMITS.note, 'The note', { multiline: true, required: true })!;
+  return { outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note };
 }
 
 /** Move a locked order one step (the step's own rules); returns the order after it. */
@@ -719,9 +796,11 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
   let after: OrderRow;
   let details: JsonObject = {};
   switch (s.to) {
-    case 'PAID':
+    case 'PAID': {
+      if (o.price_minor === null || o.currency === null) throw priceMissing();
       after = await updateOrder(tx, o.id, { status: 'PAID', paid_at: now });
       break;
+    }
     case 'SHIPPED': {
       if (o.reservation !== 'STOCK') throw notReady();
       if (o.product_id === null) throw pieceNotLinked();
@@ -751,23 +830,11 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
       details = { released: o.reservation };
       break;
     }
-    case 'RETURNED': {
-      if (s.outcome === 'RESTOCKED') {
-        const locationId = await knownLocation(tx, s.locationId!);
-        if (o.sku_id === null) throw validationError('Enter the order’s size before its piece goes back to stock.');
-        await lockSku(tx, o.sku_id);
-        await recordMovement(tx, { skuId: o.sku_id, locationId, delta: 1, reason: 'RETURNED', orderId: o.id, productId: o.product_id, note: s.note }, actor, now);
-      }
-      await tx
-        .insertInto('returns')
-        .values({ order_id: o.id, outcome: s.outcome, location_id: s.locationId, note: s.note, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
-        .execute();
-      after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
-      details = { outcome: s.outcome, ...(s.locationId ? { locationId: s.locationId } : {}) };
-      break;
-    }
   }
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS[s.to], { note: s.note, details }, actor, now), ...extra);
+  // PAID issues the invoice; paid, then cancelled, a credit note cancels it (services/invoices.ts).
+  const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now) : s.to === 'CANCELLED' && o.status === 'PAID' ? await issueCreditNote(tx, after, 'cancel', actor, now) : null;
+  if (document) notes.push(document);
   return after;
 }
 
@@ -823,6 +890,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
   const events = rows.length
     ? await db.selectFrom('order_events').select(['order_id', 'status', 'note', 'created_at']).where('order_id', 'in', rows.map((r) => r.id)).orderBy('id').execute()
     : [];
+  const invoices = await orderInvoices(db, rows.map((r) => r.id));
   return rows.map((r) => ({
     reference: orderReference(r.id),
     channel: r.channel,
@@ -843,6 +911,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     returnedAt: r.returned_at,
     carrier: r.carrier_name ?? null,
     trackingNumber: r.tracking_number,
+    invoices: invoices.filter((i) => i.order.id === r.id).map((i) => ({ number: i.number, kind: i.kind, issuedAt: i.issuedAt, currency: i.currency, totalMinor: i.totalMinor })),
     history: events.filter((e) => e.order_id === r.id).map((e) => ({ status: e.status, at: e.created_at, note: e.note })),
   }));
 }
@@ -852,6 +921,8 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
 export interface OrderServiceDeps {
   db: Db;
   audit: AuditService;
+  /** The piece's status after a return (its own, by default). */
+  lifecycle?: LifecycleService;
   clock?: Clock;
   log?: Logger;
 }
@@ -859,6 +930,7 @@ export interface OrderServiceDeps {
 export class OrderService {
   private readonly db: Db;
   private readonly audit: AuditService;
+  private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
   private readonly log: Logger;
 
@@ -866,6 +938,7 @@ export class OrderService {
     this.db = deps.db;
     this.audit = deps.audit;
     this.clock = deps.clock ?? systemClock;
+    this.lifecycle = deps.lifecycle ?? new LifecycleService({ db: deps.db, audit: deps.audit, clock: this.clock });
     this.log = deps.log ?? noopLogger;
   }
 
@@ -892,6 +965,13 @@ export class OrderService {
       .where('b.status', 'in', ['TO_MAKE', 'IN_PROGRESS'])
       .executeTakeFirst();
     const events = await this.db.selectFrom('order_events').selectAll().where('order_id', '=', id).orderBy('id').execute();
+    const returned = await this.db
+      .selectFrom('returns as x')
+      .leftJoin('stock_locations as l', 'l.id', 'x.location_id')
+      .select(['x.outcome', 'x.location_id', 'l.name as location_name', 'x.note', 'x.ownership_id', 'x.created_at'])
+      .where('x.order_id', '=', id)
+      .executeTakeFirst();
+    const invoices = await orderInvoices(this.db, [id]);
     return {
       id: r.id,
       reference: orderReference(r.id),
@@ -929,6 +1009,16 @@ export class OrderService {
           : null,
       productId: r.piece_reference ?? null,
       shopifyOrderId: r.shopify_order_id,
+      return: returned
+        ? {
+            outcome: returned.outcome,
+            location: returned.location_id && returned.location_name ? { id: returned.location_id, name: returned.location_name } : null,
+            note: returned.note,
+            at: returned.created_at,
+            ownershipReclaimed: returned.ownership_id !== null,
+          }
+        : null,
+      invoices: invoices.map((i) => ({ id: i.id, kind: i.kind, number: i.number, issuedAt: i.issuedAt, currency: i.currency, totalMinor: i.totalMinor })),
       events: events.map((e) => ({ action: e.action, status: e.status, note: e.note, at: e.created_at, actor: { type: e.actor_type, id: e.actor_id } })),
     };
   }
@@ -944,6 +1034,9 @@ export class OrderService {
       .innerJoin('models as m', 'm.id', 'o.model_id')
       .leftJoin('drops as d', 'd.id', 'o.drop_id')
       .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
+      .leftJoin('products as p', 'p.id', 'o.product_id')
+      // Its piece registered to this account now: the one ownership still open, the account's.
+      .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').onRef('w.account_id', '=', 'o.account_id').on('w.ended_at', 'is', null))
       .select([
         'o.id',
         'o.channel',
@@ -964,6 +1057,8 @@ export class OrderService {
         'd.title as release_title',
         'c.name as carrier_name',
         'c.tracking_url',
+        'p.status as piece_status',
+        'w.id as ownership_id',
       ])
       .where('o.account_id', '=', accountId.toLowerCase())
       .orderBy('o.reserved_at', 'desc')
@@ -971,6 +1066,11 @@ export class OrderService {
       .orderBy('o.id')
       .limit(ACCOUNT_ORDERS_LIMIT)
       .execute();
+    const invoices = await orderInvoices(this.db, rows.map((r) => r.id));
+    const documentOf = (orderId: string, kind: InvoiceKind) => {
+      const i = invoices.find((x) => x.order.id === orderId && x.kind === kind);
+      return i ? { number: i.number, issuedAt: i.issuedAt } : null;
+    };
     return rows.map((r) => ({
       id: r.id,
       reference: orderReference(r.id),
@@ -993,13 +1093,39 @@ export class OrderService {
         r.carrier_name && r.tracking_url && r.tracking_number
           ? { carrier: r.carrier_name, trackingNumber: r.tracking_number, trackingUrl: trackingLink(r.tracking_url, r.tracking_number) }
           : null,
+      documents: {
+        invoice: documentOf(r.id, 'INVOICE'),
+        creditNote: documentOf(r.id, 'CREDIT_NOTE'),
+        careGuide: r.status !== 'CANCELLED' && r.status !== 'RETURNED',
+        certificate: r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
+      },
     }));
   }
 
   /**
+   * The care guide of an order's model, for its own account (M6): the model's guide, or its care instructions (the
+   * CARE text of a scan), or null for the house's general care text (shared/care.ts). 404 ORDER_NOT_FOUND for another
+   * account's order or an unknown one.
+   */
+  async careGuide(accountId: string, orderId: string): Promise<OrderCareGuide> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
+    const id = knownOrderId(orderId);
+    const r = await this.db
+      .selectFrom('orders as o')
+      .innerJoin('models as m', 'm.id', 'o.model_id')
+      .select(['m.name', 'm.care_guide', 'm.care_instructions'])
+      .where('o.id', '=', id)
+      .where('o.account_id', '=', accountId.toLowerCase())
+      .executeTakeFirst();
+    if (!r) throw orderNotFound();
+    return { model: r.name, text: r.care_guide ?? r.care_instructions ?? null };
+  }
+
+  /**
    * Move an order one step (ORDER_TRANSITIONS; 409 ORDER_TRANSITION_NOT_ALLOWED otherwise), with what the step
-   * requires: SHIPPED a carrier and a tracking number, the piece in stock at the order's location; CANCELLED a note;
-   * RETURNED a note and where the piece goes. Audited `order.pay`, `.ship`, `.deliver`, `.cancel`, `.return`.
+   * requires: PAID its price (its invoice issued); SHIPPED a carrier and a tracking number, the piece in stock at the
+   * order's location; CANCELLED a note (a credit note once paid). A return is `returnOrder`. Audited `order.pay`,
+   * `.ship`, `.deliver`, `.cancel`, and `invoice.issue` or `invoice.credit`.
    */
   async transition(orderId: string, input: OrderTransitionInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -1009,6 +1135,94 @@ export class OrderService {
       await step(tx, o, s, actor, now, notes);
     });
     return this.get(id);
+  }
+
+  /**
+   * RETURNED (choice 20; from SHIPPED or DELIVERED, 409 ORDER_TRANSITION_NOT_ALLOWED otherwise), opened by Client
+   * Services with a note: the piece goes back to stock at a location (the ledger's RETURNED, +1; the piece RESOLD, ready
+   * to be sold again, or still ISSUED if it never was: 409 ORDER_RETURN_NOT_RESTOCKABLE when its record is in service,
+   * reported or flagged) or to the archive (RETIRED, unless already retired or revoked). When its buyer had registered
+   * it, ORBES takes the ownership back: it ends (RETURNED, `returns.ownership_id`), a transfer pending is cancelled, the
+   * piece is not registered any more and, back to stock, carries a new claim code (returned once, for its new card;
+   * only its hash is kept). A credit note cancels the invoice. Audited `order.return`, `ownership.reclaim` (and
+   * `ownership.transfer.cancel`), `invoice.credit` and the piece's `product.transition`, in one transaction.
+   */
+  async returnOrder(orderId: string, input: OrderReturnInput, actor: Actor): Promise<OrderReturned> {
+    assertOperator(actor);
+    const id = knownOrderId(orderId);
+    const r = checkReturn(input);
+    // Whether an ownership is taken back is read first: the new claim code's scrypt runs outside the transaction, which
+    // refuses the return if that changed meanwhile.
+    const peek = await this.db
+      .selectFrom('orders as o')
+      .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').on('w.ended_at', 'is', null))
+      .select(['o.id', 'w.id as ownership_id'])
+      .where('o.id', '=', id)
+      .executeTakeFirst();
+    if (!peek) throw orderNotFound();
+    const reclaim = peek.ownership_id !== null;
+    const claimCode = reclaim && r.outcome === 'RESTOCKED' ? generateClaimCode() : undefined;
+    const claimHash = claimCode ? await hashClaimCode(claimCode) : null;
+    let productId = '';
+    await this.change(id, async (tx, o, now, notes) => {
+      if (!isOrderTransitionAllowed(o.status, 'RETURNED')) throw stepNotAllowed(o.status, 'RETURNED');
+      if (o.product_id === null || o.sku_id === null) throw pieceNotLinked();
+      const locationId = r.outcome === 'RESTOCKED' ? await knownLocation(tx, r.locationId!) : null;
+      if (locationId) await lockSku(tx, o.sku_id);
+      const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
+      const owner = await tx.selectFrom('ownership').selectAll().where('product_id', '=', p.id).where('ended_at', 'is', null).forUpdate().executeTakeFirst();
+      if ((owner !== undefined) !== reclaim) throw returnChanged();
+      // The piece's status once back: ready to be sold again (RESOLD; ISSUED if it never was), or retired.
+      let to: ProductStatus | null;
+      if (r.outcome === 'ARCHIVED') to = p.status === 'RETIRED' || p.status === 'REVOKED' ? null : 'RETIRED';
+      else to = p.status === 'ISSUED' || p.status === 'RESOLD' ? null : 'RESOLD';
+      if (to !== null && !isTransitionAllowed(p.status, to, await returnTargetOf(tx, p))) throw notRestockable(p.status);
+      if (locationId) await recordMovement(tx, { skuId: o.sku_id, locationId, delta: 1, reason: 'RETURNED', orderId: o.id, productId: p.id, note: r.note }, actor, now);
+      const extra: AuditRecordInput[] = [];
+      if (owner) {
+        // ORBES takes the ownership back: it ends, a transfer pending with it is cancelled, the piece is unregistered.
+        const endedAt = now < owner.started_at ? owner.started_at : now;
+        await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();
+        const transfers = await tx
+          .updateTable('ownership_transfers')
+          .set({ status: 'CANCELLED', completed_at: now })
+          .where('product_id', '=', p.id)
+          .where('status', '=', 'PENDING')
+          .returning('id')
+          .execute();
+        await tx
+          .updateTable('products')
+          .set({ ownership_state: 'UNREGISTERED', updated_at: now, ...(claimHash ? { claim_secret_hash: claimHash } : {}) })
+          .where('id', '=', p.id)
+          .execute();
+        p.ownership_state = 'UNREGISTERED';
+        extra.push(
+          {
+            actor,
+            action: 'ownership.reclaim',
+            targetType: 'product',
+            targetId: p.product_id,
+            details: { accountId: owner.account_id, orderId: o.id, outcome: r.outcome, claimCodeReissued: claimHash !== null },
+          },
+          ...transfers.map((t): AuditRecordInput => ({ actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason: 'order_returned' } })),
+        );
+      }
+      await tx
+        .insertInto('returns')
+        .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
+        .execute();
+      const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
+      const details: JsonObject = { outcome: r.outcome, ...(locationId ? { locationId } : {}), ownershipReclaimed: owner !== undefined, ...(to ? { pieceStatus: to } : {}) };
+      notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra);
+      const credit = await issueCreditNote(tx, after, 'return', actor, now);
+      if (credit) notes.push(credit);
+      // Last: the piece's status, which LifecycleService audits at once (the audit chain's lock: no row is locked after it).
+      if (to !== null) {
+        await this.lifecycle.applyForService(tx, p, to, { reason: `Order ${orderReference(o.id)} returned`, via: 'order.return', ...(owner ? { ownershipState: 'UNREGISTERED' } : {}) }, actor);
+      }
+      productId = p.product_id;
+    });
+    return { order: await this.get(id), productId, ...(claimCode ? { claimCode } : {}) };
   }
 
   /**

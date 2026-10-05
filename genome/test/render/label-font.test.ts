@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LABEL_CHARSET, measureText, STROKE_RATIO, textRun, toLabelText } from '../../src/server/render/label-font.js';
+import { DOCUMENT_CHARSET, LABEL_CHARSET, measureText, STROKE_RATIO, textRun, toDocumentText, toLabelText } from '../../src/server/render/label-font.js';
 
 /** Endpoints of every M/L/A command in absolute path data. */
 function endpoints(d: string): [number, number][] {
@@ -46,8 +46,16 @@ describe('label lettering', () => {
     }
   });
 
+  it('documents letter the punctuation of an address and an email besides (plan LIVE RELEASE+, M7); a label never does', () => {
+    expect([...DOCUMENT_CHARSET].filter((ch) => !LABEL_CHARSET.has(ch)).sort()).toEqual(["'", '(', ')', '+', ',', '@'].sort());
+    for (const ch of LABEL_CHARSET) expect(DOCUMENT_CHARSET.has(ch), ch).toBe(true);
+    expect(toDocumentText('Rue de l’Église, 12 (Bât. B) — jeanne+orbes@example.com')).toBe("RUE DE L'EGLISE, 12 (BAT. B) - JEANNE+ORBES@EXAMPLE.COM");
+    expect(toLabelText('Rue de l’Église, 12 (Bât. B)')).toBe('RUE DE L EGLISE 12 BAT. B');
+    expect(toDocumentText('✓ & ✓')).toBe('');
+  });
+
   it('draws every glyph inside its advance box, with arcs continuous from the pen', () => {
-    for (const ch of LABEL_CHARSET) {
+    for (const ch of DOCUMENT_CHARSET) {
       if (ch === ' ') continue;
       const run = textRun(ch, { capHeight: 10, x: 0, baseline: 10, align: 'start' });
       expect(run.d.length, ch).toBeGreaterThan(0);

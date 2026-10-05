@@ -162,6 +162,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       status: 'RESERVED',
       ...(await times(ids.live1)),
       shipment: null,
+      // Not paid yet: no invoice; its care guide (step S4, M6).
+      documents: { invoice: null, creditNote: null, careGuide: true, certificate: false },
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -180,6 +182,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       status: 'DELIVERED',
       ...(await times(ids.delivered)),
       shipment: { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901' },
+      // Paid: its invoice (step S4, M6); its piece not registered by the account: no certificate yet.
+      documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, careGuide: true, certificate: false },
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -195,8 +199,9 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'id', 'model', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
+        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'model', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
       );
+      expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
     }
     for (const secret of ['A silk pouch', 'Jane', 'Paix', 'A. & L.', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-']) {

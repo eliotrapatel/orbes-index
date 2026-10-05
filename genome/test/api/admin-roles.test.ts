@@ -10,8 +10,8 @@
  * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, a model
  * discontinued or reinstated (P-R06), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
- * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, terms, buyer and piece, and the
- * atelier's stock, pieces to make and work sheets: OPERATOR);
+ * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
+ * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -183,6 +183,12 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'PATCH', url: `/api/admin/orders/${UUID}/terms`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'PUT', url: `/api/admin/orders/${UUID}/buyer`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/piece`, body: INVALID, min: 'OPERATOR' },
+  // Step S4: a return opened by an OPERATOR; the invoices and credit notes read by an AUDITOR (the buyer masked).
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
+  { group: 'invoices', method: 'GET', url: '/api/admin/invoices', min: 'AUDITOR' },
+  { group: 'invoices', method: 'GET', url: '/api/admin/invoices?month=2026-11&kind=CREDIT_NOTE&q=INV-2026', min: 'AUDITOR' },
+  { group: 'invoices', method: 'GET', url: '/api/admin/invoices.csv?month=2026-11', min: 'AUDITOR' },
+  { group: 'invoices', method: 'GET', url: `/api/admin/invoices/${UUID}/pdf`, min: 'AUDITOR' },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -287,6 +293,7 @@ describe('admin role enforcement', () => {
       'tiers',
       'live',
       'orders',
+      'invoices',
       'logistics',
       'atelier',
     ]) {

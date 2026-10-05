@@ -12,9 +12,13 @@
  *     print, the slip alone. A piece picked from the stock for an order holding one, paid: no SHIP until it is linked.
  *  3. The atelier: a minimum set, its suggestion confirmed into pieces to make for the stock; their work sheets, each
  *     with its reference and its ORBES code drawn at 30 mm (in print too); the CSV of what to make.
- *  4. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
+ *  4. Returns and invoices (step S4): the delivered order's invoice on its page (its PDF); its piece registered by its
+ *     buyer, a return opened back to stock: the new claim code shown once with its card to download, the return and
+ *     the credit note on the page; the Invoices page (Clients): the month's documents, their totals, a PDF, the CSV.
+ *  5. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
  *     renamed.
- *  5. An AUDITOR reads the board and an order, the emails and the buyer masked, without one action; no work sheet.
+ *  6. An AUDITOR reads the board, an order and the invoices, the emails and the buyer masked, without one action; no
+ *     work sheet.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -79,6 +83,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
   let liveEntryId = '';
   let stockPiece = '';
   let collector = '';
+  /** The claim code the atelier showed once for the late order's piece: its buyer registers the piece with it. */
+  let lateClaim = '';
 
   async function open(who: { email: string; password: string }): Promise<Page> {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
@@ -232,8 +238,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
   it('shows every order by step, the late one standing out, narrowed by the filters; the CSV', async () => {
     const p = await open(OPERATOR);
-    // Its links in the sidebar: Orders (Clients), Atelier (Registry), the settings from both; SIGN OUT still within 900 px.
-    for (const label of ['Orders', 'Atelier']) expect(await p.locator('.side__link', { hasText: new RegExp(`^${label}$`) }).count(), label).toBe(1);
+    // Its links in the sidebar: Orders and Invoices (Clients), Atelier (Registry), the settings from both; SIGN OUT still
+    // within 900 px.
+    for (const label of ['Orders', 'Invoices', 'Atelier']) expect(await p.locator('.side__link', { hasText: new RegExp(`^${label}$`) }).count(), label).toBe(1);
     expect(await p.locator('.side__link', { hasText: /^Settings$/ }).count()).toBe(0);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
@@ -288,10 +295,11 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(p, `#/orders/${o.late}`, orderReference(o.late));
     expect(await p.locator('[data-testid=order-late]').textContent()).toContain('Reserved for over 2 days, not paid yet.');
     expect(await p.locator('[data-testid=order-holds]').textContent()).toBe('To make');
-    expect(await p.locator('#order-step').textContent()).toContain('Its piece is being made at the atelier.');
-    // Only the steps that apply: no SHIP, no DELIVERED before it is paid.
+    expect(await p.locator('#order-step').textContent()).toContain('Its piece is being made at the atelier; its price is to be entered.');
+    // Only the steps that apply: no SHIP, no DELIVERED before it is paid; not paid before it is priced (its invoice).
     expect(await p.locator('[data-testid=order-ship]').count()).toBe(0);
     expect(await p.locator('[data-testid=order-deliver]').count()).toBe(0);
+    expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
 
     await p.click('[data-testid=order-terms]');
     await p.fill('dialog input[name=price]', '4 800');
@@ -325,6 +333,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.inputValue('dialog input[name=material]')).toBe('925 STERLING SILVER');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    lateClaim = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).count()).toBe(0);
 
@@ -369,7 +378,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('[data-testid=slip-surprise]').textContent()).toBe('A silk pouch');
     expect(await p.locator('[data-testid=slip-source]').textContent()).toMatch(/^LR-/);
 
-    // A piece picked from the stock for the order holding one, paid: it ships only once its piece is linked.
+    // A piece picked from the stock for the order holding one, priced and paid: it ships only once its piece is linked.
+    await ctx.services.orders.setTerms(o.stock, { priceMinor: 300_000, currency: 'EUR' }, admin);
     await ctx.services.orders.transition(o.stock, { to: 'PAID' }, admin);
     await go(p, `#/orders/${o.stock}`, orderReference(o.stock));
     expect(await p.locator('#order-step').textContent()).toContain('Link its piece from the stock.');
@@ -434,6 +444,92 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.context().close();
   }, STEP_TIMEOUT);
 
+  it('returns and invoices: the invoice on the order\'s page; a return back to stock, the new claim code once with its card; the Invoices page, its PDFs and its CSV', async () => {
+    // The late order, delivered, its piece registered by its buyer (its warranty started at the sale).
+    const piece = await ctx.db.selectFrom('orders as o').innerJoin('products as p', 'p.id', 'o.product_id').select(['p.id', 'p.product_id', 'o.account_id']).where('o.id', '=', o.late).executeTakeFirstOrThrow();
+    const code = await ctx.db.selectFrom('codes').select('id').where('product_id', '=', piece.id).where('status', '=', 'ACTIVE').executeTakeFirstOrThrow();
+    await ctx.services.warranty.activate(piece.id, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(code.id)).data }, {});
+    await ctx.services.ownership.registerFirst(piece.account_id, { registrationToken: scan.registration!.token, claimCode: lateClaim }, { type: 'account', id: piece.account_id });
+
+    const p = await open(OPERATOR);
+    await go(p, `#/orders/${o.late}`, orderReference(o.late));
+    // Its invoice, issued when it was paid: its PDF.
+    const documents = p.locator('#order-documents tbody tr');
+    await expect.poll(() => documents.count()).toBe(1);
+    expect(await documents.first().textContent()).toMatch(/INV-\d{4}-000001\s*Invoice/);
+    expect(await documents.first().textContent()).toMatch(/€\s4\s800/u);
+    const [invoicePdf] = await Promise.all([p.waitForEvent('download'), documents.first().locator('[data-testid=document-pdf]').click()]);
+    expect(invoicePdf.suggestedFilename()).toMatch(/^ORBES-invoice-INV-\d{4}-000001\.pdf$/);
+    expect(readFileSync((await invoicePdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+
+    // A return back to stock: where, and why.
+    await p.click('[data-testid=order-return]');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await p.selectOption('dialog select[name=outcome]', 'RESTOCKED');
+    await expect.poll(() => p.locator('dialog').textContent()).toContain('a new claim code is issued for its new certificate card');
+    await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Choose the location the piece goes back to.');
+    await p.selectOption('dialog select[name=locationId]', { label: 'FRANCE WAREHOUSE' });
+    await p.click('[data-testid=dialog-confirm]');
+    // ORBES took the ownership back: the new claim code, once, with its card.
+    await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    const fresh = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
+    expect(fresh).not.toBe(lateClaim);
+    const [card] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=return-card]')]);
+    expect(card.suggestedFilename()).toMatch(/\.pdf$/);
+    await shot(p, 'return-claim-code');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('RETURNED');
+    expect(await p.locator('[data-testid=return-outcome]').textContent()).toBe('Back to stock · FRANCE WAREHOUSE');
+    expect(await p.locator('#order-return').textContent()).toContain('Taken back by ORBES from its buyer');
+    await expect.poll(() => documents.count()).toBe(2);
+    expect(await documents.nth(1).textContent()).toMatch(/CN-\d{4}-000001\s*Credit note/);
+    expect(await p.locator('[data-testid=order-return]').count()).toBe(0);
+    expect(await p.locator('body').textContent()).not.toContain(fresh);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'order-returned');
+
+    // The Invoices page: the month's documents, the latest first, and their totals.
+    await p.locator('.side__link', { hasText: /^Invoices$/ }).click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Invoices');
+    const rows = p.locator('#invoices-list tbody tr');
+    await expect.poll(() => rows.count()).toBe(3);
+    const texts = await rows.allTextContents();
+    expect(texts[0]).toMatch(/CN-\d{4}-000001\s*Credit note/);
+    expect(texts[0]).toContain('Jane Doe');
+    expect(texts[0]).toMatch(/Cancels INV-\d{4}-000001/);
+    expect(texts.some((x) => /INV-\d{4}-000002/.test(x) && x.includes(orderReference(o.stock)))).toBe(true);
+    expect(texts.some((x) => /INV-\d{4}-000001/.test(x) && /Cancelled by CN-\d{4}-000001/.test(x))).toBe(true);
+    const totals = await p.locator('#invoices-totals tbody tr').textContent();
+    expect(totals).toMatch(/EUR\s*€\s7\s800\s*€\s4\s800\s*€\s3\s000/u);
+    // One kind; a search; the order's page from its reference.
+    await p.selectOption('select[name=kind]', 'CREDIT_NOTE');
+    await expect.poll(() => rows.count()).toBe(1);
+    await p.selectOption('select[name=kind]', '');
+    await p.fill('input[name=q]', orderReference(o.stock));
+    await p.press('input[name=q]', 'Enter');
+    await expect.poll(() => rows.count()).toBe(1);
+    const [pdf] = await Promise.all([p.waitForEvent('download'), rows.first().locator('[data-testid=invoice-pdf]').click()]);
+    expect(pdf.suggestedFilename()).toMatch(/^ORBES-invoice-INV-\d{4}-000002\.pdf$/);
+    const [csv] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=invoices-csv]')]);
+    expect(csv.suggestedFilename()).toMatch(/^ORBES-invoices-\d{4}-\d{2}\.csv$/);
+    const lines = readFileSync((await csv.path())!, 'utf8').trim().split('\r\n');
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toContain('"vat rate","vat","total"');
+    await p.fill('input[name=q]', '');
+    await p.press('input[name=q]', 'Enter');
+    await expect.poll(() => rows.count()).toBe(3);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'invoices');
+    await rows.first().locator('a.idlink').click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(o.late));
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
   it('changes the settings (ADMIN): the delays of the alerts, a carrier with its tracking link, a location renamed', async () => {
     const p = await open(ADMIN);
     // An ADMIN's sidebar (Team too) still fits a 900 px screen with its foot.
@@ -483,9 +579,16 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(a, `#/orders/${o.late}`, orderReference(o.late));
     expect(await a.locator('[data-testid=buyer-name]').textContent()).toBe('J*** D***');
     expect(await a.locator('[data-testid=buyer-address]').textContent()).toBe('***');
-    for (const action of ['order-pay', 'order-ship', 'order-deliver', 'order-cancel', 'order-terms', 'order-buyer', 'order-location', 'order-link']) {
+    for (const action of ['order-pay', 'order-ship', 'order-deliver', 'order-cancel', 'order-return', 'order-terms', 'order-buyer', 'order-location', 'order-link']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
+    // Its documents read; on the Invoices page, the buyer masked.
+    await expect.poll(() => a.locator('#order-documents tbody tr').count()).toBe(2);
+    await go(a, '#/invoices', 'Invoices');
+    await expect.poll(() => a.locator('#invoices-list tbody tr').count()).toBe(3);
+    expect(await a.locator('[data-testid=invoice-buyer]').first().textContent()).toBe('J*** D***');
+    expect(await a.locator('#invoices-list').textContent()).not.toContain('Jane Doe');
+    await go(a, `#/orders/${o.late}`, orderReference(o.late));
     await a.click('a.cbtn:has-text("Packing slip")');
     await a.waitForSelector('[data-testid=packing-slip]');
     expect(await a.locator('[data-testid=slip-buyer-name]').textContent()).toBe('J*** D***');

@@ -1943,11 +1943,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
-    // Club in the Clients group after Owners, then Orders (plan LIVE RELEASE+, with Atelier in the Registry); the ADMIN's
-    // sidebar, twenty-two links, still fits a 900 px screen.
+    // Club in the Clients group after Owners, then Orders and Invoices (plan LIVE RELEASE+, with Atelier in the
+    // Registry); the ADMIN's sidebar, twenty-three links, still fits a 900 px screen.
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
-    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['owners', 'club', 'orders', 'warranties', 'retailers', 'sale']);
-    expect(await p.locator('.side__link').count()).toBe(22);
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['owners', 'club', 'orders', 'invoices', 'warranties', 'retailers', 'sale']);
+    expect(await p.locator('.side__link').count()).toBe(23);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);

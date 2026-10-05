@@ -12,6 +12,10 @@
  *    and TRACK THE SHIPMENT, the carrier's page in a new tab; the order's reference. YOUR RELEASES sends the LIVE
  *    RELEASE's piece to its order's steps, never a payment still to settle.
  *  - Delivered by ORBES Client Services, read again: every step reached, DELIVERED current.
+ *  - Its documents (step S4, M6): the LIVE RELEASE's piece registered by the collector, its card offers its INVOICE
+ *    (its number in the reading face) and its OWNERSHIP CERTIFICATE, each saved as a PDF, and its CARE GUIDE, opened
+ *    under them (the house's general care text, its model having none) and closed again; the salon's order still to
+ *    pay, its care guide only; the one cancelled before it was paid, none. A document that cannot be read says so.
  *  - Its orders unreadable (a server error): said, the pieces still shown; signed out: no orders at all.
  *
  * On the screen: the text's contrast on its ground computed from the page's own colours (at least 4.5 : 1), no figure in
@@ -20,13 +24,13 @@
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
-import { ORDERS } from '../../src/web/verify/copy.js';
+import { DEFAULT_CARE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
 import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -60,6 +64,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
   let me: { id: string; token: string };
   /** The orders of the collector: the LIVE RELEASE's (shipped), the salon's to enter, the one cancelled. */
   const ids = { live: '', salon: '', cancelled: '', other: '' };
+  /** The LIVE RELEASE's piece as the atelier issued it: its code's data and its claim code, for its buyer to register it. */
+  const livePiece = { productId: '', codeData: '', claimCode: '' };
 
   async function account(tag: string) {
     const { account: a, session } = await srv.ctx.services.auth.registerAccount({ email: `orders.e2e.${tag}@example.com`, password: PASSWORD }, {});
@@ -103,7 +109,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await orders.transition(ids.live, { to: 'PAID' }, f.admin);
     const bench = await srv.ctx.db.selectFrom('bench_items').select('id').where('order_id', '=', ids.live).executeTakeFirstOrThrow();
     await srv.ctx.services.atelier.start(bench.id, f.admin);
-    await srv.ctx.services.atelier.done(bench.id, { material: '925 STERLING SILVER' }, f.admin);
+    const done = await srv.ctx.services.atelier.done(bench.id, { material: '925 STERLING SILVER' }, f.admin);
+    Object.assign(livePiece, { productId: done.productId, codeData: (await srv.ctx.services.issuance.printableCode(done.codeId)).data, claimCode: done.claimCode! });
     await orders.transition(ids.live, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
 
     ids.cancelled = await salonOrder(me.id);
@@ -237,13 +244,82 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await page.context().close();
   }, 120_000);
 
+  it('its documents: the invoice and the ownership certificate saved as PDFs, the care guide opened and closed; a document that cannot be read says so', async () => {
+    const D = ORDERS.documents;
+    // The collector registers the piece of the LIVE RELEASE (its warranty started at the sale).
+    const uuid = (await srv.ctx.db.selectFrom('products').select('id').where('product_id', '=', livePiece.productId).executeTakeFirstOrThrow()).id;
+    await srv.ctx.services.warranty.activate(uuid, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    const scan = await srv.ctx.services.verification.verify({ code: livePiece.codeData }, {});
+    await srv.ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: livePiece.claimCode }, { type: 'account', id: me.id });
+    const invoice = (await srv.ctx.services.orders.forAccount(me.id)).find((o) => o.id === ids.live)!.documents.invoice!.number;
+
+    const { page, problems } = await phone(me.token);
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const live = page.locator('article.pieces__order[data-status="DELIVERED"]');
+    await visible(live);
+    const group = live.getByRole('group', { name: D.title });
+    await visible(group);
+    const links = group.locator('.pieces__order-document');
+    await textsOf(links, [`${D.invoice} ${invoice}`, D.careGuide, D.certificate]);
+    // The number in the reading face, the label in the display face.
+    expect(await links.first().locator('.numeral').innerText()).toBe(invoice);
+    // The salon's order, not paid yet: its care guide only; the one cancelled before it was paid: no document.
+    await textsOf(page.locator('article.pieces__order[data-status="RESERVED"] .pieces__order-document'), [D.careGuide]);
+    expect(await page.locator('article.pieces__order[data-status="CANCELLED"] .pieces__order-documents').count()).toBe(0);
+
+    // INVOICE: its PDF saved.
+    const [pdf] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.invoiceLabel(invoice) }).click()]);
+    expect(pdf.suggestedFilename()).toBe(`ORBES-invoice-${invoice}.pdf`);
+    expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+    // OWNERSHIP CERTIFICATE: the piece is registered to the collector.
+    const [certificate] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.certificateLabel('MONOLITHE') }).click()]);
+    expect(certificate.suggestedFilename()).toMatch(new RegExp(`^ORBES-ownership-certificate-${livePiece.productId}-\\d{4}-\\d{2}-\\d{2}\\.pdf$`));
+
+    // CARE GUIDE: opened under the links (the house's general text: the model has none of its own), then closed.
+    const care = group.getByRole('button', { name: D.careGuideLabel('MONOLITHE') });
+    expect(await care.getAttribute('aria-expanded')).toBe('false');
+    const panel = live.locator(`#${await care.getAttribute('aria-controls')}`);
+    expect(await panel.isHidden()).toBe(true);
+    await care.click();
+    await textOf(panel, DEFAULT_CARE);
+    expect(await care.getAttribute('aria-expanded')).toBe('true');
+    expect(await group.getByRole('alert').count()).toBe(0);
+
+    // The screen with the documents and the care guide open.
+    const checks = await screenChecks(page);
+    expect(checks.contrast).toEqual([]);
+    expect(checks.figures).toEqual([]);
+    expect(await page.locator('.view--pieces .btn').count()).toBe(1);
+    const floors = await tapZoneFloors(page);
+    expect(floors.problems).toEqual([]);
+    expect(floors.checked).toEqual(expect.arrayContaining([`${D.invoice} ${invoice}`, D.careGuide, D.certificate]));
+    // At rest for the picture: the pointer off the links, the page at its top (its fixed frame drawn there).
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-documents.png'), fullPage: true });
+    await care.click();
+    expect(await care.getAttribute('aria-expanded')).toBe('false');
+    expect(await panel.isHidden()).toBe(true);
+
+    // A document that cannot be read: said under the links, nothing saved; the next try works.
+    await page.route('**/invoice.pdf', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: 'Something went wrong.' } }) }), { times: 1 });
+    await group.getByRole('button', { name: D.invoiceLabel(invoice) }).click();
+    await textOf(group.getByRole('alert'), D.downloadFailed);
+    const [again] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.invoiceLabel(invoice) }).click()]);
+    expect(again.suggestedFilename()).toBe(`ORBES-invoice-${invoice}.pdf`);
+    await expect.poll(() => group.getByRole('alert').count(), POLL).toBe(0);
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
   it('says when the orders could not be read, the pieces still shown; signed out, no orders', async () => {
     const { page, problems } = await phone(me.token);
     await page.route('**/api/v1/account/orders', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: 'Something went wrong.' } }) }));
     await page.goto(`${srv.origin}/verify/pieces`);
     const section = page.locator('section.pieces__orders');
     await textOf(section.getByRole('alert'), ORDERS.loadFailed);
-    await visible(page.locator('.pieces__empty'));
+    // The piece the collector registered with its documents (above) still shows.
+    await visible(page.locator('.pieces__list article.piece'));
     expect(await section.locator('article').count()).toBe(0);
     expect(problems).toEqual([]);
     await page.context().close();

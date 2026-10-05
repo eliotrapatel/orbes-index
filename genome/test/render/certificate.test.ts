@@ -645,3 +645,50 @@ describe('ownership certificate (F-06)', () => {
     await expect(renderPdf([{ widthMm: 10, heightMm: 10, placements: [], links: [{ xMm: 0, yMm: 0, wMm: 1, hMm: 1, url: 'javascript:alert(1)' }] }], { title: 't', creationDate: DATE })).rejects.toThrow(RangeError);
   });
 });
+
+// ── The ownership certificate among an order's documents (plan LIVE RELEASE+, M6) ─────────────────────────────────
+
+/** The same record, naming the order it was bought with instead of a live link (MY PIECES' documents). */
+function orderDoc(extra: Partial<OwnershipCertificateDocument> = {}): OwnershipCertificateDocument {
+  const { issuedAt: _i, expiresAt: _e, link: _l, ...record } = ownershipDoc();
+  return { ...record, order: 'OR-1A2B3C4D', ...extra };
+}
+
+describe('ownership certificate of an order (M6)', () => {
+  it('is the same page naming the order: no live address, no link, the record and the statement as a link\'s', () => {
+    const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+    const linked = layoutOwnershipCertificate(ownershipDoc());
+    const page = layoutOwnershipCertificate(orderDoc());
+    expect(page.links).toEqual([]);
+    expect(page.fills).toEqual(linked.fills);
+    expect(page.placements).toEqual(linked.placements);
+    expect(page.shapes).toEqual(linked.shapes);
+    // Under THIS CERTIFICATE: STATUS and ORDER (two rows) instead of STATUS, ISSUED and VALID UNTIL; no CHECK IT LIVE,
+    // its address nor its code.
+    const differ = (a: typeof page, b: typeof page) => a.marks!.filter((m) => !b.marks!.some((x) => x.d === m.d)).map((m) => bounds(m.d));
+    const gone = differ(linked, page);
+    const added = differ(page, linked);
+    expect(gone).toHaveLength(2 * 2 + 3);
+    expect(added).toHaveLength(2);
+    for (const b of gone) expect(b.y0).toBeGreaterThan(L.certificate.baseline);
+    for (const b of added) expect(b.y1).toBeCloseTo(L.certificate.first + L.rows.pitch, 0);
+    // Nothing between the statement and VERIFY ONLY, where a link's live address goes.
+    for (const st of page.marks!) {
+      const b = bounds(st.d);
+      if (b.y1 > L.statement.baselines[2] + 1) expect(b.y0).toBeGreaterThan(L.verifyOnly.baseline - L.verifyOnly.cap - 1);
+    }
+    expect(OWNERSHIP_CERTIFICATE_COPY.rows.order).toBe('ORDER');
+  });
+
+  it('renders a deterministic PDF with no annotation, its subject naming the order; refuses a link without its dates, or an order with a link', async () => {
+    const a = await renderOwnershipCertificatePdf(orderDoc());
+    expect(Buffer.from(a.body as Uint8Array).equals(Buffer.from((await renderOwnershipCertificatePdf(orderDoc())).body as Uint8Array))).toBe(true);
+    expect(a.filename).toBe('ORBES-ownership-certificate-O26-J-00184-2026-10-03.pdf');
+    const pdf = a.body as Uint8Array;
+    expect(pdfObjects(pdf)).not.toMatch(/\/Subtype \/Link|\/URI|\/Font/);
+    expect(latin1(pdf)).toContain('bought with order OR-1A2B3C4D');
+    for (const bad of [orderDoc({ order: 'OR-1' }), orderDoc({ order: undefined }), ownershipDoc({ order: 'OR-1A2B3C4D' }), ownershipDoc({ expiresAt: undefined })]) {
+      expect(() => layoutOwnershipCertificate(bad)).toThrow(CertificateInputError);
+    }
+  });
+});

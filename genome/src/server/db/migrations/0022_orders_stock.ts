@@ -61,7 +61,8 @@
  * IN_PROGRESS → DONE, or CANCELLED, each with its time; the `product_id` of its ORBES identity, reserved at creation
  * (unique); the engraving text and the surprise it carries. At most one open per order (`bench_items_one_open`).
  *
- * `returns`: an order returned (one at most), RESTOCKED at a location or ARCHIVED, with a note, by whom and when.
+ * `returns`: an order returned (one at most), RESTOCKED at a location or ARCHIVED, with a note, by whom and when, and
+ * the `ownership_id` ORBES took back when the buyer had registered the piece (ended by the return), NULL otherwise.
  *
  * `invoices`: the invoices and credit notes, numbered in sequence per kind and year (`invoices_number_key`), each of an
  * order (one invoice per order; a credit note credits one invoice, once), the issuer, the buyer, the lines and the
@@ -362,14 +363,16 @@ export const UP: readonly string[] = [
 
   // ── returns ──────────────────────────────────────────────────────────────
   `CREATE TABLE returns (
-     id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-     order_id    uuid        NOT NULL REFERENCES orders (id) ON DELETE RESTRICT,
-     outcome     text        NOT NULL CHECK (outcome IN (${RETURN_OUTCOMES})),
-     location_id uuid        NULL REFERENCES stock_locations (id) ON DELETE RESTRICT,
-     note        text        NOT NULL CHECK (${words('note', 500)}),
-     created_by  uuid        NULL REFERENCES admin_users (id) ON DELETE RESTRICT,
-     created_at  timestamptz NOT NULL DEFAULT now(),
+     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+     order_id     uuid        NOT NULL REFERENCES orders (id) ON DELETE RESTRICT,
+     outcome      text        NOT NULL CHECK (outcome IN (${RETURN_OUTCOMES})),
+     location_id  uuid        NULL REFERENCES stock_locations (id) ON DELETE RESTRICT,
+     note         text        NOT NULL CHECK (${words('note', 500)}),
+     ownership_id uuid        NULL REFERENCES ownership (id) ON DELETE RESTRICT,
+     created_by   uuid        NULL REFERENCES admin_users (id) ON DELETE RESTRICT,
+     created_at   timestamptz NOT NULL DEFAULT now(),
      CONSTRAINT returns_order_key UNIQUE (order_id),
+     CONSTRAINT returns_ownership_key UNIQUE (ownership_id),
      CONSTRAINT returns_location CHECK ((outcome = 'RESTOCKED') = (location_id IS NOT NULL))
    )`,
   `CREATE INDEX returns_location_idx ON returns (location_id)`,

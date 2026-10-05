@@ -29,6 +29,8 @@ export const ROUTES = [
   { name: 'orders', path: '/orders' },
   { name: 'order', path: '/orders/:orderId' },
   { name: 'packingSlip', path: '/orders/:orderId/slip' },
+  /** The invoices and credit notes (plan LIVE RELEASE+, M7): a month's, their PDFs and the accountant's CSV. */
+  { name: 'invoices', path: '/invoices' },
   { name: 'warranties', path: '/warranties' },
   { name: 'anomalies', path: '/anomalies' },
   { name: 'cases', path: '/cases' },

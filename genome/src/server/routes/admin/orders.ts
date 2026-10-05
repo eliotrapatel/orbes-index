@@ -14,6 +14,9 @@
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
  *   POST   /api/admin/orders/:id/piece          OPERATOR  the piece that fulfils it, picked from the stock
+ *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, or to the
+ *                                                         archive, with a note; the claim code of the piece's new card
+ *                                                         when ORBES took its buyer's ownership back (shown once, no-store)
  *
  * An AUDITOR reads the collectors' emails masked (`j***@example.com`) and the buyer's name and address masked
  * (`J*** D***`, the address withheld: serialize.ts), on the board, the order and the CSV; OPERATOR and ADMIN in clear.
@@ -27,6 +30,7 @@ import {
   orderLocationBody,
   orderParams,
   orderPieceBody,
+  orderReturnBody,
   orderTermsBody,
   orderTransitionBody,
   parse,
@@ -122,5 +126,14 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { productId } = parse(orderPieceBody, request.body);
     await atelier.linkFromStock(id, productId, adminActor(request));
     return detail(request, id);
+  });
+
+  // The answer may carry a claim code (only its hash is kept): never stored by a cache.
+  app.post('/api/admin/orders/:id/return', async (request, reply) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(orderReturnBody, request.body);
+    const r = await orders.returnOrder(id, { outcome: b.outcome, locationId: b.locationId ?? null, note: b.note }, adminActor(request));
+    reply.header('cache-control', 'no-store');
+    return { ...(await detail(request, id)), productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };
   });
 };

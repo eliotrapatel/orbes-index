@@ -1624,7 +1624,21 @@ export interface OrderView {
   shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
   productId: string | null;
   shopifyOrderId: string | null;
+  /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
+  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Iso; ownershipReclaimed: boolean } | null;
+  /** Its invoice and credit note, in order of issue. */
+  invoices: OrderDocument[];
   events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];
+}
+
+/** An invoice or a credit note of an order, as its page lists it. */
+export interface OrderDocument {
+  id: string;
+  kind: InvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  currency: OrderCurrency;
+  totalMinor: number;
 }
 
 /** GET /api/admin/orders/:id: the order, its collector, its timing, its piece, who changed it. */
@@ -1644,6 +1658,52 @@ export type OrderTransitionInput =
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor?: number | null; note?: string }
   | { to: 'DELIVERED'; note?: string }
   | { to: 'CANCELLED'; note: string };
+
+/** POST /api/admin/orders/:id/return (choice 20): back to stock at a location, or to the archive, with a note. */
+export type OrderReturnInput = { outcome: 'RESTOCKED'; locationId: string; note: string } | { outcome: 'ARCHIVED'; note: string };
+
+/** The order after its return, and the claim code of its piece's new card when ORBES took its buyer's ownership back (shown once). */
+export interface OrderReturned extends OrderDetail {
+  productId: string;
+  claimCode?: string;
+}
+
+// ── Invoices (routes/admin/invoices.ts) ───────────────────────────────────
+
+/** An invoice or a credit note (the buyer masked for an AUDITOR). */
+export interface Invoice {
+  id: string;
+  kind: InvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  order: { id: string; reference: string };
+  credits: { id: string; number: string } | null;
+  creditedBy: { id: string; number: string } | null;
+  issuer: { name: string; address: string[] };
+  buyer: { name: string | null; address: string | null; email: string | null };
+  lines: { kind: 'PIECE' | 'ADDON'; label: string; detail: string | null; amountMinor: number }[];
+  currency: OrderCurrency;
+  subtotalMinor: number;
+  vatRateBp: number | null;
+  vatMinor: number | null;
+  totalMinor: number;
+}
+
+/** GET /api/admin/invoices: a month's documents and their totals per currency. */
+export interface InvoiceList {
+  month: string;
+  /** The month now (UTC, the server's): the latest the page offers. */
+  currentMonth: string;
+  items: Invoice[];
+  totals: { currency: OrderCurrency; invoiced: number; credited: number; net: number }[];
+}
+
+/** The Invoices page's filters (its query). */
+export interface InvoiceFilters {
+  month?: string;
+  kind?: InvoiceKind;
+  q?: string;
+}
 
 /** PATCH /api/admin/orders/:id/terms: only the terms that change. */
 export interface OrderTermsChange {

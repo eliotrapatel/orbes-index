@@ -48,6 +48,7 @@ import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
 import { OrderService } from './services/orders.js';
+import { InvoiceService } from './services/invoices.js';
 import { AtelierService } from './services/atelier.js';
 import { FulfilmentService } from './services/fulfilment.js';
 import { OwnerService } from './services/owners.js';
@@ -113,6 +114,8 @@ export interface AppServices {
   stock: StockService;
   /** The orders of every sales channel (plan LIVE RELEASE+), step by step: what each holds, its steps, its buyer; the boot's setup. */
   orders: OrderService;
+  /** The invoices and credit notes of the orders (plan LIVE RELEASE+, M7): a month's, their PDFs, the accountant's CSV; MY PIECES' own. */
+  invoices: InvoiceService;
   /** The fulfilment board (plan LIVE RELEASE+): the orders by step, their time in it and the late ones (M3), the CSV, the delays. */
   fulfilment: FulfilmentService;
   /** The atelier (plan LIVE RELEASE+): the stock and its thresholds, the pieces to make, their work sheets, the pieces issued. */
@@ -218,7 +221,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const liveInsights = new LiveInsightsService({ db, clock });
     const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
     const stock = new StockService({ db, audit, clock });
-    const orders = new OrderService({ db, audit, clock, log });
+    const orders = new OrderService({ db, audit, lifecycle, clock, log });
+    const invoices = new InvoiceService({ db, clock });
     const fulfilment = new FulfilmentService({ db, audit, orders, clock });
     const atelier = new AtelierService({ db, audit, issuance, orders, clock });
 
@@ -251,6 +255,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       liveInsights,
       stock,
       orders,
+      invoices,
       fulfilment,
       atelier,
       ...overrides.services,

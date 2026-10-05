@@ -12,14 +12,17 @@
  * - Every failure becomes an ApiError with the server's public `{ code,
  *   message }`, or NETWORK / TIMEOUT / BAD_RESPONSE for transport problems.
  *   Server messages are written for customers and safe to display.
- * - The ownership certificate's PDF (F-06) is the one answer that is not
- *   JSON: it comes back as a blob with its file name, for the page to save.
+ * - The ownership certificate's PDF (F-06) and an order's documents (an
+ *   invoice, a credit note, the order's ownership certificate: M6) are the
+ *   answers that are not JSON: each comes back as a blob with its file name,
+ *   for the page to save.
  * - A LIVE RELEASE's stream is no fetch: the page opens an EventSource on
  *   `liveStreamUrl` (same origin, the session cookie with it). The boutique
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
   AccountOrder,
+  OrderCareGuide,
   CertificateLookup,
   CertificateOffer,
   CircleAnswer,
@@ -110,6 +113,9 @@ const MAX_RESPONSE_CHARS = 256 * 1024;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/** An order's documents saved as PDFs (GET /api/v1/account/orders/:id/<kind>.pdf). */
+export type OrderDocumentKind = 'invoice' | 'credit-note' | 'certificate';
 
 export class ApiClient {
   private csrfToken: string | undefined;
@@ -508,6 +514,23 @@ export class ApiClient {
     const r = await this.request<{ orders?: unknown }>('GET', '/api/v1/account/orders');
     if (!Array.isArray(r?.orders)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.orders as AccountOrder[];
+  }
+
+  /** One of an order's documents as a PDF, to save (M6): its invoice, its credit note, or its ownership certificate. */
+  async orderDocument(orderId: string, document: OrderDocumentKind): Promise<DownloadedFile> {
+    const res = await this.send('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/${document}.pdf`, undefined, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${document}.pdf`) };
+  }
+
+  /** The care guide of an order's model (M6): its own words, or null for the house's general care text. */
+  async orderCareGuide(orderId: string): Promise<OrderCareGuide> {
+    const r = await this.request<{ careGuide?: OrderCareGuide }>('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/care-guide`);
+    if (!r?.careGuide || typeof r.careGuide.model !== 'string' || (r.careGuide.text !== null && typeof r.careGuide.text !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.careGuide;
   }
 
   /** The after-sales services of one of the owner's pieces, oldest first; staff notes stay internal. */

@@ -46,8 +46,10 @@
  *     LIVE RELEASE · MONOLITHE — LIVE        RESERVED · PAID · SHIPPED · DELIVERED with their dates (or CANCELLED,
  *     ● RESERVED 5 OCT 2026 … ○ DELIVERED    or RETURNED), the current one marked; SIZE, PRICE, the add-ons, TOTAL;
  *     SIZE · PRICE · ENGRAVING · TOTAL       once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT
- *     CARRIER · TRACKING NUMBER              (the carrier's page, a new tab); ORDER OR-…, for ORBES Client Services.
- *     TRACK THE SHIPMENT · ORDER OR-1A2B3C4D  Nothing when the account has none.
+ *     CARRIER · TRACKING NUMBER              (the carrier's page, a new tab); its DOCUMENTS (M6): the INVOICE and
+ *     TRACK THE SHIPMENT                     the CREDIT NOTE (PDFs), the model's CARE GUIDE (opened under them),
+ *     DOCUMENTS · INVOICE INV-… · CARE GUIDE  the OWNERSHIP CERTIFICATE once the piece is registered to the account
+ *     ORDER OR-1A2B3C4D                      (PDF); ORDER OR-…, for ORBES Client Services. Nothing when none.
  *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM (P-X02),
  *     PLATINE and PALLADIUM owners reserve …  recalled for an account without a tier only (from
  *                                            TITANE up, YOUR TIER says it: its benefits or NEXT)
@@ -80,9 +82,10 @@
  */
 import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
-import { ApiError, type ApiClient } from '../api.js';
+import { saveDownload } from '../../shared/download.js';
+import { ApiError, type ApiClient, type OrderDocumentKind } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { ACCOUNT_PASSWORD, ORBES_CARE, ORDERS, PHOTOS, PIECES, RELEASES } from '../copy.js';
+import { ACCOUNT_PASSWORD, DEFAULT_CARE, ORBES_CARE, ORDERS, PHOTOS, PIECES, RELEASES } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import { myLiveEntries } from '../live-model.js';
@@ -425,7 +428,8 @@ class PiecesPage {
       return;
     }
     const cards = orderModels(this.orders);
-    this.ordersBlock.replaceChildren(heading, h('ul', { class: 'pieces__order-list' }, ...cards.map((m) => h('li', { class: 'pieces__order-item' }, orderCard(m)))));
+    const deps = { api: this.deps.api, session: this.deps.session };
+    this.ordersBlock.replaceChildren(heading, h('ul', { class: 'pieces__order-list' }, ...cards.map((m) => h('li', { class: 'pieces__order-item' }, orderCard(m, deps)))));
   }
 
   /**
@@ -615,9 +619,9 @@ class PiecesPage {
 /**
  * One order of YOUR ORDERS: the model (its heading), where it was sold, what its step means; its steps, the current one
  * marked for a screen reader (aria-current); its terms; once shipped, the carrier, the number and TRACK THE SHIPMENT,
- * a text link to the carrier's page in a new tab (the page keeps one hairline button); its reference.
+ * a text link to the carrier's page in a new tab (the page keeps one hairline button); its documents (M6); its reference.
  */
-function orderCard(m: OrderModel): HTMLElement {
+function orderCard(m: OrderModel, deps: { api: ApiClient; session: SessionStore }): HTMLElement {
   const titleId = `${m.key}-title`;
   const steps = h(
     'ol',
@@ -656,7 +660,88 @@ function orderCard(m: OrderModel): HTMLElement {
     steps,
     m.rows.length > 0 ? rows(m.rows, 'pieces__order-rows') : null,
     ...shipment,
+    m.documents.length > 0 ? orderDocumentsBlock(m, deps) : null,
     h('p', { class: 'ownership__meta micro soft pieces__order-reference', text: m.reference }),
+  );
+}
+
+/**
+ * An order's DOCUMENTS (M6), text links (the page keeps its one hairline button): INVOICE and CREDIT NOTE with their
+ * numbers and OWNERSHIP CERTIFICATE save their PDFs; CARE GUIDE opens the model's care guide under them (read once, on
+ * first opening; the house's general care text when the model has none) and closes it again (aria-expanded). A
+ * document that cannot be read says so under the links, the others still work.
+ */
+function orderDocumentsBlock(m: OrderModel, deps: { api: ApiClient; session: SessionStore }): HTMLElement {
+  const D = ORDERS.documents;
+  const titleId = `${m.key}-documents`;
+  const careId = `${m.key}-care`;
+  const error = h('p', { class: 'form__error pieces__order-document-error', attrs: { role: 'alert', hidden: true } });
+  const care = h('div', { class: 'pieces__order-care', id: careId, attrs: { hidden: true } });
+  let careText: string | null = null;
+  const fail = (text: string) => {
+    error.textContent = text;
+    error.hidden = false;
+  };
+  const save = async (b: HTMLButtonElement, file: OrderDocumentKind) => {
+    if (b.getAttribute('aria-busy') === 'true') return;
+    b.setAttribute('aria-busy', 'true');
+    error.hidden = true;
+    try {
+      saveDownload(await deps.api.orderDocument(m.id, file));
+    } catch (e) {
+      deps.session.noteError(e);
+      fail(D.downloadFailed);
+    } finally {
+      b.setAttribute('aria-busy', 'false');
+    }
+  };
+  const toggleCare = async (b: HTMLButtonElement) => {
+    if (b.getAttribute('aria-expanded') === 'true') {
+      b.setAttribute('aria-expanded', 'false');
+      care.hidden = true;
+      return;
+    }
+    if (careText === null) {
+      if (b.getAttribute('aria-busy') === 'true') return;
+      b.setAttribute('aria-busy', 'true');
+      error.hidden = true;
+      try {
+        const g = await deps.api.orderCareGuide(m.id);
+        careText = g.text && g.text.trim() ? g.text.trim() : DEFAULT_CARE;
+      } catch (e) {
+        deps.session.noteError(e);
+        fail(D.careFailed);
+        return;
+      } finally {
+        b.setAttribute('aria-busy', 'false');
+      }
+      care.replaceChildren(h('p', { class: 'prose pieces__order-care-text', text: careText }));
+    }
+    b.setAttribute('aria-expanded', 'true');
+    care.hidden = false;
+  };
+  const link = (d: OrderModel['documents'][number]) => {
+    // The label in the display face, the number in the reading face (`.numeral`).
+    const b: HTMLButtonElement = h(
+      'button',
+      {
+        class: 'textlink pieces__order-document',
+        attrs: { type: 'button', 'aria-label': d.ariaLabel, ...(d.file === null ? { 'aria-expanded': 'false', 'aria-controls': careId } : {}) },
+        data: { document: d.kind },
+        on: { click: () => void (d.file === null ? toggleCare(b) : save(b, d.file)) },
+      },
+      d.label,
+      ...(d.number ? [' ', h('span', { class: 'numeral', text: d.number })] : []),
+    );
+    return h('li', null, b);
+  };
+  return h(
+    'div',
+    { class: 'pieces__order-documents', attrs: { role: 'group', 'aria-labelledby': titleId } },
+    h('p', { class: 'pieces__order-documents-title', id: titleId, text: D.title }),
+    h('ul', { class: 'pieces__order-document-list' }, ...m.documents.map(link)),
+    care,
+    error,
   );
 }
 

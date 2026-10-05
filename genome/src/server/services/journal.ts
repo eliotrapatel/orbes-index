@@ -21,7 +21,7 @@ import { jsonText, type JsonObject, type ProductRow } from '../db/schema.js';
 import { validationError } from '../errors.js';
 
 /** The entities the journal names. */
-export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product'] as const);
+export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product', 'invoice'] as const);
 export type JournalEntityType = (typeof JOURNAL_ENTITY_TYPES)[number];
 
 /** A connection that reads the journal names itself so: lower case, 1 to 32 characters. */
@@ -109,6 +109,8 @@ export interface ReplayedState {
   orders: Map<string, JsonObject>;
   benchItems: Map<string, JsonObject>;
   products: Map<string, JsonObject>;
+  /** Each invoice and credit note as issued (`invoice.issue`, `invoice.credit`: never its buyer). */
+  invoices: Map<string, JsonObject>;
   stock: Map<string, number>;
 }
 
@@ -117,7 +119,7 @@ export const stockKey = (skuId: string, locationId: string): string => `${skuId}
 
 /** Replay entries in order of id (pure): each entity's last payload, the movements summed. */
 export function replayJournal(entries: Iterable<Pick<JournalEntry, 'entityType' | 'entityId' | 'payload'>>): ReplayedState {
-  const state: ReplayedState = { orders: new Map(), benchItems: new Map(), products: new Map(), stock: new Map() };
+  const state: ReplayedState = { orders: new Map(), benchItems: new Map(), products: new Map(), invoices: new Map(), stock: new Map() };
   for (const e of entries) {
     switch (e.entityType) {
       case 'order':
@@ -128,6 +130,9 @@ export function replayJournal(entries: Iterable<Pick<JournalEntry, 'entityType' 
         break;
       case 'product':
         state.products.set(e.entityId, e.payload);
+        break;
+      case 'invoice':
+        state.invoices.set(e.entityId, e.payload);
         break;
       case 'stock_movement': {
         const key = stockKey(String(e.payload.skuId), String(e.payload.locationId));

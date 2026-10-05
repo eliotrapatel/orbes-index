@@ -2,8 +2,11 @@
  * An order's page, `#/orders/:orderId` (plan LIVE RELEASE+, The console → Orders), from its card on the board.
  *
  *  - Its step: RESERVED → PAID → SHIPPED → DELIVERED with the time each was reached (or CANCELLED, or RETURNED), its
- *    time in its step, and whether it is late (M3) and why; the next steps (OPERATOR): MARK PAID, SHIP (a carrier of
- *    the settings, the tracking number, the value declared for the insurance), MARK DELIVERED, CANCEL (with a note).
+ *    time in its step, and whether it is late (M3) and why; the next steps (OPERATOR): MARK PAID (once priced: its
+ *    invoice is issued), SHIP (a carrier of the settings, the tracking number, the value declared for the insurance),
+ *    MARK DELIVERED, CANCEL (with a note; a credit note once paid), OPEN A RETURN (choice 20: back to stock at a
+ *    location, or to the archive, with a note; when ORBES takes its buyer's ownership back and the piece goes back to
+ *    stock, the claim code of its new card is shown once, with its card to download).
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
@@ -11,6 +14,8 @@
  *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (a piece in stock, a piece
  *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock).
  *  - Its shipment: the carrier, the tracking number and its link, the declared value.
+ *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
+ *  - Its documents (M7): the invoice and the credit note, each with its PDF.
  *  - Its history: each change, its note, who made it.
  * PACKING SLIP opens the printable slip (views/slip.ts). Each request is audited by the server; the page is read again.
  */
@@ -22,6 +27,7 @@ import {
   buyerInput,
   buyerProblem,
   CHANNEL_LABELS,
+  DOCUMENT_LABELS,
   durationText,
   EVENT_LABELS,
   eventActor,
@@ -30,6 +36,9 @@ import {
   ORDER_LIMITS,
   orderActions,
   priceLine,
+  RETURN_LABELS,
+  returnInput,
+  returnProblem,
   shipInput,
   shipProblem,
   shipWaitsFor,
@@ -41,10 +50,11 @@ import {
 } from '../model/orders.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import { ORDER_CURRENCIES, type OrderStatus, type OrderTransitionInput } from '../types.js';
-import { button, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
+import { ORDER_CURRENCIES, type OrderDocument, type OrderReturned, type OrderStatus, type OrderTransitionInput } from '../types.js';
+import { button, copyButton, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
-import { notify } from '../ui/toast.js';
+import { saveDownload } from '../ui/download.js';
+import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 /** The steps in order, as the strip shows them. */
@@ -70,7 +80,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Mark paid',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, 'ORBES Client Services received the payment of this order: it reads PAID, with the time.'),
+      body: h('p', { class: 'dialog__text' }, 'ORBES Client Services received the payment of this order: it reads PAID, with the time, and its invoice is issued by CONGLOMERAT LLC to the buyer entered on the order.'),
       fields: [noteField(false, 'How it was paid, for Client Services: kept in the order’s history. Optional.')],
       validate: (v) => noteProblem(v.note, false),
       confirmLabel: 'Mark paid',
@@ -123,15 +133,91 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       ),
       fields: [noteField(true, 'Why, for Client Services: kept in the order’s history.')],
       validate: (v) => noteProblem(v.note, true),
+      live: () => (o.status === 'PAID' ? h('p', { class: 'dialog__text' }, 'It was paid: a credit note cancels its invoice.') : []),
       confirmLabel: 'Cancel the order',
       submit: async (v) => step({ to: 'CANCELLED', note: v.note.trim() }),
     }).then(done('Order cancelled.'));
+  const returned = () => {
+    let result: OrderReturned | null = null;
+    void openDialog({
+      title: 'Open a return',
+      eyebrow,
+      danger: (v) => v.outcome === 'ARCHIVED',
+      phrase: (v) => (v.outcome === 'ARCHIVED' ? 'ARCHIVE' : null),
+      body: h('p', { class: 'dialog__text' }, `The piece ${o.productId ?? ''} came back to ORBES: the order reads RETURNED, and a credit note cancels its invoice.`),
+      fields: [
+        {
+          name: 'outcome',
+          label: 'The piece goes',
+          kind: 'select',
+          required: true,
+          options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, { value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }],
+          value: '',
+        },
+        {
+          name: 'locationId',
+          label: 'Location',
+          kind: 'select',
+          options: [{ value: '', label: 'Choose a location' }, ...locations.items.map((l) => ({ value: l.id, label: l.name }))],
+          value: '',
+          hint: 'Back to stock: where it is counted again.',
+        },
+        noteField(true, 'Why, and the state of the piece: kept in the order’s history.'),
+      ],
+      validate: returnProblem,
+      live: (v) =>
+        v.outcome === 'RESTOCKED'
+          ? h(
+              'p',
+              { class: 'dialog__text' },
+              'The piece is counted again in stock, ready to be sold. If its buyer registered it, ORBES takes the ownership back: the piece is no longer registered, and a new claim code is issued for its new certificate card, shown once.',
+            )
+          : v.outcome === 'ARCHIVED'
+            ? h('p', { class: 'dialog__text' }, 'The piece leaves circulation: it is retired, and its code answers as a retired piece. If its buyer registered it, ORBES takes the ownership back.')
+            : [],
+      confirmLabel: 'Open the return',
+      submit: async (v) => {
+        result = await ctx.api.returnOrder(o.id, returnInput(v));
+      },
+    }).then((v) => {
+      const r = result as OrderReturned | null;
+      if (!v || !r) return;
+      if (r.claimCode) void claimCodeDialog(r.productId, r.claimCode).then(() => done('Order returned.')(true));
+      else done('Order returned.')(true);
+    });
+  };
+  /** The new card's claim code, shown once (only its hash is kept), with the card to download. */
+  const claimCodeDialog = (productId: string, code: string) => {
+    const card = button('Download certificate card', { kind: 'ghost', testId: 'return-card' });
+    card.addEventListener('click', async () => {
+      card.disabled = true;
+      try {
+        saveDownload(await ctx.api.certificates([{ productId, claimCode: code }], { format: 'pdf', layout: 'card' }));
+      } catch (e) {
+        notifyError(e, 'The certificate card could not be produced.');
+      } finally {
+        card.disabled = false;
+      }
+    });
+    return openDialog({
+      title: 'Its new claim code',
+      eyebrow: productId,
+      body: [
+        h('p', { class: 'dialog__text' }, 'ORBES took the ownership back: the piece’s next buyer registers it with this code. Shown once: download its certificate card now. Only its hash is kept.'),
+        h('p', { class: 'claimcode', data: { testid: 'claim-code' } }, mono(code)),
+        h('div', { class: 'row-actions' }, copyButton(code, 'Copy the claim code'), card),
+      ],
+      confirmLabel: 'Done',
+      cancelLabel: 'Close',
+    });
+  };
 
   const stepTools = [
     acts.pay ? button('Mark paid', { kind: 'primary', testId: 'order-pay', onClick: pay }) : null,
     acts.ship ? button('Ship', { kind: 'primary', testId: 'order-ship', onClick: ship }) : null,
     acts.deliver ? button('Mark delivered', { kind: 'primary', testId: 'order-deliver', onClick: deliver }) : null,
     acts.cancel ? button('Cancel', { kind: 'danger', testId: 'order-cancel', onClick: cancel }) : null,
+    acts.return ? button('Open a return', { kind: 'secondary', testId: 'order-return', onClick: returned }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
 
   const reachedAt: Record<OrderStatus, string | null> = {
@@ -301,7 +387,13 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
           {
             label: 'Piece',
             value: h('a', { class: 'idlink', attrs: { href: productHref(d.piece.productId) } }, d.piece.productId),
-            note: d.piece.registered ? 'Registered by its buyer.' : 'Not registered by its buyer yet.',
+            note: o.return?.ownershipReclaimed
+              ? 'Registered by its buyer, then taken back by ORBES with its return.'
+              : d.piece.registered
+                ? 'Registered by its buyer.'
+                : o.return
+                  ? 'Never registered by its buyer.'
+                  : 'Not registered by its buyer yet.',
           },
         ]
       : []),
@@ -328,6 +420,53 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       )
     : null;
 
+  // ── The return ───────────────────────────────────────────────────────────
+  const r = o.return;
+  const returnSection = r
+    ? section(
+        'Return',
+        defList([
+          { label: 'The piece', value: h('span', { data: { testid: 'return-outcome' } }, r.location ? `${RETURN_LABELS[r.outcome]} · ${r.location.name}` : RETURN_LABELS[r.outcome]) },
+          { label: 'Ownership', value: r.ownershipReclaimed ? 'Taken back by ORBES from its buyer' : 'Not registered by its buyer' },
+          { label: 'Note', value: h('span', { class: 'prewrap' }, r.note) },
+          { label: 'When', value: formatDateTime(r.at) },
+        ]),
+        { id: 'order-return' },
+      )
+    : null;
+
+  // ── The documents ────────────────────────────────────────────────────────
+  const pdf = (doc: OrderDocument) => {
+    const b = button('PDF', { kind: 'ghost', testId: 'document-pdf' });
+    b.setAttribute('aria-label', `${DOCUMENT_LABELS[doc.kind]} ${doc.number}, PDF`);
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        saveDownload(await ctx.api.invoicePdf(doc.id));
+      } catch (e) {
+        notifyError(e, 'The document could not be produced.');
+      } finally {
+        b.disabled = false;
+      }
+    });
+    return b;
+  };
+  const documentsSection = section(
+    'Documents',
+    table(
+      [
+        { label: 'Number', cell: (x) => mono(x.number), kind: ['nowrap'] },
+        { label: 'Document', cell: (x) => DOCUMENT_LABELS[x.kind] },
+        { label: 'Issued', cell: (x) => formatDateTime(x.issuedAt), kind: ['nowrap'] },
+        { label: 'Total', cell: (x) => formatMoney(x.totalMinor, x.currency), kind: ['nowrap', 'num'] },
+        { label: '', cell: (x) => pdf(x), kind: ['actions'] },
+      ],
+      o.invoices,
+      { caption: 'Documents', empty: o.status === 'RESERVED' ? 'Its invoice is issued once it is paid.' : 'No document.' },
+    ),
+    { id: 'order-documents', tools: [linkButton('All invoices', href('invoices'), 'ghost')] },
+  );
+
   // ── The history ──────────────────────────────────────────────────────────
   const historySection = section(
     'History',
@@ -345,7 +484,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { id: 'order-history' },
   );
 
-  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, shipmentSection, historySection];
+  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, shipmentSection, returnSection, documentsSection, historySection];
   return h(
     'div',
     { class: 'view view--order' },

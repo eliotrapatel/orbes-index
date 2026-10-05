@@ -2712,6 +2712,48 @@ h1[tabindex="-1"]:focus,
   margin-top: 12px;
 }
 
+/* Its documents (M6): a small label as the rows' (under their last hairline), then text links side by side, wrapping
+   between them, never inside one; the care guide opens under them as a paragraph that keeps its own line breaks. */
+.pieces__order-documents {
+  margin-top: 18px;
+}
+
+.pieces__order-documents-title {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* A text link's tap zone overhangs its line by 4 px above and below: 8 px between two rows keeps their zones apart. */
+.pieces__order-document-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 2px;
+}
+
+.pieces__order-document {
+  white-space: nowrap;
+}
+
+.pieces__order-document[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.5;
+}
+
+.pieces__order-care[hidden],
+.pieces__order-document-error[hidden] {
+  display: none;
+}
+
+.pieces__order-care-text {
+  margin-top: 6px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .pieces__order-reference {
   margin-top: 10px;
 }
@@ -4732,6 +4774,7 @@ body[data-screen="board"] .corners {
 .pieces__badge-name,
 .pieces__order-title,
 .pieces__order-step-label,
+.pieces__order-documents-title,
 .certificate__title,
 .certificate__state,
 .certificate__footnote,

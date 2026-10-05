@@ -22,6 +22,8 @@ import type {
   BenchItem,
   BenchList,
   Carrier,
+  InvoiceFilters,
+  InvoiceList,
   IssueBenchInput,
   IssuedBenchItem,
   OrderAlertDelays,
@@ -29,6 +31,8 @@ import type {
   OrderBoard,
   OrderBoardFilters,
   OrderDetail,
+  OrderReturned,
+  OrderReturnInput,
   OrderTermsChange,
   OrderTransitionInput,
   StockLevel,
@@ -844,6 +848,30 @@ export class AdminApi {
   /** OPERATOR: the piece picked from the stock to fulfil the order. */
   linkOrderPiece(id: string, productId: string): Promise<OrderDetail> {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
+  }
+
+  /** OPERATOR: RETURNED, back to stock at a location or to the archive; the new card's claim code when ORBES took the ownership back. */
+  returnOrder(id: string, input: OrderReturnInput): Promise<OrderReturned> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/return`, input);
+  }
+
+  // ── Invoices (plan LIVE RELEASE+, M7) ────────────────────────────────────
+
+  /** A month's invoices and credit notes (the current month by default), with their totals; the buyer masked for an AUDITOR. */
+  invoices(f: InvoiceFilters = {}): Promise<InvoiceList> {
+    return this.get('/api/admin/invoices', { month: f.month, kind: f.kind, q: f.q });
+  }
+
+  /** The month's CSV for the accountant. */
+  async invoicesCsv(month: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/invoices.csv', { raw: true, query: { month } });
+    return toDownload(res, `ORBES-invoices-${month}.csv`);
+  }
+
+  /** One document's PDF. */
+  async invoicePdf(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/invoices/${encodeURIComponent(id)}/pdf`, { raw: true });
+    return toDownload(res, 'ORBES-invoice.pdf');
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

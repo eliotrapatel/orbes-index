@@ -21,7 +21,8 @@
  *                  with its material, batch, production date and claim code (shown once), the piece entering the
  *                  ledger at the location it was made for (PRODUCED, +1), and, made for an order, linked to it (the
  *                  order then holds it in stock: `attachPiece`, `order.link`). A piece of an order held in stock is
- *                  linked by picking one issued piece of its SKU from the stock (`linkFromStock`).
+ *                  linked by picking one piece of its SKU from the stock (`linkFromStock`): issued and never sold, or
+ *                  back from a return.
  *
  * Lock order (as services/orders.ts): the order, the SKU, the piece to make, the piece; the serials, the journal; the
  * audit log last. Journaled: `bench.create`, `.start`, `.done`, `.cancel`, `product.issue`, `product.retire`,
@@ -31,7 +32,7 @@
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { BenchItemRow, BenchItemStatus, OrderChannel, OrderStatus } from '../db/schema.js';
+import type { BenchItemRow, BenchItemStatus, OrderChannel, OrderStatus, ProductStatus } from '../db/schema.js';
 import { conflict, DomainError, notFound, validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
@@ -53,6 +54,8 @@ export const BENCH_TRANSITIONS: Readonly<Record<BenchItemStatus, readonly BenchI
 });
 /** The open steps: a piece being made. */
 export const BENCH_OPEN: readonly BenchItemStatus[] = Object.freeze(['TO_MAKE', 'IN_PROGRESS']);
+/** A piece picked from the stock for an order: issued and never sold, or back from a return (services/orders.ts returnOrder). */
+export const STOCK_PIECE_STATUSES: readonly ProductStatus[] = Object.freeze(['ISSUED', 'RESOLD']);
 /** What the list of pieces to make shows: the open ones (the default), the finished, the cancelled, or all. */
 export const BENCH_VIEWS = Object.freeze(['OPEN', 'DONE', 'CANCELLED', 'ALL'] as const);
 export type BenchView = (typeof BENCH_VIEWS)[number];
@@ -609,9 +612,9 @@ export class AtelierService {
   }
 
   /**
-   * The piece that fulfils an order holding one in stock, picked from the stock (Interconnection): an issued piece of
-   * the order's SKU, never registered, linked to no other open order. The order then holds that piece. Audited
-   * `order.link`.
+   * The piece that fulfils an order holding one in stock, picked from the stock (Interconnection): a piece of the
+   * order's SKU issued and never sold, or back in stock from a return (STOCK_PIECE_STATUSES), not registered, linked to
+   * no other open order. The order then holds that piece. Audited `order.link`.
    */
   async linkFromStock(orderId: string, productRef: string, actor: Actor): Promise<OrderView> {
     assertStaff(actor);
@@ -636,8 +639,11 @@ export class AtelierService {
         .executeTakeFirst();
       if (!p) throw notFound('Product', 'PRODUCT_NOT_FOUND');
       if (p.sku_id !== o.sku_id) throw conflict('PIECE_OTHER_SKU', `${p.product_id} is not of this order’s model and size.`);
-      const owned = await tx.selectFrom('ownership').select('id').where('product_id', '=', p.id).executeTakeFirst();
-      if (p.status !== 'ISSUED' || p.ownership_state !== 'UNREGISTERED' || owned) throw conflict('PIECE_NOT_IN_STOCK', `${p.product_id} is not a piece in stock: it must be issued and never registered.`);
+      // Issued and never sold (ISSUED), or back in stock from a return (RESOLD: its buyer's ownership taken back).
+      const owned = await tx.selectFrom('ownership').select('id').where('product_id', '=', p.id).where('ended_at', 'is', null).executeTakeFirst();
+      if (!STOCK_PIECE_STATUSES.includes(p.status) || p.ownership_state !== 'UNREGISTERED' || owned) {
+        throw conflict('PIECE_NOT_IN_STOCK', `${p.product_id} is not a piece in stock: it must be issued, or back from a return, and not registered.`);
+      }
       const taken = await tx.selectFrom('orders').select('id').where('product_id', '=', p.id).where('status', 'in', ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']).executeTakeFirst();
       if (taken) throw conflict('PIECE_TAKEN', `${p.product_id} fulfils another order.`);
       const { note } = await attachPiece(tx, o, p.id, 'stock', actor, now);

@@ -234,6 +234,39 @@ describe('ApiClient', () => {
     expect(await api.acceptTransfer('2KRJ-RW75-58PH', 'O26-J-00184', token)).toMatchObject({ productId: 'O26-J-00184', verified: true });
   });
 
+  it('an order\'s documents (M6): its PDFs and its care guide read with a GET, no CSRF header; a body that is not one is a bad response', async () => {
+    const ID = '1a2b3c4d-0000-4000-8000-000000000001';
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const asPdf = (name: string) => () => new Response(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${name}"` } });
+    const f = fakeFetch([
+      asPdf('ORBES-invoice-INV-2026-000001.pdf'),
+      asPdf('ORBES-credit-note-CN-2026-000001.pdf'),
+      asPdf('ORBES-ownership-certificate-O26-J-00184-2026-11-11.pdf'),
+      () => json(409, { error: { code: 'CERTIFICATE_NOT_AVAILABLE', message: 'The ownership certificate of this order is not available.' } }),
+      () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: 'Store it alone.' } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: null } }),
+      () => json(200, { careGuide: { model: 'MONOLITHE', text: 3 } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect((await api.orderDocument(ID, 'invoice')).filename).toBe('ORBES-invoice-INV-2026-000001.pdf');
+    expect((await api.orderDocument(ID, 'credit-note')).filename).toBe('ORBES-credit-note-CN-2026-000001.pdf');
+    const file = await api.orderDocument(ID, 'certificate');
+    expect(new Uint8Array(await file.blob.arrayBuffer())).toEqual(pdf);
+    expect(f.calls.map((c) => [c.method, c.url])).toEqual([
+      ['GET', `/api/v1/account/orders/${ID}/invoice.pdf`],
+      ['GET', `/api/v1/account/orders/${ID}/credit-note.pdf`],
+      ['GET', `/api/v1/account/orders/${ID}/certificate.pdf`],
+    ]);
+    expect(f.calls.every((c) => c.headers['x-csrf-token'] === undefined && c.credentials === 'same-origin')).toBe(true);
+    await expect(api.orderDocument(ID, 'certificate')).rejects.toMatchObject({ status: 409, code: 'CERTIFICATE_NOT_AVAILABLE' });
+    await expect(api.orderDocument(ID, 'invoice')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(await api.orderCareGuide(ID)).toEqual({ model: 'MONOLITHE', text: 'Store it alone.' });
+    expect(f.calls.at(-1)).toMatchObject({ method: 'GET', url: `/api/v1/account/orders/${ID}/care-guide` });
+    expect(await api.orderCareGuide(ID)).toEqual({ model: 'MONOLITHE', text: null });
+    await expect(api.orderCareGuide(ID)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
   it('ownership certificates (F-06): creates, lists and withdraws with the CSRF token; reads one and its PDF with none, the token in the body', async () => {
     const offer = { id: '5a864af8-0d6b-4c1e-9f2a-3b7c1d2e4f5a', productId: 'O26-J-00184', token: 'T'.repeat(52), url: `https://verify.theorbes.com/verify/c#${'T'.repeat(52)}`, createdAt: 'a', expiresAt: 'b' };
     const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);

@@ -144,18 +144,15 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     for (const s of steps) {
       clock.advance(MINUTE);
       if (s === 'SHIPPED') await linkPiece(orderId);
-      await orders().transition(orderId, inputFor(s), admin);
+      await stepTo(orderId, s);
     }
     return orderRow(orderId);
   }
   const inputFor = (to: OrderStatus): OrderTransitionInput =>
-    to === 'SHIPPED'
-      ? { to, carrierId: colissimo, trackingNumber: '6A12345678901' }
-      : to === 'CANCELLED'
-        ? { to, note: 'The client withdrew.' }
-        : to === 'RETURNED'
-          ? { to, outcome: 'ARCHIVED', note: 'Returned to the house.' }
-          : ({ to } as OrderTransitionInput);
+    to === 'SHIPPED' ? { to, carrierId: colissimo, trackingNumber: '6A12345678901' } : to === 'CANCELLED' ? { to, note: 'The client withdrew.' } : ({ to } as OrderTransitionInput);
+  /** One step: a return is opened on its own (archived here), every other step is a transition. */
+  const stepTo = (orderId: string, to: OrderStatus) =>
+    to === 'RETURNED' ? orders().returnOrder(orderId, { outcome: 'ARCHIVED', note: 'Returned to the house.' }, admin).then((r) => r.order) : orders().transition(orderId, inputFor(to), admin);
 
   // ── the first boot ───────────────────────────────────────────────────────
 
@@ -535,7 +532,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           const before = { events: (await eventsOf(o.id)).length, journal: (await journalOf(o.id)).length, audit: (await auditsOf(o.id)).length };
           clock.advance(MINUTE);
           if (allowed) {
-            const view = await orders().transition(o.id, inputFor(to), admin);
+            const view = await stepTo(o.id, to);
             expect(view.status).toBe(to);
             const events = await eventsOf(o.id);
             const journal = await journalOf(o.id);
@@ -548,7 +545,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
             const stamp = { PAID: 'paid_at', SHIPPED: 'shipped_at', DELIVERED: 'delivered_at', CANCELLED: 'cancelled_at', RETURNED: 'returned_at' }[to as Exclude<OrderStatus, 'RESERVED'>] as 'paid_at';
             expect((await orderRow(o.id))[stamp]).toEqual(clock.now());
           } else {
-            await rejects(orders().transition(o.id, inputFor(to), admin), to === 'RESERVED' ? 'VALIDATION_FAILED' : 'ORDER_TRANSITION_NOT_ALLOWED');
+            await rejects(stepTo(o.id, to), to === 'RESERVED' ? 'VALIDATION_FAILED' : 'ORDER_TRANSITION_NOT_ALLOWED');
             expect((await orderRow(o.id)).status).toBe(from);
             expect({ events: (await eventsOf(o.id)).length, journal: (await journalOf(o.id)).length, audit: (await auditsOf(o.id)).length }).toEqual(before);
           }
@@ -604,15 +601,17 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     it('RETURNED, with a note: back to stock at a location (+1, the return recorded), or to the archive', async () => {
       const sku = await skuOf('78');
       await receive(sku, france, 2);
-      const back = await walk((await salonOrder({ size: '78' })).id, ['PAID', 'SHIPPED', 'DELIVERED']);
-      const archived = await walk((await salonOrder({ size: '78' })).id, ['PAID', 'SHIPPED']);
-      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', note: 'Returned unworn.' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
-      await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'ARCHIVED', locationId: logistics, note: 'Returned unworn.' }, admin), 'VALIDATION_FAILED', 400);
+      const back = await walk((await salonOrder({ size: '78', priceMinor: 480_000 })).id, ['PAID', 'SHIPPED', 'DELIVERED']);
+      const archived = await walk((await salonOrder({ size: '78', priceMinor: 480_000 })).id, ['PAID', 'SHIPPED']);
+      await rejects(orders().returnOrder(back.id, { outcome: 'RESTOCKED', note: 'Returned unworn.' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
+      await rejects(orders().returnOrder(back.id, { outcome: 'ARCHIVED', locationId: logistics, note: 'Returned unworn.' }, admin), 'VALIDATION_FAILED', 400);
+      // A return is opened on its own, never as a transition.
+      await rejects(orders().transition(back.id, { to: 'RETURNED' } as unknown as OrderTransitionInput, admin), 'VALIDATION_FAILED', 400);
       // A return opens with a note, as a cancellation does.
-      for (const note of [undefined, null, '  ']) await rejects(orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, note }, admin), 'VALIDATION_FAILED', 400);
+      for (const note of [undefined, null, '  ']) await rejects(orders().returnOrder(back.id, { outcome: 'RESTOCKED', locationId: logistics, note: note as string }, admin), 'VALIDATION_FAILED', 400);
       clock.advance(MINUTE);
-      await orders().transition(back.id, { to: 'RETURNED', outcome: 'RESTOCKED', locationId: logistics, note: 'Returned unworn.' }, admin);
-      await orders().transition(archived.id, { to: 'RETURNED', outcome: 'ARCHIVED', note: 'Damaged in transit.' }, admin);
+      await orders().returnOrder(back.id, { outcome: 'RESTOCKED', locationId: logistics, note: 'Returned unworn.' }, admin);
+      await orders().returnOrder(archived.id, { outcome: 'ARCHIVED', note: 'Damaged in transit.' }, admin);
       expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 0, available: 1 });
       expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 0, reserved: 0, available: 0 });
       const returns = await t.db.selectFrom('returns').select(['order_id', 'outcome', 'location_id', 'note', 'created_by']).where('order_id', 'in', [back.id, archived.id]).orderBy('created_at').orderBy('outcome', 'desc').execute();
@@ -622,8 +621,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       ]);
     });
 
-    it('only ORBES Client Services (or the system) moves an order; an unknown order is 404', async () => {
-      const o = await salonOrder();
+    it('only ORBES Client Services (or the system) moves an order; an unknown order is 404; an order is paid once priced', async () => {
+      const unpriced = await salonOrder();
+      await rejects(orders().transition(unpriced.id, { to: 'PAID' }, admin), 'ORDER_PRICE_MISSING', 409);
+      expect((await orderRow(unpriced.id)).status).toBe('RESERVED');
+      const o = await salonOrder({ priceMinor: 480_000 });
       await rejects(orders().transition(o.id, { to: 'PAID' }, { type: 'account', id: o.account_id }), 'FORBIDDEN', 403);
       await rejects(orders().transition('5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', { to: 'PAID' }, admin), 'ORDER_NOT_FOUND', 404);
       await rejects(orders().transition(o.id, { to: 'LOST' } as unknown as OrderTransitionInput, admin), 'VALIDATION_FAILED', 400);
@@ -716,8 +718,8 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
         }),
       ]);
       expect(Object.keys(exported.orders[0]!).sort()).toEqual([
-        'addons', 'buyer', 'cancelledAt', 'carrier', 'channel', 'currency', 'deliveredAt', 'engravingText', 'history', 'model', 'paidAt', 'priceMinor', 'reference', 'release',
-        'reservedAt', 'returnedAt', 'shippedAt', 'size', 'status', 'trackingNumber',
+        'addons', 'buyer', 'cancelledAt', 'carrier', 'channel', 'currency', 'deliveredAt', 'engravingText', 'history', 'invoices', 'model', 'paidAt', 'priceMinor', 'reference',
+        'release', 'reservedAt', 'returnedAt', 'shippedAt', 'size', 'status', 'trackingNumber',
       ]);
       expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').where('target_id', '=', sale.account.id).executeTakeFirstOrThrow()).details).toMatchObject({ orders: 1 });
       // Cleared: both gone from the order.
@@ -796,7 +798,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
               await stock().adjust({ skuId: skus[sku]!, locationId: place, delta: -1, note: 'Counted.' }, admin);
               break;
             case 3:
-              open.push((await salonOrder({ size: sizes[sku]!, modelId: model.id })).id);
+              open.push((await salonOrder({ size: sizes[sku]!, modelId: model.id, priceMinor: 480_000 })).id);
               break;
             case 4:
               if (open.length) await orders().changeLocation(open[rnd(open.length)]!, place, admin);
@@ -922,7 +924,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       // the order is shipped, nothing changes.
       const [p1, p2, p3] = [await issue(), await issue(), await issue()];
       const linkedTo = async (p: Awaited<ReturnType<typeof issue>>, steps: OrderStatus[]) => {
-        const o = await walk((await salonOrder({ size: '76', accountId: buyer.id })).id, ['PAID']);
+        const o = await walk((await salonOrder({ size: '76', accountId: buyer.id, priceMinor: 480_000 })).id, ['PAID']);
         await ctx.services.atelier.linkFromStock(o.id, p.product.productId, admin);
         return walk(o.id, steps);
       };

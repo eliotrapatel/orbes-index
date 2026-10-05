@@ -485,10 +485,12 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(customer.sort()).toEqual(['post /api/v1/account/password', 'post /api/v1/account/recover']);
   },
   N3: () => {
-    // An ownership begins only by a first registration or a transfer, and ends only by a transfer.
+    // An ownership begins only by a first registration or a transfer, and ends only by a transfer, or when ORBES takes
+    // it back with a return (plan LIVE RELEASE+, choice 20: the piece goes back to ORBES, to no account).
     expect(new Set(matches(/acquired_via:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['FIRST_REGISTRATION', 'TRANSFER']));
     expect(matches(/insertInto\('ownership'\)/g)).toHaveLength(matches(/acquired_via:\s*'(\w+)'/g).length);
-    expect(new Set(matches(/ended_reason:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['TRANSFERRED_OUT']));
+    expect(new Set(matches(/ended_reason:\s*'(\w+)'/g).map((m) => m.match[1]))).toEqual(new Set(['TRANSFERRED_OUT', 'RETURNED']));
+    expect(matches(/ended_reason:\s*'RETURNED'/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'orders.ts')]);
     // No other write to an ownership row than its end and its verification; no raw SQL that would bypass them.
     const updated = matches(/updateTable\('ownership'\)\s*\.set\(\{([^}]*)\}\)/g).flatMap((m) => [...m.match[1].matchAll(/(\w+)\s*:/g)].map((k) => k[1]));
     expect(new Set(updated)).toEqual(new Set(['ended_at', 'ended_reason', 'verified']));
@@ -532,7 +534,9 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
     expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
-    expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge|invoice/i.test(r.path))).toEqual([]);
+    expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge/i.test(r.path))).toEqual([]);
+    // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken.
+    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get')).toEqual([]);
     // The confirmation is a status, and the only one PAY writes.
     expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
   },

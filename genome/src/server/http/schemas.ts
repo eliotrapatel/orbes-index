@@ -18,12 +18,14 @@ import {
   CLUB_TIER_NAMES,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
+  INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
   LOOKBOOK_STATES,
   ORDER_CHANNELS,
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
+  RETURN_OUTCOMES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
   SHOP_REQUEST_OUTCOMES,
@@ -1079,6 +1081,36 @@ export const orderBuyerBody = body({
 
 /** POST /api/admin/orders/:id/piece: the piece picked from the stock to fulfil the order, by its reference. */
 export const orderPieceBody = body({ productId: productRef });
+
+/**
+ * POST /api/admin/orders/:id/return (choice 20): where the piece goes, back to stock at a location (RESTOCKED) or to
+ * the archive (ARCHIVED, no location), and a note.
+ */
+export const orderReturnBody = body({
+  outcome: z.enum(RETURN_OUTCOMES),
+  locationId: uuid.nullable().optional(),
+  note: text(ORDER_TEXT_LIMITS.note),
+}).refine((b) => (b.outcome === 'RESTOCKED') === Boolean(b.locationId), { message: 'A piece back to stock goes to a location; one archived, to none', path: ['locationId'] });
+
+// ── Admin: the invoices (plan LIVE RELEASE+, M7: routes/admin/invoices.ts) ─
+
+/** A month, `YYYY-MM` (UTC). */
+const invoiceMonth = z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/, 'A month reads YYYY-MM');
+
+/** GET /api/admin/invoices: a month's documents (the current one by default), one kind, a number or an order's reference. */
+export const invoiceListQuery = z.object({
+  month: queryOptional(invoiceMonth),
+  kind: queryOptional(z.enum(INVOICE_KINDS)),
+  q: queryOptional(z.string().trim().max(40, 'At most 40 characters')),
+});
+
+/** GET /api/admin/invoices.csv: the month's CSV for the accountant. */
+export const invoiceCsvQuery = z.object({ month: invoiceMonth });
+
+export const invoiceParams = z.object({ id: uuid });
+
+/** GET /api/v1/account/orders/:id/…: one of the account's orders (MY PIECES, M6). */
+export const accountOrderParams = z.object({ id: uuid });
 
 /** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
 export const orderAlertsBody = body({

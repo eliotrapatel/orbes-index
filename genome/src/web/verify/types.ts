@@ -718,4 +718,24 @@ export interface AccountOrder {
   cancelledAt: string | null;
   returnedAt: string | null;
   shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
+  /** Its documents (M6), each read by its own route. Absent from a server before them: none. */
+  documents?: AccountOrderDocuments;
+}
+
+/** The documents of an order (plan LIVE RELEASE+, M6). */
+export interface AccountOrderDocuments {
+  /** Its invoice (PDF), once paid. */
+  invoice: { number: string; issuedAt: string } | null;
+  /** The credit note that cancels it (PDF), once cancelled after it was paid, or returned. */
+  creditNote: { number: string; issuedAt: string } | null;
+  /** The model's care guide: for an order neither cancelled nor returned. */
+  careGuide: boolean;
+  /** Its ownership certificate (PDF), once its piece is registered to this account. */
+  certificate: boolean;
+}
+
+/** GET /api/v1/account/orders/:id/care-guide: the model's own words, or null for the house's general care text. */
+export interface OrderCareGuide {
+  model: string;
+  text: string | null;
 }
