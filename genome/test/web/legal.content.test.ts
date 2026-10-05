@@ -22,7 +22,12 @@
  *    that loads nothing from another site; what a LIVE RELEASE records (the
  *    network's keyed fingerprint of its /24 or /48 and its 30 days, the
  *    country alone, an interest deleted when withdrawn, the export without
- *    the fingerprint);
+ *    the fingerprint); what an order records and who reads it (the buyer
+ *    entered by Client Services, kept out of the audit log and the journal,
+ *    the invoices issued by the legal notice's company without VAT, the
+ *    journal and the Shopify file sent nowhere); the segments evaluated live,
+ *    the answers audited by their position, the hourly counts without any
+ *    account;
  *  - the FAQ against the code and the customer's copy: every duration and
  *    limit equals its constant, every label of the app it quotes exists, and
  *    the second-hand answer is RESALE_GUIDANCE (J-02), in French as the
@@ -40,6 +45,9 @@ import { roundCoord } from '../../src/server/geo/resolver.js';
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE_S } from '../../src/server/http/device.js';
 import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
+import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
+import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
+import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { LIVE_NETWORK_RETENTION_DAYS, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
 import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '../../src/server/services/ownership.js';
@@ -238,7 +246,7 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(sectionProblems('t', ['- **X**: the client service of ORBES, reachable at [À COMPLÉTER: email].'], ['- **X**: the client service of ORBES.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina.'])).toEqual([]);
     expect(sectionProblems('t', ['- Host: Vercel Inc., Covina. Phone: [À COMPLÉTER: phone].'], ['- Host: Vercel Inc., Covina. Phone:'])).not.toEqual([]);
-    // …so the words that still need it are never published without it (article 19 names no mediator).
+    // …so the words that still need it are never published without it (article 20 names no mediator).
     const mediator = ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name of the mediator].'];
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator.'])).not.toEqual([]);
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES.'])).toEqual([]);
@@ -512,9 +520,67 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('says what an order records, as the code keeps it: the buyer entered by Client Services, never audited nor journaled, invoiced without VAT', () => {
+    const orders = readDoc('genome/src/server/services/orders.ts');
+    // The journal says a buyer was entered, never who (orderPayload); the order's audit entry names no buyer either.
+    const payload = /export function orderPayload\(o: OrderRow\): JsonObject \{([\s\S]*?)\n\}/.exec(orders)?.[1] ?? '';
+    expect(payload).toContain('buyer: o.buyer_name !== null || o.buyer_address !== null,');
+    expect(payload).toContain('engraving: o.engraving_text !== null,');
+    expect(payload).not.toMatch(/o\.buyer_name,|o\.buyer_address,|o\.engraving_text,/);
+    expect(orders).not.toMatch(/details: \{[^}]*buyer(?:Name|Address|_name|_address)/);
+    // No route of the collector writes the buyer: only the console's, OPERATOR.
+    expect(readDoc('genome/src/server/routes/account.ts')).not.toMatch(/buyer/i);
+    expect(readDoc('genome/src/server/routes/admin/orders.ts')).toContain("app.put('/api/admin/orders/:id/buyer'");
+    // The invoice's issuer is the legal notice's company; no VAT is computed (the fields stay empty).
+    expect(INVOICE_ISSUER.name).toBe(LEGAL_IDENTITY.companyName);
+    const invoices = ORDERS_MIGRATION.find((sql) => sql.startsWith('CREATE TABLE invoices'))!;
+    expect(invoices).toContain('vat_rate_bp        integer     NULL');
+    // The journal and the Shopify file reach no one: the server sends no request out.
+    expect(readDoc('genome/src/server/services/shopify.ts')).not.toMatch(/\bfetch\(|https?\.request\(/);
+    for (const [lang, says] of [
+      ['en', ['ORBES Client Services enters the name and the address of the buyer on the order', 'never in the service\'s audit log', `${INVOICE_ISSUER.name} issues its invoice`, 'without VAT', 'never changed nor deleted', 'the service sends these data to no one', 'The service itself sends nothing to Shopify.', 'TRACK THE SHIPMENT opens the carrier\'s own page in a new tab', 'are in the copy of your data']],
+      ['fr', ["ORBES Client Services saisit le nom et l'adresse de l'acheteur sur la commande", "jamais dans le journal d'audit du service", `${INVOICE_ISSUER.name} émet sa facture`, 'sans TVA', 'ne sont jamais modifiés ni supprimés', 'le service ne transmet ces données à personne', "Le service lui-même n'envoie rien à Shopify.", 'TRACK THE SHIPMENT ouvre la page du transporteur dans un nouvel onglet', 'figurent dans la copie de vos données']],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'orders');
+      for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
+    }
+    // The export carries the orders with their buyer and invoices, the answers, the places in an after-room.
+    const exported = /export interface ExportedOrder \{([\s\S]*?)\n\}/.exec(orders)?.[1] ?? '';
+    expect(exported).toContain('buyer: { name: string | null; address: string | null };');
+    expect(exported).toContain('invoices:');
+    const owners = readDoc('genome/src/server/services/owners.ts');
+    for (const key of ['releaseAnswers,', 'orders,']) expect(owners).toContain(`        ${key}`);
+    expect(readDoc('genome/src/server/services/live.ts')).toContain('afterRoomPlace: number | null;');
+    expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('**Invoices and credit notes**: never deleted.');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain('**Factures et avoirs** : jamais supprimés.');
+  });
+
+  it('says how ORBES groups collectors and counts their activity, as the code does: segments read live, answers by position, hourly counts without any account', () => {
+    // A segment is a rule: no table holds its members; they are the accounts its criteria match when it is read.
+    const segments = COLLECTORS_MIGRATION.find((sql) => sql.startsWith('CREATE TABLE segments'))!;
+    expect(segments).not.toMatch(/account/);
+    expect(COLLECTORS_MIGRATION.filter((sql) => /CREATE TABLE \w*member/i.test(sql))).toEqual([]);
+    expect(readDoc('genome/src/server/services/segments.ts')).toContain("export function segmentMembers(db: Db, criteria: SegmentGroup, now: Date) {");
+    // The hourly counts: an hour, a country, a tier and two counts, never an account.
+    const hourly = COLLECTORS_MIGRATION.find((sql) => sql.startsWith('CREATE TABLE activity_hourly'))!;
+    expect(hourly).not.toMatch(/account|ip|device|session/);
+    // An answer to the question after is audited by its position (and the one it replaced), nothing else.
+    expect(readDoc('genome/src/server/services/question.ts')).toContain("action: 'drop.live.answer', targetType: 'drop', targetId: d.id, details: { answer, ...(before ? { before: before.answer } : {}) } }");
+    for (const [lang, says] of [
+      ['en', ['never stored with an account', 'FOR SELECTED COLLECTORS and never names the segment', 'masked for a staff member with read-only access', 'never shows the buyer\'s details nor the words of an engraving', 'These counts name no account, no address and no device']],
+      ['fr', ['ne sont jamais conservés avec un compte', 'FOR SELECTED COLLECTORS sans jamais nommer le segment', 'masquées pour un membre du personnel en lecture seule', "ne montre jamais les données de l'acheteur ni les mots d'une gravure", 'Ces nombres ne désignent aucun compte, aucune adresse ni aucun appareil']],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'segments');
+      for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
+    }
+    expect(sectionText(DOCUMENTS.privacy.en, 'live')).toContain('Your answer is written to the service\'s audit log as the position of the answer only.');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'live')).toContain("Votre réponse est inscrite au journal d'audit du service sous la seule position de la réponse.");
+    expect(sectionText(DOCUMENTS.privacy.en, 'releases')).toContain('is computed from your entries in the releases and the LIVE RELEASES each time it is needed: it is not stored.');
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live']));
+    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments']));
     // The contact of ORBES Client Services, where the page asks the reader to write to them.
     for (const lang of LANGS) expect(DOCUMENTS.privacy[lang].sections[0].blocks).toContainEqual({ contact: true });
   });
@@ -655,9 +721,18 @@ describe('legal pages: both languages, links, lexicon', () => {
     // the privacy policy's requests; the sound preference kept on the device, P-D07: the privacy policy and the FAQ).
     // 2026-10-06: deployment D, the LIVE RELEASE (plan of 2026-10-04), one version for the whole deployment, after
     // B+C's published 2026-10-05 (the terms' article 13 and the articles it moves, the privacy policy's LIVE RELEASES).
-    // The date is a placeholder until deployment D is fixed (its runbook, §0 rule 6): this line and LEGAL_VERSION then
-    // take that day, with the fingerprint of the texts as they are then.
-    const PUBLISHED: Readonly<Record<string, string>> = { '2026-10-03': 'fe10caab21e4062e', '2026-10-04': '5d76e46ec2b9bfb3', '2026-10-05': '5f46f78e4a3dbf4c', '2026-10-06': '3212223fecb82628' };
+    // It went live with deployment D on 2026-10-05, a day before its date, and never changes since.
+    // 2026-10-07: deployment E, LIVE RELEASE+ (plan of 2026-10-04), one version for the whole deployment, the next date
+    // after D's published 2026-10-06 (the terms' article 14, the orders, and the articles it moves; articles 1, 2, 3, 7,
+    // 10, 12, 13, 15, 16 and 17; the privacy policy's orders, segments, client sheet and hourly activity); its items
+    // until that deployment move this line, never another.
+    const PUBLISHED: Readonly<Record<string, string>> = {
+      '2026-10-03': 'fe10caab21e4062e',
+      '2026-10-04': '5d76e46ec2b9bfb3',
+      '2026-10-05': '5f46f78e4a3dbf4c',
+      '2026-10-06': '3212223fecb82628',
+      '2026-10-07': '6555f203ebd98901',
+    };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
     expect(Object.keys(PUBLISHED).sort().at(-1)).toBe(LEGAL_VERSION);

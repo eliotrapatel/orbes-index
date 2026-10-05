@@ -11,7 +11,7 @@
  *    only ever run to watch it refuse, no prune, the fast-forward to the final commit after its check;
  *  - the edge it describes is the Caddyfile's (the stream routes kept out of compression and flushed at once, the
  *    silhouette's upload), checked on the server as the only file of deploy/vps changed since B+C;
- *  - the legal pages' one version, dated the day of the deployment, after B+C's, its placeholder named;
+ *  - the legal pages' one version, after B+C's, its placeholder named (2026-10-06, published with D on 2026-10-05);
  *  - the measured capacity it states is the console's (LIVE_ROOM_CAPACITY);
  *  - one real check per feature, each quoting only labels the verification app or the console shows;
  *  - one command per shell block, the console's shell commands as scripts/db.ts knows them, relative links that resolve.
@@ -45,6 +45,8 @@ const START_MIGRATIONS = NAMES.filter((n) => numberOf(n) <= 20);
 const DEPLOY_D = NAMES.filter((n) => numberOf(n) === 21);
 /** The last version the legal pages published before D: B+C's (rule 7 of DEPLOY-POTENTIEL-2026-10.md). */
 const LAST_PUBLISHED_VERSION = '2026-10-05';
+/** D's one version of the legal pages, published with it on 2026-10-05: a date published never changes, the next one comes after it. */
+const D_LEGAL_VERSION = '2026-10-06';
 
 /** What the runbook expects from the scripts and the app, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -207,17 +209,16 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(readDoc('genome/src/server/http/rate-limit.ts')).toContain('live: config.rateLimits.apiPerMinute * LIVE_NETWORK_RATE_FACTOR');
   });
 
-  it('dates the legal pages the day of the deployment, after B+C’s version, and names the placeholder until then', () => {
-    expect(LEGAL_VERSION > LAST_PUBLISHED_VERSION).toBe(true);
-    expect(LEGAL_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it('dated the legal pages after B+C’s version, its placeholder named, and published it with D', () => {
+    expect(D_LEGAL_VERSION > LAST_PUBLISHED_VERSION).toBe(true);
+    // Published with D, the version never changes: the later ones come after it (deployment E's runbook holds its own).
+    expect(LEGAL_VERSION >= D_LEGAL_VERSION).toBe(true);
     const rules = section(runbook, '## 0.');
     expect(rules).toContain(`A a publié \`2026-10-04\`, B+C \`${LAST_PUBLISHED_VERSION}\``);
-    expect(rules).toContain(`\`LEGAL_VERSION\` vaut provisoirement **\`${LEGAL_VERSION}\`**`);
+    expect(rules).toContain(`\`LEGAL_VERSION\` vaut provisoirement **\`${D_LEGAL_VERSION}\`**`);
     expect(rules).toContain('`PUBLISHED` (`genome/test/web/legal.content.test.ts`)');
-    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${LEGAL_VERSION}': '`);
-    // The drafts carry the same day as the pages.
-    expect(readDoc('docs/legal/terms.en.md')).toContain(`Version: ${dateInWords(LEGAL_VERSION, 'en')}.`);
-    expect(readDoc('docs/legal/terms.fr.md')).toContain(`Version : ${dateInWords(LEGAL_VERSION, 'fr')}.`);
+    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${D_LEGAL_VERSION}': '`);
+    expect(dateInWords(D_LEGAL_VERSION, 'en')).toBe('6 October 2026');
     expect(section(runbook, '### 1.3')).toContain("Sortie attendue : `export const LEGAL_VERSION = '<AAAA-MM-JJ>';`, le jour de `date -u`");
   });
 

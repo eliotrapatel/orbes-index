@@ -437,6 +437,7 @@ The LIVE RELEASES (§8.10, §10.12, §16.23). A LIVE RELEASE not announced (or a
 | `LIVE_NOT_INTERESTED` | 409 | (§10.12) No I'LL BE THERE to withdraw. |
 | `LIVE_ADDON_UNKNOWN` | 400 | (§10.12) Not one of the release's add-ons, or more than six. |
 | `LIVE_ANNOUNCED` | 409 | (§16.23) The release is announced: its settings no longer change; ADD PIECES raises a size's stock. |
+| `LIVE_AFTER_ROOM` | 409 | (§16.23, plan LIVE RELEASE+) An after-room is set, published and cancelled with its release, and has no board link nor feasibility of its own: *This is the after-room of a release: it is set, published and cancelled with that release.* |
 | `LIVE_QUESTION_NOT_ASKED` | 403 | (§10.16) The question after a release is not asked of this account: *This question is for the collectors who took part in this release without a piece, or who said they would be there.* |
 | `LIVE_QUESTION_CLOSED` | 409 | (§10.16) The question after a release is not open: before the release's final end (its after-room's, when one opened), a week after it, or turned off. |
 | `LIVE_NOT_ANNOUNCED` | 409 | (§16.23) Not announced yet: ADD PIECES and the host messages come from the announcement on (the sizes are a setting until then). |
@@ -471,6 +472,42 @@ The circle (P-X01, §10.11, §16.20):
 | `CIRCLE_PHOTOS_FULL` | 409 | (§16.20) The post already holds 4 photographs: remove one first. |
 | `CIRCLE_PHOTOS_CHANGED` | 409 | (§16.20) The order sent does not name the post's photographs, each once (one was added or removed meanwhile): reload them. |
 | `CIRCLE_PHOTO_NOT_FOUND` | 404 | (§16.20) The photograph is not this post's. |
+
+The orders, the stock, the atelier, the invoices, the segments and Shopify (plan LIVE RELEASE+, §10.13, §10.14, §16.24 to §16.27):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `ORDER_NOT_FOUND` | 404 | No order with this id; for a customer, any order but the session's own (§10.14). |
+| `ORDER_TRANSITION_NOT_ALLOWED` | 409 | Not one of the order's steps from where it stands (`ORDER_TRANSITIONS`; the move in `detail`): *This order cannot move to that step.* |
+| `ORDER_PRICE_MISSING` | 409 | PAID before the order's price is entered: *Enter the order’s price before it is paid: its invoice is issued then.* |
+| `ORDER_PAID` | 409 | The price of an order paid no longer changes. |
+| `ORDER_TERMS_FIXED` | 409 | A LIVE RELEASE order's size and price are its release's. |
+| `ORDER_NOT_READY` | 409 | SHIPPED before the piece is in stock at the order's location. |
+| `ORDER_PIECE_NOT_LINKED` | 409 | SHIPPED, or a return, before the piece that fulfils the order is linked. |
+| `ORDER_PIECE_LINKED` | 409 | A piece is already linked to this order: transfer the piece instead. |
+| `ORDER_PIECE_TO_MAKE` | 409 | Its piece is being made: the atelier links it when it is finished. |
+| `ORDER_CLOSED` | 409 | The order can no longer change (cancelled, returned, or no longer waiting for this piece). |
+| `ORDER_RETURN_NOT_RESTOCKABLE` | 409 | The piece's record (in service, lost, stolen, flagged) does not let it go back to stock: settle it, or archive the piece. |
+| `ORDER_RETURN_CHANGED` | 409 | The piece changed during the return: try again. |
+| `CERTIFICATE_NOT_AVAILABLE` | 409 | (§10.14) The ownership certificate of the order is not available: its piece is not registered to the account. |
+| `INVOICE_NOT_FOUND` | 404 | No invoice or credit note with this id; for a customer, none of this kind for the order. |
+| `STOCK_NOT_READY` | 503 | No default stock location yet (the first boot's setup has not run). |
+| `STOCK_NOT_AVAILABLE` | 409 | A transfer or a count corrected would take pieces the orders reserve: *Only N pieces are available there: the others are reserved by orders.* |
+| `STOCK_LOCATION_NOT_FOUND` | 404 | No stock location with this id. |
+| `STOCK_LOCATION_NAME_TAKEN` | 409 | Another location has this name, whatever the case. |
+| `CARRIER_NOT_FOUND` | 404 | No carrier with this id, or one set aside (for a shipment). |
+| `CARRIER_NAME_TAKEN` | 409 | Another carrier has this name, whatever the case. |
+| `SKU_NOT_FOUND` | 404 | No SKU with this id. |
+| `BENCH_ITEM_NOT_FOUND` | 404 | No piece to make with this id. |
+| `BENCH_STEP_NOT_ALLOWED` | 409 | Not the next step of a piece to make (TO MAKE → IN PROGRESS → DONE): *Start the piece before it is finished.* |
+| `BENCH_FOR_ORDER` | 409 | A piece made for an order is cancelled with its order, never on its own. |
+| `BENCH_NOT_OPEN` | 409 | Only a piece being made has a work sheet. |
+| `PRODUCT_NOT_RESERVED` | 409 | The identity is no longer reserved for a piece to make (issued or retired meanwhile). |
+| `SEGMENT_NOT_FOUND` | 404 | No segment with this id. |
+| `SEGMENT_NAME_TAKEN` | 409 | A segment already has this name. |
+| `SEGMENT_IN_USE` | 409 | The segment is the access rule of a release or the audience of a post of the circle: choose another there first. |
+| `SHOPIFY_PRODUCT_TAKEN` | 409 | Another model is already linked to this Shopify product. |
+| `SHOPIFY_VARIANT_TAKEN` | 409 | Another size already has this Shopify variant id. |
 
 ---
 
@@ -3748,7 +3785,7 @@ The fulfilment of every sales channel (plan LIVE RELEASE+ of 2026-10-04; `routes
 | PATCH | `/api/admin/orders/:id/terms` | OPERATOR | A draw's or a salon's size, price and currency; the engraving of any order. Audited `order.terms` |
 | PUT | `/api/admin/orders/:id/buyer` | OPERATOR | The buyer's name and address. Audited `order.buyer`, never what they are |
 | POST | `/api/admin/orders/:id/piece` | OPERATOR | `{ "productId" }`: a piece of the order's SKU issued and never sold (`ISSUED`), or back in stock from a return (`RESOLD`), not registered and fulfilling no other order, linked to an order holding one in stock. Audited `order.link` |
-| POST | `/api/admin/orders/:id/return` | OPERATOR | `{ "outcome": "RESTOCKED", "locationId", "note" }` or `{ "outcome": "ARCHIVED", "note" }` (choice 20), from `SHIPPED` or `DELIVERED`: the piece back to stock at that location (the ledger's `RETURNED`, +1; the piece `RESOLD`, ready to be sold again, or still `ISSUED` if it never was; `409 ORDER_RETURN_NOT_RESTOCKABLE` while its record says it is in service, lost, stolen or flagged) or to the archive (the piece `RETIRED`). When its buyer had registered it, ORBES takes the ownership back (it ends `RETURNED`, a pending transfer is cancelled, its certificate links end) and the piece is unregistered. Back to stock, registered or not, the piece carries a new claim code (the card that left with it no longer registers it), returned once in `claimCode` (`no-store`; only its hash is kept) for its new card (`POST /api/admin/certificates`); archived, it is retired. A credit note cancels the invoice. Answers the order's page with `productId` (and `claimCode`). The piece's row is locked before the order's, as a registration does; `409 ORDER_RETURN_CHANGED` when the piece or its ownership changed meanwhile. Audited `order.return`, `ownership.reclaim`, `ownership.transfer.cancel`, `invoice.credit`, `product.transition` |
+| POST | `/api/admin/orders/:id/return` | OPERATOR | `{ "outcome": "RESTOCKED", "locationId", "note" }` or `{ "outcome": "ARCHIVED", "note" }` (choice 20), from `SHIPPED` or `DELIVERED`: the piece back to stock at that location (the ledger's `RETURNED`, +1; the piece `RESOLD`, ready to be sold again, or still `ISSUED` if it never was; `409 ORDER_RETURN_NOT_RESTOCKABLE` while its record says it is in service, lost, stolen or flagged) or to the archive (the piece `RETIRED`). When it is registered to an account (its buyer, or whoever it was transferred to), ORBES takes that ownership back (it ends `RETURNED`, a pending transfer is cancelled, its certificate links end) and the piece is unregistered. Back to stock, registered or not, the piece carries a new claim code (the card that left with it no longer registers it), returned once in `claimCode` (`no-store`; only its hash is kept) for its new card (`POST /api/admin/certificates`); archived, it is retired. A credit note cancels the invoice. Answers the order's page with `productId` (and `claimCode`). The piece's row is locked before the order's, as a registration does; `409 ORDER_RETURN_CHANGED` when the piece or its ownership changed meanwhile. Audited `order.return`, `ownership.reclaim`, `ownership.transfer.cancel`, `invoice.credit`, `product.transition` |
 | GET | `/api/admin/atelier/stock` | AUDITOR | The stock per SKU and location (on hand, reserved, available), its minimums and suggestions (`?modelId=&locationId=`) |
 | POST | `/api/admin/atelier/stock/transfer`, `/adjust` | OPERATOR | Pieces of a SKU moved between locations; a count corrected, with why. Audited `stock.transfer`, `stock.adjust` |
 | PUT | `/api/admin/atelier/thresholds` | OPERATOR | A SKU's minimum at a location, or none. Audited `stock.threshold` |
